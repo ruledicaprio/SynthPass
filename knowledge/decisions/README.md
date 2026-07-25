@@ -32,3 +32,4 @@ the record.
 | ADR | Title | Status |
 |---|---|---|
 | [0001](ADR-0001-knowledge-tree.md) | Adopt `knowledge/` as the documentation root | Accepted |
+| [0002](ADR-0002-provider-model-before-layout-plugins.md) | Build the provider model (M7) ahead of M6 | Accepted |
