@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
-## [Unreleased] — v1.2.0 "dependency diet" + SynthPass rebrand
+## [1.2.0] — 2026-07-25 — "dependency diet" + SynthPass rebrand
 
 Roadmap: docs/ARCHITECTURE.md §10, docs/ROADMAP.md. Every dependency shed is surface the project
 no longer has to secure, license-audit, cross-compile, or explain to a procurement department;
@@ -126,6 +126,322 @@ extraction.
   against a fresh seed window and appends flattened per-document outcomes to `dataset.jsonl` on
   a dedicated `bench-data` branch, building a corpus toward future auto-tuning of
   `synthpass-gen`'s degrade parameters. Data collection only — no tuning logic yet.
+- **`synthpass-bench` now measures what fraction of Tier-1 hits still have a structurally
+  suspect line 1**, not just the binary hit rate. `check_document`'s `HitResult` carries the new
+  `synthpass_core::fusion::check_line1_integrity` verdict alongside its per-field CER, and the
+  corpus runner reports it: **of 29 Tier-1 hits on the 50-seed clean profile, 28 (96.6%) are
+  still flagged** — the check-digit gate proves the read is faithful over a bit more than a third
+  of the record and says nothing about the rest, and this is the first automated measurement of
+  how often that gap actually bites, rather than the one hand-counted specimen in the per-field
+  CER note. `hit`/`hit_rate` themselves are unchanged, so the CI gate keeps its meaning.
+- **`synthpass-bench` now measures per-field character error rate, not just a binary hit — and
+  the first run found that the Tier-1 gate is blind to half the MRZ.**
+
+  `HitResult` gains a `fields: Vec<FieldOutcome>` breakdown (expected, got, CER) and its
+  free-text `reason` becomes a `MissReason` enum, so misses aggregate by kind instead of having
+  to be read one line at a time. CER is Levenshtein distance over expected length, hand-written
+  in ~20 lines of `std` — adding `strsim` for one textbook function would spend a dependency
+  against `docs/VISION.md` §1. Ground truth is the generator's own MRZ lines parsed back through
+  `mrz::parse_td3`, so both sides are `MrzData` in identical formats and the CER measures the
+  *read* rather than a formatting difference. `run_check` was restructured so a checksum failure
+  still yields the breakdown — the old version returned early and discarded exactly the read that
+  says which field broke the checksum.
+
+  **`hit` is deliberately unchanged**, since the M4 CI gate is defined on it: the 50-seed clean
+  profile re-measures at **54%**, consistent with the 55% baseline, confirming the instrument is
+  additive.
+
+  What it found, over that same 50-seed run:
+
+  | | |
+  |---|---|
+  | Documents passing the Tier-1 gate | 27 / 50 |
+  | …with **both names** read correctly | **1** |
+  | …with **issuing country** read correctly | **4** |
+  | MRZ line 1 wrong in its first 5 characters | 38 / 42 parsed |
+  | MRZ line 2 character-perfect | 24 / 42 parsed |
+
+  The cause is structural, not statistical. ICAO 9303 TD3 check digits cover **line 2 only** —
+  document number, date of birth, date of expiry, personal number, and a composite over those.
+  **Line 1 carries no check digit at all**, so document type, issuing country, surname and given
+  names are unverified by the oracle the whole Tier-1 thesis rests on. A document can therefore
+  be checksum-proven and still return the wrong name.
+
+  The mechanism behind the line-1 errors is a single recurring misread: OCR **collapses interior
+  runs of the `<` filler**, and the trailing filler run absorbs the loss, so the line stays 44
+  characters and looks structurally valid while every field boundary after the first shifts left.
+  `P<JPNSTRAND<<ALEKSANDER<<<…` reads as `PJPNSTRANDALEKSANDER<<<<…` — a 7.9% character error
+  rate that yields `document_type` `"PJ"`, `issuing_country` `"PNS"`, `surname`
+  `"TRANDALEKSANDER"` and an empty `given_names`. The per-field CER table is dominated by this
+  cascade rather than by per-character noise, which is why `mrz_lines` CER (24.7% mean) is the
+  honest per-character read quality and the line-1 field rates (66–92%) measure parse fragility.
+
+  This **refutes** the hypothesis recorded in `docs/ROADMAP.md` after PR #30 that misses cluster
+  on the 14-character `personal_number` field; that field's CER is 25%, mid-pack, and the roadmap
+  note is corrected accordingly. It was a reasonable inference from a binary signal — it is just
+  not what the data says once the signal stops being binary.
+- **`ExtractionV2` no longer claims a check-digit proof it doesn't have, and a new
+  `synthpass_core::fusion` module catches the corruption this was hiding.** ICAO 9303's composite
+  check digit covers only `document_number`, `date_of_birth`, `date_of_expiry`, and
+  `personal_number` (verified directly against `mrz::parser`'s composite byte ranges and the
+  ICAO fixture — `nationality` and `sex` are excluded too, matching the published standard).
+  `document_type`, `issuing_country`, `surname`, and `given_names` carry no check digit at all.
+  Yet the native Tier-1 path stamped `FieldConfidence::proven()` — `1.0` on all ten fields —
+  because nothing distinguished which fields the arithmetic actually covers.
+
+  `FieldConfidence::mrz_checksum_scope()` replaces that for the native pipeline path (`proven()`
+  itself is kept, unchanged, for the WASM demo, which doesn't yet make this distinction): the
+  four check-digited fields stay at `1.0`, the other six drop to a new `MRZ_STRUCTURAL` (`0.9`)
+  band — a real OCR+MRZ-charset read, more reliable than a Tier-2 guess, but never allowed to
+  compare equal to a proof.
+
+  `synthpass_core::fusion::check_line1_integrity` adds the deterministic checks that partially
+  make up for the missing arithmetic, using tables that already ship rather than a model:
+  `issuing_country` against the ICAO code table (`mrz::country_name`), `issuing_country` against
+  `nationality` (two values parsed from different MRZ lines by the same OCR pass — an honest
+  `Support::CrossField`, ranked below `Support::CheckDigit`, since neither side is itself
+  checksum-proven), and an empty `given_names` beside a long `surname` — the exact signature of
+  the collapsed-`<`-filler-run corruption measured on the synthetic corpus
+  (`P<JPNSTRAND<<ALEKSANDER<<<…` → `PJPNSTRANDALEKSANDER<<<<…`).
+- **`synthpass_core::fusion::check_line1_integrity` gained two new findings, chosen by measuring
+  candidates over ~150 specimens first rather than shipping on intuition**
+  (`crates/synthpass-ocr/examples/integrity_survey.rs`, `docs/integrity-survey.jsonl`):
+  - `UnrecognizedNationality` — `nationality` isn't a recognized ICAO/ISO 3166-1 code. The TD3
+    composite check digit excludes `nationality` entirely, so nothing else in the parser or the
+    checksum math ever looks at this field.
+  - `NonAlphabeticName` — a digit appears in `surname` or `given_names`. ICAO 9303 names are
+    alphabetic by convention, but the parser's charset check accepts `0-9` across the whole line
+    (line 2 needs it), so a digit landing in a name field went uncaught.
+
+  Both were measured before shipping: across the survey corpus, each fired only on records an
+  existing finding had already flagged — never alone on a checksum-valid, otherwise-`Accepted`
+  document. A third candidate — reconstructing the 39-char name field from the parsed
+  `surname`/`given_names` and comparing against the raw MRZ line — was measured and **rejected**:
+  it false-positived on genuine, checksum-valid specimens (e.g. `Spain_Passport_Specimen.png`)
+  because `mrz::parser::clean_name` is lossy — any interior filler run of 2+ `<` collapses to a
+  single space via `.trim()`, so a name with a wider-than-minimum filler gap can never be
+  byte-reconstructed from the parsed strings alone.
+- **The detected MRZ band now drives a recognition pass, and 0°/180° is no longer a coin flip.**
+  `preprocess::geometry_band_variants` crops to the content-scored band that `detect_mrz_band`
+  finds (MRZ-charset density, ICAO line length, OCR-B aspect ratio) and runs the two proven
+  treatments over it. These are chained strictly as **trailing** extras after every existing
+  `mrz_variants` entry, and `mrz_variants` itself is untouched — since the retry loop breaks on
+  the first checksum-valid MRZ, a new variant is only ever reached when every existing one already
+  failed, which makes "no currently-passing specimen can regress" provable rather than asserted.
+  `SYNTHPASS_OCR_MAX_PASSES`'s default rises 7 → 9 to admit the two new variants: the worst case
+  is 6 + 2 retry variants plus the general pass, and the retry loop admits `max_passes - 1` of
+  them. That arithmetic is now derived from a single constant and pinned by a test rather than
+  described in a comment.
+
+- **The 0°/180° tie-break is a comparison between orientations, not a guess about layout.**
+  Orientation detection is detection-only and cannot distinguish 0° from 180° — both give
+  identical horizontal line geometry — so `recognize_detailed` scores the MRZ band on the page
+  *and* on its 180° flip (`geometry::detect_mrz_band_scored`) and keeps the better one.
+
+  The first attempt used the obvious layout rule instead — the MRZ sits at the bottom on
+  TD1/TD2/TD3, so a confident band in the upper third means the page is upside down — and it is
+  recorded here because it **does not work**, for a reason that generalises: on a genuinely
+  upside-down page the real MRZ is garbled, so it scores *low*, and unrelated mid-page noise
+  routinely wins `detect_mrz_band` instead. The band's position then describes the noise. On the
+  180°-rotated Croatian specimen the winning band sat mid-page, the upper-third test was false,
+  and the flip never fired. Comparing orientations sidesteps this: it never has to locate the MRZ
+  on the page it cannot read.
+
+  **Measured over the 42-image `samples/` corpus**, each page scored upright and rotated 180°:
+  the comparison gets the direction right on **41 of 42, with zero false flips**. Two constants
+  come out of that sweep rather than out of intuition. `BAND_FLIP_MARGIN` (1.2×, mirroring
+  `ROTATION_MARGIN`'s existing "ties default to leaving it alone" bias) is cleared comfortably by
+  every genuine correction — narrowest real win 1.27×, most 2–5× — while suppressing the corpus's
+  single wrong-direction vote (`Passport_of_Serbia_ID_2009_version.jpg`, a 1.18× lead) and all
+  four exact ties. Serbia 2009 is consequently the one page here that stays mis-oriented: an
+  honest miss rather than a silent wrong answer. `geometry::MRZ_BAND_CONFIDENT_SCORE` (0.75)
+  skips the probe entirely when the upright band is already strong — no upside-down page in the
+  corpus scored above 0.7132, so the flip could not have won — which keeps the common case at
+  exactly its previous cost.
+
+  The sweep also rules out the cheaper design of thresholding a single orientation: upside-down
+  scores overlap genuine upright ones across most of the range (plenty of real, correctly
+  oriented documents score 0.23–0.48), so no absolute cutoff separates them. Only running both
+  and comparing does.
+- **OCR geometry now reaches the extraction record, and Tier-2 output is normalized.** The
+  `OcrEngine` trait gained `recognize_detailed` alongside `to_markdown` — **additive, not
+  breaking**: the default body wraps `to_markdown`, so every existing implementation, in-tree or
+  out-of-tree, keeps compiling and behaving identically without a line changed. Only the
+  pure-Rust engine overrides it. `OcrResult`/`BBox` are owned by `synthpass-pipeline` rather than
+  re-exported from `synthpass-ocr`, which is an optional dependency of that crate — leaking its
+  types into a public signature would break every other feature combination. `ExtractionV2.portrait`
+  is finally populated from the detected region; as always this is **crop coordinates only**,
+  never face recognition or biometric matching (`VISION.md` §2). Tier-2 extractions are run
+  through `synthpass_core::normalize::extraction` where they leave the inferer, so every consumer
+  including the batch job queue gets `"CROATIA"` → `HRV` and `"JAAK-KRISTJAN"` → `JAAK KRISTJAN`
+  for free. Tier-1 output is deliberately left alone: it comes from the checksum-verified MRZ and
+  is canonical by construction.
+- **Batch job queue (M5): `POST /api/extract/batch` + `GET /api/jobs/{id}`, and `synthpass batch
+  <dir|glob>`.** A new `synthpass_pipeline::jobs` module adds `Pipeline::submit`/`Pipeline::job`:
+  submit N documents, get a `JobHandle` back immediately (`Queued` → `Running` → `Done`/`Failed`),
+  and poll per-document results as they land. Each document is dispatched as an independent
+  `process_document` call — a batch parallelizes exactly as much as the two concurrency
+  semaphores below allow, nothing more. Completed jobs are retained in a bounded ring buffer
+  (`SYNTHPASS_QUEUE_CAPACITY`, default 100) so a long-running server's job map doesn't grow
+  unbounded; jobs are in-memory only and do not survive a restart.
+
+  `synthpass-serve` gains `POST /api/extract/batch` (multipart upload, `202 Accepted` + job id)
+  and `GET /api/jobs/{id}` (status + per-document results, `404` once a job ages out of
+  retention), both gated on the `batch` license feature and reusing the exact same
+  `queue_full_error`/`api_error` shapes as `/api/extract` — capacity is a legitimate paid
+  boundary (BRANDING §5), single-document extraction stays ungated. `synthpass batch <dir|glob>`
+  adds the same capability to the CLI, staying synchronous end-to-end (submit + wait, one JSON
+  object printed per input plus a summary) — only `synthpass-serve` exposes async job polling.
+
+  **`SYNTHPASS_MAX_QUEUE_DEPTH` note:** this variable already controls `synthpass-serve`'s
+  `/api/extract` queue-full threshold and keeps that exact meaning. The new job queue reads
+  `SYNTHPASS_QUEUE_CAPACITY` for its own (unrelated) completed-job retention size, but — for one
+  release — falls back to `SYNTHPASS_MAX_QUEUE_DEPTH` if only that's set, with a deprecation
+  warning, so an operator who already tuned it doesn't get silently ignored on upgrade. Set
+  `SYNTHPASS_QUEUE_CAPACITY` explicitly to silence the warning; the two settings will fully
+  separate in a future release.
+- **Independent OCR-stage concurrency (`SYNTHPASS_OCR_THREADS`).** OCR is stateless, pure-CPU
+  work with no shared model context to serialize (unlike Tier-2's single loaded `llama.cpp`
+  context), so `synthpass-pipeline` now bounds it with its own semaphore, separate from the
+  existing Tier-2 `llm_semaphore`. Default: available cores − 1, floored at 1. A single
+  document's processing only ever holds one of the two semaphores at a time — the OCR permit is
+  fully released before a Tier-2 permit is ever requested — so the two can't deadlock each other,
+  and most of a batch (every MRZ-valid document) never touches the LLM semaphore at all.
+- **Structured OCR geometry API in `synthpass-ocr` (M5).** `NativeOcr::recognize_detailed` returns
+  a new `OcrPage` (plain owned `BBox`/`OcrLine` types — no `ocrs`/`rten` types leak into the public
+  API) with per-line text/bounding boxes, an auto-detected page rotation, and two layout
+  heuristics: `mrz_band` (content-and-geometry scored — MRZ-charset density, TD1/TD2/TD3 line
+  length, OCR-B glyph aspect ratio — as an additive signal alongside `preprocess.rs`'s existing
+  blind bottom-band crop, which stays as the retry loop's fallback, untouched) and `portrait`
+  (largest text-free region in the upper-left quadrant with a ~3:4 aspect ratio — **crop
+  coordinates only**; this and every future portrait feature stays bounding-box cropping, never
+  face recognition or biometric matching, per `VISION.md` §2). Orientation detection
+  (`choose_rotation`) is a cheap, detection-only 0°/90°/180°/270° heuristic, conservatively biased
+  toward "no rotation" so it never fires on an already-upright page. `NativeOcr::recognize`'s
+  signature and returned text are unchanged — it is now `recognize_detailed(..)?.text`, with the
+  original retry-pass loop, pass budget, and time budget moved verbatim (unedited) inside
+  `recognize_detailed`; the new orientation/geometry steps run before that loop's timer starts, so
+  they add to this call's total latency but never eat into the retry loop's own wall-clock budget.
+  Zero new dependencies — `ocrs`'s detected-word/line geometry (`RotatedRect`/`Rect`, from its
+  `rten-imageproc` transitive dependency, not re-exported by `ocrs` itself) is consumed via
+  inherent methods and inferred locals only, so this crate's `Cargo.toml` is unchanged.
+- **Deterministic field normalizers in `synthpass-core` (M5).** A new `normalize` module of pure,
+  idempotent functions fixes normalization-only parity misses between Tier-1 (MRZ) and Tier-2
+  (LLM) extractions — e.g. `"CROATIA"` vs `HRV`, `"JAAK-KRISTJAN"` vs `JAAK KRISTJAN` — with no
+  model and no new dependency: `issuing_country`/`nationality` (full country name → ICAO/ISO
+  3166-1 code, via a new `mrz::code_for_name` reverse lookup added over the *same* table
+  `mrz::country_name` already uses, so the two directions can't drift apart), `given_names`
+  (MRZ-convention `<`/`-` → space, whitespace collapse), `date` (day-first/unseparated/loosely-
+  padded input → the strict `YYYY-MM-DD` form `mrz::dates::parse_iso` requires), and `sex`/
+  `document_type` (long forms → single-letter ICAO codes). Table-driven unit tests only — not yet
+  wired into `synthpass-pipeline`, which is a separate integration step.
+- **`mrz` 0.3.0: robust leap-year calendar validation, first-class MRV visas, and a live browser
+  demo.** `Date::is_well_formed` now runs the true Gregorian calendar instead of a generous
+  `1..=31` day check — Feb 30, Feb 29 in a non-leap year, and April/June/September/November 31 are
+  all rejected, while Feb 29 in a leap year is correctly accepted. The new `is_leap_year` is public;
+  a property test proves `is_well_formed()` agrees with the `to_epoch_days`/`from_epoch_days`
+  civil-calendar round-trip for every year 1900-2100. MRV-A and MRV-B visas (ICAO 9303 part 7) are
+  now first-class citizens end to end: new `format_mrv_a`/`format_mrv_b` (with `MrvAFields`/
+  `MrvBFields`) emit the two-line visa MRZ the same way `format_td3`/`format_td2` already do for
+  passports and ID cards, and `find_and_parse` now scans free-form OCR text for `V`-prefixed visa
+  lines — including HTML-escaped fillers and lines merged onto one physical line — running the same
+  checksum-guided repair machinery as TD3/TD2. (MRV-A and MRV-B share the same `V<` document code
+  with no length hint of their own, so the scanner tries the narrower MRV-B geometry before MRV-A to
+  avoid a short MRV-B line being loosely padded up and misread as MRV-A.) The README now links the
+  live WASM demo at the top and marks both MRV rows `✅ parse + emit`, leaving document-number
+  overflow as the only remaining known gap.
+- **`mrz` 0.4.0: document-number overflow, which check digit failed, and a tunable century
+  pivot.** Document numbers longer than the 9-character field (ICAO 9303 part 4 §4.2.2.2) are now
+  a first-class TD1/TD2/TD3 feature instead of a documented gap: `format_td3`/`format_td2`/
+  `format_td1` reassemble the overflow automatically whenever the remainder fits the format's
+  optional-data field (TD3 personal number 14 chars, TD2 optional data 7, TD1 optional data 1 15),
+  and the parsers surface it on the new `MrzData::document_number_full` / `full_document_number()`.
+  A remainder that still doesn't fit truncates to 9 characters exactly as before. MRV-A/MRV-B
+  visas have no overflow encoding in part 7, so they're unaffected. Separately, a new `Field` enum
+  and `Checks::failed() -> Vec<Field>` name which check digit(s) disagreed instead of leaving
+  callers to infer it from five booleans, backing a new `MrzError::BadChecksum { field, position }`
+  variant for callers that want to turn a failed `Checks` into an error of their own (`MrzError` is
+  now `#[non_exhaustive]`). A new `ParseOptions { pivot_yy }` plus `parse_td3_with`/`parse_td2_with`/
+  `parse_td1_with`/`parse_mrv_a_with`/`parse_mrv_b_with`/`find_and_parse_with` let a caller pin the
+  two-digit-year century pivot explicitly instead of inheriting the constant the crate was built
+  with; the existing `parse_*`/`find_and_parse` entry points are unchanged, delegating to the
+  default. `find_and_parse`'s no-fully-valid-candidate fallback now returns the *best-scoring*
+  reading (most passing check digits) instead of the first candidate found — same signature, same
+  `Ok(invalid MrzData)` contract, a strictly better answer when nothing validates outright. And
+  `aggressive_defiller`'s repair loop now has an explicit `MAX_DEFILL_PASSES` bound instead of
+  relying on convergence.
+- **`mrz` 0.5.0: the check-digit oracle's blind spots are now a public API, and the crate has a
+  CI-enforced MSRV.** An ICAO 9303 check digit (part 3 §4.9) is a 7-3-1 weighted sum taken mod 10,
+  so it sees only each character's value mod 10 — meaning two characters are indistinguishable to
+  *every* check digit exactly when their values are congruent mod 10. That law was previously
+  trapped in `examples/checksum_blindspots.rs`, computed with the example's own private `value()`
+  helper and printed to stdout, where no downstream OCR pipeline could consume it. It is now
+  `blindspot(a, b) -> Blindspot` (`Identical` / `Caught { delta_mod10 }` / `Blind { residue }` /
+  `NotMrzCharset`, with `is_blind()`), `collisions(c) -> Vec<char>` for the complete blind set of a
+  character, `class_of(c) -> Option<&'static [char]>` for the allocation-free form, and `CLASSES`,
+  the ten residue classes partitioning the 37-character MRZ alphabet. The result inverts most
+  intuitions and is worth stating out loud: O↔0, I↔1, B↔8, S↔5 and Z↔2 are all **caught**, while
+  K↔`<`, I↔S, B↔L and A↔K are **blind**. A new integration test sweeps every data position of the
+  ICAO TD3 specimen across the whole alphabet and asserts the algebra agrees with what `parse_td3`
+  actually does, so the API is proven against the engine rather than restating it; the example now
+  builds on the same API and cross-checks `collisions` against the parser at runtime. Separately,
+  `crates/mrz/Cargo.toml` now declares `rust-version = "1.82"` — the verified floor for the
+  zero-dependency default build, set by `std::iter::repeat_n` and `Option::is_none_or` in the OCR
+  repair helpers — enforced by a new lightweight `msrv` CI job, with the policy documented in the
+  README alongside new badges and a verified feature comparison against `mrtd`.
+- **`mrz` 0.5.1: MRZ lines that lost a character to physical damage now resolve deterministically
+  instead of falling through.** When a recognizer meets a glyph destroyed by a punched hole or
+  hidden by a finger it typically *drops* it rather than emitting a placeholder, so the line
+  arrives one character too narrow and every field after the damage is shifted — a read that
+  decodes to plausible nonsense (an expiry of `2011-22-49`) rather than to a detectable error. The
+  existing length repair could not help, because it only ever reinserted missing characters inside
+  the longest `<` filler run or at the end of the line, and a punched hole lands in the middle of a
+  digit field. `find_and_parse` now runs a bounded damaged-capture pass when nothing else validates:
+  it sweeps the missing character across *every* insertion point and lets the check digits rule.
+  Measured on a real ID card with a hole punched through its MRZ, the expiry recovers exactly
+  (15 ms; a clean zone is unaffected at 180 µs and a page with no MRZ at 45 µs). The primitives are
+  public — `width_candidates(line, target)` for the position sweep and `solve_field(field, check,
+  kind) -> Resolution` (`Unique` / `Ambiguous` / `Unresolvable`) for resolving unknown positions
+  against a field's own check digit, with `UNKNOWN`, `MRZ_ALPHABET` and `FieldKind` alongside.
+  Two properties are deliberate and pinned by tests. First, a check digit sees a field only mod 10
+  and so does the composite, so one destroyed position admits a whole residue class — four readings
+  that *every* check digit accepts; only the calendar (`Date::is_well_formed`, via
+  `FieldKind::Date`) separates them, which is why a recovered record must have well-formed dates
+  before it is accepted. Second, two destroyed positions leave hundreds of readings that all
+  verify, so the answer is `Ambiguous` and the scanner does not attempt a recovery at all: a guess
+  that happens to be wrong is indistinguishable from a proof.
+- **`mrz` can now emit TD1 and TD2 MRZs, not just TD3.** New `format_td2` /
+  `format_td1` functions (and their `Td2Fields` / `Td1Fields` input structs, mirroring
+  `Td3Fields`'s style and `serde` derives) are the deterministic inverse of `parse_td2` /
+  `parse_td1` — every check digit (document number, date of birth, date of expiry,
+  composite) is computed with the same `check_digit` math the parsers verify against, so
+  feeding the output back through `parse_td2` / `parse_td1` always yields `valid() ==
+  true`. `crates/mrz/tests/roundtrip.rs` gained ICAO-specimen byte-for-byte tests and a
+  `proptest` per format alongside the existing TD3 coverage. `crates/mrz/README.md`'s
+  format table now shows "parse + emit" for all three formats. No behaviour change to
+  `parse_td1` / `parse_td2` / `parse_td3` or to the base crate's zero-dependency,
+  `wasm32-unknown-unknown` footprint.
+- **`mrz` now parses MRV-A and MRV-B machine readable visas (ICAO 9303 part 7).** New
+  `parse_mrv_a` (two 44-char lines) and `parse_mrv_b` (two 36-char lines) mirror the TD3/TD2
+  field geometry through the expiry check digit, but reject any `line1` not starting with `V`.
+  MRVs have no personal-number field and no composite check digit at all, so `Checks::personal_number`
+  and `Checks::composite` are vacuously `true` — the same convention TD1/TD2 already use for
+  `personal_number`. Two new `Format` variants (`MrvA`, `MrvB`) round out the public enum. Verified
+  against externally-checked specimen line-2 vectors whose document-number, date-of-birth and
+  expiry check digits are correct under the standard 7-3-1 weighting. `find_and_parse` is
+  unchanged — it does not yet scan for `V`-prefixed visa lines.
+- **The `mrz` crate is now publish-ready for crates.io as a standalone `0.1.0`.** Added the
+  package metadata `cargo publish` requires (`description`, `license`, `repository`, `readme`,
+  `keywords`, `categories`) and decoupled its version from the workspace `1.1.0` — this is the
+  crate's first *public* release and the API still has documented gaps (MRV visas, document-number
+  overflow), so `0.x` states that honestly. New `crates/mrz/README.md` becomes the crates.io
+  landing page, with the supported-format table (TD1/TD2/TD3; MRV-A/-B explicitly "not yet") and
+  the load-bearing caveat that a valid check digit proves a faithful *read*, not an in-date
+  document. The `serde` feature now derives `Deserialize` alongside `Serialize` (JSON *in*, not
+  just out) on `MrzData`, `Checks`, `Format`, `Td3Fields`, `Date`, and `DateValidity`, and a new
+  `tests/icao_vectors.rs` pins the check-digit primitive against ICAO Doc 9303's own worked
+  examples. `cargo publish -p mrz --dry-run` is clean. No default-feature or
+  `wasm32-unknown-unknown` behaviour changes — the base crate stays zero-dependency.
 
 ### Fixed
 - **Double-accept in the Tier-2 sampling loop.** `NativeLlm::generate` called `sampler.accept()`
@@ -135,6 +451,17 @@ extraction.
   it, the grammar's parse state advanced twice per token until its stack emptied and llama.cpp
   aborted the process on `GGML_ASSERT(!stacks.empty())`. Found by running the real-model parity
   harness, not by unit tests — none of which can observe sampler state.
+- **A corrupted OCR model download no longer poisons the model directory permanently.**
+  `synthpass_ocr::download::ensure_models` verified nothing before renaming a fetched `.rten` file
+  into its final name, so a truncated or tampered response was committed to disk. The load path in
+  `synthpass-pipeline` then rejected it (correctly, and it remains the security boundary) — but
+  `download_if_missing` skips any path that already exists, so every later run reused the same bad
+  file and failed again, with nothing in the error pointing at the fix. Recovery meant deleting
+  `text-detection.rten` / `text-recognition.rten` by hand. The bytes are now checked against the
+  same known-good hash *before* the rename; on a mismatch the `.part` scratch file is discarded and
+  the error says so, so simply re-running retries the download. `SYNTHPASS_OCR_MODEL_SKIP_VERIFY=1`
+  and the `SYNTHPASS_OCR_*_SHA256` overrides apply here exactly as they do to the existing
+  file-based checks.
 
 ### Changed
 - **The required Linux CI job no longer runs ~25 min.** The two real-model OCR smoke steps
@@ -158,6 +485,44 @@ extraction.
   `SYNTHPASS_*`. (The `docs/REBRAND_MIGRATION.md` crate-mapping record has since been removed
   now that the rename is long complete; this entry is the mapping's remaining record.) See
   `docs/VISION.md` / `docs/ROADMAP.md` for where the platform is headed next.
+- **Changelog entries now land as fragments in `changelog.d/` instead of edits to `CHANGELOG.md`.**
+  A single append point per section meant every pair of concurrently open branches conflicted on
+  the changelog, always with the same "both sides added a bullet" resolution; a file per change
+  has no shared append point. `scripts/assemble-changelog.sh --write` splices the fragments into
+  the topmost release section at release time and deletes them. Pure bash, no new tooling. See
+  [`changelog.d/README.md`](changelog.d/README.md).
+- **`docs/ROADMAP.md` now records M5 as complete.** It had still listed the bounded job queue /
+  parallel OCR / batch API as an outstanding Atlas DoD after PR #49 shipped it, and geometry
+  detection as outstanding after #48/#50. The replacement note also records the orientation
+  result honestly — 41 of 42 `samples/` documents re-oriented correctly with zero false flips,
+  one honest miss — and, more usefully, records why the first design (decide 0°/180° from where
+  the MRZ band sits on the page) was circular and had to be replaced by a comparison between the
+  two orientations. The M6 orientation scoping note is corrected to match, since it described the
+  tie-break as the position test that did not survive contact with the corpus.
+- **Roadmap M6 scoping notes.** Two additions to [`docs/ROADMAP.md`](docs/ROADMAP.md): a design
+  note on replacing the brute-force orientation probe (a full OCR detection pass at each of
+  0°/90°/180°/270°, plus a separate small-tilt sweep in `preprocess::deskew`) with a single-pass
+  width-weighted circular mean over the per-word angles `ocrs` already reports and `geometry.rs`
+  currently discards — including why the angle must be doubled before averaging, why it can never
+  resolve 0° vs 180°, and why an FFT-based approach buys nothing here; and a note that driving
+  licences are a *different mechanism* rather than a lower-priority document class, since they
+  carry no MRZ at all (AAMVA PDF417 in the US, nothing in the EU) and belong to the declared
+  `ExtractionV2.barcodes` slot rather than the MRZ roadmap.
+- **`mrz` 0.4.0 makes the output types `#[non_exhaustive]`, so that future additions stop being
+  breaking changes.** `MrzData`, `Checks` and `Format` can no longer be constructed by literal or
+  matched exhaustively from outside the crate: obtain them from a `parse_*` function, and give a
+  `match` on `Format` a `_` arm. This is a one-time cost paid deliberately inside an
+  already-breaking release. Every breaking change this crate has shipped was an addition to one of
+  those three types — `Format` gained `MrvA`/`MrvB` in 0.3.0, `MrzData` gains
+  `document_number_full` here — and each forced a minor bump that downstream `Cargo.toml`s had to
+  chase. From 0.4.0 on the same additions are patch releases. The emit-side input structs
+  (`Td3Fields` and friends) are deliberately left exhaustive: `#[non_exhaustive]` forbids
+  `..Default::default()` as well as full literals, which would leave callers no way to build one
+  short of field-by-field mutation — too high a price on a type whose whole job is being filled in.
+- **`MrzData` gained the public field `document_number_full: Option<String>`,** and `MrzError`
+  gained a `BadChecksum` variant alongside becoming `#[non_exhaustive]`, so an exhaustive match
+  over it needs a `_` arm. Code that only *reads* these types — the overwhelmingly common case —
+  needs no change at all.
 
 ### Removed
 - **`ocr-daemon` (Tesseract + Leptonica) and the `native-ocr` feature.** The Linux/WSL-only
