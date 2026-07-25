@@ -6,6 +6,7 @@ members = [
     "crates/synthpass-gen",
     "crates/synthpass-bench",
     "crates/synthpass-core",
+    "crates/synthpass-die",
     "crates/synthpass-llm",
     "crates/synthpass-ocr",
     "crates/synthpass-license",

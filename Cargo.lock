@@ -2884,6 +2884,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "synthpass-die"
+version = "1.2.0"
+dependencies = [
+ "async-trait",
+ "mrz",
+ "serde",
+ "serde_json",
+ "synthpass-core",
+]
+
+[[package]]
 name = "synthpass-gen"
 version = "1.2.0"
 dependencies = [
