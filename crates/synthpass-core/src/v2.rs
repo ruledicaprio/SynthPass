@@ -131,6 +131,15 @@ pub struct ExtractionV2 {
     /// Which producer created this record: the same vocabulary as v1
     /// (`mrz-deterministic`, `llm`, `mrz-wasm-client`).
     pub extraction_method: String,
+    /// How the record was produced — providers consulted, escalation reason,
+    /// prompt version. `None` on paths that predate the provider model and on
+    /// the WASM client, which consults nothing. Additive and optional, so
+    /// `schema_version` stays `2`.
+    ///
+    /// Carries no routing score, by construction — see [`ExtractionTrace`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[zeroize(skip)]
+    pub trace: Option<ExtractionTrace>,
     /// Reserved for multi-document input (M4, `docs/V2-DESIGN.md` §3). Always
     /// empty in v2.0.0; declared now with `default` + `skip_serializing_if` so
     /// the wire format is future-proof — M4 can start emitting it without a
@@ -155,6 +164,7 @@ impl Default for ExtractionV2 {
             portrait: None,
             barcodes: Vec::new(),
             extraction_method: String::new(),
+            trace: None,
             documents: Vec::new(),
         }
     }
@@ -392,8 +402,17 @@ impl FieldConfidence {
 ///
 /// Non-PII (the `model` string names a local GGUF file, never a person);
 /// `#[zeroize(skip)]` at the parent.
+///
+/// `#[non_exhaustive]` at the enum (not at any variant): a consumer outside
+/// this crate cannot match it exhaustively, so a future producer kind is an
+/// additive change here. Constructing the existing variants stays legal, which
+/// is what `synthpass-pipeline` does. Note this constrains *source* consumers
+/// only — on the wire, a new `"kind"` still breaks a client with a mirror
+/// enum, so adding a variant remains a deliberate decision rather than a free
+/// one.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Provenance {
     /// Tier 1: every field mathematically verified by ICAO 9303 check digits.
     #[default]
@@ -406,6 +425,218 @@ pub enum Provenance {
     /// The browser WASM demo (`mrz-wasm`), where extraction happens entirely
     /// client-side.
     WasmClient,
+}
+
+/// One of the ten ICAO fields in [`ExtractionFields`], as a value.
+///
+/// Exists because several places need to *name* a field rather than hold one:
+/// "these came back empty", "this one was flagged". `mrz::Field` covers only
+/// the five check-digited fields, so it cannot say `surname`.
+///
+/// Fieldless by construction — a variant carries no value, so it is safe in a
+/// log line, a metric label, and the extraction trace. That property is the
+/// reason this type exists rather than passing `&str` around.
+///
+/// Deliberately **not** unified with `synthpass_llm::prompt::FIELDS`. That list
+/// differs on purpose (it asks for `mrz_line` and omits `personal_number`) and
+/// `synthpass-llm`'s GBNF grammar is generated from it, so the two must stay
+/// separate sources. See `knowledge/technical_debt.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoreField {
+    DocumentType,
+    IssuingCountry,
+    DocumentNumber,
+    Surname,
+    GivenNames,
+    Nationality,
+    DateOfBirth,
+    Sex,
+    DateOfExpiry,
+    PersonalNumber,
+}
+
+impl CoreField {
+    /// Every field, in [`ExtractionFields`] declaration order.
+    pub const ALL: [Self; 10] = [
+        Self::DocumentType,
+        Self::IssuingCountry,
+        Self::DocumentNumber,
+        Self::Surname,
+        Self::GivenNames,
+        Self::Nationality,
+        Self::DateOfBirth,
+        Self::Sex,
+        Self::DateOfExpiry,
+        Self::PersonalNumber,
+    ];
+
+    /// The snake_case wire name, identical to the serde representation and to
+    /// the JSON key in [`ExtractionFields`].
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DocumentType => "document_type",
+            Self::IssuingCountry => "issuing_country",
+            Self::DocumentNumber => "document_number",
+            Self::Surname => "surname",
+            Self::GivenNames => "given_names",
+            Self::Nationality => "nationality",
+            Self::DateOfBirth => "date_of_birth",
+            Self::Sex => "sex",
+            Self::DateOfExpiry => "date_of_expiry",
+            Self::PersonalNumber => "personal_number",
+        }
+    }
+}
+
+impl std::fmt::Display for CoreField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl ExtractionFields {
+    /// Read a field by name. Returns `None` both when the field is absent and
+    /// when it is present-but-empty, since an empty string is not a value a
+    /// consumer can act on.
+    pub fn get(&self, field: CoreField) -> Option<&str> {
+        let raw = match field {
+            CoreField::DocumentType => &self.document_type,
+            CoreField::IssuingCountry => &self.issuing_country,
+            CoreField::DocumentNumber => &self.document_number,
+            CoreField::Surname => &self.surname,
+            CoreField::GivenNames => &self.given_names,
+            CoreField::Nationality => &self.nationality,
+            CoreField::DateOfBirth => &self.date_of_birth,
+            CoreField::Sex => &self.sex,
+            CoreField::DateOfExpiry => &self.date_of_expiry,
+            CoreField::PersonalNumber => &self.personal_number,
+        };
+        raw.as_deref().filter(|s| !s.trim().is_empty())
+    }
+
+    /// Which fields came back with nothing usable. The input to an escalation
+    /// decision: "ask a more capable provider for *these*."
+    pub fn missing(&self) -> Vec<CoreField> {
+        CoreField::ALL
+            .into_iter()
+            .filter(|f| self.get(*f).is_none())
+            .collect()
+    }
+}
+
+/// Compile-time identity of an intelligence provider.
+///
+/// `&'static str`, not `String`, and that is load-bearing rather than a
+/// micro-optimisation: `CONTRIBUTING.md`'s PII checklist requires metric labels
+/// to be a *closed set*. A `String` id would let a provider mint an unbounded
+/// `provider="…"` label on `/metrics`, which sits outside the trust boundary —
+/// a cardinality explosion on the one surface built to be scraped.
+///
+/// Lives here rather than beside the provider traits because it is wire
+/// vocabulary: [`ExtractionTrace`] names providers, and this crate must not
+/// depend on the crate that defines them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct ProviderId(pub &'static str);
+
+impl ProviderId {
+    pub const fn as_str(self) -> &'static str {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ProviderId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// Why a more expensive provider was consulted — the *kind* only.
+///
+/// The routing engine's own escalation type carries payloads (which check
+/// digits failed, which fields were missing); this is its fieldless projection,
+/// and the only form allowed in a log line, a metric label, or the serialized
+/// trace. See [`crate::fusion::FindingKind`] for the same split applied to
+/// integrity findings, and the reason it matters: the payload-bearing types
+/// carry PII.
+///
+/// Deliberately records *why*, never *how much*. There is no score here — see
+/// `knowledge/project_principles.md` §2 on why a routing number must not reach
+/// a consumer as though it were a confidence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EscalationKind {
+    /// No MRZ-shaped text was found at all.
+    MrzNotFound,
+    /// An MRZ parsed and one or more check digits did not verify.
+    MrzChecksumFailed,
+    /// A provider returned, leaving one or more fields empty.
+    FieldsMissing,
+    /// [`crate::fusion::check_line1_integrity`] flagged the record.
+    Line1Flagged,
+    /// The recognized text fell below the plausibility floor.
+    OcrBelowSanityFloor,
+}
+
+/// Which prompt produced a model-generated record.
+///
+/// `digest` is what makes this auditable rather than decorative: a `version`
+/// alone is a promise that whoever edited the prompt remembered to bump it,
+/// and the Tier-2 parity corpus is six documents at 19/42 field matches — a
+/// one-word prompt change is indistinguishable from noise for months. The
+/// digest is checked by a test, so forgetting the bump is a CI failure instead
+/// of a silent accuracy drift.
+///
+/// Non-PII: identifies a compiled-in template, never document content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptRef {
+    /// Stable prompt identity, e.g. `"qwen2.5-fields"`.
+    pub id: String,
+    /// Monotonic, hand-bumped on any edit to the template body.
+    pub version: u32,
+    /// First 8 hex characters of `sha256(body)`.
+    pub digest: String,
+}
+
+/// How a record was produced: which providers were consulted, why anything
+/// beyond the first was, and which prompt was used.
+///
+/// This is principle 7 — *no hidden magic; every extraction is explainable* —
+/// as a serialized value. Additive and optional: absent from every record
+/// produced before the provider model existed, and omitted entirely when empty,
+/// so `schema_version` stays `2`.
+///
+/// **Deliberately absent: any routing score.** The decision to spend compute
+/// may rest on an uncalibrated heuristic; a number that reaches a consumer
+/// alongside `confidence` may not. The routing score has no `Serialize` impl
+/// and the type that holds it is not serializable, so this omission is enforced
+/// by the type system rather than by this comment.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExtractionTrace {
+    /// Providers consulted, in the order they ran. Values come from
+    /// [`ProviderId`], so the vocabulary is closed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub providers: Vec<String>,
+    /// Why a provider beyond the first was consulted. `None` when the cheapest
+    /// provider sufficed — the common, and desirable, case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub escalation: Option<EscalationKind>,
+    /// The prompt behind a model-generated record. `None` on deterministic
+    /// paths, which use no prompt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<PromptRef>,
+}
+
+impl ExtractionTrace {
+    /// Nothing worth recording — no providers, no escalation, no prompt.
+    /// Callers use this to decide whether to attach a trace at all, keeping
+    /// the key off records that would carry an empty object.
+    pub fn is_empty(&self) -> bool {
+        self.providers.is_empty() && self.escalation.is_none() && self.prompt.is_none()
+    }
 }
 
 /// The raw MRZ zone plus per-check-digit verification results.
@@ -650,6 +881,11 @@ impl From<&Extraction> for ExtractionV2 {
             portrait: None,
             barcodes: Vec::new(),
             extraction_method: v1.extraction_method.clone(),
+            // A v1 record predates the provider model and recorded nothing
+            // about how it was produced beyond `extraction_method`. Inventing
+            // a trace here would attribute a routing decision that never
+            // happened.
+            trace: None,
             documents: Vec::new(),
         }
     }
