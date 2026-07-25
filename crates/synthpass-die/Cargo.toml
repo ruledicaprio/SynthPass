@@ -1,0 +1,38 @@
+[package]
+name = "synthpass-die"
+version.workspace = true
+edition.workspace = true
+description = "Document Intelligence Engine: the provider contract, capability model and catalog that MRZ, OCR, LLM and future vision/barcode providers all implement."
+
+# The dependency list is the deliverable, not an accident. This crate defines
+# the contract every provider implements, so it must be buildable and testable
+# by someone who has neither an OCR engine nor an LLM toolchain — otherwise
+# "write a third-party provider" means "first install llama.cpp".
+#
+# Deliberately absent, and asserted absent by CI (see the `synthpass-die
+# dependency boundary` step in .github/workflows/ci.yml):
+#   tokio         — a provider must not be forced onto one runtime. `async-trait`
+#                   desugars to a plain boxed future; it pulls in no executor.
+#   synthpass-ocr / synthpass-llm / ocrs / rten / llama-cpp-2
+#                 — the engines are *implementations*. A contract that names
+#                   one cannot be a contract for the others.
+#   tracing       — this crate makes decisions; it does not emit them. The
+#                   caller owns the log stream and its PII discipline.
+[dependencies]
+# The schema and the shared vocabulary (CoreField, ProviderId, EscalationKind,
+# ExtractionTrace, FieldConfidence, fusion::Verdict). Providers produce
+# `ExtractionV2`, so this edge is the whole point.
+synthpass-core = { path = "../synthpass-core" }
+# Zero-dependency ICAO 9303. The MRZ provider is deterministic arithmetic, and
+# this is where it lives.
+mrz = { path = "../mrz", features = ["serde"] }
+# `dyn`-compatible async methods. Native AFIT is not object-safe, and the
+# catalog is inherently `dyn`. Already in the workspace graph via
+# synthpass-pipeline, so this adds no new external crate.
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+# The doc-test proving a third-party provider needs no runtime uses a trivial
+# hand-rolled executor rather than tokio — see `provider::FieldReader`.
