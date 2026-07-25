@@ -91,6 +91,10 @@ mapfile -t path_files  < <(git grep -lE '(docs|knowledge)/' -- . 2>/dev/null || 
 echo "==> relative Markdown links"
 for f in "${md_files[@]}"; do
   dir="$(dirname "$f")"
+  # `changelog.d/` fragments are spliced verbatim into CHANGELOG.md at the repo
+  # root by scripts/assemble-changelog.sh, so their links are written
+  # root-relative and must be resolved from there, not from changelog.d/.
+  case "$f" in changelog.d/*) dir="." ;; esac
   while IFS= read -r target; do
     [ -z "$target" ] && continue
     case "$target" in http://*|https://*|mailto:*|\#*) continue ;; esac

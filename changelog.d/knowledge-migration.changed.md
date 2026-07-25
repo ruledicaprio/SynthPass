@@ -13,11 +13,11 @@
   `research/`, `papers/`) each carry a README stating what belongs in them **and what does not**,
   so an empty folder reads as a visible gap rather than decoration.
 
-  ~116 `docs/...` references across 35 files were repaired — workflow files, six crate manifests,
-  `.rs` doc comments, and historical changelog entries whose links would otherwise 404. New
-  `scripts/check-doc-links.sh`, wired into CI, is what stops that rotting again: it verifies
-  relative Markdown links resolve, that `knowledge/...` paths cited in prose exist, and that no
-  stale `docs/...` survives outside an allowlist that requires a written reason per entry.
+  ~116 references to the old path across 35 files were repaired — workflow files, six crate
+  manifests, `.rs` doc comments, and historical changelog entries whose links would otherwise 404.
+  New `scripts/check-doc-links.sh`, wired into CI, is what stops that rotting again: it verifies
+  relative Markdown links resolve, that cited `knowledge/` paths exist, and that no stale
+  reference to the old tree survives outside an allowlist requiring a written reason per entry.
 
   Two pre-existing defects were found and are recorded rather than silently patched:
   `docs/V2-DESIGN.md`, cited by section number in 11 source doc comments, **has never existed in
