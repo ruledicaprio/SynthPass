@@ -3,7 +3,7 @@
 Tracks Tier-1 MRZ corpus coverage against every ISO/ICAO country/entity code in
 `crates/mrz/src/countries.rs` (230 codes). This is the concrete backlog behind the "wider
 real-world corpus is the natural next accuracy milestone" note in
-`docs/ARCHITECTURE.md` §8 — grown one individually-vetted specimen at a time, per the
+`knowledge/ARCHITECTURE.md` §8 — grown one individually-vetted specimen at a time, per the
 checklist in `CONTRIBUTING.md`. **PRADO (`consilium.europa.eu/prado`) is never a source
 here** — its copyright notice prohibits harvesting/redistributing its material outside
 official, non-commercial use; it's consulted only as a manual human reference, never

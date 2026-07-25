@@ -10,7 +10,7 @@ into the section below at release time by `scripts/assemble-changelog.sh --write
 
 ## [1.2.0] — 2026-07-25 — "dependency diet" + SynthPass rebrand
 
-Roadmap: docs/ARCHITECTURE.md §10, docs/ROADMAP.md. Every dependency shed is surface the project
+Roadmap: knowledge/ARCHITECTURE.md §10, knowledge/ROADMAP.md. Every dependency shed is surface the project
 no longer has to secure, license-audit, cross-compile, or explain to a procurement department;
 the rebrand repositions the project as a platform spanning synthetic document generation and
 extraction.
@@ -36,16 +36,16 @@ extraction.
   document survives the real Tier-1 pipeline (OCR → checksum-valid MRZ), via a reusable library
   (`check_document`/`HitResult`) and a `synthpass-bench` corpus-runner binary that writes a
   generated JSON report (`--count`/`--seed`/`--profile`/`--min-hit-rate`, see
-  [`docs/SYNTHPASS.md`](docs/SYNTHPASS.md)). CI now gates every PR on a 50-seed `clean`-profile
+  [`knowledge/SYNTHPASS.md`](knowledge/SYNTHPASS.md)). CI now gates every PR on a 50-seed `clean`-profile
   run. Honestly measured Tier-1 hit rate: **~55%** over a 100-seed sample — the CI gate is set to
   a 30% floor with margin, not the number itself, to absorb cross-platform OCR variance; see
-  `docs/ROADMAP.md`'s M4 notes for the full account. Uncovered and fixed a genuine MRZ
+  `knowledge/ROADMAP.md`'s M4 notes for the full account. Uncovered and fixed a genuine MRZ
   glyph-rendering bug along the way: MRZ characters were flowed by font advance instead of the
   fixed per-character layout grid, and anti-aliasing used a hard threshold instead of blending by
   coverage — both fixed, improving the measured rate from 50% to 60% on the sample it was found
   against. The four degraded `CaptureProfile` variants (mobile/scanner/worn/border-kiosk) are
   measured/reported as an adversarial corpus but not yet CI-gated; see
-  [`docs/ADVERSARIAL.md`](docs/ADVERSARIAL.md).
+  [`knowledge/ADVERSARIAL.md`](knowledge/ADVERSARIAL.md).
 - **M5 safe-batch kickoff on the extraction platform (PRs #33–#37).** `synthpass-license` now
   actually enforces a license's `mlis_min_version` in `check()` instead of parsing and ignoring
   it, via a new `LicenseError::MinVersionUnmet` and hand-rolled version comparison that fails
@@ -61,7 +61,7 @@ extraction.
   `check_feature()` and a `LicenseError::FeatureNotLicensed` variant, so a license's `features`
   list is finally *enforced* rather than parsed and ignored, plus a `Tier` enum (`trial` / `pro` /
   `enterprise`) whose `default_features()` presets mirror the tier table in
-  [`docs/BRANDING.md`](docs/BRANDING.md) §5 — the paid boundary sits at capacity and reporting
+  [`knowledge/BRANDING.md`](knowledge/BRANDING.md) §5 — the paid boundary sits at capacity and reporting
   (`batch`, `multi-context`, `metrics`), never at the core `extract` capability. A new optional
   `max_llm_contexts` payload field caps concurrent Tier-2 contexts: the environment
   (`SYNTHPASS_LLM_CONTEXTS`) asks, the license permits, and `synthpass-serve` runs the lesser of
@@ -83,7 +83,7 @@ extraction.
   `synthpass-serve` exposes it at `GET /metrics` in Prometheus text format — inside the auth layer
   (unlike `/health`) and gated on the `metrics` license feature.
 
-  **One new dependency, justified in writing** per `docs/VISION.md`: `tracing-subscriber`. The
+  **One new dependency, justified in writing** per `knowledge/VISION.md`: `tracing-subscriber`. The
   `tracing` facade was already in the lock transitively via axum, hyper, tower and `llama-cpp-2`,
   so the only genuinely new crate is the subscriber; both are pure Rust with no C dependencies and
   no network behaviour. The justification is that the "no PII in any log line" DoD needs a
@@ -141,7 +141,7 @@ extraction.
   free-text `reason` becomes a `MissReason` enum, so misses aggregate by kind instead of having
   to be read one line at a time. CER is Levenshtein distance over expected length, hand-written
   in ~20 lines of `std` — adding `strsim` for one textbook function would spend a dependency
-  against `docs/VISION.md` §1. Ground truth is the generator's own MRZ lines parsed back through
+  against `knowledge/VISION.md` §1. Ground truth is the generator's own MRZ lines parsed back through
   `mrz::parse_td3`, so both sides are `MrzData` in identical formats and the CER measures the
   *read* rather than a formatting difference. `run_check` was restructured so a checksum failure
   still yields the breakdown — the old version returned early and discarded exactly the read that
@@ -176,7 +176,7 @@ extraction.
   cascade rather than by per-character noise, which is why `mrz_lines` CER (24.7% mean) is the
   honest per-character read quality and the line-1 field rates (66–92%) measure parse fragility.
 
-  This **refutes** the hypothesis recorded in `docs/ROADMAP.md` after PR #30 that misses cluster
+  This **refutes** the hypothesis recorded in `knowledge/ROADMAP.md` after PR #30 that misses cluster
   on the 14-character `personal_number` field; that field's CER is 25%, mid-pack, and the roadmap
   note is corrected accordingly. It was a reasonable inference from a binary signal — it is just
   not what the data says once the signal stops being binary.
@@ -205,7 +205,7 @@ extraction.
   (`P<JPNSTRAND<<ALEKSANDER<<<…` → `PJPNSTRANDALEKSANDER<<<<…`).
 - **`synthpass_core::fusion::check_line1_integrity` gained two new findings, chosen by measuring
   candidates over ~150 specimens first rather than shipping on intuition**
-  (`crates/synthpass-ocr/examples/integrity_survey.rs`, `docs/integrity-survey.jsonl`):
+  (`crates/synthpass-ocr/examples/integrity_survey.rs`, `knowledge/integrity-survey.jsonl`):
   - `UnrecognizedNationality` — `nationality` isn't a recognized ICAO/ISO 3166-1 code. The TD3
     composite check digit excludes `nationality` entirely, so nothing else in the parser or the
     checksum math ever looks at this field.
@@ -481,17 +481,17 @@ extraction.
   document generation *and* extraction, stewarded by **Identra**. This release renames the
   workspace mechanically (crate directories, package names, `use` paths, the CLI/serve
   binaries, CI, Docker, and top-level docs) with **no behavior change**: `mrz`/`mrz-wasm`
-  keep their names (see `docs/BRANDING.md`), and `MLIS_*` environment variables are now
+  keep their names (see `knowledge/BRANDING.md`), and `MLIS_*` environment variables are now
   `SYNTHPASS_*`. (The `docs/REBRAND_MIGRATION.md` crate-mapping record has since been removed
   now that the rename is long complete; this entry is the mapping's remaining record.) See
-  `docs/VISION.md` / `docs/ROADMAP.md` for where the platform is headed next.
+  `knowledge/VISION.md` / `knowledge/ROADMAP.md` for where the platform is headed next.
 - **Changelog entries now land as fragments in `changelog.d/` instead of edits to `CHANGELOG.md`.**
   A single append point per section meant every pair of concurrently open branches conflicted on
   the changelog, always with the same "both sides added a bullet" resolution; a file per change
   has no shared append point. `scripts/assemble-changelog.sh --write` splices the fragments into
   the topmost release section at release time and deletes them. Pure bash, no new tooling. See
   [`changelog.d/README.md`](changelog.d/README.md).
-- **`docs/ROADMAP.md` now records M5 as complete.** It had still listed the bounded job queue /
+- **`knowledge/ROADMAP.md` now records M5 as complete.** It had still listed the bounded job queue /
   parallel OCR / batch API as an outstanding Atlas DoD after PR #49 shipped it, and geometry
   detection as outstanding after #48/#50. The replacement note also records the orientation
   result honestly — 41 of 42 `samples/` documents re-oriented correctly with zero false flips,
@@ -499,7 +499,7 @@ extraction.
   the MRZ band sits on the page) was circular and had to be replaced by a comparison between the
   two orientations. The M6 orientation scoping note is corrected to match, since it described the
   tie-break as the position test that did not survive contact with the corpus.
-- **Roadmap M6 scoping notes.** Two additions to [`docs/ROADMAP.md`](docs/ROADMAP.md): a design
+- **Roadmap M6 scoping notes.** Two additions to [`knowledge/ROADMAP.md`](knowledge/ROADMAP.md): a design
   note on replacing the brute-force orientation probe (a full OCR detection pass at each of
   0°/90°/180°/270°, plus a separate small-tilt sweep in `preprocess::deskew`) with a single-pass
   width-weighted circular mean over the per-word angles `ocrs` already reports and `geometry.rs`
@@ -539,7 +539,7 @@ extraction.
 Tier-1 accuracy release: the corpus-measured Tier-1 hit rate (checksum-valid MRZ extraction, no
 LLM involved) went from **50% (3/6) to 100% (6/6)** on the MRZ-bearing specimens in `samples/`,
 with zero false positives on the three no-MRZ control images. This closes the headline limitation
-`docs/ARCHITECTURE.md` §8 has carried since v0.7.0 ("not yet reliably clean enough to reconstruct
+`knowledge/ARCHITECTURE.md` §8 has carried since v0.7.0 ("not yet reliably clean enough to reconstruct
 a checksum-valid MRZ line").
 
 ### Added
@@ -574,7 +574,7 @@ a checksum-valid MRZ line").
 
 Static musl release: a single `x86_64-unknown-linux-musl` binary bundling the pipeline, in-process
 OCR, in-process LLM inference, and licensing — the "copy one file to an air-gapped machine"
-deployment model `docs/ARCHITECTURE.md` §10 has been building toward since v0.6.0. This is the
+deployment model `knowledge/ARCHITECTURE.md` §10 has been building toward since v0.6.0. This is the
 final numbered roadmap milestone; from here the project moves to patch releases (`v1.0.1`,
 `v1.0.2`, …) — see the note at the end of this entry.
 
@@ -659,14 +659,14 @@ structured logging, a real `/health` endpoint in `mlis-serve`, unit tests for `m
 central orchestration crate, currently covered only by an ignored-by-default smoke test), and
 `dependabot.yml` — closing the specific gaps that make v1.0.0 riskier to sell against, not a
 general rewrite (the codebase audit backing this found no significant tech debt otherwise). See
-`docs/ARCHITECTURE.md` §10's closing note for where future "what's next" tracking lives.
+`knowledge/ARCHITECTURE.md` §10's closing note for where future "what's next" tracking lives.
 
 ## [0.9.0] — 2026-07-19
 
 PII memory hardening + ingest-path fuzzing: the highest-value in-memory PII structures are now
 wiped on drop, and the untrusted OCR ingest path (`mrz`'s checksum-verified repair logic, which
 also compiles to WASM for the public browser demo) is fuzz-tested. This is the fifth step on the
-road to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
+road to a single static musl binary — see `knowledge/ARCHITECTURE.md` §10.
 
 ### Added
 - **PII memory hardening (`zeroize`/`ZeroizeOnDrop`, best-effort):** `mlis_core::Extraction`
@@ -677,7 +677,7 @@ road to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
   treatment behind a new *optional* `zeroize` feature (mirrors the crate's existing optional
   `serde` feature) so `mrz-wasm`'s `wasm32-unknown-unknown` build — which never enables it — stays
   zero-dependency; `mlis-pipeline` enables `mrz/zeroize`. Documented limitations in
-  `docs/ARCHITECTURE.md` §7: this does not cover `serde_json`'s internal copies, on-disk
+  `knowledge/ARCHITECTURE.md` §7: this does not cover `serde_json`'s internal copies, on-disk
   `.md`/`.json` plaintext (only the optional `MLIS_KEY`-encrypted `.json.enc` is protected at
   rest), or `PipelineResult.markdown` (left a plain `String`, since it's returned to callers for
   display/persistence).
@@ -705,7 +705,7 @@ road to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
 Offline cryptographic licensing: the shipped `mlis`/`mlis-serve` binaries now require an
 Ed25519-signed license to run their extraction path, so the software can be sold and metered for
 air-gapped enterprise distribution without ever phoning home. This is the fourth step on the road
-to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
+to a single static musl binary — see `knowledge/ARCHITECTURE.md` §10.
 
 ### Added
 - **`mlis-license`** (new crate): `LicensePayload`/`SignedLicense` types, `verify()` (Ed25519
@@ -741,7 +741,7 @@ to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
 ### Changed
 - `crates/mlis-license/pubkey.b64` ships with a **placeholder** keypair generated during
   development. A real deployment must run `mlis-license-issuer keygen` and replace this file
-  before issuing real licenses — see `docs/ARCHITECTURE.md` §6.
+  before issuing real licenses — see `knowledge/ARCHITECTURE.md` §6.
 
 ### Known limitations
 - The license binds to an OS *installation* via `/etc/machine-id`, not physically to hardware:
@@ -749,7 +749,7 @@ to a single static musl binary — see `docs/ARCHITECTURE.md` §10.
   air-gapped operator can roll back). Because the source is public, anyone who rebuilds from
   source strips the check entirely. This meters and gates the *official pre-built binary* and
   deters casual sharing — it is explicitly **not DRM** and not sold as tamper-proof. True hardware
-  attestation would need a TPM/HSM, out of scope here. Stated in full in `docs/ARCHITECTURE.md` §6.
+  attestation would need a TPM/HSM, out of scope here. Stated in full in `knowledge/ARCHITECTURE.md` §6.
 
 ## [0.7.5] — 2026-07-19
 
@@ -842,7 +842,7 @@ stays available for PDF input (which the native engine can't parse) and the Tess
 ### Known limitations
 - `ocrs`'s out-of-the-box text recognition is not yet verified against this project's specimen
   corpus and, on the workspace's own low/medium-resolution samples, is not always clean enough to
-  reconstruct a checksum-valid MRZ line — see `docs/ARCHITECTURE.md` §7. Tier 2 still runs as
+  reconstruct a checksum-valid MRZ line — see `knowledge/ARCHITECTURE.md` §7. Tier 2 still runs as
   designed when this happens.
 
 ## [0.6.0] — 2026-07-17

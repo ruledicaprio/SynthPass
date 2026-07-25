@@ -201,7 +201,7 @@ struct SeedResult {
     /// `true` iff `synthpass_core::fusion::check_line1_integrity` flagged
     /// this read — reported independently of `hit`, since the checksum a
     /// hit proves never covered `document_type`/`issuing_country`/`surname`/
-    /// `given_names` in the first place (see `docs/ROADMAP.md`'s per-field
+    /// `given_names` in the first place (see `knowledge/ROADMAP.md`'s per-field
     /// CER note). `false` when no MRZ was read at all.
     line1_flagged: bool,
 }
@@ -357,7 +357,7 @@ fn main() {
     // passing Tier-1 gate and a structurally wrong line 1 can both be true of
     // the same document at once. This reports how often that actually
     // happens, rather than leaving it as the one hand-counted number in
-    // docs/ROADMAP.md's per-field CER note.
+    // knowledge/ROADMAP.md's per-field CER note.
     if hits > 0 {
         let flagged_hits = results.iter().filter(|r| r.hit && r.line1_flagged).count();
         println!(

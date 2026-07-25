@@ -23,7 +23,7 @@ ocr-native-rust = ["dep:synthpass-ocr"]
 # Tier-2 backend: native llama.cpp inference (synthpass-llm), no external sidecar.
 inferer-native = ["dep:synthpass-llm"]
 # Bake the .rten OCR models into the binary at compile time (off by default —
-# only the musl release build turns this on; see docs/ARCHITECTURE.md §10).
+# only the musl release build turns this on; see knowledge/ARCHITECTURE.md §10).
 ocr-embedded = ["ocr-native-rust", "synthpass-ocr/embedded-models"]
 
 [dev-dependencies]

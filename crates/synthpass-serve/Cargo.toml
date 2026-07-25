@@ -18,7 +18,7 @@ tracing-subscriber = { workspace = true }
 
 [features]
 # Bake the .rten OCR models into the binary at compile time — see
-# synthpass-pipeline/synthpass-ocr and docs/ARCHITECTURE.md §10. Only used by the musl
+# synthpass-pipeline/synthpass-ocr and knowledge/ARCHITECTURE.md §10. Only used by the musl
 # release build.
 ocr-embedded = ["synthpass-pipeline/ocr-embedded"]
 

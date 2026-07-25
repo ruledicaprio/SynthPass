@@ -515,7 +515,7 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
 /// paid boundary because it is an integration convenience, not core
 /// capability. Refusals are `403` and name the missing feature.
 ///
-/// [`BRANDING.md`]: https://github.com/ruledicaprio/SynthPass/blob/main/docs/BRANDING.md
+/// [`BRANDING.md`]: https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/BRANDING.md
 async fn metrics(State(state): State<Arc<AppState>>) -> Result<String, ApiError> {
     if let Some(payload) = &state.license {
         if let Err(e) = synthpass_license::check_feature(payload, FEATURE_METRICS) {
