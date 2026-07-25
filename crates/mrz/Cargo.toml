@@ -1,6 +1,6 @@
 [package]
 name = "mrz"
-# Decoupled from the workspace `1.1.0`: independent public-release line.
+# Decoupled from the workspace `1.2.0`: independent public-release line.
 #
 # Under Cargo's 0.x rules the *minor* slot is the breaking slot. `MrzData`,
 # `Checks` and `Format` are `#[non_exhaustive]`, so growing them is a patch
