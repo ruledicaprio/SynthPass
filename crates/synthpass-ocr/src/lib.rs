@@ -303,8 +303,13 @@ impl NativeOcr {
         //   same score and there is genuinely nothing to choose between).
         let upright_score = scored.map_or(0.0, |(_, score)| score);
         let confident = upright_score >= geometry::MRZ_BAND_CONFIDENT_SCORE;
-        let (rotation, image, lines, word_boxes, mrz_band) = if confident {
-            (rotation, image, lines, word_boxes, scored.map(|(b, _)| b))
+        // The winning `(bbox, score)` pair is carried intact and split apart
+        // below. Previously the score was dropped here via `.map(|(b, _)| b)`
+        // — it is the one number that says how MRZ-shaped the band actually
+        // looked, which a routing decision needs and a bounding box cannot
+        // answer.
+        let (rotation, image, lines, word_boxes, band_scored) = if confident {
+            (rotation, image, lines, word_boxes, scored)
         } else {
             let flipped = rotate_image(&image, 180);
             let (f_lines, f_word_boxes) = geometry_pass(&self.engine, &flipped).unwrap_or_default();
@@ -323,11 +328,15 @@ impl NativeOcr {
                     flipped,
                     f_lines,
                     f_word_boxes,
-                    f_scored.map(|(b, _)| b),
+                    f_scored,
                 )
             } else {
-                (rotation, image, lines, word_boxes, scored.map(|(b, _)| b))
+                (rotation, image, lines, word_boxes, scored)
             }
+        };
+        let (mrz_band, mrz_band_score) = match band_scored {
+            Some((bbox, score)) => (Some(bbox), Some(score)),
+            None => (None, None),
         };
         let portrait = geometry::detect_portrait(&word_boxes, image.width(), image.height());
 
@@ -342,12 +351,15 @@ impl NativeOcr {
             );
         }
         if has_valid_mrz(&text) {
+            let text_sanity = page_sanity(&text);
             return Ok(OcrPage {
                 text,
                 lines,
                 mrz_band,
+                mrz_band_score,
                 portrait,
                 rotation,
+                text_sanity,
             });
         }
         if verbose {
@@ -439,14 +451,28 @@ impl NativeOcr {
                 }
             }
         }
+        let text_sanity = page_sanity(&text);
         Ok(OcrPage {
             text,
             lines,
             mrz_band,
+            mrz_band_score,
             portrait,
             rotation,
+            text_sanity,
         })
     }
+}
+
+/// Whole-page [`geometry::text_sanity`], or `None` when nothing was
+/// recognized.
+///
+/// Distinguishing "no text" from "text that scored 0.0" matters: the first is
+/// an OCR failure and the second is a page full of unrecognizable glyphs, and
+/// a caller deciding whether to escalate should not have to guess which it is
+/// looking at.
+fn page_sanity(text: &str) -> Option<f32> {
+    (!text.trim().is_empty()).then(|| geometry::text_sanity(text))
 }
 
 /// Right-angle rotation candidates probed by [`choose_rotation`] (A3),
@@ -722,6 +748,26 @@ fn mrz_shaped_lines(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `None` (nothing was recognized) and `Some(0.0)` (something was
+    /// recognized and it was garbage) are different facts, and a caller
+    /// deciding whether to escalate acts differently on each: the first is an
+    /// OCR failure, the second is a page of unreadable glyphs. Collapsing
+    /// them into `0.0` would make an escalation policy unable to tell a blank
+    /// scan from a ruined one.
+    #[test]
+    fn page_sanity_separates_no_text_from_unreadable_text() {
+        assert_eq!(page_sanity(""), None);
+        assert_eq!(page_sanity("   \n\t "), None, "whitespace is not text");
+
+        let noise = page_sanity("#@%^&*()!!").expect("symbols are still recognized text");
+        let clean = page_sanity("P<UTOERIKSSON<<ANNA<MARIA").expect("clean text scores");
+        assert!(
+            clean > noise,
+            "clean MRZ text ({clean}) should outscore symbol noise ({noise})"
+        );
+        assert!((0.0..=1.0).contains(&noise) && (0.0..=1.0).contains(&clean));
+    }
 
     /// Pins the 0°/180° decision against the real numbers it was derived
     /// from — the `samples/` sweep described on [`BAND_FLIP_MARGIN`] — so a

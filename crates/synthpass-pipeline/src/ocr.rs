@@ -56,6 +56,15 @@ pub struct OcrResult {
     /// unchanged) — carried here so a future caller doesn't need another
     /// trait-widening round to get at it.
     pub mrz_band: Option<BBox>,
+    /// How MRZ-shaped the winning band looked, in `[0, 1]` — a different
+    /// question from [`mrz_band`]'s *where*, and the one an escalation
+    /// decision actually needs. A band can be found and still be noise; the
+    /// score is what distinguishes the two.
+    ///
+    /// `None` when no band was found, or when the engine doesn't score bands.
+    ///
+    /// [`mrz_band`]: OcrResult::mrz_band
+    pub mrz_band_score: Option<f64>,
     /// The region scored as the ID photo. **Crop coordinates only** — VISION.md
     /// §2's permanent non-goal applies here exactly as it does at the
     /// [`Pipeline::process_document`](crate::Pipeline::process_document)
@@ -66,18 +75,36 @@ pub struct OcrResult {
     /// engine didn't rotate (either because the page needed none, or because
     /// the active engine doesn't support orientation detection at all).
     pub rotation: u16,
+    /// Whole-page character-plausibility score in `[0, 1]`, when the engine
+    /// computes one.
+    ///
+    /// **Not a model confidence.** `ocrs` returns no probabilities at all —
+    /// its CTC decode scores are computed internally and never exposed — so
+    /// this is the fraction of recognized characters that are plausible for a
+    /// document, which correlates with decode quality without measuring it.
+    /// Treat it as "does this look like text at all", never as "how likely is
+    /// this to be correct". See `synthpass_ocr::geometry::text_sanity`.
+    ///
+    /// `None` when nothing was recognized, or when the engine doesn't score.
+    pub text_sanity: Option<f32>,
 }
 
 impl OcrResult {
     /// Wrap plain text with no geometry — the shape every engine that only
     /// implements [`OcrEngine::to_markdown`] gets for free via
     /// [`OcrEngine::recognize_detailed`]'s default body.
+    ///
+    /// Every geometry and scoring field is `None`/`0`, which is the honest
+    /// answer for an engine that doesn't produce them — and is why adding
+    /// fields here stays additive rather than breaking out-of-tree impls.
     pub fn from_text(text: String) -> Self {
         Self {
             text,
             mrz_band: None,
+            mrz_band_score: None,
             portrait: None,
             rotation: 0,
+            text_sanity: None,
         }
     }
 }
@@ -268,8 +295,10 @@ mod rust_ocr {
             Ok(OcrResult {
                 text: page.text,
                 mrz_band: page.mrz_band.map(convert_bbox),
+                mrz_band_score: page.mrz_band_score,
                 portrait: page.portrait.map(convert_bbox),
                 rotation: page.rotation,
+                text_sanity: page.text_sanity,
             })
         }
 
@@ -347,4 +376,65 @@ pub fn engine_from_env() -> Box<dyn OcrEngine> {
         std::env::var("SYNTHPASS_OCR_MODEL_DIR").unwrap_or_else(|_| DEFAULT_OCR_MODEL_DIR.into());
     let auto_download = std::env::var("SYNTHPASS_OCR_AUTO_DOWNLOAD").as_deref() != Ok("0");
     Box::new(RustOcrEngine::new(model_dir, auto_download))
+}
+
+#[cfg(test)]
+mod additive_trait_tests {
+    use super::*;
+
+    /// The whole point of [`OcrEngine::recognize_detailed`]'s default body:
+    /// an engine — in-tree or out-of-tree — that implements *only*
+    /// `to_markdown` keeps compiling and behaving identically when geometry
+    /// or scoring fields are added to [`OcrResult`].
+    ///
+    /// This type deliberately does **not** override `recognize_detailed`. If
+    /// adding a field to `OcrResult` ever makes this fail to compile, the
+    /// change was breaking for every third-party engine and needs a different
+    /// design — which is exactly what this test exists to catch, since no
+    /// out-of-tree impl is available to notice on our behalf.
+    struct TextOnlyEngine;
+
+    #[async_trait]
+    impl OcrEngine for TextOnlyEngine {
+        async fn to_markdown(&self, _input: &Path) -> Result<String, PipelineError> {
+            Ok("PLAIN TEXT, NO GEOMETRY".to_string())
+        }
+
+        fn describe(&self) -> String {
+            "text-only test engine".into()
+        }
+    }
+
+    #[tokio::test]
+    async fn text_only_engine_gets_none_for_every_geometry_and_score_field() {
+        let result = TextOnlyEngine
+            .recognize_detailed(Path::new("unused.png"))
+            .await
+            .expect("the default body cannot fail if to_markdown succeeds");
+
+        assert_eq!(result.text, "PLAIN TEXT, NO GEOMETRY");
+        assert_eq!(result.mrz_band, None);
+        assert_eq!(result.portrait, None);
+        assert_eq!(result.rotation, 0);
+        // The fields this change adds. `None` is the honest answer for an
+        // engine that computes neither — not `0.0`, which would claim the
+        // page scored badly rather than that nobody scored it.
+        assert_eq!(
+            result.mrz_band_score, None,
+            "an engine that scores no bands must report None, not a score"
+        );
+        assert_eq!(
+            result.text_sanity, None,
+            "an engine that scores no text must report None, not 0.0"
+        );
+    }
+
+    /// `None` and `Some(0.0)` mean different things and must stay
+    /// distinguishable: "nobody looked" versus "looked, and it was garbage".
+    #[test]
+    fn from_text_leaves_scores_unset_rather_than_zero() {
+        let r = OcrResult::from_text("something".into());
+        assert!(r.text_sanity.is_none());
+        assert!(r.mrz_band_score.is_none());
+    }
 }
