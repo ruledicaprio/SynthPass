@@ -3,17 +3,26 @@
 > **Status:** foundational document. This is the single linear execution blueprint for
 > SynthPass v2. It reconciles the two roadmaps that preceded it — the *Atlas* extraction
 > redesign (the now-removed `mlis_v2_0_0_preliminary_design.md` scratch notes) and the
-> synthetic-generation roadmap ([`synthpass_v2_0.md`](synthpass_v2_0.md)) — into one M1→M6
+> synthetic-generation roadmap ([`synthpass_v2_0.md`](synthpass_v2_0.md)) — into one M1→M7
 > spine. Where those two disagree, **this file wins**; `synthpass_v2_0.md` remains as a design
 > record.
 >
 > Read [`VISION.md`](VISION.md) first for the *why*, and [`BRANDING.md`](BRANDING.md) for
 > naming and the crate-rename migration.
 
-The evolution is **linear, M1 through M6** — no parallel tracks. Each milestone builds on the
+The evolution is **linear, M1 through M7** — no parallel tracks. Each milestone builds on the
 last and ships with a **Definition of Done (DoD)**: specific, measurable criteria, in the
 spirit of the accuracy gates already used in the repo (checksum-proven Tier 1, corpus
 hit-rate). Timelines are targets, not commitments.
+
+> **One deliberate exception to the ordering: M7 is built ahead of M6.** M7 introduces the
+> provider contract that M6's new document formats and dataset exports would otherwise have to
+> be retrofitted into. Adding TD1/TD2/MRVA/MRVB as providers against an existing interface is
+> cheap; rewriting them into a provider model after the fact is not — and M6's original
+> "plugin architecture" line was already describing M7's work without the interface to hang it
+> on. The reasoning, and the alternative of keeping strict order, are recorded in
+> [`ADR-0002`](decisions/ADR-0002-provider-model-before-layout-plugins.md). The milestones stay
+> numbered by dependency, not by build date.
 
 ## Milestone overview
 
@@ -25,8 +34,12 @@ timeline
     M3 Degradation + CLI        : Q4 2026
     M4 Regression & benchmarking: Q1 2027
     M5 Extraction platform (Atlas): Q1 2027
+    M7 Document Intelligence Engine: Q2 2027
     M6 Expansion & enterprise   : Q2 2027
 ```
+
+*(M7 appears before M6 above because that is the build order — see the note on the ordering
+exception above. The numbering follows dependency, not schedule.)*
 
 | Milestone | Target | Key deliverables | Definition of Done |
 |---|---|---|---|
@@ -35,7 +48,8 @@ timeline
 | **M3 — Degradation & Capture profiles + CLI** | Q4 2026 | Modular degradation pipeline (mobile / scanner / worn / border-control profiles); `synthpass generate` CLI subcommand; JSON sidecar metadata per document | Each profile is reproducible from a seed; CLI emits image + label JSON for a named profile; degradations are composable and individually toggleable; license gate bypassed for generation (it produces no real PII) |
 | **M4 — Regression & Benchmarking** | Q1 2027 | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented — **honestly measured at ~55% (100-seed, clean profile) as of PR #30, not the originally-aspirational 95%; CI gates at 30% as a floor with margin for cross-platform variance, see the execution note below** |
 | **M5 — Extraction platform (Atlas absorbed)** | Q1 2027 | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
-| **M6 — Expansion & Enterprise readiness** | Q2 2027 | TD1 / TD2 / MRVA / MRVB; declarative document layouts; dataset exports (COCO / YOLO / JSONL / Hugging Face); plugin architecture; air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party plugin builds against a stable interface following the docs; air-gapped install verified; Pro-beta feedback collected |
+| **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | Q2 2027 | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
+| **M6 — Expansion & Enterprise readiness** | Q2 2027 | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 ## Architecture evolution
 
@@ -250,9 +264,60 @@ flowchart LR
   `ExtractionV2.barcodes` — a declared slot with no decoder behind it — and should be scoped as a
   barcode project, not folded into the MRZ roadmap where they would quietly fail forever.
 
+## M7 — Document Intelligence Engine
+
+The shape of the change: Tier 2 stops meaning *"run the LLM"* and starts meaning *"ask a more
+capable provider only for what deterministic code could not recover."* Today that escalation is
+a hardcoded `if let Some(tier1) = … else { call LLM }`; M7 makes it a decision over evidence,
+taken against a catalog of providers that declare what they can do.
+
+**What ships**
+
+- **The contract.** `IntelligenceProvider` (identity + declared `Capability`), with `Recognizer`
+  (image → text + geometry) and `FieldReader` (context → fields) as the two work shapes. MRZ and
+  an LLM are the same shape; OCR is the other. A future vision model reads the image already in
+  the context struct rather than needing a new trait.
+- **The catalog** — builder-constructed, insertion-ordered, duplicate-id-rejecting. Deterministic
+  consultation order, because a benchmark that consults providers in a different order on two runs
+  is not a benchmark.
+- **Evidence-driven escalation.** The signals already exist and are currently discarded: the MRZ
+  band score, per-line text sanity, portrait detection, `check_line1_integrity`'s verdict, and
+  which specific check digits failed. The escalation *reason* is an enumerated, PII-free type.
+- **Versioned prompts**, compiled in, with a digest pinned by a test — because the parity corpus
+  is six documents and a one-word prompt edit is otherwise indistinguishable from noise for
+  months.
+- **A multi-provider benchmark harness**: per-provider accuracy, speed, resident memory, JSON
+  validity, and an *unsupported-assertion* rate (a value the provider asserted that appears
+  nowhere in its own input — which is what is actually measurable, as opposed to
+  "hallucination", which is not).
+
+**Non-goals — stated so they do not get re-litigated**
+
+- **No vision-language model in v1.3.0.** `Capability.vision` is `false` for every registered
+  provider, and that is the honest claim: *the interface exists and has zero vision
+  implementations.* `synthpass-llm` is text-only — it consumes OCR Markdown, not pixels — and
+  `llama-cpp-2` stays pinned at `0.1.151` with only the `sampler` feature, so no mmproj/mtmd
+  bindings enter the tree. Moondream is a **v1.4.0 spike**, and the spike's first job is to
+  establish whether `llama-cpp-2` can drive a multimodal GGUF at a usable version at all.
+- **No hardware auto-recommendation feature.** The design notes propose a `synthpass benchmark`
+  that detects your GPU and star-rates models. Not in scope. If it is ever built, its numbers come
+  from measurement, not from a table someone typed.
+- **No change to the reported confidence model.** The ordinal `Support` scale and
+  `FieldConfidence`'s bands are the public contract and stay exactly as they are. The routing
+  score introduced here is uncalibrated by construction, never serialized, and never compared
+  against a reported confidence — the split is enforced by the type system rather than by
+  convention. See [`project_principles.md`](project_principles.md) §2.
+- **No new public API in `crates/mrz`.** Everything the routing engine needs is already public.
+
+**What this buys M6.** TD1/TD2/MRVA/MRVB arrive as providers registered against an existing
+contract rather than as new branches in a growing `if`/`else`; the barcode slot that driving
+licences need (see the M6 scoping note above) becomes a provider someone can write without
+touching the pipeline; and M6's "a third-party plugin builds against a stable interface" criterion
+is satisfied by an interface that exists.
+
 ## Future Work
 
-Beyond M6, and deliberately not committed:
+Beyond M6 and M7, and deliberately not committed:
 
 - **A larger Tier-2 model — target [Qwen3-4B](https://hf.co/Qwen/Qwen3-4B-GGUF), not the 3B/7B
   the design record names.** The now-removed `mlis_v2_0_0_preliminary_design.md` §8's "bring a
