@@ -54,11 +54,14 @@
 //! - [`evidence`] — what was observed, for routing only.
 //! - [`catalog`] — the ordered, immutable provider set.
 //! - [`mrz_reader`] — the deterministic ICAO 9303 provider.
+//! - [`routing`] — turns [`Evidence`] into a spend decision, consulted by
+//!   `synthpass-pipeline`'s Tier-1 gate.
 
 pub mod catalog;
 pub mod evidence;
 pub mod mrz_reader;
 pub mod provider;
+pub mod routing;
 
 pub use catalog::{CatalogError, ProviderCatalog, ProviderCatalogBuilder};
 pub use evidence::Evidence;
@@ -67,6 +70,7 @@ pub use provider::{
     Capability, CostClass, DocumentContext, FieldReader, IntelligenceProvider, ProviderError,
     Reading, Recognition, Recognizer,
 };
+pub use routing::{Decision, RoutingPolicy};
 
 // Wire vocabulary lives in `synthpass-core` (the schema crate must not depend
 // on this one), and is re-exported here so a provider author needs one import.
