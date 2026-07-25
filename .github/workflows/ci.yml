@@ -58,6 +58,24 @@ jobs:
       - name: Documentation links resolve
         run: bash scripts/check-doc-links.sh
 
+      # The provider contract must be buildable by someone who has neither an
+      # OCR engine nor an LLM toolchain — otherwise "write a provider" starts
+      # with "install llama.cpp", and a contract that names one engine is not a
+      # contract for the others. This is M7's dependency-boundary DoD, and
+      # nothing but this step would notice it eroding.
+      - name: synthpass-die dependency boundary
+        run: |
+          set -euo pipefail
+          tree=$(cargo tree -p synthpass-die --edges normal)
+          echo "$tree"
+          for forbidden in tokio ocrs rten llama-cpp synthpass-ocr synthpass-llm tracing; do
+            if grep -qE "(^|[^a-z-])${forbidden}( |$)" <<<"$tree"; then
+              echo "::error::synthpass-die must not depend on ${forbidden} — see the crate's Cargo.toml"
+              exit 1
+            fi
+          done
+          echo "dependency boundary holds"
+
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets
 
