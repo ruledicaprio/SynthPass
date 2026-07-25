@@ -5,7 +5,7 @@
 //! and imagining the rectangle.
 //!
 //! Also appends one row to a plain JSONL ledger (`--ledger`, default
-//! `docs/document-layout-survey.jsonl`) recording what was *measured*
+//! `knowledge/document-layout-survey.jsonl`) recording what was *measured*
 //! (rotation, band/portrait boxes, a cheap keyword scan of the recognized
 //! text) alongside an optional, separately-supplied *ground truth* — the
 //! same measured/ground-truth separation `synthpass-bench` already uses.
@@ -36,7 +36,7 @@
 //! Run from the repo root:
 //! ```powershell
 //! cargo run -p synthpass-ocr --release --example visualize_mrz_band -- <path-to-image> [out.png] [flags]
-//!   --ledger PATH           JSONL ledger path (default: docs/document-layout-survey.jsonl)
+//!   --ledger PATH           JSONL ledger path (default: knowledge/document-layout-survey.jsonl)
 //!   --kind K                ground truth: passport | id_card | driving_license
 //!   --side S                ground truth, free text (not a closed enum — extend as new
 //!                           page-layout distinctions show up in real specimens):
@@ -74,7 +74,7 @@ const PORTRAIT_BORDER_PX: i64 = 2;
 
 /// Keyword groups for the descriptive scan, grouped by what they signal.
 /// Deliberately just the markers already confirmed present in this session's
-/// six-specimen survey (`docs/document-layout-survey.jsonl`'s first rows) —
+/// six-specimen survey (`knowledge/document-layout-survey.jsonl`'s first rows) —
 /// not an attempt at a complete multilingual list. Matched case-insensitively
 /// as a plain substring search over the recognized text, so this is *evidence
 /// for the ledger*, not a decision: a miss here doesn't mean the keyword
@@ -172,7 +172,8 @@ fn parse_args(raw: &[String]) -> Args {
     Args {
         path: PathBuf::from(&positional[0]),
         out_path: positional.get(1).map(PathBuf::from),
-        ledger: ledger.unwrap_or_else(|| repo_root().join("docs/document-layout-survey.jsonl")),
+        ledger: ledger
+            .unwrap_or_else(|| repo_root().join("knowledge/document-layout-survey.jsonl")),
         kind,
         side,
         mrz_present,

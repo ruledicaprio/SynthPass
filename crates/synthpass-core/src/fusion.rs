@@ -25,7 +25,7 @@
 //! **`UnrecognizedNationality` and `NonAlphabeticName`** (added after the
 //! above) were chosen by measuring candidate checks over ~150 specimens
 //! (`crates/synthpass-ocr/examples/integrity_survey.rs`,
-//! `docs/integrity-survey.jsonl`) before shipping them: both fired only on
+//! `knowledge/integrity-survey.jsonl`) before shipping them: both fired only on
 //! records that an existing finding already flagged, never alone on a
 //! checksum-valid, otherwise-`Accepted` document. A third candidate —
 //! reconstructing the 39-char name field via `mrz::emit`'s canonicalization

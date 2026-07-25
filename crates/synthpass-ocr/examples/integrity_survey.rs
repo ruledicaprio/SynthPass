@@ -1,12 +1,12 @@
 //! Measurement harness for Phase A of the line-1 integrity work
-//! (`docs/document-layout-survey.jsonl`'s sibling): runs every specimen under
+//! (`knowledge/document-layout-survey.jsonl`'s sibling): runs every specimen under
 //! `samples/` through the OCR engine, reports per-extension decode/OCR
 //! timing, and evaluates three **candidate** integrity findings that are not
 //! yet promoted into `synthpass_core::fusion::check_line1_integrity`.
 //!
 //! This script exists to answer "does a candidate check ever fire, and if
 //! so, on real corruption or a false positive" *before* it's added to
-//! `fusion.rs` — see `docs/document-layout-survey.jsonl` and the plan this
+//! `fusion.rs` — see `knowledge/document-layout-survey.jsonl` and the plan this
 //! implements. Nothing here changes production behavior.
 //!
 //! Run from the repo root (models auto-resolve there):

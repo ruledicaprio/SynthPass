@@ -24,7 +24,7 @@
 //!
 //! A general full-page pass runs first. If its output does not contain a
 //! checksum-valid MRZ (the `mrz` crate's ICAO 9303 check digits are a perfect
-//! oracle for a faithful read — see docs/ARCHITECTURE.md §8), a second engine
+//! oracle for a faithful read — see knowledge/ARCHITECTURE.md §8), a second engine
 //! constrained to the MRZ charset (`A–Z 0–9 <`, beam-search decoding) re-reads
 //! preprocessed variants of the image ([`preprocess::mrz_variants`]: a
 //! row-density-isolated MRZ-band crop, contrast-stretched/binarized/locally-
@@ -178,7 +178,7 @@ impl NativeOcr {
     /// Build warm engines from the models baked into the binary at compile
     /// time (`embedded-models` feature) — no filesystem or network access,
     /// for a true single-file air-gapped deployment (see
-    /// docs/ARCHITECTURE.md §10).
+    /// knowledge/ARCHITECTURE.md §10).
     #[cfg(feature = "embedded-models")]
     pub fn load_embedded() -> Result<Self, String> {
         let load = |bytes: &'static [u8], what: &str| {

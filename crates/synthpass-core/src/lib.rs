@@ -41,7 +41,7 @@ pub mod v2;
 /// could leak identity data. `mrz_checksums_valid` and `validity` carry no
 /// PII (plain `bool`/`i64` summaries) and are `#[zeroize(skip)]`, since
 /// `Copy` types don't implement `Zeroize`. This does not cover copies made
-/// by `serde_json` during (de)serialization — see `docs/ARCHITECTURE.md` §7.
+/// by `serde_json` during (de)serialization — see `knowledge/ARCHITECTURE.md` §7.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ZeroizeOnDrop)]
 pub struct Extraction {
     #[serde(default)]

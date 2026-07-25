@@ -9,7 +9,7 @@ Python, no Docker required for any functional path as of v0.7.5) plus a WASM bro
 crates/mrz          zero-dep ICAO 9303 engine (TD1/TD2/TD3, checksum-verified OCR repair)
 crates/mrz-wasm     wasm-bindgen wrapper for the GitHub Pages demo
 crates/synthpass-gen     synthetic passport factory: seeded identities, TD3 MRZ, layout/render/
-                    labels, capture-degradation profiles (M1-M3 of docs/ROADMAP.md)
+                    labels, capture-degradation profiles (M1-M3 of knowledge/ROADMAP.md)
 crates/synthpass-core    canonical Extraction schema + Tier-3 audit/crypto (feature `security`)
 crates/synthpass-llm     in-process Tier-2 inference: Qwen GGUF via `llama-cpp-2`
 crates/synthpass-ocr     in-process pure-Rust OCR: `ocrs`/`rten`
@@ -47,7 +47,7 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/work" \
 ### Cross-compiling to musl locally
 
 `synthpass-builder` ships `x86_64-unknown-linux-musl`'s Rust std, a pinned Zig (the `CC`/`CXX` for
-`llama-cpp-2`'s C++ build under musl), and `cargo-zigbuild` — see docs/ARCHITECTURE.md §10 for why
+`llama-cpp-2`'s C++ build under musl), and `cargo-zigbuild` — see knowledge/ARCHITECTURE.md §10 for why
 Zig was chosen over `cross-rs`/manual `musl-gcc`:
 
 ```bash
@@ -111,7 +111,7 @@ input to `fuzz/corpus/<target>/` as a permanent regression seed, add a matching 
 ### Adding a corpus specimen
 
 `samples/` and `crates/synthpass-ocr/examples/mrz_corpus.rs` grow one individually-vetted image at a
-time (see `docs/CORPUS_COVERAGE.md` for the current backlog by country). Before adding a new
+time (see `knowledge/CORPUS_COVERAGE.md` for the current backlog by country). Before adding a new
 specimen, confirm it meets **both**:
 
 1. **Provenance.** Either a genuine `SPECIMEN` watermark printed on the document itself, or an
@@ -140,7 +140,7 @@ or `samples/driving_licenses/` — basenames must stay unique across all of `sam
 lookups are basename-based), run `cargo run -p synthpass-ocr --release --example
 mrz_corpus -- --dump` in the `synthpass-builder` Docker image to confirm a Tier-1 HIT and read the real
 doc number off the MRZ, add it to `CORPUS` (or `NEGATIVE` if the document has no MRZ at all), and
-update the corresponding row in `docs/CORPUS_COVERAGE.md`.
+update the corresponding row in `knowledge/CORPUS_COVERAGE.md`.
 
 **PRADO (`consilium.europa.eu/prado`) is never a source for specimens or any other data in this
 repo.** Its copyright notice explicitly prohibits harvesting, copying, or redistributing PRADO

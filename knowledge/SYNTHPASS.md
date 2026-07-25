@@ -112,7 +112,7 @@ broken OCR integration) without being flaky. It was verified passing on GitHub's
 before being merged.
 
 **Why the measured number is ~55%, not the roadmap's original 95% target:** see
-[`docs/ROADMAP.md`](ROADMAP.md)'s M4 row and execution notes for the full account — in short, a
+[`knowledge/ROADMAP.md`](ROADMAP.md)'s M4 row and execution notes for the full account — in short, a
 real MRZ glyph-rendering bug in `synthpass-gen` was found and fixed (misaligned character cells,
 thresholded anti-aliasing) during this measurement work, improving the rate from 50%→60% on a
 smaller sample. The residual gap is believed to be per-character OCR noise compounding over the

@@ -1,7 +1,7 @@
 //! Image preprocessing variants for the MRZ-targeted retry passes.
 //!
 //! The failure modes these address (measured on `samples/` via
-//! `examples/mrz_corpus.rs`, see docs/ARCHITECTURE.md §8): low-resolution
+//! `examples/mrz_corpus.rs`, see knowledge/ARCHITECTURE.md §8): low-resolution
 //! scans whose MRZ glyphs are too small for clean recognition, low-contrast
 //! photos where the detector fragments an MRZ line into disconnected
 //! pieces, and — since the `Israel_Biometric_Passport.jpg` specimen —

@@ -1,6 +1,6 @@
 //! Tier-1 accuracy harness: runs the in-process OCR engine over every
 //! MRZ-bearing specimen in `samples/` and reports how many produce a
-//! checksum-valid MRZ (the "Tier-1 hit rate" from docs/ARCHITECTURE.md §8).
+//! checksum-valid MRZ (the "Tier-1 hit rate" from knowledge/ARCHITECTURE.md §8).
 //!
 //! Run from the repo root (models auto-resolve there):
 //! ```powershell

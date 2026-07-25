@@ -42,8 +42,8 @@ Synthetic documents → Ground truth → Benchmarking → OCR → MRZ → AI ext
 - `synthpass bench`
 - CI quality gates
 - Benchmark reports
-- `docs/SYNTHPASS.md`
-- `docs/ADVERSARIAL.md`
+- `knowledge/SYNTHPASS.md`
+- `knowledge/ADVERSARIAL.md`
 
 ## M5 – Platform Expansion
 

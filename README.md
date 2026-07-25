@@ -12,7 +12,7 @@
 ![ICAO 9303](https://img.shields.io/badge/ICAO%209303-MRZ%20checksums-0B7261?style=flat)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F230%20countries-yellow?style=flat)](docs/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F230%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 <!-- Posture -->
 ![Air-gapped](https://img.shields.io/badge/deploy-air--gapped-10B981?style=flat)
 ![Cloud calls](https://img.shields.io/badge/cloud%20calls-0-brightgreen?style=flat)
@@ -32,7 +32,7 @@ generation path produces unmistakably synthetic, watermarked documents whose lab
 > identity-document systems — letting teams build and prove their pipelines without ever
 > touching real customer PII. It is **not** a tool for producing documents that imitate genuine
 > credentials: every generated artifact carries a mandatory synthetic watermark and a generic,
-> non-country template, enforced in code. See [docs/BRANDING.md](docs/BRANDING.md) §4.
+> non-country template, enforced in code. See [knowledge/BRANDING.md](knowledge/BRANDING.md) §4.
 
 *Formerly `multi-level-id-strip` / `mlis`; see [CHANGELOG.md](CHANGELOG.md) for the crate-rename
 mapping.*
@@ -107,7 +107,7 @@ to persist it to.**
 
 Neither Docker nor Python is required to *run* SynthPass. Input is images only — JPEG, PNG, WebP,
 TIFF, BMP, GIF. PDF and HEIC/HEIF are deliberately unsupported
-([why](docs/ARCHITECTURE.md#8-known-limitations--what-tier-2-accuracy-actually-looks-like)).
+([why](knowledge/ARCHITECTURE.md#8-known-limitations--what-tier-2-accuracy-actually-looks-like)).
 
 > **Building on Windows:** Tier 2 (`llama-cpp-2`) compiles `llama.cpp`'s C++ and needs CMake,
 > LLVM/libclang and MSVC Build Tools — a heavier ask than plain Rust. A `llama-cpp-sys-2` build
@@ -192,7 +192,7 @@ sidecar with per-field ground-truth boxes and a checksum-valid MRZ built by `mrz
 an optional capture-degradation pass (`clean` | `mobile` | `scanner` | `worn` | `border-kiosk`)
 that simulates real-world capture.
 
-<img src="docs/img/synthetic_pass_example.png" alt="A generated pass — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
+<img src="knowledge/img/synthetic_pass_example.png" alt="A generated pass — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
 
 Then read it **back through the exact same extraction pipeline** — the check digits and labels grade
 the OCR read, closing the loop:
@@ -223,8 +223,8 @@ cargo run -p synthpass-bench -- --count 100 --seed 1 --profile clean
 
 Text renders with vendored OFL fonts (OCR-B and PT Sans, embedded by default; `--no-default-features`
 falls back to placeholder bars). Reports are generated, never hand-edited. Methodology in
-[docs/SYNTHPASS.md](docs/SYNTHPASS.md); the degraded-profile red-team corpus in
-[docs/ADVERSARIAL.md](docs/ADVERSARIAL.md).
+[knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md); the degraded-profile red-team corpus in
+[knowledge/ADVERSARIAL.md](knowledge/ADVERSARIAL.md).
 
 ## 🔀 How it works
 
@@ -270,8 +270,8 @@ Supporting invariants: everything runs **in one process** (no Docker, no Python,
 new dependencies must be pure Rust or justify themselves in writing; every PII-bearing value is
 zeroized on drop and the audit trail is SHA-256-only.
 
-Full reasoning in [docs/VISION.md](docs/VISION.md); engineering rationale and trade-offs in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Full reasoning in [knowledge/VISION.md](knowledge/VISION.md); engineering rationale and trade-offs in
+[knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md).
 
 ## 🔐 Extraction: Tier 1 and Tier 2
 
@@ -312,13 +312,13 @@ The generated-corpus number is much lower than the real-specimen number, and tha
 misses cluster on the 14-character `personal_number` field, consistent with per-character OCR
 noise compounding over a longer field rather than a single fixable defect. The CI floor sits
 deliberately below the measured value to absorb cross-platform variance in OCR inference without
-becoming flaky. Full account in [docs/ROADMAP.md](docs/ROADMAP.md)'s M4 notes.
+becoming flaky. Full account in [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4 notes.
 
 When the general OCR pass cannot produce a checksum-valid MRZ, targeted retry passes
 (MRZ-charset-constrained recognition over preprocessed crops) run automatically, and the check
 digits decide which reading — if any — is trusted. Tier 2 runs only after Tier 1 still misses. One
 documented permanent miss is a physically redacted specimen whose MRZ was never printed at all
-(see [docs/CORPUS_COVERAGE.md](docs/CORPUS_COVERAGE.md)) — not a recoverable OCR gap.
+(see [knowledge/CORPUS_COVERAGE.md](knowledge/CORPUS_COVERAGE.md)) — not a recoverable OCR gap.
 
 ## ⚙️ Configuration
 
@@ -377,9 +377,9 @@ of any kind. For local development, bypass it entirely with `SYNTHPASS_LICENSE_S
 and benchmarking never require a license, because they involve no real PII.
 
 Customer (`fingerprint` → `verify-license`) and vendor (`keygen` → `issue-license`) walkthroughs
-are in **[docs/LICENSING.md](docs/LICENSING.md)**. The signed-bytes format, `verify_strict`
+are in **[knowledge/LICENSING.md](knowledge/LICENSING.md)**. The signed-bytes format, `verify_strict`
 rationale, fingerprint scheme and — stated plainly — the threat model are in
-[docs/ARCHITECTURE.md §6](docs/ARCHITECTURE.md#6-offline-cryptographic-licensing-v080).
+[knowledge/ARCHITECTURE.md §6](knowledge/ARCHITECTURE.md#6-offline-cryptographic-licensing-v080).
 
 > **This meters the official binary; it is not DRM.** The source is public, so anyone who rebuilds
 > can strip the check. It exists to make the product sellable and auditable without phoning home,
@@ -413,7 +413,7 @@ flowchart LR
 Copy the binaries and the GGUF onto the target, run `synthpass fingerprint`, obtain a license
 bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale (why Zig over
 `cross-rs` or manual `musl-gcc`) and known limitations are in
-[docs/ARCHITECTURE.md §10](docs/ARCHITECTURE.md#10-v100-and-beyond).
+[knowledge/ARCHITECTURE.md §10](knowledge/ARCHITECTURE.md#10-v100-and-beyond).
 `docker/Dockerfile.musl` packages the same binaries into a `FROM scratch` image.
 
 ## 📁 Repository layout
@@ -437,7 +437,7 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 │   ├── synthpass-cli/      CLI front-end (binary `synthpass`)
 │   └── synthpass-serve/    axum web app: upload page, POST /api/extract with SSE progress,
 │                           GET /health, bearer auth, TLS, license enforcement
-├── docs/                   Vision, roadmap, branding, architecture, licensing, corpus coverage
+├── knowledge/                   Vision, roadmap, branding, architecture, licensing, corpus coverage
 ├── docker/                 Builder, musl and serve images + compose file
 ├── fuzz/                   cargo-fuzz targets for the untrusted OCR ingest path
 ├── samples/                Public-domain specimen documents and expected outputs, organized into
@@ -461,7 +461,7 @@ Two optional at-rest controls: `SYNTHPASS_AUDIT_LOG` appends a **PII-free** SHA-
 JSON with AES-256-GCM. The Tier-2 model is SHA-256-verified before use, so a substituted GGUF
 fails closed rather than running silently. The highest-value in-memory PII carriers — extracted
 fields, the AES key, raw model output — are wiped on drop via `zeroize` (best-effort; see
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) §7 for exactly what is and is not covered), and the
+[knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) §7 for exactly what is and is not covered), and the
 untrusted OCR ingest path is fuzz-tested with an always-on `proptest` suite plus opt-in
 `cargo-fuzz` targets (`cargo fuzz run mrz_find_and_parse` / `mrz_parse_td` from `fuzz/`).
 
@@ -469,18 +469,18 @@ Vulnerability reporting and the full deployment checklist: [SECURITY.md](SECURIT
 
 ## 📄 Documentation
 
-Full index: [docs/README.md](docs/README.md).
+Full index: [knowledge/README.md](knowledge/README.md).
 
 | Doc | What it covers |
 | --- | --- |
-| [docs/VISION.md](docs/VISION.md) | Why the project exists, its principles, and permanent non-goals |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | M1–M6 milestones with a Definition of Done each; shipped vs. planned |
-| [docs/BRANDING.md](docs/BRANDING.md) | Identra/SynthPass naming, messaging guardrails, commercial tiers |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Engineering rationale, trade-offs, design history |
-| [docs/SYNTHPASS.md](docs/SYNTHPASS.md) | Generation and benchmarking methodology |
-| [docs/ADVERSARIAL.md](docs/ADVERSARIAL.md) | Degraded-capture red-team corpus |
-| [docs/LICENSING.md](docs/LICENSING.md) | Customer and vendor CLI walkthroughs |
-| [docs/CORPUS_COVERAGE.md](docs/CORPUS_COVERAGE.md) | Per-country corpus status and how to add a specimen |
+| [knowledge/VISION.md](knowledge/VISION.md) | Why the project exists, its principles, and permanent non-goals |
+| [knowledge/ROADMAP.md](knowledge/ROADMAP.md) | M1–M6 milestones with a Definition of Done each; shipped vs. planned |
+| [knowledge/BRANDING.md](knowledge/BRANDING.md) | Identra/SynthPass naming, messaging guardrails, commercial tiers |
+| [knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) | Engineering rationale, trade-offs, design history |
+| [knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md) | Generation and benchmarking methodology |
+| [knowledge/ADVERSARIAL.md](knowledge/ADVERSARIAL.md) | Degraded-capture red-team corpus |
+| [knowledge/LICENSING.md](knowledge/LICENSING.md) | Customer and vendor CLI walkthroughs |
+| [knowledge/CORPUS_COVERAGE.md](knowledge/CORPUS_COVERAGE.md) | Per-country corpus status and how to add a specimen |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Build/test setup, fuzzing, git workflow, review checklist |
 | [SECURITY.md](SECURITY.md) | Threat model, deployment checklist, vulnerability reporting |
 | [CHANGELOG.md](CHANGELOG.md) | Full version-by-version history |
@@ -495,9 +495,9 @@ was AI-accelerated, across more than one model.
 - **Rusmir Skopljak** ([@ruledicaprio](https://github.com/ruledicaprio)) — creator, architecture and direction
 - **Claude Opus 4.8 / Sonnet 5** (Anthropic) — orchestration and implementation across the codebase
 - **DeepSeek** — foundational architectural strategy
-  ([docs/FOUNDATIONAL_STRATEGY.md](docs/FOUNDATIONAL_STRATEGY.md)), advisory and architectural review
+  ([knowledge/FOUNDATIONAL_STRATEGY.md](knowledge/FOUNDATIONAL_STRATEGY.md)), advisory and architectural review
 - **GPT** (OpenAI) — the v2.0 roadmap and design records
-  ([docs/synthpass_v2_0.md](docs/synthpass_v2_0.md), and the now-removed
+  ([knowledge/synthpass_v2_0.md](knowledge/synthpass_v2_0.md), and the now-removed
   `docs/mlis_v2_0_0_preliminary_design.md` scratch notes), building on DeepSeek's foundational
   strategy
 
@@ -515,4 +515,4 @@ BSD-3-Clause. Vendored generator fonts (OCR-B, PT Sans) are OFL 1.1 — see
 ---
 
 *SynthPass is an open-source project under the Identra stewardship. See
-[docs/BRANDING.md](docs/BRANDING.md) for trademark and attribution guidance.*
+[knowledge/BRANDING.md](knowledge/BRANDING.md) for trademark and attribution guidance.*

@@ -16,7 +16,7 @@ synthpass-ocr = { path = "../synthpass-ocr" }
 # The zero-dep checksum oracle deciding hit vs. miss.
 mrz = { path = "../mrz" }
 # `fusion::check_line1_integrity` — measures what fraction of Tier-1 hits
-# still have a structurally suspect line 1 (see docs/ROADMAP.md's per-field
+# still have a structurally suspect line 1 (see knowledge/ROADMAP.md's per-field
 # CER note).
 synthpass-core = { path = "../synthpass-core" }
 image = { workspace = true }
