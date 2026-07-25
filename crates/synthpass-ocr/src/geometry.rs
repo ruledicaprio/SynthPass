@@ -101,6 +101,23 @@ pub struct OcrPage {
     /// The line group scored as the MRZ zone by [`detect_mrz_band`] (A2), if
     /// any scored high enough to be confident.
     pub mrz_band: Option<BBox>,
+    /// The winning band's average score, in `[0, 1]` — the number
+    /// [`detect_mrz_band_scored`] already computes and which [`mrz_band`]
+    /// then throws away.
+    ///
+    /// Kept because "how MRZ-shaped did the best candidate look" is a
+    /// different question from "where was it", and a caller deciding whether
+    /// to spend money on a more expensive provider needs the former. A low
+    /// score on a page that still produced a band is the signal that the band
+    /// is probably noise — see the 0°/180° tie-break in
+    /// [`crate::NativeOcr::recognize_detailed`], which was written because
+    /// exactly that happens.
+    ///
+    /// `None` when no band was found at all. Compare against
+    /// [`MRZ_BAND_CONFIDENT_SCORE`].
+    ///
+    /// [`mrz_band`]: OcrPage::mrz_band
+    pub mrz_band_score: Option<f64>,
     /// The region scored as the ID photo by [`detect_portrait`] (A4), if
     /// any scored high enough to be confident. **Crop coordinates only** —
     /// see [`detect_portrait`]'s doc comment for the VISION §2 boundary this
@@ -109,6 +126,20 @@ pub struct OcrPage {
     /// The rotation (degrees, clockwise) applied before the main OCR pass —
     /// `0` if the page was used as-is. See [`crate::choose_rotation`].
     pub rotation: u16,
+    /// [`text_sanity`] over the whole page's recognized text.
+    ///
+    /// Per-line sanity already lives in [`OcrLine::confidence`], but a caller
+    /// deciding whether the page is worth escalating wants one number for the
+    /// page, not a vector it has to reduce itself — and reducing it correctly
+    /// (weighting by line length rather than averaging) is exactly the kind of
+    /// detail every call site would get subtly differently.
+    ///
+    /// Read [`text_sanity`]'s doc comment before using this to decide
+    /// anything: it is a character-plausibility proxy, not a model score,
+    /// because `ocrs` exposes no probabilities at all.
+    ///
+    /// `None` when no text was recognized.
+    pub text_sanity: Option<f32>,
 }
 
 /// Heuristic confidence proxy in `[0, 1]` for a recognized line's text.
