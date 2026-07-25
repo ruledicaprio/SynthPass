@@ -14,7 +14,7 @@ use ed25519_dalek::VerifyingKey;
 
 /// The key baked into this build. **Placeholder** — generate a real keypair
 /// with `synthpass-license-issuer keygen` and replace this file before issuing
-/// any real licenses; see `docs/ARCHITECTURE.md`'s licensing section.
+/// any real licenses; see `knowledge/ARCHITECTURE.md`'s licensing section.
 const EMBEDDED_PUBLIC_KEY_B64: &str = include_str!("../pubkey.b64");
 
 /// The verifying key to check license signatures against: `SYNTHPASS_LICENSE_PUBKEY`

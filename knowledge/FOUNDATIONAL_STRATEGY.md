@@ -305,9 +305,9 @@ Synthetic documents → Ground truth → Benchmarking → OCR → MRZ → AI ext
 * Benchmark reports
 
 
-* `docs/SYNTHPASS.md`
+* `knowledge/SYNTHPASS.md`
 
-* `docs/ADVERSARIAL.md`
+* `knowledge/ADVERSARIAL.md`
 
 
 ## M5 – Platform Expansion

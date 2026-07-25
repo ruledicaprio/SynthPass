@@ -4,7 +4,7 @@
 //!
 //! **Threat model, stated plainly (matches this project's house style of
 //! documenting limitations rather than overselling — see
-//! `docs/ARCHITECTURE.md` §7):** the source is public, so anyone who
+//! `knowledge/ARCHITECTURE.md` §7):** the source is public, so anyone who
 //! rebuilds from source can strip this check entirely. This meters and gates
 //! the *official pre-built binary*, deters casual license-sharing, and
 //! produces a compliance artifact — it is **not DRM** and is not sold as
@@ -33,7 +33,7 @@ pub use fingerprint::machine_fingerprint;
 
 /// Single-document extraction — the core capability. Named here for
 /// completeness (and so a preset can list it), but deliberately **never**
-/// gated in `synthpass-serve`: `docs/BRANDING.md` §5 draws the paid boundary
+/// gated in `synthpass-serve`: `knowledge/BRANDING.md` §5 draws the paid boundary
 /// at capacity, support, and enterprise-integration surfaces, never at the
 /// core.
 pub const FEATURE_EXTRACT: &str = "extract";
@@ -44,7 +44,7 @@ pub const FEATURE_MULTI_CONTEXT: &str = "multi-context";
 /// Prometheus `/metrics` — the "enhanced reporting" surface.
 pub const FEATURE_METRICS: &str = "metrics";
 
-/// The commercial tiers of `docs/BRANDING.md` §5, ordered so that a higher
+/// The commercial tiers of `knowledge/BRANDING.md` §5, ordered so that a higher
 /// tier is a superset of a lower one.
 ///
 /// The tier is *descriptive*: gating decisions are made per-feature by
@@ -61,7 +61,7 @@ pub enum Tier {
 
 impl Tier {
     /// The feature set an issuer stamps for this tier. Mirrors the tier table
-    /// in `docs/BRANDING.md` §5: Professional adds capacity knobs, Enterprise
+    /// in `knowledge/BRANDING.md` §5: Professional adds capacity knobs, Enterprise
     /// adds reporting on top.
     pub fn default_features(self) -> Vec<String> {
         let names: &[&str] = match self {

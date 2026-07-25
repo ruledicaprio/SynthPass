@@ -18,7 +18,7 @@
 //! check-digit bools, bounding boxes — is `#[zeroize(skip)]` (`Copy` numerics
 //! don't implement `Zeroize`, and a confidence score identifies no one). The
 //! same caveats as v1 apply: `serde_json`'s intermediate copies are not wiped
-//! (see `docs/ARCHITECTURE.md` §7).
+//! (see `knowledge/ARCHITECTURE.md` §7).
 
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};

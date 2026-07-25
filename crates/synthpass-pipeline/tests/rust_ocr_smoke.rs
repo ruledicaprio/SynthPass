@@ -9,7 +9,7 @@
 //! against this workspace's specimen samples (600x421 and 2000x2666 JPEGs)
 //! show `ocrs`'s out-of-the-box accuracy is not yet clean enough to
 //! reconstruct a checksum-valid MRZ line reliably — filler runs get
-//! mis-recognized or truncated (see `docs/ARCHITECTURE.md`'s honest
+//! mis-recognized or truncated (see `knowledge/ARCHITECTURE.md`'s honest
 //! limitations note). Tier 1's `mrz` crate already tolerates common OCR
 //! lookalike errors (`K`/`L` for `<`, short lines), but not every failure
 //! mode. So this test proves the weaker, still-meaningful claim: the OCR
@@ -111,7 +111,7 @@ async fn rust_ocr_engine_reaches_a_terminal_pipeline_result() {
 /// and WebP all flow through the OCR engine end-to-end, not just that
 /// `image::load` accepts them in isolation — these three plus TIFF/BMP/GIF
 /// (untested here, same `image` crate decode path) are the phone-common
-/// formats this milestone confirmed support for. See `docs/ARCHITECTURE.md`'s
+/// formats this milestone confirmed support for. See `knowledge/ARCHITECTURE.md`'s
 /// "Supported input formats" note. HEIC/HEIF is deliberately NOT covered here
 /// — it's meant to be rejected, not decoded (see `ocr.rs`'s `looks_like_heic`).
 #[tokio::test]

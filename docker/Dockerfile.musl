@@ -1,6 +1,6 @@
 # Packages the pre-built static x86_64-unknown-linux-musl `synthpass`/`synthpass-serve`
 # binaries (built via `cargo zigbuild`, see the `rust-musl` CI job and
-# docs/ARCHITECTURE.md §10) into a minimal `FROM scratch` image — the closest
+# knowledge/ARCHITECTURE.md §10) into a minimal `FROM scratch` image — the closest
 # Docker equivalent to the "copy one file to an air-gapped machine" story.
 #
 # Unlike docker/Dockerfile.serve (glibc, `debian:bookworm-slim`, still the

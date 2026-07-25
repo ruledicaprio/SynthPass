@@ -24,5 +24,5 @@ serde_json = "1"
 # of fetching them at runtime — see build.rs and src/embedded.rs. Off by
 # default (glibc dev/CI keeps the fast runtime-download-and-cache loop); the
 # musl release build turns this on for a true air-gapped single-file binary
-# (see docs/ARCHITECTURE.md §10).
+# (see knowledge/ARCHITECTURE.md §10).
 embedded-models = []

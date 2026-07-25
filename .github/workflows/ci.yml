@@ -53,6 +53,11 @@ jobs:
       - name: Format
         run: cargo fmt --all --check
 
+      # Guards the docs/ -> knowledge/ rename (ADR-0001). Cheap, and the only
+      # thing that would notice ~116 repaired references rotting again.
+      - name: Documentation links resolve
+        run: bash scripts/check-doc-links.sh
+
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets
 
@@ -90,7 +95,7 @@ jobs:
       # over a fixed, deterministic synthetic corpus and fails the build if it
       # drops meaningfully below the honestly-measured floor. 30% is set well
       # under the ~55% measured locally over a 100-seed sample (see
-      # docs/ROADMAP.md and PR #30) — the margin absorbs cross-platform
+      # knowledge/ROADMAP.md and PR #30) — the margin absorbs cross-platform
       # floating-point variance in OCR inference between this runner and the
       # machine the number was measured on, so the gate catches real
       # regressions without being flaky. A 50-seed corpus keeps this step's
@@ -213,7 +218,7 @@ jobs:
   # Coverage-guided fuzzing of the mrz ingest surface (find_and_parse,
   # parse_td1/td2/td3). Opt-in like native-llm above: needs nightly + a
   # non-deterministic bounded run time, which would be a poor fit for a
-  # required PR check (see docs/ARCHITECTURE.md §10 / v0.9.0). The always-on
+  # required PR check (see knowledge/ARCHITECTURE.md §10 / v0.9.0). The always-on
   # regression net (never-panics proptest suite) runs in the `rust` job above
   # as part of `cargo test --workspace`.
   fuzz:
@@ -236,7 +241,7 @@ jobs:
         run: cargo fuzz run mrz_parse_td -- -max_total_time=60
 
   # Static x86_64-unknown-linux-musl release build — the "copy one file to an
-  # air-gapped machine" artifact (see docs/ARCHITECTURE.md §10). New,
+  # air-gapped machine" artifact (see knowledge/ARCHITECTURE.md §10). New,
   # C++-heavy cross-compile infra as of v1.0.0, so this starts opt-in like
   # native-llm/fuzz above; promote to a required check once it's proven
   # stable over a few runs (tracked as a v1.0.1 fast-follow, see CHANGELOG).

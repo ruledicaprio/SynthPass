@@ -3,7 +3,7 @@
 # `.github/workflows/ci.yml`'s `rust` job's apt list (source of truth for
 # system deps) plus the nightly toolchain `fuzz` needs and, as of v1.0.0, the
 # musl target + pinned Zig + cargo-zigbuild used to cross-compile the static
-# release binaries (see docs/ARCHITECTURE.md §10).
+# release binaries (see knowledge/ARCHITECTURE.md §10).
 #
 # This replaces the old ad-hoc `docker commit`-built `synthpass-builder:latest` —
 # build it explicitly instead:
@@ -32,7 +32,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Pinned Zig release — provides a versioned clang + musl sysroot, used as the
-# CC/CXX for cargo-zigbuild's musl cross-compiles (see docs/ARCHITECTURE.md
+# CC/CXX for cargo-zigbuild's musl cross-compiles (see knowledge/ARCHITECTURE.md
 # §10 for why Zig was chosen over cross-rs / manual musl-gcc).
 RUN curl -fL "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz" -o /tmp/zig.tar.xz \
  && tar -xJf /tmp/zig.tar.xz -C /opt \

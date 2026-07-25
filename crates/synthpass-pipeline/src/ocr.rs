@@ -15,7 +15,7 @@
 //! HEIC/HEIF (Apple's default photo format) — no permissively-licensed
 //! pure-Rust decoder exists yet (the two that do are AGPL-3.0), so HEIC/HEIF
 //! input is rejected with a clear message rather than silently failing or
-//! pulling in AGPL code. See `docs/ARCHITECTURE.md`'s "Supported input
+//! pulling in AGPL code. See `knowledge/ARCHITECTURE.md`'s "Supported input
 //! formats" note.
 
 use crate::PipelineError;

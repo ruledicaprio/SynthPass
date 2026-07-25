@@ -297,7 +297,7 @@ pub fn cer(expected: &str, got: &str) -> f64 {
 /// Two rolling rows rather than a full `m*n` matrix — the distance is all
 /// that is wanted, never the alignment. Deliberately hand-written: adding
 /// the `strsim` crate for one textbook function would spend a dependency
-/// (see `docs/VISION.md` §1 on new dependencies) on ~20 lines of `std`.
+/// (see `knowledge/VISION.md` §1 on new dependencies) on ~20 lines of `std`.
 fn levenshtein(a: &[char], b: &[char]) -> usize {
     if a.is_empty() {
         return b.len();

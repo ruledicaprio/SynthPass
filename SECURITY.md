@@ -46,7 +46,7 @@ time for a fix before any public write-up.
   (extracted fields, the AES key, raw Tier-2 output) are wiped on drop via `zeroize`. This does
   not cover every intermediate copy (`serde_json::Value` internals) or on-disk plaintext
   artifacts (only the optional `SYNTHPASS_KEY`-encrypted output is protected at rest) — see
-  [docs/ARCHITECTURE.md §7](docs/ARCHITECTURE.md#7-security--compliance-posture) for the exact
+  [knowledge/ARCHITECTURE.md §7](knowledge/ARCHITECTURE.md#7-security--compliance-posture) for the exact
   scope, stated plainly rather than oversold.
 - **Fuzz-tested ingest path (v0.9.0).** The untrusted-OCR-text repair logic in `mrz` (also the
   public WASM demo's parser) is covered by an always-on `proptest` suite plus opt-in
@@ -55,7 +55,7 @@ time for a fix before any public write-up.
   OCR models at compile time and makes zero runtime network calls — nothing to compromise over
   the wire because there is no wire. Licensing is not hardware-bound (root can read the machine
   fingerprint, a from-source rebuild bypasses the check) — a compliance/metering mechanism, not
-  DRM; see [docs/ARCHITECTURE.md §6](docs/ARCHITECTURE.md#6-offline-cryptographic-licensing-v080)
+  DRM; see [knowledge/ARCHITECTURE.md §6](knowledge/ARCHITECTURE.md#6-offline-cryptographic-licensing-v080)
   for the full threat model.
 
 ## Hardening checklist for production
