@@ -115,6 +115,70 @@ pub enum Finding {
     NonAlphabeticName { field: String },
 }
 
+/// The fieldless projection of [`Finding`] — a stable, PII-free label for a
+/// finding's *kind*.
+///
+/// [`Finding`] carries `got` / `issuing_country` / `nationality`: real ICAO
+/// country codes read off a real document, which is why it derives `Zeroize`.
+/// That makes it safe inside the extraction JSON (zeroized on drop) and unsafe
+/// everywhere else. A routing decision made *because* of a finding gets logged
+/// and turned into a metric label, so it needs a form with nothing in it —
+/// this one.
+///
+/// `CONTRIBUTING.md`'s PII checklist states the rule this implements: logs may
+/// carry shape, never content. `crates/synthpass-pipeline/tests/pii_logging.rs`
+/// enforces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum FindingKind {
+    UnrecognizedIssuingCountry,
+    IssuingCountryNationalityMismatch,
+    MissingNameSeparator,
+    UnrecognizedNationality,
+    NonAlphabeticName,
+}
+
+impl FindingKind {
+    /// Stable snake_case label, identical to the serde representation. Safe as
+    /// a metric label value: the set is closed and fixed at compile time.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UnrecognizedIssuingCountry => "unrecognized_issuing_country",
+            Self::IssuingCountryNationalityMismatch => "issuing_country_nationality_mismatch",
+            Self::MissingNameSeparator => "missing_name_separator",
+            Self::UnrecognizedNationality => "unrecognized_nationality",
+            Self::NonAlphabeticName => "non_alphabetic_name",
+        }
+    }
+}
+
+impl std::fmt::Display for FindingKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Finding {
+    /// Drop the payload, keep the classification.
+    ///
+    /// Deliberately exhaustive with no catch-all, mirroring
+    /// [`crate::v2::FieldConfidence::downgrade_flagged`]: adding a [`Finding`]
+    /// variant must be a compile error here rather than silently mapping to
+    /// some default kind, because the result is what reaches logs and metrics.
+    pub fn kind(&self) -> FindingKind {
+        match self {
+            Self::UnrecognizedIssuingCountry { .. } => FindingKind::UnrecognizedIssuingCountry,
+            Self::IssuingCountryNationalityMismatch { .. } => {
+                FindingKind::IssuingCountryNationalityMismatch
+            }
+            Self::MissingNameSeparator { .. } => FindingKind::MissingNameSeparator,
+            Self::UnrecognizedNationality { .. } => FindingKind::UnrecognizedNationality,
+            Self::NonAlphabeticName { .. } => FindingKind::NonAlphabeticName,
+        }
+    }
+}
+
 /// Verdict for an [`MrzData`] record, from the checks in this module.
 /// Distinct from [`mrz::MrzData::valid`] — that asks "do the check digits
 /// verify", this asks "does the rest of the record look internally
@@ -126,6 +190,24 @@ pub enum Verdict {
     Accepted,
     /// At least one finding, none severe enough to reject outright.
     NeedsReview { reasons: Vec<Finding> },
+}
+
+impl Verdict {
+    /// The kinds of every finding in this verdict, payloads stripped. Empty for
+    /// [`Verdict::Accepted`]. This is the form safe to log or route on — see
+    /// [`FindingKind`].
+    pub fn kinds(&self) -> Vec<FindingKind> {
+        match self {
+            Self::Accepted => Vec::new(),
+            Self::NeedsReview { reasons } => reasons.iter().map(Finding::kind).collect(),
+        }
+    }
+
+    /// Whether any finding was raised. Cheaper and clearer at a call site than
+    /// matching, when the caller only needs the boolean.
+    pub fn is_flagged(&self) -> bool {
+        matches!(self, Self::NeedsReview { .. })
+    }
 }
 
 /// Threshold, in characters, above which an empty `given_names` next to a
