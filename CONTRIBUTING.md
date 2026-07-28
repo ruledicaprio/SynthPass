@@ -11,8 +11,11 @@ crates/mrz-wasm     wasm-bindgen wrapper for the GitHub Pages demo
 crates/synthpass-gen     synthetic passport factory: seeded identities, TD3 MRZ, layout/render/
                     labels, capture-degradation profiles (M1-M3 of knowledge/ROADMAP.md)
 crates/synthpass-core    canonical Extraction schema + Tier-3 audit/crypto (feature `security`)
+crates/synthpass-bench   benchmark harness + corpus runner behind the CI accuracy gate
+crates/synthpass-die     Document Intelligence Engine: provider contract, catalog, MrzReader (M7)
 crates/synthpass-llm     in-process Tier-2 inference: Qwen GGUF via `llama-cpp-2`
 crates/synthpass-ocr     in-process pure-Rust OCR: `ocrs`/`rten`
+crates/synthpass-license offline Ed25519 licensing: sign/verify, fingerprint, vendor issuer
 crates/synthpass-pipeline  OcrEngine trait → Tier 1 MRZ → Tier 2 InferBackend → JSON
 crates/synthpass-cli     CLI (binary `synthpass`; extract, `generate`, `decrypt`, `doctor`, ...)
 crates/synthpass-serve   axum web app (auth, TLS)

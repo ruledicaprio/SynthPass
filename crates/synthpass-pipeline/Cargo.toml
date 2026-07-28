@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 mrz = { path = "../mrz", features = ["serde", "zeroize"] }
 synthpass-core = { path = "../synthpass-core", features = ["security"] }
+synthpass-die = { path = "../synthpass-die" }
 tokio = { workspace = true, features = ["fs", "sync", "rt"] }
 serde_json = "1"
 async-trait = "0.1"

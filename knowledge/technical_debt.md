@@ -14,8 +14,8 @@ known imperfections.
 ### Eleven source citations point at a document that has never existed
 
 `docs/V2-DESIGN.md` is cited by section number in eleven doc comments across
-`synthpass-core` (`lib.rs:28`, `v2.rs:1,74,97,123,128,134,261`),
-`synthpass-pipeline` (`lib.rs:238,743`) and `synthpass-serve` (`main.rs:82`).
+`synthpass-core` (`lib.rs:28`, `v2.rs:1,74,97,123,128,143,271`),
+`synthpass-pipeline` (`lib.rs:248,816`) and `synthpass-serve` (`main.rs:82`).
 Verified against the full history — `git log --all -- docs/V2-DESIGN.md` returns
 nothing. **The file was never committed to this repo.**
 
