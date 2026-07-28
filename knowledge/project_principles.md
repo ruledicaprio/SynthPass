@@ -14,9 +14,11 @@ Tier 1 is ICAO 9303 check-digit arithmetic, not a model. A checksum-valid MRZ
 read is *mathematically proven* and the LLM is never consulted for it. The model
 exists to recover what deterministic code cannot.
 
-**Enforced by:** `crates/synthpass-pipeline/src/lib.rs` — the Tier-1 gate
-(`mrz::find_and_parse(..).filter(|m| m.valid())`) short-circuits Tier 2
-entirely. `crates/mrz` has zero dependencies and zero model weights.
+**Enforced by:** `crates/synthpass-pipeline/src/lib.rs`'s `ocr_and_tier1` — the
+Tier-1 gate consults `synthpass_die`'s `ProviderCatalog`/`MrzReader` for the
+checksum verdict, then `RoutingPolicy::default().decide(&evidence)` short-circuits
+Tier 2 entirely on an `Accept`. `crates/mrz` has zero dependencies and zero model
+weights.
 
 **Consequence we accept:** Tier 2's measured field-exact-match rate is ~45%. We
 publish that number rather than hiding it behind the Tier-1 hit rate.

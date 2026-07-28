@@ -427,6 +427,8 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 │   │                       render/labels, capture-degradation profiles, mandatory watermark
 │   ├── synthpass-bench/    Benchmark harness + corpus runner behind the CI accuracy gate
 │   ├── synthpass-core/     Canonical Extraction schema (v1 + v2) and audit/crypto helpers
+│   ├── synthpass-die/      Document Intelligence Engine: provider contract, capability catalog,
+│   │                       deterministic MRZ reader — the M7 routing layer
 │   ├── synthpass-ocr/      In-process pure-Rust OCR: ocrs/rten, preprocessing, model integrity
 │   ├── synthpass-llm/      In-process Tier-2 inference: Qwen GGUF via llama-cpp-2, ChatML
 │   │                       prompting, JSON repair, model integrity check

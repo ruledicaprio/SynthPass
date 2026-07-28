@@ -2951,6 +2951,7 @@ dependencies = [
  "mrz",
  "serde_json",
  "synthpass-core",
+ "synthpass-die",
  "synthpass-llm",
  "synthpass-ocr",
  "tokio",

@@ -37,8 +37,14 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use synthpass_core::v2::{CheckDigits, ExtractionV2, ImageRef, MrzBlock, MrzFormat, Provenance};
+#[cfg(test)]
+use synthpass_core::v2::MrzFormat;
+use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 use synthpass_core::Extraction;
+use synthpass_die::{
+    CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, Recognition, RoutingPolicy,
+    MRZ_PROVIDER_ID,
+};
 use tokio::sync::{mpsc, Semaphore};
 use zeroize::Zeroizing;
 
@@ -96,6 +102,10 @@ pub struct Pipeline {
     /// and durations only — never field content; see [`metrics`] on the PII
     /// rule.
     metrics: Arc<PipelineMetrics>,
+    /// The M7 provider catalog consulted by [`ocr_and_tier1`](Self::ocr_and_tier1).
+    /// Currently just the deterministic [`MrzReader`] — Tier 2 (the LLM) is not
+    /// yet a registered provider and is still called directly.
+    catalog: Arc<ProviderCatalog>,
     /// Batch-job bookkeeping (submission, status, bounded completed-job
     /// retention) — see [`jobs`] and [`Pipeline::submit`]. Shared (not
     /// re-created) across every `Clone` of this `Pipeline`, so a job
@@ -272,6 +282,10 @@ struct OcrStage {
     md_path: PathBuf,
     mrz_data: Option<mrz::MrzData>,
     tier1: Option<(Value, ExtractionV2)>,
+    /// Why the router escalated, set only when `tier1` is `None`. Folded into
+    /// the Tier-2 result's [`ExtractionTrace`] once that result exists —
+    /// escalation only means something once we know what happened next.
+    escalation: Option<EscalationKind>,
     ocr: OcrResult,
 }
 
@@ -334,6 +348,12 @@ impl Pipeline {
             ocr_semaphore: Arc::new(Semaphore::new(ocr_threads.max(1))),
             llm_queue_depth: Arc::new(AtomicUsize::new(0)),
             metrics: Arc::new(PipelineMetrics::default()),
+            catalog: Arc::new(
+                ProviderCatalog::builder()
+                    .with_reader(Arc::new(MrzReader::new()))
+                    .build()
+                    .expect("one provider, no duplicate ids"),
+            ),
             jobs: Arc::new(jobs::JobRegistry::new(jobs::DEFAULT_QUEUE_CAPACITY)),
         }
     }
@@ -549,15 +569,58 @@ impl Pipeline {
         let md_path = input.with_extension("md");
         tokio::fs::write(&md_path, &markdown).await?;
 
-        // Tier 1: deterministic ICAO 9303 MRZ validation. A valid composite
-        // checksum mathematically proves the read — no LLM needed.
+        // Tier 1: deterministic ICAO 9303 MRZ validation via the M7 provider
+        // catalog. A valid composite checksum mathematically proves the read
+        // — no LLM needed. `mrz_data` is parsed directly (not read back off
+        // `reading`, which carries no raw `mrz::MrzData`) because it's still
+        // needed for `PipelineResult.mrz` and the v1 `Extraction` shape below.
         let mrz_data = mrz::find_and_parse(&markdown).ok();
-        let tier1 = mrz_data.as_ref().filter(|m| m.valid()).map(|m| {
-            (
-                serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes"),
-                extraction_v2_from_mrz(m),
-            )
-        });
+
+        let mut recognition = Recognition::from_text(markdown.clone());
+        recognition.mrz_band_score = ocr_result.mrz_band_score;
+        recognition.portrait = ocr_result.portrait.as_ref().map(portrait_image_ref);
+        recognition.rotation = ocr_result.rotation;
+        recognition.text_sanity = ocr_result.text_sanity;
+        let ctx = DocumentContext::from_text(&markdown).with_recognition(&recognition);
+        let reader = self
+            .catalog
+            .find_reader(CostClass::Free, |c| c.deterministic)
+            .expect("MrzReader is always registered");
+        let reading = reader
+            .read(&ctx)
+            .await
+            .expect("MrzReader::read never returns Err");
+
+        let decision = RoutingPolicy::default().decide(&reading.evidence);
+        let (tier1, escalation) = match decision {
+            Decision::Accept => {
+                // Decision::Accept is exactly `mrz_found && mrz_checksums_valid`
+                // under the default policy — see routing.rs's
+                // `default_policy_is_exactly_the_v1_2_0_predicate` — so a
+                // checksum-valid `mrz_data` is guaranteed here.
+                let m = mrz_data
+                    .as_ref()
+                    .expect("Decision::Accept implies a parsed, checksum-valid MRZ");
+                let mut v2 = reading.extraction;
+                v2.trace = Some(ExtractionTrace {
+                    providers: vec![reading.by.to_string()],
+                    escalation: None,
+                    prompt: None,
+                });
+                let v1 =
+                    serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
+                (Some((v1, v2)), None)
+            }
+            Decision::Escalate { reason, .. } => (None, Some(reason)),
+            // `Decision` is `#[non_exhaustive]` so a future variant compiles
+            // here without a match update. Treat anything this code doesn't
+            // recognize as an escalation, never a silent accept — the safe
+            // default, and the one principle 1 (deterministic whenever
+            // possible; AI only fills uncertainty) already implies. No
+            // `EscalationKind` fits an unrecognized variant, so the trace
+            // records providers consulted but no reason.
+            _ => (None, None),
+        };
         tracing::debug!(
             stage = "tier1",
             mrz_found = mrz_data.is_some(),
@@ -569,6 +632,7 @@ impl Pipeline {
             md_path,
             mrz_data,
             tier1,
+            escalation,
             ocr: ocr_result,
         })
     }
@@ -591,7 +655,15 @@ impl Pipeline {
         } else {
             match self.extract_via_inferer(&stage.markdown).await {
                 Ok(extraction) => {
-                    let v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
+                    let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
+                    v2.trace = Some(ExtractionTrace {
+                        providers: vec![
+                            MRZ_PROVIDER_ID.to_string(),
+                            Method::Llm.as_str().to_string(),
+                        ],
+                        escalation: stage.escalation,
+                        prompt: None,
+                    });
                     let value = serde_json::to_value(&extraction).expect("Extraction serializes");
                     (Some(value), Some(v2), Method::Llm, None)
                 }
@@ -664,7 +736,15 @@ impl Pipeline {
         } else {
             match self.extract_via_inferer_stream(&stage.markdown, &tx).await {
                 Ok(extraction) => {
-                    let v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
+                    let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
+                    v2.trace = Some(ExtractionTrace {
+                        providers: vec![
+                            MRZ_PROVIDER_ID.to_string(),
+                            Method::Llm.as_str().to_string(),
+                        ],
+                        escalation: stage.escalation,
+                        prompt: None,
+                    });
                     let value = serde_json::to_value(&extraction).expect("Extraction serializes");
                     (Some(value), Some(v2), Method::Llm, None)
                 }
@@ -825,45 +905,6 @@ fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
         }),
         extraction_method: Method::MrzDeterministic.as_str().to_string(),
     }
-}
-
-/// Map validated MRZ data onto the v2 schema directly: every field is
-/// checksum-proven (confidence 1.0, [`Provenance::MrzChecksum`]) and the raw
-/// zone plus exact per-check-digit results ride along in [`MrzBlock`] — the
-/// detail `From<Extraction>` has to guess at, filled in precisely here.
-fn extraction_v2_from_mrz(m: &mrz::MrzData) -> ExtractionV2 {
-    // `mrz::Format` is `#[non_exhaustive]` as of mrz 0.4.0, so a future ICAO
-    // format can appear here without a matching `MrzFormat` variant. Fall back
-    // to the same line-shape heuristic the v1→v2 lift uses rather than
-    // asserting a wrong variant: the geometry is recoverable from the zone
-    // itself even when the name for it isn't.
-    let format = match m.format {
-        mrz::Format::Td1 => MrzFormat::Td1,
-        mrz::Format::Td2 => MrzFormat::Td2,
-        mrz::Format::Td3 => MrzFormat::Td3,
-        mrz::Format::MrvA => MrzFormat::MrvA,
-        mrz::Format::MrvB => MrzFormat::MrvB,
-        _ => MrzFormat::guess_from_lines(&m.mrz_lines).unwrap_or(MrzFormat::Td3),
-    };
-    let mut v2 = ExtractionV2::from(extraction_from_mrz(m));
-    v2.document.mrz_format = Some(format);
-    v2.mrz = Some(MrzBlock {
-        lines: m.mrz_lines.clone(),
-        format,
-        checks: CheckDigits {
-            document_number: m.checks.document_number,
-            date_of_birth: m.checks.date_of_birth,
-            date_of_expiry: m.checks.date_of_expiry,
-            personal_number: m.checks.personal_number,
-            composite: m.checks.composite,
-        },
-    });
-    // A field a deterministic check contradicts must not keep the confidence
-    // it had when nothing contradicted it — see `FieldConfidence::downgrade_flagged`.
-    let verdict = synthpass_core::fusion::check_line1_integrity(m);
-    v2.confidence.downgrade_flagged(&verdict);
-    v2.line1_integrity = Some(verdict);
-    v2
 }
 
 /// Convert an OCR-detected portrait box into the wire [`ImageRef`] (`u32`
@@ -1308,6 +1349,15 @@ mod tests {
         assert!(mrz.checks.all_valid());
         assert_eq!(mrz.format, MrzFormat::Td3);
         assert!(mrz.lines.contains("P<HRVSPECIMEN"));
+        assert_eq!(
+            v2.trace,
+            Some(ExtractionTrace {
+                providers: vec!["mrz".to_string()],
+                escalation: None,
+                prompt: None,
+            }),
+            "the catalog's MrzReader is the only provider consulted on an accept"
+        );
 
         // On-disk JSON defaults to the v2 shape.
         let on_disk: Value = serde_json::from_str(
@@ -1408,6 +1458,57 @@ mod tests {
         // MRZ-shaped echo is never checksum-proven.
         let mrz = v2.mrz.as_ref().expect("lifted MRZ placeholder");
         assert!(!mrz.checks.all_valid());
+        assert_eq!(
+            v2.trace,
+            Some(ExtractionTrace {
+                providers: vec!["mrz".to_string(), "llm".to_string()],
+                escalation: Some(EscalationKind::MrzNotFound),
+                prompt: None,
+            }),
+            "the catalog's MrzReader is always consulted first, found nothing, \
+             and the LLM was consulted next"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Same specimen as [`HRV_TD3_MARKDOWN`], with the document-number check
+    /// digit flipped (`1` → `0`) so the composite checksum no longer
+    /// verifies. Mirrors `synthpass_die::mrz_reader`'s own
+    /// `a_parsed_but_invalid_mrz_still_reports_which_digits_failed` — an MRZ
+    /// that parses but fails its check digits is the case
+    /// `RoutingPolicy::default()` must still escalate, exactly as the old
+    /// inline `.filter(|m| m.valid())` did.
+    const HRV_TD3_BAD_CHECKSUM_MARKDOWN: &str = "## PUTOVNICA\n\nP<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<\n0070070070HRV8212258F1407019<<<<<<<<<<<<<<06\n";
+
+    #[tokio::test]
+    async fn tier1_checksum_failure_still_escalates_to_tier2() {
+        let (input, dir) = temp_input("tier1-bad-checksum").await;
+        let pipeline = Pipeline::new(
+            Box::new(StaticOcr(HRV_TD3_BAD_CHECKSUM_MARKDOWN)),
+            Box::new(MockBackend),
+        );
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(
+            result.method,
+            Method::Llm,
+            "a parsed-but-unverified MRZ is not a Tier-1 result — the router \
+             must still hand off to Tier 2, exactly as \
+             `.filter(|m| m.valid())` used to"
+        );
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        assert_eq!(
+            v2.trace,
+            Some(ExtractionTrace {
+                providers: vec!["mrz".to_string(), "llm".to_string()],
+                escalation: Some(EscalationKind::MrzChecksumFailed),
+                prompt: None,
+            }),
+            "the specific reason must be MrzChecksumFailed, not MrzNotFound — \
+             the MRZ did parse, it just didn't verify"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
