@@ -92,142 +92,60 @@ flowchart LR
 - The workspace crate rename (`mlis-*` → `synthpass-*`) has landed — see `CHANGELOG.md` for the
   executed mapping.
 - **M1, M2, and M3 are done.** `mrz::format_td3`, the `synthpass-gen` factory, the degradation
-  profiles, and the `synthpass generate` CLI subcommand are all shipped and tested. M2's font
-  blocker is resolved: OFL **OCR-B** (`jaycee723/ocr-b`, © Raisty) and **PT Sans** (Google Fonts
-  `ofl/ptsans`, © ParaType) are vendored at `crates/synthpass-gen/fonts/` (see that directory's
-  README for provenance/license and [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)); build
-  with `--features embedded-fonts` for real glyph rendering instead of placeholder bars.
+  profiles, and the `synthpass generate` CLI subcommand are all shipped and tested, including
+  real glyph rendering via vendored OFL fonts (`--features embedded-fonts`). See `CHANGELOG.md`
+  for font provenance.
 - **M4 is done** (`synthpass-bench`, PRs #27–#31): measurement library, corpus runner, CI accuracy
   gate, and [`knowledge/SYNTHPASS.md`](SYNTHPASS.md) / [`knowledge/ADVERSARIAL.md`](ADVERSARIAL.md) have all
-  shipped. The real number, measured over a 100-seed `clean`-profile corpus after fixing a genuine
-  MRZ glyph-rendering bug (misaligned character cells + thresholded anti-aliasing, PR #28, which
-  took the rate from 50% to 60% on a smaller sample): **55%**, well under the
-  originally-aspirational 95%. ~~Root cause of the remaining gap: misses cluster on the
-  14-character `personal_number` field rather than any one systematic defect.~~ **That inference
-  has since been measured and refuted** — see the per-field CER note below; `personal_number`
-  runs a 25% CER, mid-pack. It was a reasonable reading of a binary signal, and it is simply not
-  what the data says once the signal stops being binary. The CI gate is set to 30% (a deliberate
-  margin below the measured 55%, absorbing cross-platform floating-point variance in OCR inference
-  between machines) so it catches real regressions without being flaky.
-- **M5's `ExtractionV2` schema is landed** (`crates/synthpass-core/src/v2.rs`), and a
-  **safe-batch kickoff of six small, independently-safe, zero-new-dependency slices has since
-  shipped on top of it (PRs #33–#37)**: `synthpass-license` now actually enforces
-  `mlis_min_version` in `check()` instead of just parsing it (PR #33); the v1→v2 lift scores
-  confidence **per-field** rather than one flat number (PR #34); `synthpass-serve` gained a
-  `GET /health` endpoint, deliberately outside the auth middleware since health probes are
-  typically unauthenticated (PR #35); the Tier-2 concurrency semaphore is now configurable via
-  `SYNTHPASS_LLM_CONTEXTS` instead of hardcoded to 1 (PR #36); and the queue-full 503 now carries
-  a `Retry-After: 5` header, distinct from the (non-retriable) license-expired 503 (PR #37).
-- **M5 licensing enforcement (Atlas §7) has landed.** `synthpass_license::check_feature` +
-  `LicenseError::FeatureNotLicensed` make the `features` list load-bearing, a `Tier` enum supplies
-  the `trial`/`pro`/`enterprise` presets from [`BRANDING.md`](BRANDING.md) §5, and a new
-  `max_llm_contexts` payload field meters Tier-2 concurrency (env asks, license permits, effective
-  = min, and `synthpass-serve` says so out loud when it lowers the request). Legacy licenses with
-  no `features` list are grandfathered into everything (break B6). The per-*endpoint* half of this
-  gate — 403ing a named surface — lands with the surfaces themselves: `metrics` with `/metrics`,
-  `batch` with the batch API, rather than as a middleware with nothing yet to guard.
-  The remaining Atlas DoDs are tracked below.
-- **M5 observability (Atlas §6, and §5's `/metrics` half) has landed.** `tracing` replaces every
-  request-path `println!`, `/api/extract` opens a `request_id`-bearing span, and `synthpass-serve`
-  serves Prometheus text at `GET /metrics` — inside the auth layer and gated on the `metrics`
-  license feature, so the per-endpoint half of the licensing gate now has its first real consumer.
-  Counters cover documents by tier and stage failures; latency histograms cover the OCR and Tier-2
-  stages; queue depth is a gauge. **One new dependency** (`tracing-subscriber`), justified in
-  [`CHANGELOG.md`](../CHANGELOG.md) and in the `[workspace.dependencies]` comment; no metrics
-  crate — the exposition format is hand-rolled.
-  The **"no PII in any log line" DoD is now an executable test**
-  (`crates/synthpass-pipeline/tests/pii_logging.rs`) rather than a convention, and the rule is
-  codified as a review checklist in [`CONTRIBUTING.md`](../CONTRIBUTING.md). Writing it surfaced a
-  trap worth recording: `tracing` caches callsite interest process-globally, so the same assertions
-  inside the library passed *vacuously* — capturing nothing — once sibling tests had already driven
-  those callsites. It lives in its own test binary and asserts the harness captured something
-  before asserting what it did not contain.
+  shipped. Measured Tier-1 hit rate: **55%** (100-seed clean-profile corpus), well under the
+  originally-aspirational 95% — the CI gate is set to 30% as a deliberate regression floor with
+  margin for cross-platform variance. See `CHANGELOG.md` for the measurement history, including a
+  since-refuted hypothesis about which field drove the gap.
+- **M5's `ExtractionV2` schema landed** (`crates/synthpass-core/src/v2.rs`), followed by six
+  independently-safe, zero-new-dependency slices (PRs #33–#37): license-tier enforcement,
+  per-field confidence scoring, a `GET /health` endpoint, configurable Tier-2 concurrency, and a
+  `Retry-After` header on queue-full 503s. See `CHANGELOG.md` for details on each.
+- **M5 licensing enforcement (Atlas §7) has landed.** `synthpass_license::check_feature` gates
+  named features against license tiers ([`BRANDING.md`](BRANDING.md) §5), and `max_llm_contexts`
+  meters Tier-2 concurrency. The per-*endpoint* half of this gate lands with each surface as it
+  ships (`metrics`, `batch`) rather than as a middleware guarding nothing yet. See `CHANGELOG.md`
+  for details.
+- **M5 observability (Atlas §6, and §5's `/metrics` half) has landed.** `tracing` replaces
+  request-path logging, `/api/extract` opens a request-scoped span, and `synthpass-serve` exposes
+  Prometheus text at `GET /metrics` (auth-gated, behind the `metrics` license feature). The "no
+  PII in any log line" DoD is now an executable test
+  (`crates/synthpass-pipeline/tests/pii_logging.rs`), not just a convention. See `CHANGELOG.md`
+  for the full account, including a `tracing` callsite-caching trap the test had to work around.
 - **M5 GBNF-constrained Tier-2 decoding (Atlas §8) has landed — with a flat accuracy result,
-  recorded honestly.** `synthpass-llm` generates its GBNF from `prompt::FIELDS` (so prompt and
-  grammar cannot drift), constrains JSON *structure* only, and demotes `repair.rs` to a fallback
-  behind a `needs_repair()` / `repair_fallbacks()` measurement. Measured A/B over the 6-document
-  parity corpus on qwen2.5-1.5b-instruct-q4_k_m: **repair fallbacks 2 → 0** (Atlas §8's stated
-  criterion, met), **field match rate unchanged at 19/42 (45.2%)**, **wall time +55%** (102s →
-  158s). Repair had already been salvaging those two documents, so eliminating the parse-failure
-  class bought robustness rather than accuracy — precisely the risk the now-removed
-  `mlis_v2_0_0_preliminary_design.md` §12 named. It ships on
-  by default (`SYNTHPASS_LLM_GRAMMAR=0` opts out) because unrepresentable-by-construction beats
-  repaired-after-the-fact, and the latency lands only on the Tier-2 path that runs when Tier 1 has
-  already failed. Revisiting with a larger GGUF is Future Work, not an M5 gate.
-  Landing it also uncovered and fixed a latent double-accept in the sampling loop that had been
-  harmless only because every sampler in the chain was stateless.
-- **M5 is complete — every Atlas DoD in §3–§8 has landed.** The last two closed as follows.
-  The **bounded job queue / parallel OCR / batch API** (`Pipeline::submit`/`JobHandle`,
-  `POST /api/extract/batch`, `GET /api/jobs/{id}`) shipped in PR #49, with the OCR geometry API
-  and deterministic field normalizers in #48 and their wiring into `ExtractionV2` in #50.
-
-  **OCR region detection by geometry + orientation** shipped last, and its orientation half is
-  worth recording honestly because the first design was wrong in an instructive way.
-  `detect_mrz_band` scores a line group on *recognized text* — MRZ-charset density, ICAO line
-  length, OCR-B glyph aspect — so the obvious 0°/180° rule ("the MRZ sits at the bottom on every
-  ICAO layout, so a confident band near the top means the page is upside down") is circular: on a
-  genuinely inverted page the real MRZ is garbled and scores *low*, unrelated mid-page noise wins
-  the band instead, and the band's position then describes the noise rather than the MRZ. It
-  measurably did not fire on the one specimen it was written for.
-
-  What replaced it is a comparison, not a guess: score the band on the page *and* on its 180°
-  flip, keep the better. Measured over the 42-image `samples/` corpus scored in both
-  orientations, that gets the direction right on **41 of 42 with zero false flips**. Both
-  constants come out of the sweep rather than intuition — a 1.2× margin (mirroring
-  `ROTATION_MARGIN`'s existing "ties leave it alone" bias) is cleared by every genuine correction
-  (narrowest 1.27×, most 2–5×) while suppressing the corpus's one wrong-direction vote and its
-  four exact ties, and a 0.75 confidence bar skips the extra pass entirely when the upright band
-  is already stronger than any inverted page in the corpus managed (0.7132). The sweep also ruled
-  out the cheaper design of thresholding a single orientation: inverted scores overlap genuine
-  upright ones across most of the range, so no absolute cutoff separates them. One page
-  (`Passport_of_Serbia_ID_2009_version.jpg`) stays mis-oriented — an honest miss, not a silent
-  wrong answer.
-
-  Note what this does **not** close, and what M6's orientation note below therefore still owes:
-  the estimator remains a brute-force search over right angles, and the tie-break costs a second
-  geometry pass on any page whose band is not already confident.
-- **Per-field CER measurement, and the uncomfortable thing it found.** `synthpass-bench` now
-  reports a per-field character error rate alongside the binary hit, because a hit rate says
-  *that* a document failed and never *where*. `hit` itself is unchanged, so the CI gate keeps its
-  meaning; the 50-seed clean profile re-measures at 54%, consistent with the 55% baseline.
-
-  Of the **27 of 50** documents that pass the Tier-1 gate, **1** has both names read correctly
-  and **4** have the issuing country right. This is structural, not statistical: ICAO 9303 TD3
-  check digits cover **line 2 only** — document number, dates, personal number, composite. **Line
-  1 has no check digit**, so document type, issuing country, surname and given names are
-  unverified by the very oracle Tier 1 rests on. A document can be checksum-proven and still
-  return the wrong name.
-
-  The mechanism is one recurring misread: OCR collapses interior runs of the `<` filler while the
-  trailing run absorbs the loss, so line 1 stays 44 characters and looks structurally valid while
-  every field boundary after the first shifts left. `P<JPNSTRAND<<ALEKSANDER<<<…` reads as
-  `PJPNSTRANDALEKSANDER<<<<…` — 7.9% character error producing `issuing_country` `"PNS"`,
-  `surname` `"TRANDALEKSANDER"`, empty `given_names`. Line 2 is character-perfect on 24 of 42
-  parsed documents; line 1 is wrong in its first five characters on 38 of 42.
-
-  Two consequences for what comes next, both of which outrank the M6 expansion work on the
-  [product-positioning grounds](VISION.md) that Tier 1 *is* the product: **(1)** filler-run
-  fidelity is the single highest-value OCR fix available, worth more than any per-character
-  confusion table, and **(2)** an unverified-field problem needs a *validation* answer, not only
-  a recognition one — line-1 fields should carry lower confidence and be reconcilable against the
-  visual zone, since no checksum will ever do it for them.
-- **The validation answer, and the number it turned up.** `ExtractionV2`'s confidence no longer
-  claims a proof line 1 never had: `FieldConfidence::mrz_checksum_scope` scores only the four
-  check-digited fields at `1.0`; the other six sit at a new `MRZ_STRUCTURAL` (`0.9`) band, real
-  but never equal to a proof. `synthpass_core::fusion::check_line1_integrity` adds the
-  deterministic checks the missing arithmetic can't: `issuing_country` against the ICAO code
-  table, `issuing_country` against `nationality` (two independently-OCR'd MRZ lines agreeing —
-  an honest `Support::CrossField`, ranked below `Support::CheckDigit`, not equal to it), and an
-  empty `given_names` beside a long `surname`, the collapsed-filler-run signature above.
-  `synthpass-bench` now measures how often that gap actually bites rather than leaving it as one
-  hand-counted specimen: **of 29 Tier-1 hits on the 50-seed clean profile, 28 (96.6%) are still
-  flagged.** Detection before correction — filler-run fidelity itself remains future work.
-- **A nightly bench-data-collection workflow has also shipped** (PR #38,
-  `.github/workflows/bench-data-collection.yml`): runs `synthpass-bench --profile all` daily
-  against a fresh seed window and appends flattened per-document outcomes to `dataset.jsonl` on a
-  dedicated `bench-data` branch. This is data collection only, no tuning logic yet — it's a first
-  step toward the "Future Work" section's fine-tuning loop and statistical dataset
-  characterisation below, not a new M4/M5 deliverable in its own right.
+  recorded honestly.** `synthpass-llm` derives its GBNF grammar from `prompt::FIELDS` so prompt
+  and grammar cannot drift; it constrains JSON *structure* only. A/B measurement: repair fallbacks
+  **2 → 0**, field match rate **unchanged** (45.2%), wall time **+55%**. Ships on by default
+  (`SYNTHPASS_LLM_GRAMMAR=0` opts out) because unrepresentable-by-construction beats
+  repaired-after-the-fact. See `CHANGELOG.md` for the full measurement and a latent double-accept
+  bug it uncovered.
+- **M5 is complete — every Atlas DoD in §3–§8 has landed.** The bounded job queue / parallel OCR
+  / batch API shipped in PR #49 (OCR geometry API and normalizers in #48, wired into
+  `ExtractionV2` in #50). OCR region detection by orientation shipped last: a first design
+  (position-based 0°/180° heuristic) was circular and measurably failed on its own test specimen;
+  the fix compares a band's score on the page *and* its 180° flip and keeps the better, getting
+  the direction right on 41 of 42 corpus images with zero false flips. See `CHANGELOG.md` for the
+  full derivation, including why the position-based heuristic was wrong and what it does not yet
+  close (M6's scoping note below picks that up).
+- **Per-field CER measurement uncovered a structural gap: ICAO 9303 TD3 check digits cover line 2
+  only.** Line 1 (document type, issuing country, names) carries no check digit, so a document can
+  be checksum-proven and still return the wrong name — confirmed by a real failure mode
+  (`synthpass-bench`'s per-field CER, plus a recurring OCR bug where interior `<` filler runs
+  collapse and shift every field boundary left). The validation answer has since landed:
+  `FieldConfidence::mrz_checksum_scope` demotes the six unverified fields to a new
+  `MRZ_STRUCTURAL` (0.9) band, and `synthpass_core::fusion::check_line1_integrity` adds
+  deterministic cross-checks (ICAO country-code table, issuing-country/nationality agreement, the
+  filler-run signature) — measured to flag 28 of 29 (96.6%) of the cases it should. Detection
+  before correction: filler-run fidelity itself remains future work. See `CHANGELOG.md` for the
+  full numbers.
+- **A nightly bench-data-collection workflow has shipped** (PR #38,
+  `.github/workflows/bench-data-collection.yml`): runs `synthpass-bench --profile all` daily and
+  appends outcomes to `dataset.jsonl` on a `bench-data` branch — data collection only, a first
+  step toward future fine-tuning/dataset-characterisation work.
 - **M6 scoping note — measure the page angle instead of searching for it.** Orientation handling
   currently brute-forces the angle twice: `choose_rotation` runs a full OCR *detection pass* at
   each of 0°/90°/180°/270° and keeps the best-scoring one, while `preprocess::deskew` separately
