@@ -20,6 +20,7 @@ pub use mrz;
 
 mod infer;
 pub mod jobs;
+mod llm_reader;
 pub mod metrics;
 mod ocr;
 pub use infer::InferBackend;
@@ -42,11 +43,13 @@ use synthpass_core::v2::MrzFormat;
 use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 use synthpass_core::Extraction;
 use synthpass_die::{
-    CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, Recognition, RoutingPolicy,
-    MRZ_PROVIDER_ID,
+    Capability, CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, ProviderError,
+    Recognition, RoutingPolicy, MRZ_PROVIDER_ID,
 };
 use tokio::sync::{mpsc, Semaphore};
 use zeroize::Zeroizing;
+
+use llm_reader::LlmFieldReader;
 
 #[derive(Clone)]
 pub struct Pipeline {
@@ -102,9 +105,12 @@ pub struct Pipeline {
     /// and durations only — never field content; see [`metrics`] on the PII
     /// rule.
     metrics: Arc<PipelineMetrics>,
-    /// The M7 provider catalog consulted by [`ocr_and_tier1`](Self::ocr_and_tier1).
-    /// Currently just the deterministic [`MrzReader`] — Tier 2 (the LLM) is not
-    /// yet a registered provider and is still called directly.
+    /// The M7 provider catalog: the deterministic [`MrzReader`], consulted by
+    /// [`ocr_and_tier1`](Self::ocr_and_tier1), and `LlmFieldReader` (Tier 2),
+    /// consulted by [`process_document`](Self::process_document) once
+    /// `ocr_and_tier1` escalates. `process_document_stream` still calls
+    /// [`extract_via_inferer_stream`](Self::extract_via_inferer_stream)
+    /// directly — [`FieldReader`] has no delta-forwarding hook yet.
     catalog: Arc<ProviderCatalog>,
     /// Batch-job bookkeeping (submission, status, bounded completed-job
     /// retention) — see [`jobs`] and [`Pipeline::submit`]. Shared (not
@@ -286,6 +292,13 @@ struct OcrStage {
     /// the Tier-2 result's [`ExtractionTrace`] once that result exists —
     /// escalation only means something once we know what happened next.
     escalation: Option<EscalationKind>,
+    /// The [`Decision::Escalate`] budget, meaningful only alongside
+    /// `escalation`: the cost ceiling `catalog.find_reader` is called with
+    /// when looking up a Tier-2 provider. Defaults to [`CostClass::Expensive`]
+    /// on `Decision::Accept` (unused there) and on any future non-exhaustive
+    /// `Decision` variant this code doesn't recognize — preserving today's
+    /// "always falls through to Tier 2" behavior for the latter.
+    escalation_budget: CostClass,
     ocr: OcrResult,
 }
 
@@ -339,20 +352,37 @@ impl Pipeline {
         contexts: usize,
         ocr_threads: usize,
     ) -> Self {
+        // Hoisted into `Arc` bindings (rather than converted inline in the
+        // struct literal below) so each can be cloned into both its `Pipeline`
+        // field and the `LlmFieldReader` registered in `catalog` — a struct
+        // literal's field initializers run in source order and would move
+        // `infer`/etc. out before `catalog:` ever saw them otherwise.
+        let infer: Arc<dyn InferBackend> = Arc::from(infer);
+        let llm_semaphore = Arc::new(Semaphore::new(contexts.max(1)));
+        let llm_queue_depth = Arc::new(AtomicUsize::new(0));
+        let metrics = Arc::new(PipelineMetrics::default());
+
         Self {
             ocr: Arc::from(ocr),
-            infer: Arc::from(infer),
+            infer: infer.clone(),
             audit_log: None,
             encrypt_key: None,
-            llm_semaphore: Arc::new(Semaphore::new(contexts.max(1))),
+            llm_semaphore: llm_semaphore.clone(),
             ocr_semaphore: Arc::new(Semaphore::new(ocr_threads.max(1))),
-            llm_queue_depth: Arc::new(AtomicUsize::new(0)),
-            metrics: Arc::new(PipelineMetrics::default()),
+            llm_queue_depth: llm_queue_depth.clone(),
+            metrics: metrics.clone(),
             catalog: Arc::new(
                 ProviderCatalog::builder()
                     .with_reader(Arc::new(MrzReader::new()))
+                    .with_reader(Arc::new(LlmFieldReader {
+                        infer,
+                        llm_semaphore,
+                        llm_queue_depth,
+                        metrics,
+                        capability: Capability::model_reader(CostClass::Expensive),
+                    }))
                     .build()
-                    .expect("one provider, no duplicate ids"),
+                    .expect("distinct provider ids: \"mrz\" and \"llm\""),
             ),
             jobs: Arc::new(jobs::JobRegistry::new(jobs::DEFAULT_QUEUE_CAPACITY)),
         }
@@ -481,37 +511,14 @@ impl Pipeline {
     /// [`Pipeline::process_document`]: Pipeline::process_document
     /// [`Pipeline::process_document_stream`]: Pipeline::process_document_stream
     pub async fn extract_via_inferer(&self, markdown: &str) -> Result<Extraction, String> {
-        let _depth = QueueDepthGuard::enter(&self.llm_queue_depth);
-        let _permit = self
-            .llm_semaphore
-            .acquire()
-            .await
-            .expect("llm_semaphore is never closed");
-
-        let started = Instant::now();
-        let mut result = self.infer.extract(markdown).await;
-        let elapsed = started.elapsed();
-        self.metrics.tier2_seconds.observe(elapsed);
-        match &result {
-            Ok(_) => tracing::debug!(
-                stage = "tier2",
-                elapsed_ms = elapsed.as_millis() as u64,
-                "Tier-2 extraction complete"
-            ),
-            Err(e) => {
-                self.metrics.record_tier2_failure();
-                tracing::warn!(
-                    stage = "tier2",
-                    elapsed_ms = elapsed.as_millis() as u64,
-                    error = %e,
-                    "Tier-2 extraction failed"
-                );
-            }
-        }
-        if let Ok(extraction) = &mut result {
-            synthpass_core::normalize::extraction(extraction);
-        }
-        result
+        run_tier2(
+            &self.infer,
+            &self.llm_semaphore,
+            &self.llm_queue_depth,
+            &self.metrics,
+            markdown,
+        )
+        .await
     }
 
     /// Stage 1-2: OCR the input, write `<input>.md`, and check for a
@@ -592,7 +599,7 @@ impl Pipeline {
             .expect("MrzReader::read never returns Err");
 
         let decision = RoutingPolicy::default().decide(&reading.evidence);
-        let (tier1, escalation) = match decision {
+        let (tier1, escalation, escalation_budget) = match decision {
             Decision::Accept => {
                 // Decision::Accept is exactly `mrz_found && mrz_checksums_valid`
                 // under the default policy — see routing.rs's
@@ -609,17 +616,18 @@ impl Pipeline {
                 });
                 let v1 =
                     serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
-                (Some((v1, v2)), None)
+                (Some((v1, v2)), None, CostClass::Expensive)
             }
-            Decision::Escalate { reason, .. } => (None, Some(reason)),
+            Decision::Escalate { reason, budget } => (None, Some(reason), budget),
             // `Decision` is `#[non_exhaustive]` so a future variant compiles
             // here without a match update. Treat anything this code doesn't
             // recognize as an escalation, never a silent accept — the safe
             // default, and the one principle 1 (deterministic whenever
             // possible; AI only fills uncertainty) already implies. No
             // `EscalationKind` fits an unrecognized variant, so the trace
-            // records providers consulted but no reason.
-            _ => (None, None),
+            // records providers consulted but no reason. `CostClass::Expensive`
+            // preserves today's "always falls through to Tier 2" behavior.
+            _ => (None, None, CostClass::Expensive),
         };
         tracing::debug!(
             stage = "tier1",
@@ -633,6 +641,7 @@ impl Pipeline {
             mrz_data,
             tier1,
             escalation,
+            escalation_budget,
             ocr: ocr_result,
         })
     }
@@ -646,30 +655,46 @@ impl Pipeline {
         let stage = self.ocr_and_tier1(input).await?;
         let mut json_path = stage.md_path.with_extension("json");
 
-        // Tier 2: semantic JSON extraction via the in-process LLM inferer,
+        // Tier 2: semantic JSON extraction via the catalog's LLM FieldReader,
         // used only when Tier 1 found no checksum-valid MRZ.
-        let (extracted, mut extracted_v2, method, llm_error) = if let Some((value, v2)) =
-            stage.tier1
-        {
-            (Some(value), Some(v2), Method::MrzDeterministic, None)
-        } else {
-            match self.extract_via_inferer(&stage.markdown).await {
-                Ok(extraction) => {
-                    let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
-                    v2.trace = Some(ExtractionTrace {
-                        providers: vec![
-                            MRZ_PROVIDER_ID.to_string(),
-                            Method::Llm.as_str().to_string(),
-                        ],
-                        escalation: stage.escalation,
-                        prompt: None,
-                    });
-                    let value = serde_json::to_value(&extraction).expect("Extraction serializes");
-                    (Some(value), Some(v2), Method::Llm, None)
+        let (extracted, mut extracted_v2, method, llm_error) =
+            if let Some((value, v2)) = stage.tier1 {
+                (Some(value), Some(v2), Method::MrzDeterministic, None)
+            } else {
+                let reader = self
+                    .catalog
+                    .find_reader(stage.escalation_budget, |c| c.fields && !c.deterministic)
+                    .expect("LlmFieldReader is always registered");
+                match reader
+                    .read(&DocumentContext::from_text(&stage.markdown))
+                    .await
+                {
+                    Ok(reading) => {
+                        let mut v2 = reading.extraction;
+                        v2.trace = Some(ExtractionTrace {
+                            providers: vec![
+                                MRZ_PROVIDER_ID.to_string(),
+                                Method::Llm.as_str().to_string(),
+                            ],
+                            escalation: stage.escalation,
+                            prompt: None,
+                        });
+                        let value = serde_json::to_value(extraction_from_v2_llm(&v2))
+                            .expect("Extraction serializes");
+                        (Some(value), Some(v2), Method::Llm, None)
+                    }
+                    Err(e) => {
+                        // Preserve the exact backend error text `llm_error` has
+                        // always carried — `ProviderError`'s `Display` would
+                        // prepend "provider failed: " and change it.
+                        let detail = match e {
+                            ProviderError::Failed { detail } => detail,
+                            other => other.to_string(),
+                        };
+                        (None, None, Method::Llm, Some(detail))
+                    }
                 }
-                Err(e) => (None, None, Method::Llm, Some(e)),
-            }
-        };
+            };
 
         // Portrait geometry is independent of which tier produced the field
         // extraction — it comes from the same OCR pass regardless — so it's
@@ -942,11 +967,87 @@ fn lift_tier2_extraction(extraction: &Extraction, model_id: Option<String>) -> E
     v2
 }
 
+/// Project a Tier-2 [`ExtractionV2`] back to the legacy v1 [`Extraction`]
+/// shape, for [`PipelineResult::extracted`] / `SYNTHPASS_JSON_V1=1`. Exact for
+/// every field the LLM backend can populate — `mrz_checksums_valid` is
+/// hardcoded `None` rather than derived from `mrz.checks`: the model is never
+/// asked for it (`synthpass_llm::prompt::FIELDS` omits it) and nothing on this
+/// path ever injects it, so `None` is what the real value always was here, not
+/// a guess. (`lift_tier2_extraction`'s `ExtractionV2::from` maps an absent v1
+/// `mrz_checksums_valid` to every `mrz.checks` field being `false` — identical
+/// to what a genuine `Some(false)` would produce — so reconstructing the v1
+/// bool from `mrz.checks` would be ambiguous; only this path's own invariant
+/// resolves it.)
+fn extraction_from_v2_llm(v2: &ExtractionV2) -> Extraction {
+    Extraction {
+        document_type: v2.fields.document_type.clone(),
+        issuing_country: v2.fields.issuing_country.clone(),
+        issuing_country_name: v2.fields.issuing_country_name.clone(),
+        document_number: v2.fields.document_number.clone(),
+        surname: v2.fields.surname.clone(),
+        given_names: v2.fields.given_names.clone(),
+        nationality: v2.fields.nationality.clone(),
+        nationality_name: v2.fields.nationality_name.clone(),
+        date_of_birth: v2.fields.date_of_birth.clone(),
+        sex: v2.fields.sex.clone(),
+        date_of_expiry: v2.fields.date_of_expiry.clone(),
+        personal_number: v2.fields.personal_number.clone(),
+        mrz_line: v2.mrz.as_ref().map(|m| m.lines.clone()),
+        mrz_checksums_valid: None,
+        validity: v2.validity,
+        extraction_method: v2.extraction_method.clone(),
+    }
+}
+
+/// The single seam every Tier-2 caller goes through — the pipeline's own
+/// [`Pipeline::extract_via_inferer`] and the catalog's `LlmFieldReader` both
+/// delegate here, so there is exactly one place that invokes the model:
+/// semaphore acquisition, timing, metrics, tracing, and normalization.
+async fn run_tier2(
+    infer: &Arc<dyn InferBackend>,
+    semaphore: &Semaphore,
+    queue_depth: &AtomicUsize,
+    metrics: &PipelineMetrics,
+    markdown: &str,
+) -> Result<Extraction, String> {
+    let _depth = QueueDepthGuard::enter(queue_depth);
+    let _permit = semaphore
+        .acquire()
+        .await
+        .expect("llm_semaphore is never closed");
+
+    let started = Instant::now();
+    let mut result = infer.extract(markdown).await;
+    let elapsed = started.elapsed();
+    metrics.tier2_seconds.observe(elapsed);
+    match &result {
+        Ok(_) => tracing::debug!(
+            stage = "tier2",
+            elapsed_ms = elapsed.as_millis() as u64,
+            "Tier-2 extraction complete"
+        ),
+        Err(e) => {
+            metrics.record_tier2_failure();
+            tracing::warn!(
+                stage = "tier2",
+                elapsed_ms = elapsed.as_millis() as u64,
+                error = %e,
+                "Tier-2 extraction failed"
+            );
+        }
+    }
+    if let Ok(extraction) = &mut result {
+        synthpass_core::normalize::extraction(extraction);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
     use synthpass_core::v2::LLM_HEURISTIC_CONFIDENCE;
+    use synthpass_die::FieldReader;
 
     /// Serializes tests that read or mutate `SYNTHPASS_JSON_V1` — the env var is
     /// process-global, and `cargo test` runs cases on parallel threads.
@@ -1016,6 +1117,42 @@ mod tests {
 
     fn mock_pipeline() -> Pipeline {
         Pipeline::new(Box::new(NoopOcr), Box::new(MockBackend))
+    }
+
+    /// A backend that always fails, for exercising `LlmFieldReader`'s error
+    /// mapping without a real model.
+    struct FailingBackend;
+
+    #[async_trait::async_trait]
+    impl InferBackend for FailingBackend {
+        async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+            Err("boom".to_string())
+        }
+        async fn extract_stream(
+            &self,
+            _markdown: &str,
+            _tx: &mpsc::Sender<ProcessEvent>,
+        ) -> Result<Extraction, String> {
+            Err("boom".to_string())
+        }
+        fn describe(&self) -> String {
+            "failing".into()
+        }
+        async fn health(&self) -> Result<String, String> {
+            Err("always fails".into())
+        }
+    }
+
+    /// Builds an `LlmFieldReader` directly, bypassing `Pipeline`, for tests
+    /// that exercise the provider in isolation.
+    fn llm_field_reader(infer: Arc<dyn InferBackend>) -> LlmFieldReader {
+        LlmFieldReader {
+            infer,
+            llm_semaphore: Arc::new(Semaphore::new(1)),
+            llm_queue_depth: Arc::new(AtomicUsize::new(0)),
+            metrics: Arc::new(PipelineMetrics::default()),
+            capability: Capability::model_reader(CostClass::Expensive),
+        }
     }
 
     /// A distinctive fake holder name planted in the OCR text so a leak into
@@ -1470,6 +1607,72 @@ mod tests {
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn llm_field_reader_reports_id_and_missing_fields() {
+        let reader = llm_field_reader(Arc::new(MockBackend));
+
+        let ctx = DocumentContext::from_text("P<UTO passport markdown");
+        let reading = reader.read(&ctx).await.expect("mock backend succeeds");
+
+        assert_eq!(
+            reading.by.to_string(),
+            "llm",
+            "matches Method::Llm.as_str(), the value ExtractionTrace.providers expects"
+        );
+        // `mock_extraction` leaves issuing_country/nationality/date_of_birth/
+        // sex/date_of_expiry/personal_number unset — evidence.missing must
+        // name exactly those, mirroring `Reading::missing()`.
+        assert_eq!(
+            reading.evidence.missing,
+            reading.extraction.fields.missing(),
+            "evidence.missing mirrors what the reported extraction actually left empty"
+        );
+        assert!(!reading.evidence.missing.is_empty());
+    }
+
+    #[tokio::test]
+    async fn llm_field_reader_maps_backend_failure_to_provider_error() {
+        let reader = llm_field_reader(Arc::new(FailingBackend));
+
+        let ctx = DocumentContext::from_text("irrelevant");
+        let err = reader.read(&ctx).await.expect_err("backend fails");
+
+        // The original message survives verbatim — no PII-risk `Display`
+        // prefix folded in, so the pipeline can still surface exactly what
+        // the backend said.
+        assert_eq!(
+            err,
+            ProviderError::Failed {
+                detail: "boom".into()
+            }
+        );
+    }
+
+    #[test]
+    fn extraction_from_v2_llm_round_trips_the_mock_extraction() {
+        // The trap case: `mock_extraction` sets `mrz_line` but never
+        // `mrz_checksums_valid` (stays `None`). Forward-lifting through
+        // `ExtractionV2` folds that into every `mrz.checks` field being
+        // `false` — indistinguishable, by inspecting `mrz.checks` alone, from
+        // a genuine `Some(false)`. `extraction_from_v2_llm` must still
+        // recover `None`, because on this path the model was never asked for
+        // the checksum bit, so `None` is what actually happened.
+        let original = mock_extraction("P<UTO passport markdown");
+        let v2 = lift_tier2_extraction(&original, Some("mock-model.gguf".into()));
+
+        let mrz = v2
+            .mrz
+            .as_ref()
+            .expect("mrz_line was set, so mrz lifts to Some");
+        assert!(
+            !mrz.checks.all_valid(),
+            "sanity: the lift folds an absent v1 bool into every check being false"
+        );
+
+        let round_tripped = extraction_from_v2_llm(&v2);
+        assert_eq!(round_tripped, original);
     }
 
     /// Same specimen as [`HRV_TD3_MARKDOWN`], with the document-number check
