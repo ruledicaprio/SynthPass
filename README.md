@@ -1,9 +1,5 @@
-# 🪪 SynthPass
+# SynthPass
 
-<!-- Language / backend -->
-![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
-![Tokio](https://img.shields.io/badge/Tokio-0B7261?style=flat&logo=rust&logoColor=white)
-![Axum](https://img.shields.io/badge/Axum-000000?style=flat&logo=rust&logoColor=white)
 <!-- ML / inference -->
 ![llama.cpp](https://img.shields.io/badge/llama.cpp-in--process-555555?style=flat)
 ![Qwen 2.5](https://img.shields.io/badge/Qwen%202.5-1.5B%20q4__k__m-6236FF?style=flat)
@@ -14,8 +10,6 @@
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
 [![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F230%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 <!-- Posture -->
-![Air-gapped](https://img.shields.io/badge/deploy-air--gapped-10B981?style=flat)
-![Cloud calls](https://img.shields.io/badge/cloud%20calls-0-brightgreen?style=flat)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 **Identity-document intelligence that runs entirely on your own machine.** SynthPass
@@ -25,7 +19,7 @@ calls** at any stage.
 
 The extraction path validates documents **deterministically via ICAO 9303 MRZ check digits**
 (Tier 1) and only falls back to a local quantized LLM (Tier 2) when no valid MRZ exists. The
-generation path produces unmistakably synthetic, watermarked documents whose labels are correct
+generation path produces watermarked synthetic documents whose labels are correct
 *by construction* — the ground truth the benchmark grades against.
 
 > **What this is for:** testing, validation, benchmarking, and AI/ML training data for
@@ -37,73 +31,24 @@ generation path produces unmistakably synthetic, watermarked documents whose lab
 *Formerly `multi-level-id-strip` / `mlis`; see [CHANGELOG.md](CHANGELOG.md) for the crate-rename
 mapping.*
 
-## 📚 Contents
+## Contents
 
-- [See it work](#️-see-it-work)
-- [Quickstart](#-quickstart)
-- [Make a pass, then read it back](#-make-a-pass-then-read-it-back)
-- [How it works](#-how-it-works)
-- [Why it's built this way](#-why-its-built-this-way)
-- [Extraction: Tier 1 and Tier 2](#-extraction-tier-1-and-tier-2)
-- [Accuracy, stated plainly](#-accuracy-stated-plainly)
-- [Configuration](#️-configuration)
-- [Licensing](#-licensing)
-- [Air-gapped deployment](#-air-gapped-deployment)
-- [Repository layout](#-repository-layout)
-- [Security](#-security)
-- [Documentation](#-documentation)
-- [Acknowledgments](#-acknowledgments)
-- [License](#-license)
+- [Quickstart](#quickstart)
+- [Make a pass, then read it back](#make-a-pass-then-read-it-back)
+- [How it works](#how-it-works)
+- [Why it's built this way](#why-its-built-this-way)
+- [Extraction: Tier 1 and Tier 2](#extraction-tier-1-and-tier-2)
+- [Accuracy, stated plainly](#accuracy-stated-plainly)
+- [Configuration](#configuration)
+- [Licensing](#licensing)
+- [Air-gapped deployment](#air-gapped-deployment)
+- [Repository layout](#repository-layout)
+- [Security](#security)
+- [Documentation](#documentation)
+- [Acknowledgments](#acknowledgments)
+- [License](#license)
 
-## 🖼️ See it work
-
-<img src="samples/ocr_fixtures/Croatian_passport_data_page.jpg" alt="Croatian passport data page — public-domain specimen" width="300">
-
-```
-$ synthpass Croatian_passport_data_page.jpg
-✔ SPECIMEN SPECIMEN · HRV passport 007007007 · verified in <1s, LLM never ran
-```
-
-A real run against the public-domain specimen above (from [`samples/`](samples/); see
-[samples/README.md](samples/README.md) for how the collection is organized): every ICAO
-9303 check digit on the printed MRZ verified mathematically, so the deterministic **Tier 1** path
-handled it end to end — no model call, no guessing.
-
-<details>
-<summary>Full JSON output</summary>
-
-```json
-{
-  "document_type": "P",
-  "issuing_country": "HRV",
-  "issuing_country_name": "Croatia",
-  "document_number": "007007007",
-  "surname": "SPECIMEN",
-  "given_names": "SPECIMEN",
-  "nationality": "HRV",
-  "nationality_name": "Croatia",
-  "date_of_birth": "1982-12-25",
-  "sex": "F",
-  "date_of_expiry": "2014-07-01",
-  "mrz_line": "P<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06",
-  "mrz_checksums_valid": true,
-  "validity": { "dates_well_formed": true, "in_date": false, "dob_before_expiry": true },
-  "extraction_method": "mrz-deterministic"
-}
-```
-
-`in_date: false` — the specimen expired in 2014 (live output also carries an exact
-`days_until_expiry`). A valid composite check digit proves a faithful **read** of the printed
-zone; whether the document is *in date* is a separate, non-cryptographic judgement.
-
-</details>
-
-**[Try it live →](https://ruledicaprio.github.io/SynthPass/)** The same Rust code compiled to
-WebAssembly, running in your browser tab — no install, no server, no upload. Results are shown
-for 10 seconds with a copy button, then wiped. **Nothing is persisted, because there is nowhere
-to persist it to.**
-
-## 🚀 Quickstart
+## Quickstart
 
 Neither Docker nor Python is required to *run* SynthPass. Input is images only — JPEG, PNG, WebP,
 TIFF, BMP, GIF. PDF and HEIC/HEIF are deliberately unsupported
@@ -181,11 +126,11 @@ build/test/cross-compile reference.
 | `synthpass verify-license` | Validate a `license.mlis` against the embedded key |
 | `synthpass decrypt <file>` | Decrypt output written with `SYNTHPASS_KEY` |
 
-## 🏭 Make a pass, then read it back
+## Make a pass, then read it back
 
 SynthPass doesn't just read documents — it **mints its own**, so accuracy is graded against ground
-truth instead of vibes. `synthpass generate` renders synthetic TD3 passes in the same ICAO 9303
-format as a real passport data page, but every one is **unmistakably synthetic**: a mandatory
+truth, not assumptions. `synthpass generate` renders synthetic TD3 passes in the same ICAO 9303
+format as a real passport data page, but every one carries a mandatory
 "SYNTHETIC / SPECIMEN" watermark, a generic non-country template, and fictional seed-drawn
 identities — *enforced in code, never a copy of a real document*. Each render ships a `.json`
 sidecar with per-field ground-truth boxes and a checksum-valid MRZ built by `mrz::format_td3`, plus
@@ -226,36 +171,36 @@ falls back to placeholder bars). Reports are generated, never hand-edited. Metho
 [knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md); the degraded-profile red-team corpus in
 [knowledge/ADVERSARIAL.md](knowledge/ADVERSARIAL.md).
 
-## 🔀 How it works
+## How it works
 
 ```mermaid
 flowchart LR
-    A["📷 ID photo"] --> B["🔎 Read the text<br/>(OCR)"]
+    A["ID photo"] --> B["Read the text<br/>(OCR)"]
     B --> C{"Machine-readable<br/>zone found?"}
-    C -->|"Yes"| D["✅ Verify checksums<br/>instant, deterministic"]
-    C -->|"No"| E["🧠 Local LLM fallback<br/>reads the layout"]
-    D --> F["📦 Structured JSON"]
+    C -->|"Yes"| D["Verify checksums<br/>instant, deterministic"]
+    C -->|"No"| E["Local LLM fallback<br/>reads the layout"]
+    D --> F["Structured JSON"]
     E --> F
 ```
 
 Every document is checked against its own printed math first — that is what makes the green path
-instant and *provably* correct rather than probably right. The model only runs on documents that
-need it. Both stages run in the same process, on your machine, unchanged on Windows, macOS and
-Linux.
+instant and mathematically verified, not a probabilistic guess. The model only runs on documents
+that need it. Both stages run in the same process, on your machine, unchanged on Windows, macOS
+and Linux.
 
 The generation half closes the loop: synthetic documents carry labels that are correct by
-construction, so accuracy claims come from a harness rather than from vibes.
+construction, so accuracy claims come from a harness, not assumptions.
 
 ```mermaid
 flowchart LR
-    GEN["🏭 synthpass-gen<br/>seeded, watermarked"] --> CORPUS["🏷️ labelled corpus"]
-    CORPUS --> BENCH["📊 synthpass-bench"]
+    GEN["synthpass-gen<br/>seeded, watermarked"] --> CORPUS["labelled corpus"]
+    CORPUS --> BENCH["synthpass-bench"]
     BENCH --> GATE{"CI accuracy gate"}
     GATE -->|"regression"| BLOCK["merge blocked"]
     GATE -->|"pass"| MERGE["merge allowed"]
 ```
 
-## 🎯 Why it's built this way
+## Why it's built this way
 
 Two principles drive every design decision, and they are non-negotiable:
 
@@ -273,7 +218,7 @@ zeroized on drop and the audit trail is SHA-256-only.
 Full reasoning in [knowledge/VISION.md](knowledge/VISION.md); engineering rationale and trade-offs in
 [knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md).
 
-## 🔐 Extraction: Tier 1 and Tier 2
+## Extraction: Tier 1 and Tier 2
 
 **Tier 1 — deterministic.** The [`mrz`](crates/mrz/) crate is a zero-dependency ICAO 9303 parser
 covering TD1/TD2/TD3 with every check digit verified (7-3-1 weighting), plus **checksum-verified
@@ -298,7 +243,7 @@ layout it has never seen will not match a checksum for accuracy. The parity harn
 (`crates/synthpass-llm/tests/parity.rs`) exists to catch regressions in that fallback, not to
 promise perfection. That asymmetry is *why* Tier 1 exists and runs first on every document.
 
-## 📊 Accuracy, stated plainly
+## Accuracy, stated plainly
 
 Two different corpora measure two different things. Quoting only the flattering one would be
 dishonest, so both are here.
@@ -320,7 +265,7 @@ digits decide which reading — if any — is trusted. Tier 2 runs only after Ti
 documented permanent miss is a physically redacted specimen whose MRZ was never printed at all
 (see [knowledge/CORPUS_COVERAGE.md](knowledge/CORPUS_COVERAGE.md)) — not a recoverable OCR gap.
 
-## ⚙️ Configuration
+## Configuration
 
 **OCR**
 
@@ -370,7 +315,7 @@ requires auth defeats half its purpose.
 > **Windows note:** the Tier-2 backend needs CMake + LLVM/libclang + MSVC to build
 > `llama-cpp-2`'s bundled `llama.cpp`. The OCR engine needs no native toolchain at all.
 
-## 🔑 Licensing
+## Licensing
 
 Extraction requires an offline, **Ed25519-signed** license — checked locally with no network call
 of any kind. For local development, bypass it entirely with `SYNTHPASS_LICENSE_SKIP=1`. Generation
@@ -385,7 +330,7 @@ rationale, fingerprint scheme and — stated plainly — the threat model are in
 > can strip the check. It exists to make the product sellable and auditable without phoning home,
 > and it is not sold as tamper-proof.
 
-## 📦 Air-gapped deployment
+## Air-gapped deployment
 
 For a genuine "copy one file to an isolated machine" deployment, both binaries build as
 statically-linked `x86_64-unknown-linux-musl` executables with the OCR models baked in — no
@@ -416,7 +361,7 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 [knowledge/ARCHITECTURE.md §10](knowledge/ARCHITECTURE.md#10-v100-and-beyond).
 `docker/Dockerfile.musl` packages the same binaries into a `FROM scratch` image.
 
-## 📁 Repository layout
+## Repository layout
 
 ```
 ├── crates/
@@ -451,7 +396,7 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 └── web/                    GitHub Pages demo (static, client-side only)
 ```
 
-## 🔒 Security
+## Security
 
 Everything binds to loopback by default, and `synthpass-serve` **refuses a non-loopback bind
 unless `SYNTHPASS_TOKEN` is set**, then requires `Authorization: Bearer <token>` on every request.
@@ -469,7 +414,7 @@ untrusted OCR ingest path is fuzz-tested with an always-on `proptest` suite plus
 
 Vulnerability reporting and the full deployment checklist: [SECURITY.md](SECURITY.md).
 
-## 📄 Documentation
+## Documentation
 
 Full index: [knowledge/README.md](knowledge/README.md).
 
@@ -489,7 +434,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 
 Questions or bugs: [open an issue](https://github.com/ruledicaprio/SynthPass/issues).
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 A solo-authored project where the ideas, architecture and direction are the human's; the execution
 was AI-accelerated, across more than one model.
@@ -506,7 +451,7 @@ was AI-accelerated, across more than one model.
 Copyright and authorship rest with the human author; the AI tools are credited as assistants, not
 legal authors.
 
-## 📜 License
+## License
 
 [MIT](LICENSE) © Rusmir Skopljak. Bundled third-party licenses are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The MRZ demo's OCR-B model
