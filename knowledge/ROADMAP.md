@@ -263,15 +263,20 @@ flowchart LR
   their data in an AAMVA PDF417 barcode. No amount of MRZ work reads one. They belong to
   `ExtractionV2.barcodes` — a declared slot with no decoder behind it — and should be scoped as a
   barcode project, not folded into the MRZ roadmap where they would quietly fail forever.
-- **M7 has started landing, inert and unwired.** Three pieces are on `main` so far, each shipped
-  as pure additions with no behaviour change: the schema vocabulary (#74) —
-  `synthpass_core::v2::{CoreField, ProviderId, EscalationKind, PromptRef, ExtractionTrace}`, plus
+- **M7's contract layer landed, then both tiers were wired onto it.** The schema vocabulary (#74)
+  — `synthpass_core::v2::{CoreField, ProviderId, EscalationKind, PromptRef, ExtractionTrace}`, plus
   `fusion::FindingKind`; the OCR evidence signals (#75) — `OcrResult`/`OcrPage` now carry
-  `mrz_band_score` and `text_sanity`, computed and previously discarded; and the `synthpass-die`
-  crate itself (#76) — the `IntelligenceProvider`/`Recognizer`/`FieldReader` contract, the
-  dependency-minimalism CI gate, `ProviderCatalog`, and the deterministic `MrzReader`. Nothing in
-  `synthpass-pipeline` calls any of it yet — the inline Tier-1 gate described below is still what
-  actually runs on `main`. Wiring the pipeline onto the catalog is the next chunk.
+  `mrz_band_score` and `text_sanity`, computed and previously discarded; the `synthpass-die` crate
+  itself (#76) — the `IntelligenceProvider`/`Recognizer`/`FieldReader` contract, the
+  dependency-minimalism CI gate, `ProviderCatalog`, and the deterministic `MrzReader`; `RoutingPolicy`
+  wired onto the pipeline's Tier-1 gate (#77) — `ocr_and_tier1` now consults the catalog's
+  `MrzReader` instead of an inline `mrz::find_and_parse(..).filter(valid)` check; and Tier 2 (the
+  LLM) wrapped as a registered `FieldReader` — `Pipeline::process_document` now resolves it via
+  `catalog.find_reader(budget, |c| c.fields && !c.deterministic)` instead of calling
+  `self.infer` directly. `process_document_stream` is the one exception: `FieldReader::read` has no
+  delta-forwarding hook, so it still calls `InferBackend::extract_stream` directly — see
+  `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract". Versioned prompts and
+  the multi-provider benchmark harness remain unshipped.
 
 ## M7 — Document Intelligence Engine
 
