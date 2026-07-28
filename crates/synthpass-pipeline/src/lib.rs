@@ -37,9 +37,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 #[cfg(test)]
 use synthpass_core::v2::MrzFormat;
+use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 use synthpass_core::Extraction;
 use synthpass_die::{
     CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, Recognition, RoutingPolicy,
@@ -607,7 +607,8 @@ impl Pipeline {
                     escalation: None,
                     prompt: None,
                 });
-                let v1 = serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
+                let v1 =
+                    serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
                 (Some((v1, v2)), None)
             }
             Decision::Escalate { reason, .. } => (None, Some(reason)),
@@ -656,7 +657,10 @@ impl Pipeline {
                 Ok(extraction) => {
                     let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
                     v2.trace = Some(ExtractionTrace {
-                        providers: vec![MRZ_PROVIDER_ID.to_string(), Method::Llm.as_str().to_string()],
+                        providers: vec![
+                            MRZ_PROVIDER_ID.to_string(),
+                            Method::Llm.as_str().to_string(),
+                        ],
                         escalation: stage.escalation,
                         prompt: None,
                     });
@@ -734,7 +738,10 @@ impl Pipeline {
                 Ok(extraction) => {
                     let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
                     v2.trace = Some(ExtractionTrace {
-                        providers: vec![MRZ_PROVIDER_ID.to_string(), Method::Llm.as_str().to_string()],
+                        providers: vec![
+                            MRZ_PROVIDER_ID.to_string(),
+                            Method::Llm.as_str().to_string(),
+                        ],
                         escalation: stage.escalation,
                         prompt: None,
                     });
