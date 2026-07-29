@@ -61,46 +61,6 @@ The CLI should act as the implementer.
 
 ---
 
-# Expected workflow
-
-For large features:
-
-Phase 1
-
-Claude Web
-
-* read Issues
-* inspect recent commits
-* inspect ROADMAP
-* inspect ARCHITECTURE
-* inspect knowledge/
-
-Produce an implementation plan.
-
-Phase 2
-
-Claude CLI
-
-Implement the approved plan.
-
-Phase 3
-
-Claude Web
-
-Review the resulting Git diff.
-
-Suggest improvements.
-
-Phase 4
-
-Claude CLI
-
-Apply review comments.
-
-Run tests.
-
----
-
 # Repository knowledge priority
 
 Always read these first before making architectural decisions.
@@ -142,44 +102,6 @@ Avoid
 ---
 
 # SynthPass pipeline
-
-The intended processing pipeline is
-
-```
-Image
-
-↓
-
-OCR
-
-↓
-
-MRZ detection
-
-↓
-
-ICAO validation
-
-↓
-
-Confidence scoring
-
-↓
-
-Field extraction
-
-↓
-
-LLM fallback (only if required)
-
-↓
-
-JSON
-
-↓
-
-Optional synthetic generation
-```
 
 Deterministic extraction should always be preferred over LLM inference.
 
