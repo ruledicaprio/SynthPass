@@ -1,33 +1,23 @@
-# Doc 9303
-
+# ICAO Doc 9303
 ## Machine Readable Travel Documents
-
 ### Part 9: Deployment of Biometric Identification and Electronic Storage of Data in MRTDs
+**Eighth Edition, 2021**
 
-#### Eighth Edition, 2021
+Approved by and published under the authority of the Secretary General  
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**  
 
----
-
-Approved by and published under the authority of the Secretary General
-
-### INTERNATIONAL CIVIL AVIATION ORGANIZATION
-
----
-
-Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
-999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
-
+Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the  
+INTERNATIONAL CIVIL AVIATION ORGANIZATION  
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7  
 Downloads and additional information are available at [www.icao.int/Security/FAL/TRIP](http://www.icao.int/Security/FAL/TRIP)
 
-**Doc 9303, *Machine Readable Travel Documents***
-**Part 9 — *Deployment of Biometric Identification and Electronic Storage of Data in MRTDs***
+**Doc 9303, Machine Readable Travel Documents***
+Part 9 — Deployment of Biometric Identification and Electronic Storage of Data in MRTDs
 Order No.: 9303P9
 ISBN 978-92-9265-381-1 (print version)
 ISBN 978-92-9275-331-3 (electronic version)
 
-### © ICAO 2021
-
+© ICAO 2021  
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -42,7 +32,7 @@ Amendments are announced in the supplements to the Products and Services Catalog
 | :--- | :--- | :--- |
 | 1 | 20/3/24 | ICAO |
 
-The designations employed and the presentation of the material in this publication do not imply the expression of any opinion whatsoever on the part of ICAO concerning the legal status of any country, territory, city or area or of its authorities, or concerning the delimitation of its frontiers or boundaries.
+*The designations employed and the presentation of the material in this publication do not imply the expression of any opinion whatsoever on the part of ICAO concerning the legal status of any country, territory, city or area or of its authorities, or concerning the delimitation of its frontiers or boundaries.*
 
 ---
 
@@ -79,7 +69,7 @@ The designations employed and the presentation of the material in this publicati
 
 ## 1. SCOPE
 
-Part 9 of Doc 9303 defines the specifications, additional to those for the basic MRTD set forth in Parts 3, 4, 5, 6, and 7 of Doc 9303, to be used by States or organizations wishing to issue an electronic Machine Readable Travel Document (eMRTD) capable of being used by any suitably equipped receiving State or organization to read and to authenticate data relating to the eMRTD itself and verification of its holder. This includes mandatory globally interoperable biometric data that can be used as an input to facial recognition systems, and, optionally, to fingerprint or iris recognition systems. The specifications require the globally interoperable biometric data to be stored in the form of high-resolution images on a high-capacity contactless integrated circuit (IC), the IC also being encoded with a duplicate of the MRZ data. The specifications also permit the storage of a range of optional data at the discretion of the issuing State or organization. Since the use of the contactless IC is independent of the size of the document, all specifications apply to all eMRTD sizes in their electronically enabled form. Differences between eMRTD formats relate to the MRZ, with consequences for the storage of the MRZ in the contactless IC. These differences are indicated in the specifications of the Logical Data Structure in Doc 9303-10.
+Part 9 of Doc 9303 defines the specifications, additional to those for the basic MRTD set forth in Parts 3, 4, 5, 6, and 7 of Doc 9303, to be used by States or organizations wishing to issue an electronic Machine Readable Travel Document (eMRTD) capable of being used by any suitably equipped receiving State or organization to read and to authenticate data relating to the eMRTD itself and verification of its holder. This includes mandatory globally interoperable biometric data that can be used as an input to facial recognition systems, and, optionally, to fingerprint or iris recognition systems. The specifications require the globally interoperable biometric data to be stored in the form of high-resolution images on a high-capacity contactless integrated circuit (IC), the IC also being encoded with a duplicate of the MRZ data. The specifications also permit the storage of a range of optional data at the discretion of the issuing State or organization. Since the use of the contactless IC is independent of the size of the document, all specifications apply to all eMRTD sizes in their electronically enabled form. Differences between eMRTD formats relate to the MRZ, with consequences for the storage of the MRZ in the contactless IC. These differences are indicated in the specifications of the Logical Data Structure in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md).
 
 Part 9 shall be read in conjunction with:
 
@@ -107,8 +97,10 @@ Doc 9303, Part 9 focuses on biometrics in relation to Machine Readable Travel Do
 All eMRTDs shall carry the following symbol:
 
 > **Figure 1. Chip Inside symbol**
+>
+> <img src="./figures/Doc_9303_Part9_Biometric_identification_and_Electronic_Data_storage_in_MRTDs_p10.png" alt="Chip Inside symbol">
 
-An electronic file of the symbol is available from the ICAO website. The symbol SHALL only appear on an eMRTD that contains a contactless integrated circuit, with a data storage capacity sufficient to hold the mandatory data elements in accordance with the Logical Data Structure (Doc 9303-10), with all entered data secured with a digital signature as specified in Doc 9303-11. Unless an eMRTD conforms to these minimum requirements, it SHALL NOT be described as an eMRTD nor display the Chip Inside symbol. The symbol shall appear on the front cover of the eMRTD if it is a TD3 size book (eMRP) either near the top or the bottom of the cover, or on the front side of the eMRTD if it is in the format of a card (eMROTD).
+An electronic file of the symbol is available from the ICAO website. The symbol SHALL only appear on an eMRTD that contains a contactless integrated circuit, with a data storage capacity sufficient to hold the mandatory data elements in accordance with the Logical Data Structure ([Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md)), with all entered data secured with a digital signature as specified in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md). Unless an eMRTD conforms to these minimum requirements, it SHALL NOT be described as an eMRTD nor display the Chip Inside symbol. The symbol shall appear on the front cover of the eMRTD if it is a TD3 size book (eMRP) either near the top or the bottom of the cover, or on the front side of the eMRTD if it is in the format of a card (eMROTD).
 
 On an eMRP the symbol shall be included in the foil blocking or other image on the front cover. It is recommended that the symbol also be printed on the data page in a suitable colour and in a location which does not interfere with the reading of other data. The issuing State or organization may also print the symbol on the inside page or cover of the passport book that contains the contactless IC and, at its discretion, elsewhere in the passport.
 
@@ -281,7 +273,7 @@ A high-capacity contactless IC SHALL be the electronic storage medium specified 
 
 #### Contactless IC and encoding
 
-The contactless ICs used in eMRTDs SHALL conform to ISO/IEC 14443 Type A or Type B and ISO/IEC 7816-4. The LDS SHALL be encoded according to the Random Access method. The read range (achieved by a combination of the eMRTD and the reader) typically is up to \(10cm\) as noted in ISO/IEC 14443. An ISO/IEC 14443 application profile for MRTDs is provided in Doc 9303-10.
+The contactless ICs used in eMRTDs SHALL conform to ISO/IEC 14443 Type A or Type B and ISO/IEC 7816-4. The LDS SHALL be encoded according to the Random Access method. The read range (achieved by a combination of the eMRTD and the reader) typically is up to \(10cm\) as noted in ISO/IEC 14443. An ISO/IEC 14443 application profile for MRTDs is provided in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md).
 
 #### Data storage capacity of the contactless IC
 
@@ -297,17 +289,17 @@ To ensure global interoperability for machine reading of stored details, a Logic
 
 #### Structure of the stored data
 
-The Logical Data Structure is specified in Doc 9303-10. Doc 9303-10 describes in detail the mandatory and optional information to be included within specific biometric data blocks within the LDS.
+The Logical Data Structure is specified in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md). [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md) describes in detail the mandatory and optional information to be included within specific biometric data blocks within the LDS.
 
 #### Minimum data items to be stored in the LDS
 
-The minimum mandatory items of data to be stored in the LDS on the contactless IC SHALL be a duplication of the Machine Readable Zone data in Data Group 1 and the holder's facial image in Data Group 2. In addition, the IC in a compliant eMRTD SHALL contain the Security Object (EF.SOD) that is needed to validate the integrity of data created by the issuer; this is stored in Dedicated File No. 1 as specified in the LDS (see Doc 9303-10). The Security Object (EF.SOD) consists of the hashes of the Data Groups in use.
+The minimum mandatory items of data to be stored in the LDS on the contactless IC SHALL be a duplication of the Machine Readable Zone data in Data Group 1 and the holder's facial image in Data Group 2. In addition, the IC in a compliant eMRTD SHALL contain the Security Object (EF.SOD) that is needed to validate the integrity of data created by the issuer; this is stored in Dedicated File No. 1 as specified in the LDS (see [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md)). The Security Object (EF.SOD) consists of the hashes of the Data Groups in use.
 
 ### 5.3 Security and Privacy of the Stored Data
 
-Both the issuing and any receiving States or organizations need to be satisfied that the data stored on the contactless IC have not been altered since they were recorded at the time of issue of the document. In addition, the privacy laws or practice of the issuing State or organization may require that the data cannot be accessed except by an authorized person or organization. Accordingly ICAO has developed specifications in Doc 9303-11 and Doc 9303-12 regarding the application and usage of modern encryption techniques, particularly Public Key Infrastructure (PKI) schemes, which MUST be used by issuing States or organizations in their Machine Readable Travel Documents made in accordance with Doc 9303. The intent is primarily to augment security through automated means of authentication of eMRTDs and their legitimate holders internationally. In addition, methods are recommended to implement international eMRTD authentication and to provide a path to the use of eMRTDs to facilitate biometric or e-commerce applications. The specifications in Doc 9303-11 permit the issuing State or organization to protect the stored data from unauthorized access by the use of Access Control.
+Both the issuing and any receiving States or organizations need to be satisfied that the data stored on the contactless IC have not been altered since they were recorded at the time of issue of the document. In addition, the privacy laws or practice of the issuing State or organization may require that the data cannot be accessed except by an authorized person or organization. Accordingly ICAO has developed specifications in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md) and [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md) regarding the application and usage of modern encryption techniques, particularly Public Key Infrastructure (PKI) schemes, which MUST be used by issuing States or organizations in their Machine Readable Travel Documents made in accordance with Doc 9303. The intent is primarily to augment security through automated means of authentication of eMRTDs and their legitimate holders internationally. In addition, methods are recommended to implement international eMRTD authentication and to provide a path to the use of eMRTDs to facilitate biometric or e-commerce applications. The specifications in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md) permit the issuing State or organization to protect the stored data from unauthorized access by the use of Access Control.
 
-This edition of Doc 9303 is based on the assumption that LDS1 data will not be written to the contactless IC after personalization. Therefore the personalization process SHALL lock the contactless IC as a final step. Once the contactless IC has been locked (after personalization and before issuance) further data can only be written to the contactless IC after successful execution of an authentication mechanism (TA), as specified in Doc 9303-10 and Doc 9303-11. After issuance a locked contactless IC cannot be unlocked.
+This edition of Doc 9303 is based on the assumption that LDS1 data will not be written to the contactless IC after personalization. Therefore the personalization process SHALL lock the contactless IC as a final step. Once the contactless IC has been locked (after personalization and before issuance) further data can only be written to the contactless IC after successful execution of an authentication mechanism (TA), as specified in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md) and [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md). After issuance a locked contactless IC cannot be unlocked.
 
 #### Public Key Infrastructure (PKI)
 
@@ -315,7 +307,7 @@ The aim of the PKI scheme, as described, is mainly to enable eMRTD inspecting au
 
 Certificates are used for security purposes, along with a methodology for public key (certificate) circulation to States or organizations, and the PKI is customized for ICAO purposes.
 
-The PKI specifications are described in detail in Doc 9303-12.
+The PKI specifications are described in detail in [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md).
 
 ## 6. TEST METHODOLOGIES FOR eMRTDs
 

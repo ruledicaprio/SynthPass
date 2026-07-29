@@ -1,31 +1,23 @@
 # ICAO Doc 9303
 ## Machine Readable Travel Documents
 ### Part 8: Emergency Travel Documents
+**Eighth Edition, 2021**
 
-#### Eighth Edition, 2021
-
----
-
-*Approved by and published under the authority of the Secretary General*
-
-### INTERNATIONAL CIVIL AVIATION ORGANIZATION
-
----
-
-Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the  
+Approved by and published under the authority of the Secretary General  
 **INTERNATIONAL CIVIL AVIATION ORGANIZATION**  
-999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 
+Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 Downloads and additional information are available at [www.icao.int/security/mrtd](https://www.icao.int/security/mrtd)
 
 **Doc 9303, *Machine Readable Travel Documents***  
-**Part 8 — *Emergency Travel Documents***  
+Part 8 — Emergency Travel Documents
 Order No.: 9303P8  
 ISBN 978-92-9265-374-3 (print version)  
 ISBN 978-92-9275-988-9 (electronic version)
 
-### © ICAO 2021
-
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -250,11 +242,11 @@ In cases where an MRTD ETD is not issued, the single-sheet travel document shall
 
 <sup>5</sup> Issuing Authorities may consider issuing a less secure document in conjunction with the receiving and/or transiting Authorities if the circumstances merit and justify this.
 
-<sup>6</sup> Issuing States and organizations shall ensure machine readable booklet ETDs issued without the document code 'PE' expire before 1 January 2038. Refer to Doc 9303-4 for further details regarding document codes.
+<sup>6</sup> Issuing States and organizations shall ensure machine readable booklet ETDs issued without the document code 'PE' expire before 1 January 2038. Refer to [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md) for further details regarding document codes.
 
 <sup>7</sup> Reference can be found on https://www.icao.int/icao-trip/publications - "Guide for Circulating Specimen Travel Documents"
 
-<sup>8</sup> Issuing States and organizations shall ensure machine readable single-sheet ETDs issued without the document code 'PU' expire before 1 January 2038. Refer to Doc 9303-4 for further details regarding document codes.
+<sup>8</sup> Issuing States and organizations shall ensure machine readable single-sheet ETDs issued without the document code 'PU' expire before 1 January 2038. Refer to [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md) for further details regarding document codes.
 
 ---
 
@@ -290,7 +282,7 @@ Issuing Authorities should issue an ETD in a form that clearly distinguishes it 
 
 ---
 
-<sup>9</sup> In line with Doc 9303-4: "The use of affixed or stick-on portrait photos is not permitted and these shall not be used. Instead, the portrait image shall be integrated with the biodata page using a secure personalization technology."
+<sup>9</sup> In line with [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md): "The use of affixed or stick-on portrait photos is not permitted and these shall not be used. Instead, the portrait image shall be integrated with the biodata page using a secure personalization technology."
 
 ---
 
@@ -375,7 +367,7 @@ The table below aims to emphasize the key drivers and the purpose for producing 
 
 This section specifies the profile for digital seals in ETDs.
 
-A Visible Digital Seal (VDS) is a 2D barcode that includes a cryptographically-signed data structure, which can be printed on a non-electronic document to increase its security. Doc 9303-13 specifies VDS for non-electronic documents.
+A Visible Digital Seal (VDS) is a 2D barcode that includes a cryptographically-signed data structure, which can be printed on a non-electronic document to increase its security. [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md) specifies VDS for non-electronic documents.
 
 Considering the ETD's limited security level compared to eMRTDs, they are being targeted by potential fraudsters. Digital seals are a means to ensure the integrity and authenticity of ETD data in situations where it is not possible to issue a standard full validity passport or other regular travel documents. A worked example for the MRZ of an ETD is described in Appendix B.
 
@@ -387,7 +379,7 @@ The Document Feature Definition Reference for this use-case is 0x5E.
 
 The Document Type Category for ETDs is 0x03.
 
-Otherwise, the content of the header is the same as defined in Doc 9303-13.
+Otherwise, the content of the header is the same as defined in [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md).
 
 #### 6.1.2 Document Features of a Digital Seal for ETDs
 
@@ -395,7 +387,7 @@ For the document feature set including only the MRZ as below, the Document Featu
 
 **Machine Readable Zone (REQUIRED)**
 
-Basic information is encoded using a Machine Readable Zone (MRZ) of a TD2 size MROTD, see Doc 9303-6. The MRZ of ETDs contains the following information:
+Basic information is encoded using a Machine Readable Zone (MRZ) of a TD2 size MROTD, see [Doc 9303-6](Doc_9303_Part6_Specs_for_TD2_MROTDs.md). The MRZ of ETDs contains the following information:
 
 - document code<sup>11</sup>;
 - issuing State or organization;
@@ -437,11 +429,11 @@ Appropriate key lengths offering protection against attacks SHALL be chosen for 
 
 ### 6.2 Bar Code Signer and Seal Creation
 
-A possible architecture and implementation for the ETD signer and its client is described in Doc 9303-13. For the security of the ETD signing system, see Doc 9303-13.
+A possible architecture and implementation for the ETD signer and its client is described in [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md). For the security of the ETD signing system, see [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md).
 
 ### 6.3 Public Key Infrastructure (PKI) and Certificate Profiles
 
-For the ETD, the requirements which are mentioned in Doc 9303-12 apply. The following deviations are given for the specific ETD profile.
+For the ETD, the requirements which are mentioned in [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md) apply. The following deviations are given for the specific ETD profile.
 
 #### 6.3.1 Key Requirements (Validity Period)
 
@@ -458,7 +450,7 @@ Annex 9 — *Facilitation*, Convention on International Civil Aviation ("Chicago
 
 ## APPENDIX A TO PART 8 — ETD VALIDATION POLICY RULES (INFORMATIVE)
 
-The Validation Policy Rules outlined in Doc 9303-13 apply. In addition to these rules, there are further validation rules for the ETD which are described in the following paragraphs.
+The Validation Policy Rules outlined in [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md) apply. In addition to these rules, there are further validation rules for the ETD which are described in the following paragraphs.
 
 In addition to the generic document Validation Policy, the policy for ETDs considers the following questions:
 

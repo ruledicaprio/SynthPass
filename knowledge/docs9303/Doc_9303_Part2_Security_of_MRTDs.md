@@ -1,26 +1,19 @@
 # ICAO Doc 9303
-
 ## Machine Readable Travel Documents
-
 ### Part 2: Specifications for the Security of the Design, Manufacture and Issuance of MRTDs
-
 **Eighth Edition, 2021**
 
-Approved by and published under the authority of the Secretary General
-
+Approved by and published under the authority of the Secretary General  
 **INTERNATIONAL CIVIL AVIATION ORGANIZATION**
-
----
 
 Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
 INTERNATIONAL CIVIL AVIATION ORGANIZATION
 999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
-
 Downloads and additional information are available at [www.icao.int/security/mrtd](https://www.icao.int/security/mrtd)
 
 **Doc 9303, Machine Readable Travel Documents**  
-**Part 2 — Specifications for the Security of the Design, Manufacture and Issuance of MRTDs**  
-Order No.: 9303P2  
+Part 2 — Specifications for the Security of the Design, Manufacture and Issuance of MRTDs
+Order No.: 9303P2
 ISBN 978-92-9265-319-4 (print version)
 
 © ICAO 2021
@@ -206,7 +199,7 @@ A functioning contactless IC in an eMRTD can also aid optical machine authentica
 
 > **Figure 1. Three sizes of MRTD including the MRP (TD3 size) with recommended positions for machine assisted document verification features**
 >
-> [Diagram: Dimensioned line drawings of the three MRTD sizes (TD1, TD2, and TD3/MRP) showing the recommended data-page positions for machine-verifiable security features. On each drawing, a shaded area on the left marks where a structure verification feature should be centred, and a shaded area on the right marks where a substance verification feature should be centred, both positioned clear of the MRZ. Called-out dimensions (in millimetres, with inches in parentheses) give the offsets of these feature centres from the document edges: 20.0 mm (0.79 in) and 17.0 mm (0.67 in) for the structure-feature centre, 10.0 mm (0.39 in) for the substance-feature centre, and 80.6 mm (3.17 in), 29.0 mm (1.14 in), and 23.2 mm (0.91 in) for the surrounding layout relative to the MRZ. The drawings are explicitly marked "Not to scale." The shaded area on the left is recommended for the incorporation of a structure feature and that on the right for the incorporation of a substance feature.
+> [Diagram: Dimensioned line drawings of the three MRTD sizes (TD1, TD2, and TD3/MRP) showing the recommended data-page positions for machine-verifiable security features. On each drawing, a shaded area on the left marks where a structure verification feature should be centred, and a shaded area on the right marks where a substance verification feature should be centred, both positioned clear of the MRZ. Called-out dimensions (in millimetres, with inches in parentheses) give the offsets of these feature centres from the document edges: 20.0 mm (0.79 in) and 17.0 mm (0.67 in) for the structure-feature centre, 10.0 mm (0.39 in) for the substance-feature centre, and 80.6 mm (3.17 in), 29.0 mm (1.14 in), and 23.2 mm (0.91 in) for the surrounding layout relative to the MRZ. The drawings are explicitly marked "Not to scale." The shaded area on the left is recommended for the incorporation of a structure feature and that on the right for the incorporation of a substance feature.]
 
 ## 4. SECURITY OF MRTD PRODUCTION (DESIGN AND MANUFACTURING) AND ISSUANCE FACILITIES
 
@@ -569,7 +562,7 @@ Where the substrate used for the biographical data page (or inserted label) of a
 
 ##### A.5.2.1 Background and text printing
 
-Basic features (see Doc 9303-1, 4.2 — Terms and Definitions):
+Basic features (see [Doc 9303-1](Doc_9303_Part1_Introduction.md), 4.2 — Terms and Definitions):
 
 - two-colour guilloche security background design pattern1;
 
@@ -1343,6 +1336,8 @@ The authentication software sends the document model’s identifier to the authe
 
 > **Figure C-1. Process of document identification and verification; the numbers denote the order of the involved process steps**
 >
+> <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p52.png" alt="Process of document identification and verification">
+>
 > [Diagram: Flow chart of the document-identification-and-verification process. The full page reader captures a live data set (VIS-image, UV-image, IR-image) from the document (step 1) and passes it to the authentication (inspection) software. The software sends the document model identifier (ID) to the inspection database (step 2), which returns the corresponding inspection data set (inspection routine 1, inspection routine 2, ..., inspection routine n) for that model (step 3). Optionally, the software also sends the ID to a reference database (step 4), which returns a reference data set (VIS-image, UV-image, IR-image, plus detailed images) to support manual verification by a human operator.]
 
 The verification is then performed by the authentication software. The check routines are applied to the travel document’s live data set. This examination usually leads to a Pass- or Fail-result. A Pass-result implies that the checked document does not present any abnormalities, whereby a Fail-result means the opposite. Depending on the application scenario, the interpretation of the result (pass or fail) is the responsibility of the human operator.
@@ -1363,9 +1358,13 @@ In terms of the EU regulation on minimum standards for security features and bio
 
 > **Figure C-2. Schematic diagram of the setup of an authentication system**
 >
+> <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p54.png" alt="Schematic diagram of the setup of an authentication system">
+>
 > [Diagram: Block diagram of an authentication system's architecture. An Inspection System comprises a Full Page Reader (capturing images under Light Source 1/white light, Light Source 2/infrared light, and Light Source 3/ultraviolet light) feeding an Inspection Software component, which runs a set of Inspection Algorithms (e.g. Algorithm 1 = brightness, Algorithm 2 = consistence, ..., Algorithm n = pattern matching). The Inspection Software queries an Inspection Database organized by Document Model (e.g. Document Model 1 = Germany 2007, Document Model 2 = Great Britain 2008, Document Model n = Great Britain 2010). Each document model defines a set of Features (e.g. Feature 1 = photo, Feature 2 = static printing technique, Feature n = MRZ), and each feature has one or more Inspection Routines, each testing a Property (e.g. Property 1 = absorbing, Property 2 = transparent, Property x = luminescent) using a numbered check algorithm.]
 
 > **Figure C-3. Features and properties under different light sources using the German passport**
+>
+> <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p55.png" alt="Features and properties under different light sources using the German passport">
 >
 > [Diagram: Mapping diagram, illustrated with the German passport, showing how the same document feature exhibits different properties depending on which light source is used to examine it. Under Light source 1 (visible), the feature shows Property 1 (absorbing). Under Light source 2 (infrared), the same feature shows both Property 1 (absorbing) and Property 2 (transparent). Under Light source 3 (ultraviolet), it shows Property 3 (luminescent, with a luminescent overprint), demonstrating that a single security feature can be checked for multiple, spectrally distinct properties.]
 

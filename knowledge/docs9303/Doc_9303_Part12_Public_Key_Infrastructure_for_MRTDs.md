@@ -1,24 +1,23 @@
 # ICAO Doc 9303
 ## Machine Readable Travel Documents
 ### Part 12: Public Key Infrastructure for MRTDs
-
 **Eighth Edition, 2021**
 
 Approved by and published under the authority of the Secretary General  
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**  
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
-Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the  
-INTERNATIONAL CIVIL AVIATION ORGANIZATION  
-999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7  
+Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 Downloads and additional information are available at [www.icao.int/security/mrtd](https://www.icao.int/security/mrtd)
 
-**Doc 9303, Machine Readable Travel Documents**  
-Part 12 — Public Key Infrastructure for MRTDs  
-Order No.: 9303P12  
-ISBN 978-92-9265-422-1 (print version)  
-ISBN 978-92-9275-422-8 (electronic version)  
+**Doc 9303, Machine Readable Travel Documents**
+Part 12 — Public Key Infrastructure for MRTDs
+Order No.: 9303P12
+ISBN 978-92-9265-422-1 (print version)
+ISBN 978-92-9275-422-8 (electronic version)
 
-© ICAO 2021  
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -79,9 +78,9 @@ Part 12 of Doc 9303 defines the Public Key Infrastructure (PKI) for the eMRTD ap
 The Eighth Edition of Doc 9303 incorporates the specifications for Visible Digital Seals (known as VDS) and for the optional Travel Records, Visa Records, and Additional Biometric Applications (known as LDS2) as an extension of the mandatory eMRTD application (known as LDS1).
 
 Doc 9303-12 shall be read in conjunction with:
-- Doc 9303-10 — Logical Data Structure (LDS) for Storage of Biometrics and Other Data in the Contactless Integrated Circuit (IC);
-- Doc 9303-11 — Security Mechanisms for MRTDs; and
-- Doc 9303-13 — Visible Digital Seals.
+- [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md) — Logical Data Structure (LDS) for Storage of Biometrics and Other Data in the Contactless Integrated Circuit (IC);
+- [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md) — Security Mechanisms for MRTDs; and
+- [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md) — Visible Digital Seals.
 
 ---
 
@@ -219,7 +218,7 @@ There is no revocation mechanism for CVCA, DV, or terminal certificates. Therefo
 | Terminal | 1 day – 1 month |
 
 #### 4.2.1 Cryptographic Algorithms for Terminal Authentication
-For Terminal Authentication, either RSA or ECDSA MAY be used. Details are provided in Doc 9303-11.
+For Terminal Authentication, either RSA or ECDSA MAY be used. Details are provided in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md).
 
 #### 4.2.2 Cryptographic Algorithms for SPOC
 The TLS Encryption Suites to be used for the SPOC protocol are listed below. Both the server and the client side SHALL support RSA and ECDSA-based authentication.
@@ -343,7 +342,7 @@ The profiles use the following terminology for presence requirements: `m` (manda
 *Note 4:* The Netscape Certificate Type extension can be used to limit the purposes for which a certificate can be used. The extKeyUsage and basicConstraints extensions are now the standard extensions for those purposes. Because of the potential conflict, the Netscape extension is prohibited.
 
 #### 7.1.1.1 Issuer and Subject Field Requirements
-- **countryName**: MUST be present. The value contains a country code that MUST follow the format of two-letter country codes, specified in Doc 9303-3.
+- **countryName**: MUST be present. The value contains a country code that MUST follow the format of two-letter country codes, specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 - **commonName**: MUST be present.
 
 #### 7.1.1.2 Issuer and Subject Alternative Name Requirements
@@ -507,7 +506,7 @@ The Certificate Holder Reference SHALL consist of the following concatenated ele
 **Table 12. Certificate Holder Reference**
 | Encoding | Length |
 | :--- | :--- |
-| Country Code (Doc 9303-3) | 2F |
+| Country Code ([Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md)) | 2F |
 | Holder Mnemonic (ISO/IEC 8859-1) | 9V |
 | Sequence Number (ISO/IEC 8859-1) | 5F |
 
@@ -639,7 +638,7 @@ A certificate request may have up to two signatures; an inner signature and an o
 #### 8.2.1 Request Certificate Message
 **Intended Use**: The RequestCertificate message is used by a SPOC for requesting the generation of a new certificate for one of its DVs from a foreign CVCA.
 **Input Parameters**:
-- `callerID`: (Mandatory) Two-letter country code according to Doc 9303-3.
+- `callerID`: (Mandatory) Two-letter country code according to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 - `messageID`: (Mandatory) Identification of the message.
 - `certReq`: (Mandatory) The actual certificate request.
 **Output Parameters**:

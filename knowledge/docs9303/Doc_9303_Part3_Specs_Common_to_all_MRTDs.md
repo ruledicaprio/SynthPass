@@ -1,33 +1,23 @@
-# Doc 9303
-
+# ICAO Doc 9303
 ## Machine Readable Travel Documents
-
 ### Part 3: Specifications Common to all MRTDs
-
-#### Eighth Edition, 2021
-
----
+**Eighth Edition, 2021**
 
 Approved by and published under the authority of the Secretary General
-
-### INTERNATIONAL CIVIL AVIATION ORGANIZATION
-
----
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
 Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
-999 Robert-Bourassa Boulevard, Montréal, Québec, Canada H3C 5H7
-
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 Downloads and additional information are available at [www.icao.int/Security/FAL/TRIP](http://www.icao.int/Security/FAL/TRIP)
 
-**Doc 9303, *Machine Readable Travel Documents***
-**Part 3 — *Specifications Common to all MRTDs***
+**Doc 9303, Machine Readable Travel Documents**
+Part 3 — Specifications Common to all MRTDs
 Order No.: 9303P3
 ISBN 978-92-9265-333-0 (print version)
 ISBN 978-92-9275-314-6 (electronic version)
 
-### © ICAO 2021
-
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -151,7 +141,7 @@ In the interests of facilitation, optional data elements should be entered in bo
 
 When including a translation, the different language shall be separated by an oblique character.
 
-Punctuation may be included in the VIZ. For details, see Doc 9303-4.
+Punctuation may be included in the VIZ. For details, see [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md).
 
 ### 3.2 Typeface and Type Size
 
@@ -432,7 +422,7 @@ A displayed signature or usual mark, the acceptability of which is at the issuin
 
 A displayed single-digit fingerprint, if required by the issuing State or organization, shall be either an original created on the MRTD substrate by the holder or, more probably, a digitally printed reproduction of an original. Necessary measures shall be taken by the issuing State or organization to ensure that the single-digit fingerprint is resistant to forgery and substitution. The single-digit fingerprint shall meet the following requirements.
 
-**Orientation.** The A-dimension (width) of the displayed single-digit fingerprint shall be parallel to the reference edge of the MRTD as defined in Figure 3. The top of the finger shall be that portion of the single-digit fingerprint furthest away from the reference edge of the MRTD. (See Doc 9303-6, Figure 10 and Figure 12.)
+**Orientation.** The A-dimension (width) of the displayed single-digit fingerprint shall be parallel to the reference edge of the MRTD as defined in Figure 3. The top of the finger shall be that portion of the single-digit fingerprint furthest away from the reference edge of the MRTD. (See [Doc 9303-6](Doc_9303_Part6_Specs_for_TD2_MROTDs.md), Figure 10 and Figure 12.)
 
 **Size.** The displayed single-digit fingerprint shall be a one-to-one replication (A-dimension versus B-dimension) of the original print.
 
@@ -987,7 +977,7 @@ For LDS and PKI deviations, some could go undetected for long periods of time, a
 
 ### 7.2 Deviation List Approach
 
-The approach described in this section aims to provide a standardized means for issuing States to publish and distribute a Travel Document Deviation List. It is based on principles established during the development of the CSCA Master List (see Doc 9303-12), in that a signed Deviation List for each State's non-conformities will be provided via the ICAO PKD or the issuing authority through a website or a LDAP-server. The PKD is used to support the dissemination of information relevant to the management of deviations.
+The approach described in this section aims to provide a standardized means for issuing States to publish and distribute a Travel Document Deviation List. It is based on principles established during the development of the CSCA Master List (see [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md)), in that a signed Deviation List for each State's non-conformities will be provided via the ICAO PKD or the issuing authority through a website or a LDAP-server. The PKD is used to support the dissemination of information relevant to the management of deviations.
 
 Deviations are categorized into four specific areas:
 
@@ -1024,7 +1014,7 @@ The conformity of the MRZ is routinely tested by inspection systems via data com
 
 The authenticity and integrity of data stored on MRTD RFID chip is protected by Passive Authentication. This security mechanism is based on digital signatures and Public Key Infrastructure (PKI).
 
-The structure of the MRTD LDS is defined by Doc 9303-10. While there are no specific tests to establish conformity, the data stored within the LDS is in part a subset of data available from the MRZ or VIZ page of the MRTD. Consequently, the same tests apply for the digital MRZ and VIZ data as would be applied to the MRZ and VIZ page. Authenticity of the LDS is provided through the correct application of Passive Authentication by inspection systems, while Active Authentication is performed by the chip. A brief description is below:
+The structure of the MRTD LDS is defined by [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md). While there are no specific tests to establish conformity, the data stored within the LDS is in part a subset of data available from the MRZ or VIZ page of the MRTD. Consequently, the same tests apply for the digital MRZ and VIZ data as would be applied to the MRZ and VIZ page. Authenticity of the LDS is provided through the correct application of Passive Authentication by inspection systems, while Active Authentication is performed by the chip. A brief description is below:
 
 **Passive Authentication (PA)** is based on digital signatures and consists of the following PKI components:
 
@@ -1036,7 +1026,7 @@ The structure of the MRTD LDS is defined by Doc 9303-10. While there are no spec
 
 #### 7.3.2 Issuing Deviation Lists
 
-Deviation Lists MUST NOT be issued directly by a CSCA, instead the CSCA SHALL authorize a Deviation List Signer (see Doc 9303-12) to compile, sign and publish Deviation Lists. For Deviation List specifications, see Doc 9303-12.
+Deviation Lists MUST NOT be issued directly by a CSCA, instead the CSCA SHALL authorize a Deviation List Signer (see [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md)) to compile, sign and publish Deviation Lists. For Deviation List specifications, see [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md).
 
 The procedures to be performed for issuing a Deviation List SHOULD be reflected in the published certification policies of the issuing CSCA.
 
@@ -1047,7 +1037,7 @@ Every Receiving State defines its own policies under which it accepts a Deviatio
 The Receiving State will at its sole discretion choose to allow MRTDs with a deviation to be utilized.
 
 ⁴ *Non conformities that affect single documents or small numbers of eMRTDs will not be addressed by this section, it is up to the issuing State to recall and re-issue individual documents.*
-⁵ *For any instance where there has been a security issue related to a PKI certificate, the proper response is revocation as described in Doc 9303-12. Further guidance is outside the scope of this section.*
+⁵ *For any instance where there has been a security issue related to a PKI certificate, the proper response is revocation as described in [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md). Further guidance is outside the scope of this section.*
 ⁶ *Since CRLs are a security reporting mechanism and are constantly reissued, no defects reporting is necessary for them and they are therefore outside the scope of this Part.*
 
 #### 7.3.4 Categories of Deviations

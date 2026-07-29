@@ -1,33 +1,23 @@
 # ICAO Doc 9303
-
 ## Machine Readable Travel Documents
-
 ### Part 7: Machine Readable Visas
+**Eighth Edition, 2021**
 
-#### Eighth Edition, 2021
-
----
-
-*Approved by and published under the authority of the Secretary General*
-
-### INTERNATIONAL CIVIL AVIATION ORGANIZATION
-
----
+Approved by and published under the authority of the Secretary General  
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
 Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
 999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
-
 Downloads and additional information are available at [www.icao.int/security/mrtd](http://www.icao.int/security/mrtd)
 
-**Doc 9303, *Machine Readable Travel Documents***
-**Part 7 — *Machine Readable Visas***
+**Doc 9303, Machine Readable Travel Documents***
+Part 7 — Machine Readable Visas
 Order No.: 9303P7
 ISBN 978-92-9265-364-4 (print version)
 ISBN 978-92-9275-310-8 (electronic version)
 
-### © ICAO 2021
-
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -138,11 +128,13 @@ The dimensions and placement of the MRV-A shall be as follows:
 
 The MRV-A shall be located on the passport visa page such that the MRZ is coincident with and parallel to the outside edge (reference edge) of the passport visa page, and the left edge of the MRV-A is coincident with and parallel to the left edge of the passport visa page as defined in Appendix C, Section C.1.
 
-The MRZ shall be located such that the two OCR lines contained therein are within the Effective Reading Zone (ERZ) as defined in Doc 9303-3.
+The MRZ shall be located such that the two OCR lines contained therein are within the Effective Reading Zone (ERZ) as defined in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 Only one MRV-A shall be located on a passport visa page (see Appendix C, Section C.1).
 
 > **Figure 1. MRV-A dimensional illustration**
+>
+> <img src="./figures/Doc_9303_Part7_Machine_Readable_Visas_MRVs_p10.png" alt="MRV-A dimensional illustration">
 >
 > *Not to scale*
 >
@@ -189,7 +181,7 @@ To facilitate the checking of visas by airline personnel and control authorities
 
 Zone IV provides space for an optional signature or authentication. This is normally the signature of the issuing officer or an official stamp. The application of an official stamp elsewhere on the document is not precluded except that it must not intrude into the MRZ or affect the legibility of entered data.
 
-Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the ERZ specified in Doc 9303-3, thus allowing a single reader to be used for all types and sizes of MRTDs.
+Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the ERZ specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md), thus allowing a single reader to be used for all types and sizes of MRTDs.
 
 All MRZ data elements are mandatory and shall be shown as defined in Section 4.2 even though an issuing State may choose not to include a specific MRZ data element in the VIZ.
 
@@ -231,24 +223,24 @@ All data in the VIZ shall be clearly legible.
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
-| **01/I** (Mandatory) | Issuing State | The State responsible for issuing the MRV-A. This shall be personalized, the type font being selected at the discretion of the issuing State. For transliteration rules, refer to Doc 9303-3. | Variable | Notes a, c, d, e, i. |
+| **01/I** (Mandatory) | Issuing State | The State responsible for issuing the MRV-A. This shall be personalized, the type font being selected at the discretion of the issuing State. For transliteration rules, refer to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, d, e, i. |
 | **02/I** (Mandatory) | Document | The word or words in the language of the issuing State for the document (visa or other appropriate document) which confers on the holder that State's authority to travel to a port of entry in its territory. | Variable | Notes a, c, d, e, i. |
 | **03/III** (Mandatory) | Place of issue | Post/location (usually a city) where the MRV-A is issued. A translation of the name into one or more languages, one of which should be English, French or Spanish, shall be given when the translated name is more familiar to the international community. | 15 | Notes a, b, c, i, k. |
-| **04/III** (Mandatory) | Valid from (date) | In most cases this will be the date of issue of the MRV-A and indicates the first date from which the MRV-A can be used to seek entry. For some States the date of issue and the date the visa becomes valid may differ. In such cases the latter shall be indicated in this field and the date of issue may be shown in Field 09 (see below). For date format, refer to Doc 9303-3. | 8 | Notes a, b, c, i, k. |
-| **05/III** (Mandatory) | Valid until (date) | In most cases this will be the date of expiry of the MRV-A and indicates the last day on which the MRV-A can be used to seek entry. For some States this will be the date by or on which the holder should have left the country concerned. For date format, refer to Doc 9303-3. | 8 | Notes a, b, c, i, k. |
+| **04/III** (Mandatory) | Valid from (date) | In most cases this will be the date of issue of the MRV-A and indicates the first date from which the MRV-A can be used to seek entry. For some States the date of issue and the date the visa becomes valid may differ. In such cases the latter shall be indicated in this field and the date of issue may be shown in Field 09 (see below). For date format, refer to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 8 | Notes a, b, c, i, k. |
+| **05/III** (Mandatory) | Valid until (date) | In most cases this will be the date of expiry of the MRV-A and indicates the last day on which the MRV-A can be used to seek entry. For some States this will be the date by or on which the holder should have left the country concerned. For date format, refer to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 8 | Notes a, b, c, i, k. |
 | **06/III** (Mandatory) | Number of entries | The number of entries for which the visa is valid. | 8 | Notes a, b, c, i, k. |
 | **07/III** (Mandatory) | Document number | The number given to the visa by the issuing State. | 13 | Notes a, b, c, i, j, k. |
 | **08/III** (Mandatory) | Type/class/category | This field shall include one or more of the following elements:<br>• the issuing State's indication of the type and/or class of visa granted in accordance with the law/practice of that State;<br>• the broad categorization of the type of visa granted, e.g. visitor/resident/temporary resident/student/diplomat, etc., in accordance with the law/practice of the issuing State;<br>• any limitations on the territorial validity of the visa. | 46 | Notes a, b, c, i, k. |
 | **09/III** (Optional) | Additional information | This field may include necessary endorsements as to entitlements which attach to the visa. The issuing State may also use this field to include a) the maximum authorized duration of stay; b) conditions related to the granting of the visa; c) date of issue if different from "Valid from" date; and d) record of any fees paid. | — | Note g. |
-| **10,11/II** (Mandatory) | Name | See Doc 9303-3. | Variable | Notes a, c, i. |
-| **10/II** (Mandatory) | Primary identifier | See Doc 9303-3. | Variable | Notes a, c, i, k. |
-| **11/II** (Optional) | Secondary identifier | See Doc 9303-3. | Variable | Notes a, c, i. |
+| **10,11/II** (Mandatory) | Name | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i. |
+| **10/II** (Mandatory) | Primary identifier | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i, k. |
+| **11/II** (Optional) | Secondary identifier | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i. |
 | **12/II** (Optional) | Passport number | The number of the passport or other travel document in which the MRV-A is placed. | Variable | Notes a, b, c, g, i, j. |
 | **13/II** (Optional) | Sex | Sex of MRV-A holder, when included, is to be specified by use of the single initial commonly used in the language of the State of issue. If translation into English, French or Spanish is necessary, followed by an oblique and the capital letter F for female, M for male, or X for unspecified. | 3 | Note a, f, g. |
-| **14/II** (Optional) | Date of birth | See Doc 9303-3. | 9 | Notes a, b, c, k. |
-| **15/II** (Optional) | Nationality | See Doc 9303-3. | Variable | Notes a, h, k. |
+| **14/II** (Optional) | Date of birth | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 9 | Notes a, b, c, k. |
+| **15/II** (Optional) | Nationality | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, h, k. |
 | **16/IV** (Optional) | Signature or other authorization | An authorization which may be the signature of an issuing official and/or an official stamp. | — | — |
-| **17/V** (Mandatory) | Identification feature | This field shall be entered on the document and should contain a portrait of the holder. If included, the portrait shall have a size of 36.0 ± 4.0 mm × 29.0 ± 3.0 mm (1.42 ± 0.16 in × 1.14 ± 0.12 in).<br><br>If a State does not place an identification feature in this field, a national symbol or logo may be inserted instead.<br><br>See Doc 9303-3 — Section 3.9 for additional specifications for the portrait. | — | — |
+| **17/V** (Mandatory) | Identification feature | This field shall be entered on the document and should contain a portrait of the holder. If included, the portrait shall have a size of 36.0 ± 4.0 mm × 29.0 ± 3.0 mm (1.42 ± 0.16 in × 1.14 ± 0.12 in).<br><br>If a State does not place an identification feature in this field, a national symbol or logo may be inserted instead.<br><br>See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) — Section 3.9 for additional specifications for the portrait. | — | — |
 
 * Notes can be found in the last portion of sub-section 4.2.2.2.
 
@@ -266,7 +258,7 @@ The data elements corresponding to Fields 01, 05, 10, 11, and 13 to 15 of the VI
 
 **4.2.1.3 Print specifications**
 
-Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in Doc 9303-3. The MRZ shall be printed with the line spacing as defined in Section 4.4, Figure 3, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
+Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). The MRZ shall be printed with the line spacing as defined in Section 4.4, Figure 3, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
 
 **4.2.1.4 Print position**
 
@@ -279,15 +271,15 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 | MRZ field character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 2 | — | Type of document | Capital letter V to designate a machine readable visa. One additional character may be used, at the discretion of the issuing State, to designate a particular type of visa. If the second character position is not used for this purpose, it shall be filled by the filler character (<). | 2 | Notes a, b, c, e. |
-| 3 to 5 | 01 | Issuing State | See Doc 9303-3. | 3 | Notes a, c, e. |
-| 6 to 44 | 10, 11 | Name | See Doc 9303-3. | 39 | Notes a, c, e. |
-| | | **Punctuation in the name** | Representation of punctuation is not permitted in the MRZ. | — | Doc 9303-3. |
-| | | **Apostrophes in the name** | Components of the primary or secondary identifiers separated by apostrophes shall be combined, and no filler character (<) shall be inserted.<br>Example:<br>VIZ: D'ARTAGNAN<br>MRZ: DARTAGNAN | — | Doc 9303-3. |
-| | | **Hyphens in the name** | Hyphens (-) in the name shall be converted to the filler character (<) (i.e. hyphenated names shall be represented as separate components).<br>Example:<br>VIZ: MARIE-ELISE<br>MRZ: MARIE<ELISE | — | Doc 9303-3. |
-| | | **Commas** | When a comma is used in the VIZ to separate the primary and secondary identifiers, the comma shall be omitted in the MRZ and the primary and secondary identifiers shall be separated by two filler characters (<<).<br><br>When a comma is used in the VIZ to separate two name components, it shall be represented in the MRZ by a single filler character (<). | — | Doc 9303-3. |
-| | | **Name suffixes** | Name suffixes (e.g. Jr., Sr., II or III) shall not be included in the MRZ except as permitted by Doc 9303-3 as components of the secondary identifier. | — | Doc 9303-3. |
+| 3 to 5 | 01 | Issuing State | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 3 | Notes a, c, e. |
+| 6 to 44 | 10, 11 | Name | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 39 | Notes a, c, e. |
+| | | **Punctuation in the name** | Representation of punctuation is not permitted in the MRZ. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Apostrophes in the name** | Components of the primary or secondary identifiers separated by apostrophes shall be combined, and no filler character (<) shall be inserted.<br>Example:<br>VIZ: D'ARTAGNAN<br>MRZ: DARTAGNAN | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Hyphens in the name** | Hyphens (-) in the name shall be converted to the filler character (<) (i.e. hyphenated names shall be represented as separate components).<br>Example:<br>VIZ: MARIE-ELISE<br>MRZ: MARIE<ELISE | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Commas** | When a comma is used in the VIZ to separate the primary and secondary identifiers, the comma shall be omitted in the MRZ and the primary and secondary identifiers shall be separated by two filler characters (<<).<br><br>When a comma is used in the VIZ to separate two name components, it shall be represented in the MRZ by a single filler character (<). | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Name suffixes** | Name suffixes (e.g. Jr., Sr., II or III) shall not be included in the MRZ except as permitted by [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) as components of the secondary identifier. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
 | | | **Filler** | When all components of the primary and secondary identifiers and required separators (filler characters) do not exceed 39 characters in total, all name components shall be included in the MRZ and all unused character positions shall be completed with filler characters (<) repeated up to position 44 as required. | — | — |
-| | | **Truncation of the name** | When the primary and secondary identifiers and required separators (filler characters) exceed the number of character positions available for names (i.e. 39), they shall be truncated as follows:<br><br>Characters shall be removed from one or more components of the primary identifier until three character positions are freed, and two filler characters (<<) and the first character of the first component of the secondary identifier can be inserted. The last character (position 44) shall be an alphabetic character (A through Z). This indicates that truncation may have occurred.<br><br>Further truncation of the primary identifier may be carried out to allow characters of the secondary identifier to be included, provided that the name field shall end with an alphabetic character (position 44). This indicates that truncation may have occurred.<br><br>When the name consists of only a primary identifier which exceeds the number of character positions available for the name, i.e. 39, characters shall be removed from one or more components of the name until the last character in the name field is an alphabetic character. | — | Doc 9303-3, Note a. |
+| | | **Truncation of the name** | When the primary and secondary identifiers and required separators (filler characters) exceed the number of character positions available for names (i.e. 39), they shall be truncated as follows:<br><br>Characters shall be removed from one or more components of the primary identifier until three character positions are freed, and two filler characters (<<) and the first character of the first component of the secondary identifier can be inserted. The last character (position 44) shall be an alphabetic character (A through Z). This indicates that truncation may have occurred.<br><br>Further truncation of the primary identifier may be carried out to allow characters of the secondary identifier to be included, provided that the name field shall end with an alphabetic character (position 44). This indicates that truncation may have occurred.<br><br>When the name consists of only a primary identifier which exceeds the number of character positions available for the name, i.e. 39, characters shall be removed from one or more components of the name until the last character in the name field is an alphabetic character. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md), Note a. |
 
 * Notes can be found in the last portion of sub-section 4.2.2.2.
 
@@ -296,22 +288,22 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 9 | 07 or 13 | Passport or document number | At the discretion of the issuing State, either the passport number or the visa number shall be used in this field; however, the latter option can only be exercised where the visa number has 9 characters or fewer. Any special characters or spaces in the number shall be replaced by the filler character (<). The number shall be followed by the filler character (<) repeated up to position 9 as required. | 9 | Notes a, b, c, e, j. |
-| 10 | — | Check digit | See Doc 9303-3. | 1 | Notes b, e. |
-| 11 to 13 | 16 | Nationality | See Doc 9303-3. | 3 | Notes a, c, e, h. |
-| 14 to 19 | 15 | Date of birth | See Doc 9303-3. | 6 | Notes b, c, e. |
-| 20 | — | Check digit | See Doc 9303-3. | 1 | Note b. |
+| 10 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Notes b, e. |
+| 11 to 13 | 16 | Nationality | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 3 | Notes a, c, e, h. |
+| 14 to 19 | 15 | Date of birth | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 6 | Notes b, c, e. |
+| 20 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Note b. |
 | 21 | 14 | Sex | F = Female; M = Male; < = non-specified. | 1 | Notes a, c, f, g. |
-| 22 to 27 | 05 | Valid until (date) | In most cases this will be the date of expiry of the MRV-A and indicates the last day on which the MRV-A can be used to seek entry. For some States this will be the date by or on which the holder should have left. | 6 | Doc 9303-3; Notes b, e. |
-| 28 | — | Check digit | See Doc 9303-3. | 1 | Note b. |
+| 22 to 27 | 05 | Valid until (date) | In most cases this will be the date of expiry of the MRV-A and indicates the last day on which the MRV-A can be used to seek entry. For some States this will be the date by or on which the holder should have left. | 6 | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md); Notes b, e. |
+| 28 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Note b. |
 | 29 to 44 | — | Optional data elements | For optional use of the issuing State. Unused character positions shall be completed with the filler character (<) repeated up to position 44 as required. | 16 | Notes a, b, c, e. |
 
 * Notes:
 
-a) Alphabetic characters (A–Z and a-z). National characters may be used in the VIZ. In the MRZ, only those characters specified in Doc 9303-3 shall be used.
+a) Alphabetic characters (A–Z and a-z). National characters may be used in the VIZ. In the MRZ, only those characters specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
-b) Numeric characters (0–9). National numerals may be additionally included in the VIZ. In the MRZ, only the numerals 0–9 may be used as defined in Doc 9303-3.
+b) Numeric characters (0–9). National numerals may be additionally included in the VIZ. In the MRZ, only the numerals 0–9 may be used as defined in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
-c) Punctuation may be included in the VIZ. In the MRZ, only the filler character specified in Doc 9303-3 shall be used.
+c) Punctuation may be included in the VIZ. In the MRZ, only the filler character specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
 d) The lengths of fields 01 and 02 are undefined, depending on type font and limits set by MRV-A size and position of other fields.
 
@@ -321,7 +313,7 @@ f) Where an issuing State or organization does not want to identify the sex, the
 
 g) The use of a caption to identify a field is at the option of the issuing State.
 
-h) United Nations Laissez-passer are issued to officials of the United Nations Organization under the terms of the *Convention on the Privileges and Immunities of the United Nations* of 13 February 1946 and to officials of the Specialized Agencies of the United Nations under the terms of the *Convention on the Privileges and Immunities of the Specialized Agencies of the United Nations* of 21 November 1947. In the case of visas entered in the United Nations Laissez-passer, in keeping with the international character of United Nations officials, nationality shall not be shown. Instead the appropriate code shall be entered in accordance with Doc 9303-3.
+h) United Nations Laissez-passer are issued to officials of the United Nations Organization under the terms of the *Convention on the Privileges and Immunities of the United Nations* of 13 February 1946 and to officials of the Specialized Agencies of the United Nations under the terms of the *Convention on the Privileges and Immunities of the Specialized Agencies of the United Nations* of 21 November 1947. In the case of visas entered in the United Nations Laissez-passer, in keeping with the international character of United Nations officials, nationality shall not be shown. Instead the appropriate code shall be entered in accordance with [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 i) The number of characters (in the field length) includes any blank spaces.
 
@@ -423,6 +415,8 @@ k) The field caption shall be printed on the document.
 
 > **Figure 2. Location of data elements on an MRV-A**
 >
+> <img src="./figures/Doc_9303_Part7_Machine_Readable_Visas_MRVs_p23.png" alt="Location of data elements on an MRV-A">
+>
 > *Note 1. — VIZ based on maximum printing density of 8 lines per 25.4 mm (1.0 in) and horizontal printing density of 15 characters per 25.4 mm (1.0 in).*
 >
 > *Note 2. — MRZ based on horizontal printing of 10 characters per 25.4 mm (1.0 in).*
@@ -434,6 +428,8 @@ k) The field caption shall be printed on the document.
 [Diagram showing Zone I, III, II, IV, V, and VII with field numbers and data element labels]
 
 > **Figure 3. Schematic diagram of the Machine Readable Zone of an MRV-A**
+>
+> <img src="./figures/Doc_9303_Part7_Machine_Readable_Visas_MRVs_p24.png" alt="Schematic diagram of the Machine Readable Zone of an MRV-A">
 >
 > *Note. — For illustration purposes, the smallest option for the 120.0 mm (4.72 in) dimension of the MRV-A and the smallest option for the left-hand margin in the MRZ have been selected.*
 
@@ -498,7 +494,7 @@ The dimensions and placement of the MRV-B shall be as follows:
 
 The MRV-B shall be located on the passport visa page such that the MRZ is coincident with and parallel to the outside edge (reference edge) of the passport visa page, and the left edge of the MRV-B is coincident with and parallel to the left edge of the passport visa page as defined in Appendix C, Section C.2.
 
-The MRZ shall be located such that the two OCR lines contained therein are within the Effective Reading Zone (ERZ) as defined in Doc 9303-3.
+The MRZ shall be located such that the two OCR lines contained therein are within the Effective Reading Zone (ERZ) as defined in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 Only one MRV-B shall be located on a passport visa page (see Appendix C, Section C.2).
 
@@ -543,7 +539,7 @@ To facilitate the checking of visas by airline personnel and control authorities
 
 Zone IV provides space for an optional signature or authentication. This is normally the signature of the issuing officer or an official stamp. The application of an official stamp elsewhere on the document is not precluded except that it must not intrude into the MRZ or affect the legibility of entered data.
 
-Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the ERZ specified in Doc 9303-3, thus allowing a single reader to be used for all types and sizes of MRTDs.
+Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the ERZ specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md), thus allowing a single reader to be used for all types and sizes of MRTDs.
 
 All MRZ data elements are mandatory and shall be shown as defined in Section 7.2 even though an issuing State may choose not to include a specific MRZ data element in the VIZ.
 
@@ -585,7 +581,7 @@ All data in the VIZ shall be clearly legible.
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
-| **01/I** (Mandatory) | Issuing State | The State responsible for issuing the MRV-B. This shall be personalized, the type font being selected at the discretion of the issuing State. For transliteration rules, refer to Doc 9303-3. | Variable | Notes a, c, d, e, i. |
+| **01/I** (Mandatory) | Issuing State | The State responsible for issuing the MRV-B. This shall be personalized, the type font being selected at the discretion of the issuing State. For transliteration rules, refer to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, d, e, i. |
 | **02/I** (Mandatory) | Document | The word or words in the language of the issuing State for the document (visa or other appropriate document) which confers on the holder that State's authority to travel to a port of entry in its territory. | Variable | Notes a, c, d, e, i. |
 | **03/III** (Mandatory) | Place of issue | Post/location (usually a city) where the MRV-B is issued. A translation of the name into one or more languages, one of which should be English, French or Spanish, shall be given when the translated name is more familiar to the international community. | 15 | Notes a, b, c, i, k. |
 | **04/III** (Mandatory) | Valid from (date) | In most cases this will be the date of issue of the MRV-B and indicates the first date from which the MRV-B can be used to seek entry. For some States the date of issue and the date the visa becomes valid may differ. In such cases the latter shall be indicated in this field and the date of issue may be shown in Field 09 (see below). Date formats are specified in 9303-3. | 8 | Notes a, b, c, i, k. |
@@ -594,15 +590,15 @@ All data in the VIZ shall be clearly legible.
 | **07/III** (Mandatory) | Document number | The number given to the visa by the issuing State. | 13 | Notes a, b, c, i, j, k. |
 | **08/III** (Mandatory) | Type/class/category | This field shall include one or more of the following elements:<br>• the issuing State's indication of the type and/or class of visa granted in accordance with the law/practice of that State;<br>• the broad categorization of the type of visa granted, e.g. visitor/resident/temporary resident/student/diplomat, etc., in accordance with the law/practice of the issuing State;<br>• any limitations on the territorial validity of the visa. | 46 | Notes a, b, c, i, k. |
 | **09/III** (Optional) | Additional information | This field may include necessary endorsements as to entitlements which attach to the visa. The issuing State may also use this field to include a) the maximum authorized duration of stay; b) conditions related to the granting of the visa; c) date of issue if different from "Valid from" date; and d) record of any fees paid. | — | Note g. |
-| **10,11/II** (Mandatory) | Name | See Doc 9303-3. | Variable | Notes a, c, i, k. |
-| **10/II** (Mandatory) | Primary identifier | See Doc 9303-3. | Variable | Notes a, c, i, k. |
-| **11/II** (Optional) | Secondary identifier | See Doc 9303-3. | Variable | Notes a, c, i. |
+| **10,11/II** (Mandatory) | Name | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i, k. |
+| **10/II** (Mandatory) | Primary identifier | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i, k. |
+| **11/II** (Optional) | Secondary identifier | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, i. |
 | **12/II** (Optional) | Passport number | The number of the passport or other travel document in which the MRV-B is placed. | Variable | Notes a, b, c, g, i, j. |
 | **13/II** (Optional) | Sex | Sex of MRV-B holder, when included, is to be specified by use of the single initial commonly used in the language of the State of issue. If translation into English, French or Spanish is necessary, followed by an oblique and the capital letter F for female, M for male, or X for unspecified. | 3 Fixed | Notes a, f, g. |
-| **14/II** (Optional) | Date of birth | See Doc 9303-3. | 9 | Notes a, b, c, k. |
-| **15/II** (Optional) | Nationality | See Doc 9303-3. | Variable | Notes a, h, k. |
+| **14/II** (Optional) | Date of birth | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 9 | Notes a, b, c, k. |
+| **15/II** (Optional) | Nationality | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, h, k. |
 | **16/IV** (Optional) | Signature or other authorization | An authorization which may be the signature of an issuing official or an official stamp. | — | — |
-| **17/V** (Mandatory) | Identification feature | This field shall appear on the document and should contain a portrait of the holder. If included, the portrait shall have a nominal size of 35.5 ± 3.5 mm (1.40 ± 0.14 in) × 28.5 ± 2.5 mm (1.12 ± 0.1 in).<br><br>If a State does not place an identification feature in this field, a national symbol or logo may be inserted instead.<br><br>See Doc 9303-3, Section 3.9 for additional specifications for the portrait. | — | Note e. |
+| **17/V** (Mandatory) | Identification feature | This field shall appear on the document and should contain a portrait of the holder. If included, the portrait shall have a nominal size of 35.5 ± 3.5 mm (1.40 ± 0.14 in) × 28.5 ± 2.5 mm (1.12 ± 0.1 in).<br><br>If a State does not place an identification feature in this field, a national symbol or logo may be inserted instead.<br><br>See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md), Section 3.9 for additional specifications for the portrait. | — | Note e. |
 
 * Notes can be found in the last portion of sub-section 7.2.2.2.
 
@@ -620,7 +616,7 @@ The data elements corresponding to Fields 01, 05, 10, 11, and 13 to 15 of the VI
 
 **7.2.1.3 Print specifications**
 
-Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in Doc 9303-3. The MRZ shall be printed with the line spacing as defined in Section 7.4, Figure 8, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
+Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). The MRZ shall be printed with the line spacing as defined in Section 7.4, Figure 8, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
 
 **7.2.1.4 Print position**
 
@@ -633,15 +629,15 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 | MRZ field character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 2 | — | Type of document | Capital letter V to designate an MRV. One additional character may be used, at the discretion of the issuing State, to designate a particular type of visa. If the second character position is not used for this purpose, it shall be filled by the filler character (<). | 2 | Notes a, b, c, e. |
-| 3 to 5 | 01 | Issuing State | See Doc 9303-3. | 3 | Notes a, c, e. |
-| 6 to 36 | 10, 11 | Name | See Doc 9303-3. | 31 | Notes a, c, e. |
-| | | **Punctuation in the name** | Representation of punctuation is not permitted in the MRZ. | — | Doc 9303-3. |
-| | | **Apostrophes in the name** | Components of the name in the VIZ, separated by apostrophes shall be combined, and no filler character (<) shall be inserted.<br>Example:<br>VIZ: D'ARTAGNAN<br>MRZ: DARTAGNAN | — | Doc 9303-3. |
-| | | **Hyphens in the name** | Hyphens (-) in the name shall be converted to the filler character (<) (i.e. hyphenated names shall be represented as separate components).<br>Example:<br>VIZ: MARIE-ELISE<br>MRZ: MARIE<ELISE | — | Doc 9303-3. |
-| | | **Commas** | When a comma is used in the VIZ to separate the primary and secondary identifiers, the comma shall be omitted in the MRZ and the primary and secondary identifiers shall be separated by two filler characters (<<).<br><br>When a comma is used in the VIZ to separate two name components, it shall be represented in the MRZ by a single filler character (<). | — | Doc 9303-3. |
-| | | **Name suffixes** | Name suffixes (e.g. Jr., Sr., II or III) shall not be included in the MRZ except as permitted by Doc 9303-3 as components of the secondary identifier. | — | Doc 9303-3. |
+| 3 to 5 | 01 | Issuing State | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 3 | Notes a, c, e. |
+| 6 to 36 | 10, 11 | Name | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 31 | Notes a, c, e. |
+| | | **Punctuation in the name** | Representation of punctuation is not permitted in the MRZ. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Apostrophes in the name** | Components of the name in the VIZ, separated by apostrophes shall be combined, and no filler character (<) shall be inserted.<br>Example:<br>VIZ: D'ARTAGNAN<br>MRZ: DARTAGNAN | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Hyphens in the name** | Hyphens (-) in the name shall be converted to the filler character (<) (i.e. hyphenated names shall be represented as separate components).<br>Example:<br>VIZ: MARIE-ELISE<br>MRZ: MARIE<ELISE | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Commas** | When a comma is used in the VIZ to separate the primary and secondary identifiers, the comma shall be omitted in the MRZ and the primary and secondary identifiers shall be separated by two filler characters (<<).<br><br>When a comma is used in the VIZ to separate two name components, it shall be represented in the MRZ by a single filler character (<). | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
+| | | **Name suffixes** | Name suffixes (e.g. Jr., Sr., II or III) shall not be included in the MRZ except as permitted by [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) as components of the secondary identifier. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). |
 | | | **Filler** | When all components of the primary and secondary identifiers and required separators (filler characters) do not exceed 31 characters in total, all name components shall be included in the MRZ and all unused character positions shall be completed with filler characters (<) repeated up to position 36 as required. | — | — |
-| | | **Truncation of the name** | When the primary and secondary identifiers and required separators (filler characters) exceed the number of character positions available for names (i.e. 31), they shall be truncated as follows:<br><br>Characters shall be removed from one or more components of the primary identifier until three character positions are freed, and two filler characters (<<) and the first character of the first component of the secondary identifier can be inserted. The last character (position 36) shall be an alphabetic character (A through Z). This indicates that truncation may have occurred.<br><br>Further truncation of the primary identifier may be carried out to allow characters of the secondary identifier to be included, provided that the name field shall end with an alphabetic character (position 36). This indicates that truncation may have occurred.<br><br>When the name consists of only a primary identifier which exceeds the number of character positions available for the name, i.e. 31, characters shall be removed from one or more components of the name until the last character in the name field is an alphabetic character. | — | Doc 9303-3, Notes a, c, e. |
+| | | **Truncation of the name** | When the primary and secondary identifiers and required separators (filler characters) exceed the number of character positions available for names (i.e. 31), they shall be truncated as follows:<br><br>Characters shall be removed from one or more components of the primary identifier until three character positions are freed, and two filler characters (<<) and the first character of the first component of the secondary identifier can be inserted. The last character (position 36) shall be an alphabetic character (A through Z). This indicates that truncation may have occurred.<br><br>Further truncation of the primary identifier may be carried out to allow characters of the secondary identifier to be included, provided that the name field shall end with an alphabetic character (position 36). This indicates that truncation may have occurred.<br><br>When the name consists of only a primary identifier which exceeds the number of character positions available for the name, i.e. 31, characters shall be removed from one or more components of the name until the last character in the name field is an alphabetic character. | — | [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md), Notes a, c, e. |
 
 * Notes can be found in the last portion of sub-section 7.2.2.2.
 
@@ -650,22 +646,22 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 9 | 07 or 12 | Passport or document number | At the discretion of the issuing State, either the passport number or the visa number shall be used in this field; however, the latter option can only be exercised where the visa number has 9 characters or fewer. Any special characters or spaces in the number shall be replaced by the filler character (<). The number shall be followed by the filler character (<) repeated up to position 9 as required. | 9 | Notes a, b, c, e, j. |
-| 10 | — | Check digit | See Doc 9303-3. | 1 | Notes b, e. |
-| 11 to 13 | 15 | Nationality | See Doc 9303-3. | 3 | Notes a, c, e, h. |
-| 14 to 19 | 14 | Date of birth | See Doc 9303-3. | 6 | Notes b, c, e. |
-| 20 | — | Check digit | See Doc 9303-3. | 1 | Note b. |
+| 10 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Notes b, e. |
+| 11 to 13 | 15 | Nationality | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 3 | Notes a, c, e, h. |
+| 14 to 19 | 14 | Date of birth | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 6 | Notes b, c, e. |
+| 20 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Note b. |
 | 21 | 13 | Sex | F = Female; M = Male; < = non-specified. | 1 | Notes a, c, f, g. |
 | 22 to 27 | 05 | Valid until (date) | In most cases this will be the date of expiry of the MRV-B and indicates the last day on which the visa can be used to seek entry. For some States this will be the date by or on which the holder should have left. Date formats are specified in 9303-3. | 6 | Notes b, e. |
-| 28 | — | Check digit | See Doc 9303-3. | 1 | Note b. |
+| 28 | — | Check digit | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Note b. |
 | 29 to 36 | — | Optional data elements | For optional use of the issuing State. Unused character positions shall be completed with the filler character (<) repeated up to position 36 as required. | 8 | Notes a, b, c, e. |
 
 * Notes:
 
-a) Alphabetic characters (A–Z). National characters may be used in the VIZ. In the MRZ, only those characters specified in Doc 9303-3 shall be used.
+a) Alphabetic characters (A–Z). National characters may be used in the VIZ. In the MRZ, only those characters specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
-b) Numeric characters (0–9). National numerals may be used in the VIZ. In the MRZ, only those characters specified in Doc 9303-3 shall be used.
+b) Numeric characters (0–9). National numerals may be used in the VIZ. In the MRZ, only those characters specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
-c) Punctuation or other special characters may be used in the VIZ. In the MRZ, only the filler character specified in Doc 9303-3 shall be used.
+c) Punctuation or other special characters may be used in the VIZ. In the MRZ, only the filler character specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
 d) The lengths of fields 01 and 02 are undefined, depending on type font and limits set by MRV-B size and position of other fields.
 
@@ -675,7 +671,7 @@ f) Where an issuing State or organization does not want to identify the sex, the
 
 g) The use of a caption to identify a field is at the option of the issuing State.
 
-h) United Nations Laissez-passer are issued to officials of the United Nations Organization under the terms of the *Convention on the Privileges and Immunities of the United Nations* of 13 February 1946 and to officials of the Specialized Agencies of the United Nations under the terms of the *Convention on the Privileges and Immunities of the Specialized Agencies of the United Nations* of 21 November 1947. In the case of visas entered in the United Nations Laissez-passer, in keeping with the international character of United Nations officials, nationality shall not be shown. Instead the appropriate code shall be entered in accordance Doc 9303-3.
+h) United Nations Laissez-passer are issued to officials of the United Nations Organization under the terms of the *Convention on the Privileges and Immunities of the United Nations* of 13 February 1946 and to officials of the Specialized Agencies of the United Nations under the terms of the *Convention on the Privileges and Immunities of the Specialized Agencies of the United Nations* of 21 November 1947. In the case of visas entered in the United Nations Laissez-passer, in keeping with the international character of United Nations officials, nationality shall not be shown. Instead the appropriate code shall be entered in accordance [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 i) The number of characters (in the field length) includes any blank spaces.
 
@@ -863,13 +859,13 @@ The bar code(s) optionally included in the bar code(s) area of the MRV shall not
 
 ## 9. USE OF OPTIONAL DIGITAL SEALS FOR VISA DOCUMENTS
 
-Doc 9303-13 specifies visible digital seals (VDS) for non-electronic documents. In this section the specific rules and requirements for the use of visible digital seals on Visa documents are described.
+[Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md) specifies visible digital seals (VDS) for non-electronic documents. In this section the specific rules and requirements for the use of visible digital seals on Visa documents are described.
 
 ### 9.1 Content and Encoding Rules
 
 #### 9.1.1 Header
 
-The Document Feature Definition Reference for this use case is 93dec. The Document Type Category for visas is 0x01. Otherwise, the content of the header is the same as defined in Doc 9303-13, Section 3.1.1.
+The Document Feature Definition Reference for this use case is 93dec. The Document Type Category for visas is 0x01. Otherwise, the content of the header is the same as defined in [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md), Section 3.1.1.
 
 #### 9.1.2 Document Features of a VDS for Visas
 
@@ -1004,11 +1000,11 @@ In the following, the digital encoding of document features of the visa seal is 
 
 ### 9.2 Visa Signer and Seal Creation
 
-With respect to this visa profile, Visa Signer Certificates (VSCs) are issued in a way that allows verification by Country Signing Certificate Authority (CSCA) certificates. A possible architecture and implementation for the Visa Signer and its client is described in Doc 9303-13, Section 3.2.1. For the security of the visa signing system, see Doc 9303-13, Section 3.2.2
+With respect to this visa profile, Visa Signer Certificates (VSCs) are issued in a way that allows verification by Country Signing Certificate Authority (CSCA) certificates. A possible architecture and implementation for the Visa Signer and its client is described in [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md), Section 3.2.1. For the security of the visa signing system, see [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md), Section 3.2.2
 
 ### 9.3 Public Key Infrastructure (PKI) and Certificate Profiles
 
-In general, the requirements from Doc 9303-12 apply. The following deviations apply due to the specific characteristics and properties of visa documents.
+In general, the requirements from [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md) apply. The following deviations apply due to the specific characteristics and properties of visa documents.
 
 Visa specific validity periods are as follows:
 
@@ -1016,7 +1012,7 @@ Visa specific validity periods are as follows:
 
 ### 9.4 Validation Policy Rules (Informative)
 
-For the validation policy of digital seals on visas, all rules from Doc 9303-13, Appendix D are valid. In addition, the following rules to determine the validity of the digital seal apply.
+For the validation policy of digital seals on visas, all rules from [Doc 9303-13](Doc_9303_Part13_Visible_Digital_Seals.md), Appendix D are valid. In addition, the following rules to determine the validity of the digital seal apply.
 
 In addition to the generic Document Validation Policy, the policy for visas considers the following questions:
 
@@ -1099,7 +1095,7 @@ Certain provisions of the following international Standards, referenced in this 
 
 > **Figure B-1. MRV-A MRZ construction.**
 >
-> *Note 1. — Three-letter codes are given in Doc 9303-3.*
+> *Note 1. — Three-letter codes are given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).*
 >
 > *Note 2. — Dotted lines indicate data fields; these, together with arrows and comment boxes, are shown for the reader's understanding only and are not printed on the document.*
 >
@@ -1131,7 +1127,7 @@ L898902C<3UTO6908061F9406236ZE184226B<<<<<<<
 
 > **Figure B-2. MRV-B MRZ construction**
 >
-> *Note 1. — Three-letter codes are given in Doc 9303-3.*
+> *Note 1. — Three-letter codes are given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).*
 >
 > *Note 2. — Dotted lines indicate data fields; these, together with arrows and comment boxes, are shown for the reader's understanding only and are not printed on the document.*
 >

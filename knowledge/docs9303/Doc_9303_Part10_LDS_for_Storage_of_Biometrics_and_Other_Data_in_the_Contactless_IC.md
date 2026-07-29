@@ -3,15 +3,15 @@
 ### Part 10: Logical Data Structure (LDS) for Storage of Biometrics and Other Data in the Contactless Integrated Circuit (IC)
 **Eighth Edition, 2021**
 
-Approved by and published under the authority of the Secretary General  
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**  
+Approved by and published under the authority of the Secretary General
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
-Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the  
-INTERNATIONAL CIVIL AVIATION ORGANIZATION  
-999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7  
+Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 Downloads and additional information are available at [https://www.icao.int/publications/doc-series](https://www.icao.int/publications/doc-series)
 
-**Doc 9303, Machine Readable Travel Documents**  
+**Doc 9303, Machine Readable Travel Documents**
 Part 10 — Logical Data Structure (LDS) for Storage of Biometrics and Other Data in the Contactless Integrated Circuit (IC)  
 Order No.: 9303P10  
 ISBN 978-92-9265-418-4 (print version)  
@@ -187,7 +187,7 @@ Data Groups (DG1–DG16) store the actual biometric and document data. Each DG i
 
 ### 2.5 Access Conditions
 
-Access to Data Groups is controlled by the security mechanisms defined in Doc 9303-11:
+Access to Data Groups is controlled by the security mechanisms defined in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md):
 - **Always**: No authentication required (DG1 only).
 - **BAC/PACE**: Requires successful Basic Access Control or PACE.
 - **BAC/PACE + TA**: Requires BAC/PACE plus successful Terminal Authentication.
@@ -205,7 +205,7 @@ EF.DG1 contains the data recorded in the Machine Readable Zone. It is the only D
 | `61` | DG1 template | M | Constructed |
 | `5F1F` | MRZ data | M | B (variable) |
 
-The MRZ data is encoded as a string of characters conforming to the MRZ specifications in Doc 9303-3 (TD1), Doc 9303-4 (TD2), or Doc 9303-5 (TD3).
+The MRZ data is encoded as a string of characters conforming to the MRZ specifications in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) (TD1), [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md) (TD2), or [Doc 9303-5](Doc_9303_Part5_Specs_for_TD1_MROTDs.md) (TD3).
 
 ### 3.2 EF.DG2 — Encoded Identification Features (Face)
 
@@ -349,7 +349,7 @@ EF.DG14 contains the SecurityInfos structure indicating supported security proto
 | `6E` | DG14 template | M | Constructed |
 | `7F6E` | SecurityInfos | M | Constructed |
 
-The SecurityInfos structure is defined in Doc 9303-11, Section 9.2.
+The SecurityInfos structure is defined in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md), Section 9.2.
 
 ### 3.15 EF.DG15 — Active Authentication Public Key Info
 
@@ -490,7 +490,7 @@ The following [ISO/IEC 7816-4] commands MUST be used for records access:
 
 ## 6. DIGITAL SIGNATURES
 
-The Document Security Object (EF.SOD) contains a digital signature that covers the hash values of all Data Groups. The signature mechanism is defined in Doc 9303-12 (PKI).
+The Document Security Object (EF.SOD) contains a digital signature that covers the hash values of all Data Groups. The signature mechanism is defined in [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md) (PKI).
 
 **Signature Process**:
 1. Hash each Data Group (SHA-256 or SHA-512).

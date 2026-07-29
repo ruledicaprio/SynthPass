@@ -107,10 +107,10 @@ It is assumed that the reader of this document is familiar with the concepts and
 
 While the use of public key cryptography techniques adds some complexity to the implementation of eMRTDs, such techniques add value in that they will provide front-line border control points with an additional measure to determine the authenticity of the eMRTD. It is assumed that the use of such a technique is not the sole measure for determining authenticity and it SHOULD NOT be relied upon as a single determining factor.
 
-In the event that the data from the contactless IC cannot be used, for instance as a result of a certificate revocation or an invalid signature verification, or if the contactless IC was left intentionally blank (see Section 4.5.4 of Doc 9303-10), the eMRTD is not necessarily invalidated. In such cases a receiving State MAY rely on other document security features for validation purposes.
+In the event that the data from the contactless IC cannot be used, for instance as a result of a certificate revocation or an invalid signature verification, or if the contactless IC was left intentionally blank (see Section 4.5.4 of [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md)), the eMRTD is not necessarily invalidated. In such cases a receiving State MAY rely on other document security features for validation purposes.
 
 ### 2.1 Requirements for eMRTD Chips and Terminals
-This part of Doc 9303 specifies requirements for implementations of eMRTD chips (or, equivalently, IC) and terminals (or inspection systems). While eMRTD chips must comply with those requirements according to the terminology described in Doc 9303-1, requirements for terminals are to be interpreted as guidance, i.e. interoperability of eMRTD chip and terminal are only guaranteed if the terminal complies with those requirements, otherwise the interaction with the eMRTD chip will either fail or the behaviour of the eMRTD chip is undefined. In general, the eMRTD chip need not enforce requirements related to terminals unless the security of the eMRTD chip is directly affected.
+This part of Doc 9303 specifies requirements for implementations of eMRTD chips (or, equivalently, IC) and terminals (or inspection systems). While eMRTD chips must comply with those requirements according to the terminology described in [Doc 9303-1](Doc_9303_Part1_Introduction.md), requirements for terminals are to be interpreted as guidance, i.e. interoperability of eMRTD chip and terminal are only guaranteed if the terminal complies with those requirements, otherwise the interaction with the eMRTD chip will either fail or the behaviour of the eMRTD chip is undefined. In general, the eMRTD chip need not enforce requirements related to terminals unless the security of the eMRTD chip is directly affected.
 
 ### 2.2 Notations
 The following notations are used to denote cryptographic primitives in an algorithm independent way:
@@ -135,7 +135,7 @@ Accessing an eMRTD comprises the following steps:
 2. Authentication of data (Section 5)
 3. Authentication of the chip (Section 6)
 4. Additional access control mechanisms (Section 7)
-5. Reading data (see Doc 9303-10).
+5. Reading data (see [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md)).
 
 Different protocols are available for the different steps. The exact configuration of an eMRTD is chosen by the issuing State or organization. The options given in Table 1 can be suitably combined to achieve additional security according to the requirements of issuers. Inspection Procedures for different configurations of eMRTDs are described in Appendix J.
 

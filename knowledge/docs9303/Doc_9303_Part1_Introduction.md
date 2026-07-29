@@ -1,24 +1,21 @@
+# ICAO Doc 9303
+## Machine Readable Travel Documents
+### Part 1: Introduction
+**Eighth Edition, 2021**
 
-# INTERNATIONAL CIVIL AVIATION ORGANIZATION
+Approved by and published under the authority of the Secretary General  
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
-## Doc 9303
-### Machine Readable Travel Documents
-#### Part 1: Introduction
-##### Eighth Edition, 2021
-
-*Approved by and published under the authority of the Secretary General*
-
-Published in separate English, Arabic, Chinese, French, Russian, and Spanish editions by the  
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**  
-999 Robert-Bourassa Boulevard, Montréal, Québec, Canada H3C 5H7
-
+Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
+999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
 Downloads and additional information are available at [www.icao.int/Security/mrtd](http://www.icao.int/Security/mrtd)
 
-**Doc 9303, Machine Readable Travel Documents**  
-Part 1 — Introduction  
+**Doc 9303, Machine Readable Travel Documents**
+Part 1 — Introduction
 ISBN 978-92-9265-291-3
 
-© ICAO 2021  
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -70,9 +67,9 @@ The resulting Technical Reports on the employment of biometrics and contactless 
 
 Doc 9303 consists of various separate documents in which general (applicable to all MRTDs) as well as MRTD form factor specific specifications are grouped. See Section 5.1 “Doc 9303 Composition” for an overview.
 
-These specifications are not intended to be a standard for national identity documents. However, a State whose identity documents are recognized by other States as valid travel documents shall design its identity documents such that they conform to the specifications of Doc 9303-3 and Doc 9303-4, Doc 9303-5 or Doc 9303-6.
+These specifications are not intended to be a standard for national identity documents. However, a State whose identity documents are recognized by other States as valid travel documents shall design its identity documents such that they conform to the specifications of [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) and [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md), [Doc 9303-5](Doc_9303_Part5_Specs_for_TD1_MROTDs.md) or [Doc 9303-6](Doc_9303_Part6_Specs_for_TD2_MROTDs.md).
 
-Although the specifications in Doc 9303-4 are intended for particular application to the passport, these specifications apply equally to other TD3 size identity documents, for example, the laissez-passer, the seafarer’s identity document and refugee travel documents.
+Although the specifications in [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md) are intended for particular application to the passport, these specifications apply equally to other TD3 size identity documents, for example, the laissez-passer, the seafarer’s identity document and refugee travel documents.
 
 The document at hand is Part 1. Part 1 introduces the Doc 9303 specifications. It describes the build-up of the thirteen parts of Doc 9303, provides general information on ICAO, and guidance on the terminology and abbreviations used throughout the specifications.
 
@@ -82,9 +79,9 @@ The document at hand is Part 1. Part 1 introduces the Doc 9303 specifications. I
 
 ICAO’s initiative to develop standard specifications for passports and other travel documents followed the tradition established by the League of Nations Passport Conferences of the 1920s and the work of the League’s successor, the United Nations Organization. ICAO’s mandate to continue in its leadership role stems from the Convention on International Civil Aviation (the “Chicago Convention”) which covers the full range of requirements for efficient and orderly civil aviation operations, including provisions for clearance of persons through border controls, i.e.:
 
-a) the requirement for persons travelling by air and aircraft crews to comply with immigration, customs and passport regulations (Article 13);  
-b) the requirement for States to facilitate border clearance formalities and prevent unnecessary delays (Article 22);  
-c) the requirement that States collaborate in these matters (Article 23); and  
+a) the requirement for persons travelling by air and aircraft crews to comply with immigration, customs and passport regulations (Article 13);
+b) the requirement for States to facilitate border clearance formalities and prevent unnecessary delays (Article 22);
+c) the requirement that States collaborate in these matters (Article 23); and
 d) the requirement for States to develop and adopt internationally standard procedures for immigration and customs clearance (Article 37 j)).
 
 Under this mandate, ICAO develops and maintains international Standards in Annex 9 — Facilitation to the Chicago Convention for implementation by Member States. In the development of such Standards, it is a fundamental precept that if public authorities are to facilitate inspection formalities for the vast majority of air travellers, those authorities must have a satisfactory level of confidence in the reliability of travel documents and in the effectiveness of inspection procedures. The production of standardized specifications for travel documents and the data contained therein is aimed at building that confidence.
@@ -339,8 +336,8 @@ The liaison mechanism with ISO has been successfully applied not only to the end
 | **Eavesdropping** | The unauthorized interception of data communication. |
 | **Effective reading zone (ERZ)** | A fixed-dimensional area, common to all MRTDs, in which the machine readable data in the MRZ can be read by document readers. |
 | **Electrically Erasable Programmable Read Only Memory (EEPROM)** | A non-volatile memory technology where data can be electrically erased and rewritten. |
-| **Electronic Machine Readable Passport (eMRP)** | A TD3 size MRTD conforming to the specifications of Doc 9303-4 that additionally incorporates a contactless integrated circuit including the capability of biometric identification of the holder. Commonly referred to as “ePassport”. |
-| **Electronic Machine Readable Official Travel Document (eMROTD)** | A TD1 or TD2 size MROTD conforming to the specifications of Doc 9303-5 or Doc 9303-6, respectively, that additionally incorporates a contactless integrated circuit including the capability of biometric identification of the holder. |
+| **Electronic Machine Readable Passport (eMRP)** | A TD3 size MRTD conforming to the specifications of [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md) that additionally incorporates a contactless integrated circuit including the capability of biometric identification of the holder. Commonly referred to as “ePassport”. |
+| **Electronic Machine Readable Official Travel Document (eMROTD)** | A TD1 or TD2 size MROTD conforming to the specifications of [Doc 9303-5](Doc_9303_Part5_Specs_for_TD1_MROTDs.md) or [Doc 9303-6](Doc_9303_Part6_Specs_for_TD2_MROTDs.md), respectively, that additionally incorporates a contactless integrated circuit including the capability of biometric identification of the holder. |
 | **Electronic Machine Readable Travel Document (eMRTD)** | An MRTD (passport, visa or card) that has a contactless integrated circuit embedded in it and the capability of being used for biometric identification of the MRTD holder in accordance with the standards specified in the relevant Part of Doc 9303 — Machine Readable Travel Documents. |
 | **Embedded image** | An image or information encoded or concealed within a primary visual image. Also see steganography. |
 | **Encryption** | The act of disguising information through the use of a key so that it cannot be understood by an unauthorized person. |
@@ -370,11 +367,11 @@ The liaison mechanism with ISO has been successfully applied not only to the end
 | **Fraudulent Alteration** | Involves the alteration of a genuine document in an attempt to enable it to be used for travel by an unauthorized person or to an unauthorized destination. The biographical details of the genuine holder, particularly the portrait, form the prime target for such alteration. |
 | **Front-to-back (see-through) register** | A design printed on both sides of an inner page of the document which, when the page is viewed by transmitted light, forms an interlocking image. |
 | **Full frontal (facial) image** | A portrait of the holder of the MRTD produced in accordance with the specifications established in Doc 9303. |
-| **Full size (Format-A) machine readable visa (MRV-A)** | An MRV conforming with the dimensional specifications contained in Doc 9303-7, sized to completely fill a passport visa page. |
+| **Full size (Format-A) machine readable visa (MRV-A)** | An MRV conforming with the dimensional specifications contained in [Doc 9303-7](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md), sized to completely fill a passport visa page. |
 | **Gallery** | The database of biometric templates of persons previously enrolled, which may be searched to find a probe. |
 | **Ghost Image** | See: Shadow Image. |
 | **Global interoperability** | The capability of inspection systems (either manual or automated) in different States throughout the world to obtain and exchange data, to process data received from systems in other States, and to utilize that data in inspection operations in their respective States. Global interoperability is a major objective of the standardized specifications for placement of both eye readable and machine readable data in all eMRTDs. |
-| **Globally Interoperable Biometric** | Refers to Face Image as set forth in Doc 9303-9. |
+| **Globally Interoperable Biometric** | Refers to Face Image as set forth in [Doc 9303-9](Doc_9303_Part9_Biometric_identification_and_Electronic_Data_storage_in_MRTDs.md). |
 | **Guilloche design** | A pattern of continuous fine lines, usually computer generated, and forming a unique image that can only be accurately re-originated by access to the equipment, software and parameters used in creating the original design. |
 | **Hash** | A mathematical formula that converts a message of any length into a unique fixed-length string of digits known as “message digest” that represents the original message. A hash is a one-way function, that is, it is infeasible to reverse the process to determine the original message. Also, a hash function will not produce the same message digest from two different inputs. |
 | **Heat-sealed laminate** | A laminate designed to be bonded to the biographical data page of a passport book by the application of heat and pressure. |
@@ -425,15 +422,15 @@ The liaison mechanism with ISO has been successfully applied not only to the end
 | **Locked (chip)** | After personalization, the chip MUST be locked. This means that personalization commands can no longer be executed, and personalization data can no longer be written to the chip. Only after successful execution of an authentication mechanism (TA) can data be written to the chip. A locked chip cannot be ”unlocked”. |
 | **Logical Data Structure (LDS)** | The Logical Data Structure describes how data are stored and formatted in the contactless IC of an eMRTD. |
 | **Machine Assisted Document Verification** | A process using a device to assist in the verification of the authenticity of the document in respect to data and/or security. |
-| **Machine Readable Official Travel Document (MROTD)** | A document, usually in the form of a card of TD1 or TD2 size, that conforms to the specifications of Doc 9303-5 and Doc 9303-6 and may be used to cross international borders by agreement between the States involved. |
-| **Machine Readable Passport (MRP)** | A passport conforming with the specifications contained in Doc 9303-4. Normally constructed as a TD3 size book containing pages with information on the holder and the issuing State or organization and pages for visas and other endorsements. Machine readable information is contained in two lines of OCR-B text, each with 44 characters. |
+| **Machine Readable Official Travel Document (MROTD)** | A document, usually in the form of a card of TD1 or TD2 size, that conforms to the specifications of [Doc 9303-5](Doc_9303_Part5_Specs_for_TD1_MROTDs.md) and [Doc 9303-6](Doc_9303_Part6_Specs_for_TD2_MROTDs.md) and may be used to cross international borders by agreement between the States involved. |
+| **Machine Readable Passport (MRP)** | A passport conforming with the specifications contained in [Doc 9303-4](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md). Normally constructed as a TD3 size book containing pages with information on the holder and the issuing State or organization and pages for visas and other endorsements. Machine readable information is contained in two lines of OCR-B text, each with 44 characters. |
 | **Machine Readable Travel Document (MRTD)** | Official document, conforming with the specifications contained in Doc 9303, issued by a State or organization which is used by the holder for international travel (e.g. MRP, MRV, MROTD) and which contains mandatory visual (eye readable) data and a separate mandatory data summary in a format which is capable of being read by machine. |
-| **Machine Readable Visa (MRV)** | A visa conforming with the specifications contained in Doc 9303-7. The MRV is normally attached to a visa page in a passport. |
+| **Machine Readable Visa (MRV)** | A visa conforming with the specifications contained in [Doc 9303-7](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md). The MRV is normally attached to a visa page in a passport. |
 | **Machine Readable Zone (MRZ)** | Fixed dimensional area located on the MRTD, containing mandatory and optional data formatted for machine reading using OCR methods. |
 | **Machine-verifiable biometric feature** | A unique physical personal identification feature (e.g. facial image, fingerprint or iris) stored electronically in the chip of an eMRTD. |
 | **Magnification distortion** | Image imperfection where the degree of magnification varies with the distance from the camera and the depth of the face. |
 | **Master key** | Root of the derivation chain for keys. |
-| **Master List** | A Master List is a digitally signed list of CSCA certificates that are ”trusted” by the Receiving State that issued the Master List (see Doc 9303-12). |
+| **Master List** | A Master List is a digitally signed list of CSCA certificates that are ”trusted” by the Receiving State that issued the Master List (see [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md)). |
 | **Master List Signer** | An entity that digitally signs a Master List of CSCA certificates. The Master List Signer is authorized by its national CSCA to perform this function through the issuance of a Master List Signer certificate. |
 | **Match/Matching** | The process of comparing a biometric sample against a previously stored template and scoring the level of similarity. A decision to accept or reject is then based upon whether this score exceeds the given threshold. |
 | **Message** | The smallest meaningful collection of information transmitted from sender to receiver. This information may consist of one or more card transactions or card transaction-related information. |
@@ -500,13 +497,13 @@ The liaison mechanism with ISO has been successfully applied not only to the end
 | **Secured message** | A message that is protected against illegal alteration or origination. |
 | **Security thread** | A thin strip of plastic or other material embedded or partially embedded in the substrate during the paper manufacturing process. The strip may be metallized or partially de-metallized. |
 | **See-through register (front-to-back)** | See: front-to-back register. |
-| **Sensitive Data** | These data are considered to be more privacy sensitive than non-sensitive data. Access to sensitive data SHOULD be more restricted. Doc 9303-11 specifies Terminal Authentication as an interoperable mechanism for accessing sensitive data. If no interoperability is required, other mechanisms can be used. |
+| **Sensitive Data** | These data are considered to be more privacy sensitive than non-sensitive data. Access to sensitive data SHOULD be more restricted. [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md) specifies Terminal Authentication as an interoperable mechanism for accessing sensitive data. If no interoperability is required, other mechanisms can be used. |
 | **Shadow Image** | Used as a synonym to Ghost Image: A second representation of the holder’s portrait on the document, reduced in contrast and/or saturation and/or size. |
 | **Sheet** | The individual piece of substrate in a passport that comprises more than one passport page. |
 | **Size 1 machine readable official travel document (TD1)** | A card with nominal dimensions guided by those specified for the ID-1 type card (ISO/IEC 7810) (excluding thickness). |
 | **Size 2 machine readable official travel document (TD2)** | A card or label conforming with the dimensions defined for the ID-2 type card (ISO/IEC 7810) (excluding thickness). |
 | **Skimming** | Electronically reading the data stored in the contactless IC without authorizing this reading of the document. |
-| **Small size (Format-B) machine readable visa (MRV-B)** | An MRV conforming with the dimensional specifications contained in Doc 9303-7, sized to maintain a clear area on the passport visa page. |
+| **Small size (Format-B) machine readable visa (MRV-B)** | An MRV conforming with the dimensional specifications contained in [Doc 9303-7](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md), sized to maintain a clear area on the passport visa page. |
 | **Spoofing** | Faking the sending address of a transmission to gain illegal entry into a secure system.<br>*Note:* Impersonating, masquerading, piggybacking, and mimicking are forms of spoofing. |
 | **Steganography** | An image or information encoded or concealed within a primary visual image. |
 | **Structure feature** | A structure feature involves the incorporation of a measurable structure into or onto the MRTD. The presence of the structure may be detected and measured by the detection machine. |
@@ -654,34 +651,34 @@ Doc 9303 is comprised of thirteen parts. Each part describes a specific aspect o
 
 The following parts form the complete Doc 9303 specifications for Machine Readable Travel Documents:
 
-- **Part 1 — Introduction**  
+- **Part 1 — Introduction**
   The document at hand is Part 1.
-- **Part 2 — Specifications for the Security of the Design, Manufacture and Issuance of MRTDs**  
+- **Part 2 — Specifications for the Security of the Design, Manufacture and Issuance of MRTDs**
   Part 2 provides mandatory and optional specifications for the precautions to be taken by travel document issuing authorities to ensure that their MRTDs, and their means of personalization and issuance to the rightful holders, are secure against fraudulent attack. Mandatory and optional specifications are also provided for the physical security to be provided at the premises where the MRTDs are produced, personalized and issued and for the vetting of personnel involved in these operations.
-- **Part 3 — Specifications common to all MRTDs**  
+- **Part 3 — Specifications common to all MRTDs**
   Part 3 defines specifications that are common to TD1, TD2 and TD3 size Machine Readable Travel Documents (MRTDs) including those necessary for global interoperability using visual inspection and machine readable (optical character recognition) means. Detailed specifications applicable to each document type appear in Doc 9303, Parts 4 through 7.
-- **Part 4 — Specifications for Machine Readable Passports (MRPs) and other TD3 size MRTDs**  
+- **Part 4 — Specifications for Machine Readable Passports (MRPs) and other TD3 size MRTDs**
   Part 4 defines specifications that are specific to TD3 size Machine Readable Passports (MRPs) and other TD3 size Machine Readable Travel Documents (MRTDs). For brevity, the term MRP has been used throughout Part 4 and, except where stated, all the specifications herein shall apply equally to all other TD3 size MRTDs.
-- **Part 5 — Specifications for TD1 size Machine Readable Official Travel Documents (MROTDs)**  
+- **Part 5 — Specifications for TD1 size Machine Readable Official Travel Documents (MROTDs)**
   Part 5 defines specifications that are specific to TD1 size Machine Readable Official Travel Documents (MROTDs).
-- **Part 6 — Specifications for TD2 size Machine Readable Official Travel Documents (MROTDs)**  
+- **Part 6 — Specifications for TD2 size Machine Readable Official Travel Documents (MROTDs)**
   Part 6 defines specifications that are specific to TD2 size Machine Readable Official Travel Documents (MROTDs).
-- **Part 7 — Machine Readable Visas**  
+- **Part 7 — Machine Readable Visas**
   Part 7 defines the specifications for Machine Readable Visas (MRVs) which allow compatibility and global interchange using both visual (eye readable) and machine readable means. The specifications for visas can, where issued by a State and accepted by a receiving State, be used for travel purposes. The MRV shall, as a minimum, contain the data specified in a form that is legible both visually and by optical character recognition methods, as presented in Part 7. Part 7 contains specifications for both Format-A as well as Format-B types of visas, and is based on the Third Edition of Doc 9303, Part 2, Machine Readable Visas (2005).
-- **Part 8 — Emergency Travel Documents**  
+- **Part 8 — Emergency Travel Documents**
   Part 8 provides guidance and specifications on Emergency Travel Documents (ETDs). The purpose of this guidance material is to promote a consistent approach in the issuance of ETDs in order to enhance the security of the document, protect the individual, promote greater confidence for border staff in handling ETDs at ports, and address the vulnerabilities presented by inconsistent practices and security features. Part 8 also specifies the use of Visible Digital Seals in ETDs.
-- **Part 9 — Deployment of Biometric Identification and Electronic Storage of Data in MRTDs**  
+- **Part 9 — Deployment of Biometric Identification and Electronic Storage of Data in MRTDs**
   Part 9 defines the specifications, additional to those for the basic MRTD set forth in Parts 3, 4, 5, 6, and 7 of Doc 9303, to be used by States wishing to issue an electronic Machine Readable Travel Document (eMRTD) capable of being used by any suitably equipped receiving State to read from the document a greatly increased amount of data relating to the eMRTD itself and its holder. This includes mandatory globally interoperable biometric data that can be used as an input to facial recognition systems, and, optionally, to fingerprint or iris recognition systems. The specifications require the globally interoperable biometric data to be stored in the form of high-resolution images.
 - **Part 10 — Logical Data Structure (LDS) for Storage of Biometrics and Other Data in the Contactless Integrated Circuit (IC)**  
   Part 10 defines a Logical Data Structure (LDS) for eMRTDs required for global interoperability. The contactless integrated circuit capacity expansion technology contained in an eMRTD selected by an issuing State or organization SHALL allow data to be accessible by receiving States. Part 10 defines the specifications for the standardized organization of these data. This requires the identification of all mandatory and optional Data Elements and a prescriptive ordering and/or grouping of Data Elements that SHALL be followed to achieve global interoperability for reading of details (Data Elements) recorded in the capacity expansion technology optionally included on an MRTD (eMRTD).
-- **Part 11 — Security Mechanisms for MRTDs**  
+- **Part 11 — Security Mechanisms for MRTDs**
   Part 11 provides specifications to enable States and suppliers to implement cryptographic security features for Machine Readable Travel Documents (eMRTDs) offering ICC read-only access. Part 11 specifies cryptographic protocols to:
   - prevent skimming of data from the contactless IC;
   - prevent eavesdropping on the communication between the IC and reader;
   - provide authentication of the data stored on the IC based on the PKI described in Part 12, and provide authentication of the IC itself.
-- **Part 12 — Public Key Infrastructure for MRTDs**  
+- **Part 12 — Public Key Infrastructure for MRTDs**
   Part 12 defines the Public Key Infrastructure (PKI) for the eMRTD application. Requirements for issuing States or organizations are specified, including operation of a Certification Authority (CA) that issues certificates and CRLs. Requirements for receiving States and their Inspection Systems validating those certificates and CRLs are also specified.
-- **Part 13 — Visible Digital Seals for non-electronic documents**  
+- **Part 13 — Visible Digital Seals for non-electronic documents**
   Part 13 specifies a digital seal to ensure the authenticity and integrity of non-electronic documents in a comparatively inexpensive, but highly secure manner using asymmetric cryptography. The information on the non-electronic document is cryptographically signed, and the signature is encoded as a two-dimensional bar code and printed on the document itself.
 
 ### 5.2 Relationship between MRTD Form Factors and relevant Doc 9303 Parts

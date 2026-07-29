@@ -90,6 +90,8 @@ When using standard inkjet printers, it is RECOMMENDED to print with a module si
 The encoded bar code consists of a header (see Section 2.2), message zone (see Section 2.3), and signature zone (see Section 2.4). An overview of the structure is given in Figure 1.
 
 > **Figure 1. Digital Seal Structure**
+>
+> <img src="./figures/Doc_9303_Part13_Visible_Digital_Seals_p10.png" alt="Digital Seal Structure">
 ```text
 +-------------------+-------------------+-------------------+-----------------------------------+
 | Magic Constant    | Version           | Country ID        | Signer and Certificate Reference  |
@@ -120,7 +122,7 @@ The overall length of the header is 18 bytes for version 3 and variable for vers
 | :--- | :--- | :--- |
 | `0x00` | 1 | **Magic Constant.** The magic constant has a fixed value of `0xDC` identifying a bar code conforming to this specification. |
 | `0x01` | 1 | **Version.** A byte value identifying the version of this specification. The versions defined in this specification are identified by the byte value `0x02` / `0x03`, respectively. The number *n* indicates version *n*+1, e.g. a value 0 indicates version 1. |
-| `0x02` | 2 | **Issuing Country.** A three-letter code identifying the issuing State or organization. The three-letter code is according to Doc 9303-3. If the three-letter code comprises less than three letters, the code MUST be padded with filler characters (‘<’), e.g. ‘D’ is padded to ‘D<<’. The code is encoded by C40 (see Section 2.6) as a two-byte sequence. |
+| `0x02` | 2 | **Issuing Country.** A three-letter code identifying the issuing State or organization. The three-letter code is according to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). If the three-letter code comprises less than three letters, the code MUST be padded with filler characters (‘<’), e.g. ‘D’ is padded to ‘D<<’. The code is encoded by C40 (see Section 2.6) as a two-byte sequence. |
 | `0x04` | 6 / *v* | **Signer Identifier and Certificate Reference.**<br>• *Version 3:* A nine-letter code identifying the (bar code) Signer and the certificate.<br>• *Version 4:* A variable length letter code identifying the (bar code) Signer and the certificate (‘*v*’ denotes the overall length of this field).<br>The code is encoded by C40 (see Section 2.6). For variable length encoding, see Section 2.2.1. |
 | `0x0A` / `0x04+v` | 3 | **Document Issue Date.** The date the document was issued. Encoded as defined in Section 2.3.1. |
 | `0x0D` / `0x07+v` | 3 | **Signature Creation Date.** The date the signature was created. Encoded as defined in Section 2.3.1. |
@@ -132,7 +134,7 @@ The overall length of the header is 18 bytes for version 3 and variable for vers
 
 Due to size restrictions, it is impossible to store the certificates that contain the public key corresponding to the signature within the bar code. Therefore, the certificate MUST be acquired on a different channel. In order to uniquely identify the certificate and the signer that is the subject of the certificate, and to link the certificate to the bar code, a string containing the signer identifier and a reference to the certificate is stored in the header. This string consists of:
 
-a) **The Signer Identifier**: The combination of the two-letter country code according to Doc 9303-3 of the Signer’s country and of two alphanumeric characters to identify a Signer within the above-defined country. The Signer Identifier MUST be unique for a Signer in a given country.
+a) **The Signer Identifier**: The combination of the two-letter country code according to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) of the Signer’s country and of two alphanumeric characters to identify a Signer within the above-defined country. The Signer Identifier MUST be unique for a Signer in a given country.
 
 b) **The Certificate Reference**:
    1. For header version 3: A hex-string of exactly five characters that MUST uniquely identify a certificate for a given Signer.
@@ -140,7 +142,7 @@ b) **The Certificate Reference**:
       - exactly two characters denoting the number of following characters, and
       - characters that MUST uniquely identify a certificate for a given Signer.
 
-*Note: For the specific use case of visas (see Doc 9303-7) the Signer is the Visa Signer.*
+*Note: For the specific use case of visas (see [Doc 9303-7](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md)) the Signer is the Visa Signer.*
 
 The Certificate Reference `0...0` is reserved for testing purposes and MUST NOT be used in production.
 
@@ -150,7 +152,7 @@ The (bar code) Signer Identifier and Certificate Reference MUST correspond to th
 
 The combination of the *Document Feature Definition Reference* and *Document Type Category* identifies a specific set of rules, such as this specification. Future use cases can thus reuse the same bar code and header format, but reference different feature definitions (i.e. a reference defining the list of information included in the bar code) or document type categories. This allows the reuse of existing codebases, simplifies implementations and increases interoperability.
 
-Document Feature Definition References and Document Type Categories for visa and emergency travel documents are defined in Doc 9303-7 and Doc 9303-8, respectively.
+Document Feature Definition References and Document Type Categories for visa and emergency travel documents are defined in [Doc 9303-7](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md) and [Doc 9303-8](Doc_9303_Part8_Emergency_Travel_Documents.md), respectively.
 
 ### 2.3 Message Zone
 
@@ -203,7 +205,7 @@ The beginning of the signature zone is indicated by the signature marker that ha
 
 The input of the signature algorithm MUST be the (hash of the) concatenation of the header and the complete message zone, excluding the tag that denotes the beginning of the signature zone or the length of the signature. The signature zone contains the resulting signature.
 
-Only hashing and signature algorithms defined in Doc 9303-12 SHALL be used. Due to the resulting signature size, Elliptic Curve Signature Algorithm (ECDSA) with a key length of at least 256 bit in combination with SHA-256 is (at the time this document was created) RECOMMENDED.
+Only hashing and signature algorithms defined in [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md) SHALL be used. Due to the resulting signature size, Elliptic Curve Signature Algorithm (ECDSA) with a key length of at least 256 bit in combination with SHA-256 is (at the time this document was created) RECOMMENDED.
 
 Applying the ECDSA signature algorithm results in a pair of positive integers *(r,s)*. This signature MUST be stored in raw format in the seal. The bit length of *r* and *s* respectively corresponds to the key length. Thus, for example, for ECDSA-256, the length of *r* and *s* is at most 256 bit = 32 byte each. The signature MUST be stored by computing the unsigned integer representation of *r* and *s*, potentially adding leading zeros to fit *r* and *s* to their expected length (i.e. the key length), and appending the resulting value of *s* to the one of *r*. See Appendix B for a conversion between the ASN.1 and raw format of *(r,s)*.
 
@@ -313,13 +315,15 @@ The encoding of document features depends on the Document Feature Definition Ref
 
 ### 3.2 Bar code Signer and Seal Creation
 
-To allow easy verification of digital seals, this specification leverages the existing Country Signing Certification Authority (CSCA) Public Key Infrastructure (PKI) to issue and distribute certificates as well as Certificate Revocation Lists (CRLs). For details and certificate profiles, see Doc 9303-12.
+To allow easy verification of digital seals, this specification leverages the existing Country Signing Certification Authority (CSCA) Public Key Infrastructure (PKI) to issue and distribute certificates as well as Certificate Revocation Lists (CRLs). For details and certificate profiles, see [Doc 9303-12](Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md).
 
 #### 3.2.1 Architecture of the Bar Code Signer System
 
 The bar code Signer receives data from a Document Personalization System to encode a digital seal, and uses a signing key to sign it. Figure 2 depicts a possible implementation of the bar code Signer and its client, the Document Personalization System.
 
 > **Figure 2. Document Personalization: Scenario with centralized bar code Signer**
+>
+> <img src="./figures/Doc_9303_Part13_Visible_Digital_Seals_p18.png" alt="Document Personalization: Scenario with centralized bar code Signer">
 ```text
 +---------------------------+       +---------------------------+
 | Document Personalization  |       | Bar code Signer           |

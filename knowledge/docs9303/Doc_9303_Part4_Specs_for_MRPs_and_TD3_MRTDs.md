@@ -1,31 +1,23 @@
 # ICAO Doc 9303
 ## Machine Readable Travel Documents
 ### Part 4: Specifications for Machine Readable Passports (MRPs) and other TD3 Size MRTDs
+**Eighth Edition, 2021**
 
-#### Eighth Edition, 2021
-
----
-
-Approved by and published under the authority of the Secretary General
-
-### INTERNATIONAL CIVIL AVIATION ORGANIZATION
-
----
+Approved by and published under the authority of the Secretary General  
+**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
 
 Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
-**INTERNATIONAL CIVIL AVIATION ORGANIZATION**
+INTERNATIONAL CIVIL AVIATION ORGANIZATION
 999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
-
 Downloads and additional information are available at https://www.icao.int/publications/doc-series
 
 **Doc 9303, Machine Readable Travel Documents**
-**Part 4 — Specifications for Machine Readable Passports (MRPs) and other TD3 Size MRTDs**
+Part 4 — Specifications for Machine Readable Passports (MRPs) and other TD3 Size MRTDs
 Order No.: 9303P4
 ISBN 978-92-9265-335-4 (print version)
 ISBN 978-92-9275-984-1 (electronic version)
 
-### © ICAO 2021
-
+© ICAO 2021
 All rights reserved. No part of this publication may be reproduced, stored in a retrieval system or transmitted in any form or by any means, without prior permission in writing from the International Civil Aviation Organization.
 
 ---
@@ -39,7 +31,7 @@ Amendments are announced in the supplements to the Products and Services Catalog
 | 1 | 20/3/24 | ICAO |
 | 2 | 20/2/26 | ICAO |
 
-The designations employed and the presentation of the material in this publication do not imply the expression of any opinion whatsoever on the part of ICAO concerning the legal status of any country, territory, city or area or of its authorities, or concerning the delimitation of its frontiers or boundaries.
+*The designations employed and the presentation of the material in this publication do not imply the expression of any opinion whatsoever on the part of ICAO concerning the legal status of any country, territory, city or area or of its authorities, or concerning the delimitation of its frontiers or boundaries.*
 
 ---
 
@@ -106,6 +98,8 @@ Outer rectangle: 88.75 mm × 125.75 mm (3.49 in × 4.95 in)
 
 > **Figure 1. MRP data page dimensional illustration**
 >
+> <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p10.png" alt="MRP data page dimensional illustration">
+>
 > [Diagram showing inner and outer rectangles on MRP data page]
 
 ### 2.4 MRP Data Page Margins
@@ -114,6 +108,8 @@ The dimensional specifications refer to the outer limits of the MRP data page. A
 as shown in Figure 2. The position of data in the machine readable zone is as shown in Figure 3.
 
 > **Figure 2. Edge margins of the MRP data page**
+>
+> <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p11.png" alt="Edge margins of the MRP data page">
 >
 > [Diagram showing edge margins of 2.00 mm on all sides, with radius R3.18 ± 0.30 mm]
 
@@ -150,6 +146,8 @@ The MRP data page follows a standardized layout to facilitate reading of data gl
 The MRP data page should either be an inner page in close proximity to an end leaf of the MRP or form part of the cover of the MRP. Where the MRP data page is part of the cover, precautions must be taken to ensure that the endleaf/cover assembly combined with the means of personalization are together resistant to fraudulent attack, particularly by delamination of the cover structure. Where the MRP data page is not constructed as part of the cover, the recommended practice is to locate the MRP data page on page 2 or on the penultimate page of the MRP. The location of the MRP data page in any other position in the MRP will give rise to problems for document examiners in the operation of swipe readers reading the MRZ. The MRZ shall be positioned adjacent to the outside long edge of the book, parallel to the spine of the book (see Figures 3 and 4).
 
 > **Figure 3. Schematic diagram of the Machine Readable Zone (MRZ)**
+>
+> <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p12.png" alt="Schematic diagram of the Machine Readable Zone (MRZ)">
 >
 > [Diagram showing MRZ layout with dimensions]
 
@@ -248,7 +246,7 @@ Zone IV shall be present either on the data page or on an adjacent page and cont
 
 Data elements shall appear in a standard sequence as shown in Figures 4 and 5. Figure 6 is a schematic of the nominal layout of data elements on the front side of an MRP data page, and Figure 7 is a template for the position of the personalized data fields.
 
-The dimensions and boundaries of Zone VII, the machine readable zone, are fixed. Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the effective reading zone (ERZ) specified in Doc 9303-3.
+The dimensions and boundaries of Zone VII, the machine readable zone, are fixed. Zone VII conforms in height to the MRZ defined for all MRTDs so that the machine readable data lines fall within the effective reading zone (ERZ) specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 MRZ (Zone VII) data elements shall be as defined in 4.2.2 and illustrated in Appendix B, Figure B-1.
 
@@ -330,7 +328,7 @@ When an issuing State or organization wishes to have a displayed image of an MRP
 
 ### 4.1 Visual Inspection Zone (VIZ) (Zones I through VI)
 
-Guidance on the typeface, size and line spacing, the languages and character set, to be used in the VIZ may be found in Doc 9303-3.
+Guidance on the typeface, size and line spacing, the languages and character set, to be used in the VIZ may be found in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 If any optional field or data element is not used, the data may be spread more evenly in the visual zone of the MRP data page consistent with the requirement for sequencing zones and data elements.
 
@@ -342,27 +340,27 @@ The data elements in the VIZ are specified as follows:
 
 | Field/ zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
-| **01/I** (Mandatory) | Issuing State or organization (in full) | The name of the State or organization responsible for issuing the MRP shall be displayed in full. For additional details see Doc 9303-3. | Variable | Notes a, c, d, f, g. If omitted, shall appear on an adjacent or preceding page in the passport. |
-| **02/I** (Mandatory) | Document | The word for "passport" in the language of the issuing State or organization, plus either PASSPORT (English), PASSEPORT (French) or PASAPORTE (Spanish) if the language of the issuing State or organization is not English, French or Spanish. For additional details see Doc 9303-3. | Variable | Notes a, c, d, g, m, n. If omitted, shall appear on an adjacent or preceding page in the passport. |
+| **01/I** (Mandatory) | Issuing State or organization (in full) | The name of the State or organization responsible for issuing the MRP shall be displayed in full. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, d, f, g. If omitted, shall appear on an adjacent or preceding page in the passport. |
+| **02/I** (Mandatory) | Document | The word for "passport" in the language of the issuing State or organization, plus either PASSPORT (English), PASSEPORT (French) or PASAPORTE (Spanish) if the language of the issuing State or organization is not English, French or Spanish. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, d, g, m, n. If omitted, shall appear on an adjacent or preceding page in the passport. |
 | **03/I** (Mandatory) | Document code | Capital letter P to designate an MRP. The second capital letter shall designate the MRP type. Refer to Section 4.4. | 2 | Notes a, g, l, m, q. |
-| **04/I** (Mandatory) | Issuing State or organization (in code) | As abbreviated in the three-letter code specified in Doc 9303-3. | 3 Fixed | Notes a, f, l. |
-| **05/I** (Mandatory) | Passport Number | As given by the issuing State or organization to uniquely identify the document from all other MRTDs issued by the State or organization. For additional details see Doc 9303-3. | 9 | Notes a, b, c, g, l. |
-| **06/07/II** (Mandatory) | Name | The full name of the holder, as identified by the issuing State or organization. For additional details see Doc 9303-3. | Variable | Notes a, c, g, k, l. |
-| **06/II** (Mandatory) | Primary Identifier | Predominant component(s) of the name of the holder as described in Doc 9303-3. In cases where the predominant component(s) of the name of the holder (e.g. where this consists of composite names) cannot be shown in full or in the same order, owing to space limitations of Field(s) 06 and/or 07 or national practice, the most important component(s) (as determined by the State or organization) of the primary identifier shall be inserted. | Variable | Notes a, c, g, k, l. |
-| **07/II** (Mandatory) | Secondary Identifier | Secondary component(s) of the name of the holder as described in Doc 9303-3. The most important component(s) (as determined by the State or organization) of the secondary identifier of the holder shall be inserted in full, up to the maximum dimensions of the field frame. Other components, where necessary, may be represented by initials. Where the holder's name has only predominant component(s), this data field shall be left blank. A State may optionally utilize the whole zone comprising Fields 06 and 07 as a single field. In such a case, the primary identifier shall be placed first, followed by a comma and a space, followed by the secondary identifier. | Variable | Notes a, c, k, g, l. |
-| **08/II** (Mandatory) | Nationality | For details see Doc 9303-3. | Variable | Notes a, c, f, g, l, o. |
-| **09/II** (Mandatory) | Date of birth | Holder's date of birth as recorded by the issuing State or organization. If the date of birth is unknown, see Doc 9303-3 for guidance. | Variable | Notes a, b, c, g, l. |
-| **10/II** (Optional) | Personal number | Field optionally used for personal identification number given to holder by the issuing State or organization. For additional details see Doc 9303-3. | Variable | Notes a, b, c, e, g. |
+| **04/I** (Mandatory) | Issuing State or organization (in code) | As abbreviated in the three-letter code specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 3 Fixed | Notes a, f, l. |
+| **05/I** (Mandatory) | Passport Number | As given by the issuing State or organization to uniquely identify the document from all other MRTDs issued by the State or organization. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 9 | Notes a, b, c, g, l. |
+| **06/07/II** (Mandatory) | Name | The full name of the holder, as identified by the issuing State or organization. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, g, k, l. |
+| **06/II** (Mandatory) | Primary Identifier | Predominant component(s) of the name of the holder as described in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). In cases where the predominant component(s) of the name of the holder (e.g. where this consists of composite names) cannot be shown in full or in the same order, owing to space limitations of Field(s) 06 and/or 07 or national practice, the most important component(s) (as determined by the State or organization) of the primary identifier shall be inserted. | Variable | Notes a, c, g, k, l. |
+| **07/II** (Mandatory) | Secondary Identifier | Secondary component(s) of the name of the holder as described in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). The most important component(s) (as determined by the State or organization) of the secondary identifier of the holder shall be inserted in full, up to the maximum dimensions of the field frame. Other components, where necessary, may be represented by initials. Where the holder's name has only predominant component(s), this data field shall be left blank. A State may optionally utilize the whole zone comprising Fields 06 and 07 as a single field. In such a case, the primary identifier shall be placed first, followed by a comma and a space, followed by the secondary identifier. | Variable | Notes a, c, k, g, l. |
+| **08/II** (Mandatory) | Nationality | For details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, c, f, g, l, o. |
+| **09/II** (Mandatory) | Date of birth | Holder's date of birth as recorded by the issuing State or organization. If the date of birth is unknown, see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) for guidance. | Variable | Notes a, b, c, g, l. |
+| **10/II** (Optional) | Personal number | Field optionally used for personal identification number given to holder by the issuing State or organization. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, e, g. |
 | **11/II** (Mandatory) | Sex | Sex of the holder, to be specified by use of the single initial commonly used in the language of the State or organization where the document is issued and, if translation into English, French or Spanish is necessary, followed by an oblique and the capital letter F for female, M for male, or X for unspecified. | 3 | Notes a, c, g, l, p. |
-| **12/II** (Optional element in mandatory zone) | Place of birth | Field optionally used for city and State of the holder's birthplace. Refer to Doc 9303-3 for further details. | Variable | Notes a, c, e, f, g. |
-| **13/II** (Optional element in mandatory zone) | Optional personal data elements | Optional personal data elements e.g. personal identification number or fingerprint, at the discretion of the issuing State or organization. If a fingerprint is included in this field, it should be presented as a 1:1 representation of the original. If a date is included, it shall follow the form of presentation described in Doc 9303-3. | Variable | Notes a, b, c, e, g, i. |
-| **14/III** (Mandatory) | Date of issue | For details see Doc 9303-3. | Variable | Notes a, b, c, g, i, l. |
-| **15/III** (Mandatory) | Authority or issuing organization | Authority or issuing organization for the MRP. This field shall be used to indicate the issuing authority or issuing organization and, optionally, its location, which may be personalized within this field. For additional details see Doc 9303-3. | Variable | Notes a, b, c, f, g, j, l. |
-| **16/III** (Mandatory) | Date of expiry | Date of expiry of the MRP. For additional details see Doc 9303-3. | Variable | Notes a, b, c, g, l. |
-| **17/III** (Optional element in mandatory zone) | Optional document data elements | Optional data elements relating to the document. For additional details see Doc 9303-3. | Variable | Notes a, b, c, e, g. |
-| **18/IV** (Mandatory) | Holder's signature or usual mark | At the discretion of the issuing State or organization, the signature or usual mark may be located in Zone VI. The size of the field to be allocated to the signature or usual mark on the adjoining page shall be at the discretion of the issuing State or organization, subject to the overall dimensional limits of the MRP. For additional details see Doc 9303-3. | Variable | Notes e, j. |
-| **19/V** (Mandatory) | Identification feature | This field shall contain a portrait of the holder. The portrait shall not be larger than 45.0 mm × 35.0 mm (1.77 in × 1.38 in) nor smaller than 32.0 mm × 26.0 mm (1.26 in × 1.02 in). The position of the field concerned shall be aligned to the left of Zones II, III and IV. See Doc 9303-3 for additional specifications for the portrait. | — | Note d. |
-| **20/VI** (Optional) | Optional data elements | Additional optional data elements at the discretion of the issuing State or organization. For additional details see Doc 9303-3. | — | Notes a, b, c, e, g, i. |
+| **12/II** (Optional element in mandatory zone) | Place of birth | Field optionally used for city and State of the holder's birthplace. Refer to [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) for further details. | Variable | Notes a, c, e, f, g. |
+| **13/II** (Optional element in mandatory zone) | Optional personal data elements | Optional personal data elements e.g. personal identification number or fingerprint, at the discretion of the issuing State or organization. If a fingerprint is included in this field, it should be presented as a 1:1 representation of the original. If a date is included, it shall follow the form of presentation described in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, e, g, i. |
+| **14/III** (Mandatory) | Date of issue | For details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, g, i, l. |
+| **15/III** (Mandatory) | Authority or issuing organization | Authority or issuing organization for the MRP. This field shall be used to indicate the issuing authority or issuing organization and, optionally, its location, which may be personalized within this field. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, f, g, j, l. |
+| **16/III** (Mandatory) | Date of expiry | Date of expiry of the MRP. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, g, l. |
+| **17/III** (Optional element in mandatory zone) | Optional document data elements | Optional data elements relating to the document. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes a, b, c, e, g. |
+| **18/IV** (Mandatory) | Holder's signature or usual mark | At the discretion of the issuing State or organization, the signature or usual mark may be located in Zone VI. The size of the field to be allocated to the signature or usual mark on the adjoining page shall be at the discretion of the issuing State or organization, subject to the overall dimensional limits of the MRP. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | Variable | Notes e, j. |
+| **19/V** (Mandatory) | Identification feature | This field shall contain a portrait of the holder. The portrait shall not be larger than 45.0 mm × 35.0 mm (1.77 in × 1.38 in) nor smaller than 32.0 mm × 26.0 mm (1.26 in × 1.02 in). The position of the field concerned shall be aligned to the left of Zones II, III and IV. See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) for additional specifications for the portrait. | — | Note d. |
+| **20/VI** (Optional) | Optional data elements | Additional optional data elements at the discretion of the issuing State or organization. For additional details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | — | Notes a, b, c, e, g, i. |
 
 * Notes can be found in the last portion of subsection 4.2.2.2.
 
@@ -374,9 +372,9 @@ Specifically, the purpose of the CAN is to enable the chip to be accessed withou
 
 The CAN is a 6-digit number, comprised solely of numerals, 0 to 9. There is no check digit since the check is implicitly performed by the protocol. The CAN should include a field caption.
 
-Recognizing that the issuing States or organizations have diverse requirements for the layout of the VIZ, the CAN shall appear on either the data page or the page adjacent to the data page, and should appear in the VIZ. The horizontal and vertical positions shall be at the discretion of the issuing State or organization, but shall not overlap the portrait area (Zone V) or interfere with the legibility of other data in the VIZ. Font, field and background should conform to the specifications for the MRZ set out in Doc 9303-3.
+Recognizing that the issuing States or organizations have diverse requirements for the layout of the VIZ, the CAN shall appear on either the data page or the page adjacent to the data page, and should appear in the VIZ. The horizontal and vertical positions shall be at the discretion of the issuing State or organization, but shall not overlap the portrait area (Zone V) or interfere with the legibility of other data in the VIZ. Font, field and background should conform to the specifications for the MRZ set out in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
-Further information concerning the technical specifications, derivation and implementation of CANs may be found in Doc 9303-11.
+Further information concerning the technical specifications, derivation and implementation of CANs may be found in [Doc 9303-11](Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md).
 
 ### 4.2 Machine Readable Zone (MRZ) (Zone VII)
 
@@ -401,10 +399,10 @@ The position of the left-hand edge of the first character shall be 6.0 ± 1.0 mm
 | MRZ character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 2 | 03 | Document code | The first character shall be P to designate an MRP. The second character shall identify the MRP type, as detailed in Section 4.4. | 2 | Notes a, d, m, q. |
-| 3 to 5 | 04 | Issuing State or organization | The three-letter code specified in Doc 9303-3 shall be used. Spaces shall be replaced by filler characters (<). | 3 | Notes a, d, f. |
-| 6 to 44 | 06, 07 | Name | For details see Doc 9303-3. [Primary identifier(s), secondary identifier(s) and fillers] | 39 | Notes a, c, d. |
-| | | Punctuation in the name | Representation of punctuation is not permitted in the MRZ. For details on apostrophes, hyphens, commas, etc., see Doc 9303-3. | — | — |
-| | | Name prefixes and suffixes | For details see Doc 9303-3. | — | — |
+| 3 to 5 | 04 | Issuing State or organization | The three-letter code specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used. Spaces shall be replaced by filler characters (<). | 3 | Notes a, d, f. |
+| 6 to 44 | 06, 07 | Name | For details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). [Primary identifier(s), secondary identifier(s) and fillers] | 39 | Notes a, c, d. |
+| | | Punctuation in the name | Representation of punctuation is not permitted in the MRZ. For details on apostrophes, hyphens, commas, etc., see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | — | — |
+| | | Name prefixes and suffixes | For details see [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | — | — |
 | | | Filler | When all components of the primary and secondary identifiers and required separators (filler characters) do not exceed 39 characters in total, all name components shall be included in the MRZ and all unused character positions shall be completed with filler characters (<) repeated up to position 44 as required. | — | — |
 | | | Truncation of the name | When the primary and secondary identifiers and required separators (filler characters) exceed the number of character positions available for names (i.e. 39), they shall be truncated as follows: Characters shall be removed from one or more components of the primary identifier until three character positions are freed, and two filler characters (<<) and the first character of the first component of the secondary identifier can be inserted. The last character (position 44) shall be an alphabetic character (A through Z). This indicates that truncation may have occurred. Further truncation of the primary identifier may be carried out to allow characters of the secondary identifier to be included, provided that the name field shall end with an alphabetic character (position 44). This indicates that truncation may have occurred. When the name consists of only a primary identifier which exceeds the number of character positions available for the name, i.e. 39, characters shall be removed from one or more components of the name until the last character in the name field is an alphabetic character. | — | Notes a, d. |
 
@@ -415,36 +413,36 @@ The position of the left-hand edge of the first character shall be 6.0 ± 1.0 mm
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
 | 1 to 9 | 05 | Passport number | As given by the issuing State or organization to uniquely identify the document. Any special characters or spaces in the passport number as shown in the VIZ shall be replaced by the filler character (<). The number shall be followed by the filler character (<) repeated up to position 9 as required. | 9 | Notes a, b, d. |
-| 10 | — | Check digit | Shall be calculated as specified in Doc 9303-3 and positioned as specified in 4.2.4. | 1 | Notes b, d. |
-| 11 to 13 | 08 | Nationality | As a three-letter code representing the holder's nationality as listed in Doc 9303-3. Spaces are replaced by filler characters. | 3 | Notes a, d, f. |
-| 14 to 19 | 09 | Date of birth | See Doc 9303-3 for details. | 6 | Notes b, d, i. |
-| 20 | — | Check digit | Shall be calculated as specified in Doc 9303-3 and positioned as specified in 4.2.4. | 1 | Notes b, d. |
+| 10 | — | Check digit | Shall be calculated as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) and positioned as specified in 4.2.4. | 1 | Notes b, d. |
+| 11 to 13 | 08 | Nationality | As a three-letter code representing the holder's nationality as listed in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). Spaces are replaced by filler characters. | 3 | Notes a, d, f. |
+| 14 to 19 | 09 | Date of birth | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) for details. | 6 | Notes b, d, i. |
+| 20 | — | Check digit | Shall be calculated as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) and positioned as specified in 4.2.4. | 1 | Notes b, d. |
 | 21 | 11 | Sex | F = female; M = male; < = unspecified. | 1 | Notes a, d. |
-| 22 to 27 | 16 | Date of expiry | See Doc 9303-3 for details. | 6 | Notes b, d, i. |
-| 28 | — | Check digit | Shall be calculated as specified in Doc 9303-3 and positioned as specified in 4.2.4. | 1 | Notes b, d. |
+| 22 to 27 | 16 | Date of expiry | See [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) for details. | 6 | Notes b, d, i. |
+| 28 | — | Check digit | Shall be calculated as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) and positioned as specified in 4.2.4. | 1 | Notes b, d. |
 | 29 to 42 | 10 | Personal number or other optional data elements | Any special characters, including spaces in the personal identification number given to the holder by the issuing State or organization, shall be replaced by the filler character (<). The number shall be followed by the filler character (<) repeated up to position 42 as required. When the personal number field is not used, the character positions 29 to 42 in the second MRZ line should be completed with filler characters (<) (see also under "check digit", character position 43 below). | 14 | Notes a, b, d. |
-| 43 | — | Check digit | Shall be calculated as specified in Doc 9303-3 and positioned as specified in 4.2.4. When the personal number field is not used and filler characters (<) are used in positions 29 to 42, the check digit may be zero or the filler character (<) at the option of the issuing State or organization. | 1 | Notes b, d. |
-| 44 | — | Composite check digit | Composite check digit for characters of machine readable data of the lower line in positions 1 to 10, 14 to 20 and 22 to 43, including values for letters that are a part of the number fields and their check digits. Shall be calculated as specified in Doc 9303-3. | 1 | Notes b, d. |
+| 43 | — | Check digit | Shall be calculated as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) and positioned as specified in 4.2.4. When the personal number field is not used and filler characters (<) are used in positions 29 to 42, the check digit may be zero or the filler character (<) at the option of the issuing State or organization. | 1 | Notes b, d. |
+| 44 | — | Composite check digit | Composite check digit for characters of machine readable data of the lower line in positions 1 to 10, 14 to 20 and 22 to 43, including values for letters that are a part of the number fields and their check digits. Shall be calculated as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). | 1 | Notes b, d. |
 
 *Notes to the Visual and Machine Readable data element directories:*
 
-a) Alphabetic characters (A–Z) and (a–z). National characters may be included in the VIZ. In the MRZ, only the characters defined in Doc 9303-3 shall be used.
+a) Alphabetic characters (A–Z) and (a–z). National characters may be included in the VIZ. In the MRZ, only the characters defined in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) shall be used.
 
-b) Numeric characters (0–9). National numerals may be additionally included in the VIZ. In the MRZ, only the numerals 0–9 may be used as defined in Doc 9303-3.
+b) Numeric characters (0–9). National numerals may be additionally included in the VIZ. In the MRZ, only the numerals 0–9 may be used as defined in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
-c) Punctuation may be included in the VIZ. In the MRZ, only the filler character specified in Doc 9303-3 may be used.
+c) Punctuation may be included in the VIZ. In the MRZ, only the filler character specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md) may be used.
 
 d) The field caption is not printed on the document.
 
 e) The use of a caption to identify the field is at the option of the issuing State.
 
-f) In the case of the United Nations laissez-passer, Field 01 (Issuing State or Organization) in the VIZ shall be completed with the words "UNITED NATIONS — NATIONS UNIES". In keeping with the international character of United Nations officials, neither nationality nor place of birth shall be shown. The caption for Field 08 (Nationality) shall read instead: "Official of/Fonctionnaire des" and the words "UNITED NATIONS/NATIONS UNIES" entered instead of nationality. Field 12 (Place of birth) shall be left blank. The codes to be used in Field 04 (Code for issuing State or organization) in the VIZ as well as in character positions 3 to 5 (Issuing State or Organization) in the upper line of the MRZ and in character positions 11 to 13 (Nationality) in the lower line shall be as specified in Doc 9303-3.
+f) In the case of the United Nations laissez-passer, Field 01 (Issuing State or Organization) in the VIZ shall be completed with the words "UNITED NATIONS — NATIONS UNIES". In keeping with the international character of United Nations officials, neither nationality nor place of birth shall be shown. The caption for Field 08 (Nationality) shall read instead: "Official of/Fonctionnaire des" and the words "UNITED NATIONS/NATIONS UNIES" entered instead of nationality. Field 12 (Place of birth) shall be left blank. The codes to be used in Field 04 (Code for issuing State or organization) in the VIZ as well as in character positions 3 to 5 (Issuing State or Organization) in the upper line of the MRZ and in character positions 11 to 13 (Nationality) in the lower line shall be as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 g) A blank space (or spaces) is included. Blank spaces between words shall count towards the maximum number of characters permitted in the field.
 
 h) Intentionally omitted from the Data Element Directory. In the sixth and earlier editions of Doc 9303, this Note provided for stick-in portrait photographs the use of which is no longer permitted in an MRP.
 
-i) The method of writing dates is given in Doc 9303-3.
+i) The method of writing dates is given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).
 
 j) The space reserved for Field 15 may be expanded to include additionally the space for Field 18 when the option is taken of locating the holder's signature or usual mark on the adjacent page. In this instance, the authority or issuing organization may be expressed as two lines of variable numbers of character positions.
 
@@ -635,7 +633,7 @@ Effective 1 January 2028, all MRPs shall be issued with a secondary document cod
 
 MRPs issued without a harmonized secondary document code in accordance with Section 4.4 shall expire before 1 January 2038.
 
-> *Note 1.— For single sheet documents, refer to Doc 9303-8. PU is the designated document code.*
+> *Note 1.— For single sheet documents, refer to [Doc 9303-8](Doc_9303_Part8_Emergency_Travel_Documents.md). PU is the designated document code.*
 
 ## 5. REFERENCES (NORMATIVE)
 
@@ -676,7 +674,7 @@ MRPs issued without a harmonized secondary document code in accordance with Sect
 >
 > [Diagram showing MRZ layout with annotation of fields]
 
-*Note 1.— Three-letter codes are given in Doc 9303-3.*
+*Note 1.— Three-letter codes are given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).*
 
 *Note 2.— Dotted lines indicate data fields; these, together with arrows and comment boxes, are shown for the reader's understanding only and are not printed on the document.*
 
