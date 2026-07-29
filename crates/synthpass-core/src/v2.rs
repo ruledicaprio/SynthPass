@@ -110,8 +110,10 @@ pub struct ExtractionV2 {
     /// when an MRZ was found. Distinct from `mrz.checks`: that says whether
     /// the check digits verify (line 2 only — TD1/TD2/TD3 carry none for
     /// line 1); this says whether line 1 looks internally consistent with
-    /// what line 2 and the ICAO country table say it should. `None` on the
-    /// Tier-2 (LLM) path, which has no MRZ to check.
+    /// what line 2 and the ICAO country table say it should. `None` only when
+    /// no MRZ was found at all — the Tier-2 (LLM) path populates this too, from
+    /// the same deterministic read that fills `mrz`, since escalating to a
+    /// model does not make the zone unreadable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line1_integrity: Option<crate::fusion::Verdict>,
     /// Date-plausibility summary — unchanged semantics from v1.
