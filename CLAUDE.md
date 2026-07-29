@@ -226,6 +226,11 @@ ensure
 * cargo fmt
 * cargo clippy
 * cargo test
+* bash scripts/check-doc-links.sh
+
+The doc-link check is CI-enforced and gates docs-only PRs, which the three cargo
+commands do not touch. Run it whenever a change edits Markdown or moves a file
+that prose cites.
 
 If CI exists
 

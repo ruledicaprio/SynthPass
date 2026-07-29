@@ -233,8 +233,8 @@ Each stage is a separate function/struct; they can be tested independently.
 
 ## 11. JSON Standards
 
-All output JSON must conform to a versioned schema. There is no `docs/schema.json` — the schema is
-defined in code as `synthpass-core`'s `v2` module (`ExtractionV2`, `CoreField`, ...) and pinned by
+All output JSON must conform to a versioned schema. There is no standalone schema file — the schema
+is defined in code as `synthpass-core`'s `v2` module (`ExtractionV2`, `CoreField`, ...) and pinned by
 that crate's `tests/schema_keys.rs`, which locks the exact JSON key set. `ExtractionV2.trace`
 (providers used, escalation reason if Tier 2 ran) is populated by the pipeline as of the M7 wiring
 chunk. The field list below is illustrative of intent, not a verified enumeration — check
