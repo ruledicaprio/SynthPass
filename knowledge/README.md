@@ -68,6 +68,7 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 | **[hardware/](hardware/)** | Memory budgets, CPU-only and consumer-GPU targets, deployment shapes. |
 | **[research/](research/)** | Distilled, actionable summaries drawn from `papers/`. |
 | **[papers/](papers/)** | Source academic material, kept as reference. |
+| **[docs9303/](docs9303/)** | ICAO Doc 9303, Parts 1–13 — the spec behind `crates/mrz` and `synthpass-die`, kept as reference. |
 
 ## Design notes (informal)
 
