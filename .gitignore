@@ -13,6 +13,13 @@ bench-report*.json
 # Web app upload/working directory (may contain uploaded PII)
 work/
 
+# samples/ is a tracked corpus of public-domain specimens ("No PII in logs or
+# fixtures", CONTRIBUTING.md). A real person's document must never land there,
+# but the directory being tracked means a stray `git add -A` would publish one
+# permanently. Refuse anything marked Private by name, as a second line of
+# defence behind "keep it in work/ instead".
+samples/**/*Private*
+
 # v0.3.0 work-in-progress drafts (not yet wired into the build)
 drafts/
 
