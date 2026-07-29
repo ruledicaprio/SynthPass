@@ -39,12 +39,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 #[cfg(test)]
-use synthpass_core::v2::MrzFormat;
-use synthpass_core::v2::{
-    CheckDigits, EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, MrzBlock, Provenance,
-};
+use synthpass_core::v2::{CheckDigits, MrzFormat};
+use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 use synthpass_core::Extraction;
-use synthpass_die::mrz_reader::mrz_format_of;
+use synthpass_die::mrz_reader::mrz_block_from;
 use synthpass_die::{
     Capability, CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, ProviderError,
     Recognition, RoutingPolicy, MRZ_PROVIDER_ID,
@@ -674,29 +672,7 @@ impl Pipeline {
                 {
                     Ok(reading) => {
                         let mut v2 = reading.extraction;
-                        // The LLM is separately asked for its own `mrz_line`
-                        // guess (`synthpass_llm::prompt::FIELDS`), and the v1
-                        // lift `ExtractionV2::from` would otherwise leave that
-                        // guess sitting in `v2.mrz` — a field documented as
-                        // "exactly as validated". `stage.mrz_data` is the
-                        // pipeline's own deterministic read (already computed
-                        // once in `ocr_and_tier1`, driving the escalation
-                        // decision itself) and is always the more trustworthy
-                        // source, checksum-partial or not. Reusing the same
-                        // construction `synthpass_die::mrz_reader::extraction_v2_from_mrz`
-                        // uses for the Tier-1 path keeps the two in sync.
-                        v2.mrz = stage.mrz_data.as_ref().map(|m| MrzBlock {
-                            lines: m.mrz_lines.clone(),
-                            format: mrz_format_of(m),
-                            checks: CheckDigits {
-                                document_number: m.checks.document_number,
-                                date_of_birth: m.checks.date_of_birth,
-                                date_of_expiry: m.checks.date_of_expiry,
-                                personal_number: m.checks.personal_number,
-                                composite: m.checks.composite,
-                            },
-                        });
-                        v2.document.mrz_format = v2.mrz.as_ref().map(|block| block.format);
+                        apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
                         v2.trace = Some(ExtractionTrace {
                             providers: vec![
                                 MRZ_PROVIDER_ID.to_string(),
@@ -705,8 +681,11 @@ impl Pipeline {
                             escalation: stage.escalation,
                             prompt: None,
                         });
-                        let value = serde_json::to_value(extraction_from_v2_llm(&v2))
-                            .expect("Extraction serializes");
+                        let value = serde_json::to_value(extraction_from_v2_llm(
+                            &v2,
+                            mrz_checksums_valid(stage.mrz_data.as_ref()),
+                        ))
+                        .expect("Extraction serializes");
                         (Some(value), Some(v2), Method::Llm, None)
                     }
                     Err(e) => {
@@ -780,28 +759,35 @@ impl Pipeline {
         };
         let mut json_path = stage.md_path.with_extension("json");
 
-        let (extracted, mut extracted_v2, method, llm_error) = if let Some((value, v2)) =
-            stage.tier1
-        {
-            (Some(value), Some(v2), Method::MrzDeterministic, None)
-        } else {
-            match self.extract_via_inferer_stream(&stage.markdown, &tx).await {
-                Ok(extraction) => {
-                    let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
-                    v2.trace = Some(ExtractionTrace {
-                        providers: vec![
-                            MRZ_PROVIDER_ID.to_string(),
-                            Method::Llm.as_str().to_string(),
-                        ],
-                        escalation: stage.escalation,
-                        prompt: None,
-                    });
-                    let value = serde_json::to_value(&extraction).expect("Extraction serializes");
-                    (Some(value), Some(v2), Method::Llm, None)
+        let (extracted, mut extracted_v2, method, llm_error) =
+            if let Some((value, v2)) = stage.tier1 {
+                (Some(value), Some(v2), Method::MrzDeterministic, None)
+            } else {
+                match self.extract_via_inferer_stream(&stage.markdown, &tx).await {
+                    Ok(extraction) => {
+                        let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
+                        apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
+                        v2.trace = Some(ExtractionTrace {
+                            providers: vec![
+                                MRZ_PROVIDER_ID.to_string(),
+                                Method::Llm.as_str().to_string(),
+                            ],
+                            escalation: stage.escalation,
+                            prompt: None,
+                        });
+                        // Derived from `v2`, not from the raw `extraction`: the v1
+                        // record must agree with the v2 one it ships alongside, and
+                        // `extraction.mrz_line` is still the model's guess.
+                        let value = serde_json::to_value(extraction_from_v2_llm(
+                            &v2,
+                            mrz_checksums_valid(stage.mrz_data.as_ref()),
+                        ))
+                        .expect("Extraction serializes");
+                        (Some(value), Some(v2), Method::Llm, None)
+                    }
+                    Err(e) => (None, None, Method::Llm, Some(e)),
                 }
-                Err(e) => (None, None, Method::Llm, Some(e)),
-            }
-        };
+            };
 
         // See the matching comment in `process_document`.
         if let (Some(v2), Some(bbox)) = (extracted_v2.as_mut(), stage.ocr.portrait.as_ref()) {
@@ -993,18 +979,74 @@ fn lift_tier2_extraction(extraction: &Extraction, model_id: Option<String>) -> E
     v2
 }
 
+/// Replace an LLM-produced record's MRZ-derived fields with the pipeline's own
+/// deterministic read.
+///
+/// The model is separately asked for an `mrz_line` guess
+/// (`synthpass_llm::prompt::FIELDS`), and `ExtractionV2::from` would otherwise
+/// leave that guess sitting in `v2.mrz` — a field documented as "exactly as
+/// validated" — with every check digit reported `false`. `mrz_data` is the
+/// pipeline's own read, computed once in [`Pipeline::ocr_and_tier1`] and the
+/// very thing the escalation decision was made on. It is always the more
+/// trustworthy source, checksum-partial or not; `None` means no MRZ was found
+/// at all, in which case the model's guess is dropped rather than promoted.
+///
+/// Mirrors `synthpass_die::mrz_reader::extraction_v2_from_mrz` field for field,
+/// minus `provenance` (which stays [`Provenance::Llm`] — the *scalar* fields
+/// really did come from the model). That includes `line1_integrity` and the
+/// confidence downgrade it implies: a field a deterministic check contradicts
+/// must not keep the confidence it had when nothing contradicted it, and that
+/// reasoning does not become less true because a model supplied the field.
+///
+/// Both Tier-2 paths — [`Pipeline::process_document`] and
+/// [`Pipeline::process_document_stream`] — must call this. They previously
+/// hand-rolled it, and only one of the two was ever corrected.
+fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData>) {
+    let Some(m) = mrz_data else {
+        v2.mrz = None;
+        v2.document.mrz_format = None;
+        v2.line1_integrity = None;
+        return;
+    };
+    let block = mrz_block_from(m);
+    v2.document.mrz_format = Some(block.format);
+    v2.mrz = Some(block);
+    let verdict = synthpass_core::fusion::check_line1_integrity(m);
+    v2.confidence.downgrade_flagged(&verdict);
+    v2.line1_integrity = Some(verdict);
+}
+
+/// The v1 `mrz_checksums_valid` bool for a Tier-2 record, straight from the
+/// deterministic read [`apply_deterministic_mrz`] installed. `None` only when no
+/// MRZ was found at all — which is the one case where the v1 field genuinely has
+/// nothing to report.
+///
+/// Deliberately not shortcut to `Some(false)` on the reasoning "we escalated, so
+/// the checks cannot have passed": the non-exhaustive `Decision` fallback arm in
+/// [`Pipeline::ocr_and_tier1`] escalates on an *unrecognized* variant, which a
+/// future policy could reach with a checksum-valid `mrz_data` in hand.
+fn mrz_checksums_valid(mrz_data: Option<&mrz::MrzData>) -> Option<bool> {
+    mrz_data.map(|m| m.checks.all_valid())
+}
+
 /// Project a Tier-2 [`ExtractionV2`] back to the legacy v1 [`Extraction`]
 /// shape, for [`PipelineResult::extracted`] / `SYNTHPASS_JSON_V1=1`. Exact for
-/// every field the LLM backend can populate — `mrz_checksums_valid` is
-/// hardcoded `None` rather than derived from `mrz.checks`: the model is never
-/// asked for it (`synthpass_llm::prompt::FIELDS` omits it) and nothing on this
-/// path ever injects it, so `None` is what the real value always was here, not
-/// a guess. (`lift_tier2_extraction`'s `ExtractionV2::from` maps an absent v1
-/// `mrz_checksums_valid` to every `mrz.checks` field being `false` — identical
-/// to what a genuine `Some(false)` would produce — so reconstructing the v1
-/// bool from `mrz.checks` would be ambiguous; only this path's own invariant
-/// resolves it.)
-fn extraction_from_v2_llm(v2: &ExtractionV2) -> Extraction {
+/// every field the LLM backend can populate.
+///
+/// `mrz_checksums_valid` has to be passed in rather than read back off
+/// `v2.mrz.checks`, because that round trip is ambiguous: `ExtractionV2::from`
+/// maps an *absent* v1 `mrz_checksums_valid` to every `mrz.checks` field being
+/// `false`, which is indistinguishable from a genuine `Some(false)`. Only the
+/// caller, holding the `mrz::MrzData` [`apply_deterministic_mrz`] used, can
+/// tell the two apart.
+///
+/// It used to be hardcoded `None` on the grounds that the model is never asked
+/// for the checksum bit (`synthpass_llm::prompt::FIELDS` omits it). That was
+/// true while `v2.mrz` was the model's own guess; it stopped being true when
+/// `v2.mrz` became the deterministic read whose failing check digits are what
+/// triggered the escalation in the first place. Emitting `null` there now would
+/// withhold a fact the pipeline knows.
+fn extraction_from_v2_llm(v2: &ExtractionV2, mrz_checksums_valid: Option<bool>) -> Extraction {
     Extraction {
         document_type: v2.fields.document_type.clone(),
         issuing_country: v2.fields.issuing_country.clone(),
@@ -1019,7 +1061,7 @@ fn extraction_from_v2_llm(v2: &ExtractionV2) -> Extraction {
         date_of_expiry: v2.fields.date_of_expiry.clone(),
         personal_number: v2.fields.personal_number.clone(),
         mrz_line: v2.mrz.as_ref().map(|m| m.lines.clone()),
-        mrz_checksums_valid: None,
+        mrz_checksums_valid,
         validity: v2.validity,
         extraction_method: v2.extraction_method.clone(),
     }
@@ -1690,14 +1732,14 @@ mod tests {
     }
 
     #[test]
-    fn extraction_from_v2_llm_round_trips_the_mock_extraction() {
-        // The trap case: `mock_extraction` sets `mrz_line` but never
+    fn extraction_from_v2_llm_takes_the_checksum_bit_from_its_caller() {
+        // The trap this guards: `mock_extraction` sets `mrz_line` but never
         // `mrz_checksums_valid` (stays `None`). Forward-lifting through
         // `ExtractionV2` folds that into every `mrz.checks` field being
         // `false` — indistinguishable, by inspecting `mrz.checks` alone, from
-        // a genuine `Some(false)`. `extraction_from_v2_llm` must still
-        // recover `None`, because on this path the model was never asked for
-        // the checksum bit, so `None` is what actually happened.
+        // a genuine `Some(false)`. So the projection must not read the bit back
+        // off `v2.mrz.checks`; only the caller, holding the `mrz::MrzData`,
+        // knows which of the two happened.
         let original = mock_extraction("P<UTO passport markdown");
         let v2 = lift_tier2_extraction(&original, Some("mock-model.gguf".into()));
 
@@ -1710,8 +1752,44 @@ mod tests {
             "sanity: the lift folds an absent v1 bool into every check being false"
         );
 
-        let round_tripped = extraction_from_v2_llm(&v2);
-        assert_eq!(round_tripped, original);
+        // With no deterministic read to speak for it, the record round-trips
+        // exactly — `None` in, `None` out.
+        assert_eq!(extraction_from_v2_llm(&v2, None), original);
+
+        // And the caller's answer wins over anything inferable from `checks`,
+        // in both directions.
+        assert_eq!(
+            extraction_from_v2_llm(&v2, Some(false)).mrz_checksums_valid,
+            Some(false)
+        );
+        assert_eq!(
+            extraction_from_v2_llm(&v2, Some(true)).mrz_checksums_valid,
+            Some(true),
+            "an all-false `checks` must not be able to override the caller"
+        );
+    }
+
+    /// `mrz_checksums_valid` reports the deterministic read, not the escalation
+    /// decision. Escalation usually implies failed checks, but the two are not
+    /// the same fact, and the non-exhaustive `Decision` fallback arm can
+    /// escalate with a valid read in hand.
+    #[test]
+    fn mrz_checksums_valid_reports_the_read_not_the_escalation() {
+        assert_eq!(mrz_checksums_valid(None), None, "no MRZ, nothing to report");
+
+        // The same specimen `HRV_TD3_MARKDOWN` embeds, and the same one-digit
+        // corruption as `HRV_TD3_BAD_CHECKSUM_MARKDOWN` (`…071` → `…070`).
+        const LINE1: &str = "P<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<";
+        const LINE2_OK: &str = "0070070071HRV8212258F1407019<<<<<<<<<<<<<<06";
+        const LINE2_BAD: &str = "0070070070HRV8212258F1407019<<<<<<<<<<<<<<06";
+
+        let valid = mrz::parse_td3(LINE1, LINE2_OK).expect("specimen parses");
+        assert_eq!(mrz_checksums_valid(Some(&valid)), Some(true));
+
+        // Structurally still a TD3 — only the check digits disagree, which is
+        // exactly the state that escalates to Tier 2.
+        let broken = mrz::parse_td3(LINE1, LINE2_BAD).expect("still parses structurally");
+        assert_eq!(mrz_checksums_valid(Some(&broken)), Some(false));
     }
 
     /// Same specimen as [`HRV_TD3_MARKDOWN`], with the document-number check
@@ -1780,6 +1858,106 @@ mod tests {
              LLM guess with no checksum bit would produce"
         );
         assert_eq!(v2.document.mrz_format, Some(MrzFormat::Td3));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Drive [`Pipeline::process_document_stream`] to its terminal event.
+    async fn run_stream(pipeline: &Pipeline, input: &Path) -> PipelineResult {
+        let (tx, mut rx) = mpsc::channel(64);
+        pipeline.process_document_stream(input, tx).await;
+        let mut done = None;
+        while let Some(event) = rx.recv().await {
+            match event {
+                ProcessEvent::Delta(_) => {}
+                ProcessEvent::Done(result) => done = Some(*result),
+                ProcessEvent::Failed(e) => panic!("stream failed: {e}"),
+            }
+        }
+        done.expect("stream emits exactly one Done")
+    }
+
+    /// The regression this whole seam exists for.
+    ///
+    /// `synthpass-serve` uses only the streaming path, so a fix applied to
+    /// `process_document` alone leaves every web upload emitting the broken
+    /// record. Asserting the two paths produce *equal* extractions — rather
+    /// than checking the streaming one against a hand-written expectation —
+    /// is what makes the next divergence of this kind fail here too.
+    #[tokio::test]
+    async fn both_tier2_paths_produce_the_same_extraction() {
+        let pipeline = || {
+            Pipeline::new(
+                Box::new(StaticOcr(HRV_TD3_BAD_CHECKSUM_MARKDOWN)),
+                Box::new(MockBackend),
+            )
+        };
+
+        let (blocking_in, blocking_dir) = temp_input("parity-blocking").await;
+        let blocking = pipeline()
+            .process_document(&blocking_in)
+            .await
+            .expect("process");
+
+        let (stream_in, stream_dir) = temp_input("parity-stream").await;
+        let streamed = run_stream(&pipeline(), &stream_in).await;
+
+        assert_eq!(blocking.method, Method::Llm, "fixture must reach Tier 2");
+        assert_eq!(streamed.method, blocking.method);
+        assert_eq!(
+            streamed.extracted_v2, blocking.extracted_v2,
+            "the streaming path must not emit a different v2 record than the \
+             blocking one for the same document"
+        );
+        assert_eq!(
+            streamed.extracted, blocking.extracted,
+            "…nor a different v1 projection"
+        );
+
+        // Spelled out rather than left implicit in the equality above: the
+        // streaming path used to lift the mock's 4-char `mrz_line` echo into
+        // `v2.mrz` with every check `false`.
+        let mrz = streamed
+            .extracted_v2
+            .as_ref()
+            .and_then(|v2| v2.mrz.as_ref())
+            .expect("a checksum-invalid MRZ still parses to Some");
+        assert!(
+            mrz.lines.contains("SPECIMEN"),
+            "streaming path must carry the deterministic read, not the mock's \
+             echo: {:?}",
+            mrz.lines
+        );
+        assert_eq!(
+            streamed.extracted.as_ref().expect("v1")["mrz_checksums_valid"],
+            Value::Bool(false),
+            "the v1 projection reports the real checksum verdict now that \
+             `mrz_line` is the real read"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&blocking_dir).await;
+        let _ = tokio::fs::remove_dir_all(&stream_dir).await;
+    }
+
+    /// `line1_integrity` is computable on the Tier-2 path — the zone was read,
+    /// it just failed its check digits — so withholding it there was a gap, not
+    /// a property of the tier.
+    #[tokio::test]
+    async fn tier2_still_reports_line1_integrity() {
+        let (input, dir) = temp_input("tier2-line1").await;
+        let pipeline = Pipeline::new(
+            Box::new(StaticOcr(HRV_TD3_BAD_CHECKSUM_MARKDOWN)),
+            Box::new(MockBackend),
+        );
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        assert_eq!(v2.extraction_method, Method::Llm.as_str());
+        assert!(
+            v2.line1_integrity.is_some(),
+            "escalating to a model does not make the zone unreadable"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
