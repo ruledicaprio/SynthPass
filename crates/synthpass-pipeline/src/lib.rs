@@ -40,8 +40,11 @@ use std::sync::Arc;
 use std::time::Instant;
 #[cfg(test)]
 use synthpass_core::v2::MrzFormat;
-use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
+use synthpass_core::v2::{
+    CheckDigits, EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, MrzBlock, Provenance,
+};
 use synthpass_core::Extraction;
+use synthpass_die::mrz_reader::mrz_format_of;
 use synthpass_die::{
     Capability, CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, ProviderError,
     Recognition, RoutingPolicy, MRZ_PROVIDER_ID,
@@ -671,6 +674,29 @@ impl Pipeline {
                 {
                     Ok(reading) => {
                         let mut v2 = reading.extraction;
+                        // The LLM is separately asked for its own `mrz_line`
+                        // guess (`synthpass_llm::prompt::FIELDS`), and the v1
+                        // lift `ExtractionV2::from` would otherwise leave that
+                        // guess sitting in `v2.mrz` — a field documented as
+                        // "exactly as validated". `stage.mrz_data` is the
+                        // pipeline's own deterministic read (already computed
+                        // once in `ocr_and_tier1`, driving the escalation
+                        // decision itself) and is always the more trustworthy
+                        // source, checksum-partial or not. Reusing the same
+                        // construction `synthpass_die::mrz_reader::extraction_v2_from_mrz`
+                        // uses for the Tier-1 path keeps the two in sync.
+                        v2.mrz = stage.mrz_data.as_ref().map(|m| MrzBlock {
+                            lines: m.mrz_lines.clone(),
+                            format: mrz_format_of(m),
+                            checks: CheckDigits {
+                                document_number: m.checks.document_number,
+                                date_of_birth: m.checks.date_of_birth,
+                                date_of_expiry: m.checks.date_of_expiry,
+                                personal_number: m.checks.personal_number,
+                                composite: m.checks.composite,
+                            },
+                        });
+                        v2.document.mrz_format = v2.mrz.as_ref().map(|block| block.format);
                         v2.trace = Some(ExtractionTrace {
                             providers: vec![
                                 MRZ_PROVIDER_ID.to_string(),
@@ -1590,11 +1616,24 @@ mod tests {
             result.extracted.is_some(),
             "v1 compat field still populated"
         );
-        // The mock echoes 4 chars of the markdown into v1's `mrz_line`; the
-        // lift carries it over but with every check digit false — a Tier-2
-        // MRZ-shaped echo is never checksum-proven.
-        let mrz = v2.mrz.as_ref().expect("lifted MRZ placeholder");
-        assert!(!mrz.checks.all_valid());
+        // The mock echoes 4 chars of the markdown into v1's `mrz_line` (a
+        // stand-in for the real LLM guessing at the MRZ zone), but
+        // `process_document` overrides `v2.mrz` from `stage.mrz_data` —
+        // the pipeline's own deterministic `mrz::find_and_parse` result —
+        // rather than trusting that guess. No real MRZ exists in this
+        // document's markdown, so `stage.mrz_data` is `None` and `v2.mrz`
+        // must be `None` too: an absent deterministic read is more honest
+        // than a fabricated candidate in a field documented as "exactly as
+        // validated" (`MrzBlock::lines`).
+        assert!(
+            v2.mrz.is_none(),
+            "no real MRZ was found, so the LLM's own mrz_line guess must be \
+             discarded rather than surfaced as if it were validated"
+        );
+        assert!(
+            v2.document.mrz_format.is_none(),
+            "mrz_format tracks mrz — both clear together"
+        );
         assert_eq!(
             v2.trace,
             Some(ExtractionTrace {
@@ -1712,6 +1751,35 @@ mod tests {
             "the specific reason must be MrzChecksumFailed, not MrzNotFound — \
              the MRZ did parse, it just didn't verify"
         );
+        // `MockBackend` echoes only the first 4 chars of the markdown
+        // ("## P") as its own `mrz_line` guess — if that leaked through,
+        // `v2.mrz` would be exactly 4 characters and every check would be
+        // `false`. It must instead reflect `stage.mrz_data`, the pipeline's
+        // real deterministic read: the full parsed MRZ, with the honest
+        // partial verdict (only `document_number`/`composite` fail — the
+        // one digit this fixture deliberately flipped).
+        let mrz = v2
+            .mrz
+            .as_ref()
+            .expect("a checksum-invalid MRZ still parses to Some");
+        assert!(
+            mrz.lines.contains("SPECIMEN"),
+            "must be the real parsed MRZ, not the mock's 4-char echo: {:?}",
+            mrz.lines
+        );
+        assert_eq!(
+            mrz.checks,
+            CheckDigits {
+                document_number: false,
+                date_of_birth: true,
+                date_of_expiry: true,
+                personal_number: true,
+                composite: false,
+            },
+            "the real, honest partial verdict — not all-false as a lifted \
+             LLM guess with no checksum bit would produce"
+        );
+        assert_eq!(v2.document.mrz_format, Some(MrzFormat::Td3));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
