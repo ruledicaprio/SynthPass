@@ -21,7 +21,7 @@ git fetch origin bench-data
 git show origin/bench-data:dataset.jsonl
 ```
 
-**n = 1410** rows (282 per profile), 2026-07-21 → 2026-07-28, across six
+**n = 1610** rows (322 per profile), 2026-07-21 → 2026-07-29, across seven
 `main` commits. Deduplicated: see "Corpus integrity" below.
 
 ## Hit rate by profile
@@ -32,12 +32,12 @@ extraction was correct". Tier 2 is not exercised here.
 
 | Profile | n | Hit rate | Median ms |
 |---|---:|---:|---:|
-| `mobile` | 282 | 65.2% | 3181 |
-| `scanner` | 282 | 64.9% | 3882 |
-| `clean` | 282 | 62.1% | 3917 |
-| `worn` | 282 | 57.8% | 4549 |
-| `border-kiosk` | 282 | 42.2% | 4603 |
-| **overall** | **1410** | **58.4%** | — |
+| `mobile` | 322 | 68.3% | 3143 |
+| `scanner` | 322 | 65.8% | 3810 |
+| `clean` | 322 | 63.0% | 3899 |
+| `worn` | 322 | 58.7% | 4342 |
+| `border-kiosk` | 322 | 42.2% | 4603 |
+| **overall** | **1610** | **59.6%** | — |
 
 Consistent with the 55–56% sequential figure `benchmarks/README.md` records as
 the honest number.
@@ -45,14 +45,14 @@ the honest number.
 ## The finding: only `border-kiosk` separates
 
 `clean` scores *below* `mobile` and `scanner`, which reads as a result until you
-check it. At n = 282 per profile it is not one:
+check it. At n = 322 per profile it is not one:
 
 | Comparison | Difference | z | Verdict |
 |---|---:|---:|---|
-| `clean` vs `mobile` | +3.2pp | +0.79 | not significant |
-| `clean` vs `scanner` | +2.8pp | +0.70 | not significant |
-| `clean` vs `worn` | −4.3pp | −1.03 | not significant |
-| `clean` vs `border-kiosk` | −19.9pp | **−4.82** | significant |
+| `clean` vs `mobile` | +5.3pp | +1.41 | not significant |
+| `clean` vs `scanner` | +2.8pp | +0.74 | not significant |
+| `clean` vs `worn` | −4.3pp | −1.13 | not significant |
+| `clean` vs `border-kiosk` | −20.8pp | **−5.41** | significant |
 
 So the honest statement is: **four of the five profiles are statistically
 indistinguishable, and only `border-kiosk` degrades the pipeline measurably.**
@@ -71,11 +71,12 @@ at this sample size. The `border-kiosk` gap is the only signal in this table.
 
 ## Failure modes
 
-586 misses. `checksum invalid` dominates every profile (529, 90%). `no MRZ
-found: NotFound` is rare and, notably, *most* common on `clean` (8) — worth a
-look on its own terms.
+650 misses. `checksum invalid` dominates every profile (591, 91%). `no MRZ
+found: NotFound` is rare (25) and, notably, ordered backwards: most common on
+`clean` (10), absent entirely on `border-kiosk` (0). Whatever costs
+`border-kiosk` its 20pp is not the detector failing to find a zone.
 
-31 misses are document-number mismatches where the MRZ read cleanly but got a
+34 misses are document-number mismatches where the MRZ read cleanly but got a
 character wrong, and the pairs are almost all the classic OCR confusions:
 
 ```
@@ -92,10 +93,10 @@ obvious next question and is not answered here.
 
 ## Corpus integrity
 
-The dataset had 1610 rows until 2026-07-29; 200 were duplicates. The nightly
+The dataset had 1810 rows until 2026-07-29; 200 were duplicates. The nightly
 seed window was derived from `days_since_epoch * count`, so a manual dispatch on
 2026-07-25 alongside the scheduled run re-measured the same 200 documents.
-Removed, and the workflow now continues from the dataset's own highest seed and
+Removed (1810 → 1610), and the workflow now continues from the dataset's own highest seed and
 refuses an append that would duplicate a `(seed, profile)` pair.
 
 Every duplicate pair agreed on `hit` — an unplanned confirmation that

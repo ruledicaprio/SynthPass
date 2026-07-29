@@ -141,7 +141,7 @@ workflow refuses to commit an append that would break that.
 That guarantee is newer than the dataset. The window used to be `days_since_epoch * count`, which
 assumed one run per UTC day; on **2026-07-25** a manual dispatch landed alongside the scheduled run,
 drew the same window, and added 200 duplicate rows. They were removed in a later commit on
-`bench-data` (1610 → 1410 rows), which is why the row count drops once in that branch's history.
+`bench-data` (1810 → 1610 rows), which is why the row count drops once in that branch's history.
 
 This is data collection only — nothing consumes this dataset yet. Because `synthpass-gen`'s
 output is fully determined by `seed`, each row is enough on its own to regenerate the exact
@@ -151,7 +151,7 @@ or RL-style work on the generator's degrade settings — that tuning logic doesn
 tracked separately.
 
 **Retention.** The branch grows by `count` rows per run (~200/day, ~40 KB/day) with no expiry, and
-nothing prunes it. At 1410 rows / 277 KB that is not yet a problem; a consumer will want to decide
+nothing prunes it. At 1610 rows / ~320 KB that is not yet a problem; a consumer will want to decide
 on a window before it is. Fetch it with `git fetch origin bench-data` — a normal checkout of `main`
 never pulls it.
 
