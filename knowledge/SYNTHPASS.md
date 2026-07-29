@@ -128,11 +128,20 @@ CI-gated today.
 
 ## Nightly data collection (`bench-data` branch)
 
-`.github/workflows/bench-data-collection.yml` runs `synthpass-bench --profile all` once a day
-against a fresh seed window (never the same documents as the CI gate or a previous day's run) and
+`.github/workflows/bench-data-collection.yml` runs `synthpass-bench --profile all` once a day and
 appends the flattened per-document outcomes — `seed`, `profile`, `hit`, `reason`, `elapsed_ms` — as
 JSON lines to `dataset.jsonl` on a dedicated `bench-data` branch (not `main`, which is protected;
-this workflow pushes there directly, unattended, no PR per run).
+this workflow pushes there directly, unattended, no PR per run). `bench-data` is an **orphan**
+branch: it shares no history with `main` and holds nothing but the dataset.
+
+Each run continues from the highest seed already in the dataset, so no document is ever measured
+twice and none overlaps the M4 CI gate. `(seed, profile)` is therefore the primary key, and the
+workflow refuses to commit an append that would break that.
+
+That guarantee is newer than the dataset. The window used to be `days_since_epoch * count`, which
+assumed one run per UTC day; on **2026-07-25** a manual dispatch landed alongside the scheduled run,
+drew the same window, and added 200 duplicate rows. They were removed in a later commit on
+`bench-data` (1810 → 1610 rows), which is why the row count drops once in that branch's history.
 
 This is data collection only — nothing consumes this dataset yet. Because `synthpass-gen`'s
 output is fully determined by `seed`, each row is enough on its own to regenerate the exact
@@ -140,3 +149,10 @@ document and its degrade parameters later; there was no need to also persist the
 intent is to build up a corpus of (parameters → outcome) examples ahead of any future auto-tuning
 or RL-style work on the generator's degrade settings — that tuning logic doesn't exist yet and is
 tracked separately.
+
+**Retention.** The branch grows by `count` rows per run (~200/day, ~40 KB/day) with no expiry, and
+nothing prunes it. At 1610 rows / ~320 KB that is not yet a problem; a consumer will want to decide
+on a window before it is. Fetch it with `git fetch origin bench-data` — a normal checkout of `main`
+never pulls it.
+
+Findings from the corpus belong in [`benchmarks/`](benchmarks/), not here.
