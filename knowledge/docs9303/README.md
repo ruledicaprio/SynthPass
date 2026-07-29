@@ -26,6 +26,15 @@ implement.
 | `Doc_9303_Part12_Public_Key_Infrastructure_for_MRTDs.md` | 12 — Public Key Infrastructure for MRTDs | CSCA/Document Signer certificate chains. Future Passive Authentication verification. |
 | `Doc_9303_Part13_Visible_Digital_Seals.md` | 13 — Visible Digital Seals | Barcode-based digital seal structure, used in Part 7's and Part 8's worked examples. Per `knowledge/ROADMAP.md`, barcode documents are their own project, not folded into the MRZ roadmap — kept here for reference regardless. |
 
+## Conformance basis
+
+[`CONFORMANCE_BASIS.md`](CONFORMANCE_BASIS.md) tracks, for the passages the
+`crates/mrz` conformance program relies on, how each was corroborated
+(worked example reproduced, cross-part agreement, or unverified) and records
+the corpus's known defects (the §4.2.3.3c length discrepancy, Part 8's
+Appendix B transcription damage). Living document, extended as later
+conformance segments lean on new passages.
+
 ## Figures
 
 `figures/` holds diagrams rendered from the source PDFs, prefixed with the
