@@ -83,6 +83,16 @@ to `synthpass-serve`'s SSE transport.
 **Consequence:** a third-party provider cannot stream. Acceptable while exactly
 one provider streams; a problem the moment a second one wants to.
 
+**This has already cost us once.** Because the streaming path assembles its own
+`ExtractionV2` rather than receiving one from a `FieldReader`, a fix applied to
+`process_document`'s Tier-2 assembly did not reach `process_document_stream` —
+and `synthpass-serve` uses only the latter, so every web upload kept emitting the
+record the fix had supposedly removed. The guard against a repeat is
+`both_tier2_paths_produce_the_same_extraction` in `synthpass-pipeline`, which
+asserts the two paths agree rather than checking either against a hand-written
+expectation. That is a test, not a structure: it catches the next divergence
+instead of preventing it.
+
 **Fix:** a `StreamingReader` sub-trait in a separate crate, or a runtime-agnostic
 sink abstraction.
 
@@ -126,3 +136,20 @@ the honest answer is a provider id, not a tier.
 
 **Fix:** deprecate `Method` in favour of reading `ExtractionTrace.providers`,
 after the trace has shipped long enough for consumers to migrate.
+
+### A v1 Tier-2 record mixes two sources with no way to tell them apart
+
+Since `apply_deterministic_mrz`, an escalated record's `mrz_line` is the
+deterministic read while its scalar fields (`document_number`, the names, the
+dates) are the model's. That is the right precedence — the deterministic read is
+always the better source — but it means a v1 consumer can see a `document_number`
+the accompanying `mrz_line` spells differently, with nothing marking which came
+from where. `ExtractionV2` carries `trace` and per-field provenance and has no
+such problem; v1 has no field to put it in.
+
+**Consequence:** bounded. v1 is emitted only behind `SYNTHPASS_JSON_V1=1`, and a
+consumer that cares can compare the two itself.
+
+**Fix:** none planned — adding provenance to v1 would defeat the point of the
+legacy shape. This entry exists so the mixing is a recorded decision rather than
+a surprise.

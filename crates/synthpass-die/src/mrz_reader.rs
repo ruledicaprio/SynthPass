@@ -210,6 +210,29 @@ fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
     }
 }
 
+/// The [`MrzBlock`] a parsed `mrz::MrzData` corresponds to: the raw zone plus
+/// the exact per-digit checksum results, carried verbatim rather than collapsed
+/// to a single bool.
+///
+/// Public for the same reason as [`mrz_format_of`], and for a sharper one: the
+/// Tier-2 escalation path in `synthpass-pipeline` must produce a *byte-identical*
+/// block to the Tier-1 path, because the same document can reach a caller
+/// through either tier. Two hand-written copies of this struct literal already
+/// drifted once; there is now one.
+pub fn mrz_block_from(m: &mrz::MrzData) -> MrzBlock {
+    MrzBlock {
+        lines: m.mrz_lines.clone(),
+        format: mrz_format_of(m),
+        checks: CheckDigits {
+            document_number: m.checks.document_number,
+            date_of_birth: m.checks.date_of_birth,
+            date_of_expiry: m.checks.date_of_expiry,
+            personal_number: m.checks.personal_number,
+            composite: m.checks.composite,
+        },
+    }
+}
+
 /// Map validated MRZ data onto the v2 schema: the check-digited fields are
 /// proven, the rest are structural parses, and the raw zone plus exact
 /// per-digit results ride along in [`MrzBlock`].
@@ -219,21 +242,11 @@ fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
 /// is what makes wiring the provider into the pipeline a refactor rather than
 /// a behaviour change.
 pub fn extraction_v2_from_mrz(m: &mrz::MrzData) -> ExtractionV2 {
-    let format = mrz_format_of(m);
+    let block = mrz_block_from(m);
     let mut v2 = ExtractionV2::from(&extraction_from_mrz(m));
     v2.provenance = Provenance::MrzChecksum;
-    v2.document.mrz_format = Some(format);
-    v2.mrz = Some(MrzBlock {
-        lines: m.mrz_lines.clone(),
-        format,
-        checks: CheckDigits {
-            document_number: m.checks.document_number,
-            date_of_birth: m.checks.date_of_birth,
-            date_of_expiry: m.checks.date_of_expiry,
-            personal_number: m.checks.personal_number,
-            composite: m.checks.composite,
-        },
-    });
+    v2.document.mrz_format = Some(block.format);
+    v2.mrz = Some(block);
     // A field a deterministic check contradicts must not keep the confidence it
     // had when nothing contradicted it.
     let verdict = synthpass_core::fusion::check_line1_integrity(m);
