@@ -155,7 +155,11 @@ fn blind_positions(lines: &str) -> u32 {
 /// without a matching [`MrzFormat`]. Fall back to the line-shape heuristic
 /// rather than asserting a wrong variant: the geometry is recoverable from the
 /// zone even when the name for it is not.
-fn mrz_format_of(m: &mrz::MrzData) -> MrzFormat {
+///
+/// Public so `synthpass-pipeline` can reuse this mapping when it has its own
+/// checksum-tested `mrz::MrzData` in hand (the Tier-2 escalation path) rather
+/// than re-guessing the format from raw text or duplicating the match arm.
+pub fn mrz_format_of(m: &mrz::MrzData) -> MrzFormat {
     match m.format {
         mrz::Format::Td1 => MrzFormat::Td1,
         mrz::Format::Td2 => MrzFormat::Td2,
