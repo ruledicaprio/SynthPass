@@ -273,6 +273,16 @@ const CODES: &[(&str, &str)] = &[
         "XPO",
         "International Criminal Police Organization (INTERPOL)",
     ),
+    ("XCE", "Council of Europe"),
+    ("XES", "Organization of Eastern Caribbean States (OECS)"),
+    ("XMP", "Parliamentary Assembly of the Mediterranean (PAM)"),
+    ("XDC", "Southern African Development Community"),
+    // Deprecated but valid — may still appear on documents issued before the
+    // code was withdrawn.
+    ("ANT", "Netherlands Antilles"),
+    ("NTZ", "Neutral Zone"),
+    // ICAO-internal: used only when ICAO itself digitally signs a master list.
+    ("IAO", "International Civil Aviation Organization"),
 ];
 
 /// Map a 3-letter ICAO/ISO 3166-1 code to a country or entity name.
@@ -320,6 +330,31 @@ mod tests {
         // Unknown / empty.
         assert_eq!(country_name("ZZZ"), None);
         assert_eq!(country_name(""), None);
+    }
+
+    #[test]
+    fn maps_the_seven_codes_added_by_the_full_registry_sweep() {
+        // Part 3 §5 registry, Parts A-H — segment S5 added these after a full
+        // diff against the codes already present in `CODES`.
+        assert_eq!(country_name("XCE"), Some("Council of Europe"));
+        assert_eq!(
+            country_name("XES"),
+            Some("Organization of Eastern Caribbean States (OECS)")
+        );
+        assert_eq!(
+            country_name("XMP"),
+            Some("Parliamentary Assembly of the Mediterranean (PAM)")
+        );
+        assert_eq!(
+            country_name("XDC"),
+            Some("Southern African Development Community")
+        );
+        assert_eq!(country_name("ANT"), Some("Netherlands Antilles"));
+        assert_eq!(country_name("NTZ"), Some("Neutral Zone"));
+        assert_eq!(
+            country_name("IAO"),
+            Some("International Civil Aviation Organization")
+        );
     }
 
     #[test]

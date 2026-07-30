@@ -1,7 +1,7 @@
 # Corpus coverage — comprehensive world passport-check backlog
 
 Tracks Tier-1 MRZ corpus coverage against every ISO/ICAO country/entity code in
-`crates/mrz/src/countries.rs` (230 codes). This is the concrete backlog behind the "wider
+`crates/mrz/src/countries.rs` (238 codes). This is the concrete backlog behind the "wider
 real-world corpus is the natural next accuracy milestone" note in
 `knowledge/ARCHITECTURE.md` §8 — grown one individually-vetted specimen at a time, per the
 checklist in `CONTRIBUTING.md`. **PRADO (`consilium.europa.eu/prado`) is never a source
@@ -24,8 +24,8 @@ example give an instant first-pass check when a new candidate specimen is droppe
 | Negative-control specimen only (no MRZ on that page/document) | 1 |
 | Specimen in `samples/`, not yet wired into the automated corpus | 9 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 207 |
-| **Total tracked codes** | **230** |
+| No specimen yet | 215 |
+| **Total tracked codes** | **238** |
 
 ## Full table
 
@@ -186,6 +186,7 @@ example give an instant first-pass check when a new candidate specimen is droppe
 | FIN | Finland | -- | No specimen yet | -- |
 | FRA | France | -- | No specimen yet | -- |
 | DEU | Germany | -- | No specimen yet | -- |
+| D | Germany | -- | No specimen yet | Legacy single-letter code, Doc 9303 Part 3 §5 Part A |
 | GRC | Greece | -- | No specimen yet | -- |
 | HUN | Hungary | -- | No specimen yet | -- |
 | ISL | Iceland | -- | No specimen yet | -- |
@@ -261,3 +262,10 @@ example give an instant first-pass check when a new candidate specimen is droppe
 | XCO | Common Market for Eastern and Southern Africa (COMESA) | -- | No specimen yet | -- |
 | XEC | Economic Community of West African States (ECOWAS) | -- | No specimen yet | -- |
 | XPO | International Criminal Police Organization (INTERPOL) | -- | No specimen yet | -- |
+| XCE | Council of Europe | -- | No specimen yet | -- |
+| XES | Organization of Eastern Caribbean States (OECS) | -- | No specimen yet | -- |
+| XMP | Parliamentary Assembly of the Mediterranean (PAM) | -- | No specimen yet | -- |
+| XDC | Southern African Development Community | -- | No specimen yet | -- |
+| ANT | Netherlands Antilles | -- | No specimen yet | Deprecated in ISO 3166; valid on documents issued before withdrawal |
+| NTZ | Neutral Zone | -- | No specimen yet | Deprecated in ISO 3166; valid on documents issued before withdrawal |
+| IAO | International Civil Aviation Organization | -- | No specimen yet | Used only when ICAO digitally signs a master list |

@@ -296,7 +296,7 @@ Both are off by default, keeping the base crate zero-dependency (and
 wasm-clean):
 
 - **`serde`** — derives `Serialize` + `Deserialize` on `MrzData`, `Checks`,
-  `Format`, `Td3Fields`, `Date`, and `DateValidity`.
+  `Format`, `Td3Fields`, `Date`, `DateValidity`, and `DateCompleteness`.
 - **`zeroize`** — derives `ZeroizeOnDrop` on `MrzData`, wiping the PII-bearing
   `String` fields from memory when the value is dropped.
 
