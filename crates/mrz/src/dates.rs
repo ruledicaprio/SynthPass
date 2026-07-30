@@ -72,6 +72,65 @@ pub fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
+/// How much of a six-character MRZ date field is actually known.
+///
+/// Doc 9303 Part 3 §4.8 (`:547`) lets an issuer fill unknown date-of-birth
+/// positions with `<`. Because a filler counts as zero for check-digit
+/// purposes (`:563`), an all-filler date of birth with check digit `0` is a
+/// *valid* field, not a corrupt read — this type is what lets a caller tell
+/// the two apart. See [`date_completeness`] to classify a raw field, and
+/// [`crate::MrzData::date_of_birth_completeness`] for where a parsed value
+/// ends up.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum DateCompleteness {
+    /// All six characters are ASCII digits: a complete, ordinary date.
+    #[default]
+    Complete,
+    /// A mix of ASCII digits and `<` fillers: part of the date is known.
+    PartiallyUnknown,
+    /// All six characters are `<` fillers: the date is entirely unknown, per
+    /// Doc 9303 Part 3 §4.8 — not a bad read.
+    Unknown,
+    /// Not six characters, or contains a character that is neither an ASCII
+    /// digit nor `<`: not a conformant MRZ date field at all.
+    Malformed,
+}
+
+/// Classify a raw six-character MRZ `YYMMDD` date field.
+///
+/// [`expand_date`] / [`expand_date_with_pivot`] leave any input that is not
+/// entirely ASCII digits untouched (existing behaviour, unchanged by this
+/// function) rather than expanding it to an ISO date — this function is how
+/// a caller interprets what it got back: a `date_of_birth` string that isn't
+/// `YYYY-MM-DD` shaped could mean "conformantly unknown" or "OCR garbage",
+/// and only this classification of the *raw* field (not the expanded one)
+/// can tell those apart, since a complete date is reshaped to ten characters
+/// and the original `YYMMDD` is not recoverable from it afterward.
+///
+/// Rules, in order:
+/// - length != 6 → [`DateCompleteness::Malformed`]
+/// - all six ASCII digits → [`DateCompleteness::Complete`]
+/// - all six `<` → [`DateCompleteness::Unknown`]
+/// - only ASCII digits and `<`, at least one of each → [`DateCompleteness::PartiallyUnknown`]
+/// - anything else → [`DateCompleteness::Malformed`]
+pub fn date_completeness(yymmdd: &str) -> DateCompleteness {
+    if yymmdd.len() != 6 {
+        return DateCompleteness::Malformed;
+    }
+    let digits = yymmdd.chars().filter(|c| c.is_ascii_digit()).count();
+    let fillers = yymmdd.chars().filter(|&c| c == '<').count();
+    if digits + fillers != yymmdd.len() {
+        return DateCompleteness::Malformed;
+    }
+    match (digits, fillers) {
+        (6, 0) => DateCompleteness::Complete,
+        (0, 6) => DateCompleteness::Unknown,
+        _ => DateCompleteness::PartiallyUnknown,
+    }
+}
+
 /// Number of days in `month` of `year`; `0` for an out-of-range `month`
 /// (`0` or `> 12`) so callers get an always-false range rather than a panic.
 fn days_in_month(year: i32, month: u32) -> u32 {
@@ -231,6 +290,25 @@ mod tests {
     // text; corroborated via Part 6's literal TD2 specimen).
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
     const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    #[test]
+    fn date_completeness_classifies_all_five_cases() {
+        // Complete: six ASCII digits.
+        assert_eq!(date_completeness("740812"), DateCompleteness::Complete);
+        // Unknown: six fillers.
+        assert_eq!(date_completeness("<<<<<<"), DateCompleteness::Unknown);
+        // Partially unknown: a mix of digits and fillers.
+        assert_eq!(
+            date_completeness("74<<12"),
+            DateCompleteness::PartiallyUnknown
+        );
+        // Malformed: wrong length.
+        assert_eq!(date_completeness(""), DateCompleteness::Malformed);
+        assert_eq!(date_completeness("74081"), DateCompleteness::Malformed); // 5 chars
+        assert_eq!(date_completeness("7408122"), DateCompleteness::Malformed); // 7 chars
+                                                                               // Malformed: contains a character that is neither a digit nor `<`.
+        assert_eq!(date_completeness("7X0812"), DateCompleteness::Malformed);
+    }
 
     #[test]
     fn date_century_pivot() {
