@@ -45,6 +45,18 @@
 //! mapped to the filler `<`, and every fixed-width field is padded with `<`
 //! or truncated to its exact width — this function never panics and always
 //! returns exactly 44+1+44 = 89 characters.
+//!
+//! The `surname`/`given_names` pair feeding the name field is the one
+//! exception to the blanket "non-alphanumeric maps to filler" rule above:
+//! ICAO 9303 Part 3 §4.6 defines punctuation-specific handling for names
+//! (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:509-535`)
+//! that an apostrophe is dropped with no filler, not mapped to one — see
+//! [`clean_name_half`] for the full rule set. Every other field
+//! (`document_number`, `personal_number`/`optional_data`) keeps the blanket
+//! [`clean`] behavior, per that same Part 3 passage read together with
+//! `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:415`, which specifies
+//! those fields as flat alphanumeric-or-filler, with no name-style
+//! punctuation carve-out.
 
 use crate::checksum::check_digit;
 #[cfg(feature = "serde")]
@@ -120,10 +132,177 @@ fn field(s: &str, width: usize) -> String {
     out
 }
 
-/// Build the name field: `SURNAME<<GIVEN<NAMES`, padded/truncated to `width`.
+/// Clean one half (primary or secondary identifier) of a name field per
+/// ICAO 9303 Part 3 §4.6
+/// (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:509-535`).
+/// Unlike [`clean`], this does **not** map every non-alphanumeric character
+/// to the filler `<` — names get their own punctuation rules:
+///
+/// - `A`-`Z` (after uppercasing) is kept as-is.
+/// - Hyphen (`:517-521`), comma (`:523-532`), and whitespace each become a
+///   single separator filler `<`.
+/// - **Apostrophe is dropped entirely, with no filler in its place**
+///   (`:511-515`) — e.g. `O'CONNOR` becomes `OCONNOR`, not `O<CONNOR`. This
+///   is the one rule the crate got wrong before this function existed.
+/// - Every other punctuation character is likewise dropped entirely, with
+///   no filler (`:534-535`).
+/// - `0`-`9` is kept as-is. Part 3 §4.6 (`:507`) states plainly that
+///   "numeric characters shall not be used in the name fields of the MRZ",
+///   but — unlike the apostrophe/hyphen/comma cases above — it defines no
+///   mapping for one that shows up anyway. Silently rewriting a digit to a
+///   filler would erase information with no textual basis in the spec, so
+///   this function instead preserves digits verbatim, matching the
+///   "alphanumeric survives untouched" behavior [`clean`] already applies
+///   to the document-number and optional-data fields. A digit reaching this
+///   function means the caller handed it a name that isn't spec-clean;
+///   per CLAUDE.md's OCR philosophy ("every field should be validated"),
+///   that validation belongs upstream of emission, not inside it.
+///
+/// After the per-character pass, consecutive separators collapse to one and
+/// leading/trailing separators are trimmed. That collapse is what makes
+/// `"ANNA, MARIA"` (a comma *immediately followed by* a space) yield
+/// `ANNA<MARIA` rather than `ANNA<<MARIA`, matching
+/// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:531-532`'s worked example.
+fn clean_name_half(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut last_was_sep = false;
+    for c in s.chars() {
+        let u = c.to_ascii_uppercase();
+        if u.is_ascii_alphanumeric() {
+            out.push(u);
+            last_was_sep = false;
+        } else if u == '\'' {
+            // Apostrophe: dropped, no filler (:511-515). `last_was_sep` is
+            // deliberately left unchanged — an apostrophe is transparent to
+            // separator collapsing on either side of it.
+        } else if (u == '-' || u == ',' || u.is_whitespace()) && !last_was_sep {
+            out.push('<');
+            last_was_sep = true;
+        }
+        // Every other punctuation character: dropped, no filler (:534-535).
+    }
+    // Trim leading/trailing separators left over from a name starting or
+    // ending on a hyphen/comma/space (e.g. a stray leading space).
+    out.trim_matches('<').to_string()
+}
+
+/// Truncate the `primary`/`secondary` name-field components (already run
+/// through [`clean_name_half`]) to fit exactly `width` characters, when
+/// their combined length exceeds it.
+///
+/// ICAO 9303 Part 4 §4.2.3 (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`)
+/// documents *several* issuer-discretionary truncation strategies —
+/// truncating trailing components to initials, truncating components to a
+/// shorter fixed length, or (this function's choice) dropping whole
+/// components from the end and, if needed, cutting the last one short. Part
+/// 4 does not prefer any one of these; there is no single "the" ICAO
+/// truncation algorithm, so this is one conformant choice among several,
+/// not a canonical behavior.
+///
+/// What Part 4 *does* make normative (`:465`, `:467`) is:
+/// - a name that fits within `width` is never truncated — callers only
+///   reach this function when it does not fit;
+/// - when truncation happens, the **last character of the name field**
+///   must be alphabetic `A`-`Z`, as the reader's only signal that
+///   truncation occurred.
+///
+/// This function guarantees the second rule by construction: it assembles
+/// whole `<`-or-`<<`-separated components until the next one would overflow
+/// `width`, then — since every component is letters-only (guaranteed by
+/// [`clean_name_half`]) — either takes a letters-only prefix of that next
+/// component to land exactly on `width`, or (if there is no room left even
+/// for the separator that would precede it) borrows straight from the next
+/// component's letters instead of emitting a separator nothing follows.
+/// Either way the character written last is always a letter, and the
+/// returned string is always exactly `width` characters (as long as
+/// `primary`/`secondary` together contain at least `width` characters,
+/// which holds whenever this function is called, since it's only invoked
+/// when the combined length exceeds `width`).
+///
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:585-587` documents that
+/// this ambiguity runs both ways:
+/// a name that happens to fill the field exactly, with no truncation at
+/// all, is indistinguishable from a truncated one by the same rule — "this
+/// name has not been truncated but it must be assumed that it has been
+/// truncated". That is spec-documented ambiguity to design around, not a
+/// bug to fix later; ICAO's own `PAPANDROPOULOUS` example
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:584`) is exactly this
+/// case, and is pinned as a non-truncating golden vector in
+/// `tests/icao_vectors.rs` for that reason.
+fn truncate_name_components(primary: &str, secondary: &str, width: usize) -> String {
+    // (separator-before, component) pairs, in emission order. The very
+    // first component (if any) has an empty separator; primary/primary and
+    // secondary/secondary components are joined by `<`; primary/secondary
+    // is joined by `<<`.
+    let mut parts: Vec<(&str, &str)> = Vec::new();
+    let mut primary_components = primary.split('<').filter(|c| !c.is_empty());
+    if let Some(first) = primary_components.next() {
+        parts.push(("", first));
+    }
+    for component in primary_components {
+        parts.push(("<", component));
+    }
+    let mut secondary_components = secondary.split('<').filter(|c| !c.is_empty());
+    if let Some(first) = secondary_components.next() {
+        parts.push(("<<", first));
+    }
+    for component in secondary_components {
+        parts.push(("<", component));
+    }
+
+    let mut out = String::with_capacity(width);
+    for (separator, component) in parts {
+        let remaining = width.saturating_sub(out.len());
+        if remaining == 0 {
+            break;
+        }
+        let full_len = separator.len() + component.len();
+        if full_len <= remaining {
+            out.push_str(separator);
+            out.push_str(component);
+            continue;
+        }
+        // This component doesn't fit whole. Prefer letters over a
+        // separator that nothing would follow, so the field always ends on
+        // an alphabetic character:
+        if separator.len() < remaining {
+            out.push_str(separator);
+            let take = remaining - separator.len();
+            out.push_str(&component[..take]);
+        } else {
+            // Not even room for the separator — borrow straight from this
+            // component's letters instead.
+            let take = remaining.min(component.len());
+            out.push_str(&component[..take]);
+        }
+        break;
+    }
+    out
+}
+
+/// Build the name field: `SURNAME<<GIVEN<NAMES`, padded/truncated to
+/// `width`. Each half is cleaned independently by [`clean_name_half`] per
+/// ICAO 9303 Part 3 §4.6 before joining — see that function's doc comment
+/// for the punctuation rules — and, when the combined result overflows
+/// `width`, [`truncate_name_components`] applies this crate's truncation
+/// strategy (documented there).
 fn name_field(surname: &str, given_names: &str, width: usize) -> String {
-    let combined = format!("{}<<{}", clean(surname), clean(given_names));
-    field(&combined, width)
+    let primary = clean_name_half(surname);
+    let secondary = clean_name_half(given_names);
+    // `format!("{p}<<")` then padding with fillers is byte-identical to
+    // padding `p` alone when `secondary` is empty (both just place `<` in
+    // every position after `p`), so the empty-secondary case needs no
+    // special-casing here.
+    let combined = format!("{primary}<<{secondary}");
+    if combined.len() <= width {
+        // `field` re-cleans its input via `clean`, but `combined` already
+        // contains only `[A-Z0-9<]`, on which `clean` is a no-op — so this
+        // is purely padding/truncation to `width`, not a second cleaning
+        // pass with different rules.
+        return field(&combined, width);
+    }
+    let truncated = truncate_name_components(&primary, &secondary, width);
+    field(&truncated, width)
 }
 
 /// The 9-character document-number field, its check-digit character, and any

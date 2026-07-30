@@ -167,6 +167,55 @@ proptest! {
     ) {
         let _ = parse_mrv_a(&l1, &l2);
     }
+
+    /// `format_td3`'s name field (`emit::clean_name_half` /
+    /// `emit::truncate_name_components`, segment S3 — ICAO 9303 Part 3 §4.6
+    /// punctuation handling) must never panic on arbitrary surname/given_names
+    /// input and must always produce an exact-width line, however much
+    /// punctuation, digits, or raw `any::<char>()` noise the input contains.
+    /// Unlike `short_field_strategy()`/`name_strategy()` elsewhere in this
+    /// suite (deliberately `[A-Z]`-only, for round-trip equality), this draws
+    /// from the same noisy `mrz_ish_char` population `arbitrary_text()` uses.
+    #[test]
+    fn format_td3_name_field_never_panics_on_arbitrary_input(
+        surname in prop::collection::vec(mrz_ish_char(), 0..80).prop_map(|c| c.into_iter().collect::<String>()),
+        given_names in prop::collection::vec(mrz_ish_char(), 0..80).prop_map(|c| c.into_iter().collect::<String>()),
+    ) {
+        let fields = Td3Fields {
+            surname,
+            given_names,
+            issuing_country: "UTO".to_string(),
+            ..Td3Fields::default()
+        };
+        let mrz = format_td3(&fields);
+        let (l1, l2) = mrz.split_once('\n').unwrap();
+        prop_assert_eq!(l1.chars().count(), 44);
+        prop_assert_eq!(l2.chars().count(), 44);
+    }
+
+    /// The one rule ICAO 9303 Part 4 §4.2.3 makes normative about truncation
+    /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:467`): whenever a name
+    /// is truncated, the name field's last character must be alphabetic
+    /// `A`-`Z`. `surname`/`given_names` are both drawn from a 20-40 char
+    /// letters-only range, so their combined length (>= 20 + 2 + 20 = 42) is
+    /// always past TD3's 39-char name field, guaranteeing truncation fires on
+    /// every case `emit::truncate_name_components` handles.
+    #[test]
+    fn truncated_td3_name_field_always_ends_alphabetic(
+        surname in "[A-Z]{20,40}",
+        given_names in "[A-Z]{20,40}",
+    ) {
+        let fields = Td3Fields {
+            surname,
+            given_names,
+            issuing_country: "UTO".to_string(),
+            ..Td3Fields::default()
+        };
+        let mrz = format_td3(&fields);
+        let (l1, _l2) = mrz.split_once('\n').unwrap();
+        let last = l1.chars().next_back().unwrap();
+        prop_assert!(last.is_ascii_alphabetic(), "name field ended in {last:?}, not A-Z: {l1:?}");
+    }
 }
 
 /// A document number of arbitrary MRZ-charset length 1..=20 — the whole
