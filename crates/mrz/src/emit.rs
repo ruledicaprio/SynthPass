@@ -139,20 +139,23 @@ struct DocNumber {
 /// Encode a document number, using the ICAO 9303 part 4 §4.2.2.2 overflow form
 /// when it exceeds 9 characters and the remainder fits `optional_width`.
 ///
-/// The overflow form prints the first 8 characters plus a filler, sets the
-/// check-digit position to a filler, and writes `remainder + check digit over
-/// the whole number + a terminating filler` at the start of the optional field.
-/// If the remainder cannot fit, the number is truncated to 9 as before — this
-/// function never produces an over-long field.
+/// The overflow form prints all nine principal characters, sets the
+/// check-digit position to a filler (instead of a check digit, per Part 5
+/// note j / Part 4 §4.2.2.2) to signal a truncated number, and writes
+/// `remainder + check digit over the whole number + a terminating filler` at
+/// the start of the optional field. The check digit is computed over the nine
+/// principal characters concatenated with the remainder — i.e. `cleaned`
+/// itself. If the remainder cannot fit, the number is truncated to 9 as
+/// before — this function never produces an over-long field.
 fn doc_number(number: &str, optional_width: usize) -> DocNumber {
     let cleaned = clean(number);
-    let remainder_len = cleaned.len().saturating_sub(8);
+    let remainder_len = cleaned.len().saturating_sub(9);
     if cleaned.len() > 9 && remainder_len + 2 <= optional_width {
         let check = digit_char(&cleaned);
         return DocNumber {
-            field: format!("{}<", &cleaned[0..8]),
+            field: cleaned[0..9].to_string(),
             check: '<',
-            optional_prefix: format!("{}{check}<", &cleaned[8..]),
+            optional_prefix: format!("{}{check}<", &cleaned[9..]),
         };
     }
     let field = field(&cleaned, 9);
