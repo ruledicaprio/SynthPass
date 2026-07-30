@@ -573,3 +573,69 @@ fn name_encoding_matches_icao_worked_examples() {
         assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
     }
 }
+
+// ---- Part 3 §6 Table A transliteration (S4) ----
+
+/// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1572-1574` (Appendix B,
+/// informative): "the name in a European national script: Térèsa CAÑON and
+/// the transliteration into the MRZ: `CANXXON<<TERESA`".
+///
+/// This is the `XxSuffix` style (`Ñ`→`NXX`), not the `Expanded` style the
+/// emit path wires in by default (`Ñ`→`N`), so it is built here directly
+/// from [`mrz::transliterate`] plus the same `<<`-join/pad-to-width §4.6
+/// applies, rather than through `format_td3` (which is Expanded-only).
+#[test]
+fn xxsuffix_golden_vector_teresa_canon() {
+    use mrz::{transliterate, TransliterationStyle};
+
+    let surname = transliterate("CAÑON", TransliterationStyle::XxSuffix);
+    let given_names = transliterate("Térèsa", TransliterationStyle::XxSuffix);
+    assert_eq!(surname, "CANXXON");
+    assert_eq!(given_names, "TERESA");
+
+    let combined = format!("{surname}<<{given_names}");
+    assert_eq!(combined, "CANXXON<<TERESA");
+
+    let mut padded = combined.clone();
+    while padded.len() < 39 {
+        padded.push('<');
+    }
+    assert_eq!(padded.len(), 39);
+    assert!(padded.starts_with(&combined));
+    assert!(padded[combined.len()..].chars().all(|c| c == '<'));
+}
+
+/// Emit-path regression: `clean_name_half` now transliterates Table A
+/// characters (`Expanded` style) instead of silently dropping them as
+/// "other punctuation". Exercises the real `format_td3` path end-to-end.
+#[test]
+fn emit_transliterates_table_a_characters_expanded() {
+    let cases: &[(&str, &str)] = &[
+        ("MÜLLER", "MUELLER"),
+        ("Térèsa", "TERESA"),
+        ("GROß", "GROSS"),
+        ("Øst", "OEST"),
+        ("Škoda", "SKODA"),
+        ("CAÑON", "CANON"),
+    ];
+    for (surname, expected) in cases {
+        let mrz = format_td3(&Td3Fields {
+            surname: (*surname).into(),
+            ..Default::default()
+        });
+        let line1 = mrz.split_once('\n').unwrap().0;
+        // Name field starts at offset 5 (doc code 2 + issuing country 3).
+        let name_field = &line1[5..];
+        let expected_field: String = {
+            let mut s = expected.to_string();
+            while s.len() < 39 {
+                s.push('<');
+            }
+            s
+        };
+        assert_eq!(
+            name_field, expected_field,
+            "surname {surname:?} should transliterate to {expected:?}"
+        );
+    }
+}

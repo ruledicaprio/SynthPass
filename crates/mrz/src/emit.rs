@@ -138,7 +138,19 @@ fn field(s: &str, width: usize) -> String {
 /// Unlike [`clean`], this does **not** map every non-alphanumeric character
 /// to the filler `<` — names get their own punctuation rules:
 ///
-/// - `A`-`Z` (after uppercasing) is kept as-is.
+/// - Each character is first uppercased via `char::to_uppercase()` (not
+///   `to_ascii_uppercase`), then, for **each** resulting char `u` (usually
+///   one, but see `ß`→`SS` below):
+///   1. if `u` is a Table A national character (Part 3 §6,
+///      `:703-807`), it is replaced by its [`TransliterationStyle::Expanded`]
+///      transliteration — e.g. `Ü`→`UE`, `Ñ`→`N` — with **no** separator
+///      pushed around it. This is the transliteration Part 3 `:493` mandates
+///      ("The issuing State or organization shall transliterate national
+///      characters using only the allowed OCR-B characters") and fixes what
+///      was previously silent data loss: `MÜLLER` used to emit as `MLLER`,
+///      now `MUELLER`.
+///   2. else if `u` is `A`-`Z` or `0`-`9`, it is kept as-is.
+///   3. else the existing punctuation rules below apply to `u`.
 /// - Hyphen (`:517-521`), comma (`:523-532`), and whitespace each become a
 ///   single separator filler `<`.
 /// - **Apostrophe is dropped entirely, with no filler in its place**
@@ -167,19 +179,26 @@ fn clean_name_half(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_was_sep = false;
     for c in s.chars() {
-        let u = c.to_ascii_uppercase();
-        if u.is_ascii_alphanumeric() {
-            out.push(u);
-            last_was_sep = false;
-        } else if u == '\'' {
-            // Apostrophe: dropped, no filler (:511-515). `last_was_sep` is
-            // deliberately left unchanged — an apostrophe is transparent to
-            // separator collapsing on either side of it.
-        } else if (u == '-' || u == ',' || u.is_whitespace()) && !last_was_sep {
-            out.push('<');
-            last_was_sep = true;
+        for u in c.to_uppercase() {
+            if let Some(t) = crate::translit::transliterate_char(
+                u,
+                crate::translit::TransliterationStyle::Expanded,
+            ) {
+                out.push_str(t);
+                last_was_sep = false;
+            } else if u.is_ascii_alphanumeric() {
+                out.push(u);
+                last_was_sep = false;
+            } else if u == '\'' {
+                // Apostrophe: dropped, no filler (:511-515). `last_was_sep`
+                // is deliberately left unchanged — an apostrophe is
+                // transparent to separator collapsing on either side of it.
+            } else if (u == '-' || u == ',' || u.is_whitespace()) && !last_was_sep {
+                out.push('<');
+                last_was_sep = true;
+            }
+            // Every other punctuation character: dropped, no filler (:534-535).
         }
-        // Every other punctuation character: dropped, no filler (:534-535).
     }
     // Trim leading/trailing separators left over from a name starting or
     // ending on a hyphen/comma/space (e.g. a stray leading space).

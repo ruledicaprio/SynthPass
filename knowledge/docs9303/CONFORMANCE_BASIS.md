@@ -196,6 +196,47 @@ no single canonical algorithm to reproduce, so this crate's own documented
 choice is verified against its own two normative constraints instead, via
 property test rather than a worked example.
 
+### Part 3 §6 A — transliteration of multinational Latin-based characters
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:703-807` (Table A, 95 rows,
+U+00C0…U+1E9E, sorted ascending by code point, no duplicate keys),
+`:1568-1574` (Appendix B, informative, "Térèsa CAÑON" worked example)
+
+Segment S4 added `crates/mrz/src/translit.rs`'s `TABLE_A` — a verbatim
+transcription of Table A, keyed on the Unicode column so binary search is
+valid — and wired its `Expanded` style into `emit.rs`'s `clean_name_half`,
+which previously dropped every Table A character as unrecognized punctuation
+(`MÜLLER` emitted as `MLLER`). That silent data loss was non-conformant
+against `:493` ("The issuing State or organization shall transliterate
+national characters using only the allowed OCR-B characters"); this segment
+fixes it.
+
+Table A itself has no independent worked-arithmetic example to reproduce
+(unlike the check-digit tables) — its only in-corpus corroboration is
+Appendix B's "Térèsa CAÑON" → `CANXXON<<TERESA` name, which this crate
+reproduces exactly (`crates/mrz/tests/icao_vectors.rs`,
+`xxsuffix_golden_vector_teresa_canon`) using the `XxSuffix` style (`Ñ`→`NXX`)
+plus the existing §4.6 name encoding. The `Expanded` style wired into
+`clean_name_half` is a different, also-ICAO-listed choice for the same five
+ambiguous rows (`Ñ`→`N` rather than `NXX`) — see
+`crates/mrz/src/translit.rs`'s `TransliterationStyle` doc comment for the
+full table of what each named style picks and why the grouping into three
+named styles is this crate's own organisation of a choice ICAO leaves open,
+not something Doc 9303 itself names.
+
+Table integrity (95 rows, strictly ascending, no duplicate keys, every
+variant `[A-Z]+`, `Expanded == variants[0]` for all rows, exactly the five
+documented code points are multi-valued) is asserted directly against the
+table in `crates/mrz/src/translit.rs`'s unit tests, and the
+uppercase-before-lookup design is checked by a lowercase-round-trip test
+over all 95 rows (with one documented, harmless exception — see the defect
+entry below).
+
+**Status: worked example reproduced** for the Appendix B golden vector.
+**Unverified** for the remaining 94 rows beyond internal table-integrity
+checks — there is no further worked example in this corpus to check them
+against.
+
 ## Known corpus defects
 
 ### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies
@@ -276,6 +317,78 @@ consequences.
 
 **Status: unverified — known damage, documented in place rather than
 guessed at.**
+
+### Part 3 §6 A Table A — four damaged "National character" cells
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:748` (U+0110),
+`:765` (U+0131), `:766` (U+0132), `:772` (U+013F)
+
+Four Table A rows had a "National character" cell that disagreed with the
+row's own Unicode code point — corpus transcription damage, not an ICAO
+erratum, since the Unicode column is unambiguous and each fix makes the two
+columns agree instead of merely picking a plausible-looking glyph:
+
+- `:748` — U+0110 should render `Đ` (D WITH STROKE); the corpus showed `Ð`
+  (U+00D0, ETH — already a *different* Table A row, `:723`).
+- `:765` — U+0131 should render `ı` (LATIN SMALL LETTER DOTLESS I); the
+  corpus showed ASCII `I` (U+0049).
+- `:766` — U+0132 should render `Ĳ` (LATIN CAPITAL LIGATURE IJ); the corpus
+  showed the two-character decomposition `IJ` (U+0049 U+004A).
+- `:772` — U+013F should render `Ŀ` (LATIN CAPITAL LETTER L WITH MIDDLE
+  DOT); the corpus showed `L·` (U+004C U+00B7, a plain L followed by a
+  middle-dot punctuation mark).
+
+Segment S4 corrected all four cells in place (four individual edits, verified
+by `git diff` to touch exactly those four lines and nothing else — see the
+segment's own verification). The "Recommended transliteration" column was
+already correct for all four rows and is unaffected.
+
+**Status: corrected in the corpus** (not merely worked around in code) —
+the Unicode column is authoritative and unambiguous for all four.
+
+### Part 3 §6 A / Appendix B — "nine characters" count matches nothing
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1568` (Appendix B, informative)
+
+Appendix B's prose says there is "a group of **nine** characters that are
+treated specially" in transliteration. The normative Table A
+(`:703-807`) has **five** multi-valued rows (U+00C4, U+00C5, U+00D1, U+00D6,
+U+00DC) and **eleven** rows with at least one multi-character variant
+(the five multi-valued rows above, plus U+00C6, U+00D8, U+00DE, U+0132,
+U+0152, U+1E9E, each single-valued but recommending a 2-3 letter
+transliteration). Neither count is nine, and no obvious subset or
+combination of the two produces nine either.
+
+Appendix B is explicitly informative; Table A is normative. This crate's
+`translit.rs` implements Table A as transcribed and does not attempt to
+reverse-engineer which nine characters Appendix B might have meant.
+
+**Status: unverified — discrepancy recorded, not resolved.** Table A (the
+normative table) governs.
+
+### Part 3 §6 A Table A — U+0130 lowercase round-trip exception
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:764`
+
+U+0130 (İ, LATIN CAPITAL LETTER I WITH DOT ABOVE) is a genuine exception to
+the otherwise-universal invariant that every Table A row's lowercase
+counterpart uppercases back to something this crate transliterates
+identically to the row itself. Rust's `char::to_lowercase` has no single-char
+*simple* lowercase mapping for İ; it uses the Unicode *full* case mapping
+instead, which is the two-character sequence `i` + COMBINING DOT ABOVE
+(U+0307). Neither `transliterate`'s bare per-char table lookup nor its
+ASCII-passthrough branch recombines that sequence back to İ's own output —
+only `emit.rs`'s `clean_name_half`, one layer up, which drops unrecognized
+punctuation entirely, happens to discard the stray U+0307 and land on the
+same result (`I`) İ's own row prescribes.
+
+This was found while implementing the table-integrity test suite, not
+flagged in advance — see `crates/mrz/src/translit.rs`'s
+`lowercase_round_trip` test, which documents and explicitly skips this one
+row rather than silently weakening the assertion for all 95.
+
+**Status: unverified — confirmed as a genuine, narrow, harmless exception,
+not a bug in this crate's Table A transcription or lookup logic.**
 
 ### Part 3 §4.8 — silence on two-digit-year century inference
 
