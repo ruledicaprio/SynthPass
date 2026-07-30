@@ -42,6 +42,7 @@ mod dates;
 mod emit;
 mod parser;
 mod repair;
+mod translit;
 
 pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};
 pub use checksum::{check_digit, verify};
@@ -57,6 +58,7 @@ pub use parser::{
     parse_td3_with,
 };
 pub use repair::{solve_field, width_candidates, FieldKind, Resolution, MRZ_ALPHABET, UNKNOWN};
+pub use translit::{transliterate, transliterate_char, transliterations, TransliterationStyle};
 
 /// Tunables for the parsing entry points.
 ///
