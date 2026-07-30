@@ -97,10 +97,11 @@ length-only assertions in `crates/mrz/tests/icao_vectors.rs`'s
 `SECTION_4_2_3_1_NAME_EXAMPLES` — all nine measured at exactly 44
 characters.
 
-**Status: worked example reproduced** (for line length only; the examples
-are not yet run through `format_td3` — that is segment S3's job, and
-example (d), `O'CONNOR`, is known to fail against the crate's current name
-encoder).
+**Status: worked example reproduced** for line length. Segment S3 went
+further and ran these (plus the TD1/TD2/MRV-A/MRV-B equivalents) through the
+real emitter, including example (d), `O'CONNOR` — see the dedicated S3 entry
+below ("Part 3 §4.6 / Part 4 §4.2.3.1, §4.2.3.4 — name-field punctuation and
+non-truncating worked examples") for the full account.
 
 ### Part 5 §4.2.4 / Part 6 note j — long document number encoding
 
@@ -134,7 +135,96 @@ crate does, is a deliberate extension by analogy because issuers do it in
 practice, not something Part 4 licenses. Part 7 (`:320`, `:678`) explicitly
 stops at "positions 1 to 9" with no spillover, which the crate already honours.
 
+### Part 3 §4.6 / Part 4 §4.2.3.1, §4.2.3.4 — name-field punctuation and
+non-truncating worked examples
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495-535` (punctuation rules),
+`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-584`,
+`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`,
+`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`,
+`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:338-402` (MRV-A),
+`:690-760` (MRV-B)
+
+Segment S3 implemented `crates/mrz/src/emit.rs`'s `clean_name_half` (per-half
+name cleaning: hyphen/comma/whitespace → single filler `<`, apostrophe
+dropped with **no** filler, all other punctuation dropped with no filler,
+digits passed through — see that function's doc comment) and wired it into
+`name_field`, replacing the old blanket `clean()` call that mapped every
+non-alphanumeric character — apostrophe included — to a filler. That old
+behavior turned `O'CONNOR` into `O<CONNOR`; the corpus's own worked example
+(`Doc_9303_Part4...:504`) says it must be `OCONNOR`.
+
+All 33 of the corpus's non-truncating worked name examples across TD3, TD1,
+TD2, MRV-A, and MRV-B were transcribed verbatim from the citations above into
+`crates/mrz/tests/icao_vectors.rs`'s `TD3_NAME_VECTORS` / `TD1_NAME_VECTORS`
+/ `TD2_NAME_VECTORS` / `MRV_A_NAME_VECTORS` / `MRV_B_NAME_VECTORS` and driven
+through the real `format_td3`/`format_td1`/`format_td2`/`format_mrv_a`/
+`format_mrv_b` emitters (`name_encoding_matches_icao_worked_examples`), not
+merely length-checked as the pre-S3 `SECTION_4_2_3_1_NAME_EXAMPLES` test
+already did. Every one reproduced byte-for-byte, including both `O'CONNOR`
+occurrences (TD3 `:504`, MRV-B `:708`) and the `PAPANDROPOULOUS` "fits
+exactly, must be assumed truncated" case (TD3 `:584`, MRV-A `:402`, MRV-B
+`:760`, TD1/TD2 equivalents `:427`/`:399`).
+
+Truncation itself (the §4.2.3.2/§4.2.3.3-family worked examples, and Part 7's
+equivalents) is **not** pinned as emit assertions: Part 4 §4.2.3
+(`Doc_9303_Part4...:463-587`) documents several issuer-discretionary
+truncation strategies with no single canonical algorithm. `emit.rs`'s
+`truncate_name_components` implements one conformant choice (whole
+`<`/`<<`-separated components, cutting the last one short when needed) and
+documents it as such, not as "the" ICAO behavior. It guarantees the two rules
+Part 4 *does* make normative — a name that fits is never truncated; a
+truncated field's last character is always alphabetic `A`-`Z`
+(`Doc_9303_Part4...:465`, `:467`) — the latter checked both by the pinned
+`PAPANDROPOULOUS` non-truncating vectors above and by a dedicated property
+test, `truncated_td3_name_field_always_ends_alphabetic`
+(`crates/mrz/tests/fuzz_props.rs`), which forces truncation on every case via
+oversized random surname/given_names and asserts the field's last character
+is always a letter.
+
+Numeric characters are forbidden in MRZ name fields
+(`Doc_9303_Part3...:507`), but the corpus defines no mapping for one that
+appears anyway. `clean_name_half` passes digits through unchanged rather than
+silently mapping them to a filler — see that function's doc comment for the
+reasoning (mirrors `clean()`'s existing "alphanumeric survives untouched"
+behavior on the document-number/optional-data fields; upstream validation is
+this crate's answer, not a silent rewrite inside emission).
+
+**Status: worked example reproduced** for all 33 golden vectors (the
+non-truncating cases). **Not applicable** for truncation — Part 4 licenses
+no single canonical algorithm to reproduce, so this crate's own documented
+choice is verified against its own two normative constraints instead, via
+property test rather than a worked example.
+
 ## Known corpus defects
+
+### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies
+
+`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:332` (example a),
+`:350` (example d)
+
+Two more corpus length defects, found by segment S3 while transcribing Part
+7's MRV-A name examples (same family of defect as the §4.2.3.3c entry
+below, found by an earlier segment):
+
+- `:332` (example (a), `V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<`)
+  measures 45 characters, one over the 44-character MRV-A upper-line length
+  every other example in the same section satisfies (including the very same
+  VIZ, `ERIKSSON, ANNA MARIA`, printed correctly at 44 characters in the
+  MRV-B section's `:690` and in Part 4's TD3 section's `:480`).
+- `:350` (example (d), `V<UTOOCONNOR<<ENYA<SIOBHAN<<<<<<<<<<`) measures 36
+  characters — not 44. That is exactly MRV-B's line width, not MRV-A's,
+  suggesting the MRV-B version of this example (`:708`, identical VIZ,
+  correctly 36 characters there) was pasted into the MRV-A section by
+  mistake during either the original typesetting or this corpus's
+  conversion.
+
+Both are excluded from `MRV_A_NAME_VECTORS` in
+`crates/mrz/tests/icao_vectors.rs` rather than "fixed" by guessing the
+missing/wrong character, consistent with how the §4.2.3.3c entry below was
+handled.
+
+**Status: unverified — flagged as known defects, not corrected.**
 
 ### §4.2.3.3c length discrepancy
 

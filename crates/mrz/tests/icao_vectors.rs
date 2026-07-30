@@ -16,7 +16,10 @@
 //! than asserting a blanket "these come from ICAO". See
 //! `knowledge/docs9303/CONFORMANCE_BASIS.md`.
 
-use mrz::{check_digit, verify};
+use mrz::{
+    check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, verify,
+    MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
+};
 
 /// `(field, expected_check_digit, source)`.
 ///
@@ -180,12 +183,15 @@ fn composite_check_digit_matches_icao_worked_examples() {
 /// each be exactly 44 characters.
 ///
 /// This is a length check only — it does *not* run these strings through
-/// `format_td3`. The name-encoding implementation (hyphen/apostrophe
-/// handling, truncation) is segment S3's job, and example (d) below
-/// (`O'CONNOR`) is known to fail against the crate's current name encoder
-/// today. A failure in this test means corpus transcription damage (a
-/// dropped or added character when this file was typed in), not an
-/// implementation bug — there is no implementation under test here.
+/// `format_td3`. `name_encoding_matches_icao_worked_examples` below (segment
+/// S3) does that: it re-derives the same examples from their `VIZ:` source
+/// lines and drives them through the real emitter, including example (d)
+/// (`O'CONNOR`), which the crate's name encoder got wrong before S3 (it
+/// produced `O<CONNOR` instead of `OCONNOR` — see
+/// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:511-515`). A failure in
+/// *this* test means corpus transcription damage (a dropped or added
+/// character when this file was typed in), not an implementation bug —
+/// there is no implementation under test here.
 ///
 /// The §4.2.3.3c example (`:571`, `PPUTOBENNEL<WOOLOOM<WARRAN<WARNAM<<DINGO<POTO`)
 /// is deliberately excluded: it counts to 45 characters, not the 44 the
@@ -240,5 +246,330 @@ fn section_4_2_3_1_examples_are_44_characters() {
             "9303 pt4 §4.2.3.1 {source}: {mrz_line:?} is not 44 characters — likely \
              corpus transcription damage, not an implementation bug"
         );
+    }
+}
+
+/// Segment S3 — golden name-encoding vectors, one table per MRZ format.
+///
+/// Each entry is `(VIZ, expected full MRZ name line)`, transcribed verbatim
+/// from the corpus (never retyped from memory — see the citations on each
+/// table). The test below splits `VIZ` on the *first* comma into primary and
+/// secondary identifiers (`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495`),
+/// feeds them to the real `format_*` emitter as `surname`/`given_names`, and
+/// asserts the emitted name-bearing line matches the expected line
+/// byte-for-byte. This exercises `crate::emit::clean_name_half` (hyphen,
+/// comma, apostrophe, and other-punctuation handling) end-to-end, not just
+/// the length check `SECTION_4_2_3_1_NAME_EXAMPLES` performs above.
+///
+/// Only ICAO examples that **fit** their field without truncation are
+/// pinned here. Truncation (§4.2.3.2/§4.2.3.3-family examples, and Part 7's
+/// equivalents) is issuer-discretionary per Part 4 §4.2.3
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`) — this crate
+/// picks one conformant strategy (`emit::truncate_name_components`'s doc
+/// comment) rather than ICAO's specific worked truncations, so those
+/// examples are deliberately not asserted against here. See
+/// `knowledge/docs9303/CONFORMANCE_BASIS.md`'s S3 entry.
+///
+/// Three corpus examples are excluded as known defects (wrong length),
+/// rather than "fixed" by guessing which character is wrong — also recorded
+/// in `CONFORMANCE_BASIS.md`:
+/// - `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:576` (§4.2.3.3c): 45
+///   characters on a 44-character TD3 line.
+/// - `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:332` (MRV-A example a):
+///   45 characters on a 44-character line.
+/// - `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:350` (MRV-A example d,
+///   `O'CONNOR`): 36 characters in what should be a 44-character section —
+///   looks like the MRV-B width was pasted in by mistake.
+struct NameVector {
+    source: &'static str,
+    viz: &'static str,
+    /// The full MRZ line ICAO publishes, including the document
+    /// code/country prefix (TD3/TD2/MRV-A/MRV-B) or, for TD1, the bare
+    /// 30-character name line with no prefix at all.
+    expected_line: &'static str,
+}
+
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-584`. Prefix `PPUTO`
+/// (5 chars: document code `PP` + issuing country `UTO`), name field 39
+/// chars, upper line 44 chars total.
+const TD3_NAME_VECTORS: &[NameVector] = &[
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(a):480",
+        viz: "ERIKSSON, ANNA MARIA",
+        expected_line: "PPUTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(b):488",
+        viz: "HENG, DEBORAH MING LO",
+        expected_line: "PPUTOHENG<<DEBORAH<MING<LO<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(c):496",
+        viz: "SMITH-JONES, SUSIE MARGARET",
+        expected_line: "PPUTOSMITH<JONES<<SUSIE<MARGARET<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(d):504 — the O'CONNOR case",
+        viz: "O'CONNOR, ENYA SIOBHAN",
+        expected_line: "PPUTOOCONNOR<<ENYA<SIOBHAN<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(e) van der Muellen:512",
+        viz: "VAN DER MUELLEN, MARTIN",
+        expected_line: "PPUTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(e) Al-Basri:516",
+        viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
+        expected_line: "PPUTOAL<BASRI<<HUDA<MUHAMMAD<JAWAD<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(e) Vilarchao Fernandez:520",
+        viz: "VILARCHAO FERNANDEZ, JOSE RAMON",
+        expected_line: "PPUTOVILARCHAO<FERNANDEZ<<JOSE<RAMON<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(f) Arkfreith:528",
+        viz: "ARKFREITH",
+        expected_line: "PPUTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.1(f) Satriya Sudarpa:532",
+        viz: "SATRIYA SUDARPA",
+        expected_line: "PPUTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.4 Papandropoulous:584 — fits exactly, \
+                  NOT truncated (see :585-587's note)",
+        viz: "PAPANDROPOULOUS, JONATHON WARREN TREVOR",
+        expected_line: "PPUTOPAPANDROPOULOUS<<JONATHON<WARREN<TREVOR",
+    },
+];
+
+/// `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`. Bare 30-character name
+/// line (the TD1 third line), no document-code/country prefix.
+const TD1_NAME_VECTORS: &[NameVector] = &[
+    NameVector {
+        source: "9303 pt5 §4.2.3.3:427",
+        viz: "PAPANDROPOULOUS, JONATHON ALEC",
+        expected_line: "PAPANDROPOULOUS<<JONATHON<ALEC",
+    },
+    NameVector {
+        source: "9303 pt5 §4.2.3.4 van der Muellen:437",
+        viz: "VAN DER MUELLEN, MARTIN",
+        expected_line: "VAN<DER<MUELLEN<<MARTIN<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt5 §4.2.3.4 Al-Basri:441",
+        viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
+        expected_line: "AL<BASRI<<HUDA<MUHAMMAD<JAWAD<",
+    },
+    NameVector {
+        source: "9303 pt5 §4.2.3.5 Arkfreith:453",
+        viz: "ARKFREITH",
+        expected_line: "ARKFREITH<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt5 §4.2.3.5 Satriya Sudarpa:457",
+        viz: "SATRIYA SUDARPA",
+        expected_line: "SATRIYA<SUDARPA<<<<<<<<<<<<<<<",
+    },
+];
+
+/// `Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`. Prefix `I<UTO` (5
+/// chars), name field 31 chars, upper line 36 chars total.
+const TD2_NAME_VECTORS: &[NameVector] = &[
+    NameVector {
+        source: "9303 pt6 §4.2.3.3:399",
+        viz: "PAPANDROPOULOUS, JONATHOON ALEC",
+        expected_line: "I<UTOPAPANDROPOULOUS<<JONATHOON<ALEC",
+    },
+    NameVector {
+        source: "9303 pt6 §4.2.3.4 van der Muellen:409",
+        viz: "VAN DER MUELLEN, MARTIN",
+        expected_line: "I<UTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt6 §4.2.3.4 Al-Basri:413",
+        viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
+        expected_line: "I<UTOAL<BASRI<<HUDA<MUHAMMAD<JAWAD<<",
+    },
+    NameVector {
+        source: "9303 pt6 §4.2.3.4 Vilarchao Fernandez:417",
+        viz: "VILARCHAO FERNANDEZ, JOSE RAMON",
+        expected_line: "I<UTOVILARCHAO<FERNANDEZ<<JOSE<RAMON",
+    },
+    NameVector {
+        source: "9303 pt6 §4.2.3.5 Arkfreith:425",
+        viz: "ARKFREITH",
+        expected_line: "I<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt6 §4.2.3.5 Satriya Sudarpa:429",
+        viz: "SATRIYA SUDARPA",
+        expected_line: "I<UTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<",
+    },
+];
+
+/// `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:338-402`. Prefix `V<UTO`
+/// (5 chars), name field 39 chars, upper line 44 chars total. Examples (a)
+/// `:332` and (d) `:350` are excluded — both are known corpus defects (wrong
+/// length), see the module-level doc comment above.
+const MRV_A_NAME_VECTORS: &[NameVector] = &[
+    NameVector {
+        source: "9303 pt7 §4.2.3(b):338",
+        viz: "HENG, DEBORAH MING LO",
+        expected_line: "V<UTOHENG<<DEBORAH<MING<LO<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3(c):344",
+        viz: "SMITH-JONES, SUSIE MARGARET",
+        expected_line: "V<UTOSMITH<JONES<<SUSIE<MARGARET<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3(e):356",
+        viz: "VAN DER MUELLEN, MARTIN",
+        expected_line: "V<UTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3(f):362",
+        viz: "ARKFREITH",
+        expected_line: "V<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3.3 Papandropoulous:402 — fits exactly, \
+                  NOT truncated",
+        viz: "PAPANDROPOULOUS, JONATHON WARREN TREVOR",
+        expected_line: "V<UTOPAPANDROPOULOUS<<JONATHON<WARREN<TREVOR",
+    },
+];
+
+/// `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:690-760`. Prefix `V<UTO`
+/// (5 chars), name field 31 chars, upper line 36 chars total.
+const MRV_B_NAME_VECTORS: &[NameVector] = &[
+    NameVector {
+        source: "9303 pt7 §7.2.3(a):690",
+        viz: "ERIKSSON, ANNA MARIA",
+        expected_line: "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3(b):696",
+        viz: "HENG, DEBORAH MING LO",
+        expected_line: "V<UTOHENG<<DEBORAH<MING<LO<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3(c):702",
+        viz: "SMITH-JONES, SUSIE MARGARET",
+        expected_line: "V<UTOSMITH<JONES<<SUSIE<MARGARET<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3(d):708 — the O'CONNOR case",
+        viz: "O'CONNOR, ENYA SIOBHAN",
+        expected_line: "V<UTOOCONNOR<<ENYA<SIOBHAN<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3(e):714",
+        viz: "VAN DER MUELLEN, MARTIN",
+        expected_line: "V<UTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3(f):720",
+        viz: "ARKFREITH",
+        expected_line: "V<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<",
+    },
+    NameVector {
+        source: "9303 pt7 §7.2.3.3 Papandropoulous:760 — fits exactly, \
+                  NOT truncated",
+        viz: "PAPANDROPOULOUS, STEPHEN TREVOR",
+        expected_line: "V<UTOPAPANDROPOULOUS<<STEPHEN<TREVOR",
+    },
+];
+
+/// Split a `VIZ` name on the *first* comma into (primary, secondary),
+/// trimming the whitespace `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495`
+/// puts around the comma. No comma means no secondary identifier.
+fn split_viz(viz: &str) -> (&str, &str) {
+    match viz.split_once(',') {
+        Some((primary, secondary)) => (primary.trim(), secondary.trim()),
+        None => (viz.trim(), ""),
+    }
+}
+
+#[test]
+fn name_encoding_matches_icao_worked_examples() {
+    for v in TD3_NAME_VECTORS {
+        let (surname, given_names) = split_viz(v.viz);
+        let lines = format_td3(&Td3Fields {
+            document_code: "PP".into(),
+            issuing_country: "UTO".into(),
+            surname: surname.into(),
+            given_names: given_names.into(),
+            ..Default::default()
+        });
+        let line1 = lines
+            .split_once('\n')
+            .expect("format_td3 emits two lines")
+            .0;
+        assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
+    }
+
+    for v in TD1_NAME_VECTORS {
+        let (surname, given_names) = split_viz(v.viz);
+        let lines = format_td1(&Td1Fields {
+            surname: surname.into(),
+            given_names: given_names.into(),
+            ..Default::default()
+        });
+        let line3 = lines
+            .rsplit_once('\n')
+            .expect("format_td1 emits three lines")
+            .1;
+        assert_eq!(line3, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
+    }
+
+    for v in TD2_NAME_VECTORS {
+        let (surname, given_names) = split_viz(v.viz);
+        let lines = format_td2(&Td2Fields {
+            document_code: "I".into(),
+            issuing_country: "UTO".into(),
+            surname: surname.into(),
+            given_names: given_names.into(),
+            ..Default::default()
+        });
+        let line1 = lines
+            .split_once('\n')
+            .expect("format_td2 emits two lines")
+            .0;
+        assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
+    }
+
+    for v in MRV_A_NAME_VECTORS {
+        let (surname, given_names) = split_viz(v.viz);
+        let lines = format_mrv_a(&MrvAFields {
+            issuing_country: "UTO".into(),
+            surname: surname.into(),
+            given_names: given_names.into(),
+            ..Default::default()
+        });
+        let line1 = lines
+            .split_once('\n')
+            .expect("format_mrv_a emits two lines")
+            .0;
+        assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
+    }
+
+    for v in MRV_B_NAME_VECTORS {
+        let (surname, given_names) = split_viz(v.viz);
+        let lines = format_mrv_b(&MrvBFields {
+            issuing_country: "UTO".into(),
+            surname: surname.into(),
+            given_names: given_names.into(),
+            ..Default::default()
+        });
+        let line1 = lines
+            .split_once('\n')
+            .expect("format_mrv_b emits two lines")
+            .0;
+        assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
     }
 }
