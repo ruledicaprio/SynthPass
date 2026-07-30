@@ -47,7 +47,10 @@ mod translit;
 pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};
 pub use checksum::{check_digit, verify};
 pub use countries::{code_for_name, country_name};
-pub use dates::{expand_date, expand_date_with_pivot, Date, DateValidity, CURRENT_YY};
+pub use dates::{
+    date_completeness, expand_date, expand_date_with_pivot, Date, DateCompleteness, DateValidity,
+    CURRENT_YY,
+};
 pub use emit::{
     format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, MrvAFields, MrvBFields,
     Td1Fields, Td2Fields, Td3Fields,
@@ -174,7 +177,25 @@ pub struct MrzData {
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
     /// ISO 8601 (`YYYY-MM-DD`), century inferred (see [`expand_date`]).
+    /// Holds the raw, unexpanded `YYMMDD` field instead whenever
+    /// [`date_of_birth_completeness`](Self::date_of_birth_completeness) is
+    /// not [`DateCompleteness::Complete`] — see that field's doc comment.
     pub date_of_birth: String,
+    /// Whether the holder's date of birth was fully known, partly filled with
+    /// `<`, or entirely unknown (Doc 9303 Part 3 §4.8, `:547`). `date_of_birth`
+    /// holds the raw field rather than an ISO date whenever this is not
+    /// [`DateCompleteness::Complete`].
+    ///
+    /// An unknown or partially unknown date of birth is not a bad read: Part
+    /// 3 §4.8 explicitly lets an issuer fill unknown positions with `<`, and
+    /// a filler counts as zero for check-digit purposes (`:563`), so an
+    /// all-filler date of birth with check digit `0` verifies. This field is
+    /// how a caller distinguishes "legitimately unknown, per the issuer" from
+    /// "garbage OCR" — `DateValidity::dates_well_formed` stays `false` either
+    /// way, since an unknown date is genuinely not a parseable calendar date,
+    /// so that struct alone cannot make the distinction.
+    #[cfg_attr(feature = "zeroize", zeroize(skip))]
+    pub date_of_birth_completeness: DateCompleteness,
     /// "M", "F" or "X" (unspecified).
     pub sex: String,
     /// ISO 8601 (`YYYY-MM-DD`).
@@ -330,6 +351,7 @@ mod tests {
         assert_eq!(d.document_number, "L898902C3");
         assert_eq!(d.nationality, "UTO");
         assert_eq!(d.date_of_birth, "1974-08-12");
+        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Complete);
         assert_eq!(d.sex, "F");
         assert_eq!(d.date_of_expiry, "2012-04-15");
         assert_eq!(d.personal_number.as_deref(), Some("ZE184226B"));
@@ -343,6 +365,23 @@ mod tests {
         assert!(!d.checks.date_of_birth);
         assert!(!d.checks.composite);
         assert!(!d.valid());
+    }
+
+    #[test]
+    fn td3_all_filler_dob_is_a_valid_field_not_a_bad_read() {
+        // Doc 9303 Part 3 §4.8 (`:547`) lets an issuer complete an unknown
+        // date of birth with filler characters, and `:563` gives a `<` the
+        // value zero for check-digit purposes — so an all-filler DOB field
+        // with check digit 0 is mathematically valid, not corrupt. Replace
+        // TD3_L2's dob+check field (positions 14-20, 0-indexed 13..20) with
+        // seven fillers followed by check digit '0'.
+        assert_eq!(check_digit("<<<<<<").unwrap(), 0);
+        let l2 = format!("{}{}{}", &TD3_L2[0..13], "<<<<<<0", &TD3_L2[20..]);
+        assert_eq!(l2.len(), TD3_L2.len());
+        let d = parse_td3(TD3_L1, &l2).unwrap();
+        assert!(d.checks.date_of_birth);
+        assert_eq!(d.date_of_birth, "<<<<<<"); // left unexpanded, not a lie
+        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
     }
 
     #[test]
@@ -375,7 +414,21 @@ mod tests {
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.given_names, "ANNA MARIA");
         assert_eq!(d.date_of_birth, "1974-08-12");
+        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Complete);
         assert_eq!(d.date_of_expiry, "2012-04-15");
+    }
+
+    #[test]
+    fn td1_all_filler_dob_reports_unknown() {
+        // Same all-filler-DOB scenario as the TD3 test above, but for TD1's
+        // layout, where the dob+check field is line2[0..7] rather than
+        // line2[13..20] — covers a second of the five formats per the S5 plan.
+        let l2 = format!("{}{}", "<<<<<<0", &TD1_L2[7..]);
+        assert_eq!(l2.len(), TD1_L2.len());
+        let d = parse_td1(TD1_L1, &l2, TD1_L3).unwrap();
+        assert!(d.checks.date_of_birth);
+        assert_eq!(d.date_of_birth, "<<<<<<");
+        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
     }
 
     // Official ICAO 9303 part 6 TD2 specimen (Utopia / Anna Maria Eriksson),

@@ -294,6 +294,15 @@ mod tests {
     }
 
     #[test]
+    fn all_filler_date_check_digit_is_zero() {
+        // Doc 9303 Part 3 §4.8 (`:547`) lets an issuer complete an unknown
+        // date of birth with `<`; `:563` gives a `<` the value zero for
+        // check-digit purposes. Six fillers therefore sum to zero under the
+        // 7-3-1 weighting: `<<<<<<0` is a *valid* field, not a corrupt read.
+        assert_eq!(check_digit("<<<<<<").unwrap(), 0);
+    }
+
+    #[test]
     fn aggressive_defiller_terminates_on_adversarial_runs() {
         // Worst case for the convergence loop: a solid K/L run anchored by a
         // single filler at one end, so each pass can only eat one character.
