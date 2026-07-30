@@ -2,21 +2,22 @@
 //! correct iff it is the exact inverse of its matching `parse_*` function.
 
 use mrz::{
-    format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a, parse_mrv_b,
-    parse_td1, parse_td2, parse_td3, MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
+    check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
+    parse_mrv_b, parse_td1, parse_td2, parse_td3, MrvAFields, MrvBFields, Td1Fields, Td2Fields,
+    Td3Fields,
 };
 use proptest::prelude::*;
 
 // ---- ICAO 9303 part 4 §4.2.2.2 document-number overflow sweeps ----
 //
 // The overflow encoding fires when `document_number` exceeds the 9-char
-// field AND `remainder (len - 8) + check digit + terminating filler` fits
+// field AND `remainder (len - 9) + check digit + terminating filler` fits
 // the format's optional-data field. `optional_width` below is that field's
 // width for each format (TD3 personal_number=14, TD2 optional_data=7, TD1
 // optional_data_1=15) — the same widths `src/emit.rs::doc_number` uses, so a
-// length overflows iff `len > 9 && len <= optional_width + 6`.
+// length overflows iff `len > 9 && len <= optional_width + 7`.
 fn overflows(len: usize, optional_width: usize) -> bool {
-    len > 9 && len <= optional_width + 6
+    len > 9 && len <= optional_width + 7
 }
 
 /// A document number of exactly `len` MRZ-charset characters, letters and
@@ -539,7 +540,7 @@ proptest! {
 
 #[test]
 fn td3_document_number_length_sweep() {
-    // TD3's personal_number field is 14 wide: len > 9 && len <= 20 overflows;
+    // TD3's personal_number field is 14 wide: len > 9 && len <= 21 overflows;
     // this sweep (9..=20) never reaches the truncation branch, so every
     // length past 9 must reassemble exactly.
     for len in 9..=20 {
@@ -571,8 +572,8 @@ fn td3_document_number_length_sweep() {
 
 #[test]
 fn td2_document_number_length_sweep() {
-    // TD2's optional_data field is only 7 wide: len > 9 && len <= 13
-    // overflows; len 14..=20 falls back to truncation — this sweep exercises
+    // TD2's optional_data field is only 7 wide: len > 9 && len <= 14
+    // overflows; len 15..=20 falls back to truncation — this sweep exercises
     // both branches within a single format, not just the fits-forever case.
     for len in 9..=20 {
         let document_number = doc_number_of_len(len);
@@ -602,7 +603,7 @@ fn td2_document_number_length_sweep() {
 
 #[test]
 fn td1_document_number_length_sweep() {
-    // TD1's optional_data_1 field is 15 wide: len > 9 && len <= 21 overflows,
+    // TD1's optional_data_1 field is 15 wide: len > 9 && len <= 22 overflows,
     // so (like TD3) this 9..=20 sweep never reaches the truncation branch.
     for len in 9..=20 {
         let document_number = doc_number_of_len(len);
@@ -673,4 +674,166 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     // optional_data_1's overflow prefix and "ZZZ" join as `personal_number`
     // (optional_data_2 is empty here, so no " " separator survives).
     assert_eq!(d.personal_number.as_deref(), Some("ZZZ"));
+}
+
+/// A TD1 long-document-number zone assembled directly from
+/// `Doc_9303_Part5_Specs_for_TD1_MROTDs.md`'s position ranges (§4.2.4, Note j)
+/// rather than from `format_td1` — this is the vector that proves the parser
+/// reads a spec-conformant zone this crate did not write itself, not merely
+/// that `format_td1`/`parse_td1` agree with each other.
+///
+/// Document number `D23145890XYZ` (12 chars, overflows the 9-char field).
+/// Per Note j, the nine principal characters (`D23145890`) fill line 1
+/// positions 6-14 (0-based `line1[5..14]`), position 15 (`line1[14]`) is a
+/// filler instead of a check digit, and the remainder (`XYZ`) plus a check
+/// digit *over the whole twelve-character number* plus a terminating filler
+/// open the optional-data-1 field (`line1[15..30]`).
+///
+/// Character values (ICAO 9303 part 3 §4.9): `0-9`→`0-9`, `A-Z`→`10-35` so
+/// `D`=13, `X`=33, `Y`=34, `Z`=35; `<`=0. 7-3-1 weights repeat from the start
+/// of each check-digit input.
+///
+/// Long-number check digit over `D23145890XYZ` (12 chars):
+///   D·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 + 0·1 + X·7 + Y·3 + Z·1
+///   = 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 + 0·1 + 33·7 + 34·3 + 35·1
+///   = 91 + 6 + 3 + 7 + 12 + 5 + 56 + 27 + 0 + 231 + 102 + 35 = 575 → 575 % 10 = 5
+const TD1_LONG_NUMBER_LINE1: &str = "I<UTOD23145890<XYZ5<<<<<<<<<<<";
+// dob(740812)+check(2, pt4 TD3 specimen value — see icao_vectors.rs) + sex(F)
+// + expiry(120415)+check(9, same specimen) + nationality(UTO) +
+// optional_data_2 (11 fillers, empty) + composite.
+//
+// Composite input = line1[5..30] + line2[0..7] + line2[8..15] + line2[18..29]
+// (`parser::parse_td1`'s ranges) =
+//   "D23145890<XYZ5<<<<<<<<<<<" (25) + "7408122" (7) + "1204159" (7) +
+//   "<<<<<<<<<<<" (11 fillers) = 50 chars.
+// Sum of products = 720 → 720 % 10 = 0 (worked the same way as the long-number
+// digit above; the trailing 11-filler run contributes 0 regardless of weight).
+const TD1_LONG_NUMBER_LINE2: &str = "7408122F1204159UTO<<<<<<<<<<<0";
+const TD1_LONG_NUMBER_LINE3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+
+#[test]
+fn td1_hand_built_spec_form_overflow_parses() {
+    // Sanity-check the hand-derived check digits against the crate's own
+    // primitive before trusting the parse below — this is the cross-check
+    // the surrounding arithmetic comments claim, not a substitute for it.
+    // Long-number check digit, worked above: 5.
+    assert_eq!(check_digit("D23145890XYZ").unwrap(), 5);
+    // Composite input, worked above: line1[5..30] + line2[0..7] + line2[8..15]
+    // + line2[18..29] = "D23145890<XYZ5<<<<<<<<<<<" + "7408122" + "1204159"
+    // + "<<<<<<<<<<<" (11 fillers) → composite digit 0.
+    assert_eq!(
+        check_digit("D23145890<XYZ5<<<<<<<<<<<74081221204159<<<<<<<<<<<").unwrap(),
+        0
+    );
+
+    let d = parse_td1(
+        TD1_LONG_NUMBER_LINE1,
+        TD1_LONG_NUMBER_LINE2,
+        TD1_LONG_NUMBER_LINE3,
+    )
+    .unwrap();
+    assert!(d.valid(), "checks: {:?}", d.checks);
+    assert_eq!(d.document_number, "D23145890");
+    assert_eq!(d.document_number_full.as_deref(), Some("D23145890XYZ"));
+    assert_eq!(d.full_document_number(), "D23145890XYZ");
+    assert!(!d.document_number_legacy_encoding);
+}
+
+#[test]
+fn legacy_encoding_zone_parses_and_is_flagged() {
+    // Pre-0.6 encoding this crate used to emit for a long document number:
+    // first 8 characters + filler in the 9-char number field, filler in the
+    // check-digit position, and `remainder (chars 9+) + check digit over the
+    // WHOLE number + terminating filler` at the start of the optional field.
+    // Hand-assembled here (not via `format_td3`, which now emits the
+    // spec-conformant nine-principal-character form) so the parser is proven
+    // against a zone this crate itself used to write, not one it still does.
+    let full = "L898902C31234"; // 13 chars, overflows the 9-char field
+    let head8 = &full[0..8]; // "L898902C" — the pre-0.6 truncation point
+    let remainder = &full[8..]; // "31234"
+    let full_check = char::from_digit(check_digit(full).unwrap(), 10).unwrap();
+
+    // Number field: 8 real chars + filler = 9; check-digit position is filler.
+    let doc_num_field = format!("{head8}<");
+    let doc_num_check = '<';
+
+    // Personal-number field: remainder + check + terminating filler, padded
+    // to the 14-char width with more filler.
+    let mut personal = format!("{remainder}{full_check}<");
+    while personal.len() < 14 {
+        personal.push('<');
+    }
+    let personal_check = char::from_digit(check_digit(&personal).unwrap(), 10).unwrap();
+
+    let nationality = "UTO";
+    let dob = "740812";
+    let dob_check = '2'; // ICAO pt4 TD3 specimen value (icao_vectors.rs)
+    let sex = 'F';
+    let expiry = "120415";
+    let expiry_check = '9'; // ICAO pt4 TD3 specimen value (icao_vectors.rs)
+
+    let line2_body = format!(
+        "{doc_num_field}{doc_num_check}{nationality}{dob}{dob_check}{sex}{expiry}{expiry_check}{personal}{personal_check}"
+    );
+    assert_eq!(line2_body.len(), 43);
+    let composite_input = format!(
+        "{}{}{}",
+        &line2_body[0..10],
+        &line2_body[13..20],
+        &line2_body[21..43]
+    );
+    let composite = char::from_digit(check_digit(&composite_input).unwrap(), 10).unwrap();
+    let line2 = format!("{line2_body}{composite}");
+
+    let d = parse_td3(TD3_L1, &line2).unwrap();
+    assert!(d.valid(), "checks: {:?}", d.checks);
+    assert_eq!(d.document_number_full.as_deref(), Some(full));
+    assert!(d.document_number_legacy_encoding);
+}
+
+#[test]
+fn conformant_zone_is_not_flagged_legacy() {
+    let fields = Td3Fields {
+        document_number: "L898902C31234".to_string(), // 13 chars, overflows 9
+        date_of_birth: "740812".to_string(),
+        date_of_expiry: "120415".to_string(),
+        ..Td3Fields::default()
+    };
+    let mrz = format_td3(&fields);
+    let (l1, l2) = mrz.split_once('\n').unwrap();
+    let d = parse_td3(l1, l2).unwrap();
+    assert!(d.valid(), "checks: {:?}", d.checks);
+    assert_eq!(d.document_number_full.as_deref(), Some("L898902C31234"));
+    assert!(!d.document_number_legacy_encoding);
+}
+
+#[test]
+fn neither_form_verifies_surfaces_full_number_with_failed_check() {
+    // Start from a valid spec-form overflow zone, then corrupt the single
+    // check-digit character the overflow encoding writes into the optional
+    // field. The corrupted zone's document-number field does not end in a
+    // filler (`L898902C3` doesn't), so the legacy fallback never even
+    // applies — this exercises the "neither form verifies" tail of
+    // `read_overflow`, not a legacy/spec collision.
+    let fields = Td3Fields {
+        document_number: "L898902C31234".to_string(), // 13 chars, overflows 9
+        date_of_birth: "740812".to_string(),
+        date_of_expiry: "120415".to_string(),
+        ..Td3Fields::default()
+    };
+    let mrz = format_td3(&fields);
+    let (l1, l2) = mrz.split_once('\n').unwrap();
+    // The overflow check digit sits right after the 4-char remainder ("1234")
+    // at the start of the personal-number field (offset 28 in line 2).
+    let check_pos = 28 + 4;
+    let correct = l2.as_bytes()[check_pos] as char;
+    let wrong = char::from_digit((correct.to_digit(10).unwrap() + 1) % 10, 10).unwrap();
+    let mut corrupted = l2.to_string().into_bytes();
+    corrupted[check_pos] = wrong as u8;
+    let corrupted = String::from_utf8(corrupted).unwrap();
+
+    let d = parse_td3(l1, &corrupted).unwrap();
+    assert_eq!(d.document_number_full.as_deref(), Some("L898902C31234"));
+    assert!(!d.checks.document_number);
+    assert!(!d.document_number_legacy_encoding);
 }

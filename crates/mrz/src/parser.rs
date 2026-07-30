@@ -14,32 +14,53 @@ use crate::{Checks, Format, MrzData, MrzError, ParseOptions};
 
 /// A document number that overflowed its 9-character field.
 struct Overflow {
-    /// First 8 printed characters plus the remainder read from the optional field.
+    /// The nine principal characters (spec form) or the legacy crate's
+    /// truncated eight (legacy form), plus the remainder read from the
+    /// optional field. See [`legacy`](Overflow::legacy).
     full: String,
     /// Whether the remainder's own check digit validates the reassembly.
     check_ok: bool,
+    /// `true` when `full` was reassembled using the pre-0.6 eight-character
+    /// encoding this crate used to emit, rather than the Doc 9303 form.
+    legacy: bool,
     /// Characters of the optional field consumed by the overflow encoding
     /// (remainder + its check digit + the terminating filler).
     consumed: usize,
 }
 
-/// Decode the ICAO 9303 part 4 §4.2.2.2 long-document-number encoding.
+/// Decode the ICAO 9303 part 4 §4.2.2.2 / part 5 note j long-document-number
+/// encoding.
 ///
-/// When the number exceeds the 9-character field, the document is printed with
-/// its first 8 characters followed by a filler, the field's check-digit
-/// position set to a filler, and the *remainder* plus a check digit computed
-/// over the whole number written at the start of the optional/personal-number
-/// field, terminated by a filler.
+/// When the number exceeds the 9-character field, all nine principal
+/// characters are printed, the field's check-digit position is set to a
+/// filler to signal a truncated number, and the *remainder* plus a check
+/// digit computed over the whole number (nine principal characters plus
+/// remainder) is written at the start of the optional/personal-number field,
+/// terminated by a filler.
 ///
-/// Returns `None` when the zone does not carry that signature, in which case
-/// the caller keeps the ordinary fixed-width reading. MRV-A/MRV-B never use
-/// this — ICAO 9303 part 7 defines no overflow encoding.
+/// This crate emitted a non-conformant eight-character form before 0.6.0
+/// (first 8 characters + filler, remainder starting at the 9th). Both forms
+/// are attempted here so a zone written by an older version of this crate
+/// still parses. **The two forms are distinguishable but not perfectly**:
+/// because `<` has character value 0 yet still consumes a 7-3-1 weight slot,
+/// the spec-form and legacy-form candidate inputs differ in both length and
+/// weight alignment, so they generally produce different check digits — but
+/// a legacy zone will spuriously satisfy the spec-form check roughly 1 time
+/// in 10 (one digit out of ten possible check-digit values), yielding a full
+/// number with one extra stray character. That is inherent to testing two
+/// encodings against a single printed check digit; there is no heuristic
+/// that defeats it, so this function does not attempt one.
+///
+/// Returns `None` when the zone does not carry an overflow signature at all
+/// (check digit position isn't a filler, or the optional field has no
+/// remainder to read), in which case the caller keeps the ordinary
+/// fixed-width reading. MRV-A/MRV-B never use this — ICAO 9303 part 7 defines
+/// no overflow encoding.
 fn read_overflow(number_field: &str, check: char, optional: &str) -> Option<Overflow> {
-    if check != '<' || !number_field.ends_with('<') {
+    if check != '<' {
         return None;
     }
-    let head = number_field[0..8].trim_end_matches('<');
-    if head.is_empty() {
+    if number_field.trim_end_matches('<').is_empty() {
         // A blank document-number field is a blank field, not an overflow.
         return None;
     }
@@ -53,11 +74,40 @@ fn read_overflow(number_field: &str, check: char, optional: &str) -> Option<Over
     if !check_digit.is_ascii_digit() {
         return None;
     }
-    let full = format!("{head}{remainder}");
+    let consumed = end + 1;
+
+    // Spec form: all nine principal characters plus the remainder.
+    let spec_full = format!("{number_field}{remainder}");
+    if verify(&spec_full, check_digit) {
+        return Some(Overflow {
+            full: spec_full,
+            check_ok: true,
+            legacy: false,
+            consumed,
+        });
+    }
+
+    // Legacy form: this crate's pre-0.6 eight-character truncation + filler.
+    if number_field.ends_with('<') {
+        let head = number_field[0..8].trim_end_matches('<');
+        let legacy_full = format!("{head}{remainder}");
+        if verify(&legacy_full, check_digit) {
+            return Some(Overflow {
+                full: legacy_full,
+                check_ok: true,
+                legacy: true,
+                consumed,
+            });
+        }
+    }
+
+    // Neither form verifies: surface the spec-form reassembly with a failed
+    // check so the caller still sees the full number, not a truncated one.
     Some(Overflow {
-        check_ok: verify(&full, check_digit),
-        full,
-        consumed: end + 1,
+        full: spec_full,
+        check_ok: false,
+        legacy: false,
+        consumed,
     })
 }
 
@@ -144,12 +194,14 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         ),
     };
 
+    let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
         format: Format::Td3,
         document_type: line1[0..2].trim_end_matches('<').to_string(),
         issuing_country: line1[2..5].trim_end_matches('<').to_string(),
         document_number,
         document_number_full: overflow.map(|o| o.full),
+        document_number_legacy_encoding,
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
@@ -208,12 +260,14 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         ),
     };
 
+    let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
         format: Format::Td2,
         document_type: code.to_string(),
         issuing_country: line1[2..5].trim_end_matches('<').to_string(),
         document_number,
         document_number_full: overflow.map(|o| o.full),
+        document_number_legacy_encoding,
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
@@ -287,12 +341,14 @@ pub fn parse_td1_with(
         ),
     };
 
+    let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
         format: Format::Td1,
         document_type: code.to_string(),
         issuing_country: line1[2..5].trim_end_matches('<').to_string(),
         document_number: line1[5..14].trim_end_matches('<').to_string(),
         document_number_full: overflow.map(|o| o.full),
+        document_number_legacy_encoding,
         surname,
         given_names,
         nationality: line2[15..18].trim_end_matches('<').to_string(),
@@ -353,6 +409,7 @@ pub fn parse_mrv_a_with(
         document_number,
         // ICAO 9303 part 7 defines no overflow encoding for visas.
         document_number_full: None,
+        document_number_legacy_encoding: false,
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
@@ -413,6 +470,7 @@ pub fn parse_mrv_b_with(
         document_number,
         // ICAO 9303 part 7 defines no overflow encoding for visas.
         document_number_full: None,
+        document_number_legacy_encoding: false,
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),

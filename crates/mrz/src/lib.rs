@@ -158,6 +158,13 @@ pub struct MrzData {
     /// encoding). `None` when the number fits, in which case
     /// [`document_number`](Self::document_number) is already complete.
     pub document_number_full: Option<String>,
+    /// `true` when the long document number was recovered from the pre-0.6
+    /// eight-character encoding this crate used to emit, rather than the
+    /// Doc 9303 form (nine principal characters, filler in the check-digit
+    /// position). Always `false` for conformant zones and when the number
+    /// fits its field.
+    #[cfg_attr(feature = "zeroize", zeroize(skip))]
+    pub document_number_legacy_encoding: bool,
     pub surname: String,
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
@@ -626,14 +633,15 @@ mod tests {
         };
         let mrz = format_td3(&fields);
         let (l1, l2) = mrz.split_once('\n').unwrap();
-        // First 8 chars + filler, and a filler where the check digit goes.
-        assert_eq!(&l2[0..10], "L898902C<<");
+        // Nine principal characters, then a filler where the check digit goes.
+        assert_eq!(&l2[0..10], "L898902C3<");
         let d = parse_td3(l1, l2).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
         assert_eq!(d.document_number_full.as_deref(), Some("L898902C31234"));
         assert_eq!(d.full_document_number(), "L898902C31234");
+        assert!(!d.document_number_legacy_encoding);
         // The 9-char field reading stays available and unsurprising.
-        assert_eq!(d.document_number, "L898902C");
+        assert_eq!(d.document_number, "L898902C3");
         assert_eq!(d.personal_number, None);
     }
 
@@ -708,8 +716,11 @@ mod tests {
             ..Td3Fields::default()
         };
         let mrz = format_td3(&fields);
-        // Corrupt one character of the remainder in the personal-number field.
-        let tampered = mrz.replacen("31234", "31235", 1);
+        // The nine principal characters ("L898902C3") are printed in the
+        // number field; only the 4-character remainder ("1234") is written
+        // into the personal-number field, so corrupting the remainder means
+        // corrupting "1234", not the pre-0.6 8-character-boundary "31234".
+        let tampered = mrz.replacen("1234", "1235", 1);
         let d = parse_td3_str(&tampered);
         assert!(!d.checks.document_number);
         assert!(!d.valid());

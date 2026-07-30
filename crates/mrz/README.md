@@ -54,8 +54,9 @@ let lines = format_td3(&Td3Fields {
 let (l1, l2) = lines.split_once('\n').unwrap();
 let doc = mrz::parse_td3(l1, l2).unwrap();
 assert!(doc.valid());
-assert_eq!(doc.document_number, "L898902C"); // the printed 9-char field
+assert_eq!(doc.document_number, "L898902C3"); // the printed 9-char field
 assert_eq!(doc.full_document_number(), "L898902C31234"); // the reassembled number
+assert!(!doc.document_number_legacy_encoding); // read as the Doc 9303 form, not the pre-0.6 one
 ```
 
 When the remainder doesn't fit the optional field, the number still truncates
