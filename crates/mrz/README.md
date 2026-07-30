@@ -177,6 +177,48 @@ let td1 = format_td1(&Td1Fields {
 // Three 30-char lines; parse_td1 rebuilds them as valid().
 ```
 
+### National characters are transliterated, not dropped
+
+ICAO 9303 Part 3 §6 A defines a recommended Latin-character transliteration
+table (`Ä`→`AE`, `Ñ`→`N`, `ß`→`SS`, …) for the accented/national characters
+that don't fit the MRZ's `[A-Z0-9<]` alphabet. `format_td3` / `format_td2` /
+`format_td1` apply it automatically (the `Expanded` style) when building the
+name field, so `Müller` and `Térèsa` survive instead of losing their accented
+letters outright:
+
+```rust
+use mrz::{format_td3, Td3Fields};
+
+let lines = format_td3(&Td3Fields {
+    issuing_country: "DEU".into(),
+    surname: "MÜLLER".into(),
+    given_names: "TÉRÈSA".into(),
+    ..Default::default()
+});
+let line1 = lines.split_once('\n').unwrap().0;
+assert!(line1.contains("MUELLER"));
+assert!(line1.contains("TERESA"));
+```
+
+Five of the table's 95 characters have more than one ICAO-recommended
+transliteration (the issuing State chooses); `transliterate` and
+`transliterate_char` expose the table directly, with a `TransliterationStyle`
+to pick among them, for callers that need something other than the emit
+path's default:
+
+```rust
+use mrz::{transliterate, TransliterationStyle};
+
+assert_eq!(transliterate("Ñ", TransliterationStyle::Expanded), "N");
+assert_eq!(transliterate("Ñ", TransliterationStyle::XxSuffix), "NXX");
+assert_eq!(transliterate("ß", TransliterationStyle::Simple), "SS"); // only one ICAO answer
+```
+
+This crate can *produce* a conformant transliteration; it cannot *validate*
+one, since the standard itself admits more than one correct answer. Only
+Latin-based national characters (§6 A) are implemented — Cyrillic (§6 B) and
+Arabic (§6 C) are out of scope for now.
+
 ## A valid read is not an in-date document
 
 A verified composite check digit proves the *read* is faithful — it says

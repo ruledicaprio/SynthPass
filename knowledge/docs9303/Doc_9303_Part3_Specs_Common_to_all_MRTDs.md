@@ -745,7 +745,7 @@ The following tables contain the most commonly used national characters of the L
 | 010A | Ċ | C dot above | C |
 | 010C | Č | C caron | C |
 | 010E | Ď | D caron | D |
-| 0110 | Ð | D stroke | D |
+| 0110 | Đ | D stroke | D |
 | 0112 | Ē | E macron | E |
 | 0114 | Ĕ | E breve | E |
 | 0116 | Ė | E dot above | E |
@@ -762,14 +762,14 @@ The following tables contain the most commonly used national characters of the L
 | 012C | Ĭ | I breve | I |
 | 012E | Į | I ogonek | I |
 | 0130 | İ | I dot above | I |
-| 0131 | I | I without dot (Turkey) | I |
-| 0132 | IJ | ligature IJ | IJ |
+| 0131 | ı | I without dot (Turkey) | I |
+| 0132 | Ĳ | ligature IJ | IJ |
 | 0134 | Ĵ | J circumflex | J |
 | 0136 | Ķ | K cedilla | K |
 | 0139 | Ĺ | L acute | L |
 | 013B | Ļ | L cedilla | L |
 | 013D | Ľ | L caron | L |
-| 013F | L· | L middle dot | L |
+| 013F | Ŀ | L middle dot | L |
 | 0141 | Ł | L stroke | L |
 | 0143 | Ń | N acute | N |
 | 0145 | Ņ | N cedilla | N |

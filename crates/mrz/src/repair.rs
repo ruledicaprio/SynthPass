@@ -116,7 +116,7 @@ impl Resolution {
 
 /// Every way `line` could be restored to exactly `target` characters.
 ///
-/// Combines [`crate::checksum`]'s existing filler-run and end-padding
+/// Combines the checksum module's existing filler-run and end-padding
 /// candidates with a sweep that inserts [`UNKNOWN`] at each of the `len + 1`
 /// positions — the case a punched hole or an occluded line start produces.
 /// Candidates containing [`UNKNOWN`] are not parseable as they stand; resolve

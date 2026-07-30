@@ -14,7 +14,8 @@
 
 use mrz::{
     find_and_parse, format_td1, format_td2, format_td3, parse_mrv_a, parse_mrv_b, parse_td1,
-    parse_td2, parse_td3, Td1Fields, Td2Fields, Td3Fields,
+    parse_td2, parse_td3, transliterate, transliterations, Td1Fields, Td2Fields, Td3Fields,
+    TransliterationStyle,
 };
 use proptest::prelude::*;
 
@@ -317,6 +318,70 @@ proptest! {
         prop_assert!(d.valid(), "checks: {:?}", d.checks);
         if d.document_number_full.is_some() {
             prop_assert_eq!(d.full_document_number(), document_number.as_str());
+        }
+    }
+}
+
+/// Any Unicode `char`, weighted so Table A code points and their lowercase
+/// counterparts show up often enough to be worth generating alongside
+/// genuinely arbitrary input.
+fn translit_ish_char() -> impl Strategy<Value = char> {
+    prop_oneof![
+        4 => prop::char::range('A', 'Z'),
+        2 => prop::char::range('a', 'z'),
+        2 => prop::char::range('0', '9'),
+        3 => (0usize..95).prop_map(|i| {
+            // Sample a Table A code point via `transliterations`'s own inverse:
+            // walk the known Latin-1/Latin-Extended-A ranges the table covers
+            // and pick one that has entries. Falls back to a fixed one on any
+            // miss so the closure is total.
+            const CANDIDATES: &[char] = &[
+                '\u{00C0}', '\u{00C4}', '\u{00C5}', '\u{00D1}', '\u{00D6}', '\u{00DC}',
+                '\u{00DF}', '\u{0110}', '\u{0131}', '\u{0132}', '\u{013F}', '\u{1E9E}',
+                '\u{017D}',
+            ];
+            CANDIDATES[i % CANDIDATES.len()]
+        }),
+        1 => any::<char>(),
+    ]
+}
+
+fn translit_ish_string() -> impl Strategy<Value = String> {
+    prop::collection::vec(translit_ish_char(), 0..40).prop_map(|chars| chars.into_iter().collect())
+}
+
+proptest! {
+    /// `transliterate` never panics on arbitrary input, for any style.
+    #[test]
+    fn transliterate_never_panics(
+        s in translit_ish_string(),
+        style_idx in 0u8..3,
+    ) {
+        let style = match style_idx {
+            0 => TransliterationStyle::Expanded,
+            1 => TransliterationStyle::Simple,
+            _ => TransliterationStyle::XxSuffix,
+        };
+        let _ = transliterate(&s, style);
+    }
+
+    /// Every Table A input character's transliteration output consists only
+    /// of `A`-`Z` — the property the emit path's uppercase-first design and
+    /// `[A-Z0-9<]` MRZ alphabet both depend on.
+    #[test]
+    fn transliterate_table_a_output_is_upper_ascii(
+        s in translit_ish_string(),
+    ) {
+        for c in s.chars() {
+            for u in c.to_uppercase() {
+                if !transliterations(u).is_empty() {
+                    let out = transliterate(&u.to_string(), TransliterationStyle::Expanded);
+                    prop_assert!(
+                        out.chars().all(|o| o.is_ascii_uppercase()),
+                        "transliterate({u:?}) = {out:?} contains non-[A-Z]"
+                    );
+                }
+            }
         }
     }
 }
