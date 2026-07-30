@@ -29,8 +29,10 @@ The core crate has **no runtime dependencies** and compiles to
 | MRV-A  | Visas (passport-book)             | 2 lines × 44      | ✅ parse + emit |
 | MRV-B  | Visas (smaller)                   | 2 lines × 36      | ✅ parse + emit |
 
-Document-number overflow (ICAO 9303 part 4 §4.2.2.2) is supported for TD1/TD2/
-TD3: when a document number is longer than the 9-character field, `format_td3`
+Document-number overflow (ICAO 9303 Part 5/6 note j; extended to TD3 by
+analogy, since Part 4 defines no such rule for it — see `parser::read_overflow`'s
+doc comment) is supported for TD1/TD2/TD3: when a document number is longer
+than the 9-character field, `format_td3`
 / `format_td2` / `format_td1` reassemble it automatically as long as the
 remainder fits the format's optional-data field (TD3 personal number, 14
 chars; TD2/TD1 optional data, 7/15 chars), and the parser reads it back into
@@ -185,7 +187,7 @@ consistent. That separate, non-cryptographic judgement is
 ```rust
 use mrz::{parse_td3, Date};
 
-// The ICAO 9303 part 4 specimen: expires 2012-04-15.
+// The ICAO 9303 specimen (Utopia / Anna Maria Eriksson): expires 2012-04-15.
 let doc = parse_td3(
     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",

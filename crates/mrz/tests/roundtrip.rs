@@ -8,7 +8,8 @@ use mrz::{
 };
 use proptest::prelude::*;
 
-// ---- ICAO 9303 part 4 §4.2.2.2 document-number overflow sweeps ----
+// ---- Document-number overflow sweeps (ICAO 9303 Part 5/6 note j; TD3 by
+// analogy — see `parser::read_overflow`'s doc comment) ----
 //
 // The overflow encoding fires when `document_number` exceeds the 9-char
 // field AND `remainder (len - 9) + check digit + terminating filler` fits
@@ -28,8 +29,10 @@ fn doc_number_of_len(len: usize) -> String {
         .collect()
 }
 
-// Official ICAO 9303 part 4 specimen (Utopia / Anna Maria Eriksson) — same
-// constants as the ones pinned in `src/lib.rs`'s test module.
+// ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson) — same constants
+// as the ones pinned in `src/lib.rs`'s test module, which has the full
+// provenance note (Part 4's own copy is a figure, not extracted text;
+// corroborated via Part 6's literal TD2 specimen).
 const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
 const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
@@ -161,7 +164,9 @@ proptest! {
     }
 }
 
-// Official ICAO 9303 part 6 (TD2) specimen (Utopia / Anna Maria Eriksson) —
+// Official ICAO 9303 part 6 (TD2) specimen (Utopia / Anna Maria Eriksson),
+// published verbatim as text
+// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`) —
 // same constants as the ones pinned in `src/lib.rs`'s test module.
 const TD2_L1: &str = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
 const TD2_L2: &str = "D231458907UTO7408122F1204159<<<<<<<6";
@@ -263,8 +268,9 @@ proptest! {
     }
 }
 
-// Official ICAO 9303 part 5 (TD1) specimen (Utopia / Anna Maria Eriksson) —
-// same constants as the ones pinned in `src/lib.rs`'s test module.
+// Same Utopia/Eriksson identity as the TD3/TD2 specimens (Part 5's own
+// examples are images, not text — see `src/lib.rs`'s test module for the full
+// provenance note) — same constants as the ones pinned there.
 const TD1_L1: &str = "I<UTOD231458907<<<<<<<<<<<<<<<";
 const TD1_L2: &str = "7408122F1204159UTO<<<<<<<<<<<6";
 const TD1_L3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
@@ -361,8 +367,9 @@ proptest! {
     }
 }
 
-// Verified MRV-A / MRV-B line-2 vectors (see `src/lib.rs`'s test module for
-// the worked check-digit arithmetic behind these).
+// Hand-derived MRV-A / MRV-B line-2 vectors — NOT ICAO-published specimens
+// (see `src/lib.rs`'s test module for the worked check-digit arithmetic and
+// pointers to Part 7's actual, differently-valued Appendix B examples).
 const MRV_A_L2: &str = "XK93054875BRA8502212F2703143R5T6U7V8W9<<<<<<";
 const MRV_B_L2: &str = "L234567897DEU9201017F2706306QW12ER34";
 

@@ -58,6 +58,13 @@ jobs:
       - name: Documentation links resolve
         run: bash scripts/check-doc-links.sh
 
+      # crates/mrz is deliberately clock-free (wasm32-unknown-unknown target,
+      # reproducible builds), so nothing in the crate itself can notice its
+      # two-digit-year century pivot (`dates.rs::CURRENT_YY`) going stale. CI
+      # is where a clock is legitimate — see the script for the full reasoning.
+      - name: mrz century pivot is not stale
+        run: bash scripts/check-century-pivot.sh
+
       # The provider contract must be buildable by someone who has neither an
       # OCR engine nor an LLM toolchain — otherwise "write a provider" starts
       # with "install llama.cpp", and a contract that names one engine is not a
