@@ -15,6 +15,16 @@ use serde::{Deserialize, Serialize};
 /// Century heuristic: birth dates after the current two-digit year roll back
 /// to 19xx; expiry dates are always 20xx (no valid travel document from the
 /// 1900s remains in circulation).
+///
+/// This heuristic is this crate's own invention, not ICAO's: Part 3 §4.8
+/// "Representation of Dates"
+/// (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:541-547`)
+/// defines only the six-digit `YYMMDD` structure and the unknown-date filler
+/// rule ("If all or part of the date of birth is unknown, the relevant
+/// character positions shall be completed with filler characters"). It says
+/// nothing about which century a two-digit year belongs to — checked, not
+/// assumed: the corpus has no century-inference rule anywhere, for any
+/// document type.
 pub fn expand_date(yymmdd: &str, is_birth: bool) -> String {
     // Two-digit year pivot for the 19xx/20xx decision on birth dates. Kept as a
     // single constant for auditability; callers wanting an explicit pivot can
@@ -24,6 +34,17 @@ pub fn expand_date(yymmdd: &str, is_birth: bool) -> String {
 
 /// The default two-digit-year pivot (2026). Birth years greater than this map
 /// to the 1900s.
+///
+/// Deliberately a hardcoded constant, not a clock read: this crate stays
+/// deterministic and clock-free (see the module doc above), so the constant
+/// must be bumped by hand as time passes rather than drift silently. A stale
+/// pivot degrades gracefully in general but genuinely misreads at the
+/// boundary — with this constant stuck at 26, a person born in 2027
+/// (`yy == 27`) would be dated to 1927 once such people exist.
+///
+/// `scripts/check-century-pivot.sh` runs in CI on every push and fails once
+/// this constant is more than 2 years behind the wall clock, so the review
+/// cadence is enforced rather than left to memory.
 pub const CURRENT_YY: u32 = 26;
 
 /// Like [`expand_date`] but with a caller-supplied two-digit-year pivot.
@@ -204,7 +225,10 @@ mod tests {
     use crate::parse_td3;
     use proptest::prelude::*;
 
-    // ICAO 9303 part 4 specimen: DOB 1974-08-12, expiry 2012-04-15.
+    // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson): DOB
+    // 1974-08-12, expiry 2012-04-15. See `src/lib.rs`'s test module for this
+    // specimen's provenance (Part 4's own copy is a figure, not extracted
+    // text; corroborated via Part 6's literal TD2 specimen).
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
     const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 

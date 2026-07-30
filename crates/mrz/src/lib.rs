@@ -154,8 +154,10 @@ pub struct MrzData {
     pub issuing_country: String,
     pub document_number: String,
     /// The reassembled document number when it overflows the 9-character field
-    /// (ICAO 9303 part 4 §4.2.2.2 — TD1/TD2/TD3 only; MRVs have no overflow
-    /// encoding). `None` when the number fits, in which case
+    /// (ICAO 9303 Part 5 note j / §4.2.4 for TD1, Part 6 note j for TD2; Part 4
+    /// defines no such rule, so TD3 gets it by a deliberate extension — see
+    /// `parser::read_overflow`'s doc comment. MRVs have no overflow encoding at
+    /// all, per Part 7). `None` when the number fits, in which case
     /// [`document_number`](Self::document_number) is already complete.
     pub document_number_full: Option<String>,
     /// `true` when the long document number was recovered from the pre-0.6
@@ -305,7 +307,13 @@ impl std::error::Error for MrzError {}
 mod tests {
     use super::*;
 
-    // Official ICAO 9303 part 4 specimen (Utopia / Anna Maria Eriksson).
+    // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson). Part 4's own
+    // copy is Appendix B Figure B-1 — an image in the source PDF, not
+    // extracted as text into this corpus
+    // (`knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:669-687`
+    // is the figure caption, no MRZ text). Corroborated instead by the
+    // byte-identical TD2 zone Part 6 publishes as literal text (see below,
+    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`).
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
     const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
@@ -344,7 +352,13 @@ mod tests {
         assert_eq!(d.personal_number, None);
     }
 
-    // Official ICAO 9303 part 5 TD1 specimen.
+    // Same Utopia/Eriksson identity as the TD3/TD2 specimens, reshaped into
+    // TD1's 3-line layout. Part 5's own Appendix A/B examples are images in
+    // the source PDF, not extracted as text
+    // (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:504-534`);
+    // this zone is corroborated by cross-part agreement with the literal TD2
+    // specimen (same document number, dates and name), not a published Part 5
+    // text specimen.
     const TD1_L1: &str = "I<UTOD231458907<<<<<<<<<<<<<<<";
     const TD1_L2: &str = "7408122F1204159UTO<<<<<<<<<<<6";
     const TD1_L3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
@@ -362,7 +376,9 @@ mod tests {
         assert_eq!(d.date_of_expiry, "2012-04-15");
     }
 
-    // Official ICAO 9303 part 6 TD2 specimen (Utopia / Anna Maria Eriksson).
+    // Official ICAO 9303 part 6 TD2 specimen (Utopia / Anna Maria Eriksson),
+    // published verbatim as text:
+    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`.
     const TD2_L1: &str = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
     const TD2_L2: &str = "D231458907UTO7408122F1204159<<<<<<<6";
 
@@ -511,8 +527,73 @@ mod tests {
         );
     }
 
-    // MRV-A specimen line 2 (44 chars); check-digit arithmetic (7-3-1, values
-    // A-Z=10-35, <=0):
+    // ICAO 9303 part 7's own published MRV-A specimen, transcribed verbatim
+    // from
+    // `knowledge/docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1104-1106`.
+    // Unlike the hand-derived pair below, every character here comes from the
+    // standard, so this is the MRV equivalent of the part 4/5/6 specimens.
+    const MRV_A_ICAO_L1: &str = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const MRV_A_ICAO_L2: &str = "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<";
+
+    // ICAO 9303 part 7's own published MRV-B specimen, from the same appendix:
+    // `knowledge/docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1136-1138`.
+    const MRV_B_ICAO_L1: &str = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
+    const MRV_B_ICAO_L2: &str = "L898902C<3UTO6908061F9406236ZE184226";
+
+    #[test]
+    fn mrv_a_icao_published_specimen_fully_valid() {
+        let d = parse_mrv_a(MRV_A_ICAO_L1, MRV_A_ICAO_L2).unwrap();
+        assert!(d.valid(), "checks: {:?}", d.checks);
+        assert_eq!(d.format, Format::MrvA);
+        assert_eq!(d.document_type, "V");
+        assert_eq!(d.issuing_country, "UTO");
+        assert_eq!(d.surname, "ERIKSSON");
+        assert_eq!(d.given_names, "ANNA MARIA");
+        assert_eq!(d.nationality, "UTO");
+        assert_eq!(d.sex, "F");
+        // The document-number field is `L898902C<`: eight characters padded to
+        // nine with a filler, check digit 3. The filler is padding, not the
+        // long-number signal — that would need the *check digit* position to
+        // be a filler — so no overflow is read here.
+        assert_eq!(d.document_number, "L898902C");
+        assert_eq!(d.document_number_full, None);
+        assert_eq!(d.personal_number.as_deref(), Some("ZE184226B"));
+        assert_eq!(d.date_of_birth, "1969-08-06");
+        // Doc 9303 defines no century rule (part 3 §4.8 is silent), so this
+        // crate's own policy applies: expiry is always read as 20xx. ICAO's
+        // specimen is a 1990s document, so that policy renders 940623 as 2094
+        // rather than 1994. Pinned deliberately — it is the documented
+        // heuristic behaving as designed, and the clearest illustration of its
+        // limit. See `dates::expand_date`.
+        assert_eq!(d.date_of_expiry, "2094-06-23");
+    }
+
+    #[test]
+    fn mrv_b_icao_published_specimen_fully_valid() {
+        let d = parse_mrv_b(MRV_B_ICAO_L1, MRV_B_ICAO_L2).unwrap();
+        assert!(d.valid(), "checks: {:?}", d.checks);
+        assert_eq!(d.format, Format::MrvB);
+        assert_eq!(d.document_type, "V");
+        assert_eq!(d.issuing_country, "UTO");
+        assert_eq!(d.surname, "ERIKSSON");
+        assert_eq!(d.given_names, "ANNA MARIA");
+        assert_eq!(d.nationality, "UTO");
+        assert_eq!(d.document_number, "L898902C");
+        assert_eq!(d.document_number_full, None);
+        assert_eq!(d.personal_number.as_deref(), Some("ZE184226"));
+        assert_eq!(d.date_of_birth, "1969-08-06");
+        assert_eq!(d.date_of_expiry, "2094-06-23");
+    }
+
+    // Hand-derived by this crate — NOT an ICAO-published specimen. Kept
+    // alongside the published pair above because it exercises a different
+    // nationality, dates and optional-data shape, and because the tamper
+    // tests below are wired to its values. Part 7's real MRV-A worked example
+    // is the one transcribed above:
+    // `knowledge/docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1104-1106`.
+    // Line 2 (44 chars); check-digit arithmetic (7-3-1, values A-Z=10-35,
+    // <=0), worked independently so the constant is verified rather than
+    // merely asserted:
     //   doc#   XK9305487: X=33,K=20,9,3,0,5,4,8,7 * 7,3,1,7,3,1,7,3,1
     //          = 231+60+9+21+0+5+28+24+7 = 385 -> 385 mod 10 = 5
     //   DOB    850221: 8,5,0,2,2,1 * 7,3,1,7,3,1
@@ -539,8 +620,13 @@ mod tests {
         assert_eq!(d.personal_number.as_deref(), Some("R5T6U7V8W9"));
     }
 
-    // MRV-B specimen line 2 (36 chars); check-digit arithmetic (7-3-1, values
-    // A-Z=10-35, <=0):
+    // Hand-derived by this crate — NOT an ICAO-published specimen. Kept for
+    // the same reason as the MRV-A pair above; Part 7's real MRV-B worked
+    // example is transcribed as `MRV_B_ICAO_L1`/`MRV_B_ICAO_L2`:
+    // `knowledge/docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1136-1138`.
+    // Line 2 (36 chars); check-digit arithmetic (7-3-1, values A-Z=10-35,
+    // <=0), worked independently so the constant is verified rather than
+    // merely asserted:
     //   doc#   L23456789: L=21,2,3,4,5,6,7,8,9 * 7,3,1,7,3,1,7,3,1
     //          = 147+6+3+28+15+6+49+24+9 = 287 -> 287 mod 10 = 7
     //   DOB    920101: 9,2,0,1,0,1 * 7,3,1,7,3,1
@@ -615,7 +701,8 @@ mod tests {
         assert_eq!(d.format, Format::MrvA);
     }
 
-    // ---- ICAO 9303 part 4 §4.2.2.2 document-number overflow ----
+    // ---- Document-number overflow (Part 5/6 note j; TD3 by analogy — see
+    // parser::read_overflow's doc comment) ----
 
     #[test]
     fn td3_long_document_number_round_trips() {

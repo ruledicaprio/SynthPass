@@ -170,7 +170,8 @@ proptest! {
 }
 
 /// A document number of arbitrary MRZ-charset length 1..=20 — the whole
-/// space this crate's overflow encoding (ICAO 9303 part 4 §4.2.2.2) has to
+/// space this crate's overflow encoding (ICAO 9303 Part 5/6 note j; extended
+/// to TD3 by analogy, see `parser::read_overflow`'s doc comment) has to
 /// handle: fits-as-printed (<=9), fits-via-overflow, and too-long-so-truncate.
 fn any_length_doc_number() -> impl Strategy<Value = String> {
     "[A-Z0-9]{1,20}"
