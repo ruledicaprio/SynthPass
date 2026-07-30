@@ -7,7 +7,10 @@
 
 use mrz::{parse_td3, MrzData};
 
-// Official ICAO 9303 Part 4 specimen (Utopia / Anna Maria Eriksson).
+// ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson) — see
+// `src/lib.rs`'s test module for the full provenance note (Part 4's own copy
+// is a figure, not extracted text; corroborated via Part 6's literal TD2
+// specimen).
 const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
 const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 

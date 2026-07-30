@@ -136,12 +136,15 @@ struct DocNumber {
     optional_prefix: String,
 }
 
-/// Encode a document number, using the ICAO 9303 part 4 §4.2.2.2 overflow form
-/// when it exceeds 9 characters and the remainder fits `optional_width`.
+/// Encode a document number, using the ICAO 9303 Part 5 note j / Part 6 note j
+/// long-document-number overflow form when it exceeds 9 characters and the
+/// remainder fits `optional_width`. Part 4 defines no such rule for TD3 —
+/// applying it there is a deliberate extension by analogy; see
+/// `parser::read_overflow`'s doc comment for the full citation.
 ///
 /// The overflow form prints all nine principal characters, sets the
 /// check-digit position to a filler (instead of a check digit, per Part 5
-/// note j / Part 4 §4.2.2.2) to signal a truncated number, and writes
+/// note j / §4.2.4) to signal a truncated number, and writes
 /// `remainder + check digit over the whole number + a terminating filler` at
 /// the start of the optional field. The check digit is computed over the nine
 /// principal characters concatenated with the remainder — i.e. `cleaned`

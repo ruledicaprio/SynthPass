@@ -28,8 +28,19 @@ struct Overflow {
     consumed: usize,
 }
 
-/// Decode the ICAO 9303 part 4 §4.2.2.2 / part 5 note j long-document-number
-/// encoding.
+/// Decode the ICAO 9303 long-document-number overflow encoding: TD1 note j
+/// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:368`) and its
+/// §4.2.4 check-digit table (`:464-469`), TD2 note j
+/// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:340`).
+///
+/// **Part 4 defines no overflow encoding for TD3 at all** — nothing in the
+/// corpus states a "more than 9 characters" rule for TD3; that language
+/// appears only in Parts 5, 6 and 7 (Part 7 explicitly caps at "positions 1
+/// to 9" with no spillover — MRV-A/MRV-B never call this function). Applying
+/// the TD1/TD2 rule to TD3 below is a deliberate extension by analogy, made
+/// because issuers do it in practice, not something Part 4 licenses. See
+/// `knowledge/docs9303/CONFORMANCE_BASIS.md`'s "Part 5 §4.2.4 / Part 6 note
+/// j" entry for the full corroboration.
 ///
 /// When the number exceeds the 9-character field, all nine principal
 /// characters are printed, the field's check-digit position is set to a
@@ -151,7 +162,9 @@ fn ensure_charset(line: &str) -> Result<(), MrzError> {
 }
 
 /// Parse a TD3 (passport) MRZ: two lines of exactly 44 characters
-/// (ICAO 9303 part 4 §4.2.2; document-number overflow is §4.2.2.2).
+/// (ICAO 9303 part 4 §4.2.2). Long-document-number overflow is decoded here
+/// too, though Part 4 defines no such rule for TD3 — it is applied by analogy
+/// to part 5 note j / part 6 note j, because issuers do it in practice.
 pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_td3_with(line1, line2, &ParseOptions::default())
 }

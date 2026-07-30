@@ -187,6 +187,104 @@ consequences.
 **Status: unverified — known damage, documented in place rather than
 guessed at.**
 
+### Part 3 §4.8 — silence on two-digit-year century inference
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:541-547`
+
+States only the six-digit `YYMMDD` structure and the unknown-date filler
+rule ("If all or part of the date of birth is unknown, the relevant
+character positions shall be completed with filler characters"). It does
+not say which century a two-digit year belongs to.
+
+Segment S2 searched the whole corpus (not just Part 3) for a century-pivot
+or "19xx/20xx" rule for any document type and found none. `crates/mrz`'s
+`dates::CURRENT_YY` heuristic (birth years greater than the pivot roll back
+to the 1900s) is therefore this crate's own invention, not an ICAO rule —
+the doc comment on `CURRENT_YY` says so and cites this entry.
+
+**Status: unverified — confirmed absent, not merely unchecked.** There is no
+worked example or cross-part table to corroborate here because there is
+nothing in the corpus to corroborate; the finding is the negative result
+itself.
+
+### MRV-A/MRV-B fixture provenance (`crates/mrz`)
+
+`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1104-1106` (MRV-A),
+`:1136-1138` (MRV-B)
+
+Segment S2 checked every fixture comment in `crates/mrz` claiming ICAO
+specimen provenance against the corpus:
+
+- The TD2 specimen (`I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<` /
+  `D231458907UTO7408122F1204159<<<<<<<6`) is published verbatim as text in
+  Part 6 (`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`) — the "Official
+  ICAO 9303 part 6 TD2 specimen" comment was already accurate.
+- The TD3 and TD1 specimens (same Utopia/Eriksson identity, reshaped per
+  format) are **not** extractable as text from Part 4 or Part 5: both
+  parts' Appendix A/B worked-example figures are images in the source PDF
+  (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:669-687`,
+  `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:504-534`), with no MRZ text
+  captured in this corpus. The old "Official ICAO 9303 part 4/5 specimen"
+  comments overclaimed direct textual provenance; corrected to say the
+  identity is corroborated by cross-part agreement with the literal TD2
+  text instead.
+- **The MRV-A and MRV-B fixtures are not ICAO specimens at all.** They were
+  hand-derived by this crate — `XK93054875BRA8502212F2703143R5T6U7V8W9<<<<<<`
+  and `L234567897DEU9201017F2706306QW12ER34` — with the check-digit
+  arithmetic worked in comments rather than taken from ICAO. Part 7 *does*
+  publish real MRV-A/MRV-B worked examples at the citations above, using the
+  same ERIKSSON/UTO identity but a different nationality, dates and optional
+  data (`L898902C<3UTO6908061F9406236ZE184226B<<<<<<<` for MRV-A). The old
+  comments said "specimen" without an explicit ICAO-provenance claim, which
+  was not false but was easy to misread; corrected to state plainly that
+  these are hand-derived, not published.
+
+  Rather than stop at relabelling them, S2 **transcribed Part 7's published
+  MRV-A and MRV-B specimens verbatim** and pinned them as new vectors
+  (`MRV_A_ICAO_L1`/`_L2`, `MRV_B_ICAO_L1`/`_L2` in `crates/mrz/src/lib.rs`).
+  All three of MRV-A's check digits were recomputed independently and match
+  what Part 7 prints: document number `L898902C<` → 3, date of birth
+  `690806` → 1, date of expiry `940623` → 6. The hand-derived pair is kept
+  alongside them, since it exercises a different nationality and
+  optional-data shape and the tamper tests are wired to its values.
+
+  Note the published MRV specimen is a 1990s document, so it also pins the
+  limit of this crate's century policy: with expiry always read as 20xx,
+  `940623` renders as `2094-06-23`, not 1994. That assertion is deliberate —
+  see the Part 3 §4.8 entry above for why the policy exists at all.
+
+**Status: cross-part agreement** for the TD3/TD1 identity (Part 6's literal
+text plus Part 4/5's figures, which agree on every value but weren't
+independently extractable); **worked example reproduced** for the newly
+transcribed Part 7 MRV-A/MRV-B specimens; **not applicable** for the
+hand-derived MRV pair, now correctly labelled as this crate's own vectors.
+
+### Check-digit vector provenance (`crates/mrz/tests/icao_vectors.rs`)
+
+Following from the entry above, S2 re-audited the check-digit vectors this
+file pins. Its header previously promised that "every entry is a value ICAO
+9303 documents, not one derived from this crate" — a promise the corpus
+cannot keep for two of the six:
+
+| Vector | Corroboration |
+|---|---|
+| `520727` → 3 | Part 3 Appendix A Example 1, literal text |
+| `AB2134<<<` → 5 | Part 3 Appendix A Example 2, literal text |
+| `740812` → 2 | Part 6 TD2 specimen, literal text (`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`) — **not** Part 4, as previously labelled |
+| `120415` → 9 | Part 6 TD2 specimen, literal text, same line |
+| `L898902C3` → 6 | **Not corroborated** — Part 4's specimen is image-only |
+| `ZE184226B<<<<<` → 1 | **Not corroborated** — Part 4's specimen is image-only |
+
+The arithmetic of all six is correct under the 7-3-1 rule regardless; what
+was wrong was the provenance claim, not the values. The two uncorroborated
+entries are kept (they almost certainly are ICAO's, from a specimen this
+corpus simply could not extract) but are now labelled as uncorroborated
+rather than credited to Part 4, and the file header no longer makes the
+blanket claim.
+
+**Status: worked example reproduced** for four of six; **unverified,
+explicitly flagged** for the two document-specific TD3 values.
+
 ## Scope
 
 This document is seeded by segment S0 with the passages the composite

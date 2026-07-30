@@ -8,23 +8,51 @@
 //! Each expected digit below is independently verifiable by hand under the
 //! 7-3-1 weighting (`0-9 → 0-9`, `A-Z → 10-35`, `< → 0`); the computation is
 //! shown for the two Part 3 examples in the comments.
+//!
+//! On provenance: the corpus in `knowledge/docs9303/` carries Doc 9303 as
+//! converted text, and not every worked example survived that conversion as
+//! text — several specimens are images in the source PDFs. Each vector below
+//! therefore records whether the corpus can actually corroborate it, rather
+//! than asserting a blanket "these come from ICAO". See
+//! `knowledge/docs9303/CONFORMANCE_BASIS.md`.
 
 use mrz::{check_digit, verify};
 
-/// `(field, expected_check_digit, source)` — every entry is a value ICAO 9303
-/// documents, not one derived from this crate.
+/// `(field, expected_check_digit, source)`.
+///
+/// The `source` string names where the value comes from and, where the corpus
+/// cannot corroborate it, says so. Every expected digit is correct arithmetic
+/// under the 7-3-1 rule regardless — what varies is whether *this corpus*
+/// independently confirms the value was printed on an ICAO specimen.
 const VECTORS: &[(&str, u32, &str)] = &[
     // ICAO 9303 Part 3, check-digit worked examples.
     //   5·7 + 2·3 + 0·1 + 7·7 + 2·3 + 7·1 = 35+6+0+49+6+7 = 103 → 103 % 10 = 3
     ("520727", 3, "9303 pt3 numeric example"),
     //   A·7 + B·3 + 2·1 + 1·7 + 3·3 + 4·1 = 70+33+2+7+9+4 = 125 → 125 % 10 = 5
     ("AB2134<<<", 5, "9303 pt3 alphanumeric+filler example"),
-    // ICAO 9303 Part 4, TD3 specimen (Utopia / Anna Maria Eriksson) field
-    // check digits, as printed on the specimen's line 2.
-    ("L898902C3", 6, "9303 pt4 TD3 specimen document number"),
-    ("740812", 2, "9303 pt4 TD3 specimen date of birth"),
-    ("120415", 9, "9303 pt4 TD3 specimen date of expiry"),
-    ("ZE184226B<<<<<", 1, "9303 pt4 TD3 specimen personal number"),
+    // TD3 specimen (Utopia / Anna Maria Eriksson) field check digits.
+    //
+    // Part 4's specimen data page is an IMAGE in the source PDF and did not
+    // survive conversion as text: searching the corpus for `L898902` or
+    // `ZE184226` hits only Part 7's MRV specimens, never Part 4. So the two
+    // document-specific values below cannot be corroborated from this corpus,
+    // and are labelled accordingly rather than credited to Part 4.
+    (
+        "L898902C3",
+        6,
+        "TD3 specimen document number (not corroborated by the corpus - Part 4's specimen is image-only)",
+    ),
+    (
+        "ZE184226B<<<<<",
+        1,
+        "TD3 specimen personal number (not corroborated by the corpus - Part 4's specimen is image-only)",
+    ),
+    // These two ARE corroborated, though from Part 6 rather than Part 4: the
+    // TD2 specimen's line 2 survived as literal text and carries the same
+    // date of birth and date of expiry, with the same check digits.
+    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`
+    ("740812", 2, "9303 pt6 TD2 specimen date of birth"),
+    ("120415", 9, "9303 pt6 TD2 specimen date of expiry"),
 ];
 
 #[test]
