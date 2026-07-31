@@ -38,6 +38,12 @@ pub trait InferBackend: Send + Sync {
     fn model_id(&self) -> Option<String> {
         None
     }
+    /// Which compiled-in prompt this backend used, for [`synthpass_core::v2::ExtractionTrace`].
+    /// Defaults to `None` so out-of-tree backends stay source-compatible; a
+    /// deterministic-only backend has no prompt to report.
+    fn prompt_ref(&self) -> Option<synthpass_core::v2::PromptRef> {
+        None
+    }
     /// Preflight check for `synthpass doctor`: `Ok(status)` on success, `Err(reason)`
     /// otherwise. Must not panic and should be cheap (no full model load).
     async fn health(&self) -> Result<String, String>;
@@ -137,6 +143,10 @@ mod native {
             self.model_path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
+        }
+
+        fn prompt_ref(&self) -> Option<synthpass_core::v2::PromptRef> {
+            Some(synthpass_llm::prompt::prompt_ref())
         }
 
         async fn health(&self) -> Result<String, String> {

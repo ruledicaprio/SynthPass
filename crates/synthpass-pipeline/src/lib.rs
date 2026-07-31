@@ -679,7 +679,7 @@ impl Pipeline {
                                 Method::Llm.as_str().to_string(),
                             ],
                             escalation: stage.escalation,
-                            prompt: None,
+                            prompt: self.infer.prompt_ref(),
                         });
                         let value = serde_json::to_value(extraction_from_v2_llm(
                             &v2,
@@ -773,7 +773,7 @@ impl Pipeline {
                                 Method::Llm.as_str().to_string(),
                             ],
                             escalation: stage.escalation,
-                            prompt: None,
+                            prompt: self.infer.prompt_ref(),
                         });
                         // Derived from `v2`, not from the raw `extraction`: the v1
                         // record must agree with the v2 one it ships alongside, and
