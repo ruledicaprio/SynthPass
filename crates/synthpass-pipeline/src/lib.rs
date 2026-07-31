@@ -1124,13 +1124,36 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
 /// `None` without inspecting `mrz_data` at all, so a document with no
 /// checksum-verified fields never even gets its `Checks` bits read.
 ///
-/// Reuses exactly the four checksummed-field gates
-/// [`promote_verified_mrz_fields`] already applies (same reasoning: each
-/// ICAO check digit verifies its own field independently, checksum-partial
-/// or not), plus `nationality`/`sex`, gated on `m.checks.composite` — the
-/// MRZ's own aggregate line-1 checksum, which is the strongest signal
-/// available for those two fields since neither has an individual check
-/// digit (see `synthpass_core::fusion`'s module doc).
+/// Emits **only** the four individually checksummed fields — the same four
+/// gates [`promote_verified_mrz_fields`] applies, on the same reasoning: each
+/// ICAO check digit verifies its own field independently, checksum-partial or
+/// not.
+///
+/// # Why `nationality` and `sex` are not here
+///
+/// They used to be, gated on `m.checks.composite`, described as "the
+/// strongest signal available for those two fields". That was wrong twice
+/// over, and the hint text calls itself "Verified from the machine-readable
+/// zone (trust these over the OCR text)" — so the error instructed the model
+/// to prefer an unverified value over its own, possibly correct, visual-zone
+/// read.
+///
+/// 1. **The composite check digit does not cover either field, in any
+///    format.** `mrz::parser` computes it over TD3 `line2[0..10] + [13..20] +
+///    [21..43]`, TD2 `[0..10] + [13..20] + [21..35]`, TD1 `line1[5..30] +
+///    line2[0..7] + [8..15] + [18..29]`. `nationality` (TD2/TD3 `line2[10..13]`,
+///    TD1 `line2[15..18]`) and `sex` (TD2/TD3 `line2[20]`, TD1 `line2[7]`) fall
+///    outside every one of those ranges. `synthpass_core::fusion`'s module doc
+///    already stated this — "the composite excludes `nationality` and `sex`
+///    too, matching the published standard".
+/// 2. **MRV-A and MRV-B have no composite check digit at all** and set
+///    `checks.composite = true` vacuously (`mrz::parser`, both branches). So on
+///    any visa the gate was not weak evidence — it was no evidence, read as
+///    proof. This is the identical vacuous-true trap the `personal_number`
+///    line below guards against with its `format == Td3` clause.
+///
+/// Nothing in an MRZ verifies `nationality` or `sex`. A hint can only carry
+/// what a check digit proves.
 ///
 /// Deliberately built from the raw `mrz::MrzData` at the Tier-2 call site,
 /// not from a Tier-1 [`Reading`](synthpass_die::Reading): on a checksum-partial
@@ -1158,10 +1181,6 @@ pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
         if let Some(pn) = &m.personal_number {
             parts.push(format!("personal_number={pn}"));
         }
-    }
-    if m.checks.composite {
-        parts.push(format!("nationality={}", m.nationality));
-        parts.push(format!("sex={}", m.sex));
     }
 
     if parts.is_empty() {
@@ -2529,6 +2548,26 @@ mod tests {
         .expect("ICAO 9303 worked example parses")
     }
 
+    /// A valid MRV-A visa. Its `checks.composite` and `checks.personal_number`
+    /// are both `true` *vacuously* — the format defines neither check digit —
+    /// which is exactly what makes it the fixture for the gating bug.
+    fn valid_mrv_a() -> mrz::MrzData {
+        let mrz_text = mrz::format_mrv_a(&mrz::MrvAFields {
+            document_code: "V".to_string(),
+            issuing_country: "UTO".to_string(),
+            document_number: "XK9305487".to_string(),
+            surname: "ERIKSSON".to_string(),
+            given_names: "ANNA MARIA".to_string(),
+            nationality: "BRA".to_string(),
+            date_of_birth: "850221".to_string(),
+            sex: "F".to_string(),
+            date_of_expiry: "270314".to_string(),
+            optional_data: Some("R5T6U7V8W9".to_string()),
+        });
+        let (l1, l2) = mrz_text.split_once('\n').expect("two lines");
+        mrz::parse_mrv_a(l1, l2).expect("emitted MRV-A parses")
+    }
+
     #[test]
     fn hint_is_none_when_the_flag_is_off() {
         let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
@@ -2566,8 +2605,7 @@ mod tests {
         );
         assert!(
             !hint.contains("nationality="),
-            "the composite check digit fails alongside document_number, so \
-             nationality/sex (gated on it) must be excluded: {hint}"
+            "no check digit covers nationality in any format: {hint}"
         );
         assert!(
             !hint.contains("sex="),
@@ -2576,7 +2614,13 @@ mod tests {
     }
 
     #[test]
-    fn hint_includes_nationality_and_sex_when_the_composite_check_passes() {
+    fn hint_omits_nationality_and_sex_even_on_a_fully_valid_read() {
+        // These two were previously emitted whenever `checks.composite`
+        // passed. The composite covers TD3 `line2[0..10] + [13..20] +
+        // [21..43]`; `nationality` is `[10..13]` and `sex` is `[20]`, so
+        // neither is inside it. A passing composite says nothing about them,
+        // and the hint's own prefix claims everything it carries is "Verified
+        // from the machine-readable zone".
         let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
         std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
         let m = valid_td3();
@@ -2584,10 +2628,50 @@ mod tests {
         let result = mrz_hint(Some(&m));
         std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
 
-        let hint = result.expect("a fully valid read has plenty to report");
+        let hint = result.expect("a fully valid read still reports its four checksummed fields");
         assert!(hint.contains(&format!("document_number={}", m.document_number)));
-        assert!(hint.contains(&format!("nationality={}", m.nationality)));
-        assert!(hint.contains(&format!("sex={}", m.sex)));
+        assert!(hint.contains(&format!("date_of_birth={}", m.date_of_birth)));
+        assert!(hint.contains(&format!("date_of_expiry={}", m.date_of_expiry)));
+        assert!(
+            !hint.contains("nationality="),
+            "the composite does not cover nationality: {hint}"
+        );
+        assert!(!hint.contains("sex="), "nor sex: {hint}");
+    }
+
+    #[test]
+    fn hint_reports_nothing_unverified_on_a_visa_whose_composite_bit_is_vacuous() {
+        // MRV-A and MRV-B carry no composite check digit at all; `mrz::parser`
+        // sets `checks.composite = true` vacuously for both. Gating anything
+        // on that bit therefore treated *no evidence* as proof on every visa —
+        // the same trap `personal_number` is guarded against with its
+        // `format == Td3` clause.
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let m = valid_mrv_a();
+        assert!(
+            m.checks.composite,
+            "sanity: the vacuous bit is what makes this case dangerous"
+        );
+        assert!(
+            m.checks.personal_number,
+            "sanity: vacuously true here too — the existing Td3 guard is why \
+             it is already handled correctly"
+        );
+        let result = mrz_hint(Some(&m));
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+
+        let hint = result.expect("the three real check digits still verify");
+        assert!(hint.contains(&format!("document_number={}", m.document_number)));
+        assert!(
+            !hint.contains("nationality="),
+            "a visa has no composite check digit to have verified this: {hint}"
+        );
+        assert!(!hint.contains("sex="), "nor this: {hint}");
+        assert!(
+            !hint.contains("personal_number="),
+            "already correctly excluded by the format guard: {hint}"
+        );
     }
 
     /// End-to-end through `LlmFieldReader::read` (the same seam
