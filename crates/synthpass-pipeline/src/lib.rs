@@ -2067,4 +2067,314 @@ mod tests {
     fn json_str(s: &str) -> Value {
         Value::String(s.to_string())
     }
+    // ---- promote_verified_mrz_fields (issue #100) ----
+
+    use synthpass_core::v2::FieldConfidence;
+
+    /// A bare v2 record with an LLM-shaped baseline: every core field
+    /// present, every confidence at [`LLM_HEURISTIC_CONFIDENCE`] — the flat
+    /// score a Tier-2 record carries before per-field scoring runs. Distinct
+    /// values per field (rather than one repeated string) so a test can tell
+    /// "untouched" from "coincidentally equal to the promoted value."
+    fn llm_shaped_v2() -> ExtractionV2 {
+        let mut v2 = ExtractionV2::default();
+        v2.fields.document_type = Some("P".into());
+        v2.fields.issuing_country = Some("HRV".into());
+        v2.fields.document_number = Some("LLMGUESS1".into());
+        v2.fields.surname = Some("LLM-SURNAME".into());
+        v2.fields.given_names = Some("LLM-GIVEN".into());
+        v2.fields.nationality = Some("HRV".into());
+        v2.fields.date_of_birth = Some("1900-01-01".into());
+        v2.fields.sex = Some("F".into());
+        v2.fields.date_of_expiry = Some("1900-01-01".into());
+        v2.fields.personal_number = Some("LLM-PERSONAL".into());
+        v2.confidence = FieldConfidence::llm_heuristic();
+        v2
+    }
+
+    /// A synthetic TD3 read with the document number's own check digit
+    /// corrupted so `document_number`/`composite` fail, while
+    /// `date_of_birth`, `date_of_expiry`, and `personal_number` — each
+    /// individually check-digited — still verify. Distinct from
+    /// `HRV_TD3_BAD_CHECKSUM_MARKDOWN` (used elsewhere in this module),
+    /// whose personal-number field is all filler and so, correctly, does
+    /// not exercise the promoted-with-a-value path this fixture is for.
+    fn td3_corrupted_document_number() -> mrz::MrzData {
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            personal_number: Some("ZE184226B".into()),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td3(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').expect("two lines");
+        // Flip one digit inside the 9-character document-number field
+        // (position 0), leaving its own check digit (position 9) and every
+        // other field untouched.
+        let mut bytes = l2.as_bytes().to_vec();
+        bytes[0] = if bytes[0] == b'L' { b'M' } else { b'L' };
+        let corrupted_l2 = String::from_utf8(bytes).expect("ascii MRZ stays valid UTF-8");
+
+        let m = mrz::parse_td3(l1, &corrupted_l2).expect("still parses structurally");
+        assert!(
+            !m.checks.document_number,
+            "sanity: the corruption must actually break this check digit"
+        );
+        m
+    }
+
+    #[test]
+    fn document_number_check_failure_still_promotes_the_other_three_fields() {
+        let m = td3_corrupted_document_number();
+        // `mrz::Checks` is `#[non_exhaustive]`, so it can't be built by
+        // literal for an equality assert — check each bit instead.
+        assert!(!m.checks.document_number, "sanity: this bit must fail");
+        assert!(m.checks.date_of_birth, "sanity");
+        assert!(m.checks.date_of_expiry, "sanity");
+        assert!(m.checks.personal_number, "sanity");
+        assert!(
+            !m.checks.composite,
+            "sanity: composite fails alongside document_number"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        // Not promoted: the check digit failed, so the LLM's own guess must
+        // survive untouched.
+        assert_eq!(v2.fields.document_number.as_deref(), Some("LLMGUESS1"));
+        assert_eq!(v2.confidence.document_number, LLM_HEURISTIC_CONFIDENCE);
+
+        // Promoted: byte-identical to the deterministic read, at PROVEN
+        // confidence.
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some(m.date_of_birth.as_str())
+        );
+        assert_eq!(v2.confidence.date_of_birth, 1.0);
+        assert_eq!(
+            v2.fields.date_of_expiry.as_deref(),
+            Some(m.date_of_expiry.as_str())
+        );
+        assert_eq!(v2.confidence.date_of_expiry, 1.0);
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            m.personal_number.as_deref()
+        );
+        assert_eq!(v2.confidence.personal_number, 1.0);
+
+        // Untouched: fields the ICAO check digits never cover.
+        assert_eq!(v2.fields.surname.as_deref(), Some("LLM-SURNAME"));
+        assert_eq!(v2.confidence.surname, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.given_names.as_deref(), Some("LLM-GIVEN"));
+        assert_eq!(v2.confidence.given_names, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.nationality.as_deref(), Some("HRV"));
+        assert_eq!(v2.confidence.nationality, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.sex.as_deref(), Some("F"));
+        assert_eq!(v2.confidence.sex, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn agreeing_llm_value_stays_byte_identical_and_confidence_only_rises() {
+        let m = td3_corrupted_document_number();
+
+        let mut v2 = llm_shaped_v2();
+        // The LLM already guessed the correct date of birth.
+        v2.fields.date_of_birth = Some(m.date_of_birth.clone());
+        let before = v2.confidence.date_of_birth;
+
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some(m.date_of_birth.as_str())
+        );
+        assert!(
+            v2.confidence.date_of_birth >= before,
+            "promotion must never lower a score: {before} -> {}",
+            v2.confidence.date_of_birth
+        );
+        assert_eq!(
+            v2.confidence.date_of_birth, 1.0,
+            "an LLM's ceiling confidence sits below PROVEN, so agreement upgrades to it"
+        );
+    }
+
+    #[test]
+    fn td1_vacuous_personal_number_check_bit_is_not_promoted() {
+        let fields = mrz::Td1Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td1(&fields);
+        let mut lines = mrz_text.lines();
+        let m = mrz::parse_td1(
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+        )
+        .expect("TD1 fixture parses");
+        assert_eq!(
+            m.format,
+            mrz::Format::Td1,
+            "sanity: this is the format under test"
+        );
+        assert!(
+            m.checks.personal_number,
+            "TD1 reports the personal-number check bit true vacuously — no such \
+             check digit exists on this format"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "the vacuous TD1 check bit must not promote an unverified value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn td2_vacuous_personal_number_check_bit_is_not_promoted() {
+        let fields = mrz::Td2Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td2(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').unwrap();
+        let m = mrz::parse_td2(l1, l2).expect("TD2 fixture parses");
+        assert_eq!(m.format, mrz::Format::Td2, "sanity");
+        assert!(m.checks.personal_number, "vacuous on TD2 too");
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "TD2's vacuous check bit must not promote an unverified value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn all_filler_td3_personal_number_is_not_nulled() {
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            personal_number: None, // all-filler personal-number field
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td3(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').unwrap();
+        let m = mrz::parse_td3(l1, l2).expect("TD3 fixture parses");
+        assert!(
+            m.valid(),
+            "sanity: an all-filler personal number still verifies"
+        );
+        assert!(m.checks.personal_number);
+        assert_eq!(
+            m.personal_number, None,
+            "sanity: all-filler-but-valid reads back as None, not an empty string"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "a None deterministic read must not null out the LLM's existing value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn incomplete_date_of_birth_is_not_promoted() {
+        // TD1's optional-data date-of-birth field left entirely unknown
+        // (Doc 9303 Part 3 §4.8): a legitimate issuer omission, not a bad
+        // read, but the raw field holds `<<<<<<`, not an ISO date.
+        let fields = mrz::Td1Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "<<<<<<".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td1(&fields);
+        let mut lines = mrz_text.lines();
+        let m = mrz::parse_td1(
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+        )
+        .expect("TD1 fixture parses");
+        assert_eq!(
+            m.date_of_birth_completeness,
+            mrz::DateCompleteness::Unknown,
+            "sanity: an all-filler date of birth is entirely unknown, not malformed"
+        );
+        assert!(
+            m.checks.date_of_birth,
+            "an all-filler field checks out (filler counts as zero)"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some("1900-01-01"),
+            "an incomplete date must not promote the raw YYMMDD/filler field \
+             into an ISO-typed slot"
+        );
+        assert_eq!(v2.confidence.date_of_birth, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn apply_deterministic_mrz_with_no_mrz_data_leaves_fields_untouched() {
+        let mut v2 = llm_shaped_v2();
+        let before = v2.fields.clone();
+
+        apply_deterministic_mrz(&mut v2, None);
+
+        assert_eq!(
+            v2.fields, before,
+            "no deterministic read means nothing to promote"
+        );
+        assert_eq!(v2.confidence, FieldConfidence::llm_heuristic());
+    }
+
 }
