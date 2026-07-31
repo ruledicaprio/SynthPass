@@ -196,4 +196,4 @@ list is a product feature, not housekeeping. Scope, in order:
 **Beyond v1.2.0, the project returns to patch releases.** Versioning moves to patch releases (`v1.0.1`, `v1.0.2`, …); see the "What's next" note at the end of CHANGELOG's `[1.0.0]` entry for the proposed next scope. `docker/docker-compose.yml` and `docker/Dockerfile.serve` remain as an optional, glibc-based convenience packaging path alongside the musl artifact — neither is required for any functional code path.
 
 ## 11. Getting Started
-See the [README quickstart](../README.md#-quickstart).
+See the [README quickstart](../README.md#quickstart).

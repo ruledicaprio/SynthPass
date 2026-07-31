@@ -60,7 +60,10 @@ priorities exactly; `CLAUDE.md` is canonical and this list must not drift from i
 - **Model training** – We do not train OCR or LLM models; we consume them.
 - **Real‑time video processing** – Batch or single‑image only.
 - **Mobile‑first UI** – CLI and library first; GUIs are secondary.
-- **Support for non‑ICAO documents** – Focus on passports, national IDs, visas.
+- **Support for non‑ICAO documents, for the milestones currently committed (M1–M7)** – Focus on
+  passports, national IDs, and visas under ICAO Doc 9303. Driving licences, residence permits, and
+  other non-9303 document classes are a stated longer-horizon direction, not a permanent exclusion —
+  see [§25 Future Vision](#25-future-vision) below and `knowledge/ROADMAP.md`'s Future Work section.
 
 ---
 
@@ -425,7 +428,9 @@ Every pull request must be checked against this list:
 
 SynthPass will evolve to support:
 
-- More document types (driver’s licenses, residence permits).
+- More document types (driver's licenses via AAMVA PDF417, residence permits, mobile driving
+  licences under ISO/IEC 18013 — see `knowledge/ROADMAP.md`'s "Beyond ICAO 9303" Future Work
+  entry for the scoping detail on each).
 - Additional barcode parsing (PDF417, Aztec).
 - GPU acceleration for OCR and LLM.
 - Plugin system for custom pre/post‑processing.
@@ -433,6 +438,8 @@ SynthPass will evolve to support:
 - Formal verification of MRZ parsing.
 
 All additions must remain true to the core philosophy: offline, private, deterministic, correct.
+This is the longer horizon §4's non-ICAO-documents non-goal points at: not committed for M1–M7, but
+not ruled out either.
 
 ---
 

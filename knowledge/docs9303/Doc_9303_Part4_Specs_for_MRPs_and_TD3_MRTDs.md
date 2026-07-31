@@ -573,7 +573,7 @@ MRZ: PPUTOBENNELONG<WOOLOOM<WARRAND<WARNAM<<DINGO
 ```text
 Name: Dingo Potoroo Bennelong Wooloomooloo Warrandyte Warnambool
 VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
-MRZ: PPUTOBENNEL<WOOLOOM<WARRAN<WARNAM<<DINGO<POTO
+MRZ: PPUTOBENNEL<WOOLOO<WARRAN<WARNAM<<DINGO<POTO
 ```
 
 **4.2.3.4 Names that fit into the maximum positions available within the name field, indicating possible truncation by the letter in the last position, but which are not truncated.**
