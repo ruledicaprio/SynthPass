@@ -43,6 +43,20 @@ fn grammar_enabled() -> bool {
     std::env::var("SYNTHPASS_LLM_GRAMMAR").as_deref() != Ok("0")
 }
 
+/// Whether Tier-2 should fold a checksum-verified MRZ hint into its prompt
+/// (see [`prompt::build_prompt`]'s `hint` param). Defaults to **off** —
+/// unlike [`grammar_enabled`], this is a rollout gate for a change still
+/// being A/B-measured (issue #102), not an escape hatch for an already-shipped
+/// default; opt in with `SYNTHPASS_LLM_MRZ_HINT=1`.
+///
+/// Callers that build the hint (`synthpass-pipeline`, `synthpass-bench`)
+/// must check this *before* constructing the hint string at all — see this
+/// function's callers for why "don't build it either" matters, not just
+/// "don't send it".
+pub fn mrz_hint_enabled() -> bool {
+    std::env::var("SYNTHPASS_LLM_MRZ_HINT").as_deref() == Ok("1")
+}
+
 /// The sampler chain for one generation: the extraction grammar in front of
 /// greedy selection, so every sampled token is one that can still continue a
 /// schema-valid JSON object (Atlas §8).
@@ -101,9 +115,9 @@ impl NativeLlm {
     }
 
     /// Run one deterministic (greedy) extraction, returning the parsed
-    /// [`Extraction`].
-    pub fn extract(&self, markdown: &str) -> Result<Extraction, String> {
-        let raw = self.generate(markdown, |_delta| {})?;
+    /// [`Extraction`]. `hint`: see [`prompt::build_prompt`].
+    pub fn extract(&self, markdown: &str, hint: Option<&str>) -> Result<Extraction, String> {
+        let raw = self.generate(markdown, hint, |_delta| {})?;
         repair::parse_extraction(&raw)
     }
 
@@ -112,9 +126,10 @@ impl NativeLlm {
     pub fn extract_stream(
         &self,
         markdown: &str,
+        hint: Option<&str>,
         on_delta: impl FnMut(&str),
     ) -> Result<Extraction, String> {
-        let raw = self.generate(markdown, on_delta)?;
+        let raw = self.generate(markdown, hint, on_delta)?;
         repair::parse_extraction(&raw)
     }
 
@@ -132,6 +147,7 @@ impl NativeLlm {
     fn generate(
         &self,
         markdown: &str,
+        hint: Option<&str>,
         mut on_delta: impl FnMut(&str),
     ) -> Result<Zeroizing<String>, String> {
         let _guard = self
@@ -139,7 +155,7 @@ impl NativeLlm {
             .lock()
             .map_err(|_| "generation lock poisoned")?;
 
-        let prompt_text = Zeroizing::new(prompt::build_prompt(markdown));
+        let prompt_text = Zeroizing::new(prompt::build_prompt(markdown, hint));
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(self.n_ctx))
             .with_n_batch(self.n_ctx.get());

@@ -518,13 +518,18 @@ impl Pipeline {
     ///
     /// [`Pipeline::process_document`]: Pipeline::process_document
     /// [`Pipeline::process_document_stream`]: Pipeline::process_document_stream
-    pub async fn extract_via_inferer(&self, markdown: &str) -> Result<Extraction, String> {
+    pub async fn extract_via_inferer(
+        &self,
+        markdown: &str,
+        hint: Option<&str>,
+    ) -> Result<Extraction, String> {
         run_tier2(
             &self.infer,
             &self.llm_semaphore,
             &self.llm_queue_depth,
             &self.metrics,
             markdown,
+            hint,
         )
         .await
     }
@@ -673,10 +678,12 @@ impl Pipeline {
                     .catalog
                     .find_reader(stage.escalation_budget, |c| c.fields && !c.deterministic)
                     .expect("LlmFieldReader is always registered");
-                match reader
-                    .read(&DocumentContext::from_text(&stage.markdown))
-                    .await
-                {
+                let hint = mrz_hint(stage.mrz_data.as_ref());
+                let mut ctx = DocumentContext::from_text(&stage.markdown);
+                if let Some(hint) = &hint {
+                    ctx = ctx.with_mrz_hint(hint);
+                }
+                match reader.read(&ctx).await {
                     Ok(reading) => {
                         let mut v2 = reading.extraction;
                         apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
@@ -770,7 +777,11 @@ impl Pipeline {
             if let Some((value, v2)) = stage.tier1 {
                 (Some(value), Some(v2), Method::MrzDeterministic, None)
             } else {
-                match self.extract_via_inferer_stream(&stage.markdown, &tx).await {
+                let hint = mrz_hint(stage.mrz_data.as_ref());
+                match self
+                    .extract_via_inferer_stream(&stage.markdown, hint.as_deref(), &tx)
+                    .await
+                {
                     Ok(extraction) => {
                         let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
                         apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
@@ -843,6 +854,7 @@ impl Pipeline {
     async fn extract_via_inferer_stream(
         &self,
         markdown: &str,
+        hint: Option<&str>,
         tx: &mpsc::Sender<ProcessEvent>,
     ) -> Result<Extraction, String> {
         let _depth = QueueDepthGuard::enter(&self.llm_queue_depth);
@@ -851,7 +863,7 @@ impl Pipeline {
             .acquire()
             .await
             .expect("llm_semaphore is never closed");
-        let mut result = self.infer.extract_stream(markdown, tx).await;
+        let mut result = self.infer.extract_stream(markdown, hint, tx).await;
         if let Ok(extraction) = &mut result {
             synthpass_core::normalize::extraction(extraction);
         }
@@ -1018,7 +1030,25 @@ fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData
     let block = mrz_block_from(m);
     v2.document.mrz_format = Some(block.format);
     v2.mrz = Some(block);
-    let verdict = synthpass_core::fusion::check_line1_integrity(m);
+
+    // Line-1 self-consistency (`check_line1_integrity`) plus a cross-check of
+    // the six non-checksummed line-1 fields against whatever Tier-2 already
+    // put in `v2.fields` (`check_tier2_against_mrz`) — merged into one
+    // verdict before `downgrade_flagged` runs, so either kind of finding can
+    // drive a `Verdict::Accepted` -> `NeedsReview` transition through the
+    // same downgrade path.
+    let mut reasons = match synthpass_core::fusion::check_line1_integrity(m) {
+        synthpass_core::fusion::Verdict::Accepted => Vec::new(),
+        synthpass_core::fusion::Verdict::NeedsReview { reasons } => reasons,
+    };
+    reasons.extend(synthpass_core::fusion::check_tier2_against_mrz(
+        &v2.fields, m,
+    ));
+    let verdict = if reasons.is_empty() {
+        synthpass_core::fusion::Verdict::Accepted
+    } else {
+        synthpass_core::fusion::Verdict::NeedsReview { reasons }
+    };
     v2.confidence.downgrade_flagged(&verdict);
     v2.line1_integrity = Some(verdict);
     // Last: a downgrade must never clobber a promotion this step is about to
@@ -1088,6 +1118,59 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
     }
 }
 
+/// Build the Tier-2 MRZ hint (see [`synthpass_die::DocumentContext::mrz_hint`])
+/// from a checksum-partial `mrz::MrzData`, gated on
+/// [`synthpass_llm::mrz_hint_enabled`] — when the flag is off, this returns
+/// `None` without inspecting `mrz_data` at all, so a document with no
+/// checksum-verified fields never even gets its `Checks` bits read.
+///
+/// Reuses exactly the four checksummed-field gates
+/// [`promote_verified_mrz_fields`] already applies (same reasoning: each
+/// ICAO check digit verifies its own field independently, checksum-partial
+/// or not), plus `nationality`/`sex`, gated on `m.checks.composite` — the
+/// MRZ's own aggregate line-1 checksum, which is the strongest signal
+/// available for those two fields since neither has an individual check
+/// digit (see `synthpass_core::fusion`'s module doc).
+///
+/// Deliberately built from the raw `mrz::MrzData` at the Tier-2 call site,
+/// not from a Tier-1 [`Reading`](synthpass_die::Reading): on a checksum-partial
+/// document [`MrzReader`] reports no fields at all (it only populates
+/// `extraction` when the *whole* record validates), so a `DocumentContext::prior`
+/// built from that reading would be empty even though individual fields here
+/// are proven.
+pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
+    if !synthpass_llm::mrz_hint_enabled() {
+        return None;
+    }
+    let m = mrz_data?;
+
+    let mut parts = Vec::new();
+    if m.checks.document_number {
+        parts.push(format!("document_number={}", m.document_number));
+    }
+    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+        parts.push(format!("date_of_birth={}", m.date_of_birth));
+    }
+    if m.checks.date_of_expiry {
+        parts.push(format!("date_of_expiry={}", m.date_of_expiry));
+    }
+    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+        if let Some(pn) = &m.personal_number {
+            parts.push(format!("personal_number={pn}"));
+        }
+    }
+    if m.checks.composite {
+        parts.push(format!("nationality={}", m.nationality));
+        parts.push(format!("sex={}", m.sex));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
+}
+
 /// The v1 `mrz_checksums_valid` bool for a Tier-2 record, straight from the
 /// deterministic read [`apply_deterministic_mrz`] installed. `None` only when no
 /// MRZ was found at all — which is the one case where the v1 field genuinely has
@@ -1149,6 +1232,7 @@ async fn run_tier2(
     queue_depth: &AtomicUsize,
     metrics: &PipelineMetrics,
     markdown: &str,
+    hint: Option<&str>,
 ) -> Result<Extraction, String> {
     let _depth = QueueDepthGuard::enter(queue_depth);
     let _permit = semaphore
@@ -1157,7 +1241,7 @@ async fn run_tier2(
         .expect("llm_semaphore is never closed");
 
     let started = Instant::now();
-    let mut result = infer.extract(markdown).await;
+    let mut result = infer.extract(markdown, hint).await;
     let elapsed = started.elapsed();
     metrics.tier2_seconds.observe(elapsed);
     match &result {
@@ -1215,13 +1299,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl InferBackend for MockBackend {
-        async fn extract(&self, markdown: &str) -> Result<Extraction, String> {
+        async fn extract(&self, markdown: &str, _hint: Option<&str>) -> Result<Extraction, String> {
             Ok(mock_extraction(markdown))
         }
 
         async fn extract_stream(
             &self,
             markdown: &str,
+            _hint: Option<&str>,
             tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
             let _ = tx.try_send(ProcessEvent::Delta("mock-delta".into()));
@@ -1238,6 +1323,47 @@ mod tests {
 
         async fn health(&self) -> Result<String, String> {
             Ok("mock healthy".into())
+        }
+    }
+
+    /// A Tier-2 backend that records the `hint` it was called with, for
+    /// asserting end to end that `SYNTHPASS_LLM_MRZ_HINT` actually controls
+    /// what reaches `InferBackend::extract`/`extract_stream` — not just that
+    /// `mrz_hint()` itself computes the right string in isolation.
+    struct HintRecordingBackend {
+        last_hint: std::sync::Mutex<Option<String>>,
+    }
+
+    impl HintRecordingBackend {
+        fn new() -> Self {
+            Self {
+                last_hint: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl InferBackend for HintRecordingBackend {
+        async fn extract(&self, markdown: &str, hint: Option<&str>) -> Result<Extraction, String> {
+            *self.last_hint.lock().unwrap() = hint.map(str::to_string);
+            Ok(mock_extraction(markdown))
+        }
+
+        async fn extract_stream(
+            &self,
+            markdown: &str,
+            hint: Option<&str>,
+            _tx: &mpsc::Sender<ProcessEvent>,
+        ) -> Result<Extraction, String> {
+            self.extract(markdown, hint).await
+        }
+
+        fn describe(&self) -> String {
+            "hint-recording".into()
+        }
+
+        async fn health(&self) -> Result<String, String> {
+            Ok("hint-recording healthy".into())
         }
     }
 
@@ -1265,12 +1391,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl InferBackend for FailingBackend {
-        async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+        async fn extract(
+            &self,
+            _markdown: &str,
+            _hint: Option<&str>,
+        ) -> Result<Extraction, String> {
             Err("boom".to_string())
         }
         async fn extract_stream(
             &self,
             _markdown: &str,
+            _hint: Option<&str>,
             _tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
             Err("boom".to_string())
@@ -1348,7 +1479,7 @@ mod tests {
         let pipeline = mock_pipeline();
 
         let e = pipeline
-            .extract_via_inferer("P<UTO passport markdown")
+            .extract_via_inferer("P<UTO passport markdown", None)
             .await
             .expect("inferer extract");
 
@@ -1365,7 +1496,7 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel(16);
         let extraction = pipeline
-            .extract_via_inferer_stream("P<UTO passport markdown", &tx)
+            .extract_via_inferer_stream("P<UTO passport markdown", None, &tx)
             .await
             .expect("inferer extract_stream");
         drop(tx);
@@ -1391,7 +1522,7 @@ mod tests {
         assert_eq!(pipeline.llm_queue_depth(), 0, "idle before any call");
 
         pipeline
-            .extract_via_inferer("P<UTO passport markdown")
+            .extract_via_inferer("P<UTO passport markdown", None)
             .await
             .expect("inferer extract");
         assert_eq!(
@@ -1402,7 +1533,7 @@ mod tests {
 
         let (tx, _rx) = mpsc::channel(16);
         pipeline
-            .extract_via_inferer_stream("P<UTO passport markdown", &tx)
+            .extract_via_inferer_stream("P<UTO passport markdown", None, &tx)
             .await
             .expect("inferer extract_stream");
         assert_eq!(
@@ -1528,7 +1659,7 @@ mod tests {
         );
         let extraction = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            pipeline.extract_via_inferer("P<UTO passport markdown"),
+            pipeline.extract_via_inferer("P<UTO passport markdown", None),
         )
         .await
         .expect("must not deadlock")
@@ -2067,6 +2198,7 @@ mod tests {
     fn json_str(s: &str) -> Value {
         Value::String(s.to_string())
     }
+
     // ---- promote_verified_mrz_fields (issue #100) ----
 
     use synthpass_core::v2::FieldConfidence;
@@ -2377,4 +2509,187 @@ mod tests {
         assert_eq!(v2.confidence, FieldConfidence::llm_heuristic());
     }
 
+    // ---- mrz_hint (issue #102) ----
+
+    /// Serializes tests that read or mutate `SYNTHPASS_LLM_MRZ_HINT` —
+    /// process-global, same reasoning as `ENV_LOCK` (a distinct lock, since
+    /// that one guards `SYNTHPASS_JSON_V1` and holding both together would
+    /// only widen the critical section for no benefit).
+    static MRZ_HINT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// A fully ICAO-valid TD3 record (`base()`'s ICAO 9303 worked example,
+    /// restated here since `synthpass_core::fusion`'s private `base()` isn't
+    /// reachable from this crate) — every check digit, including the
+    /// composite, passes.
+    fn valid_td3() -> mrz::MrzData {
+        mrz::parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("ICAO 9303 worked example parses")
+    }
+
+    #[test]
+    fn hint_is_none_when_the_flag_is_off() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+        assert_eq!(mrz_hint(Some(&valid_td3())), None);
+    }
+
+    #[test]
+    fn hint_is_none_with_no_mrz_data_even_when_the_flag_is_on() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let result = mrz_hint(None);
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hint_includes_only_checksum_verified_fields_on_a_checksum_partial_read() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let m = td3_corrupted_document_number();
+        let result = mrz_hint(Some(&m));
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+
+        let hint = result.expect("date_of_birth/date_of_expiry/personal_number still verify");
+        assert!(hint.contains(&format!("date_of_birth={}", m.date_of_birth)));
+        assert!(hint.contains(&format!("date_of_expiry={}", m.date_of_expiry)));
+        assert!(hint.contains(&format!(
+            "personal_number={}",
+            m.personal_number.as_deref().unwrap()
+        )));
+        assert!(
+            !hint.contains("document_number="),
+            "the corrupted check digit must not be reported as verified: {hint}"
+        );
+        assert!(
+            !hint.contains("nationality="),
+            "the composite check digit fails alongside document_number, so \
+             nationality/sex (gated on it) must be excluded: {hint}"
+        );
+        assert!(
+            !hint.contains("sex="),
+            "same reasoning as nationality: {hint}"
+        );
+    }
+
+    #[test]
+    fn hint_includes_nationality_and_sex_when_the_composite_check_passes() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let m = valid_td3();
+        assert!(m.checks.composite, "sanity: this fixture is fully valid");
+        let result = mrz_hint(Some(&m));
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+
+        let hint = result.expect("a fully valid read has plenty to report");
+        assert!(hint.contains(&format!("document_number={}", m.document_number)));
+        assert!(hint.contains(&format!("nationality={}", m.nationality)));
+        assert!(hint.contains(&format!("sex={}", m.sex)));
+    }
+
+    /// End-to-end through `LlmFieldReader::read` (the same seam
+    /// `process_document` calls): a `DocumentContext` built with
+    /// `with_mrz_hint` must actually deliver that string to
+    /// `InferBackend::extract`, not just to `ctx.mrz_hint` itself.
+    #[tokio::test]
+    async fn a_context_mrz_hint_reaches_infer_backend_extract() {
+        let backend = Arc::new(HintRecordingBackend::new());
+        let reader = llm_field_reader(backend.clone());
+
+        let ctx = DocumentContext::from_text("irrelevant markdown")
+            .with_mrz_hint("document_number=L898902C3, date_of_expiry=2012-04-15");
+        reader.read(&ctx).await.expect("mock backend succeeds");
+
+        assert_eq!(
+            backend.last_hint.lock().unwrap().as_deref(),
+            Some("document_number=L898902C3, date_of_expiry=2012-04-15")
+        );
+    }
+
+    /// The other half of that contract: a `DocumentContext` with no hint set
+    /// (the shape `process_document` builds whenever `mrz_hint()` itself
+    /// returns `None` — flag off, or nothing checksum-verified to report)
+    /// must reach the backend as an actual `None`, not an empty string.
+    #[tokio::test]
+    async fn a_context_with_no_mrz_hint_reaches_infer_backend_extract_as_none() {
+        let backend = Arc::new(HintRecordingBackend::new());
+        let reader = llm_field_reader(backend.clone());
+
+        let ctx = DocumentContext::from_text("irrelevant markdown");
+        reader.read(&ctx).await.expect("mock backend succeeds");
+
+        assert_eq!(backend.last_hint.lock().unwrap().as_deref(), None);
+    }
+
+    /// End-to-end: both `process_document` and `process_document_stream`
+    /// promote identically on a checksum-partial fixture. Mirrors
+    /// `both_tier2_paths_produce_the_same_extraction` above, which the same
+    /// fixture already backs — this asserts the *promotion*, not merely that
+    /// the two tiers agree with each other.
+    #[tokio::test]
+    async fn both_tiers_promote_verified_fields_identically() {
+        let pipeline = || {
+            Pipeline::new(
+                Box::new(StaticOcr(HRV_TD3_BAD_CHECKSUM_MARKDOWN)),
+                Box::new(MockBackend),
+            )
+        };
+        // The pipeline's own deterministic read of the OCR markdown above —
+        // not `td3_corrupted_document_number()`, whose personal-number field
+        // is deliberately populated for the unit tests above but does not
+        // match this markdown's all-filler one.
+        let m = mrz::find_and_parse(HRV_TD3_BAD_CHECKSUM_MARKDOWN).expect("fixture parses");
+
+        let (blocking_in, blocking_dir) = temp_input("promote-blocking").await;
+        let blocking = pipeline()
+            .process_document(&blocking_in)
+            .await
+            .expect("process");
+
+        let (stream_in, stream_dir) = temp_input("promote-stream").await;
+        let streamed = run_stream(&pipeline(), &stream_in).await;
+
+        for result in [&blocking, &streamed] {
+            assert_eq!(result.method, Method::Llm, "fixture must reach Tier 2");
+            let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+            assert_eq!(
+                v2.fields.date_of_birth.as_deref(),
+                Some(m.date_of_birth.as_str())
+            );
+            assert_eq!(v2.confidence.date_of_birth, 1.0);
+            assert_eq!(
+                v2.fields.date_of_expiry.as_deref(),
+                Some(m.date_of_expiry.as_str())
+            );
+            assert_eq!(v2.confidence.date_of_expiry, 1.0);
+            // This fixture's personal-number field is all filler (`m.checks
+            // .personal_number` is vacuously true but `m.personal_number` is
+            // `None`), so it must not be promoted — the mock backend's own
+            // (absent) value survives untouched.
+            assert_eq!(m.personal_number, None, "sanity: all-filler field");
+            assert_eq!(v2.fields.personal_number.as_deref(), None);
+            assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+            // The document-number check digit fails on this fixture, so the
+            // mock backend's own guess must survive, not the deterministic
+            // (unverified) read.
+            assert_eq!(v2.fields.document_number.as_deref(), Some("X1234567"));
+            assert!(v2.confidence.document_number < 1.0);
+
+            // The v1 projection gets the same promotion for free.
+            let v1 = result.extracted.as_ref().expect("v1 json populated");
+            assert_eq!(v1["date_of_birth"], json_str(&m.date_of_birth));
+            assert_eq!(v1["date_of_expiry"], json_str(&m.date_of_expiry));
+        }
+
+        assert_eq!(
+            blocking.extracted_v2, streamed.extracted_v2,
+            "both tiers must promote identically"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&blocking_dir).await;
+        let _ = tokio::fs::remove_dir_all(&stream_dir).await;
+    }
 }

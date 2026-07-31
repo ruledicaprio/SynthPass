@@ -38,7 +38,7 @@
 //! Same failure shape as a naive filler-count check would have: measure
 //! before shipping.
 
-use mrz::MrzData;
+use mrz::{MrzData, TransliterationStyle};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
@@ -113,6 +113,22 @@ pub enum Finding {
     /// `"surname"` or `"given_names"` — not PII, but `String` (not
     /// `&'static str`) so `Finding` can keep deriving `Deserialize`.
     NonAlphabeticName { field: String },
+    /// A Tier-2 (LLM) field disagrees, after normalization, with the
+    /// checksum-verified MRZ's own structural read of the same field. Covers
+    /// only the six line-1 fields with **no** ICAO check digit —
+    /// `document_type`, `issuing_country`, `surname`, `given_names`,
+    /// `nationality`, `sex` — the checksummed fields (`document_number`,
+    /// `date_of_birth`, `date_of_expiry`, `personal_number`) are promoted
+    /// straight to `PROVEN` by `promote_verified_mrz_fields` and never reach
+    /// this check. Neither side of the comparison is itself proven — see
+    /// [`Support::CrossField`] — but two independently derived reads
+    /// disagreeing is real signal, worth a human look. `field` is always one
+    /// of the six names above; deliberately field-name-only, matching
+    /// [`NonAlphabeticName`]'s discipline of never carrying the value that
+    /// disagreed.
+    ///
+    /// [`NonAlphabeticName`]: Self::NonAlphabeticName
+    LlmContradictsMrzStructural { field: String },
 }
 
 /// The fieldless projection of [`Finding`] — a stable, PII-free label for a
@@ -137,6 +153,7 @@ pub enum FindingKind {
     MissingNameSeparator,
     UnrecognizedNationality,
     NonAlphabeticName,
+    LlmContradictsMrzStructural,
 }
 
 impl FindingKind {
@@ -149,6 +166,7 @@ impl FindingKind {
             Self::MissingNameSeparator => "missing_name_separator",
             Self::UnrecognizedNationality => "unrecognized_nationality",
             Self::NonAlphabeticName => "non_alphabetic_name",
+            Self::LlmContradictsMrzStructural => "llm_contradicts_mrz_structural",
         }
     }
 }
@@ -175,6 +193,7 @@ impl Finding {
             Self::MissingNameSeparator { .. } => FindingKind::MissingNameSeparator,
             Self::UnrecognizedNationality { .. } => FindingKind::UnrecognizedNationality,
             Self::NonAlphabeticName { .. } => FindingKind::NonAlphabeticName,
+            Self::LlmContradictsMrzStructural { .. } => FindingKind::LlmContradictsMrzStructural,
         }
     }
 }
@@ -263,6 +282,115 @@ pub fn check_line1_integrity(m: &MrzData) -> Verdict {
     } else {
         Verdict::NeedsReview { reasons }
     }
+}
+
+/// The three transliteration styles [`mrz::transliterate`] can produce for an
+/// ambiguous Table A code point (see [`TransliterationStyle`]), tried in this
+/// order when checking whether a Tier-2 name reproduces the MRZ's own
+/// transliteration under *any* ICAO-sanctioned style choice.
+const NAME_TRANSLITERATION_STYLES: [TransliterationStyle; 3] = [
+    TransliterationStyle::Expanded,
+    TransliterationStyle::Simple,
+    TransliterationStyle::XxSuffix,
+];
+
+/// Whether a raw (possibly diacritic-bearing) Tier-2 name value could have
+/// produced `mrz_value` under some ICAO-sanctioned transliteration style.
+/// Normalizes `tier2_value` with [`crate::normalize::given_names`] first
+/// (uppercases, folds `<`/`-`/whitespace runs to single spaces — the same
+/// normalizer used for the `given_names` field, reused here for `surname`
+/// too since neither field has a normalizer of its own beyond that), then
+/// checks all three styles rather than just the record's own style, because
+/// nothing in an `MrzData` says which style the issuing State chose (see the
+/// module-level `translit` doc comment).
+fn name_matches_any_transliteration(tier2_value: &str, mrz_value: &str) -> bool {
+    let normalized = crate::normalize::given_names(tier2_value);
+    NAME_TRANSLITERATION_STYLES
+        .iter()
+        .any(|&style| mrz::transliterate(&normalized, style) == mrz_value)
+}
+
+/// Cross-checks the six **non-checksummed** MRZ line-1 fields —
+/// `document_type`, `issuing_country`, `surname`, `given_names`,
+/// `nationality`, `sex` — against a Tier-2 (LLM) record's own read of the
+/// same document.
+///
+/// Sibling of [`check_line1_integrity`], deliberately not folded into it:
+/// that function asks whether line 1 is internally consistent with itself
+/// (and has other, unrelated callers this must not disturb); this asks
+/// whether a *second, independent* read — the model's — agrees with the
+/// checksum-verified MRZ's structural read of the same field. The four
+/// checksummed fields (`document_number`, `date_of_birth`, `date_of_expiry`,
+/// `personal_number`) are out of scope here: they are promoted to `PROVEN`
+/// directly by `synthpass_pipeline::promote_verified_mrz_fields` from the
+/// ICAO check digit itself, a strictly stronger signal than anything this
+/// function could add.
+///
+/// A field is compared only when the Tier-2 side has a usable value
+/// ([`crate::v2::ExtractionFields::get`] already treats absent and
+/// present-but-empty alike) — a missing Tier-2 read is not a contradiction —
+/// and only when the MRZ side is non-empty, for the same reason.
+/// `document_type`/`issuing_country`/`nationality`/`sex` are normalized with
+/// this crate's existing [`crate::normalize`] functions before comparing;
+/// `surname`/`given_names` are compared permissively against every
+/// transliteration style [`mrz::transliterate`] can produce (see
+/// [`name_matches_any_transliteration`]), so a legitimate diacritic
+/// transliteration ambiguity (`Müller` → `MULLER`, `MUELLER`, or `MUXXER`,
+/// all ICAO-sanctioned) is never flagged as a contradiction.
+pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData) -> Vec<Finding> {
+    use crate::v2::CoreField;
+
+    let mut findings = Vec::new();
+
+    if let Some(v) = fields.get(CoreField::DocumentType) {
+        if !m.document_type.is_empty() && crate::normalize::document_type(v) != m.document_type {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::DocumentType.as_str().to_string(),
+            });
+        }
+    }
+
+    if let Some(v) = fields.get(CoreField::IssuingCountry) {
+        if !m.issuing_country.is_empty() && crate::normalize::country_code(v) != m.issuing_country {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::IssuingCountry.as_str().to_string(),
+            });
+        }
+    }
+
+    if let Some(v) = fields.get(CoreField::Nationality) {
+        if !m.nationality.is_empty() && crate::normalize::country_code(v) != m.nationality {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::Nationality.as_str().to_string(),
+            });
+        }
+    }
+
+    if let Some(v) = fields.get(CoreField::Sex) {
+        if !m.sex.is_empty() && crate::normalize::sex(v) != m.sex {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::Sex.as_str().to_string(),
+            });
+        }
+    }
+
+    if let Some(v) = fields.get(CoreField::Surname) {
+        if !m.surname.is_empty() && !name_matches_any_transliteration(v, &m.surname) {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::Surname.as_str().to_string(),
+            });
+        }
+    }
+
+    if let Some(v) = fields.get(CoreField::GivenNames) {
+        if !m.given_names.is_empty() && !name_matches_any_transliteration(v, &m.given_names) {
+            findings.push(Finding::LlmContradictsMrzStructural {
+                field: CoreField::GivenNames.as_str().to_string(),
+            });
+        }
+    }
+
+    findings
 }
 
 #[cfg(test)]
@@ -407,5 +535,129 @@ mod tests {
                 ]
             }
         );
+    }
+
+    // ── check_tier2_against_mrz ──
+
+    /// `base()`'s line 1, restated as the [`crate::v2::ExtractionFields`] a
+    /// perfectly agreeing Tier-2 (LLM) read would have produced: same
+    /// document type, country, names, nationality, and sex, already in MRZ
+    /// convention.
+    fn agreeing_fields() -> crate::v2::ExtractionFields {
+        crate::v2::ExtractionFields {
+            document_type: Some("P".into()),
+            issuing_country: Some("UTO".into()),
+            surname: Some("ERIKSSON".into()),
+            given_names: Some("ANNA MARIA".into()),
+            nationality: Some("UTO".into()),
+            sex: Some("F".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_sex_mismatch_is_flagged() {
+        let m = base();
+        let mut fields = agreeing_fields();
+        fields.sex = Some("M".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "sex".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_fully_agreeing_record_has_no_findings() {
+        let m = base();
+        assert_eq!(check_tier2_against_mrz(&agreeing_fields(), &m), Vec::new());
+    }
+
+    #[test]
+    fn a_long_form_sex_value_is_not_flagged() {
+        let m = base();
+        let mut fields = agreeing_fields();
+        fields.sex = Some("Female".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_diacritic_given_name_matching_any_transliteration_style_is_not_flagged() {
+        let mut m = base();
+        "TERESA".clone_into(&mut m.given_names);
+        let mut fields = agreeing_fields();
+        fields.given_names = Some("Térèsa".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_diacritic_surname_matching_the_expanded_style_is_not_flagged() {
+        let mut m = base();
+        "MUELLER".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("Müller".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_diacritic_surname_matching_the_simple_style_is_not_flagged() {
+        let mut m = base();
+        "MULLER".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("Müller".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn an_unnormalized_country_name_matching_the_mrz_code_is_not_flagged() {
+        let mut m = base();
+        "HRV".clone_into(&mut m.issuing_country);
+        "HRV".clone_into(&mut m.nationality);
+        let mut fields = agreeing_fields();
+        fields.issuing_country = Some("CROATIA".into());
+        fields.nationality = Some("CROATIA".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_genuinely_different_country_is_flagged() {
+        let m = base(); // issuing_country/nationality: UTO
+        let mut fields = agreeing_fields();
+        fields.issuing_country = Some("FRANCE".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "issuing_country".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_absent_tier2_field_is_skipped_not_flagged() {
+        let mut m = base();
+        // MRZ sex disagrees with nothing, since Tier-2's own value is absent.
+        "M".clone_into(&mut m.sex);
+        let mut fields = agreeing_fields();
+        fields.sex = None;
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn an_empty_tier2_field_is_skipped_not_flagged() {
+        let mut m = base();
+        "M".clone_into(&mut m.sex);
+        let mut fields = agreeing_fields();
+        fields.sex = Some("   ".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_finding_kind_label_round_trips() {
+        let finding = Finding::LlmContradictsMrzStructural {
+            field: "sex".to_string(),
+        };
+        assert_eq!(finding.kind(), FindingKind::LlmContradictsMrzStructural);
+        assert_eq!(finding.kind().as_str(), "llm_contradicts_mrz_structural");
     }
 }
