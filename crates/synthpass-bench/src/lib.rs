@@ -11,8 +11,125 @@
 
 use image::DynamicImage;
 use std::time::{Duration, Instant};
-use synthpass_gen::Labels;
+use synthpass_gen::degrade::{apply_profile, CaptureProfile};
+use synthpass_gen::{generate_from_seed, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
+
+pub mod provider_bench;
+
+/// Which capture profile to generate a corpus under. Shared between
+/// `synthpass-bench`'s Tier-1 hit-rate CLI and `provider-bench`'s
+/// multi-provider harness so both draw from the same corpus-generation code
+/// path rather than two copies that could silently diverge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileChoice {
+    Clean,
+    Mobile,
+    Scanner,
+    Worn,
+    BorderKiosk,
+    Damaged,
+    All,
+}
+
+// Deliberately excludes `Damaged`: the other profiles degrade legibility,
+// occlusion destroys data outright, and mixing it into `all` would move the
+// hit-rate number every existing gate is calibrated against. Ask for it by
+// name (`--profile damaged`) to measure recovery on its own.
+const ROUND_ROBIN: [ProfileChoice; 5] = [
+    ProfileChoice::Clean,
+    ProfileChoice::Mobile,
+    ProfileChoice::Scanner,
+    ProfileChoice::Worn,
+    ProfileChoice::BorderKiosk,
+];
+
+impl ProfileChoice {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "clean" => Ok(Self::Clean),
+            "mobile" => Ok(Self::Mobile),
+            "scanner" => Ok(Self::Scanner),
+            "worn" => Ok(Self::Worn),
+            "border-kiosk" => Ok(Self::BorderKiosk),
+            "damaged" => Ok(Self::Damaged),
+            "all" => Ok(Self::All),
+            other => Err(format!(
+                "unknown profile '{other}' (valid: clean, mobile, scanner, worn, border-kiosk, damaged, all)"
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::Mobile => "mobile",
+            Self::Scanner => "scanner",
+            Self::Worn => "worn",
+            Self::BorderKiosk => "border-kiosk",
+            Self::Damaged => "damaged",
+            Self::All => "all",
+        }
+    }
+
+    /// `None` for `Clean` (no degradation applied); `All` resolves to a
+    /// concrete per-seed choice before this is ever called.
+    pub fn capture_profile(self) -> Option<CaptureProfile> {
+        match self {
+            Self::Clean | Self::All => None,
+            Self::Mobile => Some(CaptureProfile::Mobile),
+            Self::Scanner => Some(CaptureProfile::Scanner),
+            Self::Worn => Some(CaptureProfile::Worn),
+            Self::BorderKiosk => Some(CaptureProfile::BorderKiosk),
+            Self::Damaged => Some(CaptureProfile::Damaged),
+        }
+    }
+
+    /// Resolves `All` to a concrete profile via round-robin over `seed_index`
+    /// (the document's position in the corpus, not the raw seed value); every
+    /// other variant is already concrete and passes through unchanged.
+    pub fn resolve(self, seed_index: u64) -> Self {
+        if self == Self::All {
+            ROUND_ROBIN[(seed_index as usize) % ROUND_ROBIN.len()]
+        } else {
+            self
+        }
+    }
+}
+
+/// One generated document: its seed, the resolved (never `All`) profile it
+/// was degraded under, the rendered image, and its ground-truth labels.
+pub struct CorpusDoc {
+    pub seed: u64,
+    pub profile: ProfileChoice,
+    pub image: DynamicImage,
+    pub labels: Labels,
+}
+
+/// Generates `count` documents deterministically from seeds
+/// `seed_start..seed_start + count`, applying `profile`'s degradation
+/// (round-robining the five real profiles when `profile` is `All`). The
+/// single corpus-generation path shared by every bench binary in this crate.
+pub fn generate_corpus(profile: ProfileChoice, seed_start: u64, count: u64) -> Vec<CorpusDoc> {
+    (0..count)
+        .map(|i| {
+            let seed = seed_start + i;
+            let resolved = profile.resolve(i);
+            let config = GeneratorConfig::new(seed);
+            let (image, labels, _passport) = generate_from_seed(&config);
+            let image = match resolved.capture_profile() {
+                Some(cp) => apply_profile(&image, cp, seed),
+                None => image,
+            };
+            CorpusDoc {
+                seed,
+                profile: resolved,
+                image,
+                labels,
+            }
+        })
+        .collect()
+}
 
 /// Why a document missed. An enum rather than the free-text string this
 /// used to be, so misses **aggregate** — "37 of 50 missed" is not actionable
