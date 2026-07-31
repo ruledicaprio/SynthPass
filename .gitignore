@@ -9,6 +9,7 @@ target/
 
 # synthpass-bench's generated JSON reports — generated, not hand-edited/committed
 bench-report*.json
+provider-bench-report*.json
 
 # Web app upload/working directory (may contain uploaded PII)
 work/

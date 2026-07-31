@@ -324,6 +324,13 @@ impl Pipeline {
         Self::with_llm_contexts(ocr, infer, 1)
     }
 
+    /// The M7 provider catalog, for callers that need to enumerate every
+    /// registered provider (e.g. a benchmark harness) rather than route
+    /// through [`ProviderCatalog::find_reader`]'s first-match selection.
+    pub fn catalog(&self) -> &ProviderCatalog {
+        &self.catalog
+    }
+
     /// Like [`new`](Pipeline::new), but with an explicit LLM-context permit
     /// count instead of the hardcoded default of 1 — split out so tests can
     /// exercise a specific count directly, without going through
@@ -679,7 +686,7 @@ impl Pipeline {
                                 Method::Llm.as_str().to_string(),
                             ],
                             escalation: stage.escalation,
-                            prompt: None,
+                            prompt: self.infer.prompt_ref(),
                         });
                         let value = serde_json::to_value(extraction_from_v2_llm(
                             &v2,
@@ -773,7 +780,7 @@ impl Pipeline {
                                 Method::Llm.as_str().to_string(),
                             ],
                             escalation: stage.escalation,
-                            prompt: None,
+                            prompt: self.infer.prompt_ref(),
                         });
                         // Derived from `v2`, not from the raw `extraction`: the v1
                         // record must agree with the v2 one it ships alongside, and
