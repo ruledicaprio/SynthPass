@@ -227,6 +227,22 @@ flowchart LR
   both consistent with existing measurements (the M4 55% Tier-1 hit rate on OCR noise, the M5 GBNF
   parity run's ~45% field match). Ships standalone (`cargo run -p synthpass-bench --release --bin
   provider-bench`); CI wiring is a separable follow-up.
+- **Post-M7 real-world validation surfaced a Tier-1/Tier-2 fusion gap.** A private Turkish
+  passport specimen (`samples/ocr_fixtures/Turkiye_Passport_private.jpeg`) escalated to Tier-2
+  on a single misread MRZ character (`document_number`'s leading glyph), which threw away
+  three other individually checksum-verified fields (`date_of_birth`, `date_of_expiry`,
+  `personal_number`) that `MrzData::valid()`'s all-or-nothing gate does not distinguish from
+  genuinely-unverifiable ones. The LLM then re-derived those fields from noisy OCR text alone
+  and got `sex`, `date_of_birth`, `surname`, and `given_names` wrong — confirmed by hand
+  against the ICAO check-digit arithmetic. Tracked as issues
+  [#99](https://github.com/ruledicaprio/SynthPass/issues/99)–[#103](https://github.com/ruledicaprio/SynthPass/issues/103):
+  single-character MRZ substitution repair, per-field (not document-level) checksum promotion
+  into Tier-2 output, an MRZ-structural-contradiction `Finding` for line-1 fields, feeding the
+  checksum-partial read into the Tier-2 prompt as a hint, and a follow-up check on visual-zone
+  OCR quality for this locale. `apply_deterministic_mrz`
+  (`crates/synthpass-pipeline/src/lib.rs:1011`) already states the operating principle — "the
+  deterministic read is always the more trustworthy source, checksum-partial or not" — these
+  issues finish applying it.
 
 ## M7 — Document Intelligence Engine
 
