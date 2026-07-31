@@ -24,75 +24,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use synthpass_bench::{check_document, MissReason};
-use synthpass_gen::degrade::{apply_profile, CaptureProfile};
-use synthpass_gen::{generate_from_seed, GeneratorConfig};
+use synthpass_bench::{check_document, generate_corpus, MissReason, ProfileChoice};
 use synthpass_ocr::NativeOcr;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProfileChoice {
-    Clean,
-    Mobile,
-    Scanner,
-    Worn,
-    BorderKiosk,
-    Damaged,
-    All,
-}
-
-// Deliberately excludes `Damaged`: the other profiles degrade legibility,
-// occlusion destroys data outright, and mixing it into `all` would move the
-// hit-rate number every existing gate is calibrated against. Ask for it by
-// name (`--profile damaged`) to measure recovery on its own.
-const ROUND_ROBIN: [ProfileChoice; 5] = [
-    ProfileChoice::Clean,
-    ProfileChoice::Mobile,
-    ProfileChoice::Scanner,
-    ProfileChoice::Worn,
-    ProfileChoice::BorderKiosk,
-];
-
-impl ProfileChoice {
-    fn parse(s: &str) -> Result<Self, String> {
-        match s.to_lowercase().as_str() {
-            "clean" => Ok(Self::Clean),
-            "mobile" => Ok(Self::Mobile),
-            "scanner" => Ok(Self::Scanner),
-            "worn" => Ok(Self::Worn),
-            "border-kiosk" => Ok(Self::BorderKiosk),
-            "damaged" => Ok(Self::Damaged),
-            "all" => Ok(Self::All),
-            other => Err(format!(
-                "unknown profile '{other}' (valid: clean, mobile, scanner, worn, border-kiosk, damaged, all)"
-            )),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Clean => "clean",
-            Self::Mobile => "mobile",
-            Self::Scanner => "scanner",
-            Self::Worn => "worn",
-            Self::BorderKiosk => "border-kiosk",
-            Self::Damaged => "damaged",
-            Self::All => "all",
-        }
-    }
-
-    /// `None` for `Clean` (no degradation applied); `All` resolves to a
-    /// concrete per-seed choice before this is ever called.
-    fn capture_profile(self) -> Option<CaptureProfile> {
-        match self {
-            Self::Clean | Self::All => None,
-            Self::Mobile => Some(CaptureProfile::Mobile),
-            Self::Scanner => Some(CaptureProfile::Scanner),
-            Self::Worn => Some(CaptureProfile::Worn),
-            Self::BorderKiosk => Some(CaptureProfile::BorderKiosk),
-            Self::Damaged => Some(CaptureProfile::Damaged),
-        }
-    }
-}
 
 struct Args {
     count: u64,
@@ -240,14 +173,6 @@ struct Report {
     results: Vec<SeedResult>,
 }
 
-fn resolve_profile(choice: ProfileChoice, seed_index: u64) -> ProfileChoice {
-    if choice == ProfileChoice::All {
-        ROUND_ROBIN[(seed_index as usize) % ROUND_ROBIN.len()]
-    } else {
-        choice
-    }
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let parsed = match parse_args(&args) {
@@ -266,7 +191,7 @@ fn main() {
     )
     .expect("failed to load OCR models — run from the repo root");
 
-    let seeds: Vec<u64> = (0..parsed.count).map(|i| parsed.seed + i).collect();
+    let corpus = generate_corpus(parsed.profile, parsed.seed, parsed.count);
 
     // Deliberately sequential: `NativeOcr::recognize` budgets its MRZ-retry
     // passes against wall-clock time (see synthpass-ocr's `max_duration`).
@@ -275,24 +200,17 @@ fn main() {
     // causing the retry budget to cut passes short — this was observed to
     // drop the measured hit rate by ~20 points versus running one at a time,
     // which is a resource-contention artifact, not a real accuracy signal.
-    let results: Vec<SeedResult> = seeds
-        .iter()
-        .map(|&seed| {
-            let resolved = resolve_profile(parsed.profile, seed - parsed.seed);
-            let config = GeneratorConfig::new(seed);
-            let (image, labels, _passport) = generate_from_seed(&config);
-            let image = match resolved.capture_profile() {
-                Some(cp) => apply_profile(&image, cp, seed),
-                None => image,
-            };
-            let result = check_document(&ocr, &image, &labels);
+    let results: Vec<SeedResult> = corpus
+        .into_iter()
+        .map(|doc| {
+            let result = check_document(&ocr, &doc.image, &doc.labels);
             let line1_flagged = matches!(
                 result.line1_integrity,
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
             );
             SeedResult {
-                seed,
-                profile: resolved.as_str(),
+                seed: doc.seed,
+                profile: doc.profile.as_str(),
                 hit: result.hit,
                 miss_kind: result.reason.as_ref().map(miss_kind),
                 reason: result.reason.map(|r| r.to_string()),

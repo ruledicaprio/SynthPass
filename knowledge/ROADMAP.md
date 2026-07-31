@@ -193,8 +193,40 @@ flowchart LR
   `catalog.find_reader(budget, |c| c.fields && !c.deterministic)` instead of calling
   `self.infer` directly. `process_document_stream` is the one exception: `FieldReader::read` has no
   delta-forwarding hook, so it still calls `InferBackend::extract_stream` directly — see
-  `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract". Versioned prompts and
-  the multi-provider benchmark harness remain unshipped.
+  `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract".
+- **M7's versioned prompts have landed.** `synthpass_llm::prompt` now exposes `PROMPT_ID`,
+  `PROMPT_VERSION`, and `prompt_ref()`, computing `PromptRef.digest` from the compiled-in ChatML
+  `TEMPLATE` (system text + field list + wrapper text, per-document OCR content excluded) via
+  `synthpass_core::audit::sha256_hex` — no new dependency, since `synthpass-llm` already pulls in
+  `sha2` transitively. `InferBackend::prompt_ref()` (default `None`, mirroring `model_id()`)
+  threads it onto `NativeInferer`; `Pipeline::process_document` and `process_document_stream` both
+  populate `ExtractionTrace.prompt` from `self.infer.prompt_ref()` at their Tier-2 call sites. A
+  pinned-digest test in `prompt.rs` fails CI on any edit to `SYSTEM`/`FIELDS`/`TEMPLATE` that
+  doesn't also bump `PROMPT_VERSION` and update the expected digest.
+- **M7 is now complete — the multi-provider benchmark harness has landed.** `provider-bench`
+  (new binary in `synthpass-bench`) runs every reader in `Pipeline::catalog()` — today the
+  deterministic `MrzReader` and the LLM's `LlmFieldReader` — against the same OCR'd synthetic
+  corpus and reports, per provider: field-match rate and mean CER (via the same `cer()`
+  `synthpass-bench`'s Tier-1 tool already uses), speed (mean/p50/p95), JSON validity
+  (`synthpass_llm::repair::repair_fallbacks()` delta, `None` for deterministic providers with no
+  JSON step), an unsupported-assertion rate (does each answered field value appear, verbatim, in
+  the OCR text the provider was given — the roadmap's own definition, deliberately not
+  "hallucination"), and resident memory. Memory ships two ways: `Capability::estimated_resident_bytes`
+  always (the declared figure the field's own doc comment already calls "the benchmark's memory
+  column") plus, behind an off-by-default `measure-memory` Cargo feature and `--measure-memory`
+  flag, a coarse `sysinfo`-based process-RSS delta — real but not per-provider-isolated, since
+  every provider runs sequentially in one process.
+
+  Reaching the real catalog required one new accessor: `LlmFieldReader` is `pub(crate)` to
+  `synthpass-pipeline`, so `Pipeline::catalog()` (mirroring the `model_id()`/`prompt_ref()`
+  pattern) is the only way a harness outside that crate can enumerate every registered provider —
+  `ProviderCatalog::readers()`/`.profiles()` already supported full enumeration, distinct from
+  `find_reader`'s first-match router. A first real run (5 documents, clean profile, the shipped
+  Qwen2.5 GGUF) confirmed the harness measures real signal, not an artifact: `mrz` scored 70%
+  field-match / 3 ms mean at zero JSON-repair cost, `llm` scored 56% field-match / ~24 s mean —
+  both consistent with existing measurements (the M4 55% Tier-1 hit rate on OCR noise, the M5 GBNF
+  parity run's ~45% field match). Ships standalone (`cargo run -p synthpass-bench --release --bin
+  provider-bench`); CI wiring is a separable follow-up.
 
 ## M7 — Document Intelligence Engine
 
