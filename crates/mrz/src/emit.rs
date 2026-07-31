@@ -175,6 +175,21 @@ fn field(s: &str, width: usize) -> String {
 /// `"ANNA, MARIA"` (a comma *immediately followed by* a space) yield
 /// `ANNA<MARIA` rather than `ANNA<<MARIA`, matching
 /// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:531-532`'s worked example.
+/// ICAO 9303 §4.6 encoding of one name component (a surname half or a given-
+/// names half), as it would be printed into an MRZ name field: uppercased,
+/// transliterated, apostrophes dropped with no filler, hyphens/commas/spaces
+/// folded to a single `<`.
+///
+/// Public so a consumer can ask "could this visual-zone reading have produced
+/// that MRZ name field?" using the same encoder that writes them, rather than
+/// re-deriving the rules. `mrz::transliterate` alone is not a substitute — its
+/// own doc comment notes it performs no filler handling and no truncation, so
+/// a name containing an apostrophe or a separator round-trips through it
+/// unchanged and then compares unequal to the MRZ form.
+pub fn encode_name_component(s: &str) -> String {
+    clean_name_half(s)
+}
+
 fn clean_name_half(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_was_sep = false;
