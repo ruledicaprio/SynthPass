@@ -113,16 +113,25 @@ pub enum Finding {
     /// `"surname"` or `"given_names"` — not PII, but `String` (not
     /// `&'static str`) so `Finding` can keep deriving `Deserialize`.
     NonAlphabeticName { field: String },
-    /// A Tier-2 (LLM) field disagrees, after normalization, with the
-    /// checksum-verified MRZ's own structural read of the same field. Covers
-    /// only the six line-1 fields with **no** ICAO check digit —
+    /// A Tier-2 (LLM) field disagrees, after normalization, with the MRZ's own
+    /// structural read of the same field.
+    ///
+    /// **The MRZ side here is not checksum-verified**, and this doc used to
+    /// claim it was. The only caller is
+    /// `synthpass_pipeline::apply_deterministic_mrz`, which the pipeline
+    /// reaches solely on the Tier-2 branch — i.e. only for records that
+    /// *failed* the Tier-1 gate, so at least one check digit did not verify.
+    /// Neither side of this comparison is proven; that is exactly why the
+    /// finding is [`Support::CrossField`] and not something stronger, and why
+    /// it means "two independent reads disagree, a human should look", never
+    /// "the model is wrong".
+    ///
+    /// Covers only the six line-1 fields with **no** ICAO check digit —
     /// `document_type`, `issuing_country`, `surname`, `given_names`,
     /// `nationality`, `sex` — the checksummed fields (`document_number`,
     /// `date_of_birth`, `date_of_expiry`, `personal_number`) are promoted
     /// straight to `PROVEN` by `promote_verified_mrz_fields` and never reach
-    /// this check. Neither side of the comparison is itself proven — see
-    /// [`Support::CrossField`] — but two independently derived reads
-    /// disagreeing is real signal, worth a human look. `field` is always one
+    /// this check. `field` is always one
     /// of the six names above; deliberately field-name-only, matching
     /// [`NonAlphabeticName`]'s discipline of never carrying the value that
     /// disagreed.
@@ -296,18 +305,77 @@ const NAME_TRANSLITERATION_STYLES: [TransliterationStyle; 3] = [
 
 /// Whether a raw (possibly diacritic-bearing) Tier-2 name value could have
 /// produced `mrz_value` under some ICAO-sanctioned transliteration style.
-/// Normalizes `tier2_value` with [`crate::normalize::given_names`] first
-/// (uppercases, folds `<`/`-`/whitespace runs to single spaces — the same
-/// normalizer used for the `given_names` field, reused here for `surname`
-/// too since neither field has a normalizer of its own beyond that), then
-/// checks all three styles rather than just the record's own style, because
-/// nothing in an `MrzData` says which style the issuing State chose (see the
+///
+/// Checks all three styles rather than just the record's own, because nothing
+/// in an `MrzData` says which style the issuing State chose (see the
 /// module-level `translit` doc comment).
+///
+/// # Why this goes through `mrz::encode_name_component`
+///
+/// [`mrz::transliterate`] alone is not the MRZ name encoding, and its own doc
+/// comment says so: it performs "no MRZ filler handling and no truncation".
+/// Two consequences made this check fire on correct Tier-2 reads:
+///
+/// - **Apostrophes.** ICAO drops them with no filler, so `O'Brien` is printed
+///   `OBRIEN`. Transliteration alone leaves the apostrophe in place, and
+///   `O'BRIEN != OBRIEN`.
+/// - **Truncation.** A name too long for the fixed-width field is cut to fit,
+///   so the parsed `mrz_value` is a *prefix* of the full name, never equal to
+///   it. Handled below by accepting a prefix match — but only against the
+///   encoded form, so a prefix match cannot be claimed for two names that
+///   merely start alike in their raw spelling.
+///
+/// Both sides are compared with interior whitespace collapsed:
+/// `mrz::parser::clean_name` turns each `<` into one space without collapsing
+/// runs, so a wider-than-minimum filler gap reaches this function as several
+/// spaces where the encoder emits exactly one.
 fn name_matches_any_transliteration(tier2_value: &str, mrz_value: &str) -> bool {
-    let normalized = crate::normalize::given_names(tier2_value);
-    NAME_TRANSLITERATION_STYLES
-        .iter()
-        .any(|&style| mrz::transliterate(&normalized, style) == mrz_value)
+    let expected = collapse_spaces(mrz_value);
+    if expected.is_empty() {
+        return true;
+    }
+    NAME_TRANSLITERATION_STYLES.iter().any(|&style| {
+        // Transliterate first (picks the style), then apply the ICAO name
+        // encoding (filler, apostrophes, punctuation) to the result.
+        let translit = mrz::transliterate(&tier2_value.to_uppercase(), style);
+        let encoded = collapse_spaces(&mrz::encode_name_component(&translit).replace('<', " "));
+        encoded == expected
+            // Truncated into the fixed-width field: the MRZ holds a prefix.
+            // Requires a real truncation (the MRZ side must be shorter), so
+            // this never turns a genuinely different, longer MRZ name into a
+            // match.
+            || (expected.len() < encoded.len() && encoded.starts_with(&expected))
+    })
+}
+
+/// Fold runs of whitespace to a single space and trim. Used on both sides of
+/// the name comparison so filler-width differences can't masquerade as
+/// disagreements — see [`name_matches_any_transliteration`].
+fn collapse_spaces(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Whether a Tier-2 document type agrees with the MRZ's own document code.
+///
+/// Compared on the **first character only**, which is the part ICAO 9303
+/// defines as the document class. The MRZ field is two characters wide and
+/// its second position is issuer-discretionary: `PO` (official), `PD`
+/// (diplomatic), `PS` (service) are all passports, and most TD1/TD2 national
+/// identity cards print `ID`. [`crate::normalize::document_type`] can only
+/// ever produce the single letters `P`/`I`/`V`, so a whole-string comparison
+/// reported a contradiction on every one of those documents — the model and
+/// the MRZ agreeing that it is a passport was recorded as them disagreeing.
+///
+/// `I` and `ID` are the same class under this rule. A genuine disagreement
+/// (`P` vs `ID`) still differs in the first character and is still flagged.
+fn document_types_agree(tier2_value: &str, mrz_value: &str) -> bool {
+    let first = |s: &str| s.chars().next().map(|c| c.to_ascii_uppercase());
+    match (first(tier2_value), first(mrz_value)) {
+        (Some(a), Some(b)) => a == b,
+        // An empty Tier-2 read is not a contradiction; the MRZ side is
+        // already guarded as non-empty at the call site.
+        _ => true,
+    }
 }
 
 /// Cross-checks the six **non-checksummed** MRZ line-1 fields —
@@ -318,8 +386,16 @@ fn name_matches_any_transliteration(tier2_value: &str, mrz_value: &str) -> bool 
 /// Sibling of [`check_line1_integrity`], deliberately not folded into it:
 /// that function asks whether line 1 is internally consistent with itself
 /// (and has other, unrelated callers this must not disturb); this asks
-/// whether a *second, independent* read — the model's — agrees with the
-/// checksum-verified MRZ's structural read of the same field. The four
+/// whether a *second, independent* read — the model's — agrees with the MRZ's
+/// structural read of the same field.
+///
+/// **Neither side is proven.** The only caller reaches this on the Tier-2
+/// branch alone, so the `MrzData` in hand has already failed at least one
+/// check digit; its line 1 may itself be the garbled one. A finding here is a
+/// disagreement to be reviewed, not a verdict against the model — see
+/// [`Finding::LlmContradictsMrzStructural`].
+///
+/// The four
 /// checksummed fields (`document_number`, `date_of_birth`, `date_of_expiry`,
 /// `personal_number`) are out of scope here: they are promoted to `PROVEN`
 /// directly by `synthpass_pipeline::promote_verified_mrz_fields` from the
@@ -343,7 +419,9 @@ pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData
     let mut findings = Vec::new();
 
     if let Some(v) = fields.get(CoreField::DocumentType) {
-        if !m.document_type.is_empty() && crate::normalize::document_type(v) != m.document_type {
+        if !m.document_type.is_empty()
+            && !document_types_agree(&crate::normalize::document_type(v), &m.document_type)
+        {
             findings.push(Finding::LlmContradictsMrzStructural {
                 field: CoreField::DocumentType.as_str().to_string(),
             });
@@ -351,7 +429,9 @@ pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData
     }
 
     if let Some(v) = fields.get(CoreField::IssuingCountry) {
-        if !m.issuing_country.is_empty() && crate::normalize::country_code(v) != m.issuing_country {
+        if !m.issuing_country.is_empty()
+            && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.issuing_country)
+        {
             findings.push(Finding::LlmContradictsMrzStructural {
                 field: CoreField::IssuingCountry.as_str().to_string(),
             });
@@ -359,7 +439,9 @@ pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData
     }
 
     if let Some(v) = fields.get(CoreField::Nationality) {
-        if !m.nationality.is_empty() && crate::normalize::country_code(v) != m.nationality {
+        if !m.nationality.is_empty()
+            && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.nationality)
+        {
             findings.push(Finding::LlmContradictsMrzStructural {
                 field: CoreField::Nationality.as_str().to_string(),
             });
@@ -629,6 +711,147 @@ mod tests {
             check_tier2_against_mrz(&fields, &m),
             vec![Finding::LlmContradictsMrzStructural {
                 field: "issuing_country".to_string()
+            }]
+        );
+    }
+
+    // ── the four systematic false positives this check used to produce ──
+
+    #[test]
+    fn the_german_legacy_country_code_is_not_a_contradiction() {
+        // German documents print the legacy single-letter `D` in the MRZ,
+        // while `normalize::country_code` resolves "Germany"/"DEU" to the
+        // primary code `DEU`. Comparing those as plain strings flagged — and
+        // downgraded — both country fields on every German document that
+        // reached Tier 2.
+        let mut m = base();
+        "D".clone_into(&mut m.issuing_country);
+        "D".clone_into(&mut m.nationality);
+        for value in ["Germany", "DEU", "D"] {
+            let mut fields = agreeing_fields();
+            fields.issuing_country = Some(value.into());
+            fields.nationality = Some(value.into());
+            assert_eq!(
+                check_tier2_against_mrz(&fields, &m),
+                Vec::new(),
+                "{value} should agree with the MRZ's `D`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_two_character_document_code_agrees_on_its_class() {
+        // `PO` (official), `PD` (diplomatic), `PS` (service) are passports;
+        // `ID` is an identity card. `normalize::document_type` only ever
+        // yields `P`/`I`/`V`, so a whole-string compare could never match any
+        // of them.
+        for (mrz_code, tier2_value) in [
+            ("PO", "P"),
+            ("PD", "PASSPORT"),
+            ("PS", "P"),
+            ("ID", "IDENTITY CARD"),
+            ("ID", "I"),
+        ] {
+            let mut m = base();
+            mrz_code.clone_into(&mut m.document_type);
+            let mut fields = agreeing_fields();
+            fields.document_type = Some(tier2_value.into());
+            assert_eq!(
+                check_tier2_against_mrz(&fields, &m),
+                Vec::new(),
+                "{tier2_value} should agree with the MRZ's {mrz_code}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_genuinely_different_document_class_is_still_flagged() {
+        let mut m = base();
+        "ID".clone_into(&mut m.document_type);
+        let mut fields = agreeing_fields();
+        fields.document_type = Some("PASSPORT".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "document_type".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn an_apostrophe_dropped_by_icao_name_encoding_is_not_a_contradiction() {
+        // ICAO 9303 §4.6 drops apostrophes with no filler, so `O'Brien` is
+        // printed `OBRIEN`. `mrz::transliterate` alone performs no filler
+        // handling, so the old comparison left the apostrophe in and flagged.
+        let mut m = base();
+        "OBRIEN".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("O'Brien".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_hyphenated_name_encoded_with_filler_is_not_a_contradiction() {
+        // A hyphen becomes `<`, which `parser::clean_name` reads back as a
+        // space.
+        let mut m = base();
+        "SMITH JONES".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("Smith-Jones".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_wider_than_minimum_filler_gap_is_not_a_contradiction() {
+        // `clean_name` turns each `<` into one space without collapsing runs,
+        // so a wide filler gap arrives here as several spaces where the
+        // encoder emits exactly one.
+        let mut m = base();
+        "ANNA   MARIA".clone_into(&mut m.given_names);
+        let mut fields = agreeing_fields();
+        fields.given_names = Some("Anna Maria".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_name_truncated_into_the_fixed_width_field_is_not_a_contradiction() {
+        // The MRZ name field is fixed-width; a long name is cut to fit, so the
+        // parsed value is a prefix of the full name and can never equal it.
+        let mut m = base();
+        "BARTHOLOMEW MAXIMILI".clone_into(&mut m.given_names);
+        let mut fields = agreeing_fields();
+        fields.given_names = Some("Bartholomew Maximilian".into());
+        assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
+    }
+
+    #[test]
+    fn a_shorter_mrz_name_that_is_not_a_prefix_is_still_flagged() {
+        // Truncation tolerance must not become "any two names that differ in
+        // length agree".
+        let mut m = base();
+        "NIELSEN".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("Eriksson".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "surname".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn a_longer_mrz_name_is_never_absorbed_by_the_prefix_rule() {
+        // The prefix rule only fires when the MRZ side is *shorter* — the
+        // direction a truncation can actually produce.
+        let mut m = base();
+        "ERIKSSONSDOTTIR".clone_into(&mut m.surname);
+        let mut fields = agreeing_fields();
+        fields.surname = Some("Eriksson".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "surname".to_string()
             }]
         );
     }
