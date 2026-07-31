@@ -22,8 +22,10 @@
 use serde::Serialize;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use synthpass_bench::provider_bench::{run_provider_bench, ProviderReport};
-use synthpass_bench::{generate_corpus, ProfileChoice};
+use synthpass_bench::provider_bench::{
+    run_provider_bench, run_provider_bench_real, ProviderReport, UnsupportedAssertion,
+};
+use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice};
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
 
@@ -33,6 +35,12 @@ struct Args {
     profile: ProfileChoice,
     out: String,
     measure_memory: bool,
+    /// Run over real specimens in `samples/` instead of the synthetic
+    /// corpus — see `synthpass_bench::load_real_specimens`. `--count`/
+    /// `--seed`/`--profile` are synthetic-corpus-only and ignored in this
+    /// mode: a real specimen has no seed to start from and no capture
+    /// profile to apply, it is what it is.
+    real_specimens: bool,
 }
 
 impl Default for Args {
@@ -43,13 +51,15 @@ impl Default for Args {
             profile: ProfileChoice::Clean,
             out: "provider-bench-report.json".to_string(),
             measure_memory: false,
+            real_specimens: false,
         }
     }
 }
 
 fn usage() {
     eprintln!(
-        "Usage: provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH] [--measure-memory]"
+        "Usage: provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH] \
+         [--measure-memory] [--real-specimens]"
     );
     eprintln!("  --count N          number of documents to check (default: 20)");
     eprintln!("  --seed N           base seed; document i uses seed N+i (default: 0)");
@@ -58,6 +68,10 @@ fn usage() {
     );
     eprintln!("  --out PATH         report JSON path (default: provider-bench-report.json)");
     eprintln!("  --measure-memory   sample process RSS around each provider's loop (coarse)");
+    eprintln!(
+        "  --real-specimens   run over samples/ instead of the synthetic corpus (ground truth \
+         optional per specimen; --count/--seed/--profile are ignored)"
+    );
 }
 
 /// Hand-rolled flag parser, consistent with `synthpass-bench`'s own binary
@@ -103,6 +117,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.measure_memory = true;
                 i += 1;
             }
+            "--real-specimens" => {
+                parsed.real_specimens = true;
+                i += 1;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -112,20 +130,54 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
 #[derive(Serialize)]
 struct CapabilityReport {
     deterministic: bool,
+    vision: bool,
     cost: &'static str,
 }
 
+/// `field_match_rate`/`mean_cer`/each `PerFieldCer::mean_cer` are `null` in
+/// the JSON report exactly when `labelled_documents == 0` (whole report) or
+/// no labelled document had ground truth for that specific field (per-field)
+/// — see `synthpass_bench::provider_bench::AccuracyStats`'s doc for why that
+/// is reported as absent rather than a fabricated `0.0`.
 #[derive(Serialize)]
 struct AccuracyReport {
-    field_match_rate: f64,
-    mean_cer: f64,
+    labelled_documents: usize,
+    field_match_rate: Option<f64>,
+    mean_cer: Option<f64>,
     per_field_cer: Vec<PerFieldCer>,
 }
 
 #[derive(Serialize)]
 struct PerFieldCer {
     field: &'static str,
-    mean_cer: f64,
+    mean_cer: Option<f64>,
+}
+
+/// Mirrors `synthpass_bench::provider_bench::UnsupportedAssertion` for JSON:
+/// `serde`'s adjacently-tagged enum representation, so a report reader sees
+/// either `{"status": "computed", "rate": ..., "assertions_total": ...}` or
+/// `{"status": "not_applicable", "reason": "..."}` — never a bare number
+/// that would look the same whether it was measured or skipped.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum UnsupportedAssertionReport {
+    Computed { rate: f64, assertions_total: usize },
+    NotApplicable { reason: &'static str },
+}
+
+impl From<UnsupportedAssertion> for UnsupportedAssertionReport {
+    fn from(u: UnsupportedAssertion) -> Self {
+        match u {
+            UnsupportedAssertion::Computed {
+                rate,
+                assertions_total,
+            } => Self::Computed {
+                rate,
+                assertions_total,
+            },
+            UnsupportedAssertion::NotApplicable { reason } => Self::NotApplicable { reason },
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -151,7 +203,7 @@ struct ProviderRow {
     speed: SpeedReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     json_validity: Option<JsonValidityReport>,
-    unsupported_assertion_rate: f64,
+    unsupported_assertion: UnsupportedAssertionReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     declared_resident_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,9 +217,11 @@ impl From<ProviderReport> for ProviderRow {
             documents: r.documents,
             capability: CapabilityReport {
                 deterministic: r.capability.deterministic,
+                vision: r.capability.vision,
                 cost: r.capability.cost,
             },
             accuracy: AccuracyReport {
+                labelled_documents: r.accuracy.labelled_documents,
                 field_match_rate: r.accuracy.field_match_rate,
                 mean_cer: r.accuracy.mean_cer,
                 per_field_cer: r
@@ -191,7 +245,7 @@ impl From<ProviderReport> for ProviderRow {
                 repair_fallbacks: j.repair_fallbacks,
                 documents: j.documents,
             }),
-            unsupported_assertion_rate: r.unsupported_assertion_rate,
+            unsupported_assertion: r.unsupported_assertion.into(),
             declared_resident_bytes: r.declared_resident_bytes,
             measured_rss_delta_bytes: r.measured_rss_delta_bytes,
         }
@@ -201,9 +255,16 @@ impl From<ProviderReport> for ProviderRow {
 #[derive(Serialize)]
 struct Report {
     timestamp_unix: u64,
-    profile: &'static str,
+    /// "synthetic-corpus" or "real-specimens" — which of `run_provider_bench`/
+    /// `run_provider_bench_real` produced `providers` below, since the two
+    /// populate `profile`/`count`/`seed_start` differently (a real specimen
+    /// has no capture profile and no seed).
+    source: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<&'static str>,
     count: u64,
-    seed_start: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed_start: Option<u64>,
     providers: Vec<ProviderRow>,
 }
 
@@ -259,20 +320,70 @@ async fn main() {
     let infer: Box<dyn InferBackend> = Box::new(NativeInferer::new(model_path(), n_ctx()));
     let pipeline = Pipeline::new(pipeline_ocr, infer);
 
-    let corpus = generate_corpus(parsed.profile, parsed.seed, parsed.count);
-    let reports =
-        run_provider_bench(pipeline.catalog(), &ocr, &corpus, parsed.measure_memory).await;
+    // Real specimens (ground truth optional, MRZ-less fronts included) vs.
+    // the synthetic corpus (ground truth always present) — see
+    // `synthpass_bench::provider_bench`'s top doc comment for why both
+    // sources feed the exact same reader loop and reporting shape.
+    let (reports, source, profile, count, seed_start) = if parsed.real_specimens {
+        let specimens = load_real_specimens(&root.join("samples"));
+        if specimens.is_empty() {
+            eprintln!(
+                "❌ no image files found under samples/ — is this being run from the repo root?"
+            );
+            std::process::exit(1);
+        }
+        let labelled = specimens.iter().filter(|s| s.labels.is_some()).count();
+        eprintln!(
+            "loaded {} real specimens ({labelled} with samples/ocr_fixtures/ ground truth, {} \
+             unlabelled)",
+            specimens.len(),
+            specimens.len() - labelled,
+        );
+        let reports =
+            run_provider_bench_real(pipeline.catalog(), &ocr, &specimens, parsed.measure_memory)
+                .await;
+        (
+            reports,
+            "real-specimens",
+            None,
+            specimens.len() as u64,
+            None,
+        )
+    } else {
+        let corpus = generate_corpus(parsed.profile, parsed.seed, parsed.count);
+        let reports =
+            run_provider_bench(pipeline.catalog(), &ocr, &corpus, parsed.measure_memory).await;
+        (
+            reports,
+            "synthetic-corpus",
+            Some(parsed.profile.as_str()),
+            parsed.count,
+            Some(parsed.seed),
+        )
+    };
 
     for r in &reports {
+        let field_match = r
+            .accuracy
+            .field_match_rate
+            .map(|v| format!("{:.1}%", v * 100.0))
+            .unwrap_or_else(|| "n/a".to_string());
+        let mean_cer = r
+            .accuracy
+            .mean_cer
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "n/a".to_string());
+        let unsupported = match &r.unsupported_assertion {
+            UnsupportedAssertion::Computed { rate, .. } => format!("{:.1}%", rate * 100.0),
+            UnsupportedAssertion::NotApplicable { reason } => format!("n/a ({reason})"),
+        };
         println!(
-            "{}: {} docs, field match {:.1}%, mean CER {:.3}, mean {} ms, unsupported-assertion \
-             rate {:.1}%",
+            "{}: {} docs ({} labelled), field match {field_match}, mean CER {mean_cer}, mean {} \
+             ms, unsupported-assertion rate {unsupported}",
             r.provider_id,
             r.documents,
-            r.accuracy.field_match_rate * 100.0,
-            r.accuracy.mean_cer,
+            r.accuracy.labelled_documents,
             r.speed.mean.as_millis(),
-            r.unsupported_assertion_rate * 100.0,
         );
     }
 
@@ -281,9 +392,10 @@ async fn main() {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
-        profile: parsed.profile.as_str(),
-        count: parsed.count,
-        seed_start: parsed.seed,
+        source,
+        profile,
+        count,
+        seed_start,
         providers: reports.into_iter().map(ProviderRow::from).collect(),
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");

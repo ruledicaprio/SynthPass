@@ -679,7 +679,15 @@ impl Pipeline {
                     .find_reader(stage.escalation_budget, |c| c.fields && !c.deterministic)
                     .expect("LlmFieldReader is always registered");
                 let hint = mrz_hint(stage.mrz_data.as_ref());
-                let mut ctx = DocumentContext::from_text(&stage.markdown);
+                // `with_image(input)`: harmless for the text-only `LlmFieldReader` shipped
+                // today (it ignores `DocumentContext::image` entirely), but load-bearing for
+                // the day a vision-capable `FieldReader` is registered — `DocumentContext::
+                // with_image`'s own doc says a multimodal provider is meant to be a new
+                // implementation against this same struct, not a new trait, and that promise
+                // is only true if the pipeline actually populates the field. `input` is the
+                // original on-disk file, not the OCR engine's temp copy, so this also survives
+                // whatever the OCR stage does with its own scratch files.
+                let mut ctx = DocumentContext::from_text(&stage.markdown).with_image(input);
                 if let Some(hint) = &hint {
                     ctx = ctx.with_mrz_hint(hint);
                 }
