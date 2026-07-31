@@ -291,6 +291,36 @@ Beyond M6 and M7, and deliberately not committed:
 - **Statistical dataset characterisation** — tooling to describe and diff generated corpora.
 - **Distributed generation** — parallel factory runs for very large dataset builds.
 
+### Beyond ICAO 9303
+
+Everything above stays inside Doc 9303's scope (passports, visas, TD1/TD2 official travel
+documents — all covered by `knowledge/docs9303/`). Two document families sit genuinely outside
+it, named here so the M6 "driving licences are a different mechanism, not a lower priority" note
+above has somewhere to point once it's time to scope the work, rather than staying a bare mention:
+
+- **AAMVA PDF417 barcode decoding (US/Canada driving licences).** AAMVA (the American Association
+  of Motor Vehicle Administrators) publishes its own Card Design Standard, independent of ICAO —
+  the data lives entirely in a PDF417 2D barcode on the back of the card, not an OCR-B MRZ. This is
+  the concrete first user of the `ExtractionV2.barcodes` slot the M6 scoping note references: a
+  PDF417 decoder (no new runtime dependency category — PDF417 is a well-understood 2D symbology
+  with existing pure-Rust decoders) plus an AAMVA field-layout parser, structured as a
+  `synthpass-die` provider the same way MRZ is, per the M7 contract. No MRZ work of any kind
+  reads this format — it needs its own decoder before it needs anything else.
+- **ISO/IEC 18013 (mobile driving licence / mDL).** A different standard family again: 18013-5
+  defines an mDL as a signed, holder-controlled data structure (CBOR-encoded, presented over
+  NFC/BLE or as a QR code) rather than a printed page, so there is no OCR step and no MRZ-style
+  fixed-width text zone to parse — the "document" is the response to a cryptographic device
+  request. If SynthPass ever takes this on, it is closer in shape to Part 11's chip-authentication
+  work (`knowledge/docs9303/Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md`) than to the MRZ
+  pipeline: parsing a signed CBOR structure and verifying its issuer certificate chain, not
+  running OCR against a physical card. Not started, not scoped past this paragraph — named here so
+  it isn't rediscovered from scratch later, and so it doesn't get assumed away as "just another
+  barcode format" the way AAMVA licences are, when it is not.
+
+Neither item changes `SYNTHPASS_ENGINEERING_CONSTITUTION.md` §3's Project Goals or the M1–M7
+milestones above; §4's "non-ICAO documents" non-goal is scoped to the currently committed
+milestones for exactly this reason — see §25 there.
+
 These reassure long-term contributors and partners that SynthPass is a platform with sustained
 momentum, not a fixed-scope tool — while keeping the committed roadmap honest about what M1–M6
 actually deliver.

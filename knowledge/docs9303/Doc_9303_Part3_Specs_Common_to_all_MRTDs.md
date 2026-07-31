@@ -762,8 +762,8 @@ The following tables contain the most commonly used national characters of the L
 | 012C | Ĭ | I breve | I |
 | 012E | Į | I ogonek | I |
 | 0130 | İ | I dot above | I |
-| 0131 | ı | I without dot (Turkey) | I |
-| 0132 | Ĳ | ligature IJ | IJ |
+| 0131 | I | I without dot (Turkey) | I |
+| 0132 | IJ | ligature IJ | IJ |
 | 0134 | Ĵ | J circumflex | J |
 | 0136 | Ķ | K cedilla | K |
 | 0139 | Ĺ | L acute | L |

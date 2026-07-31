@@ -80,18 +80,26 @@ Every `Doc 9303-N` mention in the corpus is now a real Markdown link to that
 part's file — 247 of them. The source documents cite each other only at
 whole-part granularity in prose (`Doc 9303-11`, `see Part 4`); they do not
 cite specific section numbers across parts, so there was nothing finer to
-link at that level. Headings do carry their section number in the heading
-text itself (e.g. `## 4.2.2 Document Number`), so a GitHub-style anchor is
-always derivable — `Doc_9303_Part4_....md#422-document-number` — for anyone
-who wants to cite a specific section precisely, the way `crates/mrz/src/*.rs`
-already does in prose (`ICAO 9303 part 4 §4.2.2.2`). Nothing wires those
-Rust doc comments to real links yet; that's a natural follow-up once this
-tree has settled, not done here.
+link at that level there. Headings do carry their section number in the
+heading text itself (e.g. `## 4.2.2 Document Number`), so a GitHub-style
+anchor is always derivable — `Doc_9303_Part4_....md#422-document-number`.
+`CONFORMANCE_BASIS.md`'s own file:line citations now use exactly this form —
+a real link whose visible text is the file:line citation and whose target is
+the section anchor, not a bare backtick citation — and
+`scripts/check-doc-links.sh` verifies every such fragment resolves to a real
+heading, not just a real file.
+`crates/mrz/src/*.rs`'s doc comments still cite sections in prose only
+(`ICAO 9303 part 4 §4.2.2.2`) rather than as real links — wiring those up
+remains the one piece of this not done here.
 
-Part 8's Visible Digital Seal byte-dump example (Appendix B) is short about
-13 of the 134 bytes the source PDF states it should have — a two-column hex
-layout that doesn't extract into a reliable byte order from text alone.
-Documented in place with a comment rather than guessed at.
+Part 8's Visible Digital Seal byte-dump example (Appendix B) was previously
+short about 13 of the 134 bytes the source PDF states it should have — a
+16-column × 9-row grid that plain text extraction flattened into the wrong
+column order and silently dropped one column from. Recovered in full by
+clustering each word's on-page coordinates back into the source's true
+grid (see [`CONFORMANCE_BASIS.md`](CONFORMANCE_BASIS.md)); the same
+coordinate-clustering approach also fixed the same page's MRZ example, which
+had literal spaces where filler characters belonged.
 
 ## What does not belong here
 
