@@ -326,6 +326,45 @@ licences need (see the M6 scoping note above) becomes a provider someone can wri
 touching the pipeline; and M6's "a third-party plugin builds against a stable interface" criterion
 is satisfied by an interface that exists.
 
+## M6 — Expansion & Enterprise readiness
+
+M7's contract is what M6 was waiting on (see "What this buys M6" above) — this section is the
+kickoff: gathering the scoping notes already dropped into the Execution notes above into one
+place, with a suggested order, before any of it becomes code.
+
+**What ships**
+
+- **The generator gap, not just the extraction gap.** `synthpass-gen` emits **TD3 only** today —
+  every accuracy number in this file, M1 through M7, is measured against synthetic passports and
+  nothing else. TD1 (3×30 ID cards / residence permits), TD2 (2×36), and MRVA/MRVB (visas) need to
+  exist on the *generation* side before the extraction side has anything real to measure against.
+  This is the actual bottleneck, not the provider wiring below — do this first.
+- **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Once the generator produces them, extraction
+  is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
+  same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
+  M7 section above for the contract itself.
+- **Declarative document layout plugins.** A third-party layout definition drives generation
+  without a code change — the M6 DoD criterion the milestone table already states.
+- **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
+  trainer end-to-end.
+- **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
+- **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
+  the rest existing first.
+
+**Scoped separately — not folded into this milestone**
+
+- **AAMVA PDF417 barcode decoding for driving licences.** A different mechanism entirely (no MRZ,
+  data lives in a 2D barcode), its own standard family outside Doc 9303, and the concrete first
+  user of the `ExtractionV2.barcodes` slot. Full scoping in "Beyond ICAO 9303" below — do not read
+  M6's TD1/TD2/MRVA/MRVB line as covering it.
+- **The orientation circular-mean improvement** (see the M6 scoping note above, under Execution
+  notes). An OCR-quality win, not an M6 deliverable — worth picking up opportunistically, but
+  doesn't block or get blocked by anything above.
+
+**Suggested order:** generator (TD1/TD2/MRVA/MRVB emission) → extraction providers against the M7
+contract → layout plugins → dataset exports → deployment guide + Pro beta. Each step after the
+first makes the next one's accuracy numbers meaningful instead of TD3-only.
+
 ## Future Work
 
 Beyond M6 and M7, and deliberately not committed:
