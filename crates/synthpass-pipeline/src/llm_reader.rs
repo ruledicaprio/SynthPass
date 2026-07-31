@@ -61,6 +61,7 @@ impl FieldReader for LlmFieldReader {
             &self.llm_queue_depth,
             &self.metrics,
             ctx.text,
+            ctx.mrz_hint,
         )
         .await
         .map_err(|detail| ProviderError::Failed { detail })?;

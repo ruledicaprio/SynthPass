@@ -333,6 +333,18 @@ impl FieldConfidence {
                     "given_names" => self.given_names = IMPLAUSIBLE,
                     _ => {}
                 },
+                // Only the Tier-2/`fields` side drops — the MRZ structural
+                // value this was compared against isn't itself downgraded,
+                // it's the thing the contradiction was measured against.
+                Finding::LlmContradictsMrzStructural { field } => match field.as_str() {
+                    "document_type" => self.document_type = IMPLAUSIBLE,
+                    "issuing_country" => self.issuing_country = IMPLAUSIBLE,
+                    "surname" => self.surname = IMPLAUSIBLE,
+                    "given_names" => self.given_names = IMPLAUSIBLE,
+                    "nationality" => self.nationality = IMPLAUSIBLE,
+                    "sex" => self.sex = IMPLAUSIBLE,
+                    _ => {}
+                },
                 // Deliberately exhaustive, with no catch-all: a new `Finding`
                 // variant must not silently leave the field it flags sitting
                 // at full structural confidence, so adding one is a compile
@@ -1179,5 +1191,19 @@ mod tests {
         ] {
             assert!(obj.contains_key(key), "missing key: {key}");
         }
+    }
+
+    #[test]
+    fn downgrade_flagged_drops_only_the_named_field() {
+        let mut confidence = FieldConfidence::mrz_checksum_scope();
+        let verdict = crate::fusion::Verdict::NeedsReview {
+            reasons: vec![crate::fusion::Finding::LlmContradictsMrzStructural {
+                field: "sex".to_string(),
+            }],
+        };
+        confidence.downgrade_flagged(&verdict);
+        assert_eq!(confidence.sex, IMPLAUSIBLE);
+        // An unrelated field must survive at its prior score, untouched.
+        assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
     }
 }

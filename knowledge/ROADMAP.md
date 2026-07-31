@@ -227,6 +227,53 @@ flowchart LR
   both consistent with existing measurements (the M4 55% Tier-1 hit rate on OCR noise, the M5 GBNF
   parity run's ~45% field match). Ships standalone (`cargo run -p synthpass-bench --release --bin
   provider-bench`); CI wiring is a separable follow-up.
+- **Issue #103 scoping note — visual-zone OCR noise is corpus-wide, not specimen-specific; a
+  `preprocess`-style treatment for the non-MRZ zone is worth scoping (no code change proposed
+  yet).** #103 reported OCR noise on a private, untracked Türkiye candidate specimen
+  (`work/Turkiye_Passport_Private_snipped.jpg`, never committed). Reproduction: `check_sample`
+  still returns a checksum-valid MRZ HIT for it under the current `ocrs` engine, so the MRZ zone
+  itself is not the problem — the noise is confined to the visual zone (photo/header/data-field
+  text above the MRZ). A new measurement harness, `crates/synthpass-ocr/examples/visual_zone_survey.rs`
+  (modelled on `examples/integrity_survey.rs`), classifies each geometry-detected line as MRZ or
+  non-MRZ (via `geometry::mrz_line_score`) and reports, per non-MRZ line, whether it's noise (<= 2
+  non-whitespace characters, or >= 50% non-alphanumeric) — no ground truth required, so it ran over
+  the whole `samples/` corpus (135 specimens with at least one non-MRZ line; JSONL at
+  `knowledge/visual-zone-survey.jsonl`). Corpus-wide noise-line fraction: **median 0.243, IQR
+  [0.111, 0.455]**. The Türkiye specimen scored **0.652** (46 non-MRZ lines, 30 noise) — above the
+  IQR, but at roughly the 89th percentile of the full corpus (15 of 135 tracked specimens score as
+  high or higher, across unrelated countries/formats) and *not* above the high end of a
+  typographically-close proxy set drawn from already-tracked specimens (Azerbaijan, Albania,
+  Romania, Croatia, Bosnia and Herzegovina, Kosovo, North Macedonia, Poland, Viet Nam) — Viet Nam's
+  specimen scores higher (0.778). Conclusion: this is a **systematic** corpus property, not
+  something unique to the Türkiye candidate. The natural follow-up — not implemented here, per
+  #103's stated scope — is to extend the visual zone with the same deterministic
+  upscale/contrast/threshold/deskew treatment `preprocess.rs` already applies to the MRZ band (see
+  its module docs and e.g. `preprocess::mrz_variants`), rather than treating the MRZ-band retry
+  passes as the only place OCR quality gets a second chance.
+- **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
+  helps, at no measurable latency cost once measured on an uncontended machine.**
+  `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new
+  `{hint}` template slot, digest re-pinned), threaded end to end from
+  `synthpass_die::DocumentContext::mrz_hint` through `InferBackend::extract`/`extract_stream` to
+  the prompt. The hint is built from the individual `mrz::Checks` bits (not `DocumentContext.prior`,
+  which only populates when the *whole* MRZ record validates) — `document_number`, `date_of_birth`,
+  `date_of_expiry`, `personal_number` when their own check digit passes, plus `nationality`/`sex`
+  when the line-1 composite check passes — so a checksum-partial read still contributes whatever
+  it individually proved. Gated behind `SYNTHPASS_LLM_MRZ_HINT` (default **off**).
+
+  First A/B (`provider-bench --count 10 --seed 42 --profile worn`, flag off vs on) ran while other
+  `cargo`/`provider-bench` processes were active on the same machine and reported a **+39%** mean
+  latency cost (33.3s → 46.3s) alongside the accuracy gains — caught as suspect (thanks to a sharp
+  eye on the number) precisely because CPU-bound llama.cpp inference is exactly the kind of
+  workload contention skews. Re-run back-to-back with nothing else running (`tasklist` checked
+  clean before each half): field-match rate **65% → 69%**, mean CER **0.722 → 0.436**,
+  unsupported-assertion rate **5.7% → 1.3%** — unchanged from the contended run, as expected since
+  none of those depend on wall-clock — and mean latency **29.12s → 29.00s**, i.e. no cost at all.
+  All three of the plan's ship criteria (+≥3pt field-match, CER not worse, latency +<10%) are now
+  met at `n=10`. **Ship decision: land the plumbing now, keep the flag off pending a larger run**
+  (`n=10` is still a small sample for a default-behavior flip) — `provider-bench` itself now
+  attaches an MRZ prior the same way the pipeline does, so re-measuring at `--count 20+` needs no
+  further code changes, only a clean (uncontended) machine to run it on.
 
 ## M7 — Document Intelligence Engine
 

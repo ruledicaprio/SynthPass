@@ -149,6 +149,20 @@ pub struct DocumentContext<'a> {
     /// on the prior reading and request exactly those fields. Costs nothing to
     /// carry now; a prompt change later.
     pub prior: Option<&'a Reading>,
+    /// A short, pre-rendered `k=v` hint string of checksum-verified MRZ
+    /// line-1 fields, for a [`FieldReader`] to fold into its own prompt.
+    ///
+    /// Deliberately not sourced from [`Self::prior`]: a Tier-1 [`MrzReader`]
+    /// reading reports fields only when the *whole* record validates
+    /// ([`MrzData::valid`](mrz::MrzData::valid)), so a checksum-partial read
+    /// (some individual check digits pass, the composite or another does
+    /// not) leaves `prior` empty even though some fields are still
+    /// mathematically proven. The caller that holds the raw `mrz::MrzData`
+    /// builds this string directly from the individual check bits instead.
+    /// Already fully rendered (not the raw `MrzData`) so this crate's
+    /// dependency boundary — no `tokio`, no LLM engine, no prompt format
+    /// opinions — stays intact; it is just a string.
+    pub mrz_hint: Option<&'a str>,
 }
 
 impl<'a> DocumentContext<'a> {
@@ -159,6 +173,7 @@ impl<'a> DocumentContext<'a> {
             text,
             recognition: None,
             prior: None,
+            mrz_hint: None,
         }
     }
 
@@ -174,6 +189,11 @@ impl<'a> DocumentContext<'a> {
 
     pub fn with_prior(mut self, prior: &'a Reading) -> Self {
         self.prior = Some(prior);
+        self
+    }
+
+    pub fn with_mrz_hint(mut self, hint: &'a str) -> Self {
+        self.mrz_hint = Some(hint);
         self
     }
 }

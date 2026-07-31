@@ -167,7 +167,20 @@ pub async fn run_provider_bench(
             let Some((page, truth)) = page_and_truth else {
                 continue;
             };
-            let ctx = DocumentContext::from_text(&page.text);
+            // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
+            // `mrz::find_and_parse(&markdown)` — a *read* of this provider's
+            // OCR text, not `truth` (the corpus's ground-truth labels): the
+            // hint must reflect what this run's OCR pass actually recovered,
+            // including a checksum-partial read, the same as production.
+            // `mrz_hint` itself is a no-op unless `SYNTHPASS_LLM_MRZ_HINT=1`
+            // is set, so this harness measures exactly the same gate the
+            // pipeline does.
+            let read_mrz = mrz::find_and_parse(&page.text).ok();
+            let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
+            let mut ctx = DocumentContext::from_text(&page.text);
+            if let Some(hint) = &hint {
+                ctx = ctx.with_mrz_hint(hint);
+            }
             let started = Instant::now();
             let reading = reader.read(&ctx).await;
             elapsed_per_doc.push(started.elapsed());
