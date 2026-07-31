@@ -11,8 +11,8 @@
 //! undamaged assertions fail first.
 
 use mrz::{
-    format_td1, format_td3, solve_field, width_candidates, FieldKind, Resolution, Td1Fields,
-    Td3Fields, UNKNOWN,
+    find_and_parse, format_td1, format_td3, solve_field, width_candidates, FieldKind, Resolution,
+    Td1Fields, Td3Fields, UNKNOWN,
 };
 
 /// A synthetic TD1 card. Expiry `301230` is what makes this fixture useful:
@@ -185,6 +185,57 @@ fn an_undamaged_zone_is_unaffected() {
     for line in [&l1, &l2, &l3] {
         assert_eq!(width_candidates(line, 30), vec![line.to_string()]);
     }
+}
+
+/// A correctly-sized line with a single misread glyph: no character was
+/// inserted or deleted, `ocrs` just confused two visually similar characters
+/// in the document-number field. This is the [`mrz::substitution_candidates`]
+/// / [`mrz::solve_substitution`] path exercised end to end through
+/// [`find_and_parse`], rather than the width-repair path the other tests in
+/// this file cover.
+#[test]
+fn a_single_misread_glyph_in_the_document_number_resolves_through_find_and_parse() {
+    let (l1, l2) = td3_zone();
+    assert!(mrz::parse_td3(&l1, &l2)
+        .expect("emitted TD3 parses")
+        .valid());
+
+    // Document number "E00000000" starts the line; corrupt the '1' the field
+    // does *not* have naturally, so build a fixture whose document number
+    // contains a '1' to misread as 'I' — a `CONFUSABLES` pair — the way OCR
+    // does on a real capture.
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "UTO".to_string(),
+        document_number: "AB123457".to_string(),
+        surname: "SPECIMEN".to_string(),
+        given_names: "TEST".to_string(),
+        nationality: "UTO".to_string(),
+        date_of_birth: "800101".to_string(),
+        sex: "F".to_string(),
+        date_of_expiry: "301230".to_string(),
+        personal_number: None,
+    });
+    let lines: Vec<&str> = mrz.lines().collect();
+    let (l1, l2) = (lines[0].to_string(), lines[1].to_string());
+    assert!(mrz::parse_td3(&l1, &l2)
+        .expect("fixture parses before damage")
+        .valid());
+
+    // Document number occupies l2[0..9]; index 2 holds the '1' in "AB123457<".
+    assert_eq!(&l2[0..9], "AB123457<");
+    let mut damaged = l2.clone().into_bytes();
+    damaged[2] = b'I';
+    let damaged_l2 = String::from_utf8(damaged).expect("ascii in, ascii out");
+    assert_ne!(damaged_l2, l2, "the fixture must actually be damaged");
+
+    let text = format!("{l1}\n{damaged_l2}");
+    let recovered = find_and_parse(&text).expect("a single misread glyph must still parse");
+    assert!(
+        recovered.valid(),
+        "the recovered reading must checksum-verify"
+    );
+    assert_eq!(recovered.document_number, "AB123457");
 }
 
 /// The document-number field is left-justified and `<`-padded, so a reading

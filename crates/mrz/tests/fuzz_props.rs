@@ -14,8 +14,8 @@
 
 use mrz::{
     find_and_parse, format_td1, format_td2, format_td3, parse_mrv_a, parse_mrv_b, parse_td1,
-    parse_td2, parse_td3, transliterate, transliterations, Td1Fields, Td2Fields, Td3Fields,
-    TransliterationStyle,
+    parse_td2, parse_td3, substitution_candidates, transliterate, transliterations, Td1Fields,
+    Td2Fields, Td3Fields, TransliterationStyle,
 };
 use proptest::prelude::*;
 
@@ -348,6 +348,55 @@ fn translit_ish_char() -> impl Strategy<Value = char> {
 
 fn translit_ish_string() -> impl Strategy<Value = String> {
     prop::collection::vec(translit_ish_char(), 0..40).prop_map(|chars| chars.into_iter().collect())
+}
+
+/// The 37-character ICAO MRZ alphabet, unweighted — unlike `mrz_ish_char`
+/// this strategy never emits noise, so every generated field is exactly what
+/// `substitution_candidates` is meant to operate on.
+fn strict_mrz_char() -> impl Strategy<Value = char> {
+    prop_oneof![
+        prop::char::range('A', 'Z'),
+        prop::char::range('0', '9'),
+        Just('<'),
+    ]
+}
+
+fn strict_mrz_string() -> impl Strategy<Value = String> {
+    prop::collection::vec(strict_mrz_char(), 0..40).prop_map(|c| c.into_iter().collect())
+}
+
+proptest! {
+    /// Every candidate `substitution_candidates` proposes is the same length
+    /// as the input, pure ASCII, and drawn from the MRZ charset — the
+    /// invariant `substituted`/`solve_substitution` in `crates/mrz/src/parser.rs`
+    /// and `repair.rs` depend on to feed candidates straight back into the
+    /// check-digit oracle without a charset check of their own.
+    #[test]
+    fn substitution_candidates_preserve_length_ascii_and_charset(field in strict_mrz_string()) {
+        let candidates = substitution_candidates(&field);
+        for c in &candidates {
+            prop_assert_eq!(
+                c.chars().count(),
+                field.chars().count(),
+                "length changed for {:?} -> {:?}",
+                field,
+                c
+            );
+            prop_assert!(c.is_ascii(), "{c:?} is not ascii");
+            prop_assert!(
+                c.chars().all(|ch| matches!(ch, 'A'..='Z' | '0'..='9' | '<')),
+                "{c:?} escapes the MRZ charset"
+            );
+        }
+    }
+
+    /// `substitution_candidates` must never panic on arbitrary noisy input
+    /// either — the same "never panics" contract the rest of this suite holds
+    /// the parser to.
+    #[test]
+    fn substitution_candidates_never_panics_on_arbitrary_text(field in arbitrary_text()) {
+        let _ = substitution_candidates(&field);
+    }
 }
 
 proptest! {
