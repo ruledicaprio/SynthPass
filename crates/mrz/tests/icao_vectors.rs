@@ -270,16 +270,22 @@ fn section_4_2_3_1_examples_are_44_characters() {
 /// examples are deliberately not asserted against here. See
 /// `knowledge/docs9303/CONFORMANCE_BASIS.md`'s S3 entry.
 ///
-/// Three corpus examples are excluded as known defects (wrong length),
-/// rather than "fixed" by guessing which character is wrong — also recorded
-/// in `CONFORMANCE_BASIS.md`:
-/// - `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:576` (§4.2.3.3c): 45
-///   characters on a 44-character TD3 line.
+/// Three corpus examples are excluded regardless: all three are from the
+/// truncation-family sections (§4.2.3.2/§4.2.3.3, MRV-A's equivalent), which
+/// are never pinned here at all (see above) because truncation strategy is
+/// issuer-discretionary, not because of a length defect — also recorded in
+/// `CONFORMANCE_BASIS.md`:
+/// - `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:576` (§4.2.3.3c): was
+///   45 characters on a 44-character TD3 line due to a corpus transcription
+///   error (an extra `M`); fixed in the corpus (now a clean 44 characters),
+///   but still excluded here as a truncation example, not a defect.
 /// - `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:332` (MRV-A example a):
-///   45 characters on a 44-character line.
+///   45 characters on a 44-character line — confirmed a genuine ICAO
+///   erratum present in the source PDF itself, not corpus damage.
 /// - `Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:350` (MRV-A example d,
 ///   `O'CONNOR`): 36 characters in what should be a 44-character section —
-///   looks like the MRV-B width was pasted in by mistake.
+///   confirmed a genuine ICAO erratum (the MRV-B width was pasted in by
+///   mistake in ICAO's own text, not this corpus's conversion).
 struct NameVector {
     source: &'static str,
     viz: &'static str,
