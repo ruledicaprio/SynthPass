@@ -631,20 +631,27 @@ across all 13 parts in one pass) confirms the ending prose matches for 9 of
 `— END —` marker for those 9 (Parts 1, 2, 3, 7, 10, 11, 12, 13, plus 6's
 prose match though see below).
 
-**Parts 4, 5, 6, and 9 do not have this confirmed the same way**: each of
-these four PDFs' final one-to-three pages carry no extractable text at all
-(0 characters from `page.get_text()`) — almost certainly a full-page diagram
-(Part 4/6's TD3/TD2 layout figures, Part 5's Crew Member Certificate zone
-diagram, Part 9's biometric inspection flowchart), consistent with
-`docs9303/README.md`'s note that this tree only extracts the
-highest-value diagrams as images. The corpus's own `— END —` footer for
-these four files could not be corroborated against PDF text for lack of any
-text on the relevant page — it may be present as part of the diagram image,
-or may genuinely not appear as text in the source. `README.md`'s claim that
-"every part genuinely ends with `-- END --` in the official ICAO text" is
-accurate for the 9 parts checked here but not independently confirmed for
-these 4; a future segment with the appetite to render (not just extract
-text from) each part's true final page can close this out.
+**Parts 4, 5, 6, and 9 — now confirmed too.** The original pass checked only
+each PDF's literal final one-to-three physical pages, which are blank filler
+or a back-cover ISBN barcode in all four cases (0 characters from
+`page.get_text()`) — not the true end of content. Scanning backward from the
+end of each file for the last page carrying substantial text (rather than
+the last page, full stop) finds each part's real closing page, and every one
+ends in a genuine `— END —` marker, confirmed both by direct text extraction
+and a targeted regex match on the surrounding text (ruling out a stray
+substring match on an unrelated word):
+
+| Part | True last content page | What follows it |
+|---|---|---|
+| 4 | 37 (Appendix B, Figure B-1 annotations) | 2 blank pages, then an ISBN barcode page |
+| 5 | 34 (Appendix C, Figure C-1 zone diagram) | 2 blank pages |
+| 6 | 29 (Appendix, document-code note) | 3 blank/diagram-only pages |
+| 9 | 23 (biometric inspection flowchart) | 3 blank/diagram-only pages |
+
+`README.md`'s claim that "every part genuinely ends with `-- END --` in the
+official ICAO text" is now confirmed for all 13 parts, not just 9. The
+earlier "not confirmed" status was a page-selection artifact of the spot-check
+script (looking at the literal last pages), not a real gap in the corpus.
 
 No content-loss recurrence of the ADR-0003 bug itself was found in this
 pass — the readable-page text matches, part for part, for all 13 files.
