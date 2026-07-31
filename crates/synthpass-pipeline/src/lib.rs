@@ -324,6 +324,13 @@ impl Pipeline {
         Self::with_llm_contexts(ocr, infer, 1)
     }
 
+    /// The M7 provider catalog, for callers that need to enumerate every
+    /// registered provider (e.g. a benchmark harness) rather than route
+    /// through [`ProviderCatalog::find_reader`]'s first-match selection.
+    pub fn catalog(&self) -> &ProviderCatalog {
+        &self.catalog
+    }
+
     /// Like [`new`](Pipeline::new), but with an explicit LLM-context permit
     /// count instead of the hardcoded default of 1 — split out so tests can
     /// exercise a specific count directly, without going through
