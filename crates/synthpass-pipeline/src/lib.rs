@@ -1021,6 +1021,71 @@ fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData
     let verdict = synthpass_core::fusion::check_line1_integrity(m);
     v2.confidence.downgrade_flagged(&verdict);
     v2.line1_integrity = Some(verdict);
+    // Last: a downgrade must never clobber a promotion this step is about to
+    // make, and a promotion here is always correct regardless of what ran
+    // before it (see the function's own doc comment).
+    promote_verified_mrz_fields(v2, m);
+}
+
+/// Promote individually-verified MRZ fields into `v2.fields`/`v2.confidence`
+/// at full ("PROVEN") confidence via [`FieldConfidence::prove`], on *any*
+/// Tier-1 or Tier-2
+/// record that carries a deterministic MRZ read — not just a fully-valid
+/// one. Each ICAO check digit verifies its own field independently of the
+/// composite, so a document whose overall read escalated to Tier 2 (a bad
+/// composite, an unrelated failing field, or simply no read at all until
+/// now) can still have individual fields that are mathematically proven and
+/// deserve better than the LLM's heuristic score. A fully-valid read makes
+/// every promotion here trivially correct too, so this runs unconditionally
+/// rather than being gated on `!m.valid()`.
+///
+/// Called as the last step of [`apply_deterministic_mrz`], which already
+/// installs `v2.mrz`/`v2.confidence.downgrade_flagged` for *both* tiers (see
+/// its two call sites in `process_document`/`process_document_stream`), so
+/// this needs no tier-specific wiring of its own — the v1 JSON gets the same
+/// promotion for free through `extraction_from_v2_llm`'s re-projection of
+/// `v2.fields`.
+fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
+    use synthpass_core::v2::CoreField;
+
+    // `m.document_number`, not `m.full_document_number()`: byte-identical to
+    // Tier 1's own construction (`synthpass_die::mrz_reader::extraction_from_mrz`),
+    // which likewise uses the raw 9-character field, not the reassembled
+    // overflow form.
+    if m.checks.document_number {
+        v2.fields
+            .set(CoreField::DocumentNumber, Some(m.document_number.clone()));
+        v2.confidence.prove(CoreField::DocumentNumber);
+    }
+
+    // The raw field holds `YYMMDD`, not ISO `YYYY-MM-DD`, whenever the date
+    // is not fully known (see `MrzData::date_of_birth_completeness`'s doc
+    // comment) — promoting in that case would leak a non-ISO value into an
+    // ISO-typed slot.
+    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+        v2.fields
+            .set(CoreField::DateOfBirth, Some(m.date_of_birth.clone()));
+        v2.confidence.prove(CoreField::DateOfBirth);
+    }
+
+    if m.checks.date_of_expiry {
+        v2.fields
+            .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.clone()));
+        v2.confidence.prove(CoreField::DateOfExpiry);
+    }
+
+    // TD1/TD2/MRV formats report `checks.personal_number == true` vacuously —
+    // there is no such check digit outside TD3 — so promoting an unverified
+    // value there would misrepresent a structural parse as a mathematical
+    // proof. When `personal_number` is `None` despite the check bit being
+    // true (an all-filler-but-valid field), leave the LLM's existing value
+    // untouched rather than nulling it out.
+    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+        if let Some(pn) = &m.personal_number {
+            v2.fields.set(CoreField::PersonalNumber, Some(pn.clone()));
+            v2.confidence.prove(CoreField::PersonalNumber);
+        }
+    }
 }
 
 /// The v1 `mrz_checksums_valid` bool for a Tier-2 record, straight from the
