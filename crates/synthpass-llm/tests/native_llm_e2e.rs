@@ -53,7 +53,9 @@ fn native_llm_extracts_via_unary_and_streaming_calls() {
     let markdown = std::fs::read_to_string(find_sample("Croatian_passport_data_page.md"))
         .expect("sample markdown exists");
 
-    let extraction = llm.extract(&markdown).expect("unary extraction succeeds");
+    let extraction = llm
+        .extract(&markdown, None)
+        .expect("unary extraction succeeds");
     assert_eq!(extraction.extraction_method, "llm");
     // Exact field-accuracy parity against the Python inferer is a separate,
     // dedicated check (see the parity harness); this smoke test only proves
@@ -67,6 +69,7 @@ fn native_llm_extracts_via_unary_and_streaming_calls() {
     let streamed = llm
         .extract_stream(
             "Name: JOHN DOE. Nationality: Utopia. Passport number A1234567.",
+            None,
             |delta| deltas.push(delta.to_string()),
         )
         .expect("streaming extraction succeeds");

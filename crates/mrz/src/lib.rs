@@ -60,7 +60,10 @@ pub use parser::{
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
     parse_td3_with,
 };
-pub use repair::{solve_field, width_candidates, FieldKind, Resolution, MRZ_ALPHABET, UNKNOWN};
+pub use repair::{
+    solve_field, solve_substitution, substitution_candidates, width_candidates, FieldKind,
+    Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
+};
 pub use translit::{transliterate, transliterate_char, transliterations, TransliterationStyle};
 
 /// Tunables for the parsing entry points.

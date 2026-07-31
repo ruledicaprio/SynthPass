@@ -52,12 +52,13 @@ fn sentinel_extraction() -> Extraction {
 
 #[async_trait]
 impl InferBackend for SentinelBackend {
-    async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+    async fn extract(&self, _markdown: &str, _hint: Option<&str>) -> Result<Extraction, String> {
         Ok(sentinel_extraction())
     }
     async fn extract_stream(
         &self,
         _markdown: &str,
+        _hint: Option<&str>,
         _tx: &mpsc::Sender<ProcessEvent>,
     ) -> Result<Extraction, String> {
         Ok(sentinel_extraction())

@@ -136,7 +136,7 @@ fn native_llm_field_accuracy_over_sample_set() {
             .or_insert_with(|| "mrz-deterministic".into());
         let expected: Extraction =
             serde_json::from_value(expected_value).expect("fixture parses as Extraction");
-        let actual = llm.extract(&markdown).expect("extraction succeeds");
+        let actual = llm.extract(&markdown, None).expect("extraction succeeds");
 
         println!("--- {name} ---");
         for (i, get) in FIELDS.iter().enumerate() {

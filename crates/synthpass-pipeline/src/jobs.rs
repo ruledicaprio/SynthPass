@@ -441,7 +441,11 @@ mod tests {
 
     #[async_trait]
     impl crate::InferBackend for JobsMockBackend {
-        async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+        async fn extract(
+            &self,
+            _markdown: &str,
+            _hint: Option<&str>,
+        ) -> Result<Extraction, String> {
             let mut e = Extraction::default();
             e.extraction_method = "llm".into();
             Ok(e)
@@ -449,9 +453,10 @@ mod tests {
         async fn extract_stream(
             &self,
             markdown: &str,
+            hint: Option<&str>,
             _tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
-            self.extract(markdown).await
+            self.extract(markdown, hint).await
         }
         fn describe(&self) -> String {
             "jobs-mock-backend".into()
