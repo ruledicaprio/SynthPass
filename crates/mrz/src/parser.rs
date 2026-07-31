@@ -921,6 +921,34 @@ fn restored(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String>
     out
 }
 
+/// Concrete candidate readings for a line that arrived **exactly** the target
+/// width, with a single glyph swept across [`crate::repair::CONFUSABLES`].
+///
+/// The mirror image of [`restored`]: that function handles a line one
+/// character too narrow, this one a line the right width but with one
+/// position misread. Guarded by `n.len() == target` rather than `restored`'s
+/// `n.len() + 1 == target`, so the two are mutually exclusive by
+/// construction — a line can match at most one of them, and there is no
+/// ordering question between the two repair kinds.
+///
+/// Empty for any other line, which is what keeps this off the happy path.
+fn substituted(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String> {
+    let n = normalize_line(raw);
+    if n.len() != target || !is_mrz_charset(&n) {
+        return Vec::new();
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for concrete in crate::repair::substitution_candidates(&n) {
+        for form in [repair(&concrete), concrete] {
+            if seen.insert(form.clone()) {
+                out.push(form);
+            }
+        }
+    }
+    out
+}
+
 /// A reading recovered from damage has to clear a higher bar than one read
 /// cleanly: every check digit valid **and** both dates real calendar dates.
 ///
@@ -961,7 +989,7 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     // TD1: three consecutive lines, any one of them narrow.
     for i in 0..lines.len().saturating_sub(2) {
         let (a, b, c) = (lines[i], lines[i + 1], lines[i + 2]);
-        let shapes: [(Vec<String>, Vec<String>, Vec<String>); 3] = [
+        let shapes: [(Vec<String>, Vec<String>, Vec<String>); 6] = [
             (
                 restored(a, 30, repair_td1_line1),
                 variants(b, 30, repair_td1_line2),
@@ -976,6 +1004,21 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
                 variants(a, 30, repair_td1_line1),
                 variants(b, 30, repair_td1_line2),
                 restored(c, 30, repair_td1_line3),
+            ),
+            (
+                substituted(a, 30, repair_td1_line1),
+                variants(b, 30, repair_td1_line2),
+                variants(c, 30, repair_td1_line3),
+            ),
+            (
+                variants(a, 30, repair_td1_line1),
+                substituted(b, 30, repair_td1_line2),
+                variants(c, 30, repair_td1_line3),
+            ),
+            (
+                variants(a, 30, repair_td1_line1),
+                variants(b, 30, repair_td1_line2),
+                substituted(c, 30, repair_td1_line3),
             ),
         ];
         for (v1, v2, v3) in shapes {
@@ -1031,6 +1074,8 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
             for (v1, v2) in [
                 (restored(a, width, rep1), variants(b, width, rep2)),
                 (variants(a, width, rep1), restored(b, width, rep2)),
+                (substituted(a, width, rep1), variants(b, width, rep2)),
+                (variants(a, width, rep1), substituted(b, width, rep2)),
             ] {
                 for l1 in &v1 {
                     if !l1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {

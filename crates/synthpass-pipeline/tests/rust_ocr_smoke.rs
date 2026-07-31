@@ -51,13 +51,14 @@ struct StubInferer;
 
 #[async_trait]
 impl InferBackend for StubInferer {
-    async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+    async fn extract(&self, _markdown: &str, _hint: Option<&str>) -> Result<Extraction, String> {
         Ok(Extraction::default())
     }
 
     async fn extract_stream(
         &self,
         _markdown: &str,
+        _hint: Option<&str>,
         _tx: &mpsc::Sender<ProcessEvent>,
     ) -> Result<Extraction, String> {
         Ok(Extraction::default())

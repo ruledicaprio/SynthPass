@@ -518,13 +518,18 @@ impl Pipeline {
     ///
     /// [`Pipeline::process_document`]: Pipeline::process_document
     /// [`Pipeline::process_document_stream`]: Pipeline::process_document_stream
-    pub async fn extract_via_inferer(&self, markdown: &str) -> Result<Extraction, String> {
+    pub async fn extract_via_inferer(
+        &self,
+        markdown: &str,
+        hint: Option<&str>,
+    ) -> Result<Extraction, String> {
         run_tier2(
             &self.infer,
             &self.llm_semaphore,
             &self.llm_queue_depth,
             &self.metrics,
             markdown,
+            hint,
         )
         .await
     }
@@ -673,10 +678,12 @@ impl Pipeline {
                     .catalog
                     .find_reader(stage.escalation_budget, |c| c.fields && !c.deterministic)
                     .expect("LlmFieldReader is always registered");
-                match reader
-                    .read(&DocumentContext::from_text(&stage.markdown))
-                    .await
-                {
+                let hint = mrz_hint(stage.mrz_data.as_ref());
+                let mut ctx = DocumentContext::from_text(&stage.markdown);
+                if let Some(hint) = &hint {
+                    ctx = ctx.with_mrz_hint(hint);
+                }
+                match reader.read(&ctx).await {
                     Ok(reading) => {
                         let mut v2 = reading.extraction;
                         apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
@@ -770,7 +777,11 @@ impl Pipeline {
             if let Some((value, v2)) = stage.tier1 {
                 (Some(value), Some(v2), Method::MrzDeterministic, None)
             } else {
-                match self.extract_via_inferer_stream(&stage.markdown, &tx).await {
+                let hint = mrz_hint(stage.mrz_data.as_ref());
+                match self
+                    .extract_via_inferer_stream(&stage.markdown, hint.as_deref(), &tx)
+                    .await
+                {
                     Ok(extraction) => {
                         let mut v2 = lift_tier2_extraction(&extraction, self.infer.model_id());
                         apply_deterministic_mrz(&mut v2, stage.mrz_data.as_ref());
@@ -843,6 +854,7 @@ impl Pipeline {
     async fn extract_via_inferer_stream(
         &self,
         markdown: &str,
+        hint: Option<&str>,
         tx: &mpsc::Sender<ProcessEvent>,
     ) -> Result<Extraction, String> {
         let _depth = QueueDepthGuard::enter(&self.llm_queue_depth);
@@ -851,7 +863,7 @@ impl Pipeline {
             .acquire()
             .await
             .expect("llm_semaphore is never closed");
-        let mut result = self.infer.extract_stream(markdown, tx).await;
+        let mut result = self.infer.extract_stream(markdown, hint, tx).await;
         if let Ok(extraction) = &mut result {
             synthpass_core::normalize::extraction(extraction);
         }
@@ -1018,9 +1030,145 @@ fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData
     let block = mrz_block_from(m);
     v2.document.mrz_format = Some(block.format);
     v2.mrz = Some(block);
-    let verdict = synthpass_core::fusion::check_line1_integrity(m);
+
+    // Line-1 self-consistency (`check_line1_integrity`) plus a cross-check of
+    // the six non-checksummed line-1 fields against whatever Tier-2 already
+    // put in `v2.fields` (`check_tier2_against_mrz`) — merged into one
+    // verdict before `downgrade_flagged` runs, so either kind of finding can
+    // drive a `Verdict::Accepted` -> `NeedsReview` transition through the
+    // same downgrade path.
+    let mut reasons = match synthpass_core::fusion::check_line1_integrity(m) {
+        synthpass_core::fusion::Verdict::Accepted => Vec::new(),
+        synthpass_core::fusion::Verdict::NeedsReview { reasons } => reasons,
+    };
+    reasons.extend(synthpass_core::fusion::check_tier2_against_mrz(
+        &v2.fields, m,
+    ));
+    let verdict = if reasons.is_empty() {
+        synthpass_core::fusion::Verdict::Accepted
+    } else {
+        synthpass_core::fusion::Verdict::NeedsReview { reasons }
+    };
     v2.confidence.downgrade_flagged(&verdict);
     v2.line1_integrity = Some(verdict);
+    // Last: a downgrade must never clobber a promotion this step is about to
+    // make, and a promotion here is always correct regardless of what ran
+    // before it (see the function's own doc comment).
+    promote_verified_mrz_fields(v2, m);
+}
+
+/// Promote individually-verified MRZ fields into `v2.fields`/`v2.confidence`
+/// at full ("PROVEN") confidence via [`FieldConfidence::prove`], on *any*
+/// Tier-1 or Tier-2
+/// record that carries a deterministic MRZ read — not just a fully-valid
+/// one. Each ICAO check digit verifies its own field independently of the
+/// composite, so a document whose overall read escalated to Tier 2 (a bad
+/// composite, an unrelated failing field, or simply no read at all until
+/// now) can still have individual fields that are mathematically proven and
+/// deserve better than the LLM's heuristic score. A fully-valid read makes
+/// every promotion here trivially correct too, so this runs unconditionally
+/// rather than being gated on `!m.valid()`.
+///
+/// Called as the last step of [`apply_deterministic_mrz`], which already
+/// installs `v2.mrz`/`v2.confidence.downgrade_flagged` for *both* tiers (see
+/// its two call sites in `process_document`/`process_document_stream`), so
+/// this needs no tier-specific wiring of its own — the v1 JSON gets the same
+/// promotion for free through `extraction_from_v2_llm`'s re-projection of
+/// `v2.fields`.
+fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
+    use synthpass_core::v2::CoreField;
+
+    // `m.document_number`, not `m.full_document_number()`: byte-identical to
+    // Tier 1's own construction (`synthpass_die::mrz_reader::extraction_from_mrz`),
+    // which likewise uses the raw 9-character field, not the reassembled
+    // overflow form.
+    if m.checks.document_number {
+        v2.fields
+            .set(CoreField::DocumentNumber, Some(m.document_number.clone()));
+        v2.confidence.prove(CoreField::DocumentNumber);
+    }
+
+    // The raw field holds `YYMMDD`, not ISO `YYYY-MM-DD`, whenever the date
+    // is not fully known (see `MrzData::date_of_birth_completeness`'s doc
+    // comment) — promoting in that case would leak a non-ISO value into an
+    // ISO-typed slot.
+    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+        v2.fields
+            .set(CoreField::DateOfBirth, Some(m.date_of_birth.clone()));
+        v2.confidence.prove(CoreField::DateOfBirth);
+    }
+
+    if m.checks.date_of_expiry {
+        v2.fields
+            .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.clone()));
+        v2.confidence.prove(CoreField::DateOfExpiry);
+    }
+
+    // TD1/TD2/MRV formats report `checks.personal_number == true` vacuously —
+    // there is no such check digit outside TD3 — so promoting an unverified
+    // value there would misrepresent a structural parse as a mathematical
+    // proof. When `personal_number` is `None` despite the check bit being
+    // true (an all-filler-but-valid field), leave the LLM's existing value
+    // untouched rather than nulling it out.
+    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+        if let Some(pn) = &m.personal_number {
+            v2.fields.set(CoreField::PersonalNumber, Some(pn.clone()));
+            v2.confidence.prove(CoreField::PersonalNumber);
+        }
+    }
+}
+
+/// Build the Tier-2 MRZ hint (see [`synthpass_die::DocumentContext::mrz_hint`])
+/// from a checksum-partial `mrz::MrzData`, gated on
+/// [`synthpass_llm::mrz_hint_enabled`] — when the flag is off, this returns
+/// `None` without inspecting `mrz_data` at all, so a document with no
+/// checksum-verified fields never even gets its `Checks` bits read.
+///
+/// Reuses exactly the four checksummed-field gates
+/// [`promote_verified_mrz_fields`] already applies (same reasoning: each
+/// ICAO check digit verifies its own field independently, checksum-partial
+/// or not), plus `nationality`/`sex`, gated on `m.checks.composite` — the
+/// MRZ's own aggregate line-1 checksum, which is the strongest signal
+/// available for those two fields since neither has an individual check
+/// digit (see `synthpass_core::fusion`'s module doc).
+///
+/// Deliberately built from the raw `mrz::MrzData` at the Tier-2 call site,
+/// not from a Tier-1 [`Reading`](synthpass_die::Reading): on a checksum-partial
+/// document [`MrzReader`] reports no fields at all (it only populates
+/// `extraction` when the *whole* record validates), so a `DocumentContext::prior`
+/// built from that reading would be empty even though individual fields here
+/// are proven.
+pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
+    if !synthpass_llm::mrz_hint_enabled() {
+        return None;
+    }
+    let m = mrz_data?;
+
+    let mut parts = Vec::new();
+    if m.checks.document_number {
+        parts.push(format!("document_number={}", m.document_number));
+    }
+    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+        parts.push(format!("date_of_birth={}", m.date_of_birth));
+    }
+    if m.checks.date_of_expiry {
+        parts.push(format!("date_of_expiry={}", m.date_of_expiry));
+    }
+    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+        if let Some(pn) = &m.personal_number {
+            parts.push(format!("personal_number={pn}"));
+        }
+    }
+    if m.checks.composite {
+        parts.push(format!("nationality={}", m.nationality));
+        parts.push(format!("sex={}", m.sex));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(", "))
+    }
 }
 
 /// The v1 `mrz_checksums_valid` bool for a Tier-2 record, straight from the
@@ -1084,6 +1232,7 @@ async fn run_tier2(
     queue_depth: &AtomicUsize,
     metrics: &PipelineMetrics,
     markdown: &str,
+    hint: Option<&str>,
 ) -> Result<Extraction, String> {
     let _depth = QueueDepthGuard::enter(queue_depth);
     let _permit = semaphore
@@ -1092,7 +1241,7 @@ async fn run_tier2(
         .expect("llm_semaphore is never closed");
 
     let started = Instant::now();
-    let mut result = infer.extract(markdown).await;
+    let mut result = infer.extract(markdown, hint).await;
     let elapsed = started.elapsed();
     metrics.tier2_seconds.observe(elapsed);
     match &result {
@@ -1150,13 +1299,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl InferBackend for MockBackend {
-        async fn extract(&self, markdown: &str) -> Result<Extraction, String> {
+        async fn extract(&self, markdown: &str, _hint: Option<&str>) -> Result<Extraction, String> {
             Ok(mock_extraction(markdown))
         }
 
         async fn extract_stream(
             &self,
             markdown: &str,
+            _hint: Option<&str>,
             tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
             let _ = tx.try_send(ProcessEvent::Delta("mock-delta".into()));
@@ -1173,6 +1323,47 @@ mod tests {
 
         async fn health(&self) -> Result<String, String> {
             Ok("mock healthy".into())
+        }
+    }
+
+    /// A Tier-2 backend that records the `hint` it was called with, for
+    /// asserting end to end that `SYNTHPASS_LLM_MRZ_HINT` actually controls
+    /// what reaches `InferBackend::extract`/`extract_stream` — not just that
+    /// `mrz_hint()` itself computes the right string in isolation.
+    struct HintRecordingBackend {
+        last_hint: std::sync::Mutex<Option<String>>,
+    }
+
+    impl HintRecordingBackend {
+        fn new() -> Self {
+            Self {
+                last_hint: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl InferBackend for HintRecordingBackend {
+        async fn extract(&self, markdown: &str, hint: Option<&str>) -> Result<Extraction, String> {
+            *self.last_hint.lock().unwrap() = hint.map(str::to_string);
+            Ok(mock_extraction(markdown))
+        }
+
+        async fn extract_stream(
+            &self,
+            markdown: &str,
+            hint: Option<&str>,
+            _tx: &mpsc::Sender<ProcessEvent>,
+        ) -> Result<Extraction, String> {
+            self.extract(markdown, hint).await
+        }
+
+        fn describe(&self) -> String {
+            "hint-recording".into()
+        }
+
+        async fn health(&self) -> Result<String, String> {
+            Ok("hint-recording healthy".into())
         }
     }
 
@@ -1200,12 +1391,17 @@ mod tests {
 
     #[async_trait::async_trait]
     impl InferBackend for FailingBackend {
-        async fn extract(&self, _markdown: &str) -> Result<Extraction, String> {
+        async fn extract(
+            &self,
+            _markdown: &str,
+            _hint: Option<&str>,
+        ) -> Result<Extraction, String> {
             Err("boom".to_string())
         }
         async fn extract_stream(
             &self,
             _markdown: &str,
+            _hint: Option<&str>,
             _tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
             Err("boom".to_string())
@@ -1283,7 +1479,7 @@ mod tests {
         let pipeline = mock_pipeline();
 
         let e = pipeline
-            .extract_via_inferer("P<UTO passport markdown")
+            .extract_via_inferer("P<UTO passport markdown", None)
             .await
             .expect("inferer extract");
 
@@ -1300,7 +1496,7 @@ mod tests {
 
         let (tx, mut rx) = mpsc::channel(16);
         let extraction = pipeline
-            .extract_via_inferer_stream("P<UTO passport markdown", &tx)
+            .extract_via_inferer_stream("P<UTO passport markdown", None, &tx)
             .await
             .expect("inferer extract_stream");
         drop(tx);
@@ -1326,7 +1522,7 @@ mod tests {
         assert_eq!(pipeline.llm_queue_depth(), 0, "idle before any call");
 
         pipeline
-            .extract_via_inferer("P<UTO passport markdown")
+            .extract_via_inferer("P<UTO passport markdown", None)
             .await
             .expect("inferer extract");
         assert_eq!(
@@ -1337,7 +1533,7 @@ mod tests {
 
         let (tx, _rx) = mpsc::channel(16);
         pipeline
-            .extract_via_inferer_stream("P<UTO passport markdown", &tx)
+            .extract_via_inferer_stream("P<UTO passport markdown", None, &tx)
             .await
             .expect("inferer extract_stream");
         assert_eq!(
@@ -1463,7 +1659,7 @@ mod tests {
         );
         let extraction = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            pipeline.extract_via_inferer("P<UTO passport markdown"),
+            pipeline.extract_via_inferer("P<UTO passport markdown", None),
         )
         .await
         .expect("must not deadlock")
@@ -2001,5 +2197,499 @@ mod tests {
     /// Tiny helper so expected-string assertions read clearly.
     fn json_str(s: &str) -> Value {
         Value::String(s.to_string())
+    }
+
+    // ---- promote_verified_mrz_fields (issue #100) ----
+
+    use synthpass_core::v2::FieldConfidence;
+
+    /// A bare v2 record with an LLM-shaped baseline: every core field
+    /// present, every confidence at [`LLM_HEURISTIC_CONFIDENCE`] — the flat
+    /// score a Tier-2 record carries before per-field scoring runs. Distinct
+    /// values per field (rather than one repeated string) so a test can tell
+    /// "untouched" from "coincidentally equal to the promoted value."
+    fn llm_shaped_v2() -> ExtractionV2 {
+        let mut v2 = ExtractionV2::default();
+        v2.fields.document_type = Some("P".into());
+        v2.fields.issuing_country = Some("HRV".into());
+        v2.fields.document_number = Some("LLMGUESS1".into());
+        v2.fields.surname = Some("LLM-SURNAME".into());
+        v2.fields.given_names = Some("LLM-GIVEN".into());
+        v2.fields.nationality = Some("HRV".into());
+        v2.fields.date_of_birth = Some("1900-01-01".into());
+        v2.fields.sex = Some("F".into());
+        v2.fields.date_of_expiry = Some("1900-01-01".into());
+        v2.fields.personal_number = Some("LLM-PERSONAL".into());
+        v2.confidence = FieldConfidence::llm_heuristic();
+        v2
+    }
+
+    /// A synthetic TD3 read with the document number's own check digit
+    /// corrupted so `document_number`/`composite` fail, while
+    /// `date_of_birth`, `date_of_expiry`, and `personal_number` — each
+    /// individually check-digited — still verify. Distinct from
+    /// `HRV_TD3_BAD_CHECKSUM_MARKDOWN` (used elsewhere in this module),
+    /// whose personal-number field is all filler and so, correctly, does
+    /// not exercise the promoted-with-a-value path this fixture is for.
+    fn td3_corrupted_document_number() -> mrz::MrzData {
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            personal_number: Some("ZE184226B".into()),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td3(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').expect("two lines");
+        // Flip one digit inside the 9-character document-number field
+        // (position 0), leaving its own check digit (position 9) and every
+        // other field untouched.
+        let mut bytes = l2.as_bytes().to_vec();
+        bytes[0] = if bytes[0] == b'L' { b'M' } else { b'L' };
+        let corrupted_l2 = String::from_utf8(bytes).expect("ascii MRZ stays valid UTF-8");
+
+        let m = mrz::parse_td3(l1, &corrupted_l2).expect("still parses structurally");
+        assert!(
+            !m.checks.document_number,
+            "sanity: the corruption must actually break this check digit"
+        );
+        m
+    }
+
+    #[test]
+    fn document_number_check_failure_still_promotes_the_other_three_fields() {
+        let m = td3_corrupted_document_number();
+        // `mrz::Checks` is `#[non_exhaustive]`, so it can't be built by
+        // literal for an equality assert — check each bit instead.
+        assert!(!m.checks.document_number, "sanity: this bit must fail");
+        assert!(m.checks.date_of_birth, "sanity");
+        assert!(m.checks.date_of_expiry, "sanity");
+        assert!(m.checks.personal_number, "sanity");
+        assert!(
+            !m.checks.composite,
+            "sanity: composite fails alongside document_number"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        // Not promoted: the check digit failed, so the LLM's own guess must
+        // survive untouched.
+        assert_eq!(v2.fields.document_number.as_deref(), Some("LLMGUESS1"));
+        assert_eq!(v2.confidence.document_number, LLM_HEURISTIC_CONFIDENCE);
+
+        // Promoted: byte-identical to the deterministic read, at PROVEN
+        // confidence.
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some(m.date_of_birth.as_str())
+        );
+        assert_eq!(v2.confidence.date_of_birth, 1.0);
+        assert_eq!(
+            v2.fields.date_of_expiry.as_deref(),
+            Some(m.date_of_expiry.as_str())
+        );
+        assert_eq!(v2.confidence.date_of_expiry, 1.0);
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            m.personal_number.as_deref()
+        );
+        assert_eq!(v2.confidence.personal_number, 1.0);
+
+        // Untouched: fields the ICAO check digits never cover.
+        assert_eq!(v2.fields.surname.as_deref(), Some("LLM-SURNAME"));
+        assert_eq!(v2.confidence.surname, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.given_names.as_deref(), Some("LLM-GIVEN"));
+        assert_eq!(v2.confidence.given_names, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.nationality.as_deref(), Some("HRV"));
+        assert_eq!(v2.confidence.nationality, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.sex.as_deref(), Some("F"));
+        assert_eq!(v2.confidence.sex, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn agreeing_llm_value_stays_byte_identical_and_confidence_only_rises() {
+        let m = td3_corrupted_document_number();
+
+        let mut v2 = llm_shaped_v2();
+        // The LLM already guessed the correct date of birth.
+        v2.fields.date_of_birth = Some(m.date_of_birth.clone());
+        let before = v2.confidence.date_of_birth;
+
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some(m.date_of_birth.as_str())
+        );
+        assert!(
+            v2.confidence.date_of_birth >= before,
+            "promotion must never lower a score: {before} -> {}",
+            v2.confidence.date_of_birth
+        );
+        assert_eq!(
+            v2.confidence.date_of_birth, 1.0,
+            "an LLM's ceiling confidence sits below PROVEN, so agreement upgrades to it"
+        );
+    }
+
+    #[test]
+    fn td1_vacuous_personal_number_check_bit_is_not_promoted() {
+        let fields = mrz::Td1Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td1(&fields);
+        let mut lines = mrz_text.lines();
+        let m = mrz::parse_td1(
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+        )
+        .expect("TD1 fixture parses");
+        assert_eq!(
+            m.format,
+            mrz::Format::Td1,
+            "sanity: this is the format under test"
+        );
+        assert!(
+            m.checks.personal_number,
+            "TD1 reports the personal-number check bit true vacuously — no such \
+             check digit exists on this format"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "the vacuous TD1 check bit must not promote an unverified value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn td2_vacuous_personal_number_check_bit_is_not_promoted() {
+        let fields = mrz::Td2Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td2(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').unwrap();
+        let m = mrz::parse_td2(l1, l2).expect("TD2 fixture parses");
+        assert_eq!(m.format, mrz::Format::Td2, "sanity");
+        assert!(m.checks.personal_number, "vacuous on TD2 too");
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "TD2's vacuous check bit must not promote an unverified value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn all_filler_td3_personal_number_is_not_nulled() {
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            personal_number: None, // all-filler personal-number field
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td3(&fields);
+        let (l1, l2) = mrz_text.split_once('\n').unwrap();
+        let m = mrz::parse_td3(l1, l2).expect("TD3 fixture parses");
+        assert!(
+            m.valid(),
+            "sanity: an all-filler personal number still verifies"
+        );
+        assert!(m.checks.personal_number);
+        assert_eq!(
+            m.personal_number, None,
+            "sanity: all-filler-but-valid reads back as None, not an empty string"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.personal_number.as_deref(),
+            Some("LLM-PERSONAL"),
+            "a None deterministic read must not null out the LLM's existing value"
+        );
+        assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn incomplete_date_of_birth_is_not_promoted() {
+        // TD1's optional-data date-of-birth field left entirely unknown
+        // (Doc 9303 Part 3 §4.8): a legitimate issuer omission, not a bad
+        // read, but the raw field holds `<<<<<<`, not an ISO date.
+        let fields = mrz::Td1Fields {
+            document_number: "D231458907".into(),
+            date_of_birth: "<<<<<<".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let mrz_text = mrz::format_td1(&fields);
+        let mut lines = mrz_text.lines();
+        let m = mrz::parse_td1(
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+            lines.next().unwrap(),
+        )
+        .expect("TD1 fixture parses");
+        assert_eq!(
+            m.date_of_birth_completeness,
+            mrz::DateCompleteness::Unknown,
+            "sanity: an all-filler date of birth is entirely unknown, not malformed"
+        );
+        assert!(
+            m.checks.date_of_birth,
+            "an all-filler field checks out (filler counts as zero)"
+        );
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some("1900-01-01"),
+            "an incomplete date must not promote the raw YYMMDD/filler field \
+             into an ISO-typed slot"
+        );
+        assert_eq!(v2.confidence.date_of_birth, LLM_HEURISTIC_CONFIDENCE);
+    }
+
+    #[test]
+    fn apply_deterministic_mrz_with_no_mrz_data_leaves_fields_untouched() {
+        let mut v2 = llm_shaped_v2();
+        let before = v2.fields.clone();
+
+        apply_deterministic_mrz(&mut v2, None);
+
+        assert_eq!(
+            v2.fields, before,
+            "no deterministic read means nothing to promote"
+        );
+        assert_eq!(v2.confidence, FieldConfidence::llm_heuristic());
+    }
+
+    // ---- mrz_hint (issue #102) ----
+
+    /// Serializes tests that read or mutate `SYNTHPASS_LLM_MRZ_HINT` —
+    /// process-global, same reasoning as `ENV_LOCK` (a distinct lock, since
+    /// that one guards `SYNTHPASS_JSON_V1` and holding both together would
+    /// only widen the critical section for no benefit).
+    static MRZ_HINT_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// A fully ICAO-valid TD3 record (`base()`'s ICAO 9303 worked example,
+    /// restated here since `synthpass_core::fusion`'s private `base()` isn't
+    /// reachable from this crate) — every check digit, including the
+    /// composite, passes.
+    fn valid_td3() -> mrz::MrzData {
+        mrz::parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("ICAO 9303 worked example parses")
+    }
+
+    #[test]
+    fn hint_is_none_when_the_flag_is_off() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+        assert_eq!(mrz_hint(Some(&valid_td3())), None);
+    }
+
+    #[test]
+    fn hint_is_none_with_no_mrz_data_even_when_the_flag_is_on() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let result = mrz_hint(None);
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn hint_includes_only_checksum_verified_fields_on_a_checksum_partial_read() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let m = td3_corrupted_document_number();
+        let result = mrz_hint(Some(&m));
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+
+        let hint = result.expect("date_of_birth/date_of_expiry/personal_number still verify");
+        assert!(hint.contains(&format!("date_of_birth={}", m.date_of_birth)));
+        assert!(hint.contains(&format!("date_of_expiry={}", m.date_of_expiry)));
+        assert!(hint.contains(&format!(
+            "personal_number={}",
+            m.personal_number.as_deref().unwrap()
+        )));
+        assert!(
+            !hint.contains("document_number="),
+            "the corrupted check digit must not be reported as verified: {hint}"
+        );
+        assert!(
+            !hint.contains("nationality="),
+            "the composite check digit fails alongside document_number, so \
+             nationality/sex (gated on it) must be excluded: {hint}"
+        );
+        assert!(
+            !hint.contains("sex="),
+            "same reasoning as nationality: {hint}"
+        );
+    }
+
+    #[test]
+    fn hint_includes_nationality_and_sex_when_the_composite_check_passes() {
+        let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
+        std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
+        let m = valid_td3();
+        assert!(m.checks.composite, "sanity: this fixture is fully valid");
+        let result = mrz_hint(Some(&m));
+        std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
+
+        let hint = result.expect("a fully valid read has plenty to report");
+        assert!(hint.contains(&format!("document_number={}", m.document_number)));
+        assert!(hint.contains(&format!("nationality={}", m.nationality)));
+        assert!(hint.contains(&format!("sex={}", m.sex)));
+    }
+
+    /// End-to-end through `LlmFieldReader::read` (the same seam
+    /// `process_document` calls): a `DocumentContext` built with
+    /// `with_mrz_hint` must actually deliver that string to
+    /// `InferBackend::extract`, not just to `ctx.mrz_hint` itself.
+    #[tokio::test]
+    async fn a_context_mrz_hint_reaches_infer_backend_extract() {
+        let backend = Arc::new(HintRecordingBackend::new());
+        let reader = llm_field_reader(backend.clone());
+
+        let ctx = DocumentContext::from_text("irrelevant markdown")
+            .with_mrz_hint("document_number=L898902C3, date_of_expiry=2012-04-15");
+        reader.read(&ctx).await.expect("mock backend succeeds");
+
+        assert_eq!(
+            backend.last_hint.lock().unwrap().as_deref(),
+            Some("document_number=L898902C3, date_of_expiry=2012-04-15")
+        );
+    }
+
+    /// The other half of that contract: a `DocumentContext` with no hint set
+    /// (the shape `process_document` builds whenever `mrz_hint()` itself
+    /// returns `None` — flag off, or nothing checksum-verified to report)
+    /// must reach the backend as an actual `None`, not an empty string.
+    #[tokio::test]
+    async fn a_context_with_no_mrz_hint_reaches_infer_backend_extract_as_none() {
+        let backend = Arc::new(HintRecordingBackend::new());
+        let reader = llm_field_reader(backend.clone());
+
+        let ctx = DocumentContext::from_text("irrelevant markdown");
+        reader.read(&ctx).await.expect("mock backend succeeds");
+
+        assert_eq!(backend.last_hint.lock().unwrap().as_deref(), None);
+    }
+
+    /// End-to-end: both `process_document` and `process_document_stream`
+    /// promote identically on a checksum-partial fixture. Mirrors
+    /// `both_tier2_paths_produce_the_same_extraction` above, which the same
+    /// fixture already backs — this asserts the *promotion*, not merely that
+    /// the two tiers agree with each other.
+    #[tokio::test]
+    async fn both_tiers_promote_verified_fields_identically() {
+        let pipeline = || {
+            Pipeline::new(
+                Box::new(StaticOcr(HRV_TD3_BAD_CHECKSUM_MARKDOWN)),
+                Box::new(MockBackend),
+            )
+        };
+        // The pipeline's own deterministic read of the OCR markdown above —
+        // not `td3_corrupted_document_number()`, whose personal-number field
+        // is deliberately populated for the unit tests above but does not
+        // match this markdown's all-filler one.
+        let m = mrz::find_and_parse(HRV_TD3_BAD_CHECKSUM_MARKDOWN).expect("fixture parses");
+
+        let (blocking_in, blocking_dir) = temp_input("promote-blocking").await;
+        let blocking = pipeline()
+            .process_document(&blocking_in)
+            .await
+            .expect("process");
+
+        let (stream_in, stream_dir) = temp_input("promote-stream").await;
+        let streamed = run_stream(&pipeline(), &stream_in).await;
+
+        for result in [&blocking, &streamed] {
+            assert_eq!(result.method, Method::Llm, "fixture must reach Tier 2");
+            let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+            assert_eq!(
+                v2.fields.date_of_birth.as_deref(),
+                Some(m.date_of_birth.as_str())
+            );
+            assert_eq!(v2.confidence.date_of_birth, 1.0);
+            assert_eq!(
+                v2.fields.date_of_expiry.as_deref(),
+                Some(m.date_of_expiry.as_str())
+            );
+            assert_eq!(v2.confidence.date_of_expiry, 1.0);
+            // This fixture's personal-number field is all filler (`m.checks
+            // .personal_number` is vacuously true but `m.personal_number` is
+            // `None`), so it must not be promoted — the mock backend's own
+            // (absent) value survives untouched.
+            assert_eq!(m.personal_number, None, "sanity: all-filler field");
+            assert_eq!(v2.fields.personal_number.as_deref(), None);
+            assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+            // The document-number check digit fails on this fixture, so the
+            // mock backend's own guess must survive, not the deterministic
+            // (unverified) read.
+            assert_eq!(v2.fields.document_number.as_deref(), Some("X1234567"));
+            assert!(v2.confidence.document_number < 1.0);
+
+            // The v1 projection gets the same promotion for free.
+            let v1 = result.extracted.as_ref().expect("v1 json populated");
+            assert_eq!(v1["date_of_birth"], json_str(&m.date_of_birth));
+            assert_eq!(v1["date_of_expiry"], json_str(&m.date_of_expiry));
+        }
+
+        assert_eq!(
+            blocking.extracted_v2, streamed.extracted_v2,
+            "both tiers must promote identically"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&blocking_dir).await;
+        let _ = tokio::fs::remove_dir_all(&stream_dir).await;
     }
 }

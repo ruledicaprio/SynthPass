@@ -39,6 +39,24 @@
 //! the finger-occluded passport leaves 138 surviving pairs — the answer is
 //! [`Resolution::Ambiguous`], never a pick. A guess that happens to be wrong
 //! is worse than a refusal, because it is indistinguishable from a proof.
+//!
+//! # A third shape: correct width, one glyph wrong
+//!
+//! Neither of the above covers a line that arrived the *correct* width with
+//! one glyph misread — no insertion or deletion, just OCR confusing e.g. `0`
+//! and `O`. This looks like it should be *easier* than the missing-character
+//! case, but the arithmetic makes it the more dangerous one to get sloppy
+//! about: because the check-digit weights 7, 3, and 1 are each coprime to 10,
+//! whether two characters are interchangeable at a position depends only on
+//! their ICAO value mod 10, *never* on the weight — so a full residue class
+//! (see [`crate::CLASSES`]) is check-digit-equivalent at every position, not
+//! just some. `0`, `A`, `K`, and `U` all share value ≡ 0 (mod 10), so an
+//! unrestricted single-position sweep of the whole alphabet would accept `A`
+//! and `K` as readings of a misprinted `0` just as readily as the `O` a real
+//! OCR engine would actually emit. [`substitution_candidates`] sweeps a
+//! bounded, hand-built table of *visually* confusable characters instead of
+//! the full alphabet, so [`solve_substitution`]'s answers stay restricted to
+//! misreads OCR plausibly makes, not every character sharing a residue.
 
 use crate::checksum::{fit_length, is_mrz_charset, verify};
 use crate::dates::Date;
@@ -225,6 +243,140 @@ pub fn solve_field(field: &str, check: char, kind: FieldKind) -> Resolution {
     }
 }
 
+/// Positions [`substitution_candidates`] will change in one candidate.
+///
+/// Fixed at one by design, not merely by default: [`CONFUSABLES`] already
+/// bounds each position to a handful of visually plausible alternatives, but
+/// letting two positions vary independently multiplies those small counts
+/// together and starts re-admitting the coincidental agreement the table
+/// exists to keep out. A field with two misread glyphs is better served by
+/// two separate passes — or by [`solve_field`] once the still-wrong position
+/// is known — than by a search that quietly widens what "one repair" means.
+const MAX_SUBSTITUTIONS: usize = 1;
+
+/// Most candidates [`substitution_candidates`] will return.
+///
+/// A sibling of [`MAX_UNKNOWNS`]/[`MAX_WIDTH_DEFICIT`]: this runs inside the
+/// same OCR retry loop, so the sweep — at most `field.len() * 4` candidates
+/// given [`CONFUSABLES`]'s widest row — needs a hard ceiling rather than trust
+/// that no field ever gets long enough to matter.
+const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
+
+/// Bounded table of OCR glyph confusions, `(character, confusable-with)`.
+///
+/// Each entry is bidirectional: `('0', "ODQ")` means `0` may be misread as
+/// `O`, `D`, or `Q` *and* that any of `O`, `D`, `Q` may be misread as `0` —
+/// [`confusable_alternatives`] walks the table both ways, so the digit and
+/// its lookalike letters do not each need their own row.
+///
+/// Deliberately small and shape-driven (round vs. round, vertical stroke vs.
+/// vertical stroke), not derived from [`crate::CLASSES`]. A residue class is
+/// check-digit-equivalent at *every* weight (see the module doc), but `K` and
+/// `U` are not plausible misreads of `0` — restricting this table to glyphs
+/// that actually look alike is what keeps [`solve_substitution`]'s answers
+/// meaningfully unique instead of reproducing the whole residue class.
+pub const CONFUSABLES: &[(char, &str)] = &[
+    ('0', "ODQ"),
+    ('1', "ILTU"),
+    ('2', "Z"),
+    ('4', "A"),
+    ('5', "S"),
+    ('6', "G"),
+    ('7', "T"),
+    ('8', "B"),
+    ('9', "G"),
+];
+
+/// Every character [`CONFUSABLES`] lists as a plausible misread of `c`, in
+/// both directions, excluding `c` itself.
+fn confusable_alternatives(c: char) -> Vec<char> {
+    let mut alts: Vec<char> = Vec::new();
+    for &(key, group) in CONFUSABLES {
+        if c == key {
+            for g in group.chars() {
+                if g != c && !alts.contains(&g) {
+                    alts.push(g);
+                }
+            }
+        } else if group.contains(c) && key != c && !alts.contains(&key) {
+            alts.push(key);
+        }
+    }
+    alts
+}
+
+/// Every single-glyph substitution of `field` under [`CONFUSABLES`].
+///
+/// Sweeps positions left to right; at each position, tries every plausible
+/// confusable in place of the character actually there ([`MAX_SUBSTITUTIONS`]
+/// keeps this to one changed position per candidate — never two at once).
+/// Non-ASCII input or a field still carrying [`UNKNOWN`] yields nothing: a
+/// position this module cannot read is [`solve_field`]'s problem, not this
+/// one's. The identity reading (`field` itself, unchanged) is never included
+/// — this function only proposes *different* readings for [`solve_substitution`]
+/// to test. Bounded by [`MAX_SUBSTITUTION_CANDIDATES`], in a stable order.
+pub fn substitution_candidates(field: &str) -> Vec<String> {
+    if !field.is_ascii() || field.contains(UNKNOWN) {
+        return Vec::new();
+    }
+    let chars: Vec<char> = field.chars().collect();
+    let mut out: Vec<String> = Vec::new();
+    'positions: for i in 0..chars.len() {
+        for alt in confusable_alternatives(chars[i]) {
+            let mut candidate = chars.clone();
+            candidate[i] = alt;
+            let s: String = candidate.into_iter().collect();
+            debug_assert_eq!(
+                s.chars().zip(field.chars()).filter(|(a, b)| a != b).count(),
+                MAX_SUBSTITUTIONS,
+                "substitution_candidates must change exactly one position"
+            );
+            if s != field && !out.contains(&s) {
+                out.push(s);
+                if out.len() >= MAX_SUBSTITUTION_CANDIDATES {
+                    break 'positions;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Resolve a field that is the *right width* but may carry one misread glyph.
+///
+/// A field that already verifies is returned unchanged — this never
+/// "repairs" a field the check digit has already proven, only one it has
+/// rejected. Otherwise sweeps [`substitution_candidates`], keeping readings
+/// whose check digit verifies *and* which satisfy `kind`'s structural
+/// constraint, exactly as [`solve_field`] does for [`UNKNOWN`] positions.
+///
+/// Returns [`Resolution::Unresolvable`] for non-ASCII input or an unreadable
+/// check digit, for the same reason [`solve_field`] does: a check digit that
+/// was not itself read faithfully cannot prove anything about the field next
+/// to it.
+pub fn solve_substitution(field: &str, check: char, kind: FieldKind) -> Resolution {
+    if !field.is_ascii() || check == UNKNOWN {
+        return Resolution::Unresolvable;
+    }
+    if verify(field, check) && satisfies(field, kind) {
+        return Resolution::Unique(field.to_string());
+    }
+
+    let mut hits: Vec<String> = Vec::new();
+    for candidate in substitution_candidates(field) {
+        if verify(&candidate, check) && satisfies(&candidate, kind) && !hits.contains(&candidate) {
+            hits.push(candidate);
+        }
+    }
+
+    hits.sort();
+    match hits.len() {
+        0 => Resolution::Unresolvable,
+        1 => Resolution::Unique(hits.remove(0)),
+        _ => Resolution::Ambiguous { candidates: hits },
+    }
+}
+
 /// Every concrete reading of a line still carrying [`UNKNOWN`]s, for callers
 /// that would rather let a whole-record parse be the oracle than resolve field
 /// by field.
@@ -303,6 +455,7 @@ fn is_plausible_yymmdd(field: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::checksum::check_digit;
 
     #[test]
     fn width_candidates_are_all_target_width_and_deduplicated() {
@@ -384,5 +537,90 @@ mod tests {
         assert!(!is_plausible_yymmdd("301332"));
         assert!(!is_plausible_yymmdd("D01230"));
         assert!(!is_plausible_yymmdd("30123"));
+    }
+
+    #[test]
+    fn confusable_alternatives_are_bidirectional_and_exclude_identity() {
+        // '0' is a key row: its listed confusables come back directly.
+        let mut zero = confusable_alternatives('0');
+        zero.sort();
+        assert_eq!(zero, vec!['D', 'O', 'Q']);
+        // 'O' only appears inside '0's row, so it must resolve back to '0'
+        // via the reverse direction, without needing its own row.
+        assert_eq!(confusable_alternatives('O'), vec!['0']);
+        // A character absent from every row has no confusables at all.
+        assert!(confusable_alternatives('Y').is_empty());
+    }
+
+    #[test]
+    fn substitution_candidates_never_includes_the_identity_reading() {
+        for field in ["13E1AE", "AB0234C7", "L898902C", "OOOOOO"] {
+            let candidates = substitution_candidates(field);
+            assert!(
+                !candidates.contains(&field.to_string()),
+                "{field:?} candidates must never include the unchanged input"
+            );
+        }
+    }
+
+    #[test]
+    fn substitution_candidates_respects_the_cap_on_a_worst_case_input() {
+        // '1' is CONFUSABLES's widest row (I, L, T, U — four alternatives),
+        // so a long run of '1's is the worst case for the sweep: 100
+        // positions * 4 alternatives = 400 raw candidates, well past the cap.
+        let field = "1".repeat(100);
+        let candidates = substitution_candidates(&field);
+        assert_eq!(candidates.len(), MAX_SUBSTITUTION_CANDIDATES);
+    }
+
+    #[test]
+    fn solve_substitution_leaves_an_already_verifying_field_unchanged() {
+        // ICAO 9303 part 3 worked example, reused from `solve_field`'s test:
+        // a field that already checksums must never be "repaired".
+        assert_eq!(
+            solve_substitution("L898902C<", '3', FieldKind::DocumentNumber),
+            Resolution::Unique("L898902C<".to_string())
+        );
+    }
+
+    #[test]
+    fn solve_substitution_resolves_a_single_confusable_glyph() {
+        // Synthetic field, not drawn from any real document: the printed
+        // field is "13E1AE" (check digit computed via `checksum::check_digit`
+        // the same way an issuer's MRZ would be), and OCR misreads the
+        // leading '1' as the visually similar 'I' — a `CONFUSABLES` pair.
+        let field = "13E1AE";
+        let check = '1';
+        assert_eq!(check_digit(field).unwrap(), 1, "fixture's own check digit");
+        let corrupted = "I3E1AE";
+        assert!(
+            !verify(corrupted, check),
+            "the OCR misread must not verify as-is"
+        );
+        assert_eq!(
+            solve_substitution(corrupted, check, FieldKind::Other),
+            Resolution::Unique(field.to_string())
+        );
+    }
+
+    #[test]
+    fn solve_substitution_reports_ambiguity_instead_of_guessing() {
+        // Synthetic field: two different single-glyph substitutions of this
+        // corrupted reading both verify against the same check digit, and
+        // neither the checksum nor `FieldKind::Other` can separate them. This
+        // is exactly why `CONFUSABLES` must stay a bounded, shape-driven
+        // table rather than a full residue-class sweep (see the module
+        // doc): even restricted to plausible OCR confusions, ambiguity is
+        // still possible — an unrestricted sweep over `CLASSES` would only
+        // make it worse by admitting readings like 'K' or 'U' here too.
+        let corrupted = "O0ZVEZ";
+        let check = '9';
+        assert!(!verify(corrupted, check));
+        assert_eq!(
+            solve_substitution(corrupted, check, FieldKind::Other),
+            Resolution::Ambiguous {
+                candidates: vec!["00ZVEZ".to_string(), "OOZVEZ".to_string()],
+            }
+        );
     }
 }

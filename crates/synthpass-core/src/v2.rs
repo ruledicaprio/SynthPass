@@ -333,6 +333,18 @@ impl FieldConfidence {
                     "given_names" => self.given_names = IMPLAUSIBLE,
                     _ => {}
                 },
+                // Only the Tier-2/`fields` side drops — the MRZ structural
+                // value this was compared against isn't itself downgraded,
+                // it's the thing the contradiction was measured against.
+                Finding::LlmContradictsMrzStructural { field } => match field.as_str() {
+                    "document_type" => self.document_type = IMPLAUSIBLE,
+                    "issuing_country" => self.issuing_country = IMPLAUSIBLE,
+                    "surname" => self.surname = IMPLAUSIBLE,
+                    "given_names" => self.given_names = IMPLAUSIBLE,
+                    "nationality" => self.nationality = IMPLAUSIBLE,
+                    "sex" => self.sex = IMPLAUSIBLE,
+                    _ => {}
+                },
                 // Deliberately exhaustive, with no catch-all: a new `Finding`
                 // variant must not silently leave the field it flags sitting
                 // at full structural confidence, so adding one is a compile
@@ -394,6 +406,27 @@ impl FieldConfidence {
     /// Every field checksum-proven.
     pub fn all_proven(&self) -> bool {
         *self == Self::proven()
+    }
+
+    /// Mark a single field as checksum-proven ([`PROVEN`]), independent of
+    /// which tier produced the record. Used when a deterministic MRZ
+    /// check digit individually verifies a field a Tier-2 (LLM) record
+    /// carries — the field can be promoted to full confidence even though
+    /// the rest of the record stays at its heuristic score.
+    pub fn prove(&mut self, field: CoreField) {
+        let slot = match field {
+            CoreField::DocumentType => &mut self.document_type,
+            CoreField::IssuingCountry => &mut self.issuing_country,
+            CoreField::DocumentNumber => &mut self.document_number,
+            CoreField::Surname => &mut self.surname,
+            CoreField::GivenNames => &mut self.given_names,
+            CoreField::Nationality => &mut self.nationality,
+            CoreField::DateOfBirth => &mut self.date_of_birth,
+            CoreField::Sex => &mut self.sex,
+            CoreField::DateOfExpiry => &mut self.date_of_expiry,
+            CoreField::PersonalNumber => &mut self.personal_number,
+        };
+        *slot = PROVEN;
     }
 }
 
@@ -524,6 +557,25 @@ impl ExtractionFields {
             .into_iter()
             .filter(|f| self.get(*f).is_none())
             .collect()
+    }
+
+    /// Write a field by name — [`Self::get`]'s write-side counterpart. Used
+    /// by a deterministic cross-check (e.g. an individually verified MRZ
+    /// field) to overwrite an existing Tier-2 guess with the proven value.
+    pub fn set(&mut self, field: CoreField, value: Option<String>) {
+        let slot = match field {
+            CoreField::DocumentType => &mut self.document_type,
+            CoreField::IssuingCountry => &mut self.issuing_country,
+            CoreField::DocumentNumber => &mut self.document_number,
+            CoreField::Surname => &mut self.surname,
+            CoreField::GivenNames => &mut self.given_names,
+            CoreField::Nationality => &mut self.nationality,
+            CoreField::DateOfBirth => &mut self.date_of_birth,
+            CoreField::Sex => &mut self.sex,
+            CoreField::DateOfExpiry => &mut self.date_of_expiry,
+            CoreField::PersonalNumber => &mut self.personal_number,
+        };
+        *slot = value;
     }
 }
 
@@ -1139,5 +1191,19 @@ mod tests {
         ] {
             assert!(obj.contains_key(key), "missing key: {key}");
         }
+    }
+
+    #[test]
+    fn downgrade_flagged_drops_only_the_named_field() {
+        let mut confidence = FieldConfidence::mrz_checksum_scope();
+        let verdict = crate::fusion::Verdict::NeedsReview {
+            reasons: vec![crate::fusion::Finding::LlmContradictsMrzStructural {
+                field: "sex".to_string(),
+            }],
+        };
+        confidence.downgrade_flagged(&verdict);
+        assert_eq!(confidence.sex, IMPLAUSIBLE);
+        // An unrelated field must survive at its prior score, untouched.
+        assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
     }
 }

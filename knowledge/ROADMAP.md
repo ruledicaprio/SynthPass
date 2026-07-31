@@ -243,6 +243,53 @@ flowchart LR
   (`crates/synthpass-pipeline/src/lib.rs:1011`) already states the operating principle — "the
   deterministic read is always the more trustworthy source, checksum-partial or not" — these
   issues finish applying it.
+- **Issue #103 scoping note — visual-zone OCR noise is corpus-wide, not specimen-specific; a
+  `preprocess`-style treatment for the non-MRZ zone is worth scoping (no code change proposed
+  yet).** #103 reported OCR noise on a private, untracked Türkiye candidate specimen
+  (`work/Turkiye_Passport_Private_snipped.jpg`, never committed). Reproduction: `check_sample`
+  still returns a checksum-valid MRZ HIT for it under the current `ocrs` engine, so the MRZ zone
+  itself is not the problem — the noise is confined to the visual zone (photo/header/data-field
+  text above the MRZ). A new measurement harness, `crates/synthpass-ocr/examples/visual_zone_survey.rs`
+  (modelled on `examples/integrity_survey.rs`), classifies each geometry-detected line as MRZ or
+  non-MRZ (via `geometry::mrz_line_score`) and reports, per non-MRZ line, whether it's noise (<= 2
+  non-whitespace characters, or >= 50% non-alphanumeric) — no ground truth required, so it ran over
+  the whole `samples/` corpus (135 specimens with at least one non-MRZ line; JSONL at
+  `knowledge/visual-zone-survey.jsonl`). Corpus-wide noise-line fraction: **median 0.243, IQR
+  [0.111, 0.455]**. The Türkiye specimen scored **0.652** (46 non-MRZ lines, 30 noise) — above the
+  IQR, but at roughly the 89th percentile of the full corpus (15 of 135 tracked specimens score as
+  high or higher, across unrelated countries/formats) and *not* above the high end of a
+  typographically-close proxy set drawn from already-tracked specimens (Azerbaijan, Albania,
+  Romania, Croatia, Bosnia and Herzegovina, Kosovo, North Macedonia, Poland, Viet Nam) — Viet Nam's
+  specimen scores higher (0.778). Conclusion: this is a **systematic** corpus property, not
+  something unique to the Türkiye candidate. The natural follow-up — not implemented here, per
+  #103's stated scope — is to extend the visual zone with the same deterministic
+  upscale/contrast/threshold/deskew treatment `preprocess.rs` already applies to the MRZ band (see
+  its module docs and e.g. `preprocess::mrz_variants`), rather than treating the MRZ-band retry
+  passes as the only place OCR quality gets a second chance.
+- **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
+  helps, at no measurable latency cost once measured on an uncontended machine.**
+  `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new
+  `{hint}` template slot, digest re-pinned), threaded end to end from
+  `synthpass_die::DocumentContext::mrz_hint` through `InferBackend::extract`/`extract_stream` to
+  the prompt. The hint is built from the individual `mrz::Checks` bits (not `DocumentContext.prior`,
+  which only populates when the *whole* MRZ record validates) — `document_number`, `date_of_birth`,
+  `date_of_expiry`, `personal_number` when their own check digit passes, plus `nationality`/`sex`
+  when the line-1 composite check passes — so a checksum-partial read still contributes whatever
+  it individually proved. Gated behind `SYNTHPASS_LLM_MRZ_HINT` (default **off**).
+
+  First A/B (`provider-bench --count 10 --seed 42 --profile worn`, flag off vs on) ran while other
+  `cargo`/`provider-bench` processes were active on the same machine and reported a **+39%** mean
+  latency cost (33.3s → 46.3s) alongside the accuracy gains — caught as suspect (thanks to a sharp
+  eye on the number) precisely because CPU-bound llama.cpp inference is exactly the kind of
+  workload contention skews. Re-run back-to-back with nothing else running (`tasklist` checked
+  clean before each half): field-match rate **65% → 69%**, mean CER **0.722 → 0.436**,
+  unsupported-assertion rate **5.7% → 1.3%** — unchanged from the contended run, as expected since
+  none of those depend on wall-clock — and mean latency **29.12s → 29.00s**, i.e. no cost at all.
+  All three of the plan's ship criteria (+≥3pt field-match, CER not worse, latency +<10%) are now
+  met at `n=10`. **Ship decision: land the plumbing now, keep the flag off pending a larger run**
+  (`n=10` is still a small sample for a default-behavior flip) — `provider-bench` itself now
+  attaches an MRZ prior the same way the pipeline does, so re-measuring at `--count 20+` needs no
+  further code changes, only a clean (uncontended) machine to run it on.
 
 ## M7 — Document Intelligence Engine
 
@@ -294,6 +341,45 @@ contract rather than as new branches in a growing `if`/`else`; the barcode slot 
 licences need (see the M6 scoping note above) becomes a provider someone can write without
 touching the pipeline; and M6's "a third-party plugin builds against a stable interface" criterion
 is satisfied by an interface that exists.
+
+## M6 — Expansion & Enterprise readiness
+
+M7's contract is what M6 was waiting on (see "What this buys M6" above) — this section is the
+kickoff: gathering the scoping notes already dropped into the Execution notes above into one
+place, with a suggested order, before any of it becomes code.
+
+**What ships**
+
+- **The generator gap, not just the extraction gap.** `synthpass-gen` emits **TD3 only** today —
+  every accuracy number in this file, M1 through M7, is measured against synthetic passports and
+  nothing else. TD1 (3×30 ID cards / residence permits), TD2 (2×36), and MRVA/MRVB (visas) need to
+  exist on the *generation* side before the extraction side has anything real to measure against.
+  This is the actual bottleneck, not the provider wiring below — do this first.
+- **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Once the generator produces them, extraction
+  is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
+  same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
+  M7 section above for the contract itself.
+- **Declarative document layout plugins.** A third-party layout definition drives generation
+  without a code change — the M6 DoD criterion the milestone table already states.
+- **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
+  trainer end-to-end.
+- **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
+- **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
+  the rest existing first.
+
+**Scoped separately — not folded into this milestone**
+
+- **AAMVA PDF417 barcode decoding for driving licences.** A different mechanism entirely (no MRZ,
+  data lives in a 2D barcode), its own standard family outside Doc 9303, and the concrete first
+  user of the `ExtractionV2.barcodes` slot. Full scoping in "Beyond ICAO 9303" below — do not read
+  M6's TD1/TD2/MRVA/MRVB line as covering it.
+- **The orientation circular-mean improvement** (see the M6 scoping note above, under Execution
+  notes). An OCR-quality win, not an M6 deliverable — worth picking up opportunistically, but
+  doesn't block or get blocked by anything above.
+
+**Suggested order:** generator (TD1/TD2/MRVA/MRVB emission) → extraction providers against the M7
+contract → layout plugins → dataset exports → deployment guide + Pro beta. Each step after the
+first makes the next one's accuracy numbers meaningful instead of TD3-only.
 
 ## Future Work
 
