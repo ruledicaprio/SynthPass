@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1911-11-11",
+  "date_of_expiry": "2019-11-26",
+  "document_number": "XE7207436",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "BIOMETRIA",
+  "issuing_country": "SVK",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSSVKSPECIMEN<<BIOMETRIA<<<<<<<<<<<<<<<<<<<<\nXE72074364SVK1111112F19112641111111111<<<<04",
+  "nationality": "SVK",
+  "personal_number": "1111111111",
+  "sex": "F",
+  "surname": "SPECIMEN"
+}

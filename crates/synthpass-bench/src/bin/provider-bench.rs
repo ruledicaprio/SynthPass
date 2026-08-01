@@ -15,7 +15,8 @@
 //!
 //! ```text
 //! provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH]
-//!                [--measure-memory] [--real-specimens]
+//!                [--measure-memory] [--real-specimens] [--limit N]
+//!                [--format NAME] [--verbose]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
@@ -26,6 +27,13 @@
 //!   --real-specimens   run over samples/ instead of the synthetic corpus;
 //!                      ground truth is optional per specimen, and
 //!                      --count/--seed/--profile are ignored
+//!   --limit N          with --real-specimens: run N specimens spread evenly
+//!                      across the (possibly --format-scoped) corpus
+//!   --format NAME      with --real-specimens: restrict to one document
+//!                      class — passport|id_card|driving_license (default:
+//!                      all classes), applied before --limit
+//!   --verbose, -v      print the per-document breakdown behind each
+//!                      provider's aggregates
 //! ```
 
 use serde::Serialize;
@@ -35,7 +43,7 @@ use synthpass_bench::provider_bench::{
     run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
     UnsupportedAssertion,
 };
-use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice};
+use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice, SpecimenClass};
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
 
@@ -56,6 +64,11 @@ struct Args {
     limit: Option<usize>,
     /// Print the per-document breakdown behind each provider's aggregates.
     verbose: bool,
+    /// Restrict `--real-specimens` to one `samples/` document class (e.g.
+    /// `passport`) via `synthpass_bench::classify_specimen`. `--real-specimens`
+    /// only, applied before `--limit` so a stride subsamples the already-scoped
+    /// population, not the whole corpus.
+    format: Option<SpecimenClass>,
 }
 
 impl Default for Args {
@@ -69,6 +82,7 @@ impl Default for Args {
             real_specimens: false,
             limit: None,
             verbose: false,
+            format: None,
         }
     }
 }
@@ -92,6 +106,10 @@ fn usage() {
     eprintln!(
         "  --limit N          with --real-specimens: run N specimens spread evenly across the \
          corpus (deterministic; default: all)"
+    );
+    eprintln!(
+        "  --format NAME      with --real-specimens: restrict to one document class — \
+         passport|id_card|driving_license (default: all classes)"
     );
 }
 
@@ -159,8 +177,18 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.limit = Some(n);
                 i += 2;
             }
+            "--format" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--format requires a value".to_string())?;
+                parsed.format = Some(SpecimenClass::parse(v)?);
+                i += 2;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
+    }
+    if parsed.format.is_some() && !parsed.real_specimens {
+        return Err("--format is only valid together with --real-specimens".to_string());
     }
     Ok(parsed)
 }
@@ -392,6 +420,10 @@ struct Report {
     source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<&'static str>,
+    /// The `--format` class this run was restricted to, `real-specimens`
+    /// only — absent means every `samples/` class was included.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    format: Option<&'static str>,
     count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     seed_start: Option<u64>,
@@ -461,6 +493,16 @@ async fn main() {
                 "❌ no image files found under samples/ — is this being run from the repo root?"
             );
             std::process::exit(1);
+        }
+        if let Some(class) = parsed.format {
+            specimens.retain(|s| s.class == class);
+            if specimens.is_empty() {
+                eprintln!(
+                    "❌ no samples/ specimens classified as {} — nothing to run",
+                    class.as_str()
+                );
+                std::process::exit(1);
+            }
         }
         if let Some(n) = parsed.limit {
             specimens = subsample(specimens, n);
@@ -596,6 +638,7 @@ async fn main() {
             .unwrap_or(0),
         source,
         profile,
+        format: parsed.format.map(SpecimenClass::as_str),
         count,
         seed_start,
         providers: reports.into_iter().map(ProviderRow::from).collect(),
@@ -657,5 +700,37 @@ mod tests {
     #[test]
     fn subsample_handles_a_limit_of_one() {
         assert_eq!(subsample((0..137).collect::<Vec<u32>>(), 1), vec![0]);
+    }
+
+    #[test]
+    fn format_parses_alongside_real_specimens() {
+        let args: Vec<String> = ["--real-specimens", "--format", "passport"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&args).expect("valid combination");
+        assert_eq!(parsed.format, Some(SpecimenClass::Passport));
+        assert!(parsed.real_specimens);
+    }
+
+    #[test]
+    fn format_without_real_specimens_is_rejected() {
+        let args: Vec<String> = ["--format", "passport"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(
+            parse_args(&args).is_err(),
+            "--format only makes sense scoping --real-specimens"
+        );
+    }
+
+    #[test]
+    fn format_rejects_an_unknown_class() {
+        let args: Vec<String> = ["--real-specimens", "--format", "visa"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&args).is_err());
     }
 }

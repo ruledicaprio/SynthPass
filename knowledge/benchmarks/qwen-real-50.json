@@ -1,0 +1,170 @@
+{
+  "timestamp_unix": 1785546606,
+  "source": "real-specimens",
+  "count": 50,
+  "providers": [
+    {
+      "provider_id": "mrz",
+      "documents": 50,
+      "capability": {
+        "deterministic": true,
+        "vision": false,
+        "cost": "free"
+      },
+      "accuracy": {
+        "labelled_documents": 2,
+        "field_match_rate": 0.8947368421052632,
+        "mean_cer": 0.14473684210526316,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "document_number",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "surname",
+            "mean_cer": 0.875
+          },
+          {
+            "field": "given_names",
+            "mean_cer": 0.5
+          },
+          {
+            "field": "nationality",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "sex",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": 0.0
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 3,
+        "p50_ms": 0,
+        "p95_ms": 24
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.2874251497005988,
+          "assertions_total": 167,
+          "documents": 50
+        },
+        "with_mrz_anchor": {
+          "rate": 0.2874251497005988,
+          "assertions_total": 167,
+          "documents": 28
+        },
+        "without_mrz_anchor": {
+          "rate": 0.0,
+          "assertions_total": 0,
+          "documents": 22
+        }
+      }
+    },
+    {
+      "provider_id": "llm",
+      "documents": 50,
+      "capability": {
+        "deterministic": false,
+        "vision": false,
+        "cost": "expensive"
+      },
+      "accuracy": {
+        "labelled_documents": 2,
+        "field_match_rate": 0.2631578947368421,
+        "mean_cer": 1.1350877192982456,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": 0.5
+          },
+          {
+            "field": "document_number",
+            "mean_cer": 0.3333333333333333
+          },
+          {
+            "field": "surname",
+            "mean_cer": 1.1875
+          },
+          {
+            "field": "given_names",
+            "mean_cer": 2.145833333333333
+          },
+          {
+            "field": "nationality",
+            "mean_cer": 4.166666666666667
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": 0.45
+          },
+          {
+            "field": "sex",
+            "mean_cer": 1.0
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": 0.5
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": 1.0
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 34058,
+        "p50_ms": 33192,
+        "p95_ms": 55786
+      },
+      "json_validity": {
+        "repair_fallbacks": 0,
+        "documents": 50,
+        "repair_fallback_rate": 0.0
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.2747524752475248,
+          "assertions_total": 404,
+          "documents": 50
+        },
+        "with_mrz_anchor": {
+          "rate": 0.2066115702479339,
+          "assertions_total": 242,
+          "documents": 28
+        },
+        "without_mrz_anchor": {
+          "rate": 0.3765432098765432,
+          "assertions_total": 162,
+          "documents": 22
+        }
+      }
+    }
+  ]
+}

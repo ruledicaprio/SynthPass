@@ -1,12 +1,15 @@
 {
-  "document_type": "PASSPORT",
-  "issuing_country": "CETIS d.d.",
+  "date_of_birth": "1990-04-13",
+  "date_of_expiry": "2031-07-01",
   "document_number": "SD9990322",
-  "surname": "LANA",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
   "given_names": "LANA",
+  "issuing_country": "TRC",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<TRCSAMPLE<<LANA<<<<<<<<<<<<<<<<<<<<<<<<<<<\nSD99903223TRC9004137F3107014<<<<<<<<<<<<<<00",
   "nationality": "TRC",
-  "date_of_birth": "13 ABR/AVR 90",
+  "personal_number": null,
   "sex": "F",
-  "date_of_expiry": "1JUL/JUI/JUL31",
-  "mrz_line": "P&lt;TRCSAMPE&lt;&lt;LANA&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;"
+  "surname": "SAMPLE"
 }

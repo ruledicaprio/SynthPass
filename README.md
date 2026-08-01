@@ -259,6 +259,11 @@ noise compounding over a longer field rather than a single fixable defect. The C
 deliberately below the measured value to absorb cross-platform variance in OCR inference without
 becoming flaky. Full account in [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4 notes.
 
+Beyond this snapshot, a local multi-provider bench loop (`provider-bench`, M7) tracks trend data
+by document format over time — passports, the whole real-specimen corpus, and more as they're
+run — pushed by hand to the `bench-data` branch rather than committed to `main`. Live charts per
+track: [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md#live-tracks).
+
 When the general OCR pass cannot produce a checksum-valid MRZ, targeted retry passes
 (MRZ-charset-constrained recognition over preprocessed crops) run automatically, and the check
 digits decide which reading — if any — is trusted. Tier 2 runs only after Tier 1 still misses. One
