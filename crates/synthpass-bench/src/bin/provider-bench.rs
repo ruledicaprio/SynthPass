@@ -51,6 +51,9 @@ struct Args {
     /// mode: a real specimen has no seed to start from and no capture
     /// profile to apply, it is what it is.
     real_specimens: bool,
+    /// Cap on how many real specimens to run (`--real-specimens` only).
+    /// `None` runs the whole corpus.
+    limit: Option<usize>,
 }
 
 impl Default for Args {
@@ -62,6 +65,7 @@ impl Default for Args {
             out: "provider-bench-report.json".to_string(),
             measure_memory: false,
             real_specimens: false,
+            limit: None,
         }
     }
 }
@@ -81,6 +85,10 @@ fn usage() {
     eprintln!(
         "  --real-specimens   run over samples/ instead of the synthetic corpus (ground truth \
          optional per specimen; --count/--seed/--profile are ignored)"
+    );
+    eprintln!(
+        "  --limit N          with --real-specimens: run N specimens spread evenly across the \
+         corpus (deterministic; default: all)"
     );
 }
 
@@ -131,10 +139,53 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.real_specimens = true;
                 i += 1;
             }
+            "--limit" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--limit requires a value".to_string())?;
+                let n = v
+                    .parse::<usize>()
+                    .map_err(|_| format!("--limit: not a valid number: {v}"))?;
+                if n == 0 {
+                    return Err("--limit must be at least 1".to_string());
+                }
+                parsed.limit = Some(n);
+                i += 2;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     Ok(parsed)
+}
+
+/// Take `n` specimens spread evenly across `all`, preserving order.
+///
+/// Deliberately a stride, not `all.truncate(n)`. `load_real_specimens` returns
+/// paths sorted, and `samples/` is organised by document class
+/// (`driving_licenses/`, `id_cards/`, `misc/`, `ocr_fixtures/`, `passports/`),
+/// so taking the first `n` would fill the whole subset from the alphabetically
+/// earliest directories and include no passports at all — a subset that
+/// silently answers a different question than the corpus it claims to sample.
+/// An even stride keeps the class mix roughly proportional.
+///
+/// Deterministic by construction: same `n`, same corpus, same subset, every
+/// run. A random sample would be a better estimator in principle and a worse
+/// benchmark in practice — two runs that disagree because they drew different
+/// documents cannot be compared, which is the same reasoning
+/// `ProviderCatalog`'s insertion-ordered consultation already applies to
+/// provider order.
+fn subsample<T>(all: Vec<T>, n: usize) -> Vec<T> {
+    let total = all.len();
+    if n >= total {
+        return all;
+    }
+    // `i * total / n` for i in 0..n — integer arithmetic, so no float rounding
+    // decides membership, and the first element is always included.
+    let mut keep: Vec<Option<T>> = all.into_iter().map(Some).collect();
+    (0..n)
+        .map(|i| i * total / n)
+        .filter_map(|idx| keep[idx].take())
+        .collect()
 }
 
 #[derive(Serialize)]
@@ -364,12 +415,15 @@ async fn main() {
     // `synthpass_bench::provider_bench`'s top doc comment for why both
     // sources feed the exact same reader loop and reporting shape.
     let (reports, source, profile, count, seed_start) = if parsed.real_specimens {
-        let specimens = load_real_specimens(&root.join("samples"));
+        let mut specimens = load_real_specimens(&root.join("samples"));
         if specimens.is_empty() {
             eprintln!(
                 "❌ no image files found under samples/ — is this being run from the repo root?"
             );
             std::process::exit(1);
+        }
+        if let Some(n) = parsed.limit {
+            specimens = subsample(specimens, n);
         }
         let labelled = specimens.iter().filter(|s| s.labels.is_some()).count();
         eprintln!(
@@ -468,4 +522,51 @@ fn repo_root() -> std::path::PathBuf {
         .nth(2)
         .expect("crates/synthpass-bench is two levels below the repo root")
         .to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subsample_returns_everything_when_the_limit_is_not_binding() {
+        let all: Vec<u32> = (0..10).collect();
+        assert_eq!(subsample(all.clone(), 10), all);
+        assert_eq!(subsample(all.clone(), 99), all);
+    }
+
+    #[test]
+    fn subsample_takes_a_spread_not_a_prefix() {
+        // The property that matters: `samples/` is ordered by document class,
+        // so a prefix would be all one class. A stride over 137 documents must
+        // reach the end of the corpus, not stop a third of the way in.
+        let all: Vec<u32> = (0..137).collect();
+        let picked = subsample(all, 50);
+        assert_eq!(picked.len(), 50);
+        assert_eq!(picked[0], 0, "the first document is always included");
+        assert!(
+            *picked.last().expect("non-empty") > 100,
+            "a stride must reach the far end of the corpus; got {:?}",
+            picked.last()
+        );
+        let mut sorted = picked.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), 50, "no duplicates");
+        assert_eq!(sorted, picked, "corpus order is preserved");
+    }
+
+    #[test]
+    fn subsample_is_deterministic() {
+        // Two runs that disagree because they drew different documents cannot
+        // be compared against each other, which is the whole point of a
+        // benchmark subset.
+        let all: Vec<u32> = (0..137).collect();
+        assert_eq!(subsample(all.clone(), 50), subsample(all, 50));
+    }
+
+    #[test]
+    fn subsample_handles_a_limit_of_one() {
+        assert_eq!(subsample((0..137).collect::<Vec<u32>>(), 1), vec![0]);
+    }
 }
