@@ -41,3 +41,16 @@ web/tessdata/eng.traineddata.gz
 
 # Generated synthetic documents (synthpass generate --out-dir out/)
 /out/
+
+# Bulk Wikimedia Commons fetch staging (tools/fetch_*.py). Deliberately NOT
+# committed: the fetchers pull whole Commons categories, and at ~900 KB per
+# image a few hundred files already outweighs the entire tracked corpus
+# (samples/ is ~50 MB over 155 files; .git itself is ~59 MB). Git keeps every
+# byte forever, so a bulk dump is a permanent cost for a staging area whose
+# whole purpose is to be sifted.
+#
+# The fetch scripts themselves ARE committed — they are the reproducible
+# provenance record. A specimen earns its way into samples/ one at a time,
+# individually vetted per CONTRIBUTING.md, which is also where its licence and
+# attribution get recorded. This directory is the holding pen, not the corpus.
+tools/downloaded_passports_and_ids/
