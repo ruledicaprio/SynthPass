@@ -39,3 +39,13 @@
   older `InferBackend::extract_stream` interface directly. `with_image` is wired at the one
   production call site that actually builds a `DocumentContext` for Tier 2; extending the
   streaming path onto the same contract is a larger, separate change.
+
+  The unsupported-assertion rate is additionally **split by whether the document gave the
+  provider an MRZ to anchor on** (`mrz::find_and_parse` succeeding on the OCR text — the
+  found/not-found line, matching `EscalationKind::MrzNotFound` versus `MrzChecksumFailed`, not
+  the checksum-valid line). A single blended figure hides that the anchored and unanchored
+  populations fail in different kinds rather than different degrees, and the unanchored half —
+  where a text-only provider has no deterministic anchor at all — is the one nobody had measured.
+  Each half carries its own document count, since the two are never the same size. Both are
+  `null` when the corpus contains no document of that kind, which is always true of
+  `without_mrz_anchor` on the synthetic corpus.
