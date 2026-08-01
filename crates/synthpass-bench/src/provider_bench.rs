@@ -450,6 +450,50 @@ pub async fn run_provider_bench_real(
     run_prepped(catalog, &prepped, measure_memory).await
 }
 
+/// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
+/// parsed from — `YYMMDD`, e.g. `"1974-08-12"` -> `"740812"`.
+///
+/// `synthpass_core::normalize` reformats every date field to ISO before it
+/// reaches this harness (see `crates/synthpass-core/src/normalize.rs`), but
+/// the OCR text a text-only provider actually read only ever contains the
+/// raw MRZ digits (or a printed-page date in some other format) — never the
+/// ISO string. Checking the verbatim ISO value against OCR text therefore
+/// flags a *correct* date read as an unsupported assertion almost every
+/// time, which is exactly the near-universal `date_of_birth`/`date_of_expiry`
+/// pattern seen on real runs. Falling back to this raw digit string when the
+/// direct match misses recovers the true positive without weakening the
+/// check for any other field.
+fn mrz_date_digits(iso_date: &str) -> Option<String> {
+    let (year, rest) = iso_date.split_once('-')?;
+    let (month, day) = rest.split_once('-')?;
+    if year.len() != 4 || month.len() != 2 || day.len() != 2 {
+        return None;
+    }
+    if !year.bytes().all(|b| b.is_ascii_digit())
+        || !month.bytes().all(|b| b.is_ascii_digit())
+        || !day.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(format!("{}{month}{day}", &year[2..]))
+}
+
+/// Whether `value` (the field this provider asserted) is grounded in
+/// `ocr_text` — a verbatim substring match for every field, plus a
+/// raw-MRZ-digit fallback for date fields specifically (see
+/// [`mrz_date_digits`]).
+fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
+    if ocr_text_lower.contains(&value.to_lowercase()) {
+        return true;
+    }
+    if matches!(field, CoreField::DateOfBirth | CoreField::DateOfExpiry) {
+        if let Some(digits) = mrz_date_digits(value) {
+            return ocr_text_lower.contains(&digits);
+        }
+    }
+    false
+}
+
 /// The shared reader loop both [`run_provider_bench`] and
 /// [`run_provider_bench_real`] funnel into — the one place accuracy and
 /// unsupported-assertion are computed, so the two corpus sources cannot
@@ -546,6 +590,9 @@ async fn run_prepped(
 
             let mut doc_assertions = 0usize;
             let mut doc_unsupported_fields: Vec<&'static str> = Vec::new();
+            // Identical for every field in the loop below — computed once
+            // per document rather than once per assertion.
+            let ocr_text_lower = bench_page.page.text.to_lowercase();
 
             for (i, field) in CoreField::ALL.iter().enumerate() {
                 let got = reading.extraction.fields.get(*field);
@@ -577,11 +624,7 @@ async fn run_prepped(
                 if !capability.vision {
                     if let Some(value) = got {
                         if !value.is_empty() {
-                            let unsupported = !bench_page
-                                .page
-                                .text
-                                .to_lowercase()
-                                .contains(&value.to_lowercase());
+                            let unsupported = !is_supported(*field, value, &ocr_text_lower);
                             assertions_total += 1;
                             if unsupported {
                                 assertions_unsupported += 1;
@@ -784,6 +827,58 @@ mod tests {
         let fabricated = "SMITH";
         assert!(ocr_text.to_lowercase().contains(&echoed.to_lowercase()));
         assert!(!ocr_text.to_lowercase().contains(&fabricated.to_lowercase()));
+    }
+
+    #[test]
+    fn mrz_date_digits_converts_iso_to_the_printed_mrz_substring() {
+        assert_eq!(mrz_date_digits("1974-08-12"), Some("740812".to_string()));
+        assert_eq!(mrz_date_digits("2005-01-09"), Some("050109".to_string()));
+    }
+
+    #[test]
+    fn mrz_date_digits_rejects_non_iso_input() {
+        assert_eq!(mrz_date_digits("12.08.1974"), None);
+        assert_eq!(mrz_date_digits(""), None);
+        assert_eq!(mrz_date_digits("DOE"), None);
+    }
+
+    #[test]
+    fn a_correct_iso_date_absent_from_ocr_text_is_still_supported_via_mrz_digits() {
+        // The OCR text carries the raw MRZ line (YYMMDD), never the ISO
+        // string synthpass_core::normalize reformats it to -- this is the
+        // false-positive the near-universal date_of_birth/date_of_expiry
+        // unsupported-assertion pattern on real runs was coming from.
+        let ocr_text_lower = "p<utoDOE<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
+            l898902c3utO7408122m1204159<<<<<<<<<<<<<<06"
+            .to_lowercase();
+        assert!(is_supported(
+            CoreField::DateOfBirth,
+            "1974-08-12",
+            &ocr_text_lower
+        ));
+    }
+
+    #[test]
+    fn a_fabricated_date_is_still_unsupported() {
+        let ocr_text_lower = "l898902c3uto7408122m1204159<<<<<<<<<<<<<<06".to_lowercase();
+        assert!(!is_supported(
+            CoreField::DateOfBirth,
+            "1999-12-31",
+            &ocr_text_lower
+        ));
+    }
+
+    #[test]
+    fn the_mrz_digit_fallback_is_scoped_to_date_fields_only() {
+        // "740812" happening to be a substring of a non-date field's OCR
+        // text must not make an unrelated fabricated value "supported" --
+        // the fallback only ever applies to DateOfBirth/DateOfExpiry.
+        let ocr_text_lower = "document number 740812 issued".to_lowercase();
+        assert!(!is_supported(
+            CoreField::DocumentNumber,
+            "1974-08-12",
+            &ocr_text_lower
+        ));
     }
 
     #[tokio::test]
