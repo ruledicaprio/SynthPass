@@ -11,6 +11,10 @@ path = "src/bin/synthpass-bench.rs"
 name = "provider-bench"
 path = "src/bin/provider-bench.rs"
 
+[[bin]]
+name = "bench-chart"
+path = "src/bin/bench-chart.rs"
+
 [dependencies]
 # Always built with real glyphs regardless of synthpass-gen's own default —
 # a benchmark measuring OCR hit rate against placeholder bars would be
@@ -42,6 +46,11 @@ tokio = { workspace = true }
 # Coarse process-RSS measurement for `provider-bench --measure-memory`, never
 # built by default — see the `measure-memory` feature below.
 sysinfo = { version = "0.32", optional = true }
+# `bench-chart`'s SVG renderer. Pure Rust, no C dependency: only the
+# `svg_backend` (a thin wrapper over the `svg` crate's XML text generation)
+# and `line_series` features are enabled — the default `bitmap` backend pulls
+# in font rasterization this crate has no other use for.
+plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
 
 [features]
 # Opt-in real memory sampling for `provider-bench`. Off by default: everyone

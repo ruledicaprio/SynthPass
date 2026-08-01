@@ -1,0 +1,170 @@
+{
+  "timestamp_unix": 1785548630,
+  "source": "real-specimens",
+  "count": 10,
+  "providers": [
+    {
+      "provider_id": "mrz",
+      "documents": 10,
+      "capability": {
+        "deterministic": true,
+        "vision": false,
+        "cost": "free"
+      },
+      "accuracy": {
+        "labelled_documents": 0,
+        "field_match_rate": null,
+        "mean_cer": null,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": null
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": null
+          },
+          {
+            "field": "document_number",
+            "mean_cer": null
+          },
+          {
+            "field": "surname",
+            "mean_cer": null
+          },
+          {
+            "field": "given_names",
+            "mean_cer": null
+          },
+          {
+            "field": "nationality",
+            "mean_cer": null
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": null
+          },
+          {
+            "field": "sex",
+            "mean_cer": null
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": null
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": null
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 5
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.21428571428571427,
+          "assertions_total": 28,
+          "documents": 10
+        },
+        "with_mrz_anchor": {
+          "rate": 0.21428571428571427,
+          "assertions_total": 28,
+          "documents": 5
+        },
+        "without_mrz_anchor": {
+          "rate": 0.0,
+          "assertions_total": 0,
+          "documents": 5
+        }
+      }
+    },
+    {
+      "provider_id": "llm",
+      "documents": 10,
+      "capability": {
+        "deterministic": false,
+        "vision": false,
+        "cost": "expensive"
+      },
+      "accuracy": {
+        "labelled_documents": 0,
+        "field_match_rate": null,
+        "mean_cer": null,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": null
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": null
+          },
+          {
+            "field": "document_number",
+            "mean_cer": null
+          },
+          {
+            "field": "surname",
+            "mean_cer": null
+          },
+          {
+            "field": "given_names",
+            "mean_cer": null
+          },
+          {
+            "field": "nationality",
+            "mean_cer": null
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": null
+          },
+          {
+            "field": "sex",
+            "mean_cer": null
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": null
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": null
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 35916,
+        "p50_ms": 33899,
+        "p95_ms": 61462
+      },
+      "json_validity": {
+        "repair_fallbacks": 0,
+        "documents": 10,
+        "repair_fallback_rate": 0.0
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.3058823529411765,
+          "assertions_total": 85,
+          "documents": 10
+        },
+        "with_mrz_anchor": {
+          "rate": 0.1111111111111111,
+          "assertions_total": 45,
+          "documents": 5
+        },
+        "without_mrz_anchor": {
+          "rate": 0.525,
+          "assertions_total": 40,
+          "documents": 5
+        }
+      }
+    }
+  ]
+}
