@@ -237,8 +237,11 @@ enum UnsupportedAssertionReport {
 }
 
 #[derive(Serialize)]
+/// `rate` is `null` when `assertions_total == 0` — the provider answered
+/// nothing over this subset, which is a different fact from a measured rate
+/// of zero and must not serialize as one.
 struct AssertionBucketReport {
-    rate: f64,
+    rate: Option<f64>,
     assertions_total: usize,
     documents: usize,
 }
@@ -477,13 +480,26 @@ async fn main() {
                 // populations fail in different *kinds*, not just degrees.
                 // Each half prints its own document count, because they are
                 // never the same size and a bare rate would conceal that.
+                //
+                // "no claims" rather than "0.0%" when nothing was asserted.
+                // The first real run made the difference matter: over the 22
+                // documents with no MRZ, the deterministic reader asserted
+                // nothing at all, and printing that as `0.0%` read as a
+                // measured, perfect score in the same column where a genuine
+                // 0.0 means "answered plenty, all of it supported". Declining
+                // to answer is the correct behaviour there and deserves to be
+                // legible as such, not disguised as a good grade.
+                let rate = |b: &AssertionBucket| match b.rate {
+                    Some(r) => format!("{:.1}%", r * 100.0),
+                    None => "no claims".to_string(),
+                };
                 let half = |label: &str, b: &Option<AssertionBucket>| match b {
-                    Some(b) => format!(", {label} {:.1}% ({} docs)", b.rate * 100.0, b.documents),
+                    Some(b) => format!(", {label} {} ({} docs)", rate(b), b.documents),
                     None => String::new(),
                 };
                 format!(
-                    "{:.1}%{}{}",
-                    overall.rate * 100.0,
+                    "{}{}{}",
+                    rate(overall),
                     half("with-MRZ", with_mrz_anchor),
                     half("no-MRZ", without_mrz_anchor),
                 )

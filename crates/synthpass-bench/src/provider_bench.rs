@@ -160,25 +160,31 @@ pub enum UnsupportedAssertion {
 /// 4 documents" and "40% over 120" are different claims, and the whole point
 /// of this split is that the smaller half is the one nobody had measured.
 pub struct AssertionBucket {
-    pub rate: f64,
+    /// `None` when the provider made **no assertions at all** over this
+    /// subset — not the same fact as a measured rate of zero, and on this
+    /// metric the difference is the whole point.
+    ///
+    /// The first real run made that concrete: on the 22 corpus documents with
+    /// no MRZ, the deterministic reader asserted nothing whatsoever, while the
+    /// LLM asserted 162 field values. Rendering the former as `0.0` printed it
+    /// as "measured, and perfectly clean" — praise for the one provider that
+    /// had correctly declined to answer, in the same column where a genuine
+    /// 0.0 would mean "answered a lot, all of it supported". Exactly the
+    /// fabricated-zero that [`AccuracyStats`]'s `Option`s exist to prevent,
+    /// one struct over.
+    pub rate: Option<f64>,
     pub assertions_total: usize,
     pub documents: usize,
 }
 
 impl AssertionBucket {
     /// `None` when the subset had no documents at all — absent, rather than a
-    /// `0.0` rate that would read as "measured, and clean". Same reasoning as
-    /// [`AccuracyStats`]'s `Option`s.
+    /// bucket that would have to invent a rate for an empty population. A
+    /// bucket that *does* exist may still carry `rate: None`; see
+    /// [`AssertionBucket::rate`].
     fn new(unsupported: usize, total: usize, documents: usize) -> Option<Self> {
         (documents > 0).then_some(Self {
-            // A document can legitimately contribute zero assertions (the
-            // provider answered nothing), so `total == 0` with `documents > 0`
-            // is a real state: nothing asserted is nothing unsupported.
-            rate: if total == 0 {
-                0.0
-            } else {
-                unsupported as f64 / total as f64
-            },
+            rate: (total > 0).then(|| unsupported as f64 / total as f64),
             assertions_total: total,
             documents,
         })
@@ -558,8 +564,10 @@ async fn run_prepped(
                     assertions_total,
                     ocr_documents,
                 )
+                // An empty corpus is the one case with no documents at all,
+                // so there is no rate to report and nothing was asserted.
                 .unwrap_or(AssertionBucket {
-                    rate: 0.0,
+                    rate: None,
                     assertions_total: 0,
                     documents: 0,
                 }),
@@ -852,7 +860,11 @@ mod tests {
                 without_mrz_anchor,
             } => {
                 assert_eq!(overall.assertions_total, 1);
-                assert_eq!(overall.rate, 1.0, "SMITH never appears in the OCR text");
+                assert_eq!(
+                    overall.rate,
+                    Some(1.0),
+                    "SMITH never appears in the OCR text"
+                );
                 // The fixture's OCR text carries no MRZ, so the whole
                 // measurement belongs to the unanchored half — the population
                 // Phase 2's grounding gate is aimed at.
@@ -864,7 +876,7 @@ mod tests {
                     .as_ref()
                     .expect("the one fixture document had no MRZ");
                 assert_eq!(unanchored.documents, 1);
-                assert_eq!(unanchored.rate, 1.0);
+                assert_eq!(unanchored.rate, Some(1.0));
             }
             UnsupportedAssertion::NotApplicable { .. } => {
                 panic!("a deterministic (!vision) provider must get a computed rate")
