@@ -394,7 +394,8 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 ├── fuzz/                   cargo-fuzz targets for the untrusted OCR ingest path
 ├── samples/                Public-domain specimen documents and expected outputs, organized into
 │                           passports/, id_cards/, driving_licenses/, ocr_fixtures/, misc/ —
-│                           see samples/README.md
+│                           only ocr_fixtures/ (the hand-verified subset) is tracked in git; the
+│                           rest is a gitignored local mirror — see samples/README.md
 ├── scripts/                Development helpers
 ├── tools/                  Standalone scripts not themselves test fixtures (e.g. the Wikipedia
 │                           specimen scraper)
