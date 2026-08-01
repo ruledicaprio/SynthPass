@@ -33,7 +33,6 @@
 //! cargo run -p synthpass-ocr --release --example visual_zone_survey -- --batch 5
 //! ```
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use synthpass_ocr::geometry::{self, OcrLine};
 use synthpass_ocr::NativeOcr;
@@ -288,17 +287,39 @@ fn main() {
 
     // Per-specimen table sorted worst-to-best, so an outlier is easy to spot
     // by eye without grepping the JSONL.
-    let mut by_fraction: BTreeMap<String, f64> = BTreeMap::new();
-    for r in &results {
-        if let Some(f) = r.noise_line_fraction {
-            by_fraction.insert(r.filename.clone(), f);
-        }
-    }
-    let mut ranked: Vec<(&String, &f64)> = by_fraction.iter().collect();
-    ranked.sort_by(|a, b| b.1.total_cmp(a.1));
+    // Collected into a Vec, not a map keyed on `filename`: `walk_samples`
+    // recurses, and `filename` is a bare basename, so two specimens sharing a
+    // basename across subdirectories would collide and one would vanish from
+    // this table without a word. The median/IQR above read `results` directly
+    // and were never affected — only this ranking was.
+    let mut ranked: Vec<(&str, f64)> = results
+        .iter()
+        .filter_map(|r| r.noise_line_fraction.map(|f| (r.filename.as_str(), f)))
+        .collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
     println!("\n=== ranked by noise-line fraction (highest first) ===");
     for (name, frac) in &ranked {
         println!("{frac:.3}  {name}");
+    }
+
+    // `knowledge/visual-zone-survey.jsonl` is a checked-in, full-corpus
+    // artifact that prose cites. `--only` deliberately narrows the run to a
+    // handful of specimens, so writing it here would silently replace the
+    // committed dataset with a partial one — a corruption that survives into
+    // `git diff` looking like a legitimate re-measurement. Same reasoning the
+    // `--file` path above already applies to itself ("a one-off comparison
+    // point, not a corpus member"), just applied to the other filter too.
+    if let Some(substr) = &only {
+        println!(
+            "\nskipping {} — this was a --only={substr} run over {} of {} specimens, \
+             not the full corpus the checked-in file records",
+            root.join("knowledge")
+                .join("visual-zone-survey.jsonl")
+                .display(),
+            results.len(),
+            total,
+        );
+        return;
     }
 
     let out_path = root.join("knowledge").join("visual-zone-survey.jsonl");
