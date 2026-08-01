@@ -308,6 +308,39 @@ pub fn code_for_name(name: &str) -> Option<&'static str> {
         .map(|&(c, _)| c)
 }
 
+/// Whether two ICAO/ISO 3166-1 codes name the same country or entity.
+///
+/// Not the same question as `a == b`, because `CODES` deliberately carries
+/// more than one legitimate code for some entities (Germany: `DEU` and the
+/// legacy single-letter `D`; Kosovo: `XKX` and `RKS` — see `CODES`'s doc
+/// comment). A German passport prints `D` in the MRZ, while any name-based
+/// resolution of "Germany" goes through [`code_for_name`], which returns the
+/// primary code `DEU`. Comparing those two as plain strings reports a
+/// disagreement between two readings that agree perfectly.
+///
+/// Unrecognized codes compare by case-insensitive equality only: with no
+/// table entry there is nothing to resolve them through, and two unknown
+/// strings being equal is the most that can honestly be said about them.
+pub fn codes_equivalent(a: &str, b: &str) -> bool {
+    if a.eq_ignore_ascii_case(b) {
+        return true;
+    }
+    // Case-insensitive on both sides so this can't quietly answer `false`
+    // for a caller that hasn't uppercased its input — the fast path above is
+    // already case-insensitive, and a lookup that isn't would make the two
+    // halves of this function disagree about what "the same code" means.
+    fn name_of(code: &str) -> Option<&'static str> {
+        CODES
+            .iter()
+            .find(|&&(c, _)| c.eq_ignore_ascii_case(code))
+            .map(|&(_, name)| name)
+    }
+    match (name_of(a), name_of(b)) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -373,6 +406,53 @@ mod tests {
         // the primary ISO/ICAO code (appearing first) must win.
         assert_eq!(code_for_name("Kosovo"), Some("XKX"));
         assert_eq!(code_for_name("Germany"), Some("DEU"));
+    }
+
+    #[test]
+    fn aliased_codes_are_equivalent_to_their_primary_code() {
+        // The case this function exists for: German documents print the
+        // legacy `D` in the MRZ, while any name-based resolution of
+        // "Germany" yields `DEU`. They are the same country.
+        assert!(codes_equivalent("D", "DEU"));
+        assert!(codes_equivalent("DEU", "D"));
+        assert!(codes_equivalent("XKX", "RKS"));
+    }
+
+    #[test]
+    fn distinct_countries_are_never_equivalent() {
+        assert!(!codes_equivalent("DEU", "AUT"));
+        assert!(!codes_equivalent("D", "DNK"));
+        // Unrecognized codes have nothing to resolve through, so only exact
+        // (case-insensitive) equality can be claimed for them.
+        assert!(!codes_equivalent("ZZZ", "DEU"));
+        assert!(!codes_equivalent("ZZZ", "QQQ"));
+        assert!(codes_equivalent("ZZZ", "zzz"));
+        // Empty is not a wildcard.
+        assert!(!codes_equivalent("", "DEU"));
+    }
+
+    #[test]
+    fn equivalence_is_case_insensitive_through_the_table_too() {
+        assert!(codes_equivalent("d", "deu"));
+        assert!(codes_equivalent("Deu", "D"));
+    }
+
+    #[test]
+    fn every_code_is_equivalent_to_itself_and_to_its_aliases() {
+        // Reflexivity over the whole table, plus the symmetry/transitivity
+        // that the shared-name definition implies: any two codes naming the
+        // same entity must compare equal in both directions.
+        for &(code, name) in CODES {
+            assert!(codes_equivalent(code, code), "{code} vs itself");
+            for &(other, other_name) in CODES {
+                if name == other_name {
+                    assert!(
+                        codes_equivalent(code, other) && codes_equivalent(other, code),
+                        "{code} and {other} both name {name}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
