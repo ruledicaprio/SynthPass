@@ -903,8 +903,7 @@ mod tests {
     /// is the common case in `samples/`: every MRZ-less ID-card front has no
     /// label file at all, and the loader has to treat that as "unlabelled,"
     /// per this crate's whole reason for existing (see `RealSpecimenDoc`'s
-    /// doc). `Bulgaria_ID_Card_front.png` has no sibling JSON under
-    /// `samples/ocr_fixtures/` as of this writing.
+    /// doc).
     /// A label file that exists but is malformed reads as unlabelled rather
     /// than aborting the load — but is not silently identical to "no label
     /// file", which is what the warning in [`load_ground_truth`] is for.
@@ -931,19 +930,34 @@ mod tests {
         );
     }
 
+    /// Written to a temp tree rather than `samples/`, so this doesn't depend
+    /// on any specific file surviving in the real (gitignored, local-mirror-
+    /// only) bulk corpus — only `samples/ocr_fixtures/` is tracked, and nothing
+    /// there is deliberately unlabelled.
     #[test]
     fn specimen_loader_reports_no_labels_when_absent() {
-        let root = repo_root();
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-no-labels-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
         let samples = root.join("samples");
+        std::fs::create_dir_all(samples.join("id_cards")).expect("temp dir is creatable");
+        let image_path = samples.join("id_cards").join("unlabelled.png");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(&image_path)
+            .expect("temp fixture writes");
+
         assert!(
-            load_ground_truth(&samples, "Bulgaria_ID_Card_front").is_none(),
-            "no samples/ocr_fixtures/Bulgaria_ID_Card_front.json should exist"
+            load_ground_truth(&samples, "unlabelled").is_none(),
+            "no samples/ocr_fixtures/unlabelled.json should exist"
         );
 
-        let image_path = samples.join("id_cards").join("Bulgaria_ID_Card_front.png");
         let specimen = load_specimen(&samples, &image_path)
             .expect("the image itself exists and should decode");
-        assert_eq!(specimen.name, "Bulgaria_ID_Card_front");
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(specimen.name, "unlabelled");
         assert!(
             specimen.labels.is_none(),
             "an unlabelled specimen must not silently acquire fabricated ground truth"
