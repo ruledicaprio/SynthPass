@@ -163,6 +163,87 @@ pub struct RealSpecimenDoc {
     /// has hand-verified. Treating a missing label as an error would make
     /// the loader fail exactly on the population Phase 1 exists to measure.
     pub labels: Option<synthpass_core::Extraction>,
+    /// Which `samples/` document format this specimen represents, for
+    /// `provider-bench --format`. See [`classify_specimen`] for how this is
+    /// decided.
+    pub class: SpecimenClass,
+}
+
+/// Which `samples/` document format a specimen represents, for
+/// `provider-bench --format`. Directory-based, not filename-based: `samples/`
+/// has already been reorganized once (see [`find_image_files`]'s doc) and is
+/// mid-reorg again as this is written, so anything reading the filename
+/// itself would need re-deriving every time a specimen gets renamed or
+/// re-fetched. The immediate parent directory is stable under a rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecimenClass {
+    Passport,
+    IdCard,
+    DrivingLicense,
+    /// `misc/`, or an `ocr_fixtures/`/`misc/` specimen whose label (if any)
+    /// has no recognizable `document_type` — never guessed.
+    Unclassified,
+}
+
+impl SpecimenClass {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "passport" => Ok(Self::Passport),
+            "id_card" => Ok(Self::IdCard),
+            "driving_license" => Ok(Self::DrivingLicense),
+            other => Err(format!(
+                "unknown format '{other}' (valid: passport, id_card, driving_license; \
+                 omit --format entirely to run everything)"
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passport => "passport",
+            Self::IdCard => "id_card",
+            Self::DrivingLicense => "driving_license",
+            Self::Unclassified => "unclassified",
+        }
+    }
+}
+
+/// Classifies one specimen by its `samples/` subdirectory, falling back to
+/// its ground-truth `document_type` (ICAO 9303 short code, or the odd
+/// unnormalized long form seen in a couple of hand-written fixtures — e.g.
+/// `PASSPORT` alongside `P`) for the two directories that mix formats
+/// (`ocr_fixtures/`, which holds specimens hand-labelled from more than one
+/// directory, and `misc/`).
+///
+/// KNOWN GAP, not fixed here: an in-progress `samples/` reorg has, as of this
+/// writing, left several passport specimens misfiled under `id_cards/`
+/// (their names still say `..._Passport_Specimen_...`). Those classify as
+/// `IdCard` until the reorg moves them — `--format passport` will
+/// under-count during that window, never over-count, since nothing under
+/// `passports/` is anything other than a passport.
+pub fn classify_specimen(
+    image_path: &Path,
+    labels: Option<&synthpass_core::Extraction>,
+) -> SpecimenClass {
+    match image_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+    {
+        Some("passports") => return SpecimenClass::Passport,
+        Some("id_cards") => return SpecimenClass::IdCard,
+        Some("driving_licenses") => return SpecimenClass::DrivingLicense,
+        _ => {}
+    }
+    match labels
+        .and_then(|l| l.document_type.as_deref())
+        .map(str::to_uppercase)
+        .as_deref()
+    {
+        Some("P") | Some("PASSPORT") => SpecimenClass::Passport,
+        Some("ID") | Some("I") | Some("ID1") | Some("ID2") | Some("ID3") => SpecimenClass::IdCard,
+        _ => SpecimenClass::Unclassified,
+    }
 }
 
 /// Image file extensions this loader will decode, matched case-insensitively.
@@ -263,10 +344,12 @@ pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpeci
     let name = image_path.file_stem()?.to_str()?.to_string();
     let image = image::open(image_path).ok()?;
     let labels = load_ground_truth(samples_root, &name);
+    let class = classify_specimen(image_path, labels.as_ref());
     Some(RealSpecimenDoc {
         name,
         image,
         labels,
+        class,
     })
 }
 
@@ -730,6 +813,89 @@ mod tests {
         assert_eq!(truth.document_number.as_deref(), Some("955555546"));
         assert_eq!(truth.surname.as_deref(), Some("TEST"));
         assert_eq!(truth.given_names.as_deref(), Some("MILICA"));
+    }
+
+    /// Directory alone decides `passports/`, `id_cards/`, and
+    /// `driving_licenses/` — no label needed, and a label that disagrees
+    /// (which should never happen, but the classifier must not be fooled by
+    /// hypothetically-bad label data) still loses to the directory.
+    #[test]
+    fn classify_specimen_uses_directory_first() {
+        let disagreeing_label = extraction_with_document_type("ID");
+        assert_eq!(
+            classify_specimen(Path::new("samples/passports/Foo.jpg"), None),
+            SpecimenClass::Passport
+        );
+        assert_eq!(
+            classify_specimen(
+                Path::new("samples/passports/Foo.jpg"),
+                Some(&disagreeing_label)
+            ),
+            SpecimenClass::Passport,
+            "directory wins over a disagreeing label"
+        );
+        assert_eq!(
+            classify_specimen(Path::new("samples/id_cards/Foo.jpg"), None),
+            SpecimenClass::IdCard
+        );
+        assert_eq!(
+            classify_specimen(Path::new("samples/driving_licenses/Foo.jpg"), None),
+            SpecimenClass::DrivingLicense
+        );
+    }
+
+    /// `ocr_fixtures/` and `misc/` mix formats, so classification falls back
+    /// to the specimen's own labelled `document_type` — both the ICAO short
+    /// code (`P`, `ID`, `I`) and the unnormalized long form seen in one real
+    /// fixture (`PASSPORT`, see `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json`).
+    #[test]
+    fn classify_specimen_falls_back_to_label_for_mixed_directories() {
+        let passport_short = extraction_with_document_type("P");
+        let passport_long = extraction_with_document_type("PASSPORT");
+        let id_short = extraction_with_document_type("ID");
+        for path in ["samples/ocr_fixtures/Foo.jpg", "samples/misc/Foo.jpg"] {
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&passport_short)),
+                SpecimenClass::Passport,
+                "{path} with document_type P"
+            );
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&passport_long)),
+                SpecimenClass::Passport,
+                "{path} with document_type PASSPORT"
+            );
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&id_short)),
+                SpecimenClass::IdCard,
+                "{path} with document_type ID"
+            );
+        }
+    }
+
+    /// No label at all, or a label with no `document_type`/an unrecognized
+    /// one, is `Unclassified` rather than a guess — this classifier must
+    /// never fabricate a class it has no evidence for.
+    #[test]
+    fn classify_specimen_is_unclassified_without_directory_or_recognizable_label() {
+        assert_eq!(
+            classify_specimen(Path::new("samples/ocr_fixtures/Foo.jpg"), None),
+            SpecimenClass::Unclassified
+        );
+        let visa = extraction_with_document_type("V");
+        assert_eq!(
+            classify_specimen(Path::new("samples/misc/Foo.jpg"), Some(&visa)),
+            SpecimenClass::Unclassified,
+            "a visa is neither a passport nor an ID card"
+        );
+    }
+
+    /// `Extraction` has a custom `Drop` (`ZeroizeOnDrop`), so struct-update
+    /// syntax (`..Default::default()`) against a temporary doesn't
+    /// typecheck — build it field-by-field instead.
+    fn extraction_with_document_type(document_type: &str) -> synthpass_core::Extraction {
+        let mut e = synthpass_core::Extraction::default();
+        e.document_type = Some(document_type.to_string());
+        e
     }
 
     /// A specimen with an image but no matching `samples/ocr_fixtures/

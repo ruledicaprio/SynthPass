@@ -227,6 +227,39 @@ flowchart LR
   both consistent with existing measurements (the M4 55% Tier-1 hit rate on OCR noise, the M5 GBNF
   parity run's ~45% field match). Ships standalone (`cargo run -p synthpass-bench --release --bin
   provider-bench`); CI wiring is a separable follow-up.
+- **A local, multi-track `provider-bench` loop now exists** — still not CI wiring (that remains
+  the separable follow-up above), but a way to accumulate real trend data by hand instead of
+  one-off ad hoc runs, across as many benchmark "tracks" as get run. `provider-bench --format
+  <passport|id_card|driving_license>` (backed by a new `SpecimenClass`/`classify_specimen` in
+  `synthpass-bench`, directory-based with a ground-truth-`document_type` fallback for the mixed
+  `ocr_fixtures/`/`misc/` directories) scopes a run to one `samples/` subdirectory;
+  `--real-specimens` with no `--format` covers the whole real corpus. `scripts/run-bench.ps1
+  -Track <name>` runs one, flattens the report to one row per `(run, provider)`, and appends to
+  `results/<track>-bench/history.jsonl` on the `bench-data` branch (the same branch
+  `bench-data-collection.yml` already uses, via the same isolated-`git worktree` checkout pattern,
+  but pushed manually rather than on a schedule) — see `knowledge/benchmarks/README.md` for the
+  row schema and the live per-track charts. `-FromReport PATH` flattens an existing report instead
+  of re-running one, which both covers slow manual runs you don't want to redo and backfilling:
+  the four ad hoc `qwen-real-{10,10-run-2,30,50}.json` sweeps from earlier the same day were folded
+  into the `real-specimens` track this way (recorded with an honest `"unknown (backfilled
+  from ...)"` `git_sha` rather than misattributed to a commit they weren't actually measured
+  against). `bench-chart` (new bin, same crate, `plotters`' pure-Rust SVG backend, track-agnostic —
+  one binary renders every track's history) renders each track's history into
+  `knowledge/img/<track>-bench-trend.svg`, embedded in `knowledge/benchmarks/README.md`'s live-tracks
+  dashboard (README's own "Accuracy, stated plainly" links out to it rather than embedding every
+  chart inline).
+
+  Passport ground truth also grew from 4 (one of which, on inspection, turned out to be malformed —
+  `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json` was missing `extraction_method`
+  and had several wrong fields, e.g. `issuing_country: "CETIS d.d."`, the *printer's* name, not an
+  ICAO code) to 8 good labelled specimens (fixed that one; added UAE, Slovakia Service passport, a
+  second Canada specimen, China) — each hand-verified against the image rather than trusted from
+  the OCR read, since only `document_number`/`date_of_birth`/`date_of_expiry`/`personal_number` are
+  individually checksum-protected in a TD3 MRZ; `surname`/`given_names`/`document_type`/
+  `issuing_country` are not, and the verification pass caught real Tier-1 imperfections this way (a
+  dropped space in two specimens' `given_names`, and a century-pivot misread on a `11`
+  year-of-birth specimen — see `scripts/check-century-pivot.sh`). Expanding beyond 8 remains future
+  work; each label needs the same one-by-one visual check, not a batch script.
 - **Post-M7 real-world validation surfaced a Tier-1/Tier-2 fusion gap.** A private Turkish
   passport specimen (`samples/ocr_fixtures/Turkiye_Passport_private.jpeg`) escalated to Tier-2
   on a single misread MRZ character (`document_number`'s leading glyph), which threw away
