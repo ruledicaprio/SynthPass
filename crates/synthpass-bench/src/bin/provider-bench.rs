@@ -54,6 +54,8 @@ struct Args {
     /// Cap on how many real specimens to run (`--real-specimens` only).
     /// `None` runs the whole corpus.
     limit: Option<usize>,
+    /// Print the per-document breakdown behind each provider's aggregates.
+    verbose: bool,
 }
 
 impl Default for Args {
@@ -66,6 +68,7 @@ impl Default for Args {
             measure_memory: false,
             real_specimens: false,
             limit: None,
+            verbose: false,
         }
     }
 }
@@ -137,6 +140,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--real-specimens" => {
                 parsed.real_specimens = true;
+                i += 1;
+            }
+            "--verbose" | "-v" => {
+                parsed.verbose = true;
                 i += 1;
             }
             "--limit" => {
@@ -246,6 +253,19 @@ struct AssertionBucketReport {
     documents: usize,
 }
 
+/// Per-document rows behind a provider's aggregates. Counts and field *names*
+/// only — never an asserted value, which would put document content into a
+/// report file (see `synthpass_bench::provider_bench::DocumentDetail`).
+#[derive(Serialize)]
+struct DocumentDetailReport {
+    name: String,
+    mrz_found: bool,
+    read_ok: bool,
+    assertions_total: usize,
+    assertions_unsupported: usize,
+    unsupported_fields: Vec<&'static str>,
+}
+
 impl From<AssertionBucket> for AssertionBucketReport {
     fn from(b: AssertionBucket) -> Self {
         Self {
@@ -301,6 +321,11 @@ struct ProviderRow {
     declared_resident_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     measured_rss_delta_bytes: Option<i64>,
+    /// Always serialized, regardless of `--verbose` — the flag governs
+    /// terminal noise, not what the report records. A run that took an hour
+    /// should not have to be repeated because the per-document detail was
+    /// only printed and never saved.
+    documents_detail: Vec<DocumentDetailReport>,
 }
 
 impl From<ProviderReport> for ProviderRow {
@@ -341,6 +366,18 @@ impl From<ProviderReport> for ProviderRow {
             unsupported_assertion: r.unsupported_assertion.into(),
             declared_resident_bytes: r.declared_resident_bytes,
             measured_rss_delta_bytes: r.measured_rss_delta_bytes,
+            documents_detail: r
+                .documents_detail
+                .into_iter()
+                .map(|d| DocumentDetailReport {
+                    name: d.name,
+                    mrz_found: d.mrz_found,
+                    read_ok: d.read_ok,
+                    assertions_total: d.assertions_total,
+                    assertions_unsupported: d.assertions_unsupported,
+                    unsupported_fields: d.unsupported_fields,
+                })
+                .collect(),
         }
     }
 }
@@ -514,6 +551,42 @@ async fn main() {
             r.accuracy.labelled_documents,
             r.speed.mean.as_millis(),
         );
+
+        if parsed.verbose {
+            // Worst first. An aggregate tells you a provider made 61
+            // unsupported assertions; this tells you which documents produced
+            // them, which is the difference between a number and something
+            // you can go and fix. Documents where nothing was asserted are
+            // skipped — on the MRZ-less half that is most of the deterministic
+            // reader's rows, and listing 22 empty lines would bury the ones
+            // that matter.
+            let mut rows: Vec<_> = r
+                .documents_detail
+                .iter()
+                .filter(|d| !d.read_ok || d.assertions_total > 0)
+                .collect();
+            rows.sort_by(|a, b| {
+                b.assertions_unsupported
+                    .cmp(&a.assertions_unsupported)
+                    .then_with(|| a.name.cmp(&b.name))
+            });
+            for d in rows {
+                let anchor = if d.mrz_found { "mrz" } else { "no-mrz" };
+                if !d.read_ok {
+                    println!("    {:<6}  {}  READ FAILED", anchor, d.name);
+                    continue;
+                }
+                let fields = if d.unsupported_fields.is_empty() {
+                    String::new()
+                } else {
+                    format!("  [{}]", d.unsupported_fields.join(", "))
+                };
+                println!(
+                    "    {:<6}  {:<52}  {}/{} unsupported{}",
+                    anchor, d.name, d.assertions_unsupported, d.assertions_total, fields,
+                );
+            }
+        }
     }
 
     let report = Report {

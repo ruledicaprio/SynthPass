@@ -59,6 +59,40 @@ pub struct ProviderReport {
     /// one call's delta. Treat as an order-of-magnitude sanity check on
     /// `declared_resident_bytes`, not a precise figure.
     pub measured_rss_delta_bytes: Option<i64>,
+    /// Per-document breakdown behind the aggregates above, in corpus order.
+    ///
+    /// An aggregate says a provider made 162 unsupported assertions; it never
+    /// says *which document* produced them, and a rate you cannot drill into
+    /// is a rate you cannot act on. Always collected — it is a handful of
+    /// integers per document — and rendered only on request
+    /// (`provider-bench --verbose`).
+    pub documents_detail: Vec<DocumentDetail>,
+}
+
+/// What one provider did on one document. **Shape only, never content**:
+/// counts and field *names*, never the values asserted.
+///
+/// The values are the document's identity fields — exactly the PII
+/// `CONTRIBUTING.md` forbids in any log line, and the discipline
+/// `synthpass_core::fusion::Finding` already follows by carrying a field name
+/// and never the value that disagreed. Knowing *that* `surname` was
+/// unsupported on a given specimen is enough to go and look; printing the
+/// fabricated surname itself would put document content into a terminal and a
+/// JSON report for no additional diagnostic power.
+pub struct DocumentDetail {
+    /// Corpus-local identity: a synthetic document's seed, or a real
+    /// specimen's file stem. Public-domain specimen filenames, not PII.
+    pub name: String,
+    /// Whether `mrz::find_and_parse` recovered an MRZ from this document's
+    /// OCR text — which bucket this document counted toward.
+    pub mrz_found: bool,
+    /// Whether the provider returned a reading at all. `false` means it
+    /// errored and contributed nothing to any aggregate.
+    pub read_ok: bool,
+    pub assertions_total: usize,
+    pub assertions_unsupported: usize,
+    /// Which fields were asserted but absent from the OCR text. Names only.
+    pub unsupported_fields: Vec<&'static str>,
 }
 
 pub struct CapabilitySnapshot {
@@ -286,6 +320,9 @@ fn extraction_ground_truth(extraction: &synthpass_core::Extraction) -> HashMap<C
 /// outlive the whole run, not just one OCR call. [`run_prepped`] removes
 /// every `image_path` after the last reader has finished with it.
 struct BenchPage {
+    /// Corpus-local identity, carried for `DocumentDetail`: a synthetic
+    /// document's seed or a real specimen's file stem.
+    name: String,
     page: OcrPage,
     ground_truth: Option<HashMap<CoreField, String>>,
     image_path: PathBuf,
@@ -351,6 +388,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
             // an MRZ, but a degraded capture can leave none of it legible.
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             Some(BenchPage {
+                name: doc.seed.to_string(),
                 page,
                 ground_truth: Some(mrz_ground_truth(&truth)),
                 image_path,
@@ -372,6 +410,7 @@ fn prep_specimens(ocr: &NativeOcr, specimens: &[RealSpecimenDoc]) -> Vec<Option<
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             Some(BenchPage {
+                name: doc.name.clone(),
                 page,
                 ground_truth,
                 image_path,
@@ -459,6 +498,7 @@ async fn run_prepped(
         // MRZ anchor. Accumulated separately rather than derived afterwards
         // because an assertion belongs to the document it was made about, and
         // that association is only available here inside the loop.
+        let mut documents_detail: Vec<DocumentDetail> = Vec::with_capacity(prepped.len());
         let mut anchored_total = 0usize;
         let mut anchored_unsupported = 0usize;
         let mut unanchored_total = 0usize;
@@ -487,7 +527,25 @@ async fn run_prepped(
             let reading = reader.read(&ctx).await;
             elapsed_per_doc.push(started.elapsed());
 
-            let Ok(reading) = reading else { continue };
+            let Ok(reading) = reading else {
+                // Recorded rather than skipped silently: a provider that
+                // errored on a document contributed nothing to any aggregate,
+                // and a per-document view that simply omitted the row would
+                // make that indistinguishable from a document it handled
+                // cleanly with no assertions.
+                documents_detail.push(DocumentDetail {
+                    name: bench_page.name.clone(),
+                    mrz_found: bench_page.mrz_found,
+                    read_ok: false,
+                    assertions_total: 0,
+                    assertions_unsupported: 0,
+                    unsupported_fields: Vec::new(),
+                });
+                continue;
+            };
+
+            let mut doc_assertions = 0usize;
+            let mut doc_unsupported_fields: Vec<&'static str> = Vec::new();
 
             for (i, field) in CoreField::ALL.iter().enumerate() {
                 let got = reading.extraction.fields.get(*field);
@@ -537,10 +595,27 @@ async fn run_prepped(
                             if unsupported {
                                 *bad += 1;
                             }
+
+                            doc_assertions += 1;
+                            if unsupported {
+                                // The field *name*, never `value` — see
+                                // `DocumentDetail`'s doc on why the asserted
+                                // value must not reach a log or a report.
+                                doc_unsupported_fields.push(field.as_str());
+                            }
                         }
                     }
                 }
             }
+
+            documents_detail.push(DocumentDetail {
+                name: bench_page.name.clone(),
+                mrz_found: bench_page.mrz_found,
+                read_ok: true,
+                assertions_total: doc_assertions,
+                assertions_unsupported: doc_unsupported_fields.len(),
+                unsupported_fields: doc_unsupported_fields,
+            });
         }
 
         let repair_after = synthpass_llm::repair::repair_fallbacks();
@@ -604,6 +679,7 @@ async fn run_prepped(
             }),
             unsupported_assertion,
             declared_resident_bytes: capability.estimated_resident_bytes,
+            documents_detail,
             measured_rss_delta_bytes: match (rss_before, rss_after) {
                 (Some(before), Some(after)) => Some(after as i64 - before as i64),
                 _ => None,
@@ -772,6 +848,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
+                name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
                     ..OcrPage::default()
@@ -781,6 +858,7 @@ mod tests {
                 mrz_found: false,
             }),
             Some(BenchPage {
+                name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE, no label file for this one".to_string(),
                     ..OcrPage::default()
@@ -811,6 +889,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE".to_string(),
                 ..OcrPage::default()
@@ -843,6 +922,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
                 ..OcrPage::default()
@@ -900,6 +980,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, no SMITH anywhere in this text".to_string(),
                 ..OcrPage::default()
