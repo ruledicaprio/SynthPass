@@ -1,15 +1,21 @@
 //! `provider-bench` — M7 multi-provider benchmark. Runs every registered
 //! [`FieldReader`](synthpass_die::FieldReader) (today: the deterministic
-//! `MrzReader` and the LLM's `LlmFieldReader`) against the same synthetic
-//! corpus and reports, per provider: accuracy, speed, JSON validity, an
+//! `MrzReader` and the LLM's `LlmFieldReader`) against the same corpus and
+//! reports, per provider: accuracy, speed, JSON validity, an
 //! unsupported-assertion rate, and resident memory.
+//!
+//! Two corpus sources: the synthetic one from `synthpass-gen` (default), and
+//! the real specimens in `samples/` (`--real-specimens`). The latter is the
+//! only one that can contain a document with no MRZ, which is the population
+//! the unsupported-assertion split below exists to measure separately.
 //!
 //! Requires the shipped GGUF present at the repo root (same precondition as
 //! the existing `#[ignore]`d `native_llm_e2e`/`parity` tests in
 //! `synthpass-llm`) — the LLM provider has to actually run to be measured.
 //!
 //! ```text
-//! provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH] [--measure-memory]
+//! provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH]
+//!                [--measure-memory] [--real-specimens]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
@@ -17,13 +23,17 @@
 //!   --measure-memory   sample process RSS around each provider's loop
 //!                      (requires the `measure-memory` feature; see its doc
 //!                      comment in Cargo.toml for why this is coarse)
+//!   --real-specimens   run over samples/ instead of the synthetic corpus;
+//!                      ground truth is optional per specimen, and
+//!                      --count/--seed/--profile are ignored
 //! ```
 
 use serde::Serialize;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real, ProviderReport, UnsupportedAssertion,
+    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
+    UnsupportedAssertion,
 };
 use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice};
 use synthpass_ocr::NativeOcr;
@@ -154,26 +164,55 @@ struct PerFieldCer {
 }
 
 /// Mirrors `synthpass_bench::provider_bench::UnsupportedAssertion` for JSON:
-/// `serde`'s adjacently-tagged enum representation, so a report reader sees
-/// either `{"status": "computed", "rate": ..., "assertions_total": ...}` or
+/// `serde`'s internally-tagged enum representation, so a report reader sees
+/// either `{"status": "computed", "overall": {...}, ...}` or
 /// `{"status": "not_applicable", "reason": "..."}` — never a bare number
 /// that would look the same whether it was measured or skipped.
+///
+/// `with_mrz_anchor`/`without_mrz_anchor` are `null` when the corpus had no
+/// document of that kind — always the case for `without_mrz_anchor` on the
+/// synthetic corpus, since every generated document carries an MRZ.
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum UnsupportedAssertionReport {
-    Computed { rate: f64, assertions_total: usize },
-    NotApplicable { reason: &'static str },
+    Computed {
+        overall: AssertionBucketReport,
+        with_mrz_anchor: Option<AssertionBucketReport>,
+        without_mrz_anchor: Option<AssertionBucketReport>,
+    },
+    NotApplicable {
+        reason: &'static str,
+    },
+}
+
+#[derive(Serialize)]
+struct AssertionBucketReport {
+    rate: f64,
+    assertions_total: usize,
+    documents: usize,
+}
+
+impl From<AssertionBucket> for AssertionBucketReport {
+    fn from(b: AssertionBucket) -> Self {
+        Self {
+            rate: b.rate,
+            assertions_total: b.assertions_total,
+            documents: b.documents,
+        }
+    }
 }
 
 impl From<UnsupportedAssertion> for UnsupportedAssertionReport {
     fn from(u: UnsupportedAssertion) -> Self {
         match u {
             UnsupportedAssertion::Computed {
-                rate,
-                assertions_total,
+                overall,
+                with_mrz_anchor,
+                without_mrz_anchor,
             } => Self::Computed {
-                rate,
-                assertions_total,
+                overall: overall.into(),
+                with_mrz_anchor: with_mrz_anchor.map(Into::into),
+                without_mrz_anchor: without_mrz_anchor.map(Into::into),
             },
             UnsupportedAssertion::NotApplicable { reason } => Self::NotApplicable { reason },
         }
@@ -374,7 +413,27 @@ async fn main() {
             .map(|v| format!("{v:.3}"))
             .unwrap_or_else(|| "n/a".to_string());
         let unsupported = match &r.unsupported_assertion {
-            UnsupportedAssertion::Computed { rate, .. } => format!("{:.1}%", rate * 100.0),
+            UnsupportedAssertion::Computed {
+                overall,
+                with_mrz_anchor,
+                without_mrz_anchor,
+            } => {
+                // The split is the point of this line, not a detail: a single
+                // blended figure hides that the anchored and unanchored
+                // populations fail in different *kinds*, not just degrees.
+                // Each half prints its own document count, because they are
+                // never the same size and a bare rate would conceal that.
+                let half = |label: &str, b: &Option<AssertionBucket>| match b {
+                    Some(b) => format!(", {label} {:.1}% ({} docs)", b.rate * 100.0, b.documents),
+                    None => String::new(),
+                };
+                format!(
+                    "{:.1}%{}{}",
+                    overall.rate * 100.0,
+                    half("with-MRZ", with_mrz_anchor),
+                    half("no-MRZ", without_mrz_anchor),
+                )
+            }
             UnsupportedAssertion::NotApplicable { reason } => format!("n/a ({reason})"),
         };
         println!(

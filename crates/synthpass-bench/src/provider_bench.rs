@@ -135,11 +135,54 @@ pub struct AccuracyStats {
 /// `Capability::vision` is `false`; a vision-capable provider gets
 /// `NotApplicable` with the reason recorded, never a silently-wrong number.
 pub enum UnsupportedAssertion {
-    /// Computed over `assertions_total` non-null answered fields, from a
-    /// `!capability.vision` provider.
-    Computed { rate: f64, assertions_total: usize },
+    /// Computed over the non-null answered fields of a `!capability.vision`
+    /// provider, split by whether the document gave it an MRZ to anchor on.
+    Computed {
+        overall: AssertionBucket,
+        /// Documents where `mrz::find_and_parse` recovered an MRZ. `None`
+        /// when the corpus contained no such document.
+        with_mrz_anchor: Option<AssertionBucket>,
+        /// Documents with no MRZ at all — the population where a text-only
+        /// provider has no deterministic anchor whatsoever. `None` when the
+        /// corpus contained no such document, which is always the case for
+        /// the synthetic corpus (every generated document carries an MRZ by
+        /// construction).
+        without_mrz_anchor: Option<AssertionBucket>,
+    },
     /// Not computed. `capability.vision` was `true` for this provider.
     NotApplicable { reason: &'static str },
+}
+
+/// One unsupported-assertion measurement over a named subset of documents.
+///
+/// `documents` is carried alongside the rate because the two halves of the
+/// split are not the same size and a rate alone would hide that: "40% over
+/// 4 documents" and "40% over 120" are different claims, and the whole point
+/// of this split is that the smaller half is the one nobody had measured.
+pub struct AssertionBucket {
+    pub rate: f64,
+    pub assertions_total: usize,
+    pub documents: usize,
+}
+
+impl AssertionBucket {
+    /// `None` when the subset had no documents at all — absent, rather than a
+    /// `0.0` rate that would read as "measured, and clean". Same reasoning as
+    /// [`AccuracyStats`]'s `Option`s.
+    fn new(unsupported: usize, total: usize, documents: usize) -> Option<Self> {
+        (documents > 0).then_some(Self {
+            // A document can legitimately contribute zero assertions (the
+            // provider answered nothing), so `total == 0` with `documents > 0`
+            // is a real state: nothing asserted is nothing unsupported.
+            rate: if total == 0 {
+                0.0
+            } else {
+                unsupported as f64 / total as f64
+            },
+            assertions_total: total,
+            documents,
+        })
+    }
 }
 
 const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-text predicate \
@@ -240,6 +283,20 @@ struct BenchPage {
     page: OcrPage,
     ground_truth: Option<HashMap<CoreField, String>>,
     image_path: PathBuf,
+    /// Whether `mrz::find_and_parse` recovered *any* MRZ from this document's
+    /// OCR text — parsed, not necessarily checksum-valid.
+    ///
+    /// This is the "zero anchor vs some anchor" split, and it is deliberately
+    /// the found/not-found line rather than the checksum-valid/invalid one.
+    /// It mirrors the routing distinction the pipeline already draws:
+    /// `EscalationKind::MrzNotFound` versus `MrzChecksumFailed`
+    /// (`synthpass_die::RoutingPolicy::decide`, whose clause order is
+    /// documented as normative for exactly this reason). A checksum-partial
+    /// read still pins several fields mathematically; no MRZ at all pins
+    /// nothing, and that is the population where a text-only provider has
+    /// nothing to be right about — which is what
+    /// [`UnsupportedAssertion`]'s split exists to measure separately.
+    mrz_found: bool,
 }
 
 /// Writes `image` to a uniquely-named temp file and OCRs it via
@@ -282,10 +339,16 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
             let (page, image_path) =
                 ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
             let truth = mrz::parse_td3(&doc.labels.mrz_line1, &doc.labels.mrz_line2).ok()?;
+            // Read from the OCR text, never from `labels`: the question is
+            // what this run's OCR pass actually recovered, which is what a
+            // provider had to work with. A generated document always *has*
+            // an MRZ, but a degraded capture can leave none of it legible.
+            let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             Some(BenchPage {
                 page,
                 ground_truth: Some(mrz_ground_truth(&truth)),
                 image_path,
+                mrz_found,
             })
         })
         .collect()
@@ -301,10 +364,12 @@ fn prep_specimens(ocr: &NativeOcr, specimens: &[RealSpecimenDoc]) -> Vec<Option<
         .map(|doc| {
             let (page, image_path) = ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
+            let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             Some(BenchPage {
                 page,
                 ground_truth,
                 image_path,
+                mrz_found,
             })
         })
         .collect()
@@ -354,6 +419,18 @@ async fn run_prepped(
         .iter()
         .filter(|p| matches!(p, Some(bp) if bp.ground_truth.is_some()))
         .count();
+    // Counted over documents, not per reader: the split is a property of the
+    // corpus, identical for every provider, so counting it once also makes it
+    // impossible for two providers to disagree about how many anchored
+    // documents they saw.
+    let anchored_documents = prepped
+        .iter()
+        .filter(|p| matches!(p, Some(bp) if bp.mrz_found))
+        .count();
+    let unanchored_documents = prepped
+        .iter()
+        .filter(|p| matches!(p, Some(bp) if !bp.mrz_found))
+        .count();
 
     let mut reports = Vec::with_capacity(catalog.readers().len());
     for reader in catalog.readers() {
@@ -372,6 +449,14 @@ async fn run_prepped(
             .collect();
         let mut assertions_total = 0usize;
         let mut assertions_unsupported = 0usize;
+        // Same two counters again, restricted to documents with / without an
+        // MRZ anchor. Accumulated separately rather than derived afterwards
+        // because an assertion belongs to the document it was made about, and
+        // that association is only available here inside the loop.
+        let mut anchored_total = 0usize;
+        let mut anchored_unsupported = 0usize;
+        let mut unanchored_total = 0usize;
+        let mut unanchored_unsupported = 0usize;
 
         for bench_page in prepped.iter().flatten() {
             // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
@@ -428,14 +513,23 @@ async fn run_prepped(
                 if !capability.vision {
                     if let Some(value) = got {
                         if !value.is_empty() {
-                            assertions_total += 1;
-                            if !bench_page
+                            let unsupported = !bench_page
                                 .page
                                 .text
                                 .to_lowercase()
-                                .contains(&value.to_lowercase())
-                            {
+                                .contains(&value.to_lowercase());
+                            assertions_total += 1;
+                            if unsupported {
                                 assertions_unsupported += 1;
+                            }
+                            let (total, bad) = if bench_page.mrz_found {
+                                (&mut anchored_total, &mut anchored_unsupported)
+                            } else {
+                                (&mut unanchored_total, &mut unanchored_unsupported)
+                            };
+                            *total += 1;
+                            if unsupported {
+                                *bad += 1;
                             }
                         }
                     }
@@ -459,12 +553,26 @@ async fn run_prepped(
             }
         } else {
             UnsupportedAssertion::Computed {
-                rate: if assertions_total == 0 {
-                    0.0
-                } else {
-                    assertions_unsupported as f64 / assertions_total as f64
-                },
-                assertions_total,
+                overall: AssertionBucket::new(
+                    assertions_unsupported,
+                    assertions_total,
+                    ocr_documents,
+                )
+                .unwrap_or(AssertionBucket {
+                    rate: 0.0,
+                    assertions_total: 0,
+                    documents: 0,
+                }),
+                with_mrz_anchor: AssertionBucket::new(
+                    anchored_unsupported,
+                    anchored_total,
+                    anchored_documents,
+                ),
+                without_mrz_anchor: AssertionBucket::new(
+                    unanchored_unsupported,
+                    unanchored_total,
+                    unanchored_documents,
+                ),
             }
         };
 
@@ -662,6 +770,7 @@ mod tests {
                 },
                 ground_truth: Some(labelled_truth),
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+                mrz_found: false,
             }),
             Some(BenchPage {
                 page: OcrPage {
@@ -670,6 +779,7 @@ mod tests {
                 },
                 ground_truth: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
+                mrz_found: false,
             }),
         ];
 
@@ -699,6 +809,7 @@ mod tests {
             },
             ground_truth: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;
@@ -730,16 +841,30 @@ mod tests {
             },
             ground_truth: None, // deliberately unlabelled — must not block this metric
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;
-        match reports[0].unsupported_assertion {
+        match &reports[0].unsupported_assertion {
             UnsupportedAssertion::Computed {
-                rate,
-                assertions_total,
+                overall,
+                with_mrz_anchor,
+                without_mrz_anchor,
             } => {
-                assert_eq!(assertions_total, 1);
-                assert_eq!(rate, 1.0, "SMITH never appears in the OCR text");
+                assert_eq!(overall.assertions_total, 1);
+                assert_eq!(overall.rate, 1.0, "SMITH never appears in the OCR text");
+                // The fixture's OCR text carries no MRZ, so the whole
+                // measurement belongs to the unanchored half — the population
+                // Phase 2's grounding gate is aimed at.
+                assert!(
+                    with_mrz_anchor.is_none(),
+                    "no fixture document had a parseable MRZ"
+                );
+                let unanchored = without_mrz_anchor
+                    .as_ref()
+                    .expect("the one fixture document had no MRZ");
+                assert_eq!(unanchored.documents, 1);
+                assert_eq!(unanchored.rate, 1.0);
             }
             UnsupportedAssertion::NotApplicable { .. } => {
                 panic!("a deterministic (!vision) provider must get a computed rate")
@@ -769,6 +894,7 @@ mod tests {
             },
             ground_truth: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;
