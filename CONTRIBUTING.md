@@ -152,6 +152,34 @@ reference (e.g. to check whether a document format is genuinely MRZ-bearing befo
 whether to source a specimen) but nothing from it is ever fetched programmatically or stored in
 this repository.
 
+### Running the local bench loop
+
+`scripts/run-bench.ps1 -Track <name>` runs `provider-bench --real-specimens` (M7's
+multi-provider harness) scoped to one named track — `passport`, `id_card`,
+`driving_license`, or `real-specimens` (the whole `samples/` real corpus) — appends
+the result to `results/<track>-bench/history.jsonl` on the `bench-data` branch, and
+regenerates that track's `knowledge/img/<track>-bench-trend.svg` locally. It pushes
+to `bench-data` (the same branch `.github/workflows/bench-data-collection.yml`
+already writes to on a schedule), not `main`, so it's safe to run without opening a
+PR — nothing lands on a protected branch. See `knowledge/benchmarks/README.md` for
+the row schema and the live per-track charts.
+
+Prerequisites: the OCR `.rten` models and the shipped GGUF present at the repo root
+(same as any other bench run — see "Building & testing" above), and `git` on `PATH`
+(no `jq` needed; the flattening step is native PowerShell).
+
+```powershell
+./scripts/run-bench.ps1 -Track passport               # whole samples/passports/ corpus
+./scripts/run-bench.ps1 -Track passport -Limit 30     # a faster, evenly-sampled subset
+./scripts/run-bench.ps1 -Track real-specimens -Limit 50
+```
+
+`-FromReport PATH` flattens an existing `provider-bench` report instead of running
+one — useful for folding in a slow run you already have, without redoing it.
+
+The regenerated SVG is never auto-committed — review it and commit it yourself on a
+normal branch/PR, same as any other README asset.
+
 ## Semver policy (the `mrz` crate)
 
 `crates/mrz` is [published to crates.io](https://crates.io/crates/mrz) on its own version line,
