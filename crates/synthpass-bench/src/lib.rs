@@ -903,7 +903,7 @@ mod tests {
     /// is the common case in `samples/`: every MRZ-less ID-card front has no
     /// label file at all, and the loader has to treat that as "unlabelled,"
     /// per this crate's whole reason for existing (see `RealSpecimenDoc`'s
-    /// doc). `Bulgaria_ID_Card_front.png` has no sibling JSON under
+    /// doc). `Bulgaria_ID_Card_specimen.png` has no sibling JSON under
     /// `samples/ocr_fixtures/` as of this writing.
     /// A label file that exists but is malformed reads as unlabelled rather
     /// than aborting the load — but is not silently identical to "no label
@@ -936,14 +936,14 @@ mod tests {
         let root = repo_root();
         let samples = root.join("samples");
         assert!(
-            load_ground_truth(&samples, "Bulgaria_ID_Card_front").is_none(),
-            "no samples/ocr_fixtures/Bulgaria_ID_Card_front.json should exist"
+            load_ground_truth(&samples, "Bulgaria_ID_Card_specimen").is_none(),
+            "no samples/ocr_fixtures/Bulgaria_ID_Card_specimen.json should exist"
         );
 
-        let image_path = samples.join("id_cards").join("Bulgaria_ID_Card_front.png");
+        let image_path = samples.join("id_cards").join("Bulgaria_ID_Card_specimen.png");
         let specimen = load_specimen(&samples, &image_path)
             .expect("the image itself exists and should decode");
-        assert_eq!(specimen.name, "Bulgaria_ID_Card_front");
+        assert_eq!(specimen.name, "Bulgaria_ID_Card_specimen");
         assert!(
             specimen.labels.is_none(),
             "an unlabelled specimen must not silently acquire fabricated ground truth"

@@ -5,6 +5,15 @@ LLM, and pipeline crates. Files are organized by document kind into
 subdirectories; **no file has been renamed** (see "Naming convention" below
 for why).
 
+**Images are not tracked on `main`.** They live on the orphan `samples-data`
+branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
+you want the latest corpus) to populate this directory locally; it's
+`.gitignore`d otherwise. `samples/README.md` and `samples/ocr_fixtures/*.json`
+/ `*.md` (the hand-verified OCR ground truth) are the only things under
+`samples/` still tracked here. See CONTRIBUTING.md's "Adding a corpus
+specimen" section and `knowledge/benchmarks/README.md`'s "local bench loop"
+for how the corpus grows now.
+
 ## Layout
 
 ```
@@ -17,9 +26,11 @@ samples/
   README.md
 ```
 
-`tools/fetch_wiki_category_with_images.py` (repo root `tools/`) is the
-scraper originally used to collect the Wikipedia specimen images; it lives
-outside `samples/` since it is not itself a test fixture.
+`tools/fetch_commons_mrz_specimens_v2.py` (repo root `tools/`) is the
+scraper used to collect candidate specimen images from Wikimedia Commons; it
+stages them in a gitignored directory for `scripts/ingest-fetched-samples.ps1`
+to sift into `samples/` (see CONTRIBUTING.md). It lives outside `samples/`
+since it is not itself a test fixture.
 
 ## Document kind -> MRZ format
 
@@ -76,19 +87,12 @@ ever needed.
 
 ## Format / count summary
 
-Total files under `samples/`: 149 (137 images + 6 `.md` + 6 `.json` OCR
-fixture sidecars).
+The corpus now grows continuously (see CONTRIBUTING.md's "Adding a corpus
+specimen"), so a hardcoded count here would go stale immediately. Check
+the live count instead:
 
-| Format | Count |
-|--------|-------|
-| JPG (`.jpg`)   | 85 |
-| JPEG (`.jpeg`) | 3  |
-| PNG (`.png`)   | 33 |
-| WEBP (`.webp`) | 14 |
-| GIF (`.gif`)   | 2  |
-| MD (`.md`)     | 6  |
-| JSON (`.json`) | 6  |
-
-Per-directory counts: `passports/` 100, `id_cards/` 25,
-`driving_licenses/` 3, `ocr_fixtures/` 18 (6 image + 6 `.md` + 6 `.json`),
-`misc/` 3.
+```powershell
+Get-ChildItem samples -Recurse -File -Include *.jpg,*.jpeg,*.png,*.webp,*.gif |
+    Group-Object { Split-Path (Split-Path $_.FullName -Parent) -Leaf } |
+    Select-Object Name, Count
+```
