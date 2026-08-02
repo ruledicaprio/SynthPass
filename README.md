@@ -8,7 +8,7 @@
 ![ICAO 9303](https://img.shields.io/badge/ICAO%209303-MRZ%20checksums-0B7261?style=flat)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F230%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 <!-- Posture -->
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
@@ -259,6 +259,11 @@ noise compounding over a longer field rather than a single fixable defect. The C
 deliberately below the measured value to absorb cross-platform variance in OCR inference without
 becoming flaky. Full account in [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4 notes.
 
+Beyond this snapshot, a local multi-provider bench loop (`provider-bench`, M7) tracks trend data
+by document format over time — passports, the whole real-specimen corpus, and more as they're
+run — pushed by hand to the `bench-data` branch rather than committed to `main`. Live charts per
+track: [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md#live-tracks).
+
 When the general OCR pass cannot produce a checksum-valid MRZ, targeted retry passes
 (MRZ-charset-constrained recognition over preprocessed crops) run automatically, and the check
 digits decide which reading — if any — is trusted. Tier 2 runs only after Tier 1 still misses. One
@@ -389,7 +394,8 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 ├── fuzz/                   cargo-fuzz targets for the untrusted OCR ingest path
 ├── samples/                Public-domain specimen documents and expected outputs, organized into
 │                           passports/, id_cards/, driving_licenses/, ocr_fixtures/, misc/ —
-│                           see samples/README.md
+│                           only ocr_fixtures/ (the hand-verified subset) is tracked in git; the
+│                           rest is a gitignored local mirror — see samples/README.md
 ├── scripts/                Development helpers
 ├── tools/                  Standalone scripts not themselves test fixtures (e.g. the Wikipedia
 │                           specimen scraper)

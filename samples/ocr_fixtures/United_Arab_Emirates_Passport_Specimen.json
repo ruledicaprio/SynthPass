@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1974-02-02",
+  "date_of_expiry": "2016-12-31",
+  "document_number": "ZK8K81404",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "SAIF ABDUL RAHMAN OBAID MOHAMM",
+  "issuing_country": "ARE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<AREALKAABI<<SAIF<ABDUL<RAHMAN<OBAID<MOHAMM\nZK8K814040ARE7402027M1612310<<<<<<<<<<<<<<<8",
+  "nationality": "ARE",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "ALKAABI"
+}

@@ -20,7 +20,12 @@ compile_error!("synthpass-pipeline requires the `inferer-native` feature");
 /// Produces an [`Extraction`] from OCR Markdown (Tier 2 — the LLM fallback).
 #[async_trait]
 pub trait InferBackend: Send + Sync {
-    async fn extract(&self, markdown: &str) -> Result<Extraction, String>;
+    /// `hint`: a short, pre-rendered `k=v` string of checksum-verified MRZ
+    /// fields the caller wants folded into the prompt (see
+    /// `synthpass_llm::prompt::build_prompt`'s `hint` param), or `None`.
+    /// Backends with no prompt of their own (test/mock implementations) are
+    /// free to ignore it.
+    async fn extract(&self, markdown: &str, hint: Option<&str>) -> Result<Extraction, String>;
     /// Like [`Self::extract`], but forwards incremental text on `tx` as
     /// [`ProcessEvent::Delta`] while the model generates. Implementations
     /// must use non-blocking sends (`try_send`) — a stalled receiver must
@@ -28,6 +33,7 @@ pub trait InferBackend: Send + Sync {
     async fn extract_stream(
         &self,
         markdown: &str,
+        hint: Option<&str>,
         tx: &mpsc::Sender<ProcessEvent>,
     ) -> Result<Extraction, String>;
     /// Short human-readable identity for logs.
@@ -36,6 +42,12 @@ pub trait InferBackend: Send + Sync {
     /// e.g. the GGUF filename. Defaults to `None` so out-of-tree backends stay
     /// source-compatible; the pipeline records `"unknown"` in that case.
     fn model_id(&self) -> Option<String> {
+        None
+    }
+    /// Which compiled-in prompt this backend used, for [`synthpass_core::v2::ExtractionTrace`].
+    /// Defaults to `None` so out-of-tree backends stay source-compatible; a
+    /// deterministic-only backend has no prompt to report.
+    fn prompt_ref(&self) -> Option<synthpass_core::v2::PromptRef> {
         None
     }
     /// Preflight check for `synthpass doctor`: `Ok(status)` on success, `Err(reason)`
@@ -100,10 +112,11 @@ mod native {
 
     #[async_trait]
     impl InferBackend for NativeInferer {
-        async fn extract(&self, markdown: &str) -> Result<Extraction, String> {
+        async fn extract(&self, markdown: &str, hint: Option<&str>) -> Result<Extraction, String> {
             let llm = self.get_or_load().await?;
             let markdown = markdown.to_string();
-            tokio::task::spawn_blocking(move || llm.extract(&markdown))
+            let hint = hint.map(str::to_string);
+            tokio::task::spawn_blocking(move || llm.extract(&markdown, hint.as_deref()))
                 .await
                 .map_err(|e| format!("inference task panicked: {e}"))?
         }
@@ -111,13 +124,15 @@ mod native {
         async fn extract_stream(
             &self,
             markdown: &str,
+            hint: Option<&str>,
             tx: &mpsc::Sender<ProcessEvent>,
         ) -> Result<Extraction, String> {
             let llm = self.get_or_load().await?;
             let markdown = markdown.to_string();
+            let hint = hint.map(str::to_string);
             let tx = tx.clone();
             tokio::task::spawn_blocking(move || {
-                llm.extract_stream(&markdown, |delta| {
+                llm.extract_stream(&markdown, hint.as_deref(), |delta| {
                     // Non-blocking: a stalled receiver must never extend how
                     // long the caller's concurrency permit is held.
                     let _ = tx.try_send(ProcessEvent::Delta(delta.to_string()));
@@ -137,6 +152,10 @@ mod native {
             self.model_path
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
+        }
+
+        fn prompt_ref(&self) -> Option<synthpass_core::v2::PromptRef> {
+            Some(synthpass_llm::prompt::prompt_ref())
         }
 
         async fn health(&self) -> Result<String, String> {

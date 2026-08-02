@@ -48,7 +48,7 @@ const CORPUS: &[(&str, &str)] = &[
     // isolation — not for the hit-rate, which cannot reach 100% while this
     // entry is present. The placeholder value below can never match.
     (
-        "Israel_Biometric_Passport.jpg",
+        "Israel_Passport_Specimen.jpg",
         "REDACTED-NO-GROUND-TRUTH-MRZ",
     ),
 ];
@@ -56,8 +56,8 @@ const CORPUS: &[(&str, &str)] = &[
 /// Samples with no MRZ at all: the retry passes run in full (worst-case
 /// latency) and must never produce a checksum-valid MRZ.
 const NEGATIVE: &[&str] = &[
-    "BulgariaID_face.png",
-    "SerbianID_face.png",
+    "Bulgaria_ID_Card_specimen.png",
+    "Serbian_ID_Specimen_face.png",
     "Slovenian_ID_Card_2022_-_Front.jpg",
     // Genuine Slovak passport specimen, but this particular crop doesn't
     // include the bottom MRZ strip at all -- correctly must not validate.
@@ -74,8 +74,13 @@ fn main() {
     .expect("failed to load OCR models — run from the repo root");
 
     let mut hits = 0usize;
+    let mut missing = 0usize;
     for (file, expected_doc) in CORPUS {
-        let path = find_sample(file);
+        let Some(path) = find_sample(file) else {
+            println!("SKIP  {file}: not found under samples/ — stale corpus entry");
+            missing += 1;
+            continue;
+        };
         let started = std::time::Instant::now();
         let text = match ocr.recognize(&path) {
             Ok(t) => t,
@@ -121,13 +126,24 @@ fn main() {
             }
         }
     }
+    // Denominator is the whole declared corpus, not just what was found: a
+    // stale entry is a gap in coverage, and hiding it by shrinking the
+    // denominator would quietly inflate the rate this harness exists to report.
     let total = CORPUS.len();
     let pct = 100.0 * hits as f64 / total as f64;
     println!("\nTier-1 hit rate: {hits}/{total} = {pct:.0}%");
+    if missing > 0 {
+        println!(
+            "warning: {missing} corpus entr(y/ies) not found under samples/ — counted as misses"
+        );
+    }
 
     println!("\nNegative controls (no MRZ present — must not validate):");
     for file in NEGATIVE {
-        let path = find_sample(file);
+        let Some(path) = find_sample(file) else {
+            println!("SKIP  {file}: not found under samples/ — stale corpus entry");
+            continue;
+        };
         let started = std::time::Instant::now();
         let text = match ocr.recognize(&path) {
             Ok(t) => t,
@@ -160,7 +176,16 @@ fn repo_root() -> PathBuf {
 /// searching recursively — so this survives `samples/` being reorganized
 /// into continent/class subfolders without every `CORPUS`/`NEGATIVE` entry
 /// needing its exact subpath hardcoded.
-fn find_sample(name: &str) -> PathBuf {
+///
+/// Returns `None` rather than panicking on a name that no longer exists.
+/// The recursive search above only absorbs a specimen being *moved*; a
+/// *rename* still strands the entry, and that is what happened to two of them
+/// (`Israel_Biometric_Passport.jpg`, `BulgariaID_face.png`) when `samples/`
+/// was reorganized. Panicking made the first stranded name abort the whole
+/// run — including, because the `CORPUS` loop runs first, the negative-control
+/// sweep that never got reached. A skipped specimen should cost one line of
+/// output and one entry off the denominator, not the entire harness.
+fn find_sample(name: &str) -> Option<PathBuf> {
     fn search(dir: &Path, name: &str) -> Option<PathBuf> {
         for entry in std::fs::read_dir(dir).ok()?.flatten() {
             let path = entry.path();
@@ -175,5 +200,4 @@ fn find_sample(name: &str) -> PathBuf {
         None
     }
     search(&repo_root().join("samples"), name)
-        .unwrap_or_else(|| panic!("sample file not found anywhere under samples/: {name}"))
 }

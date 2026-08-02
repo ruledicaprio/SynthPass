@@ -7,6 +7,14 @@ edition.workspace = true
 name = "synthpass-bench"
 path = "src/bin/synthpass-bench.rs"
 
+[[bin]]
+name = "provider-bench"
+path = "src/bin/provider-bench.rs"
+
+[[bin]]
+name = "bench-chart"
+path = "src/bin/bench-chart.rs"
+
 [dependencies]
 # Always built with real glyphs regardless of synthpass-gen's own default —
 # a benchmark measuring OCR hit rate against placeholder bars would be
@@ -19,6 +27,34 @@ mrz = { path = "../mrz" }
 # still have a structurally suspect line 1 (see knowledge/ROADMAP.md's per-field
 # CER note).
 synthpass-core = { path = "../synthpass-core" }
+# M7 provider contract — iterate every registered `FieldReader` rather than
+# only the OCR+MRZ Tier-1 path above.
+synthpass-die = { path = "../synthpass-die" }
+# `repair::repair_fallbacks()` — the LLM provider's JSON-validity signal.
+synthpass-llm = { path = "../synthpass-llm" }
+# Builds the real M7 catalog (`MrzReader` + `LlmFieldReader`) via
+# `Pipeline::catalog()` — `LlmFieldReader` is `pub(crate)` there, so this is
+# the only way to reach the registered instance.
+synthpass-pipeline = { path = "../synthpass-pipeline" }
 image = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# `FieldReader::read` is `#[async_trait]`; `provider-bench` drives it from
+# `#[tokio::main]`, and unit tests drive it from `#[tokio::test]`.
+async-trait = "0.1"
+tokio = { workspace = true }
+# Coarse process-RSS measurement for `provider-bench --measure-memory`, never
+# built by default — see the `measure-memory` feature below.
+sysinfo = { version = "0.32", optional = true }
+# `bench-chart`'s SVG renderer. Pure Rust, no C dependency: only the
+# `svg_backend` (a thin wrapper over the `svg` crate's XML text generation)
+# and `line_series` features are enabled — the default `bitmap` backend pulls
+# in font rasterization this crate has no other use for.
+plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
+
+[features]
+# Opt-in real memory sampling for `provider-bench`. Off by default: everyone
+# else gets `Capability::estimated_resident_bytes` (the provider's own
+# declared figure, already designed to be the benchmark's memory column) with
+# zero extra dependency weight.
+measure-memory = ["dep:sysinfo"]

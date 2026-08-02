@@ -514,37 +514,46 @@ Emergency Travel Document
 
 Emergency Travel Document
 MRZ 1st line
-PUU OERIKSSONT <<ANNA MARIA< <<<<<<<<<<<
+PUUTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<
 
 MRZ 2nd line
-D231458907UTO7408122F 2606277 <<<<<<< 8
+D231458907UTO7408122F2606277<<<<<<<8
 
 Submit
 ```
 
-| DC | 5E | 58 | 4D | 13 | AC | F1 | E9 | 32 |
-|---|---|---|---|---|---|---|---|---|
-| 03 | 03 | 13 | 0D | 3C | 16 | 0A | 08 | 7A |
-| D9 | 02 | 5C | 4A | 13 | 73 | 97 | 3A | 4E |
-| C5 | 30 | 6F | 32 | 45 | 2D | 89 | 7F | 0E |
-| CA | B3 | FC | C1 | 40 | E2 | 51 | 6F | ED |
-| D9 | BA | 57 | B0 | FF | 7E | 0D | 20 | E6 |
-| C8 | D2 | 13 | 1A | 39 | C2 | 1C | 04 | |
-| A7 | B3 | 3C | E6 | 03 | 0D | 3C | FB | |
-| 5D | CD | 13 | 27 | DA | 7B | 48 | DB | |
-| 99 | 49 | 3C | 84 | 85 | EF | B9 | AF | |
-| 91 | 1D | 3C | 15 | 18 | 38 | 07 | 8A | |
-| 3A | A9 | 6B | 3F | 3C | 1C | A4 | B9 | |
-| 3A | C5 | 13 | 26 | 4E | 7A | 47 | 35 | |
-| 57 | D4 | 8A | 3C | D3 | 09 | 7C | 93 | |
-| 9C | 5B | 20 | 45 | C0 | E5 | F6 | 8A | |
+*Note.— Both MRZ lines above measure 36 characters (TD2 format), not the
+44-character TD3 width — this Emergency Travel Document example uses the
+TD2-size MRZ. The lines were recovered from the source PDF by extracting
+each word's on-page coordinates and concatenating left to right, rather than
+trusting flat text order: the PDF's flat text layer interleaves the two
+`<`-filler runs with the name and yields spurious literal spaces (a
+two-column-ish layout that plain text extraction does not linearize
+correctly), which is what the previous transcription reproduced verbatim.*
 
-<!-- The source PDF states "Datamatrix contains 134 bytes of data"; this table
-     accounts for 121. The remaining ~13 bytes could not be reliably ordered
-     from the PDF's text layer (a two-column hex layout that pdftotext
-     flattens ambiguously) — needs a visual re-check against the source PDF
-     page (Appendix B, Emergency Travel Document Visible Digital Seal
-     example) rather than a guessed transcription. -->
+The seal's byte payload, reconstructed the same way (word coordinates
+clustered into the source table's true 16-column × 9-row grid, rather than
+the 9-column layout previously guessed from flat text order):
+
+| Col 1 | Col 2 | Col 3 | Col 4 | Col 5 | Col 6 | Col 7 | Col 8 | Col 9 | Col 10 | Col 11 | Col 12 | Col 13 | Col 14 | Col 15 | Col 16 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| DC | 03 | D9 | C5 | D9 | CA | C8 | A7 | 3A | 99 | 5D | 91 | 3A | 7D | 9C | 57 |
+| 5E | 03 | 02 | 30 | BA | B3 | D2 | B3 | C5 | 49 | CD | 1D | A9 | 3C | 5B | D4 |
+| 58 | 13 | 5C | 6F | 57 | FC | 13 | 3C | 13 | 3C | 13 | 3C | 6B | 38 | 20 | 8A |
+| 4D | 0D | 4A | 32 | B0 | C1 | 1A | E6 | 26 | 84 | 27 | 15 | 3F | 7C | 45 | 3C |
+| 13 | 3C | 13 | 45 | FF | 40 | 39 | 03 | 4E | 85 | DA | 18 | 3C | 1C | C0 | D3 |
+| AC | 16 | 73 | 2D | 7E | E2 | C2 | 0D | 7A | EF | 7B | 38 | 1C | 0A | E5 | 09 |
+| F1 | 0A | 97 | 89 | 0D | 51 | 1C | 3C | 47 | B9 | 48 | 07 | A4 | D0 | F6 | 7C |
+| E9 | 08 | 3A | 7F | 20 | 6F | 04 | FB | 35 | AF | DB | 8A | B9 | 65 | 8A | 93 |
+| 32 | 7A | 4E | 0E | E6 | ED | | | | | | | | | | |
+
+Read column by column, top to bottom (Col 1 then Col 2, and so on) — 134
+values total, matching "Datamatrix contains 134 bytes of data" exactly.
+Corrected from the previous 9-column table, which had reordered 15 of the
+source's 16 columns from flat text-extraction order (with two columns
+transposed) and dropped one entire column (Col 14 above: `7D 3C 38 7C 1C 0A
+D0 65`) rather than an evenly-spread ~13 missing bytes as the old inline
+comment estimated.
 
 ---
 *— END —*

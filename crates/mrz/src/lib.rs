@@ -46,21 +46,24 @@ mod translit;
 
 pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};
 pub use checksum::{check_digit, verify};
-pub use countries::{code_for_name, country_name};
+pub use countries::{code_for_name, codes_equivalent, country_name};
 pub use dates::{
     date_completeness, expand_date, expand_date_with_pivot, Date, DateCompleteness, DateValidity,
     CURRENT_YY,
 };
 pub use emit::{
-    format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, MrvAFields, MrvBFields,
-    Td1Fields, Td2Fields, Td3Fields,
+    encode_name_component, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3,
+    MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
 };
 pub use parser::{
     find_and_parse, find_and_parse_with, parse_mrv_a, parse_mrv_a_with, parse_mrv_b,
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
     parse_td3_with,
 };
-pub use repair::{solve_field, width_candidates, FieldKind, Resolution, MRZ_ALPHABET, UNKNOWN};
+pub use repair::{
+    solve_field, solve_substitution, substitution_candidates, width_candidates, FieldKind,
+    Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
+};
 pub use translit::{transliterate, transliterate_char, transliterations, TransliterationStyle};
 
 /// Tunables for the parsing entry points.

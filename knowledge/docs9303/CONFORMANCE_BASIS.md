@@ -12,10 +12,16 @@ ADR-0003 (`../decisions/ADR-0003-docs9303-source-of-truth.md`) records, as
 its own negative consequence, that a cleanup-script bug briefly clipped real
 content from several files' endings, and that the corpus "should be
 spot-checked against source again before being treated as fully
-authoritative" rather than trusted just because it looks clean. There are no
-source PDFs in this repository to diff against (see
-[README.md](README.md)'s "What does not belong here"), so verification here
-is necessarily internal to the corpus.
+authoritative" rather than trusted just because it looks clean. The source
+PDFs are still deliberately not committed to this repository (see
+[README.md](README.md)'s "What does not belong here"), but a later pass
+(see the entries marked "verified against the source PDF" below, and the
+ADR-0003 follow-up entry) had access to them on the converting machine and
+diffed the flagged passages directly — several entries below have moved from
+"unverified" to a source-confirmed status as a result. Anything still marked
+"unverified" here either predates that pass in a way a PDF diff wouldn't
+settle (a code-behavior property, or a confirmed *absence* in the corpus)
+rather than being an open TODO.
 
 For the MRZ check-digit core specifically, that internal verification is
 strong: Appendix A's worked examples (Part 3) are numeric, hand-checkable
@@ -43,7 +49,7 @@ happening to compensate for it.
 
 ### Part 3 Appendix A — composite check-digit worked examples
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1241-1383`
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1241-1383`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#example-3--composite-check-digit-calculation-for-td3-documents)
 
 Establishes three fully worked composite check-digit calculations (Examples
 3-5), each showing every per-character product and the final sum. Pinned
@@ -75,7 +81,7 @@ uses, cross-checked against the layout tables below:
 
 ### Part 5 §4.2.4 composite check-digit table
 
-`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:476-479`
+[`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:476-479`](Doc_9303_Part5_Specs_for_TD1_MROTDs.md#424-check-digits-in-the-mrz)
 
 States the TD1 composite check digit covers "6-30 (upper line), 1-7, 9-15,
 19-29 (middle line)" and explicitly notes positions "1-30 (lower line)...
@@ -89,7 +95,7 @@ with each other without either one citing the other.
 
 ### Part 4 §4.2.3.1 — worked VIZ→MRZ name examples
 
-`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-533`
+[`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-533`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#423-truncation-of-names-in-the-mrz)
 
 Nine worked examples (a-f, with (e) containing three) showing a VIZ name
 truncated/formatted into a 44-character TD3 upper MRZ line. Pinned as
@@ -105,8 +111,8 @@ non-truncating worked examples") for the full account.
 
 ### Part 5 §4.2.4 / Part 6 note j — long document number encoding
 
-`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:368` (note j), `:464-469` (§4.2.4),
-`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:340` (note j)
+[`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:368`](Doc_9303_Part5_Specs_for_TD1_MROTDs.md#422-data-structure-of-machine-readable-data-for-the-td1) (note j), `:464-469` (§4.2.4),
+[`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:340`](Doc_9303_Part6_Specs_for_TD2_MROTDs.md#422-data-structure-of-machine-readable-data-for-the-td2) (note j)
 
 Establishes that a document number exceeding nine characters puts all **nine**
 principal characters in the number field, a filler in the *check-digit*
@@ -129,7 +135,7 @@ composite is 720 % 10 = 0, both reproduced independently of the crate.
 
 Note that **Part 4 contains no overflow rule at all** — searching the corpus
 for "more than 9 characters" hits Parts 5, 6 and 7 only, and Part 4's
-passport-number rows (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:415-425`)
+passport-number rows ([`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:415-425`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#422-data-structure-of-machine-readable-data-for-the-mrp-data-page))
 define a flat nine-character field. Applying the TD1/TD2 rule to TD3, as this
 crate does, is a deliberate extension by analogy because issuers do it in
 practice, not something Part 4 licenses. Part 7 (`:320`, `:678`) explicitly
@@ -138,11 +144,11 @@ stops at "positions 1 to 9" with no spillover, which the crate already honours.
 ### Part 3 §4.6 / Part 4 §4.2.3.1, §4.2.3.4 — name-field punctuation and
 non-truncating worked examples
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495-535` (punctuation rules),
-`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-584`,
-`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`,
-`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`,
-`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:338-402` (MRV-A),
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495-535`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#46-convention-for-writing-the-name-of-the-holder) (punctuation rules),
+[`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-584`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#423-truncation-of-names-in-the-mrz),
+[`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`](Doc_9303_Part5_Specs_for_TD1_MROTDs.md#423-truncation-of-names-in-the-mrz),
+[`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`](Doc_9303_Part6_Specs_for_TD2_MROTDs.md#423-truncation-of-names-in-the-mrz),
+[`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:338-402`](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md#423-examples-of-names-of-the-holder-in-the-mrz) (MRV-A),
 `:690-760` (MRV-B)
 
 Segment S3 implemented `crates/mrz/src/emit.rs`'s `clean_name_half` (per-half
@@ -198,7 +204,7 @@ property test rather than a worked example.
 
 ### Part 3 §6 A — transliteration of multinational Latin-based characters
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:703-807` (Table A, 95 rows,
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:703-807`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#a-transliteration-of-multinational-latin-based-characters) (Table A, 95 rows,
 U+00C0…U+1E9E, sorted ascending by code point, no duplicate keys),
 `:1568-1574` (Appendix B, informative, "Térèsa CAÑON" worked example)
 
@@ -239,7 +245,7 @@ against.
 
 ### Part 3 §5 — issuing-state/nationality code registry, full cross-check
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:618-696` (Parts A-H)
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:618-696`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#5-codes-for-nationality-place-of-birth-location-of-issuing-stateauthority-and-other-purposes) (Parts A-H)
 
 Segment S5 diffed every 3-letter code the registry lists (Parts A-H) against
 `crates/mrz/src/countries.rs`'s `CODES` table. 24 codes already present and
@@ -273,7 +279,7 @@ directly, not by pattern-matching neighboring entries.
 
 ### Part 3 §4.8/§4.9 — filler dates and the check-digit interaction
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:547` (unknown-date filler rule),
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:547`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#48-representation-of-dates) (unknown-date filler rule),
 `:563` (filler value zero for check-digit purposes)
 
 `:547` states that if all or part of the **date of birth** (not expiry) is
@@ -307,7 +313,7 @@ combination is a direct application rather than an inference.
 
 ### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies
 
-`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:332` (example a),
+[`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:332`](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md#423-examples-of-names-of-the-holder-in-the-mrz) (example a),
 `:350` (example d)
 
 Two more corpus length defects, found by segment S3 while transcribing Part
@@ -331,26 +337,32 @@ Both are excluded from `MRV_A_NAME_VECTORS` in
 missing/wrong character, consistent with how the §4.2.3.3c entry below was
 handled.
 
-**Status: unverified — flagged as known defects, not corrected.**
+**Status: confirmed — genuine ICAO erratum, present in the source PDF
+itself.** Verified directly against `9303_p7_cons_en.pdf` (pages 20-21):
+`PyMuPDF` text extraction of the exact "MRZ (upper line):" strings on those
+pages reproduces both examples verbatim, at 45 and 36 characters
+respectively. The corpus is a faithful transcription; ICAO's own published
+text carries these two errors. Correctly left out of the pinned vectors.
 
 ### §4.2.3.3c length discrepancy
 
-`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:571-577`
+[`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:571-577`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#423-truncation-of-names-in-the-mrz)
 
-The example (`PPUTOBENNEL<WOOLOOM<WARRAN<WARNAM<<DINGO<POTO`) measures 45
+The example (`PPUTOBENNEL<WOOLOOM<WARRAN<WARNAM<<DINGO<POTO`) measured 45
 characters, one over the 44-character TD3 upper-line length every other
-example in the same section satisfies. Either the source PDF's own
-typesetting dropped/added a character in transcription, or ICAO's text
-itself carries an erratum — undetermined without the source PDF, which is
-not in this repository. Deliberately excluded from
-`SECTION_4_2_3_1_NAME_EXAMPLES` rather than "fixed" by guessing which
-character is wrong.
+example in the same section satisfies.
 
-**Status: unverified — flagged as a known defect, not corrected.**
+**Status: corrected in the corpus.** Verified against `9303_p4_cons_en.pdf`
+page 31: the source reads `PPUTOBENNEL<WOOLOO<WARRAN<WARNAM<<DINGO<POTO` — a
+clean 44 characters. The corpus had an extra transcribed `M` in `WOOLOO`
+(rendering it `WOOLOOM`); this was our transcription damage, not an ICAO
+erratum, and the line is now fixed to match the source exactly. Candidate
+for re-inclusion in `SECTION_4_2_3_1_NAME_EXAMPLES` now that it is a clean
+44-character vector.
 
 ### Part 5 §4.2.4 long-number check-digit position, table vs note
 
-`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:464-469`
+[`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:464-469`](Doc_9303_Part5_Specs_for_TD1_MROTDs.md#424-check-digits-in-the-mrz)
 
 The table's "Check digit position (upper MRZ line)" cell for the long document
 number reads "17 – 18 (one digit only)", but the note directly beneath it says
@@ -361,60 +373,106 @@ position 28, so a check digit that follows it can sit anywhere up to 29.
 The note is self-consistent with the same table's input range ("6 – 14,
 16 – 28") and with note j, so the implementation follows the note and locates
 the check digit dynamically as the character preceding the terminating filler.
-The "17 – 18" cell is most likely transcription damage in a narrow table
-column, but that is unconfirmed without the source PDF.
 
-**Status: unverified — resolved in favour of the note, discrepancy recorded.**
+**Status: confirmed — genuine inconsistency in the ICAO source document
+itself.** Verified against `9303_p5_cons_en.pdf` page 27: the table cell and
+the note beneath it disagree in the source PDF exactly as transcribed, word
+for word. Not a corpus transcription artifact. The implementation's choice
+to follow the note (self-consistent with the rest of the same table) stands.
 
 ### Part 8 Appendix B transcription damage
 
-`Doc_9303_Part8_Emergency_Travel_Documents.md:516-520`
+[`Doc_9303_Part8_Emergency_Travel_Documents.md:516-520`](Doc_9303_Part8_Emergency_Travel_Documents.md#appendix-b-to-part-8--worked-example-visible-digital-seal-for-etd-informative)
 
-The MRZ example's filler characters (`<`) render as literal spaces in the
+The MRZ example's filler characters (`<`) rendered as literal spaces in the
 converted text (`PUU OERIKSSONT <<ANNA MARIA< <<<<<<<<<<<` instead of a
-clean `<`-filled MRZ line) — a two-column source layout that didn't extract
-cleanly. Not usable as a pinned vector as transcribed.
+clean `<`-filled MRZ line), and the Appendix B byte-dump table accounted for
+only 121-126 of the 134 bytes the source PDF states it should have.
 
-`:542-547` carries an inline HTML comment, left in place from the original
-cleanup pass, admitting the same section's Appendix B byte-dump table
-accounts for only 121 of the 134 bytes the source PDF states it should have
-— also noted in `README.md`'s "Note on provenance" and ADR-0003's negative
-consequences.
+**Status: corrected in the corpus.** Both defects came from the same root
+cause: `9303_p8_cons_en.pdf` page 25 lays the MRZ example and the byte table
+out with fields positioned by absolute coordinates rather than a simple text
+flow (filler-character runs and a 16-column × 9-row grid), which
+flat text extraction (`pdftotext`-equivalent reading order) does not
+linearize correctly — words get emitted out of visual order, and in the
+table's case, one whole column silently vanished from the flattened stream.
 
-**Status: unverified — known damage, documented in place rather than
-guessed at.**
+Fixed by extracting each word's `(x, y)` coordinates via `PyMuPDF` and
+reassembling by position instead of extraction order:
 
-### Part 3 §6 A Table A — four damaged "National character" cells
+- MRZ lines are now `PUUTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<` and
+  `D231458907UTO7408122F2606277<<<<<<<8` — both a clean 36 characters
+  (TD2-size MRZ, appropriate for an Emergency Travel Document), verified
+  against the PDF's own word positions.
+- The byte table is now the full 16×9 grid (134 cells, 10 blank in the last
+  row), reconstructed by clustering word x/y-coordinates into the grid's
+  true row and column bands. The previous 9-column table had 15 of the 16
+  real columns present but reordered (two transposed) from flat-text
+  extraction order, and was missing column 14 (`7D 3C 38 7C 1C 0A D0 65`)
+  entirely — not a diffuse ~13-byte gap as the old inline comment estimated.
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:748` (U+0110),
+### Part 3 §6 A Table A — four "National character" cells, two genuinely
+fixed and two reverted
+
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:748`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#a-transliteration-of-multinational-latin-based-characters) (U+0110),
 `:765` (U+0131), `:766` (U+0132), `:772` (U+013F)
 
-Four Table A rows had a "National character" cell that disagreed with the
-row's own Unicode code point — corpus transcription damage, not an ICAO
-erratum, since the Unicode column is unambiguous and each fix makes the two
-columns agree instead of merely picking a plausible-looking glyph:
+Segment S4 corrected all four cells in place on the theory that each
+disagreed with its own Unicode code point due to corpus transcription
+damage: `:748` (U+0110) from `Ð` to `Đ`; `:765` (U+0131) from `I` to `ı`;
+`:766` (U+0132) from `IJ` to `Ĳ`; `:772` (U+013F) from `L·` to `Ŀ`. At the
+time there was no source PDF in the repository to check the assumption
+against, and the entry below originally read "Status: corrected in the
+corpus."
 
-- `:748` — U+0110 should render `Đ` (D WITH STROKE); the corpus showed `Ð`
-  (U+00D0, ETH — already a *different* Table A row, `:723`).
-- `:765` — U+0131 should render `ı` (LATIN SMALL LETTER DOTLESS I); the
-  corpus showed ASCII `I` (U+0049).
-- `:766` — U+0132 should render `Ĳ` (LATIN CAPITAL LIGATURE IJ); the corpus
-  showed the two-character decomposition `IJ` (U+0049 U+004A).
-- `:772` — U+013F should render `Ŀ` (LATIN CAPITAL LETTER L WITH MIDDLE
-  DOT); the corpus showed `L·` (U+004C U+00B7, a plain L followed by a
-  middle-dot punctuation mark).
+**Status: half-reverted after visual verification against the source PDF.**
+`9303_p3_cons_en.pdf` page 33's Table A was rendered to an image
+(`page.get_pixmap`, not text extraction — see why below) and inspected
+directly:
 
-Segment S4 corrected all four cells in place (four individual edits, verified
-by `git diff` to touch exactly those four lines and nothing else — see the
-segment's own verification). The "Recommended transliteration" column was
-already correct for all four rows and is unaffected.
+- **U+0110 → `Đ`: confirmed correct, kept as segment S4 left it.** The
+  rendered glyph is a D with a straight horizontal stroke through the stem,
+  matching `Đ`, not `Ð`.
+- **U+0131 → reverted to `I`.** The rendered glyph in the source PDF's own
+  table is a plain, undotted capital `I` — not `ı` (a lowercase letter,
+  which would be visually distinct). Segment S4's fix introduced a new
+  divergence from the source that did not previously exist. Table A
+  transliterates *into* the MRZ, which is always upper-case, so ICAO's own
+  table plausibly shows the upper-case form the row maps to (`I`) rather
+  than literally rendering U+0131's lower-case glyph — but whatever the
+  reason, `I` is what the source prints, and that is what the corpus must
+  transcribe.
+- **U+0132 → reverted to `IJ`.** The rendered glyph in the source PDF is two
+  separate letters `I` and `J`, not the single ligature glyph `Ĳ`. Same
+  reasoning as U+0131: segment S4 "fixed" a cell that was already a correct
+  transcription.
+- **U+013F → `Ŀ`: confirmed correct, kept as segment S4 left it.** The
+  rendered glyph is a single L-with-middle-dot form consistent with `Ŀ`.
 
-**Status: corrected in the corpus** (not merely worked around in code) —
-the Unicode column is authoritative and unambiguous for all four.
+Text extraction (`page.get_text()`) of this same PDF page returns `Ð` for
+U+0110 and `I` for U+0131 — i.e. it disagrees with the *rendered* glyph for
+U+0110 (which visually is `Đ`) while agreeing with it for U+0131. This is
+consistent with a known class of PDF defect (a subset/embedded font whose
+`ToUnicode` CMap maps a glyph to the wrong code point even though the glyph
+itself renders correctly) rather than a uniform extraction bug — which is
+exactly why this entry now cites a rendered image, not extracted text, as
+its evidence.
+
+Note that `crates/mrz/src/translit.rs`'s `TABLE_A` was **never affected** by
+any of this: its values are the "Recommended transliteration" column
+(`"I"`, `"IJ"`, etc.), which was correct throughout and independent of the
+"National character" column's display glyph — only a Rust doc-comment next
+to each entry echoes the display glyph, and only for documentation. No code
+change is needed here, only the corpus Markdown's display column.
+
+**Status: corrected in the corpus** for U+0110 and U+013F; **reverted to
+match the source** for U+0131 and U+0132 — all four now verified against a
+rendered image of the source PDF page rather than internal consistency
+alone.
 
 ### Part 3 §6 A / Appendix B — "nine characters" count matches nothing
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1568` (Appendix B, informative)
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:1568`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#b41-transliteration-of-european-languages-in-the-mrz) (Appendix B, informative)
 
 Appendix B's prose says there is "a group of **nine** characters that are
 treated specially" in transliteration. The normative Table A
@@ -429,12 +487,18 @@ Appendix B is explicitly informative; Table A is normative. This crate's
 `translit.rs` implements Table A as transcribed and does not attempt to
 reverse-engineer which nine characters Appendix B might have meant.
 
-**Status: unverified — discrepancy recorded, not resolved.** Table A (the
-normative table) governs.
+**Status: confirmed — genuine ICAO document inconsistency, verified against
+the source PDF.** `9303_p3_cons_en.pdf` page 61 states, verbatim: "There are
+a group of nine characters that are treated specially, for example, the
+character 'Ñ' can be transliterated into the MRZ as 'NXX'" — the corpus's
+transcription is faithful; the "nine" claim originates in ICAO's own text,
+not a conversion artifact. Table A (the normative table, also checked
+against the source in the entry above) remains authoritative and the
+discrepancy stands unresolved in ICAO's own document.
 
 ### Part 3 §6 A Table A — U+0130 lowercase round-trip exception
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:764`
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:764`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#a-transliteration-of-multinational-latin-based-characters)
 
 U+0130 (İ, LATIN CAPITAL LETTER I WITH DOT ABOVE) is a genuine exception to
 the otherwise-universal invariant that every Table A row's lowercase
@@ -458,7 +522,7 @@ not a bug in this crate's Table A transcription or lookup logic.**
 
 ### Part 3 §4.8 — silence on two-digit-year century inference
 
-`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:541-547`
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:541-547`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#48-representation-of-dates)
 
 States only the six-digit `YYMMDD` structure and the unknown-date filler
 rule ("If all or part of the date of birth is unknown, the relevant
@@ -478,7 +542,7 @@ itself.
 
 ### MRV-A/MRV-B fixture provenance (`crates/mrz`)
 
-`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1104-1106` (MRV-A),
+[`Doc_9303_Part7_Machine_Readable_Visas_MRVs.md:1104-1106`](Doc_9303_Part7_Machine_Readable_Visas_MRVs.md#b1-mrv-a-mrz-construction) (MRV-A),
 `:1136-1138` (MRV-B)
 
 Segment S2 checked every fixture comment in `crates/mrz` claiming ICAO
@@ -486,13 +550,13 @@ specimen provenance against the corpus:
 
 - The TD2 specimen (`I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<` /
   `D231458907UTO7408122F1204159<<<<<<<6`) is published verbatim as text in
-  Part 6 (`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`) — the "Official
+  Part 6 ([`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`](Doc_9303_Part6_Specs_for_TD2_MROTDs.md#appendix-a-to-part-6--examples-of-a-personalized-td2-size-mrotd-informative)) — the "Official
   ICAO 9303 part 6 TD2 specimen" comment was already accurate.
 - The TD3 and TD1 specimens (same Utopia/Eriksson identity, reshaped per
   format) are **not** extractable as text from Part 4 or Part 5: both
   parts' Appendix A/B worked-example figures are images in the source PDF
-  (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:669-687`,
-  `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:504-534`), with no MRZ text
+  ([`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:669-687`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#appendix-b-to-part-4),
+  [`Doc_9303_Part5_Specs_for_TD1_MROTDs.md:504-534`](Doc_9303_Part5_Specs_for_TD1_MROTDs.md#appendix-a-to-part-5--examples-of-a-personalized-td1-size-mrotd-informative)), with no MRZ text
   captured in this corpus. The old "Official ICAO 9303 part 4/5 specimen"
   comments overclaimed direct textual provenance; corrected to say the
   identity is corroborated by cross-part agreement with the literal TD2
@@ -539,7 +603,7 @@ cannot keep for two of the six:
 |---|---|
 | `520727` → 3 | Part 3 Appendix A Example 1, literal text |
 | `AB2134<<<` → 5 | Part 3 Appendix A Example 2, literal text |
-| `740812` → 2 | Part 6 TD2 specimen, literal text (`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`) — **not** Part 4, as previously labelled |
+| `740812` → 2 | Part 6 TD2 specimen, literal text ([`Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`](Doc_9303_Part6_Specs_for_TD2_MROTDs.md#appendix-a-to-part-6--examples-of-a-personalized-td2-size-mrotd-informative)) — **not** Part 4, as previously labelled |
 | `120415` → 9 | Part 6 TD2 specimen, literal text, same line |
 | `L898902C3` → 6 | **Not corroborated** — Part 4's specimen is image-only |
 | `ZE184226B<<<<<` → 1 | **Not corroborated** — Part 4's specimen is image-only |
@@ -553,6 +617,44 @@ blanket claim.
 
 **Status: worked example reproduced** for four of six; **unverified,
 explicitly flagged** for the two document-specific TD3 values.
+
+### ADR-0003 follow-up — file-ending spot-check against the source PDFs
+
+ADR-0003 records, as a negative consequence, that a cleanup-script bug once
+clipped real content from several files' endings, and recommends the corpus
+"be spot-checked against source again" once PDFs are available.
+
+All 13 parts' Markdown files end with `— END —`. Comparing each file's tail
+against the last text-bearing page of its source PDF (`PyMuPDF`, automated
+across all 13 parts in one pass) confirms the ending prose matches for 9 of
+13 parts, with the source PDF's own last page likewise ending in an
+`— END —` marker for those 9 (Parts 1, 2, 3, 7, 10, 11, 12, 13, plus 6's
+prose match though see below).
+
+**Parts 4, 5, 6, and 9 — now confirmed too.** The original pass checked only
+each PDF's literal final one-to-three physical pages, which are blank filler
+or a back-cover ISBN barcode in all four cases (0 characters from
+`page.get_text()`) — not the true end of content. Scanning backward from the
+end of each file for the last page carrying substantial text (rather than
+the last page, full stop) finds each part's real closing page, and every one
+ends in a genuine `— END —` marker, confirmed both by direct text extraction
+and a targeted regex match on the surrounding text (ruling out a stray
+substring match on an unrelated word):
+
+| Part | True last content page | What follows it |
+|---|---|---|
+| 4 | 37 (Appendix B, Figure B-1 annotations) | 2 blank pages, then an ISBN barcode page |
+| 5 | 34 (Appendix C, Figure C-1 zone diagram) | 2 blank pages |
+| 6 | 29 (Appendix, document-code note) | 3 blank/diagram-only pages |
+| 9 | 23 (biometric inspection flowchart) | 3 blank/diagram-only pages |
+
+`README.md`'s claim that "every part genuinely ends with `-- END --` in the
+official ICAO text" is now confirmed for all 13 parts, not just 9. The
+earlier "not confirmed" status was a page-selection artifact of the spot-check
+script (looking at the literal last pages), not a real gap in the corpus.
+
+No content-loss recurrence of the ADR-0003 bug itself was found in this
+pass — the readable-page text matches, part for part, for all 13 files.
 
 ## Scope
 

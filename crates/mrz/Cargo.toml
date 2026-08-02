@@ -1,6 +1,6 @@
 [package]
 name = "mrz"
-# Decoupled from the workspace `1.2.0`: independent public-release line.
+# Decoupled from the workspace `1.3.0`: independent public-release line.
 #
 # Under Cargo's 0.x rules the *minor* slot is the breaking slot. `MrzData`,
 # `Checks` and `Format` are `#[non_exhaustive]`, so growing them is a patch
@@ -8,7 +8,7 @@ name = "mrz"
 # exhaustive, so adding a field to one of those is breaking (0.6.0). CI diffs
 # this crate against its published baseline and fails a PR whose API change
 # outruns the version below — see the `semver` job and CONTRIBUTING.md.
-version = "0.6.1"
+version = "0.6.2"
 edition.workspace = true
 # Verified floor for the zero-dependency default build, which is the whole of
 # this crate's own source: `std::iter::repeat_n` (checksum.rs) and

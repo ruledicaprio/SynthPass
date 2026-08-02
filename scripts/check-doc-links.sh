@@ -3,13 +3,18 @@
 #
 #   scripts/check-doc-links.sh
 #
-# Three checks, over git-tracked files only:
+# Four checks, over git-tracked files only:
 #
 #   1. Every relative Markdown link `[text](path)` resolves to something that
 #      exists.
 #   2. Every `knowledge/...` path cited in prose — including `.rs` doc comments,
 #      Cargo.toml comments and workflow files — exists.
 #   3. No `docs/...` references survive, outside a written allowlist.
+#   4. Every `#fragment` on a Markdown link resolves to an actual `##`-`####`
+#      heading in the target file (GitHub's heading-slug algorithm), not just
+#      the file itself. Check 1 strips the fragment before checking existence,
+#      so a link to a real file with a stale or invented anchor previously
+#      passed silently.
 #
 # Check 3 is the one that matters most: the `docs/` -> `knowledge/` rename left
 # ~116 references behind, and nothing but this script would notice them rotting
@@ -19,6 +24,10 @@
 # notes contain proposed directory trees and shell snippets, which are
 # illustrations rather than citations. A path a reader is meant to follow does
 # not live inside a ``` fence.
+#
+# Check 3 also strips http(s):// URLs before matching: a `docs/` segment
+# inside a link to someone else's repo (e.g. the Claude Code Action template's
+# own README URL) is not this repo's tree and never was.
 #
 # Pure bash + git. Nothing to install.
 set -euo pipefail
@@ -82,6 +91,33 @@ prose() {
 fail=0
 report() { printf '  %s\n' "$1"; fail=1; }
 
+# GitHub's heading-slug algorithm, applied to every `##`-`####` heading in a
+# file: lowercase, trim the ends, drop anything that isn't a
+# letter/digit/space/hyphen/underscore, then turn each remaining space into a
+# hyphen INDIVIDUALLY — runs are not collapsed, so a removed character
+# flanked by spaces (e.g. "Foo — Bar") yields a double hyphen ("foo--bar"),
+# matching what GitHub actually renders. Repeated slugs within one file get
+# -1, -2, ... suffixes. One `awk` process per file (fence-toggling, heading
+# match, and slug bookkeeping all done in-process) rather than one shell
+# subprocess per heading line — the latter was slow enough on Windows/MSYS
+# process-spawn overhead to time out across a corpus this size.
+heading_slugs() {
+  awk '
+    /^[[:space:]]*```/ { fence = !fence; next }
+    fence { next }
+    /^##[[:space:]]/ || /^###[[:space:]]/ || /^####[[:space:]]/ {
+      line = $0
+      sub(/^#+[[:space:]]+/, "", line)
+      gsub(/^[ \t]+|[ \t]+$/, "", line)
+      line = tolower(line)
+      gsub(/[^a-z0-9 _-]/, "", line)
+      gsub(/ /, "-", line)
+      if (line in seen) { seen[line]++; print line "-" seen[line] }
+      else { seen[line] = 0; print line }
+    }
+  ' "$1"
+}
+
 # Only files that actually mention a path are worth opening: `git grep -l` does
 # the filtering in one process instead of 300 shell iterations.
 mapfile -t md_files    < <(git ls-files '*.md')
@@ -128,7 +164,41 @@ for f in "${path_files[@]}"; do
     p="${p%.}"
     is_allowed "$p" && continue
     report "$f still references $p (the tree moved to knowledge/ — see ADR-0001)"
-  done < <(prose "$f" | grep -ohE 'docs/[A-Za-z0-9_./-]*' | sort -u)
+  done < <(prose "$f" | sed -E 's#https?://[^[:space:])]+##g' | grep -ohE 'docs/[A-Za-z0-9_./-]*' | sort -u)
+done
+
+# ------------------------------------------------ 4. markdown anchor fragments
+echo "==> markdown anchor fragments"
+# Cache each target file's heading slugs (newline-joined) so a file linked
+# from many places — e.g. ARCHITECTURE.md — only gets its headings parsed
+# once, not once per inbound link.
+declare -A slug_cache=()
+for f in "${md_files[@]}"; do
+  dir="$(dirname "$f")"
+  case "$f" in changelog.d/*) dir="." ;; esac
+  while IFS= read -r target; do
+    [ -z "$target" ] && continue
+    case "$target" in http://*|https://*|mailto:*) continue ;; esac
+    case "$target" in *"#"*) ;; *) continue ;; esac
+    path="${target%%#*}"
+    frag="${target#*#}"
+    frag="${frag%% *}"
+    [ -z "$frag" ] && continue
+    if [ -z "$path" ]; then
+      target_file="$repo_root/$f"
+    else
+      path="${path%% *}"
+      resolved="$(realpath -m --relative-to="$repo_root" "$dir/$path" 2>/dev/null || printf '%s' "$path")"
+      target_file="$repo_root/$resolved"
+    fi
+    [ -f "$target_file" ] || continue # check 1 already reports a missing file
+    case "$target_file" in *.md) ;; *) continue ;; esac
+    if [ -z "${slug_cache[$target_file]+x}" ]; then
+      slug_cache[$target_file]="$(heading_slugs "$target_file")"
+    fi
+    grep -qxF -- "$frag" <<<"${slug_cache[$target_file]}" ||
+      report "$f -> $target (no ## heading slugs to #$frag in $target_file)"
+  done < <(grep -oE '\]\([^)]+\)' "$f" 2>/dev/null | sed -e 's/^](//' -e 's/)$//')
 done
 
 if [ "$fail" -ne 0 ]; then

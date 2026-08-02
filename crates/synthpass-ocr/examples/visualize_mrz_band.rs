@@ -340,9 +340,23 @@ fn draw_box(image: &mut RgbImage, bbox: BBox, color: [u8; 3], alpha: f32, border
     }
 }
 
-/// Appends one JSON object per line to `args.ledger`, creating it (and its
+/// Writes one JSON object per line to `args.ledger`, creating it (and its
 /// parent directory) if it doesn't exist yet. Hand-rolled rather than
 /// `serde_json` — see the module doc comment.
+///
+/// **Upserts by `filename` rather than blindly appending.** Labelling is
+/// inherently iterative — a specimen gets surveyed once with no ground truth,
+/// then re-run later with `--mrz-present`/`--side`/`--kind` once someone has
+/// actually looked at it — and a pure append left two rows for the same file,
+/// disagreeing about its labels, with nothing marking which was current. Any
+/// consumer counting rows then double-counts that specimen, which silently
+/// skews exactly the distribution the ledger exists to describe. Replacing in
+/// place makes the ledger re-runnable, which is what turns it from a one-shot
+/// record into something a measurement loop can iterate on.
+///
+/// Order is preserved: a replaced row keeps its original position, so the file
+/// stays diff-friendly and a re-label shows up as a one-line change rather
+/// than a deletion plus an append.
 fn append_ledger_row(
     args: &Args,
     page: &synthpass_ocr::geometry::OcrPage,
@@ -385,11 +399,24 @@ fn append_ledger_row(
     if let Some(parent) = args.ledger.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&args.ledger)?;
-    writeln!(file, "{row}")
+
+    // Match on the `"filename":"..."` prefix the row above always writes
+    // first. A substring search would match a filename appearing anywhere in
+    // the line (a `keyword_hits` entry, say); anchoring to the field this
+    // writer controls keeps the match exact without parsing the JSON back.
+    let key = format!("{{\"filename\":{}", json_string(filename));
+    let existing = std::fs::read_to_string(&args.ledger).unwrap_or_default();
+    let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
+    match lines.iter().position(|l| l.starts_with(&key)) {
+        Some(i) => lines[i] = row,
+        None => lines.push(row),
+    }
+
+    let mut file = std::fs::File::create(&args.ledger)?;
+    for line in &lines {
+        writeln!(file, "{line}")?;
+    }
+    Ok(())
 }
 
 fn json_string(s: &str) -> String {

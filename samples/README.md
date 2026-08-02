@@ -2,24 +2,44 @@
 
 Identity-document specimen images used as test/example fixtures for the OCR,
 LLM, and pipeline crates. Files are organized by document kind into
-subdirectories; **no file has been renamed** (see "Naming convention" below
-for why).
+subdirectories; **no file has been renamed** when moved between them (see
+"Naming convention" below for why).
+
+**Only `ocr_fixtures/` is tracked in git.** It's the hand-verified,
+ground-truth-labelled subset, and required CI (`native_ocr_e2e`,
+`rust_ocr_smoke`) depends on specific files in it. Everything else —
+`passports/`, `id_cards/`, `driving_licenses/`, `misc/` — is a gitignored
+local corpus: git keeps every committed byte forever, and a corpus this size
+mirrored by hand across machines doesn't need git for that. Populate it by
+running `tools/fetch_commons_mrz_specimens_v2.py` or by copying an existing
+`samples/` tree from another machine.
+
+**Images are not tracked on `main`.** They live on the orphan `samples-data`
+branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
+you want the latest corpus) to populate this directory locally; it's
+`.gitignore`d otherwise. `samples/README.md` and `samples/ocr_fixtures/*.json`
+/ `*.md` (the hand-verified OCR ground truth) are the only things under
+`samples/` still tracked here. See CONTRIBUTING.md's "Adding a corpus
+specimen" section and `knowledge/benchmarks/README.md`'s "local bench loop"
+for how the corpus grows now.
 
 ## Layout
 
 ```
 samples/
-  passports/          ~100 passport specimen images (TD3 MRZ format)
-  id_cards/            ~25 national identity card images (TD1 / TD2 MRZ format)
-  driving_licenses/     3  driving licence specimen images (no MRZ)
-  ocr_fixtures/         6  docling OCR test fixtures, each an image + .md + .json triple
-  misc/                 3  unclassifiable specimens (e.g. border-pass documents, wiki reference image)
+  passports/          passport specimen images (TD3 MRZ format) — gitignored, local mirror
+  id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
+  driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
+  ocr_fixtures/         docling OCR test fixtures, each an image + .md + .json triple — tracked, required by CI
+  misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
   README.md
 ```
 
-`tools/fetch_wiki_category_with_images.py` (repo root `tools/`) is the
-scraper originally used to collect the Wikipedia specimen images; it lives
-outside `samples/` since it is not itself a test fixture.
+`tools/fetch_commons_mrz_specimens_v2.py` (repo root `tools/`) is the
+scraper used to collect candidate specimen images from Wikimedia Commons; it
+stages them in a gitignored directory for `scripts/ingest-fetched-samples.ps1`
+to sift into `samples/` (see CONTRIBUTING.md). It lives outside `samples/`
+since it is not itself a test fixture.
 
 ## Document kind -> MRZ format
 
@@ -36,7 +56,10 @@ Existing filenames are used as lookup keys by several tests (`find_sample`
 / `walk_samples` helpers walk `samples/` recursively and match by
 **basename**), so **existing files are intentionally left un-renamed** when
 moved into subdirectories — renaming any of them would break those test
-references.
+references. For the gitignored portion of the corpus this is no longer
+something CI can check (nothing there is tracked), so treat it as an
+honor-system convention enforced by the fetch script's own naming, plus
+whatever discipline you bring to a hand-maintained local mirror.
 
 New files added going forward should follow:
 
@@ -76,19 +99,12 @@ ever needed.
 
 ## Format / count summary
 
-Total files under `samples/`: 149 (137 images + 6 `.md` + 6 `.json` OCR
-fixture sidecars).
+The corpus now grows continuously (see CONTRIBUTING.md's "Adding a corpus
+specimen"), so a hardcoded count here would go stale immediately. Check
+the live count instead:
 
-| Format | Count |
-|--------|-------|
-| JPG (`.jpg`)   | 85 |
-| JPEG (`.jpeg`) | 3  |
-| PNG (`.png`)   | 33 |
-| WEBP (`.webp`) | 14 |
-| GIF (`.gif`)   | 2  |
-| MD (`.md`)     | 6  |
-| JSON (`.json`) | 6  |
-
-Per-directory counts: `passports/` 100, `id_cards/` 25,
-`driving_licenses/` 3, `ocr_fixtures/` 18 (6 image + 6 `.md` + 6 `.json`),
-`misc/` 3.
+```powershell
+Get-ChildItem samples -Recurse -File -Include *.jpg,*.jpeg,*.png,*.webp,*.gif |
+    Group-Object { Split-Path (Split-Path $_.FullName -Parent) -Leaf } |
+    Select-Object Name, Count
+```

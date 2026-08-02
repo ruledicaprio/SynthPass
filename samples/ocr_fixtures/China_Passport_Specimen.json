@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1983-10-29",
+  "date_of_expiry": "2022-02-05",
+  "document_number": "E00000000",
+  "document_type": "PO",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "YANGBEN",
+  "issuing_country": "CHN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "POCHNZHENGJIAN<<YANGBEN<<<<<<<<<<<<<<<<<<<<<\nE000000008CHN8310291F2202059NGKELMPONBPJB972",
+  "nationality": "CHN",
+  "personal_number": "NGKELMPONBPJB9",
+  "sex": "F",
+  "surname": "ZHENGJIAN"
+}

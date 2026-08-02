@@ -41,15 +41,17 @@ timeline
 *(M7 appears before M6 above because that is the build order — see the note on the ordering
 exception above. The numbering follows dependency, not schedule.)*
 
-| Milestone | Target | Key deliverables | Definition of Done |
-|---|---|---|---|
-| **M1 — Synthetic MRZ core** | Q3 2026 | TD3 MRZ emitter in the standalone `mrz` crate (`format_td3`); parse↔emit round-trip proptest; zero new runtime deps | Emitter is byte-for-byte correct vs an ICAO 9303 Part 4 specimen; `cargo test -p mrz` green incl. a 512-case round-trip proptest; `mrz` stays zero-dependency |
-| **M2 — Synthetic Document Factory** | Q4 2026 | `synthpass-gen` crate: deterministic fictional identities, layout/render/labels, reproducible seeds, **mandatory synthetic watermark + generic non-country template** | `generate(&Passport, &GeneratorConfig) -> (image, Labels)` produces a checksum-valid MRZ that round-trips back through `mrz` from the rendered image; labels are 100% accurate by construction; watermark renders unconditionally; no runtime leak into the extraction pipeline |
-| **M3 — Degradation & Capture profiles + CLI** | Q4 2026 | Modular degradation pipeline (mobile / scanner / worn / border-control profiles); `synthpass generate` CLI subcommand; JSON sidecar metadata per document | Each profile is reproducible from a seed; CLI emits image + label JSON for a named profile; degradations are composable and individually toggleable; license gate bypassed for generation (it produces no real PII) |
-| **M4 — Regression & Benchmarking** | Q1 2027 | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented — **honestly measured at ~55% (100-seed, clean profile) as of PR #30, not the originally-aspirational 95%; CI gates at 30% as a floor with margin for cross-platform variance, see the execution note below** |
-| **M5 — Extraction platform (Atlas absorbed)** | Q1 2027 | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
-| **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | Q2 2027 | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Expansion & Enterprise readiness** | Q2 2027 | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+| Milestone | Status | Target | Key deliverables | Definition of Done |
+|---|---|---|---|---|
+| **M1 — Synthetic MRZ core** | ✅ Done | Q3 2026 | TD3 MRZ emitter in the standalone `mrz` crate (`format_td3`); parse↔emit round-trip proptest; zero new runtime deps | Emitter is byte-for-byte correct vs an ICAO 9303 Part 4 specimen; `cargo test -p mrz` green incl. a 512-case round-trip proptest; `mrz` stays zero-dependency |
+| **M2 — Synthetic Document Factory** | ✅ Done | Q4 2026 | `synthpass-gen` crate: deterministic fictional identities, layout/render/labels, reproducible seeds, **mandatory synthetic watermark + generic non-country template** | `generate(&Passport, &GeneratorConfig) -> (image, Labels)` produces a checksum-valid MRZ that round-trips back through `mrz` from the rendered image; labels are 100% accurate by construction; watermark renders unconditionally; no runtime leak into the extraction pipeline |
+| **M3 — Degradation & Capture profiles + CLI** | ✅ Done | Q4 2026 | Modular degradation pipeline (mobile / scanner / worn / border-control profiles); `synthpass generate` CLI subcommand; JSON sidecar metadata per document | Each profile is reproducible from a seed; CLI emits image + label JSON for a named profile; degradations are composable and individually toggleable; license gate bypassed for generation (it produces no real PII) |
+| **M4 — Regression & Benchmarking** | ✅ Done | Q1 2027 | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented — **honestly measured at ~55% (100-seed, clean profile) as of PR #30, not the originally-aspirational 95%; CI gates at 30% as a floor with margin for cross-platform variance, see the execution note below** |
+| **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Q1 2027 | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
+| **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | Q2 2027 | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
+| **M6 — Expansion & Enterprise readiness** | 🔜 Kickoff/scoping | Q2 2027 | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+
+*("Target" quarters are the original planning targets and are left as-is for historical record; the new "Status" column reflects what's actually landed, per the Execution notes below.)*
 
 ## Architecture evolution
 
@@ -193,8 +195,136 @@ flowchart LR
   `catalog.find_reader(budget, |c| c.fields && !c.deterministic)` instead of calling
   `self.infer` directly. `process_document_stream` is the one exception: `FieldReader::read` has no
   delta-forwarding hook, so it still calls `InferBackend::extract_stream` directly — see
-  `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract". Versioned prompts and
-  the multi-provider benchmark harness remain unshipped.
+  `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract".
+- **M7's versioned prompts have landed.** `synthpass_llm::prompt` now exposes `PROMPT_ID`,
+  `PROMPT_VERSION`, and `prompt_ref()`, computing `PromptRef.digest` from the compiled-in ChatML
+  `TEMPLATE` (system text + field list + wrapper text, per-document OCR content excluded) via
+  `synthpass_core::audit::sha256_hex` — no new dependency, since `synthpass-llm` already pulls in
+  `sha2` transitively. `InferBackend::prompt_ref()` (default `None`, mirroring `model_id()`)
+  threads it onto `NativeInferer`; `Pipeline::process_document` and `process_document_stream` both
+  populate `ExtractionTrace.prompt` from `self.infer.prompt_ref()` at their Tier-2 call sites. A
+  pinned-digest test in `prompt.rs` fails CI on any edit to `SYSTEM`/`FIELDS`/`TEMPLATE` that
+  doesn't also bump `PROMPT_VERSION` and update the expected digest.
+- **M7 is now complete — the multi-provider benchmark harness has landed.** `provider-bench`
+  (new binary in `synthpass-bench`) runs every reader in `Pipeline::catalog()` — today the
+  deterministic `MrzReader` and the LLM's `LlmFieldReader` — against the same OCR'd synthetic
+  corpus and reports, per provider: field-match rate and mean CER (via the same `cer()`
+  `synthpass-bench`'s Tier-1 tool already uses), speed (mean/p50/p95), JSON validity
+  (`synthpass_llm::repair::repair_fallbacks()` delta, `None` for deterministic providers with no
+  JSON step), an unsupported-assertion rate (does each answered field value appear, verbatim, in
+  the OCR text the provider was given — the roadmap's own definition, deliberately not
+  "hallucination"), and resident memory. Memory ships two ways: `Capability::estimated_resident_bytes`
+  always (the declared figure the field's own doc comment already calls "the benchmark's memory
+  column") plus, behind an off-by-default `measure-memory` Cargo feature and `--measure-memory`
+  flag, a coarse `sysinfo`-based process-RSS delta — real but not per-provider-isolated, since
+  every provider runs sequentially in one process.
+
+  Reaching the real catalog required one new accessor: `LlmFieldReader` is `pub(crate)` to
+  `synthpass-pipeline`, so `Pipeline::catalog()` (mirroring the `model_id()`/`prompt_ref()`
+  pattern) is the only way a harness outside that crate can enumerate every registered provider —
+  `ProviderCatalog::readers()`/`.profiles()` already supported full enumeration, distinct from
+  `find_reader`'s first-match router. A first real run (5 documents, clean profile, the shipped
+  Qwen2.5 GGUF) confirmed the harness measures real signal, not an artifact: `mrz` scored 70%
+  field-match / 3 ms mean at zero JSON-repair cost, `llm` scored 56% field-match / ~24 s mean —
+  both consistent with existing measurements (the M4 55% Tier-1 hit rate on OCR noise, the M5 GBNF
+  parity run's ~45% field match). Ships standalone (`cargo run -p synthpass-bench --release --bin
+  provider-bench`); CI wiring is a separable follow-up.
+- **A local, multi-track `provider-bench` loop now exists** — still not CI wiring (that remains
+  the separable follow-up above), but a way to accumulate real trend data by hand instead of
+  one-off ad hoc runs, across as many benchmark "tracks" as get run. `provider-bench --format
+  <passport|id_card|driving_license>` (backed by a new `SpecimenClass`/`classify_specimen` in
+  `synthpass-bench`, directory-based with a ground-truth-`document_type` fallback for the mixed
+  `ocr_fixtures/`/`misc/` directories) scopes a run to one `samples/` subdirectory;
+  `--real-specimens` with no `--format` covers the whole real corpus. `scripts/run-bench.ps1
+  -Track <name>` runs one, flattens the report to one row per `(run, provider)`, and appends to
+  `results/<track>-bench/history.jsonl` on the `bench-data` branch (the same branch
+  `bench-data-collection.yml` already uses, via the same isolated-`git worktree` checkout pattern,
+  but pushed manually rather than on a schedule) — see `knowledge/benchmarks/README.md` for the
+  row schema and the live per-track charts. `-FromReport PATH` flattens an existing report instead
+  of re-running one, which both covers slow manual runs you don't want to redo and backfilling:
+  the four ad hoc `qwen-real-{10,10-run-2,30,50}.json` sweeps from earlier the same day were folded
+  into the `real-specimens` track this way (recorded with an honest `"unknown (backfilled
+  from ...)"` `git_sha` rather than misattributed to a commit they weren't actually measured
+  against). `bench-chart` (new bin, same crate, `plotters`' pure-Rust SVG backend, track-agnostic —
+  one binary renders every track's history) renders each track's history into
+  `knowledge/img/<track>-bench-trend.svg`, embedded in `knowledge/benchmarks/README.md`'s live-tracks
+  dashboard (README's own "Accuracy, stated plainly" links out to it rather than embedding every
+  chart inline).
+
+  Passport ground truth also grew from 4 (one of which, on inspection, turned out to be malformed —
+  `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json` was missing `extraction_method`
+  and had several wrong fields, e.g. `issuing_country: "CETIS d.d."`, the *printer's* name, not an
+  ICAO code) to 8 good labelled specimens (fixed that one; added UAE, Slovakia Service passport, a
+  second Canada specimen, China) — each hand-verified against the image rather than trusted from
+  the OCR read, since only `document_number`/`date_of_birth`/`date_of_expiry`/`personal_number` are
+  individually checksum-protected in a TD3 MRZ; `surname`/`given_names`/`document_type`/
+  `issuing_country` are not, and the verification pass caught real Tier-1 imperfections this way (a
+  dropped space in two specimens' `given_names`, and a century-pivot misread on a `11`
+  year-of-birth specimen — see `scripts/check-century-pivot.sh`). Expanding beyond 8 remains future
+  work; each label needs the same one-by-one visual check, not a batch script.
+- **Post-M7 real-world validation surfaced a Tier-1/Tier-2 fusion gap.** A private Turkish
+  passport specimen (`samples/ocr_fixtures/Turkiye_Passport_private.jpeg`) escalated to Tier-2
+  on a single misread MRZ character (`document_number`'s leading glyph), which threw away
+  three other individually checksum-verified fields (`date_of_birth`, `date_of_expiry`,
+  `personal_number`) that `MrzData::valid()`'s all-or-nothing gate does not distinguish from
+  genuinely-unverifiable ones. The LLM then re-derived those fields from noisy OCR text alone
+  and got `sex`, `date_of_birth`, `surname`, and `given_names` wrong — confirmed by hand
+  against the ICAO check-digit arithmetic. Tracked as issues
+  [#99](https://github.com/ruledicaprio/SynthPass/issues/99)–[#103](https://github.com/ruledicaprio/SynthPass/issues/103):
+  single-character MRZ substitution repair, per-field (not document-level) checksum promotion
+  into Tier-2 output, an MRZ-structural-contradiction `Finding` for line-1 fields, feeding the
+  checksum-partial read into the Tier-2 prompt as a hint, and a follow-up check on visual-zone
+  OCR quality for this locale. `apply_deterministic_mrz`
+  (`crates/synthpass-pipeline/src/lib.rs:1011`) already states the operating principle — "the
+  deterministic read is always the more trustworthy source, checksum-partial or not" — these
+  issues finish applying it.
+- **Issue #103 scoping note — visual-zone OCR noise is corpus-wide, not specimen-specific; a
+  `preprocess`-style treatment for the non-MRZ zone is worth scoping (no code change proposed
+  yet).** #103 reported OCR noise on a private, untracked Türkiye candidate specimen
+  (`work/Turkiye_Passport_Private_snipped.jpg`, never committed). Reproduction: `check_sample`
+  still returns a checksum-valid MRZ HIT for it under the current `ocrs` engine, so the MRZ zone
+  itself is not the problem — the noise is confined to the visual zone (photo/header/data-field
+  text above the MRZ). A new measurement harness, `crates/synthpass-ocr/examples/visual_zone_survey.rs`
+  (modelled on `examples/integrity_survey.rs`), classifies each geometry-detected line as MRZ or
+  non-MRZ (via `geometry::mrz_line_score`) and reports, per non-MRZ line, whether it's noise (<= 2
+  non-whitespace characters, or >= 50% non-alphanumeric) — no ground truth required, so it ran over
+  the whole `samples/` corpus (135 specimens with at least one non-MRZ line; JSONL at
+  `knowledge/visual-zone-survey.jsonl`). Corpus-wide noise-line fraction: **median 0.243, IQR
+  [0.111, 0.455]**. The Türkiye specimen scored **0.652** (46 non-MRZ lines, 30 noise) — above the
+  IQR, but at roughly the 89th percentile of the full corpus (15 of 135 tracked specimens score as
+  high or higher, across unrelated countries/formats) and *not* above the high end of a
+  typographically-close proxy set drawn from already-tracked specimens (Azerbaijan, Albania,
+  Romania, Croatia, Bosnia and Herzegovina, Kosovo, North Macedonia, Poland, Viet Nam) — Viet Nam's
+  specimen scores higher (0.778). Conclusion: this is a **systematic** corpus property, not
+  something unique to the Türkiye candidate. The natural follow-up — not implemented here, per
+  #103's stated scope — is to extend the visual zone with the same deterministic
+  upscale/contrast/threshold/deskew treatment `preprocess.rs` already applies to the MRZ band (see
+  its module docs and e.g. `preprocess::mrz_variants`), rather than treating the MRZ-band retry
+  passes as the only place OCR quality gets a second chance.
+- **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
+  helps, at no measurable latency cost once measured on an uncontended machine.**
+  `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new
+  `{hint}` template slot, digest re-pinned), threaded end to end from
+  `synthpass_die::DocumentContext::mrz_hint` through `InferBackend::extract`/`extract_stream` to
+  the prompt. The hint is built from the individual `mrz::Checks` bits (not `DocumentContext.prior`,
+  which only populates when the *whole* MRZ record validates) — `document_number`, `date_of_birth`,
+  `date_of_expiry`, `personal_number` when their own check digit passes, plus `nationality`/`sex`
+  when the line-1 composite check passes — so a checksum-partial read still contributes whatever
+  it individually proved. Gated behind `SYNTHPASS_LLM_MRZ_HINT` (default **off**).
+
+  First A/B (`provider-bench --count 10 --seed 42 --profile worn`, flag off vs on) ran while other
+  `cargo`/`provider-bench` processes were active on the same machine and reported a **+39%** mean
+  latency cost (33.3s → 46.3s) alongside the accuracy gains — caught as suspect (thanks to a sharp
+  eye on the number) precisely because CPU-bound llama.cpp inference is exactly the kind of
+  workload contention skews. Re-run back-to-back with nothing else running (`tasklist` checked
+  clean before each half): field-match rate **65% → 69%**, mean CER **0.722 → 0.436**,
+  unsupported-assertion rate **5.7% → 1.3%** — unchanged from the contended run, as expected since
+  none of those depend on wall-clock — and mean latency **29.12s → 29.00s**, i.e. no cost at all.
+  All three of the plan's ship criteria (+≥3pt field-match, CER not worse, latency +<10%) are now
+  met at `n=10`. **Ship decision: land the plumbing now, keep the flag off pending a larger run**
+  (`n=10` is still a small sample for a default-behavior flip) — `provider-bench` itself now
+  attaches an MRZ prior the same way the pipeline does, so re-measuring at `--count 20+` needs no
+  further code changes, only a clean (uncontended) machine to run it on.
 
 ## M7 — Document Intelligence Engine
 
@@ -247,6 +377,45 @@ licences need (see the M6 scoping note above) becomes a provider someone can wri
 touching the pipeline; and M6's "a third-party plugin builds against a stable interface" criterion
 is satisfied by an interface that exists.
 
+## M6 — Expansion & Enterprise readiness
+
+M7's contract is what M6 was waiting on (see "What this buys M6" above) — this section is the
+kickoff: gathering the scoping notes already dropped into the Execution notes above into one
+place, with a suggested order, before any of it becomes code.
+
+**What ships**
+
+- **The generator gap, not just the extraction gap.** `synthpass-gen` emits **TD3 only** today —
+  every accuracy number in this file, M1 through M7, is measured against synthetic passports and
+  nothing else. TD1 (3×30 ID cards / residence permits), TD2 (2×36), and MRVA/MRVB (visas) need to
+  exist on the *generation* side before the extraction side has anything real to measure against.
+  This is the actual bottleneck, not the provider wiring below — do this first.
+- **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Once the generator produces them, extraction
+  is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
+  same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
+  M7 section above for the contract itself.
+- **Declarative document layout plugins.** A third-party layout definition drives generation
+  without a code change — the M6 DoD criterion the milestone table already states.
+- **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
+  trainer end-to-end.
+- **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
+- **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
+  the rest existing first.
+
+**Scoped separately — not folded into this milestone**
+
+- **AAMVA PDF417 barcode decoding for driving licences.** A different mechanism entirely (no MRZ,
+  data lives in a 2D barcode), its own standard family outside Doc 9303, and the concrete first
+  user of the `ExtractionV2.barcodes` slot. Full scoping in "Beyond ICAO 9303" below — do not read
+  M6's TD1/TD2/MRVA/MRVB line as covering it.
+- **The orientation circular-mean improvement** (see the M6 scoping note above, under Execution
+  notes). An OCR-quality win, not an M6 deliverable — worth picking up opportunistically, but
+  doesn't block or get blocked by anything above.
+
+**Suggested order:** generator (TD1/TD2/MRVA/MRVB emission) → extraction providers against the M7
+contract → layout plugins → dataset exports → deployment guide + Pro beta. Each step after the
+first makes the next one's accuracy numbers meaningful instead of TD3-only.
+
 ## Future Work
 
 Beyond M6 and M7, and deliberately not committed:
@@ -290,6 +459,36 @@ Beyond M6 and M7, and deliberately not committed:
   same declarative-layout engine.
 - **Statistical dataset characterisation** — tooling to describe and diff generated corpora.
 - **Distributed generation** — parallel factory runs for very large dataset builds.
+
+### Beyond ICAO 9303
+
+Everything above stays inside Doc 9303's scope (passports, visas, TD1/TD2 official travel
+documents — all covered by `knowledge/docs9303/`). Two document families sit genuinely outside
+it, named here so the M6 "driving licences are a different mechanism, not a lower priority" note
+above has somewhere to point once it's time to scope the work, rather than staying a bare mention:
+
+- **AAMVA PDF417 barcode decoding (US/Canada driving licences).** AAMVA (the American Association
+  of Motor Vehicle Administrators) publishes its own Card Design Standard, independent of ICAO —
+  the data lives entirely in a PDF417 2D barcode on the back of the card, not an OCR-B MRZ. This is
+  the concrete first user of the `ExtractionV2.barcodes` slot the M6 scoping note references: a
+  PDF417 decoder (no new runtime dependency category — PDF417 is a well-understood 2D symbology
+  with existing pure-Rust decoders) plus an AAMVA field-layout parser, structured as a
+  `synthpass-die` provider the same way MRZ is, per the M7 contract. No MRZ work of any kind
+  reads this format — it needs its own decoder before it needs anything else.
+- **ISO/IEC 18013 (mobile driving licence / mDL).** A different standard family again: 18013-5
+  defines an mDL as a signed, holder-controlled data structure (CBOR-encoded, presented over
+  NFC/BLE or as a QR code) rather than a printed page, so there is no OCR step and no MRZ-style
+  fixed-width text zone to parse — the "document" is the response to a cryptographic device
+  request. If SynthPass ever takes this on, it is closer in shape to Part 11's chip-authentication
+  work (`knowledge/docs9303/Doc_9303_Part11_Security_Mechanisms_for_MRTDs.md`) than to the MRZ
+  pipeline: parsing a signed CBOR structure and verifying its issuer certificate chain, not
+  running OCR against a physical card. Not started, not scoped past this paragraph — named here so
+  it isn't rediscovered from scratch later, and so it doesn't get assumed away as "just another
+  barcode format" the way AAMVA licences are, when it is not.
+
+Neither item changes `SYNTHPASS_ENGINEERING_CONSTITUTION.md` §3's Project Goals or the M1–M7
+milestones above; §4's "non-ICAO documents" non-goal is scoped to the currently committed
+milestones for exactly this reason — see §25 there.
 
 These reassure long-term contributors and partners that SynthPass is a platform with sustained
 momentum, not a fixed-scope tool — while keeping the committed roadmap honest about what M1–M6

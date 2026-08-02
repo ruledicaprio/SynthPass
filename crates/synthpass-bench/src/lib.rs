@@ -10,9 +10,367 @@
 //! a reusable library instead of example-local logic.
 
 use image::DynamicImage;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use synthpass_gen::Labels;
+use synthpass_gen::degrade::{apply_profile, CaptureProfile};
+use synthpass_gen::{generate_from_seed, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
+
+pub mod provider_bench;
+
+/// Which capture profile to generate a corpus under. Shared between
+/// `synthpass-bench`'s Tier-1 hit-rate CLI and `provider-bench`'s
+/// multi-provider harness so both draw from the same corpus-generation code
+/// path rather than two copies that could silently diverge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileChoice {
+    Clean,
+    Mobile,
+    Scanner,
+    Worn,
+    BorderKiosk,
+    Damaged,
+    All,
+}
+
+// Deliberately excludes `Damaged`: the other profiles degrade legibility,
+// occlusion destroys data outright, and mixing it into `all` would move the
+// hit-rate number every existing gate is calibrated against. Ask for it by
+// name (`--profile damaged`) to measure recovery on its own.
+const ROUND_ROBIN: [ProfileChoice; 5] = [
+    ProfileChoice::Clean,
+    ProfileChoice::Mobile,
+    ProfileChoice::Scanner,
+    ProfileChoice::Worn,
+    ProfileChoice::BorderKiosk,
+];
+
+impl ProfileChoice {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "clean" => Ok(Self::Clean),
+            "mobile" => Ok(Self::Mobile),
+            "scanner" => Ok(Self::Scanner),
+            "worn" => Ok(Self::Worn),
+            "border-kiosk" => Ok(Self::BorderKiosk),
+            "damaged" => Ok(Self::Damaged),
+            "all" => Ok(Self::All),
+            other => Err(format!(
+                "unknown profile '{other}' (valid: clean, mobile, scanner, worn, border-kiosk, damaged, all)"
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Clean => "clean",
+            Self::Mobile => "mobile",
+            Self::Scanner => "scanner",
+            Self::Worn => "worn",
+            Self::BorderKiosk => "border-kiosk",
+            Self::Damaged => "damaged",
+            Self::All => "all",
+        }
+    }
+
+    /// `None` for `Clean` (no degradation applied); `All` resolves to a
+    /// concrete per-seed choice before this is ever called.
+    pub fn capture_profile(self) -> Option<CaptureProfile> {
+        match self {
+            Self::Clean | Self::All => None,
+            Self::Mobile => Some(CaptureProfile::Mobile),
+            Self::Scanner => Some(CaptureProfile::Scanner),
+            Self::Worn => Some(CaptureProfile::Worn),
+            Self::BorderKiosk => Some(CaptureProfile::BorderKiosk),
+            Self::Damaged => Some(CaptureProfile::Damaged),
+        }
+    }
+
+    /// Resolves `All` to a concrete profile via round-robin over `seed_index`
+    /// (the document's position in the corpus, not the raw seed value); every
+    /// other variant is already concrete and passes through unchanged.
+    pub fn resolve(self, seed_index: u64) -> Self {
+        if self == Self::All {
+            ROUND_ROBIN[(seed_index as usize) % ROUND_ROBIN.len()]
+        } else {
+            self
+        }
+    }
+}
+
+/// One generated document: its seed, the resolved (never `All`) profile it
+/// was degraded under, the rendered image, and its ground-truth labels.
+pub struct CorpusDoc {
+    pub seed: u64,
+    pub profile: ProfileChoice,
+    pub image: DynamicImage,
+    pub labels: Labels,
+}
+
+/// Generates `count` documents deterministically from seeds
+/// `seed_start..seed_start + count`, applying `profile`'s degradation
+/// (round-robining the five real profiles when `profile` is `All`). The
+/// single corpus-generation path shared by every bench binary in this crate.
+pub fn generate_corpus(profile: ProfileChoice, seed_start: u64, count: u64) -> Vec<CorpusDoc> {
+    (0..count)
+        .map(|i| {
+            let seed = seed_start + i;
+            let resolved = profile.resolve(i);
+            let config = GeneratorConfig::new(seed);
+            let (image, labels, _passport) = generate_from_seed(&config);
+            let image = match resolved.capture_profile() {
+                Some(cp) => apply_profile(&image, cp, seed),
+                None => image,
+            };
+            CorpusDoc {
+                seed,
+                profile: resolved,
+                image,
+                labels,
+            }
+        })
+        .collect()
+}
+
+/// One real specimen loaded from `samples/`: its file stem, the decoded
+/// image, and OPTIONAL ground truth read from a sibling
+/// `samples/ocr_fixtures/<stem>.json` label file (the v1 `Extraction` shape
+/// — verified against `samples/ocr_fixtures/SerbianID_back.json` before
+/// writing this loader).
+///
+/// This exists because [`CorpusDoc`] cannot represent a real specimen:
+/// `CorpusDoc::labels` is [`Labels`], which requires two 44-character MRZ
+/// lines that only `synthpass-gen` can produce, since it is the one that
+/// drew them. A photographed ID-card front has no MRZ to supply those lines
+/// even when it has a hand-verified label file, so real-specimen ground
+/// truth has to be a different, optional shape rather than a variant of
+/// `Labels` — see `provider_bench`'s doc for how the two feed the same
+/// accuracy loop despite the different shapes.
+#[derive(Debug, Clone)]
+pub struct RealSpecimenDoc {
+    /// File stem (no extension, no directory) — the join key between the
+    /// image and its optional `samples/ocr_fixtures/<name>.json` label, and
+    /// the identity used in per-document report rows. Never a full path:
+    /// `samples/` has already been reorganized once (see [`find_image_files`]'s
+    /// doc), so nothing here should assume a subdirectory stays put.
+    pub name: String,
+    pub image: DynamicImage,
+    /// `None` when `samples/ocr_fixtures/<name>.json` does not exist, or
+    /// exists but fails to parse. Both cases mean "no ground truth for this
+    /// specimen," not "load error" — most of `samples/` (every MRZ-less
+    /// ID-card front, in particular) has no label file at all, by the
+    /// nature of `samples/ocr_fixtures/` only covering the specimens someone
+    /// has hand-verified. Treating a missing label as an error would make
+    /// the loader fail exactly on the population Phase 1 exists to measure.
+    pub labels: Option<synthpass_core::Extraction>,
+    /// Which `samples/` document format this specimen represents, for
+    /// `provider-bench --format`. See [`classify_specimen`] for how this is
+    /// decided.
+    pub class: SpecimenClass,
+}
+
+/// Which `samples/` document format a specimen represents, for
+/// `provider-bench --format`. Directory-based, not filename-based: `samples/`
+/// has already been reorganized once (see [`find_image_files`]'s doc) and is
+/// mid-reorg again as this is written, so anything reading the filename
+/// itself would need re-deriving every time a specimen gets renamed or
+/// re-fetched. The immediate parent directory is stable under a rename.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecimenClass {
+    Passport,
+    IdCard,
+    DrivingLicense,
+    /// `misc/`, or an `ocr_fixtures/`/`misc/` specimen whose label (if any)
+    /// has no recognizable `document_type` — never guessed.
+    Unclassified,
+}
+
+impl SpecimenClass {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "passport" => Ok(Self::Passport),
+            "id_card" => Ok(Self::IdCard),
+            "driving_license" => Ok(Self::DrivingLicense),
+            other => Err(format!(
+                "unknown format '{other}' (valid: passport, id_card, driving_license; \
+                 omit --format entirely to run everything)"
+            )),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Passport => "passport",
+            Self::IdCard => "id_card",
+            Self::DrivingLicense => "driving_license",
+            Self::Unclassified => "unclassified",
+        }
+    }
+}
+
+/// Classifies one specimen by its `samples/` subdirectory, falling back to
+/// its ground-truth `document_type` (ICAO 9303 short code, or the odd
+/// unnormalized long form seen in a couple of hand-written fixtures — e.g.
+/// `PASSPORT` alongside `P`) for the two directories that mix formats
+/// (`ocr_fixtures/`, which holds specimens hand-labelled from more than one
+/// directory, and `misc/`).
+///
+/// KNOWN GAP, not fixed here: an in-progress `samples/` reorg has, as of this
+/// writing, left several passport specimens misfiled under `id_cards/`
+/// (their names still say `..._Passport_Specimen_...`). Those classify as
+/// `IdCard` until the reorg moves them — `--format passport` will
+/// under-count during that window, never over-count, since nothing under
+/// `passports/` is anything other than a passport.
+pub fn classify_specimen(
+    image_path: &Path,
+    labels: Option<&synthpass_core::Extraction>,
+) -> SpecimenClass {
+    match image_path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+    {
+        Some("passports") => return SpecimenClass::Passport,
+        Some("id_cards") => return SpecimenClass::IdCard,
+        Some("driving_licenses") => return SpecimenClass::DrivingLicense,
+        _ => {}
+    }
+    match labels
+        .and_then(|l| l.document_type.as_deref())
+        .map(str::to_uppercase)
+        .as_deref()
+    {
+        Some("P") | Some("PASSPORT") => SpecimenClass::Passport,
+        Some("ID") | Some("I") | Some("ID1") | Some("ID2") | Some("ID3") => SpecimenClass::IdCard,
+        _ => SpecimenClass::Unclassified,
+    }
+}
+
+/// Image file extensions this loader will decode, matched case-insensitively.
+/// Covers every format actually present under `samples/` (`jpg`/`jpeg`,
+/// `png`, `webp`, `gif`) plus two more the `image` crate also decodes
+/// (`bmp`, `tif`/`tiff`) in case a future specimen arrives in one of those.
+const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", "tif", "tiff"];
+
+/// Recursively finds every image file under `dir`, returned in sorted order
+/// for a deterministic corpus ordering (`std::fs::read_dir`'s own order is
+/// OS- and filesystem-dependent, and this repo's engineering priorities put
+/// deterministic behavior ahead of the convenience of skipping the sort).
+///
+/// Recursive rather than a fixed list of subdirectories — `samples/` has
+/// already been reorganized once (continent/class subfolders) and stranded
+/// two hardcoded references, which is exactly why
+/// `crates/synthpass-ocr/examples/mrz_corpus.rs`'s `find_sample` searches
+/// recursively too. A directory that can't be read (permissions, a dangling
+/// symlink) is skipped rather than aborting the whole walk, for the same
+/// "one bad entry costs one entry, not the run" reason `find_sample` returns
+/// `Option` instead of panicking.
+fn find_image_files(dir: &Path) -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.to_lowercase().as_str()))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, &mut out);
+    out.sort();
+    out
+}
+
+/// Reads `samples_root/ocr_fixtures/<stem>.json` and parses it as a v1
+/// [`synthpass_core::Extraction`]. Returns `None` — never an error — when
+/// the file is absent, unreadable, or fails to parse: see
+/// [`RealSpecimenDoc::labels`]'s doc for why "no ground truth" must never be
+/// conflated with a loader failure.
+///
+/// A file that exists but fails to *parse* still returns `None`, but warns on
+/// stderr first. Absent and malformed are both "unlabelled" to the caller,
+/// and deliberately so — one broken file must not abort a corpus load — but
+/// only one of them is normal, and a silent malformed label would shrink the
+/// labelled population without anyone noticing.
+pub fn load_ground_truth(samples_root: &Path, stem: &str) -> Option<synthpass_core::Extraction> {
+    let path = samples_root
+        .join("ocr_fixtures")
+        .join(format!("{stem}.json"));
+    let bytes = std::fs::read(&path).ok()?;
+    match serde_json::from_slice(&bytes) {
+        Ok(extraction) => Some(extraction),
+        Err(e) => {
+            // A label file that exists but does not parse is a different
+            // thing from no label file, and must not be silently folded into
+            // it. Absent is the normal case (most of `samples/` has never
+            // been hand-labelled); malformed means someone wrote a label and
+            // it is broken, which would silently shrink the labelled
+            // population this whole module exists to report honestly — the
+            // exact failure mode `AccuracyStats`'s `Option` is there to
+            // prevent, reintroduced one layer down. Still `None`, so one bad
+            // file costs one specimen rather than the run, but never quiet.
+            //
+            // The path and the serde error are shape, not content: a
+            // specimen filename and a parse position. Neither carries a
+            // document field value, per CONTRIBUTING.md's PII rule.
+            eprintln!(
+                "warning: {} exists but did not parse as a v1 Extraction ({e}) — \
+                 treating this specimen as unlabelled",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+/// Loads one real specimen from `image_path`, attaching ground truth from
+/// `samples_root/ocr_fixtures/<stem>.json` when one exists.
+///
+/// Returns `None` when `image_path` doesn't exist, isn't readable, or isn't
+/// a format the `image` crate can decode — the same "skip, don't abort"
+/// contract as [`find_image_files`]. A caller checking a hand-picked path
+/// (rather than one this crate's own walk produced) gets the same graceful
+/// handling, which is what makes "loader given a nonexistent file" a safe,
+/// panic-free case to test.
+pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpecimenDoc> {
+    let name = image_path.file_stem()?.to_str()?.to_string();
+    let image = image::open(image_path).ok()?;
+    let labels = load_ground_truth(samples_root, &name);
+    let class = classify_specimen(image_path, labels.as_ref());
+    Some(RealSpecimenDoc {
+        name,
+        image,
+        labels,
+        class,
+    })
+}
+
+/// Loads every image file found recursively under `samples_root` as a
+/// [`RealSpecimenDoc`], attaching ground truth from `samples_root/
+/// ocr_fixtures/<stem>.json` wherever that file exists.
+///
+/// Callers pass `repo_root().join("samples")` — the same directory every
+/// other real-corpus harness in this workspace reads from
+/// (`crates/synthpass-ocr/examples/mrz_corpus.rs`). `samples/ocr_fixtures/`
+/// itself holds specimen images too (the ones someone has hand-labelled),
+/// and those are included in the walk like any other image under
+/// `samples_root` — there is no separate code path for them, and no
+/// specimen appears twice (`samples/ocr_fixtures/`'s images are not
+/// duplicated anywhere else in the tree).
+pub fn load_real_specimens(samples_root: &Path) -> Vec<RealSpecimenDoc> {
+    find_image_files(samples_root)
+        .into_iter()
+        .filter_map(|path| load_specimen(samples_root, &path))
+        .collect()
+}
 
 /// Why a document missed. An enum rather than the free-text string this
 /// used to be, so misses **aggregate** — "37 of 50 missed" is not actionable
@@ -440,6 +798,275 @@ mod tests {
             "expected at least one hit across 5 seeds, got: {:?}",
             results.iter().map(|r| &r.reason).collect::<Vec<_>>()
         );
+    }
+
+    /// Ground truth loads and parses correctly when a `samples/ocr_fixtures/
+    /// <stem>.json` label file exists. `SerbianID_back` is the specimen the
+    /// task brief pointed at to confirm the v1 `Extraction` shape before any
+    /// code was written, so it doubles as the loader's own confirmation.
+    #[test]
+    fn specimen_loader_finds_labels_when_present() {
+        let root = repo_root();
+        let samples = root.join("samples");
+        let truth = load_ground_truth(&samples, "SerbianID_back")
+            .expect("samples/ocr_fixtures/SerbianID_back.json should parse");
+        assert_eq!(truth.document_number.as_deref(), Some("955555546"));
+        assert_eq!(truth.surname.as_deref(), Some("TEST"));
+        assert_eq!(truth.given_names.as_deref(), Some("MILICA"));
+    }
+
+    /// Directory alone decides `passports/`, `id_cards/`, and
+    /// `driving_licenses/` — no label needed, and a label that disagrees
+    /// (which should never happen, but the classifier must not be fooled by
+    /// hypothetically-bad label data) still loses to the directory.
+    #[test]
+    fn classify_specimen_uses_directory_first() {
+        let disagreeing_label = extraction_with_document_type("ID");
+        assert_eq!(
+            classify_specimen(Path::new("samples/passports/Foo.jpg"), None),
+            SpecimenClass::Passport
+        );
+        assert_eq!(
+            classify_specimen(
+                Path::new("samples/passports/Foo.jpg"),
+                Some(&disagreeing_label)
+            ),
+            SpecimenClass::Passport,
+            "directory wins over a disagreeing label"
+        );
+        assert_eq!(
+            classify_specimen(Path::new("samples/id_cards/Foo.jpg"), None),
+            SpecimenClass::IdCard
+        );
+        assert_eq!(
+            classify_specimen(Path::new("samples/driving_licenses/Foo.jpg"), None),
+            SpecimenClass::DrivingLicense
+        );
+    }
+
+    /// `ocr_fixtures/` and `misc/` mix formats, so classification falls back
+    /// to the specimen's own labelled `document_type` — both the ICAO short
+    /// code (`P`, `ID`, `I`) and the unnormalized long form seen in one real
+    /// fixture (`PASSPORT`, see `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json`).
+    #[test]
+    fn classify_specimen_falls_back_to_label_for_mixed_directories() {
+        let passport_short = extraction_with_document_type("P");
+        let passport_long = extraction_with_document_type("PASSPORT");
+        let id_short = extraction_with_document_type("ID");
+        for path in ["samples/ocr_fixtures/Foo.jpg", "samples/misc/Foo.jpg"] {
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&passport_short)),
+                SpecimenClass::Passport,
+                "{path} with document_type P"
+            );
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&passport_long)),
+                SpecimenClass::Passport,
+                "{path} with document_type PASSPORT"
+            );
+            assert_eq!(
+                classify_specimen(Path::new(path), Some(&id_short)),
+                SpecimenClass::IdCard,
+                "{path} with document_type ID"
+            );
+        }
+    }
+
+    /// No label at all, or a label with no `document_type`/an unrecognized
+    /// one, is `Unclassified` rather than a guess — this classifier must
+    /// never fabricate a class it has no evidence for.
+    #[test]
+    fn classify_specimen_is_unclassified_without_directory_or_recognizable_label() {
+        assert_eq!(
+            classify_specimen(Path::new("samples/ocr_fixtures/Foo.jpg"), None),
+            SpecimenClass::Unclassified
+        );
+        let visa = extraction_with_document_type("V");
+        assert_eq!(
+            classify_specimen(Path::new("samples/misc/Foo.jpg"), Some(&visa)),
+            SpecimenClass::Unclassified,
+            "a visa is neither a passport nor an ID card"
+        );
+    }
+
+    /// `Extraction` has a custom `Drop` (`ZeroizeOnDrop`), so struct-update
+    /// syntax (`..Default::default()`) against a temporary doesn't
+    /// typecheck — build it field-by-field instead.
+    fn extraction_with_document_type(document_type: &str) -> synthpass_core::Extraction {
+        let mut e = synthpass_core::Extraction::default();
+        e.document_type = Some(document_type.to_string());
+        e
+    }
+
+    /// A specimen with an image but no matching `samples/ocr_fixtures/
+    /// <stem>.json` reports `labels: None` — not an error, not a panic. This
+    /// is the common case in `samples/`: every MRZ-less ID-card front has no
+    /// label file at all, and the loader has to treat that as "unlabelled,"
+    /// per this crate's whole reason for existing (see `RealSpecimenDoc`'s
+    /// doc). `Bulgaria_ID_Card_specimen.png` has no sibling JSON under
+    /// `samples/ocr_fixtures/` as of this writing.
+    /// A label file that exists but is malformed reads as unlabelled rather
+    /// than aborting the load — but is not silently identical to "no label
+    /// file", which is what the warning in [`load_ground_truth`] is for.
+    /// Written to a temp `ocr_fixtures/` tree rather than `samples/`, so the
+    /// real corpus never has to carry a deliberately-broken fixture.
+    #[test]
+    fn a_malformed_label_file_reads_as_unlabelled_without_aborting() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-malformed-label-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let fixtures = root.join("ocr_fixtures");
+        std::fs::create_dir_all(&fixtures).expect("temp dir is creatable");
+        std::fs::write(fixtures.join("broken.json"), b"{ not valid json at all")
+            .expect("temp file is writable");
+
+        let result = load_ground_truth(&root, "broken");
+        std::fs::remove_dir_all(&root).ok();
+
+        assert!(
+            result.is_none(),
+            "a malformed label must not yield fabricated ground truth"
+        );
+    }
+
+    /// Written to a temp tree rather than `samples/`, so this doesn't depend
+    /// on any specific file surviving in the real (gitignored, local-mirror-
+    /// only) bulk corpus — only `samples/ocr_fixtures/` is tracked, and nothing
+    /// there is deliberately unlabelled.
+    #[test]
+    fn specimen_loader_reports_no_labels_when_absent() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-no-labels-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let samples = root.join("samples");
+        std::fs::create_dir_all(samples.join("id_cards")).expect("temp dir is creatable");
+        let image_path = samples.join("id_cards").join("unlabelled.png");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(&image_path)
+            .expect("temp fixture writes");
+
+        assert!(
+            load_ground_truth(&samples, "unlabelled").is_none(),
+            "no samples/ocr_fixtures/unlabelled.json should exist"
+        );
+
+        let specimen = load_specimen(&samples, &image_path)
+            .expect("the image itself exists and should decode");
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(specimen.name, "unlabelled");
+        assert!(
+            specimen.labels.is_none(),
+            "an unlabelled specimen must not silently acquire fabricated ground truth"
+        );
+    }
+
+    /// A nonexistent image path is skipped gracefully — `None`, not a panic
+    /// or an `Err` that would abort a whole-corpus load over one stale path.
+    /// Same "one bad entry costs one entry" contract as `find_sample` in
+    /// `crates/synthpass-ocr/examples/mrz_corpus.rs`.
+    #[test]
+    fn specimen_loader_handles_a_nonexistent_file_without_panicking() {
+        let root = repo_root();
+        let samples = root.join("samples");
+        let bogus = samples.join("id_cards").join("does_not_exist_1234.png");
+        assert!(load_specimen(&samples, &bogus).is_none());
+    }
+
+    /// The recursive walk finds specimens in more than one subdirectory,
+    /// including `ocr_fixtures/` itself, and returns a deterministic
+    /// (sorted) order rather than whatever order the OS filesystem API
+    /// happens to yield.
+    ///
+    /// Deliberately exercises `find_image_files` + `load_ground_truth`
+    /// directly rather than `load_real_specimens`, which also decodes every
+    /// image with the `image` crate — real disk-and-CPU cost that belongs
+    /// behind `--ignored`, not the default `cargo test` loop.
+    ///
+    /// Written to a temp tree rather than the real `samples/`: only
+    /// `samples/ocr_fixtures/` is tracked in git, and every image there is
+    /// hand-labelled by construction, so a fresh checkout with no local
+    /// mirror of the gitignored bulk corpus has no unlabelled specimen at
+    /// all — this test's "covers unlabelled" half must not depend on that.
+    #[test]
+    fn find_image_files_is_deterministic_and_covers_labelled_and_unlabelled_specimens() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-find-image-files-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let id_cards = root.join("id_cards");
+        let ocr_fixtures = root.join("ocr_fixtures");
+        std::fs::create_dir_all(&id_cards).expect("temp dir is creatable");
+        std::fs::create_dir_all(&ocr_fixtures).expect("temp dir is creatable");
+
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(id_cards.join("unlabelled.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(ocr_fixtures.join("labelled.png"))
+            .expect("temp fixture writes");
+        std::fs::write(
+            ocr_fixtures.join("labelled.json"),
+            serde_json::to_vec(&synthpass_core::Extraction::default())
+                .expect("Extraction serializes"),
+        )
+        .expect("temp fixture writes");
+
+        let paths = find_image_files(&root);
+        assert!(
+            !paths.is_empty(),
+            "the walk should find the images written to the temp tree"
+        );
+
+        let paths_again = find_image_files(&root);
+        assert_eq!(
+            paths, paths_again,
+            "repeated walks of the same directory must yield the same order"
+        );
+
+        let has_label = |path: &Path| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(|stem| load_ground_truth(&root, stem).is_some())
+        };
+        let has_labelled = paths.iter().any(|p| has_label(p));
+        let has_unlabelled = paths.iter().any(|p| !has_label(p));
+        std::fs::remove_dir_all(&root).ok();
+
+        assert!(
+            has_labelled,
+            "ocr_fixtures/ should contribute at least one labelled specimen"
+        );
+        assert!(
+            has_unlabelled,
+            "an MRZ-less front like a bare ID-card face should have no label file"
+        );
+    }
+
+    /// The full, real end-to-end load — every image under `samples/`
+    /// actually decoded via `load_real_specimens`, the way `provider-bench
+    /// --real-specimens` uses it. Slow (~140 real photographs decoded), so
+    /// it stays behind `--ignored` like this crate's other real-fixture
+    /// tests (`some_clean_generated_documents_hit`); run with
+    /// `cargo test -p synthpass-bench -- --ignored`.
+    #[test]
+    #[ignore]
+    fn load_real_specimens_decodes_every_image_under_samples() {
+        let root = repo_root();
+        let specimens = load_real_specimens(&root.join("samples"));
+        let expected = find_image_files(&root.join("samples")).len();
+        assert_eq!(
+            specimens.len(),
+            expected,
+            "every image `find_image_files` locates should decode successfully"
+        );
+        assert!(specimens.iter().any(|s| s.labels.is_some()));
+        assert!(specimens.iter().any(|s| s.labels.is_none()));
     }
 
     fn repo_root() -> std::path::PathBuf {
