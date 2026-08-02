@@ -25,6 +25,10 @@
 # illustrations rather than citations. A path a reader is meant to follow does
 # not live inside a ``` fence.
 #
+# Check 3 also strips http(s):// URLs before matching: a `docs/` segment
+# inside a link to someone else's repo (e.g. the Claude Code Action template's
+# own README URL) is not this repo's tree and never was.
+#
 # Pure bash + git. Nothing to install.
 set -euo pipefail
 
@@ -160,7 +164,7 @@ for f in "${path_files[@]}"; do
     p="${p%.}"
     is_allowed "$p" && continue
     report "$f still references $p (the tree moved to knowledge/ — see ADR-0001)"
-  done < <(prose "$f" | grep -ohE 'docs/[A-Za-z0-9_./-]*' | sort -u)
+  done < <(prose "$f" | sed -E 's#https?://[^[:space:])]+##g' | grep -ohE 'docs/[A-Za-z0-9_./-]*' | sort -u)
 done
 
 # ------------------------------------------------ 4. markdown anchor fragments
