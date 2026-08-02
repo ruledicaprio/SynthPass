@@ -1,0 +1,5057 @@
+{
+  "timestamp_unix": 1785697990,
+  "profile": "all",
+  "count": 80,
+  "seed_start": 0,
+  "hits": 37,
+  "hit_rate": 0.4625,
+  "results": [
+    {
+      "seed": 0,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 150798,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "CAN"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "TO337R26F"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "MORAVEC"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "IRINA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "CAN"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1991-07-02"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2028-11-17"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "R571RSVMB1UXBG"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<CANMORAVEC<<IRINA<<<<<<<<<<<<<<<<<<<<<<<<<\nTO337R26F4CAN9107027F2811176R571RSVMB1UXBG64"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 1,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 181993,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 2,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 201236,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "UTO"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "YE7LAMGCI"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "DUBOISARD"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ASTRID"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "UTO"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1996-03-25"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2028-03-23"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "U1P9ILN26APD0Z"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<UTODUBOISARD<<ASTRID<<<<<<<<<<<<<<<<<<<<<<\nYE7LAMGCI2UTO9603253F2803238U1P9ILN26APD0Z20"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 3,
+      "profile": "worn",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 178552,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "3LHYHUK1I",
+          "got": "3LHYHUK1T"
+        },
+        {
+          "field": "surname",
+          "cer": 0.8571428571428571,
+          "expected": "OKONKWO",
+          "got": "OKONKWO PRIYA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "PRIYA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "Z3J7QPR083AITI",
+          "got": "73J7QPR083AITI"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<ZAFOKONKWO<<PRIYA<<<<<<<<<<<<<<<<<<<<<<<<<\n3LHYHUK1I1ZAF6910033F3408098Z3J7QPR083AITI82",
+          "got": "P<ZAFOKONKWO<PRIYA<<<<<<<<<<<<<<<<<<<<<<<<<<\n3LHYHUK1T1ZAF6910033F340809873J7QPR083AITI82"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 4,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 135354,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "5LC6R6WB7",
+          "got": "PSFRAOKON"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "OKONKWO",
+          "got": "OKONKWOCSPRIYA"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.8,
+          "expected": "PRIYA",
+          "got": "YK"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "FRA",
+          "got": "WO"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.9,
+          "expected": "2001-11-22",
+          "got": "<PR1VA"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F",
+          "got": "X"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2029-03-02",
+          "got": "<<<<<<"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "J54XZMQ16GNDZ0",
+          "got": ""
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.5280898876404494,
+          "expected": "P<FRAOKONKWO<<PRIYA<<<<<<<<<<<<<<<<<<<<<<<<<\n5LC6R6WB73FRA0111229F2903024J54XZMQ16GNDZ006",
+          "got": "P<FRAOKONKWOCSPRIYA<<<<<<<<<<<<<<<<<<<YK<<<<\nPSFRAOKONKWO<<PR1VA<<<<<<<<<<<<<<<<<<<<<<<<<"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 5,
+      "profile": "clean",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 183599,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PE"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "FRA",
+          "got": "RAA"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "KA95ZVUO3",
+          "got": "KA95ZVU03"
+        },
+        {
+          "field": "surname",
+          "cer": 0.7142857142857143,
+          "expected": "ADEYEMI",
+          "got": "DEYEMIOMAR"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "OMAR",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0898876404494382,
+          "expected": "P<FRAADEYEMI<<OMAR<<<<<<<<<<<<<<<<<<<<<<<<<<\nKA95ZVUO35FRA9804256M350609747PONDLVS3H44350",
+          "got": "PERAADEYEMIOMAR<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nKA95ZVU035FRA9804256M350609747PONDLVS3H44350"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 6,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 183181,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOH"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "HALVORSEN",
+          "got": "ALVORSEN"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<UTOHALVORSEN<<AMARE<<<<<<<<<<<<<<<<<<<<<<<\nY6CGDB9BH3UTO6804222M2908030BLH5N6XCNN5GY106",
+          "got": "PUTOHALVORSEN<<AMARE<<<<<<<<<<<<<<<<<<<<<<<<\nY6CGDB9BH3UTO6804222M2908030BLH5N6XCNN5GY106"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 7,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 184467,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PG"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "GBR",
+          "got": "BRB"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "BLACKWOOD",
+          "got": "LACKWOOD"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<GBRBLACKWOOD<<MATEO<<<<<<<<<<<<<<<<<<<<<<<\nMICJ4MNR98GBR9101210M2708230QH0NTS6JNPIS3K94",
+          "got": "PGBRBLACKWOOD<<MATEO<<<<<<<<<<<<<<<<<<<<<<<<\nMICJ4MNR98GBR9101210M2708230QH0NTS6JNPIS3K94"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 8,
+      "profile": "worn",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 181548,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PJ"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "JPN",
+          "got": "PNS"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "4OYB2RON6",
+          "got": "40YB2RON6"
+        },
+        {
+          "field": "surname",
+          "cer": 1.8333333333333333,
+          "expected": "STRAND",
+          "got": "TRANDALEKSANDER"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ALEKSANDER",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.07865168539325842,
+          "expected": "P<JPNSTRAND<<ALEKSANDER<<<<<<<<<<<<<<<<<<<<<\n4OYB2RON67JPN9904167M2707277HJHCAVNJKXQSLA08",
+          "got": "PJPNSTRANDALEKSANDER<<<<<<<<<<<<<<<<<<<<<<<<\n40YB2RON67JPN9904167M2707277HJHCAVNJKXQSLA08"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 9,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 138631,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PE"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.2,
+          "expected": "ELIAS",
+          "got": "ELJAS"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<SWESTRAND<<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<<\nLTU8I68RP2SWE7008050M3508208MSEGXTOVR7HFRQ28",
+          "got": "PESWESTRAND<<ELJAS<<<<<<<<<<<<<<<<<<<<<<<<<<\nLTU8I68RP2SWE7008050M3508208MSEGXTOVR7HFRQ28"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 10,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 230299,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PG"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "GBR",
+          "got": "BRV"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1,
+          "expected": "VANTERPOOL",
+          "got": "ANTERPOOL"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<GBRVANTERPOOL<<YUKI<<<<<<<<<<<<<<<<<<<<<<<\nFC3EL7GZ21GBR8107259F3110245BD4DXPYB5HZ20H88",
+          "got": "PGBRVANTERPOOL<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\nFC3EL7GZ21GBR8107259F3110245BD4DXPYB5HZ20H88"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 11,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 235223,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.21428571428571427,
+          "expected": "4MO9LO0C05GEMF",
+          "got": "4M09L0OC05GEMF"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.033707865168539325,
+          "expected": "P<CANOKONKWO<<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<\n52H9NT9WE2CAN7311165M32032824MO9LO0C05GEMF08",
+          "got": "P<CANOKONKWO<<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<\n52H9NT9WE2CAN7311165M32032824M09L0OC05GEMF08"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 12,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 232539,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PA"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "AUS",
+          "got": "USS"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "4OVRP5CAE",
+          "got": "4OVRP5CAF"
+        },
+        {
+          "field": "surname",
+          "cer": 1.1666666666666667,
+          "expected": "STRAND",
+          "got": "TRAND ELIAS"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ELIAS",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "XDOZ4GYQDXTAGD",
+          "got": "XD0Z4GYQDXTAGD"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<AUSSTRAND<<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<<\n4OVRP5CAE8AUS9011089M3608049XDOZ4GYQDXTAGD58",
+          "got": "PAUSSTRAND<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n4OVRP5CAF8AUS9011089M3608049XD0Z4GYQDXTAGD58"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 13,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 213453,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PG"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "GBR",
+          "got": "BRO"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.14285714285714285,
+          "expected": "OKONKWO",
+          "got": "KONKWO"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<GBROKONKWO<<TARIQ<<<<<<<<<<<<<<<<<<<<<<<<<\n01HU2RX4C8GBR6711089M2810054GJY3YF5WBQPEGU64",
+          "got": "PGBROKONKWO<<TARIQ<<<<<<<<<<<<<<<<<<<<<<<<<<\n01HU2RX4C8GBR6711089M2810054GJY3YF5WBQPEGU64"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 14,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 130706,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.6666666666666666,
+          "expected": "WHITFIELD",
+          "got": "WHITFIELDS ZARA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ZARA",
+          "got": "TE"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.033707865168539325,
+          "expected": "P<USAWHITFIELD<<ZARA<<<<<<<<<<<<<<<<<<<<<<<<\nEHLVMF8Z98USA5311275F34070805KS1HHSH6XGPKX48",
+          "got": "P<USAWHITFIELDS<ZARA<<<<<<<<<<<<<<<<<<TE<<<<\nEHLVMF8Z98USA5311275F34070805KS1HHSH6XGPKX48"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 15,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 182068,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "BWWPD4QMX"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "OKONKWO"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "SOFIA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1969-06-01"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2027-05-20"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "RLNJ2O6NHZSMVE"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<JPNOKONKWO<<SOFIA<<<<<<<<<<<<<<<<<<<<<<<<<\nBWWPD4QMX4JPN6906012F2705206RLNJ2O6NHZSMVE68"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 16,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 172574,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PB"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "BRA",
+          "got": "RAA"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.14285714285714285,
+          "expected": "ADEYEMI",
+          "got": "DEYEMI"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<BRAADEYEMI<<DMITRI<<<<<<<<<<<<<<<<<<<<<<<<\nTMSQW6FXY9BRA5110054M3603088OZ0LGF7NK9PPYX14",
+          "got": "PBRAADEYEMI<<DMITRI<<<<<<<<<<<<<<<<<<<<<<<<<\nTMSQW6FXY9BRA5110054M3603088OZ0LGF7NK9PPYX14"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 17,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 159490,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PA"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "AUS",
+          "got": "USK"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "KIRSCHNER",
+          "got": "IRSCHNER"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<AUSKIRSCHNER<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\nNJP1X1N1T3AUS8310213F2907088QXH28ZJCEGTJBM50",
+          "got": "PAUSKIRSCHNER<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<<\nNJP1X1N1T3AUS8310213F2907088QXH28ZJCEGTJBM50"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 18,
+      "profile": "worn",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 174654,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOC"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "MZ6FXO426",
+          "got": "MZ6FX0426"
+        },
+        {
+          "field": "surname",
+          "cer": 0.1,
+          "expected": "CASTELLANO",
+          "got": "ASTELLANO"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.2,
+          "expected": "TARIQ",
+          "got": "TARTQ"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<UTOCASTELLANO<<TARIQ<<<<<<<<<<<<<<<<<<<<<<\nMZ6FXO4263UTO6006059M28120474SY4LNFE50N58V54",
+          "got": "PUTOCASTELLANO<<TARTQ<<<<<<<<<<<<<<<<<<<<<<<\nMZ6FX04263UTO6006059M28120474SY4LNFE50N58V54"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 19,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 140790,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.8888888888888888,
+          "expected": "WHITFIELD",
+          "got": "WHITFIELDS PIETRO"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "PIETRO",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.21428571428571427,
+          "expected": "S4JSB43KHT7ER5",
+          "got": "4JSB43KHTZER50"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<UTOWHITFIELD<<PIETRO<<<<<<<<<<<<<<<<<<<<<<\nW7XKW58T46UTO0001074M3601017S4JSB43KHT7ER508",
+          "got": "P<UTOWHITFIELDS<PIETRO<<<<<<<<<<<<<<<<<<<<<<\nW7XKW58T46UTO0001074M36010174JSB43KHTZER508<"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 20,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 179287,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOH"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "HALVORSEN",
+          "got": "ALVORSEN"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<UTOHALVORSEN<<MILENA<<<<<<<<<<<<<<<<<<<<<<\n1045VG9E66UTO8308252F300623293L479NR4CIAMH06",
+          "got": "PUTOHALVORSEN<<MILENA<<<<<<<<<<<<<<<<<<<<<<<\n1045VG9E66UTO8308252F300623293L479NR4CIAMH06"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 21,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 182853,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 22,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 183859,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PF"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "FRA",
+          "got": "RAB"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.8888888888888888,
+          "expected": "BLACKWOOD",
+          "got": "LACKWOODLEILANI"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "LEILANI",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<FRABLACKWOOD<<LEILANI<<<<<<<<<<<<<<<<<<<<<\n6OQCGRMOU5FRA9110018F29010198CHF1F6E6KC73H78",
+          "got": "PFRABLACKWOODLEILANI<<<<<<<<<<<<<<<<<<<<<<<<\n6OQCGRMOU5FRA9110018F29010198CHF1F6E6KC73H78"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 23,
+      "profile": "worn",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 206769,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "CZAFUCFD7"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "NYSTROM"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "YUKI"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1967-01-25"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2033-09-03"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "3CWTNCTW8Q53HI"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<AUSNYSTROM<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<<<\nCZAFUCFD77AUS6701251F33090363CWTNCTW8Q53HI38"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 24,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 155471,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "PPB0UPY6W",
+          "got": "PPBOUPY6W"
+        },
+        {
+          "field": "surname",
+          "cer": 1.1428571428571428,
+          "expected": "ADEYEMI",
+          "got": "ADEYEMIS SOFTAK"
+        },
+        {
+          "field": "given_names",
+          "cer": 3.0,
+          "expected": "SOFIA",
+          "got": "K            I K"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.07865168539325842,
+          "expected": "P<SWEADEYEMI<<SOFIA<<<<<<<<<<<<<<<<<<<<<<<<<\nPPB0UPY6W4SWE0506236F3004179QDTYFCFGQA534R12",
+          "got": "P<SWEADEYEMIS<SOFTAK<<<<<<K<<<<<<<<<<<<I<K<<\nPPBOUPY6W4SWE0506236F3004179QDTYFCFGQA534R12"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 25,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 186977,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 26,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 207181,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 27,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 186280,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PG"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "GBR",
+          "got": "BRH"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "HALVORSEN",
+          "got": "ALVORSEN"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<GBRHALVORSEN<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<\nNDME02R3T9GBR6612131F3510052Z5JISBYSSKICF690",
+          "got": "PGBRHALVORSEN<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<<\nNDME02R3T9GBR6612131F3510052Z5JISBYSSKICF690"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 28,
+      "profile": "worn",
+      "hit": false,
+      "reason": "document number mismatch: got \"YAK05VOV2\", expected \"YAKO5V0V2\"",
+      "miss_kind": "document_number_mismatch",
+      "elapsed_ms": 187608,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PD"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "DEU",
+          "got": "EUE"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.2222222222222222,
+          "expected": "YAKO5V0V2",
+          "got": "YAK05VOV2"
+        },
+        {
+          "field": "surname",
+          "cer": 0.5555555555555556,
+          "expected": "ESKANDARI",
+          "got": "SKANDARITOVA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "TOVA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0898876404494382,
+          "expected": "P<DEUESKANDARI<<TOVA<<<<<<<<<<<<<<<<<<<<<<<<\nYAKO5V0V27DEU7608243F3307205UBWL048G8P1DHG68",
+          "got": "PDEUESKANDARITOVA<<<<<<<<<<<<<<<<<<<<<<<<<<<\nYAK05VOV27DEU7608243F3307205UBWL048G8P1DHG68"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 29,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 157025,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "OKONKWO",
+          "got": "OKONKWO SHANSE"
+        },
+        {
+          "field": "given_names",
+          "cer": 3.75,
+          "expected": "HANS",
+          "got": "K       K SI   K"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.07865168539325842,
+          "expected": "P<SWEOKONKWO<<HANS<<<<<<<<<<<<<<<<<<<<<<<<<<\nNGM26LXBM0SWE8103114M34032889T2IOWGZVBCQ2X28",
+          "got": "P<SWEOKONKWO<SHANSE<<<<<<<K<<<<<<<K<SI<<<K<<\nNGM26LXBM0SWE8103114M34032889T2IOWGZVBCQ2X28"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 30,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 183151,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "FRA"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "TF5UUIM6C"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "BLACKWOOD"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "MAREN"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "FRA"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1971-10-06"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2035-02-06"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "ES22FTWW6894YS"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<FRABLACKWOOD<<MAREN<<<<<<<<<<<<<<<<<<<<<<<\nTF5UUIM6C5FRA7110069F3502066ES22FTWW6894YS76"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 31,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 96701,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "UTO"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "YDXQO768K"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "STRAND"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "AMARA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "UTO"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1983-09-24"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2027-06-08"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "UPLWXFY7WZZ2FD"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<UTOSTRAND<<AMARA<<<<<<<<<<<<<<<<<<<<<<<<<<\nYDXQO768K7UTO8309248F2706085UPLWXFY7WZZ2FD12"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 32,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 171812,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "USA",
+          "got": "SAV"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1,
+          "expected": "VANTERPOOL",
+          "got": "ANTERPOOL"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<USAVANTERPOOL<<YUKI<<<<<<<<<<<<<<<<<<<<<<<\nAPUUR5FYL9USA9905131F3103119BH4QJUNYPVYTUP24",
+          "got": "PUSAVANTERPOOL<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\nAPUUR5FYL9USA9905131F3103119BH4QJUNYPVYTUP24"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 33,
+      "profile": "worn",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 172503,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PB"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "BRA",
+          "got": "RAS"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.16666666666666666,
+          "expected": "STRAND",
+          "got": "TRAND"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.2,
+          "expected": "MATEO",
+          "got": "MATEOC"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "9LYD5YGT3RO0SK",
+          "got": "9LYD5YGT3ROOSK"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.033707865168539325,
+          "expected": "P<BRASTRAND<<MATEO<<<<<<<<<<<<<<<<<<<<<<<<<<\n9K91HFP2M8BRA7709025M30091419LYD5YGT3RO0SK98",
+          "got": "PBRASTRAND<<MATEOC<<<<<<<<<<<<<<<<<<<<<<<<<<\n9K91HFP2M8BRA7709025M30091419LYD5YGT3ROOSK98"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 34,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 149654,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOV"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.2222222222222222,
+          "expected": "DACNFE0BJ",
+          "got": "DACNFFOBJ"
+        },
+        {
+          "field": "surname",
+          "cer": 0.9,
+          "expected": "VANTERPOOL",
+          "got": "ANTERPOOLS NADJAK"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "NADIA",
+          "got": "TY"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "VI75PIZDOX824Z",
+          "got": "VI75PIZ0OX824Z"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.10112359550561797,
+          "expected": "P<UTOVANTERPOOL<<NADIA<<<<<<<<<<<<<<<<<<<<<<\nDACNFE0BJ5UTO7906271F3610217VI75PIZDOX824Z42",
+          "got": "PUTOVANTERPOOLS<NADJAK<<<<<<<<<<<<<<<<<TY<<<\nDACNFFOBJ5UTO7906271F3610217VI75PIZ0OX824Z42"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 35,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 182852,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "DYMDJIWG5"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "CASTELLANO"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ASTRID"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1977-06-13"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2027-06-23"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "2DFXYGHSPM9ESZ"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<JPNCASTELLANO<<ASTRID<<<<<<<<<<<<<<<<<<<<<\nDYMDJIWG58JPN7706138F27062362DFXYGHSPM9ESZ14"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 36,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 177639,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "H1RC2R4N8ONTKO",
+          "got": "H1RC2RAN8ONTK0"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<GBRKIRSCHNER<<TARIQ<<<<<<<<<<<<<<<<<<<<<<<\n51BGSCU6I3GBR5412242M2802035H1RC2R4N8ONTKO94",
+          "got": "P<GBRKIRSCHNER<<TARIQ<<<<<<<<<<<<<<<<<<<<<<<\n51BGSCU6I3GBR5412242M2802035H1RC2RAN8ONTK094"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 37,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 174289,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "USA",
+          "got": "SAD"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "DUBOISARD",
+          "got": "UBOISARD"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<USADUBOISARD<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\n452JUI9C27USA8106126F34091109WDSCE013SSPTN14",
+          "got": "PUSADUBOISARD<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<<\n452JUI9C27USA8106126F34091109WDSCE013SSPTN14"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 38,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 178235,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOE"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.5555555555555556,
+          "expected": "ESKANDARI",
+          "got": "SKANDARIHANS"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "HANS",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<UTOESKANDARI<<HANS<<<<<<<<<<<<<<<<<<<<<<<<\nWBVTL25U89UTO6802103M27020983UE8UPAYD2MJDU14",
+          "got": "PUTOESKANDARIHANS<<<<<<<<<<<<<<<<<<<<<<<<<<<\nWBVTL25U89UTO6802103M27020983UE8UPAYD2MJDU14"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 39,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 142867,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.8571428571428571,
+          "expected": "ADEYEMI",
+          "got": "ADEYEMISSTOMA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "TOVA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "VLC2PETBIYZ4K4",
+          "got": "VLC2PE1BEYZ4K4"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<GBRADEYEMI<<TOVA<<<<<<<<<<<<<<<<<<<<<<<<<<\nKSYT45PO50GBR0810038F3508172VLC2PETBIYZ4K482",
+          "got": "P<GBRADEYEMISSTOMA<<<<<<<<<<<<<<<<<<<<<<<<<<\nKSYT45PO50GBR0810038F3508172VLC2PE1BEYZ4K482"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 40,
+      "profile": "clean",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 183561,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOC"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "R0K68D54E",
+          "got": "ROK68D54E"
+        },
+        {
+          "field": "surname",
+          "cer": 0.7,
+          "expected": "CASTELLANO",
+          "got": "ASTELLANO SOREN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "SOREN",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<UTOCASTELLANO<<SOREN<<<<<<<<<<<<<<<<<<<<<<\nR0K68D54E9UTO8208259M2905039DRUP985Q12B07280",
+          "got": "PUTOCASTELLANO<SOREN<<<<<<<<<<<<<<<<<<<<<<<<\nROK68D54E9UTO8208259M2905039DRUP985Q12B07280"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 41,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 182240,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "FRA"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "44KM3KIEB"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "VANTERPOOL"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "NADIA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "FRA"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1985-07-09"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2029-12-17"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "TVBXH2RDHAJB21"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<FRAVANTERPOOL<<NADIA<<<<<<<<<<<<<<<<<<<<<<\n44KM3KIEB2FRA8507099F2912176TVBXH2RDHAJB2112"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 42,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 179250,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PB"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "BRA",
+          "got": "RAE"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "FLLF2W13I",
+          "got": "FLLF2W13T"
+        },
+        {
+          "field": "surname",
+          "cer": 0.7777777777777778,
+          "expected": "ESKANDARI",
+          "got": "SKANDARI MAREN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "MAREN",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<BRAESKANDARI<<MAREN<<<<<<<<<<<<<<<<<<<<<<<\nFLLF2W13I6BRA7505180F3404182TSN6V81V60LG9U16",
+          "got": "PBRAESKANDARI<MAREN<<<<<<<<<<<<<<<<<<<<<<<<<\nFLLF2W13T6BRA7505180F3404182TSN6V81V60LG9U16"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 43,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 175873,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PB"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "BRA",
+          "got": "RAK"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.5555555555555556,
+          "expected": "KIRSCHNER",
+          "got": "IRSCHNERLUCA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "LUCA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<BRAKIRSCHNER<<LUCA<<<<<<<<<<<<<<<<<<<<<<<<\nNZ13888OS6BRA9407130M28110289VQI4C1VZUI2NX34",
+          "got": "PBRAKIRSCHNERLUCA<<<<<<<<<<<<<<<<<<<<<<<<<<<\nNZ13888OS6BRA9407130M28110289VQI4C1VZUI2NX34"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 44,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 114894,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PR"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.011235955056179775,
+          "expected": "P<USAADEYEMI<<PRIYA<<<<<<<<<<<<<<<<<<<<<<<<<\nJ183MGQT40USA9503113F3211108HRPUXXMSFDYVUS80",
+          "got": "PRUSAADEYEMI<<PRIYA<<<<<<<<<<<<<<<<<<<<<<<<<\nJ183MGQT40USA9503113F3211108HRPUXXMSFDYVUS80"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 45,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 179530,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.8888888888888888,
+          "expected": "DUBOISARD",
+          "got": "DUBOISARD DMITRIK"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "DMITRI",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<CANDUBOISARD<<DMITRI<<<<<<<<<<<<<<<<<<<<<<\nDKHCBS4V71CAN8706043M33050509ARHK1ECVGOQFD96",
+          "got": "P<CANDUBOISARD<DMITRIK<<<<<<<<<<<<<<<<<<<<<<\nDKHCBS4V71CAN8706043M33050509ARHK1ECVGOQFD96"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 46,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 185335,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 2.8,
+          "expected": "PRIYA",
+          "got": "PRIYACCCCCCCCCCCCCC"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "TFSQ68OYV81RJE",
+          "got": "TFSQ680YV81RJE"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.16853932584269662,
+          "expected": "P<BRAVANTERPOOL<<PRIYA<<<<<<<<<<<<<<<<<<<<<<\nN2804SBRZ8BRA8406125F3607145TFSQ68OYV81RJE68",
+          "got": "P<BRAVANTERPOOL<<PRIYACCCCCCCCCCCCCC<<<<<<<<\nN2804SBRZ8BRA8406125F3607145TFSQ680YV81RJE68"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 47,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 177813,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "USA",
+          "got": "SAH"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "O0AK3Q9CK",
+          "got": "00AK3Q9CK"
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "HALVORSEN",
+          "got": "ALVORSEN"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "XOSS809XRGCDUP",
+          "got": "X0SS809XRGCDUP"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<USAHALVORSEN<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<\nO0AK3Q9CK2USA9401080F3410107XOSS809XRGCDUP66",
+          "got": "PUSAHALVORSEN<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<<\n00AK3Q9CK2USA9401080F3410107X0SS809XRGCDUP66"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 48,
+      "profile": "worn",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 174043,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "JV7BSA3U7"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "BLACKWOOD"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "OMAR"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "JPN"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1976-10-27"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "M"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2034-04-11"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "2MSUV5TH7AB8IO"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<JPNBLACKWOOD<<OMAR<<<<<<<<<<<<<<<<<<<<<<<<\nJV7BSA3U72JPN7610271M34041152MSUV5TH7AB8IO66"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 49,
+      "profile": "border-kiosk",
+      "hit": true,
+      "elapsed_ms": 127507,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PX"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.6666666666666666,
+          "expected": "ESKANDARI",
+          "got": "ESKANDARIS YUKI"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "YUKI",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "D6N1WV278HGAOO",
+          "got": "D6N1WV278HGA00"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<BRAESKANDARI<<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\nF4AB2F2I25BRA6801092F3606230D6N1WV278HGAOO64",
+          "got": "PXBRAESKANDARIS<YUKI<<<<<<<<<<<<<<<<<<<<<<<<\nF4AB2F2I25BRA6801092F3606230D6N1WV278HGA0064"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 50,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 187305,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "DFUBAKOM5"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "CASTELLANO"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "OMAR"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1950-07-10"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "M"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2032-08-04"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "MH3SXF0BRLN7LI"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<AUSCASTELLANO<<OMAR<<<<<<<<<<<<<<<<<<<<<<<\nDFUBAKOM52AUS5007107M3208047MH3SXF0BRLN7LI22"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 51,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 179028,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PS"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "SWE",
+          "got": "WEK"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "KIRSCHNER",
+          "got": "IRSCHNER"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.2,
+          "expected": "SOFIA",
+          "got": "SOFIAC"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<SWEKIRSCHNER<<SOFIA<<<<<<<<<<<<<<<<<<<<<<<\nCAHIDP8KE1SWE0404228F290723970HUPR68VDM7TI60",
+          "got": "PSWEKIRSCHNER<<SOFIAC<<<<<<<<<<<<<<<<<<<<<<<\nCAHIDP8KE1SWE0404228F290723970HUPR68VDM7TI60"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 52,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 188991,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "USA",
+          "got": "SAD"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "0WZ31DC27",
+          "got": "OWZ31DC27"
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "DUBOISARD",
+          "got": "UBOISARD"
+        },
+        {
+          "field": "given_names",
+          "cer": 3.142857142857143,
+          "expected": "NIKOLAI",
+          "got": "NIKOLAL                    K"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<USADUBOISARD<<NIKOLAI<<<<<<<<<<<<<<<<<<<<<\n0WZ31DC275USA5909164M3406164RP6DN8HONKYU9K76",
+          "got": "PUSADUBOISARD<<NIKOLAL<<<<<<<<<<<<<<<<<<<<K<\nOWZ31DC275USA5909164M3406164RP6DN8HONKYU9K76"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 53,
+      "profile": "worn",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 179441,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "CAN"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "JFPVF6SP9"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "NYSTROM"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ELIAS"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "CAN"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1952-11-04"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "M"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2030-11-06"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "B3Z1JZ5GUS8ID4"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<CANNYSTROM<<ELIAS<<<<<<<<<<<<<<<<<<<<<<<<<\nJFPVF6SP91CAN5211043M3011065B3Z1JZ5GUS8ID440"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 54,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 136797,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.3333333333333333,
+          "expected": "ZQWB51WP0",
+          "got": "2GWB51WPO"
+        },
+        {
+          "field": "surname",
+          "cer": 0.7777777777777778,
+          "expected": "WHITFIELD",
+          "got": "WHITFIELDSSTOVAR"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "TOVA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<GBRWHITFIELD<<TOVA<<<<<<<<<<<<<<<<<<<<<<<<\nZQWB51WP07GBR6106133F2704047TDLI3T36IADGRX72",
+          "got": "P<GBRWHITFIELDSSTOVAR<<<<<<<<<<<<<<<<<<<<<<<\n2GWB51WPO7GBR6106133F2704047TDLI3T36IADGRX72"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 55,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 180798,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "BRA"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "ZN5I5SB71"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "VANTERPOOL"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "MILENA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "BRA"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "2000-03-14"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2028-09-07"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "SQFD92LGU7NHOA"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<BRAVANTERPOOL<<MILENA<<<<<<<<<<<<<<<<<<<<<\nZN5I5SB717BRA0003148F2809078SQFD92LGU7NHOA78"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 56,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 187853,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PD"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "DEU",
+          "got": "EUP"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "PELLETIER",
+          "got": "ELLETIER"
+        },
+        {
+          "field": "given_names",
+          "cer": 2.4,
+          "expected": "SOREN",
+          "got": "SOREN C      C  C"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "6SRJ6EYN4A0Q6O",
+          "got": "6SRJ6EYN4A0Q60"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<DEUPELLETIER<<SOREN<<<<<<<<<<<<<<<<<<<<<<<\nXSMXCU7XW4DEU8206026M34041486SRJ6EYN4A0Q6O98",
+          "got": "PDEUPELLETIER<<SOREN<C<<<<<<C<<C<<<<<<<<<<<<\nXSMXCU7XW4DEU8206026M34041486SRJ6EYN4A0Q6098"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 57,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 176157,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PJ"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "JPN",
+          "got": "PNN"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.14285714285714285,
+          "expected": "NYSTROM",
+          "got": "YSTROM"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<JPNNYSTROM<<MAREN<<<<<<<<<<<<<<<<<<<<<<<<<\nK2HPBKQ2L0JPN6507110F3311226T8C7EXTQH53NHS18",
+          "got": "PJPNNYSTROM<<MAREN<<<<<<<<<<<<<<<<<<<<<<<<<<\nK2HPBKQ2L0JPN6507110F3311226T8C7EXTQH53NHS18"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 58,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 172544,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PA"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "AUS",
+          "got": "USN"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.14285714285714285,
+          "expected": "NYSTROM",
+          "got": "YSTROM"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "MVYDWZIU5L4FNU",
+          "got": "MVYDWZT15L4FNU"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<AUSNYSTROM<<AMARA<<<<<<<<<<<<<<<<<<<<<<<<<\nR5D4S1JUH0AUS7310250F2703040MVYDWZIU5L4FNU92",
+          "got": "PAUSNYSTROM<<AMARA<<<<<<<<<<<<<<<<<<<<<<<<<<\nR5D4S1JUH0AUS7310250F2703040MVYDWZT15L4FNU92"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 59,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "document number mismatch: got \"PZNIG9GGG\", expected \"PZNIQ9GGG\"",
+      "miss_kind": "document_number_mismatch",
+      "elapsed_ms": 146814,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PS"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "PZNIQ9GGG",
+          "got": "PZNIG9GGG"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "OKONKWO",
+          "got": "OKONKWO SIRINA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "IRINA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "UQJRPTCS63MF0V",
+          "got": "U0JRPTCS63MFOV"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<FRAOKONKWO<<IRINA<<<<<<<<<<<<<<<<<<<<<<<<<\nPZNIQ9GGG2FRA6504223F3309209UQJRPTCS63MF0V90",
+          "got": "PSFRAOKONKWO<SIRINA<<<<<<<<<<<<<<<<<<<<<<<<<\nPZNIG9GGG2FRA6504223F3309209U0JRPTCS63MFOV90"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 60,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 168300,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PF"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "FRA",
+          "got": "RAM"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.14285714285714285,
+          "expected": "MORAVEC",
+          "got": "ORAVEC"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<FRAMORAVEC<<NIKOLAI<<<<<<<<<<<<<<<<<<<<<<<\nRYQGVYGT61FRA8303202M3102226L0QE10PZFXGCT612",
+          "got": "PFRAMORAVEC<<NIKOLAI<<<<<<<<<<<<<<<<<<<<<<<<\nRYQGVYGT61FRA8303202M3102226L0QE10PZFXGCT612"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 61,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 139129,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "DEU"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "5XHH4VZAQ"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "ESKANDARI"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "AMARE"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "DEU"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1991-04-13"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "M"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2032-06-23"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "YF5LNM3YVCLIAZ"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<DEUESKANDARI<<AMARE<<<<<<<<<<<<<<<<<<<<<<<\n5XHH4VZAQ4DEU9104130M3206238YF5LNM3YVCLIAZ08"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 62,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 169494,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOA"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "ADEYEMI",
+          "got": "DEYEMI SOREN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "SOREN",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<UTOADEYEMI<<SOREN<<<<<<<<<<<<<<<<<<<<<<<<<\nFXKOJBF407UTO6310183M2801072TXEWGQUYXUCFA002",
+          "got": "PUTOADEYEMI<SOREN<<<<<<<<<<<<<<<<<<<<<<<<<<<\nFXKOJBF407UTO6310183M2801072TXEWGQUYXUCFA002"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 63,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 165824,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "USA",
+          "got": "SAC"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.9,
+          "expected": "CASTELLANO",
+          "got": "ASTELLANO NIKOLAL"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.8571428571428571,
+          "expected": "NIKOLAI",
+          "got": "K"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.056179775280898875,
+          "expected": "P<USACASTELLANO<<NIKOLAI<<<<<<<<<<<<<<<<<<<<\nHVGJYWM6C9USA8803274M29032206SKKR0H24M5D1892",
+          "got": "PUSACASTELLANO<NIKOLAL<<<<<<<<<<<<<<<<<<<<K<\nHVGJYWM6C9USA8803274M29032206SKKR0H24M5D1892"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 64,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 146401,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PS"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.3333333333333333,
+          "expected": "FRA",
+          "got": "ERA"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "47Z38JZ9I",
+          "got": "47238JZ9I"
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "MFFJE43Y79ON5X",
+          "got": "MFFJE43Y79ON5K"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<FRASTRAND<<ALEKSANDER<<<<<<<<<<<<<<<<<<<<<\n47Z38JZ9I8FRA0108087M3504233MFFJE43Y79ON5X54",
+          "got": "PSERASTRAND<<ALEKSANDER<<<<<<<<<<<<<<<<<<<<<\n47238JZ9I8FRA0108087M3504233MFFJE43Y79ON5K54"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 65,
+      "profile": "clean",
+      "hit": true,
+      "elapsed_ms": 167628,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOS"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.16666666666666666,
+          "expected": "STRAND",
+          "got": "TRAND"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<UTOSTRAND<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<<<<\n3RCXPATNR9UTO7601288F30051650ZC5XW9E1SCQT264",
+          "got": "PUTOSTRAND<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<<<<<\n3RCXPATNR9UTO7601288F30051650ZC5XW9E1SCQT264"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 66,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 176005,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PC"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.7777777777777778,
+          "expected": "DUBOISARD",
+          "got": "DUBOISARD PIETRO"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "PIETRO",
+          "got": "C"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "3LZ5XFILU7U0AF",
+          "got": "3LZ5XFILU7UOAF"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0449438202247191,
+          "expected": "P<AUSDUBOISARD<<PIETRO<<<<<<<<<<<<<<<<<<<<<<\nNOVLBROAK9AUS8302021M29012603LZ5XFILU7U0AF12",
+          "got": "PCAUSDUBOISARD<PIETRO<<<<<C<<<<<<<<<<<<<<<<<\nNOVLBROAK9AUS8302021M29012603LZ5XFILU7UOAF12"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 67,
+      "profile": "scanner",
+      "hit": true,
+      "elapsed_ms": 166668,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOB"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.7777777777777778,
+          "expected": "BLACKWOOD",
+          "got": "LACKWOODLEILAN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "LEILANI",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.07865168539325842,
+          "expected": "P<UTOBLACKWOOD<<LEILANI<<<<<<<<<<<<<<<<<<<<<\n8D4V4FQ256UTO0309138F3409110668K1BJP0M96VX30",
+          "got": "PUTOBLACKWOODLEILAN<<<<<<<<<<<<<<<<<<<<<<<<<\n8D4V4FQ256UTO0309138F3409110668K1BJP0M96VX30"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 68,
+      "profile": "worn",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 168718,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "TSTRZGDPQ"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "KIRSCHNER"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "AMARA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1972-05-22"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2027-05-09"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "X4JUHW8ZBJ82JG"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<SWEKIRSCHNER<<AMARA<<<<<<<<<<<<<<<<<<<<<<<\nTSTRZGDPQ8SWE7205228F2705099X4JUHW8ZBJ82JG78"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 69,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "document number mismatch: got \"SBB2729YH\", expected \"5BBZ729YH\"",
+      "miss_kind": "document_number_mismatch",
+      "elapsed_ms": 139314,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "VP"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "ZAF",
+          "got": "SZA"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.2222222222222222,
+          "expected": "5BBZ729YH",
+          "got": "SBB2729YH"
+        },
+        {
+          "field": "surname",
+          "cer": 1.1428571428571428,
+          "expected": "MORAVEC",
+          "got": "FMORAVECSSAMARA"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "AMARA",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.35714285714285715,
+          "expected": "9R1D94NKDHRQBH",
+          "got": "9R1094NKDHRORH5G"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.12359550561797752,
+          "expected": "P<ZAFMORAVEC<<AMARA<<<<<<<<<<<<<<<<<<<<<<<<<\n5BBZ729YH9ZAF7309012F35091809R1D94NKDHRQBH54",
+          "got": "VPSZAFMORAVECSSAMARA<<<<<<<<<<<<<<<<<<<<<<<<\nSBB2729YH9ZAF7309012F35091809R1094NKDHRORH5G"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 70,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 175681,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "HR3989MXU"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "ADEYEMI"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "TOVA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1961-05-18"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2032-05-25"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "P540JC6KMH73PY"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<SWEADEYEMI<<TOVA<<<<<<<<<<<<<<<<<<<<<<<<<<\nHR3989MXU2SWE6105181F3205253P540JC6KMH73PY78"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 71,
+      "profile": "mobile",
+      "hit": true,
+      "elapsed_ms": 168395,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 72,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 174716,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PB"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "BRA",
+          "got": "RAD"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.7777777777777778,
+          "expected": "DUBOISARD",
+          "got": "UBOISARD KENJN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "KENJI",
+          "got": ""
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "JS4IDSMEX6ED0Z",
+          "got": "JS4IDSMEX6ED07"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<BRADUBOISARD<<KENJI<<<<<<<<<<<<<<<<<<<<<<<\n7BQY3ZEZP8BRA6507143M3103072JS4IDSMEX6ED0Z52",
+          "got": "PBRADUBOISARD<KENJN<<<<<<<<<<<<<<<<<<<<<<<<<\n7BQY3ZEZP8BRA6507143M3103072JS4IDSMEX6ED0752"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 73,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 166191,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.0
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 74,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 138280,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PS"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 5.2,
+          "expected": "SOFIA",
+          "got": "SOFJA        K               E"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.14285714285714285,
+          "expected": "4OADO3IPS73F1F",
+          "got": "40AD03IPS73F1F"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.06741573033707865,
+          "expected": "P<DEUADEYEMI<<SOFIA<<<<<<<<<<<<<<<<<<<<<<<<<\nOA3NYVYA69DEU0502216F27010914OADO3IPS73F1F00",
+          "got": "PSDEUADEYEMI<<SOFJA<<<<<<<<K<<<<<<<<<<<<<<<E\nOA3NYVYA69DEU0502216F270109140AD03IPS73F1F00"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 75,
+      "profile": "clean",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 173962,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "AMG7TQCG1"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "WHITFIELD"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "ANIKA"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "AUS"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "2004-03-27"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "F"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2031-09-07"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "X9OY40XOANB5T4"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<AUSWHITFIELD<<ANIKA<<<<<<<<<<<<<<<<<<<<<<<\nAMG7TQCG17AUS0403276F3109074X9OY40XOANB5T490"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 76,
+      "profile": "mobile",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 163807,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.1111111111111111,
+          "expected": "ZI19ZD39P",
+          "got": "ZI197D39P"
+        },
+        {
+          "field": "surname",
+          "cer": 0.0
+        },
+        {
+          "field": "given_names",
+          "cer": 0.0
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.07142857142857142,
+          "expected": "LXXAGW5W8W36OZ",
+          "got": "LXXAGW5W8W360Z"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<FRASTRAND<<AMARE<<<<<<<<<<<<<<<<<<<<<<<<<<\nZI19ZD39P4FRA8611068M3410130LXXAGW5W8W36OZ08",
+          "got": "P<FRASTRAND<<AMARE<<<<<<<<<<<<<<<<<<<<<<<<<<\nZI197D39P4FRA8611068M3410130LXXAGW5W8W360Z08"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 77,
+      "profile": "scanner",
+      "hit": false,
+      "reason": "no MRZ found: NotFound",
+      "miss_kind": "no_mrz_found",
+      "elapsed_ms": 172079,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "document_number",
+          "cer": 1.0,
+          "expected": "Z3SIU052O"
+        },
+        {
+          "field": "surname",
+          "cer": 1.0,
+          "expected": "VANTERPOOL"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "PIETRO"
+        },
+        {
+          "field": "nationality",
+          "cer": 1.0,
+          "expected": "SWE"
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 1.0,
+          "expected": "1966-10-06"
+        },
+        {
+          "field": "sex",
+          "cer": 1.0,
+          "expected": "M"
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 1.0,
+          "expected": "2034-07-26"
+        },
+        {
+          "field": "personal_number",
+          "cer": 1.0,
+          "expected": "GP5ESM13DGYI05"
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 1.0,
+          "expected": "P<SWEVANTERPOOL<<PIETRO<<<<<<<<<<<<<<<<<<<<<\nZ3SIU052O3SWE6610067M3407264GP5ESM13DGYI0526"
+        }
+      ],
+      "line1_flagged": false
+    },
+    {
+      "seed": 78,
+      "profile": "worn",
+      "hit": true,
+      "elapsed_ms": 167956,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 1.0,
+          "expected": "P",
+          "got": "PU"
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.6666666666666666,
+          "expected": "UTO",
+          "got": "TOH"
+        },
+        {
+          "field": "document_number",
+          "cer": 0.0
+        },
+        {
+          "field": "surname",
+          "cer": 0.1111111111111111,
+          "expected": "HALVORSEN",
+          "got": "ALVORSEN"
+        },
+        {
+          "field": "given_names",
+          "cer": 1.0,
+          "expected": "HANS",
+          "got": "HANS   C"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.02247191011235955,
+          "expected": "P<UTOHALVORSEN<<HANS<<<<<<<<<<<<<<<<<<<<<<<<\nSC2BMDAK33UTO8511283M2703028H2ANHIFT9PXRYY72",
+          "got": "PUTOHALVORSEN<<HANS<<<C<<<<<<<<<<<<<<<<<<<<<\nSC2BMDAK33UTO8511283M2703028H2ANHIFT9PXRYY72"
+        }
+      ],
+      "line1_flagged": true
+    },
+    {
+      "seed": 79,
+      "profile": "border-kiosk",
+      "hit": false,
+      "reason": "checksum invalid",
+      "miss_kind": "checksum_failed",
+      "elapsed_ms": 142137,
+      "fields": [
+        {
+          "field": "document_type",
+          "cer": 0.0
+        },
+        {
+          "field": "issuing_country",
+          "cer": 0.0
+        },
+        {
+          "field": "document_number",
+          "cer": 0.2222222222222222,
+          "expected": "5SPVTFIVJ",
+          "got": "SSPVTFTVJ"
+        },
+        {
+          "field": "surname",
+          "cer": 1.1111111111111112,
+          "expected": "DUBOISARD",
+          "got": "DUBOISARDSSNIKOLAIK"
+        },
+        {
+          "field": "given_names",
+          "cer": 0.8571428571428571,
+          "expected": "NIKOLAI",
+          "got": "K"
+        },
+        {
+          "field": "nationality",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_birth",
+          "cer": 0.0
+        },
+        {
+          "field": "sex",
+          "cer": 0.0
+        },
+        {
+          "field": "date_of_expiry",
+          "cer": 0.0
+        },
+        {
+          "field": "personal_number",
+          "cer": 0.0
+        },
+        {
+          "field": "mrz_lines",
+          "cer": 0.07865168539325842,
+          "expected": "P<UTODUBOISARD<<NIKOLAI<<<<<<<<<<<<<<<<<<<<<\n5SPVTFIVJ1UTO6402086M3201071TCCHPMCX8ZJFHG24",
+          "got": "P<UTODUBOISARDSSNIKOLAIK<<<K<<<<<<<<<<<<<<<<\nSSPVTFTVJ1UTO6402086M320107ATCCHPMCX8ZJFHG24"
+        }
+      ],
+      "line1_flagged": false
+    }
+  ]
+}

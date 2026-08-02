@@ -1,0 +1,975 @@
+{
+  "timestamp_unix": 1785614277,
+  "source": "real-specimens",
+  "count": 40,
+  "providers": [
+    {
+      "provider_id": "mrz",
+      "documents": 40,
+      "capability": {
+        "deterministic": true,
+        "vision": false,
+        "cost": "free"
+      },
+      "accuracy": {
+        "labelled_documents": 3,
+        "field_match_rate": 0.8,
+        "mean_cer": 0.07404558404558405,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": 0.3333333333333333
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": 0.2222222222222222
+          },
+          {
+            "field": "document_number",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "surname",
+            "mean_cer": 0.05555555555555555
+          },
+          {
+            "field": "given_names",
+            "mean_cer": 0.06267806267806268
+          },
+          {
+            "field": "nationality",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": 0.06666666666666667
+          },
+          {
+            "field": "sex",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": 0.0
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 5,
+        "p50_ms": 0,
+        "p95_ms": 14
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.26,
+          "assertions_total": 150,
+          "documents": 40
+        },
+        "with_mrz_anchor": {
+          "rate": 0.26,
+          "assertions_total": 150,
+          "documents": 29
+        },
+        "without_mrz_anchor": {
+          "rate": null,
+          "assertions_total": 0,
+          "documents": 11
+        }
+      },
+      "documents_detail": [
+        {
+          "name": "Bosnia_Herzegovina_Driving_License_Specimen_face",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Austria_ID_Specimen_Front_Marked_Facial_Date",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Belgian_ID_back_2",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Bulgaria_ID_Card_specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Egypt_ID_Specimen_Egyptian",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Guatemala_ID_Specimen_front_Guatemalan_C_png",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Indonesia_Passport_Specimen_data_page_Indonesian_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Iraq_Passport_Specimen_specimen_Iraqi_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Italy_Document_Specimen_specimen_CIE_Italy2022jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Norway_ID_Specimen_Back",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "given_names",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Poland_ID_2015_Specimen_mrz_band",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Switzerland_ID_Specimen_front_NIDK",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Unknown_Document_Specimen_specimen_All-you-need-know-about-emirates-id",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Croatia_Border_Pass_Specimen_Back",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry",
+            "personal_number"
+          ]
+        },
+        {
+          "name": "Estonia_PASSPORT_face",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Albania_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Argentina_Passport_Specimen_data_page_Argentina-emergency--2023-free_biod",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Austria_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Bangladesh_Passport_Specimen_Bangladesh_Bio_Pagejpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Belgium_Passport_Specimen_data_page_Belgium_biodata",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 4,
+          "unsupported_fields": [
+            "surname",
+            "given_names",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Bulgaria_Passport_Specimen_data_page_Bulgaria",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "China_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Columbia_Passport_Specimen_Hoja_de_datos_biometricos_Col",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Czechia_Passport_Specimen_specimen_Czech_2005_MRZ_data",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Denmark_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "given_names",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Egypt_Passport_Specimen_specimen_Egyptian_Bio_Page_1",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Finland_Passport_Specimen_specimen_Finnish_2007",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Greece_Passport_Specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "India_Passport_Specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Japan_Passport_Specimen_specimen_2025_of_Japanpng",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Kiribati_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Kosovo_Passport_Specimen_data_page_Kosovo_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Mauritania_Passport_Specimen_specimen_Mauritanie_Passeport_Bio_-_Mauritan",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Nepal_Passport_Specimen_specimen_Nepali_E-jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "North_Macedonia_Passport_Specimen_Private",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "surname",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Portugal_Passport_Specimen_Data",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Serbia_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "surname",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Slovakia_Passport_Specimen_3",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 10,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Ukraine_Passport_Specimen_Foreignpassukr_2nd_01",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "United_States_of_America_Passport_Specimen_Interior_of_US_JPG",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 0,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        }
+      ]
+    },
+    {
+      "provider_id": "llm",
+      "documents": 40,
+      "capability": {
+        "deterministic": false,
+        "vision": false,
+        "cost": "expensive"
+      },
+      "accuracy": {
+        "labelled_documents": 3,
+        "field_match_rate": 0.4,
+        "mean_cer": 0.8728612128612129,
+        "per_field_cer": [
+          {
+            "field": "document_type",
+            "mean_cer": 0.3333333333333333
+          },
+          {
+            "field": "issuing_country",
+            "mean_cer": 1.888888888888889
+          },
+          {
+            "field": "document_number",
+            "mean_cer": 0.037037037037037035
+          },
+          {
+            "field": "surname",
+            "mean_cer": 1.2777777777777777
+          },
+          {
+            "field": "given_names",
+            "mean_cer": 1.0915750915750915
+          },
+          {
+            "field": "nationality",
+            "mean_cer": 0.0
+          },
+          {
+            "field": "date_of_birth",
+            "mean_cer": 0.3666666666666667
+          },
+          {
+            "field": "sex",
+            "mean_cer": 2.3333333333333335
+          },
+          {
+            "field": "date_of_expiry",
+            "mean_cer": 0.39999999999999997
+          },
+          {
+            "field": "personal_number",
+            "mean_cer": 1.0
+          }
+        ]
+      },
+      "speed": {
+        "mean_ms": 23355,
+        "p50_ms": 21815,
+        "p95_ms": 35015
+      },
+      "json_validity": {
+        "repair_fallbacks": 0,
+        "documents": 40,
+        "repair_fallback_rate": 0.0
+      },
+      "unsupported_assertion": {
+        "status": "computed",
+        "overall": {
+          "rate": 0.2222222222222222,
+          "assertions_total": 342,
+          "documents": 40
+        },
+        "with_mrz_anchor": {
+          "rate": 0.1606425702811245,
+          "assertions_total": 249,
+          "documents": 29
+        },
+        "without_mrz_anchor": {
+          "rate": 0.3870967741935484,
+          "assertions_total": 93,
+          "documents": 11
+        }
+      },
+      "documents_detail": [
+        {
+          "name": "Bosnia_Herzegovina_Driving_License_Specimen_face",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "document_type",
+            "issuing_country",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Austria_ID_Specimen_Front_Marked_Facial_Date",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "issuing_country",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Belgian_ID_back_2",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 3,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Bulgaria_ID_Card_specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "issuing_country",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Egypt_ID_Specimen_Egyptian",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 7,
+          "unsupported_fields": [
+            "issuing_country",
+            "document_number",
+            "surname",
+            "given_names",
+            "nationality",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Guatemala_ID_Specimen_front_Guatemalan_C_png",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 6,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "document_type",
+            "issuing_country",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Indonesia_Passport_Specimen_data_page_Indonesian_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Iraq_Passport_Specimen_specimen_Iraqi_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 4,
+          "unsupported_fields": [
+            "issuing_country",
+            "nationality",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Italy_Document_Specimen_specimen_CIE_Italy2022jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Norway_ID_Specimen_Back",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 7,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Poland_ID_2015_Specimen_mrz_band",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "nationality",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Switzerland_ID_Specimen_front_NIDK",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Unknown_Document_Specimen_specimen_All-you-need-know-about-emirates-id",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 7,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "issuing_country",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Croatia_Border_Pass_Specimen_Back",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "surname",
+            "given_names",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Estonia_PASSPORT_face",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Albania_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Argentina_Passport_Specimen_data_page_Argentina-emergency--2023-free_biod",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "given_names"
+          ]
+        },
+        {
+          "name": "Austria_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Bangladesh_Passport_Specimen_Bangladesh_Bio_Pagejpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Belgium_Passport_Specimen_data_page_Belgium_biodata",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "nationality"
+          ]
+        },
+        {
+          "name": "Bulgaria_Passport_Specimen_data_page_Bulgaria",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "China_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Columbia_Passport_Specimen_Hoja_de_datos_biometricos_Col",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Czechia_Passport_Specimen_specimen_Czech_2005_MRZ_data",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "date_of_birth"
+          ]
+        },
+        {
+          "name": "Denmark_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Egypt_Passport_Specimen_specimen_Egyptian_Bio_Page_1",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Finland_Passport_Specimen_specimen_Finnish_2007",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "issuing_country",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Greece_Passport_Specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "issuing_country",
+            "nationality"
+          ]
+        },
+        {
+          "name": "India_Passport_Specimen",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 8,
+          "unsupported_fields": [
+            "document_type",
+            "issuing_country",
+            "document_number",
+            "surname",
+            "given_names",
+            "nationality",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Japan_Passport_Specimen_specimen_2025_of_Japanpng",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "document_number",
+            "nationality"
+          ]
+        },
+        {
+          "name": "Kiribati_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "Kosovo_Passport_Specimen_data_page_Kosovo_jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 4,
+          "unsupported_fields": [
+            "issuing_country",
+            "given_names",
+            "nationality",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Mauritania_Passport_Specimen_specimen_Mauritanie_Passeport_Bio_-_Mauritan",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "surname",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Nepal_Passport_Specimen_specimen_Nepali_E-jpg",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "North_Macedonia_Passport_Specimen_Private",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Portugal_Passport_Specimen_Data",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 5,
+          "unsupported_fields": [
+            "document_type",
+            "issuing_country",
+            "document_number",
+            "nationality",
+            "date_of_birth"
+          ]
+        },
+        {
+          "name": "Serbia_Passport_Specimen",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 3,
+          "unsupported_fields": [
+            "nationality",
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Slovakia_Passport_Specimen_3",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 2,
+          "unsupported_fields": [
+            "date_of_birth",
+            "date_of_expiry"
+          ]
+        },
+        {
+          "name": "Ukraine_Passport_Specimen_Foreignpassukr_2nd_01",
+          "mrz_found": false,
+          "read_ok": true,
+          "assertions_total": 9,
+          "assertions_unsupported": 0,
+          "unsupported_fields": []
+        },
+        {
+          "name": "United_States_of_America_Passport_Specimen_Interior_of_US_JPG",
+          "mrz_found": true,
+          "read_ok": true,
+          "assertions_total": 8,
+          "assertions_unsupported": 1,
+          "unsupported_fields": [
+            "nationality"
+          ]
+        }
+      ]
+    }
+  ]
+}
