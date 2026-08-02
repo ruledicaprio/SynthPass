@@ -14,7 +14,10 @@ use synthpass_ocr::NativeOcr;
 /// Every sample that physically carries an MRZ, with the expected document
 /// number from its checked-in `.json` ground truth.
 const CORPUS: &[(&str, &str)] = &[
-    ("2022_cetis_terra_condifea_passport_datapage3rd_inner_page.jpg", "SD9990322"),
+    (
+        "2022_cetis_terra_condifea_passport_datapage3rd_inner_page.jpg",
+        "SD9990322",
+    ),
     ("Croatian_passport_data_page.jpg", "007007007"),
     ("Estonia_PASSPORT_face.png", "KS0000182"),
     ("Passport_of_Serbia_ID_2009_version.jpg", "000000000"),
