@@ -237,6 +237,72 @@ entry below).
 checks — there is no further worked example in this corpus to check them
 against.
 
+### Part 3 §5 — issuing-state/nationality code registry, full cross-check
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:618-696` (Parts A-H)
+
+Segment S5 diffed every 3-letter code the registry lists (Parts A-H) against
+`crates/mrz/src/countries.rs`'s `CODES` table. 24 codes already present and
+correct (`GBD GBN GBO GBS GBP RKS D EUE UNO UNA UNK XBA XIM XCC XCO XEC XPO
+XOM XXA XXB XXC XXX UTO`, plus `IAO`/`ANT`/`NTZ` which the program plan had
+already flagged as candidates before this sweep). Seven were missing and
+added by this segment:
+
+| code | entity | corpus line | §5 part |
+|---|---|---|---|
+| `XCE` | Council of Europe | `:656` | D |
+| `XES` | Organization of Eastern Caribbean States (OECS) | `:660` | D |
+| `XMP` | Parliamentary Assembly of the Mediterranean (PAM) | `:661` | D |
+| `XDC` | Southern African Development Community | `:663` | D |
+| `ANT` | Netherlands Antilles | `:678` | F (deprecated) |
+| `NTZ` | Neutral Zone | `:679` | F (deprecated) |
+| `IAO` | International Civil Aviation Organization | `:695` | H |
+
+Four of the seven (the Part D codes) were a new finding from doing the full
+registry sweep rather than checking only the three codes the conformance
+program's plan had predicted (`IAO`/`ANT`/`NTZ`) — Part D had only 7 of its
+11 codes present before this segment. `IAO` is used only when ICAO itself
+digitally signs a master list (`:691`), which the new table entry's comment
+records. None of the seven collide with an existing table entry's name, so
+`code_for_name`'s reverse-lookup / first-match-wins behaviour is unaffected.
+
+**Status: cross-part agreement** — the registry table (Part 3 §5) is the
+sole source for these codes; there is no separate worked example to check
+them against, but each addition was verified by re-reading its corpus line
+directly, not by pattern-matching neighboring entries.
+
+### Part 3 §4.8/§4.9 — filler dates and the check-digit interaction
+
+`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:547` (unknown-date filler rule),
+`:563` (filler value zero for check-digit purposes)
+
+`:547` states that if all or part of the **date of birth** (not expiry) is
+unknown, the relevant positions are completed with `<`. `:563` states a `<`
+"shall be given the value of zero for the purpose of calculating the check
+digit." `crates/mrz/src/checksum.rs`'s `char_value` already mapped `'<' =>
+Ok(0)` before this segment, so an all-filler date of birth (`<<<<<<`) sums to
+zero under the 7-3-1 weighting and its printed check digit is legitimately
+`0` — `<<<<<<0` is a *valid* field, not a corrupt read. This segment does not
+change that arithmetic; it pins it with `checksum.rs`'s
+`all_filler_date_check_digit_is_zero` and `lib.rs`'s
+`td3_all_filler_dob_is_a_valid_field_not_a_bad_read` /
+`td1_all_filler_dob_reports_unknown` tests, and adds
+`dates::DateCompleteness` / `dates::date_completeness` plus
+`MrzData::date_of_birth_completeness` so a caller can distinguish this case
+from an OCR-garbage read, which was previously impossible: a complete date
+is reshaped from six characters to ten (`YYYY-MM-DD`) by `expand_date`, so
+the original raw `YYMMDD` field is not recoverable from `date_of_birth`
+after the fact for a `Complete` read, and for a non-`Complete` read
+`date_of_birth` holds the raw field verbatim with no marker distinguishing
+"conformantly unknown" from "garbage" until this field existed.
+
+**Status: worked example reproduced** for the arithmetic (`<<<<<< → 0`,
+hand-verified independently of the crate: 0·7+0·3+0·1+0·7+0·3+0·1 = 0, 0 mod
+10 = 0) — no independent ICAO-published all-filler worked example exists in
+this corpus, but the rule (`:547`, `:563`) and the general 7-3-1 check-digit
+definition (already corroborated above) are both literal corpus text, so the
+combination is a direct application rather than an inference.
+
 ## Known corpus defects
 
 ### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies

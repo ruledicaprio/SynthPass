@@ -9,7 +9,7 @@ use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,
     is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
 };
-use crate::dates::expand_date_with_pivot;
+use crate::dates::{date_completeness, expand_date_with_pivot};
 use crate::{Checks, Format, MrzData, MrzError, ParseOptions};
 
 /// A document number that overflowed its 9-character field.
@@ -219,6 +219,7 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
         date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
+        date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(personal),
@@ -285,6 +286,7 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
         date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
+        date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
@@ -366,6 +368,7 @@ pub fn parse_td1_with(
         given_names,
         nationality: line2[15..18].trim_end_matches('<').to_string(),
         date_of_birth: expand_date_with_pivot(&line2[0..6], true, opts.pivot_yy),
+        date_of_birth_completeness: date_completeness(&line2[0..6]),
         sex: clean_sex(line2.as_bytes()[7] as char),
         date_of_expiry: expand_date_with_pivot(&line2[8..14], false, opts.pivot_yy),
         personal_number: opt_string(&personal),
@@ -427,6 +430,7 @@ pub fn parse_mrv_a_with(
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
         date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
+        date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
@@ -488,6 +492,7 @@ pub fn parse_mrv_b_with(
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
         date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
+        date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
