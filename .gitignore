@@ -14,11 +14,27 @@ provider-bench-report*.json
 # Web app upload/working directory (may contain uploaded PII)
 work/
 
-# samples/ocr_fixtures/ is a tracked corpus of public-domain specimens ("No PII
-# in logs or fixtures", CONTRIBUTING.md). A real person's document must never
-# land there, but the directory being tracked means a stray `git add -A` would
-# publish one permanently. Refuse anything marked Private by name, as a second
-# line of defence behind "keep it in work/ instead".
+# samples/ specimen IMAGES are not tracked on main -- they live on the
+# orphan `samples-data` branch (see scripts/sync-samples.ps1), the same
+# isolated-worktree pattern bench-data uses, so a bulk corpus refresh never
+# grows main's history. Only the small hand-verified ground truth stays
+# tracked here: samples/README.md and samples/ocr_fixtures/*.json + *.md.
+# Run `./scripts/sync-samples.ps1` after a fresh clone to populate images.
+samples/passports/
+samples/id_cards/
+samples/driving_licenses/
+samples/misc/
+samples/ocr_fixtures/*
+!samples/ocr_fixtures/*.json
+!samples/ocr_fixtures/*.md
+
+# "No PII in logs or fixtures" (CONTRIBUTING.md) still applies to whatever
+# lands in samples-data: refuse anything marked Private by name, as a second
+# line of defence behind "keep it in work/ instead". samples/ no longer being
+# tracked on main doesn't relax this -- scripts/sync-samples.ps1 and
+# scripts/ingest-fetched-samples.ps1 both operate against local samples/, and
+# a stray manual `git add -A` inside the samples-data worktree is exactly the
+# accident this guards against.
 samples/**/*Private*
 
 # The real-specimen corpus (except samples/ocr_fixtures/, which is committed —
@@ -52,14 +68,19 @@ web/tessdata/eng.traineddata.gz
 /out/
 
 # Bulk Wikimedia Commons fetch staging (tools/fetch_*.py). Deliberately NOT
-# committed: the fetchers pull whole Commons categories, and at ~900 KB per
-# image a few hundred files already outweighs the entire tracked corpus
-# (samples/ is ~50 MB over 155 files; .git itself is ~59 MB). Git keeps every
-# byte forever, so a bulk dump is a permanent cost for a staging area whose
-# whole purpose is to be sifted.
+# committed, same reasoning as samples/ itself now living on samples-data
+# rather than main: the fetchers pull whole Commons categories, and git keeps
+# every byte forever, so a bulk dump is a permanent cost for a staging area
+# whose whole purpose is to be sifted.
 #
 # The fetch scripts themselves ARE committed — they are the reproducible
-# provenance record. A specimen earns its way into samples/ one at a time,
-# individually vetted per CONTRIBUTING.md, which is also where its licence and
-# attribution get recorded. This directory is the holding pen, not the corpus.
+# provenance record. scripts/ingest-fetched-samples.ps1 is what sifts this
+# staging area into samples/ (automated specimen-marker check replacing a
+# human PR review, per CONTRIBUTING.md's "Adding a corpus specimen"), then
+# scripts/sync-samples.ps1 -Push moves accepted files onto samples-data. This
+# directory is the holding pen, not the corpus.
 tools/downloaded_passports_and_ids/
+tools/downloaded_mrz_documents/
+# fetch_commons_mrz_specimens_v2.py resolves its staging dir relative to
+# whatever cwd it's invoked from, not always tools/ — ignore both spots.
+/downloaded_mrz_documents/

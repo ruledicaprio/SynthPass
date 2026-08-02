@@ -8,7 +8,7 @@
 ![ICAO 9303](https://img.shields.io/badge/ICAO%209303-MRZ%20checksums-0B7261?style=flat)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F230%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 <!-- Posture -->
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 

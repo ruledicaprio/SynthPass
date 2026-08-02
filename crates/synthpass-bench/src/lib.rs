@@ -903,7 +903,8 @@ mod tests {
     /// is the common case in `samples/`: every MRZ-less ID-card front has no
     /// label file at all, and the loader has to treat that as "unlabelled,"
     /// per this crate's whole reason for existing (see `RealSpecimenDoc`'s
-    /// doc).
+    /// doc). `Bulgaria_ID_Card_specimen.png` has no sibling JSON under
+    /// `samples/ocr_fixtures/` as of this writing.
     /// A label file that exists but is malformed reads as unlabelled rather
     /// than aborting the load — but is not silently identical to "no label
     /// file", which is what the warning in [`load_ground_truth`] is for.

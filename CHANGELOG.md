@@ -8,6 +8,532 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
+## [1.3.0] — 2026-08-02 — Document Intelligence Engine (M7) complete
+
+Roadmap: knowledge/ROADMAP.md (M5 closeout, M7 in full). The two-tier hardcoded fallback becomes a
+provider contract (`synthpass-die`: `IntelligenceProvider`/`Recognizer`/`FieldReader`) with
+evidence-driven escalation, versioned prompts, and a multi-provider benchmark harness
+(`provider-bench`) — plus a run of `mrz` crate correctness fixes (long document numbers, name
+punctuation, ICAO registry codes, Part 3 §6 A transliteration) found along the way.
+
+### Added
+- **Tier-2 fields that contradict the MRZ's own structural read are now flagged.**
+  `synthpass_core::fusion::check_tier2_against_mrz` cross-checks the six non-checksummed MRZ
+  line-1 fields (`document_type`, `issuing_country`, `surname`, `given_names`, `nationality`,
+  `sex`) against whatever the Tier-2 (LLM) pass already put in `ExtractionV2.fields`, after
+  normalizing both sides with the existing `normalize` functions and, for the two name fields,
+  comparing permissively against every ICAO-sanctioned transliteration style (so `Müller` reading
+  as `MULLER`, `MUELLER`, or `MUXXER` is never a false positive). Neither side of the comparison
+  is proven — the check only runs on records that already failed the Tier-1 checksum gate, so the
+  MRZ's own line 1 may be the garbled one; a finding means "two independent reads disagree, review
+  this", not "the model is wrong". A disagreement raises a new
+  `Finding::LlmContradictsMrzStructural { field }` finding, wired into `apply_deterministic_mrz`
+  alongside the existing `check_line1_integrity` verdict, which can downgrade the affected
+  Tier-2 field to `IMPLAUSIBLE` confidence and turn an `Accepted` verdict into `NeedsReview`.
+- **Schema vocabulary for provider traces, and the first test that pins the v2 wire contract.**
+  `synthpass-core` gains `v2::CoreField` (the ten ICAO fields as a value — `mrz::Field` covers only
+  the five check-digited ones, so it cannot say `surname`), `v2::ProviderId`, `v2::EscalationKind`,
+  `v2::PromptRef`, `v2::ExtractionTrace`, and an optional `ExtractionV2.trace` recording which
+  providers ran, why anything beyond the first was consulted, and which prompt version produced a
+  model-generated record. `ExtractionFields` gains `get(CoreField)` and `missing()`, which treat a
+  whitespace-only value as absent — an empty string is not something a consumer can act on.
+
+  `trace` is additive and optional: `schema_version` stays `2`, the key is omitted entirely unless
+  populated, and records written before it existed still deserialize. **It carries no routing
+  score, and cannot.** A decision to spend compute may rest on an uncalibrated heuristic; a number
+  reaching a consumer alongside `confidence` may not (see
+  [`project_principles.md`](knowledge/project_principles.md) §2) — the routing type has no
+  `Serialize` impl, so the omission is enforced by the type system rather than by a comment.
+
+  `fusion::FindingKind` + `Finding::kind()` + `Verdict::kinds()` add the fieldless projection of
+  `Finding`. `Finding` carries real ICAO country codes read off a document — it derives `Zeroize`
+  for that reason — which makes it safe inside the zeroized extraction JSON and unsafe in a log
+  line or a metric label. Routing decisions get the payload-free form. `Finding::kind()` is
+  exhaustive with no catch-all, mirroring `FieldConfidence::downgrade_flagged`: a new variant must
+  be a compile error rather than silently mapping to a default.
+
+  `Provenance` becomes `#[non_exhaustive]` at the enum, so a future producer kind is additive for
+  Rust consumers while existing variants stay constructible. This constrains *source* consumers
+  only — a new `"kind"` still breaks a client with a mirror enum, so the wire tags are pinned by
+  test to keep that a deliberate act.
+
+  **`crates/synthpass-core` had no `tests/` directory**, so nothing checked the serialized shape of
+  the type that *is* the published contract: a renamed field or a changed `skip_serializing_if`
+  would have shipped silently. New `tests/schema_keys.rs` pins the exact top-level key set for the
+  Tier-1 and Tier-2 paths, that `trace` stays invisible until populated, that no routing score
+  leaks into it under any spelling, that `Provenance` wire tags are stable, and that `CoreField`'s
+  names match `ExtractionFields`' JSON keys. 11 tests. They are meant to fail when the schema
+  changes — that is the point.
+- **`synthpass-die`: the provider contract every intelligence provider implements.** A new crate
+  holding `IntelligenceProvider` (identity + declared `Capability`) and the two work shapes:
+  `Recognizer` (image → text and layout geometry) and `FieldReader` (context → fields). MRZ and an
+  LLM are the *same* shape; OCR is the other one. A future vision model reads the image already
+  sitting in `DocumentContext` rather than needing a third trait — which is why the context is a
+  struct and not a `&str`.
+
+  Deliberately **not** a single `run(Request) -> Response`: that would force every provider to
+  `match` on request variants it structurally cannot serve and answer "unsupported" at runtime,
+  demoting a compile-time fact to a runtime failure.
+
+  **The dependency list is the deliverable, not an accident.** The crate depends on
+  `synthpass-core`, `mrz`, `async-trait` and `serde` — no tokio, no OCR engine, no llama.cpp — and
+  CI asserts their absence with a `cargo tree` gate. A contract that names one engine cannot be a
+  contract for the others, and "write a provider" must not begin with "install llama.cpp". The
+  doc-test on `FieldReader` implements a working third-party provider in about twenty lines against
+  this crate alone, driven by a hand-rolled executor to prove no runtime is required. It is the
+  roadmap's *"a third-party provider builds against the published contract"* criterion, executed on
+  every CI run rather than asserted in prose.
+
+  **Reported confidence and routing evidence are different things, and the split is structural.**
+  `Reading` carries both an `ExtractionV2` (the reported half — the ordinal confidence model,
+  unchanged, part of the published JSON contract) and an `Evidence` (the routing half). Neither
+  `Reading` nor `Evidence` derives `Serialize`, so there is no code path — not a careless one, not
+  a future one — that can serialize routing signal into the document JSON. A routing score may be
+  uncalibrated, because being wrong costs CPU seconds rather than truth; a number reaching a
+  consumer next to `confidence` may not. See
+  [`project_principles.md`](knowledge/project_principles.md) §2.
+
+  `Evidence` collects signals that **already existed and were being discarded**: the MRZ band
+  score, whole-page text sanity, portrait detection, rotation, `check_line1_integrity`'s verdict as
+  PII-free `FindingKind`s, and — the one the old inline `.filter(|m| m.valid())` threw away —
+  *which specific check digits failed*, which is the most actionable escalation reason available.
+  Every field is a count, a bool, a bounded score or a fieldless enum, so there is nowhere in the
+  struct to put a name or a document number.
+
+  `ProviderCatalog` is builder-constructed, sorted cheapest-first with a stable sort so equal-cost
+  providers keep registration order, and rejects duplicate ids at construction. Consultation order
+  is therefore fully determined by the wiring: a benchmark that consults providers in a different
+  order on two runs is not a benchmark. Link-time registration (`inventory`/`linkme`) was
+  considered and rejected — it is invisible to Cargo features, its ordering is unspecified, and it
+  works through linker sections, which is exactly what gets fragile under this project's
+  `lto = true` / `codegen-units = 1` / static-musl release profile.
+
+  `MrzReader` is the deterministic ICAO 9303 provider: `Capability::deterministic`, `CostClass::Free`,
+  zero configuration and zero state. It never returns `Err` — "I looked and there is no MRZ" is an
+  answer, not a failure, and reporting it as an error would leave the router unable to tell a broken
+  provider from an empty page. It also records `blind_positions`, the count of characters whose OCR
+  confusions are congruent mod 10 and therefore *invisible to the check digits*. That value ships
+  **observed-only**: recording a signal before anyone has measured what it predicts is how you earn
+  a threshold; routing on it first is how you invent one.
+
+  Nothing is wired to this yet — `synthpass-pipeline` keeps its inline Tier-1 path, so behaviour is
+  unchanged. Note that `extraction_v2_from_mrz` now exists in both places until that wiring lands.
+- **M7 is complete: a multi-provider benchmark harness has landed (`provider-bench`, new binary in
+  `synthpass-bench`).** It runs every reader in the real M7 `ProviderCatalog` — the deterministic
+  `MrzReader` and the LLM's `LlmFieldReader` — against the same OCR'd synthetic corpus and reports,
+  per provider: field-match rate and mean CER (reusing `synthpass-bench`'s existing `cer()`),
+  speed (mean/p50/p95), JSON validity (`synthpass_llm::repair::repair_fallbacks()` delta, `None`
+  for deterministic providers), an unsupported-assertion rate (does each answered field value
+  appear, verbatim, in the OCR text the provider saw), and resident memory —
+  `Capability::estimated_resident_bytes` always, plus an optional coarse `sysinfo` process-RSS
+  delta behind an off-by-default `measure-memory` Cargo feature and `--measure-memory` flag.
+
+  Reaching the real catalog needed one new accessor, `Pipeline::catalog()`
+  (`crates/synthpass-pipeline/src/lib.rs`) — `LlmFieldReader` is `pub(crate)`, so a benchmark
+  outside `synthpass-pipeline` had no other way to reach the registered instance.
+  `ProviderCatalog::readers()`/`.profiles()` already supported full enumeration; no catalog
+  changes were needed.
+
+  The Tier-1-only corpus-generation loop previously inlined in `synthpass-bench.rs`'s `main()` is
+  now `synthpass_bench::generate_corpus`, shared by both binaries.
+
+  A first real run (5 documents, clean profile, the shipped Qwen2.5 GGUF) measured `mrz` at 70%
+  field-match / 3 ms mean / zero JSON-repair fallbacks, and `llm` at 56% field-match / ~24 s mean —
+  both in line with existing measurements (M4's 55% Tier-1 hit rate on OCR noise; M5's GBNF parity
+  run's ~45% field match), not an artifact of the new measurement code.
+
+  Ships standalone: `cargo run -p synthpass-bench --release --bin provider-bench`. Not wired into
+  CI in this PR — a separable follow-up once the metrics have more runs behind them.
+- **`synthpass-die::routing`: the type that turns routing `Evidence` into a spend decision.**
+  `RoutingPolicy::decide(&Evidence) -> Decision` — `Decision` is either `Accept` or
+  `Escalate { reason: EscalationKind, budget: CostClass }`. **Nothing consumes this yet** —
+  `synthpass-pipeline` keeps its inline Tier-1 path, so this PR changes no behaviour; wiring it in
+  is a later chunk.
+
+  The default policy (`RoutingPolicy::v1_2_0_compatible()`) reproduces v1.2.0's routing exactly:
+  escalate if and only if the MRZ did not parse or a check digit did not verify. Every opt-in
+  signal — `escalate_on_missing_fields`, `escalate_on_line1_flagged`, `sanity_floor` — defaults off,
+  because introducing this crate must not itself be a behaviour change. A signal gets enabled only
+  once the benchmark harness (a later PR) has produced data saying what it actually predicts.
+  `sanity_floor` in particular stays `None`: `text_sanity` is a character-plausibility proxy, not a
+  model confidence, and no threshold on a proxy can be better than the proxy itself.
+
+  `decide`'s clause order is normative and documented as such: MRZ-not-found is checked before
+  MRZ-checksum-failed, because a blank page — no MRZ-shaped text anywhere — would otherwise be
+  reported as a checksum failure, which is false. `Evidence::blind_positions` is never read here,
+  matching its observed-only status from the MRZ reader: it is uncalibrated, and routing on it
+  before anything has measured what it predicts would be inventing a threshold rather than acting
+  on one.
+
+  `Decision` derives no `Serialize`, matching `Evidence` and `Reading` — `EscalationKind` (already
+  serializable, in `synthpass-core`) remains the only wire-legal projection of a routing decision.
+- **Tier-2 prompts are now versioned and digest-pinned, closing the first of M7's two remaining
+  items.** `synthpass_llm::prompt` exposes `PROMPT_ID` (`"qwen2.5-fields"`), `PROMPT_VERSION`, and
+  `prompt_ref() -> synthpass_core::v2::PromptRef`. The digest is `sha256` of the compiled-in ChatML
+  `TEMPLATE` with `{content}` left empty — the static system text and field list, not any one
+  document's OCR markdown — reusing `synthpass_core::audit::sha256_hex` rather than adding a new
+  dependency. `build_prompt` and the digest now fill the same `TEMPLATE` constant, so they cannot
+  drift apart.
+
+  `InferBackend` gained `prompt_ref()` (default `None`, mirroring the existing `model_id()`
+  pattern so out-of-tree backends stay source-compatible); `NativeInferer` overrides it to return
+  `synthpass_llm::prompt::prompt_ref()`. `Pipeline::process_document` and
+  `process_document_stream` both now populate `ExtractionTrace.prompt` from
+  `self.infer.prompt_ref()` at their Tier-2 call sites, replacing a `prompt: None` stub that had
+  sat unpopulated since the field was added.
+
+  A pinned-digest test in `prompt.rs` fails the moment `SYSTEM`, `FIELDS`, or `TEMPLATE` changes
+  without a matching `PROMPT_VERSION` bump and digest update — the parity corpus is six documents,
+  so a one-word prompt edit was previously indistinguishable from noise for months.
+
+  **Not in this PR:** the multi-provider benchmark harness, M7's other remaining item.
+- **Latin national-character transliteration (ICAO 9303 Part 3 §6 A).** New `crates/mrz` module
+  `translit` exposes `transliterations`, `transliterate_char`, `transliterate`, and
+  `TransliterationStyle` (`Expanded`/`Simple`/`XxSuffix`), implementing the 95-entry table ICAO
+  recommends for transliterating accented/national Latin characters (`Ä`, `Ñ`, `ß`, `Ø`, …) into the
+  MRZ's `[A-Z]` alphabet. Cyrillic (§6 B) and Arabic (§6 C) are not implemented.
+
+  **Behaviour change:** `format_td3`/`format_td2`/`format_td1`/`format_mrv_a`/`format_mrv_b` now
+  transliterate Table A characters in the name field (the `Expanded` style) instead of silently
+  dropping them as unrecognized punctuation. `MÜLLER` used to emit as `MLLER`; it now emits as
+  `MUELLER`. `Térèsa` used to emit as `TRSA`; it now emits as `TERESA`. This is a deliberate fix for
+  non-conformant, silent data loss (Part 3 `:493` requires transliteration, not deletion, of national
+  characters) — anyone relying on the old truncating behaviour for names containing accented
+  characters will see different (and now spec-conformant) MRZ bytes. Document numbers and
+  optional-data fields are unaffected; only the name field's cleaning function changed.
+- **`OcrPage` and the pipeline's `OcrResult` now carry the two signals the OCR engine already
+  computed and then threw away**: `mrz_band_score` (how MRZ-shaped the winning band looked, in
+  `[0, 1]`) and `text_sanity` (whole-page character plausibility).
+
+  `detect_mrz_band_scored` has always returned `(BBox, f64)`, and the caller discarded the score
+  with `.map(|(b, _)| b)` — so *where* the band was survived and *how convincing it was* did not.
+  Those are different questions, and the second is the one an escalation decision needs: a band can
+  be found and still be noise, which is precisely the failure the 0°/180° tie-break exists to
+  handle. Per-line sanity likewise existed inside `OcrPage.lines` but never reached the pipeline,
+  whose `OcrResult` dropped `lines` entirely.
+
+  Both are `Option`, and `None` is kept distinct from `Some(0.0)` on purpose: "nobody scored this"
+  and "this scored zero" are different facts, and an escalation policy acts differently on a blank
+  scan than on a ruined one. `text_sanity` remains a **character-plausibility proxy, not a model
+  confidence** — `ocrs` exposes no probabilities at all — and the doc comments say so at every
+  level rather than letting the name imply otherwise.
+
+  Additive: `OcrResult::from_text` leaves both unset, so `OcrEngine::recognize_detailed`'s default
+  body keeps every engine that implements only `to_markdown` compiling and behaving identically.
+  A new test asserts exactly that against a deliberately minimal in-tree engine, since no
+  out-of-tree implementation is available to notice on our behalf.
+
+  No behaviour change: nothing consumes the new fields yet.
+- **`provider-bench` can now run over real specimens in `samples/`, not only the synthetic
+  corpus.** `synthpass_bench::load_real_specimens` recursively finds every image under
+  `samples/` and attaches optional ground truth from a sibling `samples/ocr_fixtures/<stem>.json`
+  label file (the v1 `Extraction` shape) when one exists — a missing label means "unlabelled," not
+  a load error, since most of `samples/` (every MRZ-less ID-card front in particular) has never
+  been hand-labelled. Run with `provider-bench --real-specimens`.
+
+  This closes a real gap: the old harness derived ground truth exclusively by parsing a
+  document's MRZ lines, so a document with no MRZ had no path through it at all — exactly why a
+  serious Tier-2 failure mode (the local LLM inventing entire identities on MRZ-less ID-card
+  fronts) was found by hand instead of by CI.
+
+  `unsupported_assertion_rate` and `field_match_rate`/`mean_cer` are now reported over the
+  populations they actually have, honestly: `AccuracyStats` carries `labelled_documents` and makes
+  `field_match_rate`/`mean_cer`/per-field CER `Option`, so an unlabelled specimen contributes zero
+  field comparisons instead of being scored as a miss, and an all-unlabelled run reports `None`
+  rather than a fabricated `0%`. The unsupported-assertion check itself no longer needs — or is
+  gated behind — ground truth at all, so it now runs on every specimen including MRZ-less ones (a
+  latent coupling in the old code silently skipped it for any field without ground truth, which
+  this also fixes for the synthetic corpus).
+
+  The unsupported-assertion metric is now capability-dispatched: it is computed only for
+  `!Capability::vision` providers. The predicate — "the answer must appear, verbatim, in the OCR
+  text" — is correct for a text-only provider but invalid for a vision-capable one, which may
+  correctly report a value that appears nowhere in the OCR text by reading pixels directly. A
+  vision provider now reports `UnsupportedAssertion::NotApplicable { reason }` instead of a
+  number, so the next phase's Qwen-vs-Moondream comparison won't score a working VLM as maximally
+  hallucinating.
+
+  `DocumentContext::with_image` — present since M7 but called from nowhere in the workspace — is
+  now wired: in `provider-bench` (via a temp file kept alive across the whole reader loop, since
+  every provider revisits every document) and in `synthpass-pipeline`'s Tier-2 `LlmFieldReader`
+  call site (`Pipeline::process_document`), passing the original on-disk file. Harmless for every
+  provider shipped today (all text-only, so `DocumentContext::image` is ignored), and required
+  before any vision-capable `FieldReader` can work at all.
+
+  Note: `synthpass-pipeline`'s *streaming* Tier-2 path (`process_document_stream`, used by
+  `synthpass-serve`) does not go through `DocumentContext`/`FieldReader` at all — it calls the
+  older `InferBackend::extract_stream` interface directly. `with_image` is wired at the one
+  production call site that actually builds a `DocumentContext` for Tier 2; extending the
+  streaming path onto the same contract is a larger, separate change.
+
+  The unsupported-assertion rate is additionally **split by whether the document gave the
+  provider an MRZ to anchor on** (`mrz::find_and_parse` succeeding on the OCR text — the
+  found/not-found line, matching `EscalationKind::MrzNotFound` versus `MrzChecksumFailed`, not
+  the checksum-valid line). A single blended figure hides that the anchored and unanchored
+  populations fail in different kinds rather than different degrees, and the unanchored half —
+  where a text-only provider has no deterministic anchor at all — is the one nobody had measured.
+  Each half carries its own document count, since the two are never the same size. Both are
+  `null` when the corpus contains no document of that kind, which is always true of
+  `without_mrz_anchor` on the synthetic corpus.
+
+### Changed
+- **`docs/` is now [`knowledge/`](knowledge/README.md) — a technical library rather than a docs
+  folder.** Documentation describes what was built; this tree preserves *why*, so the reasoning
+  outlives the code and the models. Renamed with `git mv`, so `git log --follow` still works.
+  Rationale, rejected alternatives and consequences:
+  [`ADR-0001`](knowledge/decisions/ADR-0001-knowledge-tree.md).
+
+  Three living artefacts land with it:
+  [`project_principles.md`](knowledge/project_principles.md) (seven principles, each tied to the
+  place in the codebase that enforces it — a principle nothing checks is a preference),
+  [`technical_debt.md`](knowledge/technical_debt.md) (deferred decisions with honest severity and
+  effort), and [`decisions/`](knowledge/decisions/README.md) for ADRs. Ten subject folders
+  (`providers/`, `prompts/`, `ocr/`, `vision/`, `benchmarks/`, `evaluation/`, `hardware/`,
+  `research/`, `papers/`) each carry a README stating what belongs in them **and what does not**,
+  so an empty folder reads as a visible gap rather than decoration.
+
+  ~116 references to the old path across 35 files were repaired — workflow files, six crate
+  manifests, `.rs` doc comments, and historical changelog entries whose links would otherwise 404.
+  New `scripts/check-doc-links.sh`, wired into CI, is what stops that rotting again: it verifies
+  relative Markdown links resolve, that cited `knowledge/` paths exist, and that no stale
+  reference to the old tree survives outside an allowlist requiring a written reason per entry.
+
+  Two pre-existing defects were found and are recorded rather than silently patched:
+  `docs/V2-DESIGN.md`, cited by section number in 11 source doc comments, **has never existed in
+  this repository** (filed as High in `technical_debt.md`; deliberately not rewritten, since
+  moving a broken link is not fixing it); and a paper in `papers/` was filed under the filename of
+  an unrelated crowd-counting paper, renamed to match its actual contents.
+
+  No behaviour change — the only source edits are doc comments.
+- **`synthpass-pipeline` now consults the `synthpass-die` catalog for Tier 2, instead of calling
+  the inferer directly.** `Pipeline::process_document` used to hand off to Tier 2 with a bare
+  `self.extract_via_inferer(&stage.markdown)`. It now looks up a `FieldReader` via
+  `catalog.find_reader(stage.escalation_budget, |c| c.fields && !c.deterministic)` — the new
+  `LlmFieldReader`, registered alongside `MrzReader` at `Pipeline` construction — and calls
+  `.read(&ctx)` on it. `RoutingPolicy`'s `Decision::Escalate { budget, .. }`, previously discarded,
+  now selects the cost ceiling that lookup runs under.
+
+  `LlmFieldReader` wraps the same `Arc<dyn InferBackend>` and semaphore/queue-depth/metrics
+  plumbing `extract_via_inferer` always used, through a newly shared `run_tier2` seam — there is
+  still exactly one place that can invoke the model. Proven behaviour-unchanged: every existing
+  Tier-2 test (JSON shape, provenance, trace, `SYNTHPASS_JSON_V1` shim, metrics) passes unmodified,
+  plus a new round-trip test covering the one real trap — `ExtractionV2` has no reverse conversion
+  to the legacy v1 `Extraction` shape, and a naive one would have wrongly turned an absent
+  `mrz_checksums_valid` into `Some(false)`.
+
+  **Not in this PR:** `process_document_stream` still calls `InferBackend::extract_stream`
+  directly — `FieldReader::read` has no delta-forwarding hook, and adding one is separable, scoped
+  work (see `knowledge/technical_debt.md`'s "Streaming bypasses the provider contract"). Versioned
+  prompts and the multi-provider benchmark harness remain unshipped.
+- **`synthpass-pipeline` now consults the `synthpass-die` catalog for Tier 1, instead of its own
+  inline gate.** `ocr_and_tier1` used to decide MRZ-vs-LLM with a bare
+  `mrz::find_and_parse(&text).ok().filter(|m| m.valid())`. It now builds a `synthpass_die::Evidence`
+  via the catalog's registered `MrzReader` and asks `RoutingPolicy::default().decide(&evidence)` for
+  an `Accept`/`Escalate` `Decision`. The default policy is `v1_2_0_compatible()`, so the accept/
+  escalate outcome and every field produced are unchanged — proven by three pipeline tests exercising
+  a clean MRZ, a checksum-valid-but-structurally-flawed one, and a checksum-*invalid* one (the
+  corrupted-check-digit case the old inline gate also escalated on, now asserted explicitly).
+
+  The pipeline's own private `extraction_v2_from_mrz` — duplicated on purpose since
+  `synthpass-die::mrz_reader` landed with "byte-for-byte the same output" — is deleted. The
+  catalog's `MrzReader` is now the single place that mapping lives.
+
+  **`ExtractionV2.trace` is populated for the first time**, on every processed document:
+  `providers` always starts with `"mrz"` (the catalog reader the pipeline always consults first),
+  with `"llm"` appended when Tier 2 ran, and `escalation` carrying the `EscalationKind` that sent it
+  there. This is additive (`skip_serializing_if`) and does not change which fields are populated or
+  any field's value or confidence, but it is a real, visible change to on-disk JSON: documents
+  processed after this PR gain a `trace` key that was never present before.
+
+  **Not in this PR:** Tier 2 (the LLM) is still called directly (`self.infer.extract_via_inferer`),
+  not through the catalog — it is not yet a registered `FieldReader`. Wrapping it as one, versioned
+  prompts, and the multi-provider benchmark harness remain later chunks.
+- **Roadmap: M6's "plugin architecture" narrows to declarative *layout* plugins, and a new
+  [M7 — Document Intelligence Engine](knowledge/ROADMAP.md) takes over the provider interface.**
+  M6 already contained M7's work without the interface to hang it on: its deliverables listed
+  "plugin architecture" and its DoD required that "a third-party plugin builds against a stable
+  interface", while nothing in the milestone would produce one.
+
+  M7 is **built ahead of M6**, and the roadmap's "linear, M1 through M6 — no parallel tracks"
+  statement is amended to record the exception rather than quietly break it. The reason is a
+  dependency inversion: M6 adds TD1/TD2/MRVA/MRVB plus the barcode decoder driving licences need,
+  and today's extraction path is a hardcoded two-tier branch. Adding those formats as branches
+  first and refactoring them into providers afterwards is the same work twice, with the second
+  pass landing on shipped behaviour. Alternatives considered and rejected — including keeping
+  strict order — are in
+  [`ADR-0002`](knowledge/decisions/ADR-0002-provider-model-before-layout-plugins.md). Milestones
+  stay numbered by dependency, not build date.
+
+  M7's section carries explicit **non-goals**, so they do not get re-litigated: no
+  vision-language model in v1.3.0 (`Capability.vision` is `false` for every registered provider —
+  the honest claim is that the interface exists and has zero vision implementations, with
+  `llama-cpp-2` staying pinned at `0.1.151`/`sampler` and Moondream deferred to a v1.4.0 spike);
+  no hardware auto-recommendation feature; no change to the reported confidence model; and no new
+  public API in `crates/mrz`.
+- **`mrz`'s ICAO 9303 doc-comment citations now match the corpus (no behaviour change).**
+  Nine citations of "part 4 §4.2.2.2" for the long-document-number overflow encoding were wrong —
+  Part 4 defines no overflow rule at all; the real sources are Part 5 note j / §4.2.4 (TD1) and
+  Part 6 note j (TD2), with TD3 covered only by a deliberate extension by analogy. Corrected across
+  `src/emit.rs`, `src/lib.rs`, `src/parser.rs`, `tests/fuzz_props.rs`, `tests/roundtrip.rs` and
+  `README.md`; the full explanation now lives once in `parser::read_overflow`'s doc comment, with
+  the other sites pointing at it. `src/dates.rs`'s two-digit-year century-pivot heuristic is now
+  documented as this crate's own invention (Part 3 §4.8 is silent on century inference — checked
+  against the whole corpus, not assumed), and `scripts/check-century-pivot.sh` runs in CI to catch
+  the pivot constant drifting more than two years stale. Several fixture comments claiming direct
+  ICAO specimen provenance were corrected: the TD3/TD1 specimens' matching Part 4/5 appendix figures
+  are images in the source PDF, not extracted text, so they're corroborated via Part 6's literal TD2
+  specimen instead. The MRV-A/MRV-B fixtures turned out not to be ICAO specimens at all but
+  hand-derived by this crate, so Part 7's **real** published MRV-A and MRV-B specimens are now
+  transcribed verbatim and pinned as tests alongside them (all three MRV-A check digits recomputed
+  independently and matching). Two entries in `tests/icao_vectors.rs` credited to Part 4 are now
+  labelled honestly: Part 4's specimen data page is an image in the source PDF, so the corpus cannot
+  corroborate them, while the date-of-birth and date-of-expiry vectors are correctly credited to
+  Part 6's literal TD2 text. See `knowledge/docs9303/CONFORMANCE_BASIS.md`'s S2 entries for the full
+  corroboration record. No parsing, emission or arithmetic changed.
+
+### Fixed
+- **`mrz_corpus` runs again.** Two `CORPUS`/`NEGATIVE` entries named specimens that had been
+  renamed by the `samples/` reorganization (`Israel_Biometric_Passport.jpg`,
+  `BulgariaID_face.png`), and `find_sample` panicked on a name it could not resolve. Because the
+  stranded entry was last in `CORPUS`, `cargo run -p synthpass-ocr --release --example
+  mrz_corpus` — the command `CONTRIBUTING.md` gives for vetting a new specimen — aborted before
+  printing the Tier-1 hit rate and before reaching the negative-control sweep at all. Names
+  corrected, and a missing specimen is now reported and skipped rather than aborting the run,
+  with the count surfaced next to the hit rate (the denominator still counts the whole declared
+  corpus, so a stale entry cannot inflate the rate).
+- **`visual_zone_survey --only` no longer overwrites the checked-in survey.** The run wrote
+  `knowledge/visual-zone-survey.jsonl` unconditionally, so a deliberately narrowed `--only` run
+  silently replaced the committed full-corpus dataset with a partial one. It now skips the write
+  and says so, matching what the `--file` path already did. The ranked table also no longer keys
+  on bare filenames, so two specimens sharing a basename across subdirectories can't collide and
+  drop one from the output.
+- **The Tier-2 MRZ hint no longer presents `nationality`/`sex` as checksum-verified.**
+  `synthpass_pipeline::mrz_hint` emitted those two fields whenever `checks.composite` passed,
+  under a prompt banner reading "Verified from the machine-readable zone (trust these over the
+  OCR text)". No composite check digit covers either field in any format — TD1, TD2 and TD3 all
+  exclude the `nationality` and `sex` positions from the composite range — and MRV-A/MRV-B have
+  no composite check digit at all, reporting `checks.composite = true` vacuously, so on a visa
+  the gate treated *no evidence* as proof. The hint now carries only the four individually
+  check-digited fields, matching the gates `promote_verified_mrz_fields` already applies. Affects
+  only runs with `SYNTHPASS_LLM_MRZ_HINT=1` (opt-in, off by default). The prompt template text is
+  unchanged, so `PROMPT_VERSION` and the pinned prompt digest stay as they were.
+- **`mrz` adds seven missing ICAO 9303 Part 3 §5 registry codes and an explicit unknown-date
+  representation (`mrz` 0.6.1, additive).** A full diff of every 3-letter code in the Part 3 §5
+  registry (Parts A-H) against `crates/mrz/src/countries.rs` found seven codes this crate could
+  not yet name: `XCE` (Council of Europe), `XES` (Organization of Eastern Caribbean States),
+  `XMP` (Parliamentary Assembly of the Mediterranean), `XDC` (Southern African Development
+  Community), `ANT` (Netherlands Antilles, deprecated), `NTZ` (Neutral Zone, deprecated), and
+  `IAO` (ICAO itself, used only when it digitally signs a master list). All seven now resolve
+  through `country_name`/`code_for_name`.
+
+  **New:** `mrz::DateCompleteness` and `mrz::date_completeness` classify a raw six-character MRZ
+  date field as `Complete`, `PartiallyUnknown`, `Unknown`, or `Malformed`. Doc 9303 Part 3 §4.8
+  lets an issuer fill an unknown date of birth with `<`, and a filler counts as zero for
+  check-digit purposes (§4.9) — so an all-filler date of birth with check digit `0`
+  (`<<<<<<0`) is a mathematically *valid* field, not a corrupt read, and this crate's arithmetic
+  already handled it correctly. What was missing was a way for a caller to tell "the issuer
+  conformantly recorded an unknown date of birth" apart from "the OCR read failed":
+  `expand_date`/`expand_date_with_pivot` leave non-numeric input untouched, so
+  `MrzData::date_of_birth` held the same shape (`"<<<<<<"` or garbage like `"7X0812"`) for both
+  cases, and a complete date is reshaped from six characters to ten (`YYYY-MM-DD`) so the
+  original raw field is not recoverable after the fact.
+
+  `MrzData` gains `date_of_birth_completeness: DateCompleteness` (additive, `#[non_exhaustive]`),
+  populated by all five parsers (`parse_td1`, `parse_td2`, `parse_td3`, `parse_mrv_a`,
+  `parse_mrv_b`). `Checks` and `DateValidity` are unchanged — `DateValidity::dates_well_formed`
+  correctly stays `false` for an unknown date of birth (it genuinely isn't a parseable calendar
+  date); callers distinguish "legitimately unknown" from "garbage" via the new field instead.
+- **`mrz` now emits and reads ICAO 9303-conformant long document numbers (BREAKING, `mrz` 0.6.0).**
+  Doc 9303 part 5 note j, part 6 note j and part 5 §4.2.4 put all **nine** principal characters of a
+  long document number in the number field and replace only the check-digit position with a filler
+  (part 4 defines no overflow encoding for TD3 at all; applying the TD1/TD2 rule there is a
+  deliberate extension, because issuers do it in practice). This crate was
+  writing eight characters plus a filler instead, and computing the reassembly check digit over the
+  wrong input. Because the parser also required the number field to end with `<` to recognize an
+  overflow — true for the crate's own wrong encoding but not for a conformant nine-character field —
+  it could not read a spec-conformant long-document-number MRZ at all, silently falling back to a
+  truncated, check-failing nine-character reading.
+
+  `format_td3`/`format_td2`/`format_td1` now print the full nine principal characters before the
+  filler. `parse_td3`/`parse_td2`/`parse_td1` now try the spec-form reassembly first, fall back to
+  the pre-0.6 eight-character legacy form so zones written by an older version of this crate still
+  parse, and — if neither form's check digit verifies — surface the spec-form reassembly with
+  `checks.document_number == false` rather than silently truncating. `MrzData` gains
+  `document_number_legacy_encoding: bool` (additive, `#[non_exhaustive]`) reporting which form a
+  reassembled number came from.
+
+  Consumers that inspect the raw MRZ bytes of a long document number (upper-line positions 6-14 for
+  TD1, lower-line positions 1-9 for TD2 and TD3) will see the ninth principal character where a
+  filler used to be, and correspondingly one fewer character at the start of the optional-data
+  remainder. The check-digit position itself is unchanged and, as before, always holds `<`.
+  `document_number_full`/`full_document_number()` values do not
+  change for any number that already round-tripped correctly through this crate's own emit/parse
+  pair; only zones written by 0.5.x or earlier are affected, and those still parse via the legacy
+  fallback.
+- **MRZ name-field punctuation now follows ICAO 9303 Part 3 §4.6.** `format_td3`/`format_td2`/
+  `format_td1`/`format_mrv_a`/`format_mrv_b` used to map every non-alphanumeric character in a
+  name — apostrophe included — to the `<` filler, so `O'CONNOR` emitted as `O<CONNOR`. It now
+  drops apostrophes with no filler (`OCONNOR`, matching ICAO's own worked example) and drops all
+  other punctuation the same way, while hyphens, commas, and whitespace still become a single `<`
+  separator. This changes the emitted bytes for any name containing an apostrophe or other
+  punctuation beyond hyphen/comma/space; document numbers and optional-data fields are unaffected.
+
+  Name truncation also changed. A name too long for its field used to be cut mid-character-run,
+  which could leave the field ending on a filler; Part 4 §4.2.3 requires the last character of a
+  truncated name field to be alphabetic, as the reader's only signal that truncation happened.
+  Truncation now drops whole `<`-separated components from the end and shortens the last one if
+  needed, so the field always ends on a letter. Note that Part 4 offers several issuer-discretionary
+  truncation strategies and prefers none of them — this is one conformant choice, not "the" ICAO
+  algorithm — and that a name which exactly fills its field is indistinguishable from a truncated
+  one, which the standard states explicitly rather than treating as a defect.
+
+  All 33 non-truncating VIZ→MRZ worked examples published across Parts 4, 5, 6 and 7 are now pinned
+  as tests and reproduce byte-for-byte.
+- **Tier-2 cross-check no longer downgrades correct reads on four classes of document.**
+  `synthpass_core::fusion::check_tier2_against_mrz` compared normalized values as plain strings,
+  which reported a contradiction — and dropped the field to `IMPLAUSIBLE` confidence — whenever
+  the two sides were the same value written two legitimate ways. Fixed for: **German documents**
+  (the MRZ prints the legacy single-letter `D`, while any name-based resolution of "Germany"
+  yields `DEU`; now compared through the new `mrz::codes_equivalent`, which treats codes naming
+  the same entity as equal); **two-character document codes** (`PO` official, `PD` diplomatic,
+  `PS` service, `ID` on most TD1/TD2 cards, against a normalizer that can only emit `P`/`I`/`V`
+  — now compared on the document-class character only); and **ICAO §4.6 name encoding**
+  (apostrophes are dropped with no filler, so `O'Brien` is printed `OBRIEN`, and long names are
+  truncated into the fixed-width field — now compared through the new
+  `mrz::encode_name_component`, the same encoder that writes MRZ name fields, with a
+  truncation-prefix match accepted). Interior filler-width differences are also folded away.
+  A genuine disagreement is still flagged, in both directions.
+- **Tier-2 JSON's `mrz` field no longer disagrees with the pipeline's own MRZ read.** When Tier 1
+  escalates to Tier 2, the persisted `ExtractionV2.mrz` used to come from the LLM's own `mrz_line`
+  guess (`synthpass_llm::prompt::FIELDS` asks for one) rather than `stage.mrz_data` — the
+  deterministic `mrz::find_and_parse` result already computed in `ocr_and_tier1` and used to drive
+  the escalation decision itself. The two could — and, on real photos, reliably did — disagree: the
+  CLI's stdout diagnostic reported the accurate partial-checksum read while the saved JSON showed a
+  short, unrelated fragment with every check digit `false`.
+
+  Both Tier-2 entry points now install the deterministic read through one shared
+  `apply_deterministic_mrz`, which mirrors `synthpass_die::mrz_reader::extraction_v2_from_mrz` field
+  for field: `mrz`, `document.mrz_format`, `line1_integrity`, and the confidence downgrade that
+  verdict implies. A real but checksum-partial candidate when one was found, `None` (not a
+  fabricated guess) when it wasn't. `mrz_format_of` and the new `mrz_block_from` are `pub` in
+  `synthpass_die::mrz_reader` so there is exactly one construction of an `MrzBlock`.
+
+  This covers `process_document_stream` — and therefore `synthpass-serve`, which uses only the
+  streaming path — where the first pass of the fix had not reached: every web/API upload that
+  escalated to Tier 2 was still writing the divergent record. It also no longer derives that path's
+  v1 projection from the raw model output, so the v1 and v2 records ship in agreement. A test now
+  asserts the two paths produce *equal* extractions for the same document.
+
+- **`line1_integrity` is populated on the Tier-2 path.** Escalating to a model does not make the
+  zone unreadable, so a suspect line 1 on an escalated document is now reported rather than
+  silently dropped — in the JSON, and in the CLI's `NeedsReview` warning, which previously printed
+  only on the Tier-1 branch.
+
+- **v1's `mrz_checksums_valid` reports the real verdict on the Tier-2 path.** It was hardcoded
+  `null` on the grounds that the model is never asked for the checksum bit. That was true while
+  `mrz_line` was the model's guess; it stopped being true once `mrz_line` became the deterministic
+  read whose failing check digits are what triggered the escalation.
+
 ## [1.2.0] — 2026-07-25 — "dependency diet" + SynthPass rebrand
 
 Roadmap: knowledge/ARCHITECTURE.md §10, knowledge/ROADMAP.md. Every dependency shed is surface the project

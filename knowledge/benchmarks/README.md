@@ -34,6 +34,11 @@ the invocation. See `MRZ_BAND_CONFIDENT_SCORE` in
 
 ## The local bench loop (tracks)
 
+Prerequisite: `samples/` images aren't tracked on `main` — run
+`./scripts/sync-samples.ps1` once to pull the corpus down from the orphan
+`samples-data` branch before a track's first run (see CONTRIBUTING.md's
+"Adding a corpus specimen").
+
 `scripts/run-bench.ps1 -Track <name>` runs `provider-bench --real-specimens`
 scoped to one named track, appends the flattened result to that track's
 `results/<track>-bench/history.jsonl` on the `bench-data` branch (the same
@@ -68,11 +73,31 @@ all) and `unsupported_assertion_rate` are always computable, no ground truth
 needed. `field_match_rate`/`mean_cer` are `null` until a run includes at
 least one labelled specimen — `labelled_documents` says how many did.
 
+**`unsupported_assertion_rate` and date fields (fixed 2026-08-01).** The
+predicate is "does the provider's asserted value appear verbatim in the OCR
+text it was given" — but `date_of_birth`/`date_of_expiry` are always
+reformatted to ISO (`crates/synthpass-core/src/normalize.rs`) before reaching
+this harness, while the OCR text only ever carries the raw MRZ `YYMMDD`
+digits. A verbatim-only check therefore flagged a *correct* date read as
+unsupported almost every time — the 130-specimen passport run's `--verbose`
+breakdown showed `date_of_birth`/`date_of_expiry` in nearly every document's
+unsupported-fields list, for both the `mrz` and `llm` providers, which is
+what surfaced this. `provider_bench.rs::is_supported` now also accepts the
+raw `YYMMDD` substring for date fields specifically (`mrz_date_digits`) —
+scoped to those two fields only, so a coincidental digit match elsewhere
+can't paper over a genuinely fabricated non-date value. This is the same
+category of false positive `synthpass-core/src/fusion.rs`'s retired
+name-reconstruction check hit (see "Record the rejections" above), caught
+here instead of thrown away because the fix (compare against the
+pre-formatting representation) is cheap and doesn't weaken the check.
+
 ## Live tracks
 
-Each chart is regenerated locally by `scripts/run-bench.ps1` and committed
-by hand on a normal branch/PR — never auto-committed from the script itself,
-since `main` is branch-protected by design.
+Each chart is regenerated locally by `scripts/run-bench.ps1`, or on a schedule by
+`.github/workflows/bench-charts.yml`, and lands on `main` only via a normal, human-reviewed
+PR — never auto-committed from either the script or the workflow, since `main` is
+branch-protected by design. The workflow opens the PR for you when a scheduled run produces a
+changed SVG; a local `run-bench.ps1` run leaves the regenerated file for you to commit yourself.
 
 ### `passport` — `samples/passports/`
 

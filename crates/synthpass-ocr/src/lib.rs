@@ -687,6 +687,16 @@ fn run_pass(engine: &OcrsEngine, image: &RgbImage) -> Result<String, String> {
 
 /// Does this text already contain a checksum-valid MRZ? The oracle that
 /// decides whether the retry passes are worth their CPU.
+///
+/// Deliberately checksum-only, despite line 1 (`document_type`/
+/// `issuing_country`/`surname`/`given_names`) carrying no check digit at all
+/// — a stricter oracle here (require a line-1 plausibility heuristic too,
+/// not just checksum validity, before stopping retries) was measured and
+/// reverted: it makes the retry loop run more MRZ-constrained passes per
+/// document, appending more candidate lines for `find_and_parse` to search,
+/// which measurably hurt accuracy rather than helping. See
+/// `synthpass_core::fusion`'s module doc comment for the full writeup and
+/// numbers.
 fn has_valid_mrz(text: &str) -> bool {
     mrz::find_and_parse(text).is_ok_and(|d| d.valid())
 }

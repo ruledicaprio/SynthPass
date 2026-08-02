@@ -1,9 +1,9 @@
-# 🏛️ Architectural Manifest: SynthPass — Air-Gapped Document Processing (v1.0.0)
+# 🏛️ Architectural Manifest: SynthPass — Air-Gapped Document Processing (v1.2.0)
 
 ## 1. Executive Summary
 This repository houses the design and implementation of a localized, air-gapped machine learning architecture dedicated to processing identity documents (passports, ID cards). Engineered for high-stakes rental and compliance applications, the system automates data extraction while enforcing strict data privacy, zero recurring cloud API costs, and optimal local hardware utilization. By decoupling high-concurrency file orchestration from heavy machine learning workloads, the pipeline achieves a robust, production-ready foundation for sensitive Personally Identifiable Information (PII) processing.
 
-As of **v1.0.0**, the whole pipeline is a single, statically-linked `x86_64-unknown-linux-musl` binary: OCR and LLM inference both run in-process (no Python, no gRPC sidecar, no Docker), OCR models are embedded at compile time, and extraction is gated behind an offline Ed25519-signed license — no cloud call anywhere in the processing path, ever. This document describes what's true *today*, in this repo, right now; for the version-by-version path that got here (v0.6.0 → v1.0.0) see [CHANGELOG.md](../CHANGELOG.md). See [§7](#7-security--compliance-posture) for the security/PII posture and [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like) for accuracy caveats stated plainly rather than oversold.
+As of **v1.2.0**, the whole pipeline is a single, statically-linked `x86_64-unknown-linux-musl` binary: OCR and LLM inference both run in-process (no Python, no gRPC sidecar, no Docker), OCR models are embedded at compile time, and extraction is gated behind an offline Ed25519-signed license — no cloud call anywhere in the processing path, ever. This document describes what's true *today*, in this repo, right now; for the version-by-version path that got here (v0.6.0 → v1.2.0) see [CHANGELOG.md](../CHANGELOG.md). See [§7](#7-security--compliance-posture) for the security/PII posture and [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like) for accuracy caveats stated plainly rather than oversold. Work has continued past v1.2.0 without a new numbered release yet (M5/M7 of the platform roadmap, plus the provider-bench tooling) — see [`knowledge/ROADMAP.md`](ROADMAP.md) for that in-flight state; this document still describes the last cut release.
 
 ## 2. Architectural Foundation: Two-Tier Extraction Behind a Pluggable Inference Seam
 The system is a **Rust-first pipeline with a deliberately narrow, swappable boundary** where probabilistic inference happens — everything else is deterministic Rust:
@@ -166,34 +166,38 @@ The headline architectural facts worth stating in this doc specifically (build o
 * **Fingerprint fallback:** stock Alpine ships no OS-level machine-id at all, so `synthpass-license::fingerprint` persists a `/dev/urandom`-seeded id on first run (`/var/lib/mlis/instance-id`, override `SYNTHPASS_INSTANCE_ID_PATH`) rather than every such install colliding on one placeholder — see [§6](#6-offline-cryptographic-licensing-v080)'s threat model, unchanged in kind, just more robust in this one edge case.
 * **Non-goals, explicitly:** no Tesseract-under-musl (the C dependency chain — libjpeg/libpng/libtiff/zlib — was never worth cross-building), no macOS/Windows musl target, no GGUF embedding, no hardware-attestation fingerprinting (TPM/HSM).
 
-### v1.2.0 — "dependency diet" (in progress)
+### v1.2.0 — "dependency diet" (shipped 2026-07-25)
 
 One numbered milestone earned its way back onto the roadmap: **every dependency the project
 sheds is surface it no longer has to secure, license-audit, cross-compile, or explain to a
 procurement department** — for an air-gapped, commercially-licensed binary, a short dependency
-list is a product feature, not housekeeping. Scope, in order:
+list is a product feature, not housekeeping. Scope, in order — **all four items below shipped**:
 
-1. **Retire `ocr-daemon` (Tesseract/Leptonica) — done in this milestone's first PR.** The
+1. **Retire `ocr-daemon` (Tesseract/Leptonica) — done.** The
    pure-Rust engine's measured 100% Tier-1 corpus hit rate (v1.1.0, [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like))
    closed the accuracy-parity question that justified the fallback. Removes the last C-library
    OCR chain, the `native-ocr` feature, and the Tesseract packages from CI and the builder image.
-2. **Self-host the browser demo's OCR assets — done in this milestone's second PR.** The demo
+2. **Self-host the browser demo's OCR assets — done.** The demo
    pages used to load tesseract.js from the jsDelivr CDN; `web/fetch-vendor.sh` now vendors the
    script, worker, LSTM cores, and `eng` traineddata (fetched + SHA-256-pinned at Pages deploy
    time, mirroring the `.rten` pattern — not committed to git), so the deployed page makes zero
    CDN requests and "nothing leaves the device" is true of the page itself, not just guest data.
-3. **Spike: `ocrs`/`rten` compiled to WASM in the browser.** The end state is *one* OCR engine
+3. **Spike: `ocrs`/`rten` compiled to WASM in the browser — done.** The end state is *one* OCR engine
    everywhere — the exact `synthpass-ocr` preprocessing and retry passes running client-side, deleting
    tesseract.js entirely and the JS port of the preprocessing with it. Gated on measured
    single-threaded WASM latency (GitHub Pages sends no COOP/COEP headers, so no wasm threads);
    the spike ships only if a worst-case scan stays interactive.
-4. **Rust dependency audit.** `cargo tree` review of the remaining graph: trim `image` crate
+4. **Rust dependency audit — done.** `cargo tree` review of the remaining graph: trim `image` crate
    default features to the formats actually accepted (the decoder list in
    [`ocr.rs`](../crates/synthpass-pipeline/src/ocr.rs)), re-justify every default feature pulled in by
    `reqwest`/`axum`, and record the resulting dependency count as a tracked number in this
    section rather than an untracked vibe.
 
-**Beyond v1.2.0, the project returns to patch releases.** Versioning moves to patch releases (`v1.0.1`, `v1.0.2`, …); see the "What's next" note at the end of CHANGELOG's `[1.0.0]` entry for the proposed next scope. `docker/docker-compose.yml` and `docker/Dockerfile.serve` remain as an optional, glibc-based convenience packaging path alongside the musl artifact — neither is required for any functional code path.
+See CHANGELOG.md's `[1.2.0]` entry for the full account, including the SynthPass rebrand that
+shipped alongside the dependency diet. **Beyond v1.2.0, the project moved to the M1–M7 platform
+roadmap** in [`knowledge/ROADMAP.md`](ROADMAP.md) (generation, benchmarking, and the
+Document Intelligence Engine) rather than a simple patch-release line — that file, not this
+section, is now the current source for in-flight and completed post-1.2.0 work. `docker/docker-compose.yml` and `docker/Dockerfile.serve` remain as an optional, glibc-based convenience packaging path alongside the musl artifact — neither is required for any functional code path.
 
 ## 11. Getting Started
 See the [README quickstart](../README.md#quickstart).

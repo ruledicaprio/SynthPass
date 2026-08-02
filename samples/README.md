@@ -14,6 +14,15 @@ mirrored by hand across machines doesn't need git for that. Populate it by
 running `tools/fetch_commons_mrz_specimens_v2.py` or by copying an existing
 `samples/` tree from another machine.
 
+**Images are not tracked on `main`.** They live on the orphan `samples-data`
+branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
+you want the latest corpus) to populate this directory locally; it's
+`.gitignore`d otherwise. `samples/README.md` and `samples/ocr_fixtures/*.json`
+/ `*.md` (the hand-verified OCR ground truth) are the only things under
+`samples/` still tracked here. See CONTRIBUTING.md's "Adding a corpus
+specimen" section and `knowledge/benchmarks/README.md`'s "local bench loop"
+for how the corpus grows now.
+
 ## Layout
 
 ```
@@ -26,10 +35,11 @@ samples/
   README.md
 ```
 
-`tools/fetch_commons_mrz_specimens_v2.py` (repo root `tools/`) is the current
-scraper used to collect specimen images from Wikimedia Commons; it lives
-outside `samples/` since it is not itself a test fixture. It supersedes the
-earlier `tools/fetch_wiki_category_with_images.py`.
+`tools/fetch_commons_mrz_specimens_v2.py` (repo root `tools/`) is the
+scraper used to collect candidate specimen images from Wikimedia Commons; it
+stages them in a gitignored directory for `scripts/ingest-fetched-samples.ps1`
+to sift into `samples/` (see CONTRIBUTING.md). It lives outside `samples/`
+since it is not itself a test fixture.
 
 ## Document kind -> MRZ format
 
@@ -89,8 +99,12 @@ ever needed.
 
 ## Format / count summary
 
-Counts aren't tracked here: `passports/`, `id_cards/`, `driving_licenses/`,
-and `misc/` are gitignored local mirrors that grow independently on each
-contributor's machine, so any number recorded in this file would drift out
-of date immediately. `git ls-files samples/ocr_fixtures/` gives an exact,
-always-current count for the tracked subset.
+The corpus now grows continuously (see CONTRIBUTING.md's "Adding a corpus
+specimen"), so a hardcoded count here would go stale immediately. Check
+the live count instead:
+
+```powershell
+Get-ChildItem samples -Recurse -File -Include *.jpg,*.jpeg,*.png,*.webp,*.gif |
+    Group-Object { Split-Path (Split-Path $_.FullName -Parent) -Leaf } |
+    Select-Object Name, Count
+```

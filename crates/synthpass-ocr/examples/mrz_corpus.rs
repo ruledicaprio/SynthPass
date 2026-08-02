@@ -56,8 +56,8 @@ const CORPUS: &[(&str, &str)] = &[
 /// Samples with no MRZ at all: the retry passes run in full (worst-case
 /// latency) and must never produce a checksum-valid MRZ.
 const NEGATIVE: &[&str] = &[
-    "Bulgaria_ID_Card_front.png",
-    "SerbianID_face.png",
+    "Bulgaria_ID_Card_specimen.png",
+    "Serbian_ID_Specimen_face.png",
     "Slovenian_ID_Card_2022_-_Front.jpg",
     // Genuine Slovak passport specimen, but this particular crop doesn't
     // include the bottom MRZ strip at all -- correctly must not validate.

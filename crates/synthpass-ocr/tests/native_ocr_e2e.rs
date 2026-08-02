@@ -49,15 +49,15 @@ fn native_ocr_recognizes_mrz_fragment_from_sample_passport() {
     let (detection_path, recognition_path) = require_models();
     let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
 
-    let image_path = find_sample("Croatian_passport_data_page.jpg");
+    let image_path = find_sample("Canada_Passport_Specimen_2.jpg");
     let text = ocr.recognize(&image_path).expect("recognition succeeds");
 
     assert!(!text.is_empty(), "expected non-empty OCR output");
     // The sample is a published specimen passport; its MRZ line contains
-    // "HRV" (Croatia's ICAO nationality code) and "SPECIMEN".
+    // "CAN" (Canada's ICAO nationality code) and surname "MARTIN".
     let upper = text.to_uppercase();
     assert!(
-        upper.contains("SPECIMEN") || upper.contains("HRV"),
+        upper.contains("SARAH") || upper.contains("CAN"),
         "expected a recognizable MRZ fragment in OCR output, got: {text}"
     );
 }
@@ -76,13 +76,13 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
     let (detection_path, recognition_path) = require_models();
     let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
 
-    let source_path = find_sample("Croatian_passport_data_page.jpg");
+    let source_path = find_sample("Canada_Passport_Specimen_2.jpg");
     let upright = image::open(&source_path)
         .expect("sample image opens")
         .into_rgb8();
     let flipped = image::imageops::rotate180(&upright);
 
-    let rotated_path = std::env::temp_dir().join("synthpass_ocr_test_croatian_passport_180.png");
+    let rotated_path = std::env::temp_dir().join("synthpass_ocr_test_canadian_passport_180.png");
     flipped.save(&rotated_path).expect("rotated fixture writes");
 
     let page = ocr
@@ -93,7 +93,7 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
 
     let upper = page.text.to_uppercase();
     assert!(
-        upper.contains("SPECIMEN") || upper.contains("HRV"),
+        upper.contains("SARAH") || upper.contains("CAN"),
         "expected the 180°-rotated fixture to recover the same MRZ fragment \
          as the upright original, got: {}",
         page.text
