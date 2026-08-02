@@ -18,8 +18,8 @@ to run against a working tree that already has extra/staged specimens.
 -Push: mirrors local `samples/{passports,id_cards,driving_licenses,misc}/`
 (whole directories -- every file in them is an image) plus the image files
 under `samples/ocr_fixtures/` (everything except `*.json`/`*.md`, which stay
-on `main`) into the worktree, commits, and pushes. Uses `robocopy /MIR` so a
-local deletion is reflected on `samples-data` too.
+on `main`) into the worktree, commits, and pushes. Uses a cross-platform
+mirror so a local deletion is reflected on `samples-data` too.
 
 All git writes happen inside an isolated worktree, never in this repo's own
 working tree -- safe to run with uncommitted changes on your current branch.
@@ -51,18 +51,131 @@ Set-Location $repoRoot
 # Whole directories: every file in them is a corpus image.
 $imageDirs = @("passports", "id_cards", "driving_licenses", "misc")
 
-# robocopy's exit codes 0-7 are all success (e.g. 1 = files copied); only 8+
-# is failure. PowerShell 7.3+'s $PSNativeCommandUseErrorActionPreference
-# would otherwise turn a normal "files copied" result into a terminating
-# error under $ErrorActionPreference = "Stop".
-function Invoke-Robocopy {
-    param([string[]]$RobocopyArgs)
-    robocopy @RobocopyArgs | Out-Null
-    if ($LASTEXITCODE -ge 8) {
-        throw "robocopy failed (exit $LASTEXITCODE): $($RobocopyArgs -join ' ')"
+# ----------------------------------------------------------------------------
+# Cross-platform replacement for robocopy /E /XO (additive copy, newer wins)
+# ----------------------------------------------------------------------------
+function Copy-Additive {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [string[]]$ExcludePatterns = @()
+    )
+
+    if (-not (Test-Path $Source)) {
+        return
     }
-    $global:LASTEXITCODE = 0
+
+    # Ensure destination exists
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    }
+
+    # Build exclusion filter for file names (e.g. "*.json", "*.md")
+    $excludeRegex = if ($ExcludePatterns.Count -gt 0) {
+        ($ExcludePatterns -join '|') -replace '\*', '.*'
+    } else {
+        $null
+    }
+
+    # Recursively get all files from source
+    $sourceFiles = Get-ChildItem -Path $Source -File -Recurse
+
+    foreach ($srcFile in $sourceFiles) {
+        # Check exclusion
+        if ($excludeRegex -and $srcFile.Name -match $excludeRegex) {
+            continue
+        }
+
+        $relPath = $srcFile.FullName.Substring($Source.Length).TrimStart('\', '/')
+        $destFile = Join-Path $Destination $relPath
+
+        # Ensure destination subdirectory exists
+        $destDir = Split-Path $destFile -Parent
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        # Copy only if destination doesn't exist or source is newer (/XO semantics)
+        if (-not (Test-Path $destFile)) {
+            Copy-Item -Path $srcFile.FullName -Destination $destFile -Force
+        } else {
+            $srcTime = (Get-Item $srcFile.FullName).LastWriteTimeUtc
+            $dstTime = (Get-Item $destFile).LastWriteTimeUtc
+            if ($srcTime -gt $dstTime) {
+                Copy-Item -Path $srcFile.FullName -Destination $destFile -Force
+            }
+        }
+    }
 }
+
+# ----------------------------------------------------------------------------
+# Cross-platform replacement for robocopy /MIR (mirror, with exclusions)
+# ----------------------------------------------------------------------------
+function Copy-Mirror {
+    param(
+        [string]$Source,
+        [string]$Destination,
+        [string[]]$ExcludePatterns = @()
+    )
+
+    if (-not (Test-Path $Source)) {
+        # If source doesn't exist, mirror means delete everything in destination
+        if (Test-Path $Destination) {
+            Remove-Item -Path $Destination -Recurse -Force
+        }
+        return
+    }
+
+    # Ensure destination exists
+    if (-not (Test-Path $Destination)) {
+        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    }
+
+    # Build exclusion filter for file names
+    $excludeRegex = if ($ExcludePatterns.Count -gt 0) {
+        ($ExcludePatterns -join '|') -replace '\*', '.*'
+    } else {
+        $null
+    }
+
+    # ---- 1. Remove files/dirs in destination that are not in source ----
+    $destItems = Get-ChildItem -Path $Destination -Recurse
+    foreach ($destItem in $destItems) {
+        $relPath = $destItem.FullName.Substring($Destination.Length).TrimStart('\', '/')
+        $srcItem = Join-Path $Source $relPath
+
+        # If the source item doesn't exist, the destination item is orphaned
+        if (-not (Test-Path $srcItem)) {
+            if ($destItem.PSIsContainer) {
+                Remove-Item -Path $destItem.FullName -Recurse -Force
+            } else {
+                Remove-Item -Path $destItem.FullName -Force
+            }
+        }
+    }
+
+    # ---- 2. Copy everything from source (respecting exclusions) ----
+    $sourceFiles = Get-ChildItem -Path $Source -File -Recurse
+
+    foreach ($srcFile in $sourceFiles) {
+        # Check exclusion
+        if ($excludeRegex -and $srcFile.Name -match $excludeRegex) {
+            continue
+        }
+
+        $relPath = $srcFile.FullName.Substring($Source.Length).TrimStart('\', '/')
+        $destFile = Join-Path $Destination $relPath
+
+        $destDir = Split-Path $destFile -Parent
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        Copy-Item -Path $srcFile.FullName -Destination $destFile -Force
+    }
+}
+
+# --- Worktree setup (unchanged from original) ---
 
 $worktree = Join-Path (Split-Path $repoRoot -Parent) "synthpass-samples-data-worktree"
 if (Test-Path $worktree) {
@@ -85,6 +198,8 @@ if ($branchExists) {
 }
 Pop-Location
 
+# --- Pull: additive copy from worktree to local samples/ ---
+
 if (-not $Push) {
     if (-not $branchExists) {
         Write-Host "origin/samples-data does not exist yet -- nothing to pull. Run -Push first."
@@ -92,42 +207,32 @@ if (-not $Push) {
         foreach ($dir in $imageDirs) {
             $src = Join-Path $worktree "samples\$dir"
             $dst = Join-Path $repoRoot "samples\$dir"
-            if (Test-Path $src) {
-                New-Item -ItemType Directory -Force -Path $dst | Out-Null
-                # Additive copy -- never deletes a local file, so re-running is safe.
-                Invoke-Robocopy @($src, $dst, "/E", "/XO")
-            }
+            # Cross-platform additive copy (like robocopy /E /XO)
+            Copy-Additive -Source $src -Destination $dst
         }
         $src = Join-Path $worktree "samples\ocr_fixtures"
         $dst = Join-Path $repoRoot "samples\ocr_fixtures"
-        if (Test-Path $src) {
-            New-Item -ItemType Directory -Force -Path $dst | Out-Null
-            Invoke-Robocopy @($src, $dst, "/E", "/XO", "/XF", "*.json", "*.md")
-        }
+        # Exclude JSON and Markdown files (they stay on main)
+        Copy-Additive -Source $src -Destination $dst -ExcludePatterns @("*.json", "*.md")
         Write-Host "Pulled samples-data into local samples/."
     }
     git worktree remove $worktree --force
     exit 0
 }
 
-# --- -Push: mirror local samples/ into the worktree, commit, push. ---------
+# --- -Push: mirror local samples/ into the worktree, commit, push. ---
 
 foreach ($dir in $imageDirs) {
     $src = Join-Path $repoRoot "samples\$dir"
     $dst = Join-Path $worktree "samples\$dir"
-    New-Item -ItemType Directory -Force -Path $dst | Out-Null
-    if (Test-Path $src) {
-        # /MIR so a local deletion is reflected on samples-data too.
-        Invoke-Robocopy @($src, $dst, "/MIR")
-    }
+    # Cross-platform mirror (like robocopy /MIR)
+    Copy-Mirror -Source $src -Destination $dst
 }
 
 $src = Join-Path $repoRoot "samples\ocr_fixtures"
 $dst = Join-Path $worktree "samples\ocr_fixtures"
-New-Item -ItemType Directory -Force -Path $dst | Out-Null
-if (Test-Path $src) {
-    Invoke-Robocopy @($src, $dst, "/MIR", "/XF", "*.json", "*.md")
-}
+# Exclude JSON and Markdown files from the mirror (they stay on main)
+Copy-Mirror -Source $src -Destination $dst -ExcludePatterns @("*.json", "*.md")
 
 Push-Location $worktree
 git add samples
