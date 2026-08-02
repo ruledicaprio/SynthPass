@@ -2,8 +2,17 @@
 
 Identity-document specimen images used as test/example fixtures for the OCR,
 LLM, and pipeline crates. Files are organized by document kind into
-subdirectories; **no file has been renamed** (see "Naming convention" below
-for why).
+subdirectories; **no file has been renamed** when moved between them (see
+"Naming convention" below for why).
+
+**Only `ocr_fixtures/` is tracked in git.** It's the hand-verified,
+ground-truth-labelled subset, and required CI (`native_ocr_e2e`,
+`rust_ocr_smoke`) depends on specific files in it. Everything else —
+`passports/`, `id_cards/`, `driving_licenses/`, `misc/` — is a gitignored
+local corpus: git keeps every committed byte forever, and a corpus this size
+mirrored by hand across machines doesn't need git for that. Populate it by
+running `tools/fetch_commons_mrz_specimens_v2.py` or by copying an existing
+`samples/` tree from another machine.
 
 **Images are not tracked on `main`.** They live on the orphan `samples-data`
 branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
@@ -18,11 +27,11 @@ for how the corpus grows now.
 
 ```
 samples/
-  passports/          ~100 passport specimen images (TD3 MRZ format)
-  id_cards/            ~25 national identity card images (TD1 / TD2 MRZ format)
-  driving_licenses/     3  driving licence specimen images (no MRZ)
-  ocr_fixtures/         6  docling OCR test fixtures, each an image + .md + .json triple
-  misc/                 3  unclassifiable specimens (e.g. border-pass documents, wiki reference image)
+  passports/          passport specimen images (TD3 MRZ format) — gitignored, local mirror
+  id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
+  driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
+  ocr_fixtures/         docling OCR test fixtures, each an image + .md + .json triple — tracked, required by CI
+  misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
   README.md
 ```
 
@@ -47,7 +56,10 @@ Existing filenames are used as lookup keys by several tests (`find_sample`
 / `walk_samples` helpers walk `samples/` recursively and match by
 **basename**), so **existing files are intentionally left un-renamed** when
 moved into subdirectories — renaming any of them would break those test
-references.
+references. For the gitignored portion of the corpus this is no longer
+something CI can check (nothing there is tracked), so treat it as an
+honor-system convention enforced by the fetch script's own naming, plus
+whatever discipline you bring to a hand-maintained local mirror.
 
 New files added going forward should follow:
 

@@ -37,6 +37,15 @@ samples/ocr_fixtures/*
 # accident this guards against.
 samples/**/*Private*
 
+# The real-specimen corpus (except samples/ocr_fixtures/, which is committed —
+# see samples/README.md) is not tracked: git keeps every byte forever, and a
+# multi-machine local mirror doesn't need git for that. Fetch/regenerate via
+# tools/fetch_commons_mrz_specimens_v2.py, or copy from another machine.
+samples/passports/
+samples/id_cards/
+samples/driving_licenses/
+samples/misc/
+
 # v0.3.0 work-in-progress drafts (not yet wired into the build)
 drafts/
 

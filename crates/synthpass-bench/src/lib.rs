@@ -931,19 +931,34 @@ mod tests {
         );
     }
 
+    /// Written to a temp tree rather than `samples/`, so this doesn't depend
+    /// on any specific file surviving in the real (gitignored, local-mirror-
+    /// only) bulk corpus — only `samples/ocr_fixtures/` is tracked, and nothing
+    /// there is deliberately unlabelled.
     #[test]
     fn specimen_loader_reports_no_labels_when_absent() {
-        let root = repo_root();
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-no-labels-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
         let samples = root.join("samples");
+        std::fs::create_dir_all(samples.join("id_cards")).expect("temp dir is creatable");
+        let image_path = samples.join("id_cards").join("unlabelled.png");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(&image_path)
+            .expect("temp fixture writes");
+
         assert!(
-            load_ground_truth(&samples, "Bulgaria_ID_Card_specimen").is_none(),
-            "no samples/ocr_fixtures/Bulgaria_ID_Card_specimen.json should exist"
+            load_ground_truth(&samples, "unlabelled").is_none(),
+            "no samples/ocr_fixtures/unlabelled.json should exist"
         );
 
-        let image_path = samples.join("id_cards").join("Bulgaria_ID_Card_specimen.png");
         let specimen = load_specimen(&samples, &image_path)
             .expect("the image itself exists and should decode");
-        assert_eq!(specimen.name, "Bulgaria_ID_Card_specimen");
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(specimen.name, "unlabelled");
         assert!(
             specimen.labels.is_none(),
             "an unlabelled specimen must not silently acquire fabricated ground truth"
@@ -962,29 +977,53 @@ mod tests {
         assert!(load_specimen(&samples, &bogus).is_none());
     }
 
-    /// The recursive walk finds specimens in more than one `samples/`
-    /// subdirectory, including `ocr_fixtures/` itself, and returns a
-    /// deterministic (sorted) order rather than whatever order the OS
-    /// filesystem API happens to yield.
+    /// The recursive walk finds specimens in more than one subdirectory,
+    /// including `ocr_fixtures/` itself, and returns a deterministic
+    /// (sorted) order rather than whatever order the OS filesystem API
+    /// happens to yield.
     ///
     /// Deliberately exercises `find_image_files` + `load_ground_truth`
-    /// directly rather than `load_real_specimens`: the latter also decodes
-    /// every image with the `image` crate, and doing that for the ~140
-    /// files under `samples/` — twice, to check determinism — is the kind
-    /// of real disk-and-CPU cost that belongs behind `--ignored`, not in the
-    /// default `cargo test` loop. Checking label presence needs only a JSON
-    /// read per stem, which stays cheap.
+    /// directly rather than `load_real_specimens`, which also decodes every
+    /// image with the `image` crate — real disk-and-CPU cost that belongs
+    /// behind `--ignored`, not the default `cargo test` loop.
+    ///
+    /// Written to a temp tree rather than the real `samples/`: only
+    /// `samples/ocr_fixtures/` is tracked in git, and every image there is
+    /// hand-labelled by construction, so a fresh checkout with no local
+    /// mirror of the gitignored bulk corpus has no unlabelled specimen at
+    /// all — this test's "covers unlabelled" half must not depend on that.
     #[test]
     fn find_image_files_is_deterministic_and_covers_labelled_and_unlabelled_specimens() {
-        let root = repo_root();
-        let samples = root.join("samples");
-        let paths = find_image_files(&samples);
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-find-image-files-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let id_cards = root.join("id_cards");
+        let ocr_fixtures = root.join("ocr_fixtures");
+        std::fs::create_dir_all(&id_cards).expect("temp dir is creatable");
+        std::fs::create_dir_all(&ocr_fixtures).expect("temp dir is creatable");
+
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(id_cards.join("unlabelled.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(ocr_fixtures.join("labelled.png"))
+            .expect("temp fixture writes");
+        std::fs::write(
+            ocr_fixtures.join("labelled.json"),
+            serde_json::to_vec(&synthpass_core::Extraction::default())
+                .expect("Extraction serializes"),
+        )
+        .expect("temp fixture writes");
+
+        let paths = find_image_files(&root);
         assert!(
             !paths.is_empty(),
-            "samples/ should contain at least one image"
+            "the walk should find the images written to the temp tree"
         );
 
-        let paths_again = find_image_files(&samples);
+        let paths_again = find_image_files(&root);
         assert_eq!(
             paths, paths_again,
             "repeated walks of the same directory must yield the same order"
@@ -993,14 +1032,18 @@ mod tests {
         let has_label = |path: &Path| {
             path.file_stem()
                 .and_then(|s| s.to_str())
-                .is_some_and(|stem| load_ground_truth(&samples, stem).is_some())
+                .is_some_and(|stem| load_ground_truth(&root, stem).is_some())
         };
+        let has_labelled = paths.iter().any(|p| has_label(p));
+        let has_unlabelled = paths.iter().any(|p| !has_label(p));
+        std::fs::remove_dir_all(&root).ok();
+
         assert!(
-            paths.iter().any(|p| has_label(p)),
-            "samples/ocr_fixtures/ should contribute at least one labelled specimen"
+            has_labelled,
+            "ocr_fixtures/ should contribute at least one labelled specimen"
         );
         assert!(
-            paths.iter().any(|p| !has_label(p)),
+            has_unlabelled,
             "an MRZ-less front like a bare ID-card face should have no label file"
         );
     }
