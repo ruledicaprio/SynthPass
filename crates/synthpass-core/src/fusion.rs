@@ -19,6 +19,25 @@
 //! catches that specific, reproducible corruption deterministically, using
 //! data that already ships (`mrz::country_name`) rather than a model.
 //!
+//! **A candidate-selection fix was tried and measured worse, not better —
+//! record kept so it isn't retried blind.** The obvious next step reads as:
+//! teach `mrz::find_and_parse` to prefer a checksum-valid candidate whose
+//! line 1 also passes this module's reasoning over one that doesn't, instead
+//! of accepting the first checksum-valid candidate outright. Implemented and
+//! measured on the 200-doc `synthpass-bench --profile all` corpus: it made
+//! things worse — hit rate 69.5%→61.5%, and `given_names`/`surname` CER both
+//! rose rather than fell. Root cause: continuing to search after the first
+//! checksum-valid hit, hunting for one that also looks plausible, tries far
+//! more line-1×line-2 combinations than before, and each extra combination
+//! is one more chance of a coincidental false match against a checksum with
+//! known blind spots (`mrz::Blindspot`) — that risk grew faster than the
+//! benefit of occasionally finding a genuinely better line 1. Pairing it
+//! with a change to `synthpass-ocr`'s MRZ-retry oracle (require plausibility,
+//! not just checksum validity, before stopping retries) made it worse
+//! still, by appending more noisy candidate lines to search through in the
+//! first place. Both changes were reverted; this module stays a
+//! reporting-only layer for now.
+//!
 //! What this is not: a posterior probability. See `Support`'s doc comment —
 //! the ranking is ordinal on purpose.
 //!
