@@ -65,7 +65,11 @@ pub fn build_td1_lines(passport: &Passport) -> (String, String, String) {
     let emitted = format_td1(&fields);
     let lines: Vec<&str> = emitted.split('\n').collect();
     assert_eq!(lines.len(), 3, "format_td1 should return three lines");
-    (lines[0].to_string(), lines[1].to_string(), lines[2].to_string())
+    (
+        lines[0].to_string(),
+        lines[1].to_string(),
+        lines[2].to_string(),
+    )
 }
 
 /// Assemble the two TD2 MRZ lines for `passport` via [`mrz::format_td2`].

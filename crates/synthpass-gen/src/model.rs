@@ -64,9 +64,9 @@ impl DocumentType {
     /// Get the MRZ document code character for this type.
     pub fn document_code(self) -> &'static str {
         match self {
-            DocumentType::TD1 => "I",  // Identity card
-            DocumentType::TD2 => "I",  // Official travel document (also uses 'I')
-            DocumentType::TD3 => "P",  // Passport
+            DocumentType::TD1 => "I", // Identity card
+            DocumentType::TD2 => "I", // Official travel document (also uses 'I')
+            DocumentType::TD3 => "P", // Passport
         }
     }
 

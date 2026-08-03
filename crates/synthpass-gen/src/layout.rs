@@ -86,8 +86,18 @@ pub fn mrz_lines(doc_type: DocumentType) -> Vec<Rect> {
             let start_y = 620; // Start higher to fit 3 lines
             vec![
                 Rect::new(60, start_y, mrz_width, MRZ_LINE_HEIGHT),
-                Rect::new(60, start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING, mrz_width, MRZ_LINE_HEIGHT),
-                Rect::new(60, start_y + 2*(MRZ_LINE_HEIGHT + MRZ_LINE_SPACING), mrz_width, MRZ_LINE_HEIGHT),
+                Rect::new(
+                    60,
+                    start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING,
+                    mrz_width,
+                    MRZ_LINE_HEIGHT,
+                ),
+                Rect::new(
+                    60,
+                    start_y + 2 * (MRZ_LINE_HEIGHT + MRZ_LINE_SPACING),
+                    mrz_width,
+                    MRZ_LINE_HEIGHT,
+                ),
             ]
         }
         DocumentType::TD2 | DocumentType::TD3 => {
@@ -95,7 +105,12 @@ pub fn mrz_lines(doc_type: DocumentType) -> Vec<Rect> {
             let start_y = 720;
             vec![
                 Rect::new(60, start_y, mrz_width, MRZ_LINE_HEIGHT),
-                Rect::new(60, start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING, mrz_width, MRZ_LINE_HEIGHT),
+                Rect::new(
+                    60,
+                    start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING,
+                    mrz_width,
+                    MRZ_LINE_HEIGHT,
+                ),
             ]
         }
     }
@@ -107,8 +122,6 @@ pub fn mrz_char_rect_for_line(line: Rect, mrz_chars: u32, index: u32) -> Rect {
     let cell_width = line.width / mrz_chars;
     Rect::new(line.x + index * cell_width, line.y, cell_width, line.height)
 }
-
-
 
 #[cfg(test)]
 mod tests {

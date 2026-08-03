@@ -732,7 +732,8 @@ mod tests {
     fn a_checksum_invalid_read_still_reports_per_field_detail() {
         let config = GeneratorConfig::new(7);
         let (_image, labels, _passport) = generate_from_seed(&config);
-        let truth = mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
+        let truth =
+            mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
 
         let mut misread = truth.clone();
         misread.surname = format!("{}X", truth.surname);
@@ -758,7 +759,8 @@ mod tests {
     fn an_unparsed_document_is_a_total_loss_not_an_absence() {
         let config = GeneratorConfig::new(11);
         let (_image, labels, _passport) = generate_from_seed(&config);
-        let truth = mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
+        let truth =
+            mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
 
         let fields = total_loss(&truth);
         assert_eq!(fields.len(), COMPARED_FIELDS.len() + 1);

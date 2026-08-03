@@ -22,7 +22,6 @@ use crate::labels::Labels;
 use crate::layout::{self, Rect};
 use crate::model::{DocumentType, Passport};
 
-
 const BACKGROUND: Rgb<u8> = Rgb([244, 243, 236]);
 const FRAME: Rgb<u8> = Rgb([70, 72, 90]);
 const PORTRAIT_FILL: Rgb<u8> = Rgb([205, 205, 210]);
@@ -170,7 +169,13 @@ fn draw_glyph_text(
 /// mismatch (which compounds over all 44 columns) must not be allowed to
 /// merge or overlap adjacent glyphs.
 #[cfg(feature = "embedded-fonts")]
-fn draw_mrz_glyphs(img: &mut RgbImage, font: &ab_glyph::FontArc, text: &str, line_rect: Rect, mrz_chars: u32) {
+fn draw_mrz_glyphs(
+    img: &mut RgbImage,
+    font: &ab_glyph::FontArc,
+    text: &str,
+    line_rect: Rect,
+    mrz_chars: u32,
+) {
     use ab_glyph::{point, Font, ScaleFont};
 
     let px_scale = line_rect.height as f32 * 0.8;
