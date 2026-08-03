@@ -2,7 +2,7 @@
 //! through the appropriate mrz parser as fully checksum-valid, and every parsed field
 //! must equal the generated `Passport` field it came from.
 
-use synthpass_gen::{data::generate_passport, generate, GeneratorConfig, DocumentType};
+use synthpass_gen::{data::generate_passport, generate, DocumentType, GeneratorConfig};
 
 #[test]
 fn generated_mrz_round_trips_through_mrz_crate() {
