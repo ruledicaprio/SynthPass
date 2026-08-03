@@ -88,7 +88,6 @@ fn generated_td1_mrz_round_trips() {
             "seed {seed}: TD1 MRZ parsed but not checksum-valid: {:?}",
             parsed.checks
         );
-        
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
     }
@@ -113,7 +112,6 @@ fn generated_td2_mrz_round_trips() {
             "seed {seed}: TD2 MRZ parsed but not checksum-valid: {:?}",
             parsed.checks
         );
-        
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
     }
