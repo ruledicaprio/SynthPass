@@ -1,8 +1,8 @@
 //! Keystone correctness test: the MRZ extracted from `Labels` must parse back
-//! through `mrz::parse_td3` as fully checksum-valid, and every parsed field
+//! through the appropriate mrz parser as fully checksum-valid, and every parsed field
 //! must equal the generated `Passport` field it came from.
 
-use synthpass_gen::{data::generate_passport, generate, GeneratorConfig};
+use synthpass_gen::{data::generate_passport, generate, GeneratorConfig, DocumentType};
 
 #[test]
 fn generated_mrz_round_trips_through_mrz_crate() {
@@ -69,9 +69,61 @@ fn generated_mrz_round_trips_through_mrz_crate() {
 }
 
 #[test]
+fn generated_td1_mrz_round_trips() {
+    for seed in 0..50u64 {
+        let cfg = GeneratorConfig::with_document_type(seed, DocumentType::TD1);
+        let passport = generate_passport(&cfg);
+        let (_image, labels) = generate(&passport, &cfg);
+
+        let mrz_string = labels.mrz_string();
+        let mut lines = mrz_string.lines();
+        let line1 = lines.next().expect("line1");
+        let line2 = lines.next().expect("line2");
+        let line3 = lines.next().expect("line3");
+
+        let parsed = mrz::parse_td1(line1, line2, line3)
+            .unwrap_or_else(|e| panic!("seed {seed}: TD1 MRZ failed to parse: {e}"));
+        assert!(
+            parsed.valid(),
+            "seed {seed}: TD1 MRZ parsed but not checksum-valid: {:?}",
+            parsed.checks
+        );
+        
+        assert_eq!(parsed.surname, passport.surname, "seed {seed}");
+        assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+    }
+}
+
+#[test]
+fn generated_td2_mrz_round_trips() {
+    for seed in 0..50u64 {
+        let cfg = GeneratorConfig::with_document_type(seed, DocumentType::TD2);
+        let passport = generate_passport(&cfg);
+        let (_image, labels) = generate(&passport, &cfg);
+
+        let mrz_string = labels.mrz_string();
+        let mut lines = mrz_string.lines();
+        let line1 = lines.next().expect("line1");
+        let line2 = lines.next().expect("line2");
+
+        let parsed = mrz::parse_td2(line1, line2)
+            .unwrap_or_else(|e| panic!("seed {seed}: TD2 MRZ failed to parse: {e}"));
+        assert!(
+            parsed.valid(),
+            "seed {seed}: TD2 MRZ parsed but not checksum-valid: {:?}",
+            parsed.checks
+        );
+        
+        assert_eq!(parsed.surname, passport.surname, "seed {seed}");
+        assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+    }
+}
+
+#[test]
 fn generated_mrz_round_trips_without_personal_number() {
     let cfg = GeneratorConfig {
         seed: 999,
+        document_type: DocumentType::TD3,
         include_personal_number: false,
     };
     let passport = generate_passport(&cfg);

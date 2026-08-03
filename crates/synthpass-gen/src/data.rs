@@ -9,7 +9,7 @@ use mrz::Date;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::model::{GeneratorConfig, Passport, Sex};
+use crate::model::{DocumentType, GeneratorConfig, Passport, Sex};
 
 /// Fictional given names, split by sex so [`Sex`] and name agree.
 const GIVEN_NAMES_M: &[&str] = &[
@@ -67,9 +67,15 @@ fn pick<'a, T>(rng: &mut ChaCha8Rng, pool: &'a [T]) -> &'a T {
     &pool[rng.random_range(0..pool.len())]
 }
 
-fn random_document_number(rng: &mut ChaCha8Rng) -> String {
-    // TD3 document numbers are up to 9 characters; use the full width.
-    (0..9)
+fn random_document_number(rng: &mut ChaCha8Rng, doc_type: DocumentType) -> String {
+    // Document number lengths by type:
+    // - TD1: up to 9 characters
+    // - TD2: up to 9 characters  
+    // - TD3: up to 9 characters
+    let length = match doc_type {
+        DocumentType::TD1 | DocumentType::TD2 | DocumentType::TD3 => 9,
+    };
+    (0..length)
         .map(|_| ALNUM[rng.random_range(0..ALNUM.len())] as char)
         .collect()
 }
@@ -124,7 +130,7 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
     let date_of_expiry = random_date(&mut rng, 2027, 2036);
     debug_assert!(date_of_birth.to_epoch_days() < date_of_expiry.to_epoch_days());
 
-    let document_number = random_document_number(&mut rng);
+    let document_number = random_document_number(&mut rng, config.document_type);
     let personal_number = if config.include_personal_number {
         Some(random_personal_number(&mut rng))
     } else {
@@ -132,7 +138,7 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
     };
 
     Passport {
-        document_type: "P".to_string(),
+        document_type: config.document_type.document_code().to_string(),
         issuing_country,
         surname,
         given_names,

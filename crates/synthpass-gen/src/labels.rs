@@ -3,8 +3,8 @@
 //! so labels are 100% accurate by construction, never inferred after the fact.
 
 use crate::layout::Rect;
-use crate::model::Passport;
-use crate::mrz_line::build_td3_lines;
+use crate::model::{DocumentType, Passport};
+use crate::mrz_line::build_mrz_lines;
 
 /// One labelled field: the ground-truth text and where it was drawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -35,34 +35,37 @@ pub struct Labels {
     pub sex: FieldLabel,
     pub date_of_expiry: FieldLabel,
     pub personal_number: Option<FieldLabel>,
-    /// Line 1 of the rendered TD3 MRZ (44 characters).
-    pub mrz_line1: String,
-    /// Line 2 of the rendered TD3 MRZ (44 characters).
-    pub mrz_line2: String,
-    /// Bounding box of the full 2-line MRZ band.
+    /// MRZ lines for the document (2 for TD2/TD3, 3 for TD1).
+    pub mrz_lines: Vec<String>,
+    /// Bounding box of the full MRZ band.
     pub mrz_rect: Rect,
 }
 
 impl Labels {
-    /// The full MRZ as `mrz::parse_td3` expects it: two newline-joined lines.
+    /// The full MRZ as newline-joined lines.
     pub fn mrz_string(&self) -> String {
-        format!("{}\n{}", self.mrz_line1, self.mrz_line2)
+        self.mrz_lines.join("\n")
     }
 }
 
 /// Build the ground-truth [`Labels`] for `passport`, using the fixed
 /// [`crate::layout`] rectangles. The MRZ lines come from
-/// [`crate::mrz_line::build_td3_lines`] — the single source of truth also
+/// [`crate::mrz_line::build_mrz_lines`] — the single source of truth also
 /// used by the renderer, so the drawn text and the label always agree.
-pub fn build_labels(passport: &Passport) -> Labels {
+pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
     use crate::layout::*;
 
-    let (mrz_line1, mrz_line2) = build_td3_lines(passport);
+    let mrz_line_strings = build_mrz_lines(passport, doc_type);
+    let mrz_rects = crate::layout::mrz_lines(doc_type);
+    
+    // Calculate the full MRZ bounding box
+    let first_line = &mrz_rects[0];
+    let last_line = &mrz_rects[mrz_rects.len() - 1];
     let mrz_rect = Rect::new(
-        MRZ_LINE1.x,
-        MRZ_LINE1.y,
-        MRZ_LINE1.width,
-        (MRZ_LINE2.y + MRZ_LINE2.height) - MRZ_LINE1.y,
+        first_line.x,
+        first_line.y,
+        first_line.width,
+        (last_line.y + last_line.height) - first_line.y,
     );
 
     Labels {
@@ -79,8 +82,7 @@ pub fn build_labels(passport: &Passport) -> Labels {
             .personal_number
             .as_ref()
             .map(|v| FieldLabel::new(v.clone(), PERSONAL_NUMBER)),
-        mrz_line1,
-        mrz_line2,
+        mrz_lines: mrz_line_strings,
         mrz_rect,
     }
 }
@@ -98,38 +100,60 @@ mod tests {
 
     #[test]
     fn all_label_rects_within_image_bounds() {
+        use crate::model::DocumentType;
+        
         for seed in 0..20u64 {
             let p = generate_passport(&GeneratorConfig::new(seed));
-            let labels = build_labels(&p);
-            let mut rects = vec![
-                labels.document_type.rect,
-                labels.issuing_country.rect,
-                labels.surname.rect,
-                labels.given_names.rect,
-                labels.document_number.rect,
-                labels.nationality.rect,
-                labels.date_of_birth.rect,
-                labels.sex.rect,
-                labels.date_of_expiry.rect,
-                labels.mrz_rect,
-            ];
-            if let Some(pn) = &labels.personal_number {
-                rects.push(pn.rect);
-            }
-            for r in rects {
-                assert!(
-                    r.within_bounds(IMAGE_WIDTH, IMAGE_HEIGHT),
-                    "{r:?} out of bounds"
-                );
+            // Test all document types
+            for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+                let labels = build_labels(&p, doc_type);
+                let mut rects = vec![
+                    labels.document_type.rect,
+                    labels.issuing_country.rect,
+                    labels.surname.rect,
+                    labels.given_names.rect,
+                    labels.document_number.rect,
+                    labels.nationality.rect,
+                    labels.date_of_birth.rect,
+                    labels.sex.rect,
+                    labels.date_of_expiry.rect,
+                    labels.mrz_rect,
+                ];
+                if let Some(pn) = &labels.personal_number {
+                    rects.push(pn.rect);
+                }
+                for r in rects {
+                    assert!(
+                        r.within_bounds(IMAGE_WIDTH, IMAGE_HEIGHT),
+                        "{r:?} out of bounds for {doc_type:?}"
+                    );
+                }
             }
         }
     }
 
     #[test]
-    fn mrz_lines_are_44_chars() {
+    fn mrz_lines_match_document_type() {
+        use crate::model::DocumentType;
+        
+        // Test TD3 (default)
         let p = generate_passport(&GeneratorConfig::new(7));
-        let labels = build_labels(&p);
-        assert_eq!(labels.mrz_line1.len(), 44);
-        assert_eq!(labels.mrz_line2.len(), 44);
+        let labels = build_labels(&p, DocumentType::TD3);
+        assert_eq!(labels.mrz_lines.len(), 2);
+        assert_eq!(labels.mrz_lines[0].len(), 44);
+        assert_eq!(labels.mrz_lines[1].len(), 44);
+        
+        // Test TD2
+        let labels_td2 = build_labels(&p, DocumentType::TD2);
+        assert_eq!(labels_td2.mrz_lines.len(), 2);
+        assert_eq!(labels_td2.mrz_lines[0].len(), 36);
+        assert_eq!(labels_td2.mrz_lines[1].len(), 36);
+        
+        // Test TD1
+        let labels_td1 = build_labels(&p, DocumentType::TD1);
+        assert_eq!(labels_td1.mrz_lines.len(), 3);
+        assert_eq!(labels_td1.mrz_lines[0].len(), 30);
+        assert_eq!(labels_td1.mrz_lines[1].len(), 30);
+        assert_eq!(labels_td1.mrz_lines[2].len(), 30);
     }
 }

@@ -20,7 +20,8 @@ use image::{DynamicImage, Rgb, RgbImage};
 use crate::fonts::{load_fonts, Fonts};
 use crate::labels::Labels;
 use crate::layout::{self, Rect};
-use crate::model::Passport;
+use crate::model::{DocumentType, Passport};
+
 
 const BACKGROUND: Rgb<u8> = Rgb([244, 243, 236]);
 const FRAME: Rgb<u8> = Rgb([70, 72, 90]);
@@ -80,12 +81,12 @@ fn draw_placeholder_bar(img: &mut RgbImage, rect: Rect) {
 /// filled when the printed character is not the `<` filler, and left blank
 /// otherwise — this keeps the per-character bounding boxes meaningful (filler
 /// runs stay visually empty) without needing real glyphs.
-fn draw_mrz_placeholder(img: &mut RgbImage, line_rect: Rect, text: &str) {
+fn draw_mrz_placeholder(img: &mut RgbImage, line_rect: Rect, text: &str, mrz_chars: u32) {
     for (i, c) in text.chars().enumerate() {
         if c == '<' {
             continue;
         }
-        let cell = layout::mrz_char_rect(line_rect, i as u32);
+        let cell = layout::mrz_char_rect_for_line(line_rect, mrz_chars, i as u32);
         let inset = cell.height / 5;
         let glyph_box = Rect::new(
             cell.x + 1,
@@ -169,14 +170,14 @@ fn draw_glyph_text(
 /// mismatch (which compounds over all 44 columns) must not be allowed to
 /// merge or overlap adjacent glyphs.
 #[cfg(feature = "embedded-fonts")]
-fn draw_mrz_glyphs(img: &mut RgbImage, font: &ab_glyph::FontArc, text: &str, line_rect: Rect) {
+fn draw_mrz_glyphs(img: &mut RgbImage, font: &ab_glyph::FontArc, text: &str, line_rect: Rect, mrz_chars: u32) {
     use ab_glyph::{point, Font, ScaleFont};
 
     let px_scale = line_rect.height as f32 * 0.8;
     let scaled = font.as_scaled(px_scale);
     let y = line_rect.y as f32 + scaled.ascent();
     for (i, c) in text.chars().enumerate() {
-        let cell = layout::mrz_char_rect(line_rect, i as u32);
+        let cell = layout::mrz_char_rect_for_line(line_rect, mrz_chars, i as u32);
         let id = scaled.glyph_id(c);
         let advance = scaled.h_advance(id);
         let x = cell.x as f32 + ((cell.width as f32 - advance) / 2.0).max(0.0);
@@ -196,15 +197,15 @@ fn draw_text_field(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fo
     draw_placeholder_bar(img, rect);
 }
 
-fn draw_mrz_line(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fonts>) {
+fn draw_mrz_line(img: &mut RgbImage, rect: Rect, text: &str, mrz_chars: u32, fonts: Option<&Fonts>) {
     #[cfg(feature = "embedded-fonts")]
     if let Some(fonts) = fonts {
-        draw_mrz_glyphs(img, &fonts.mrz, text, rect);
+        draw_mrz_glyphs(img, &fonts.mrz, text, rect, mrz_chars);
         return;
     }
     #[cfg(not(feature = "embedded-fonts"))]
     let _ = fonts;
-    draw_mrz_placeholder(img, rect, text);
+    draw_mrz_placeholder(img, rect, text, mrz_chars);
 }
 
 // ---------------------------------------------------------------------
@@ -367,7 +368,7 @@ fn draw_watermark(img: &mut RgbImage) {
 
 /// Compose the full data-page image for `passport`, using `labels` as the
 /// single source of truth for text content and placement.
-pub fn render(passport: &Passport, labels: &Labels) -> DynamicImage {
+pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> DynamicImage {
     // `labels` is the single source of drawn text (kept in sync with
     // `passport` by construction, see `labels::build_labels`); `passport` is
     // accepted for API symmetry with `crate::generate` and future per-field
@@ -440,8 +441,14 @@ pub fn render(passport: &Passport, labels: &Labels) -> DynamicImage {
         draw_text_field(&mut img, layout::PERSONAL_NUMBER, &pn.value, fonts_ref);
     }
 
-    draw_mrz_line(&mut img, layout::MRZ_LINE1, &labels.mrz_line1, fonts_ref);
-    draw_mrz_line(&mut img, layout::MRZ_LINE2, &labels.mrz_line2, fonts_ref);
+    // Draw MRZ lines based on document type
+    let mrz_rects = layout::mrz_lines(doc_type);
+    let mrz_chars_count = layout::mrz_chars(doc_type);
+    for (i, mrz_line) in labels.mrz_lines.iter().enumerate() {
+        if i < mrz_rects.len() {
+            draw_mrz_line(&mut img, mrz_rects[i], mrz_line, mrz_chars_count, fonts_ref);
+        }
+    }
 
     // Guardrail #1: unconditional synthetic watermark, drawn last so it stays
     // on top of every other element.
