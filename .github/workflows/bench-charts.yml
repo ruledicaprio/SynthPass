@@ -1,0 +1,132 @@
+name: Bench charts
+
+# Regenerates the provider-bench trend charts (knowledge/img/*-bench-trend.svg)
+# on a schedule and opens a PR with whatever changed. This is the CI
+# counterpart to a developer running `scripts/run-bench.ps1 -Track <name>` by
+# hand -- same script, same isolated-`git worktree` push to `bench-data`/
+# `samples-data`, same "never touch main directly" rule (main is branch-
+# protected by design, see CONTRIBUTING.md): this workflow only ever opens a
+# PR, exactly like a human would, never pushes to main itself.
+
+on:
+  schedule:
+    - cron: "30 4 * * 1" # weekly, Monday, off the hour to avoid GitHub's cron rush
+  workflow_dispatch:
+    inputs:
+      track:
+        description: "Track to run (or 'all')"
+        type: choice
+        options: [all, passport, id_card, driving_license, real-specimens]
+        default: all
+      limit:
+        description: "Cap on specimens per track (blank = every specimen)"
+        default: ""
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bench-charts
+  cancel-in-progress: false
+
+jobs:
+  refresh-charts:
+    name: Refresh trend charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config clang libclang-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache OCR .rten models
+        uses: actions/cache@v5
+        with:
+          path: |
+            text-detection.rten
+            text-recognition.rten
+          key: ocrs-rten-models-v1
+
+      - name: Download + checksum-verify the OCR .rten models
+        run: |
+          for f in text-detection.rten text-recognition.rten; do
+            if [ ! -f "$f" ]; then
+              curl -fL --retry 3 -o "$f" "https://ocrs-models.s3-accelerate.amazonaws.com/$f"
+            fi
+          done
+          echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
+          echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
+
+      # provider-bench's llm provider needs the same real GGUF as ci.yml's
+      # opt-in native-llm job.
+      - name: Download + checksum-verify the GGUF model
+        run: |
+          MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+          MODEL_SHA256="6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
+          curl -fL --retry 3 -o qwen2.5-1.5b-instruct-q4_k_m.gguf "$MODEL_URL"
+          echo "$MODEL_SHA256  qwen2.5-1.5b-instruct-q4_k_m.gguf" | sha256sum -c -
+
+      # scripts/sync-samples.ps1 and scripts/run-bench.ps1 both commit inside
+      # isolated worktrees (samples-data / bench-data) -- a fresh runner has
+      # no git identity configured, unlike a developer's machine.
+      - name: Configure git identity for the sync/bench scripts
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Pull the samples corpus from samples-data
+        shell: pwsh
+        run: ./scripts/sync-samples.ps1
+
+      - name: Run bench track(s)
+        shell: pwsh
+        env:
+          TRACK_INPUT: ${{ github.event.inputs.track || 'all' }}
+          LIMIT_INPUT: ${{ github.event.inputs.limit }}
+        run: |
+          $tracks = if ($env:TRACK_INPUT -eq 'all' -or [string]::IsNullOrEmpty($env:TRACK_INPUT)) {
+            @("passport", "id_card", "driving_license", "real-specimens")
+          } else {
+            @($env:TRACK_INPUT)
+          }
+
+          foreach ($track in $tracks) {
+            Write-Host "=== Track: $track ===" -ForegroundColor Cyan
+            $benchArgs = @{ Track = $track }
+            if (-not [string]::IsNullOrEmpty($env:LIMIT_INPUT)) {
+              $benchArgs["Limit"] = [int]$env:LIMIT_INPUT
+            }
+            ./scripts/run-bench.ps1 @benchArgs
+            if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
+              throw "run-bench.ps1 -Track $track failed (exit $LASTEXITCODE)"
+            }
+          }
+
+      - name: Open a PR if any chart changed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet -- knowledge/img/*.svg; then
+            echo "No chart changes -- nothing to PR."
+            exit 0
+          fi
+
+          branch="bench-charts/$(date +%Y-%m-%d)-${{ github.run_number }}"
+          git checkout -b "$branch"
+          git add knowledge/img/*.svg
+          git commit -m "chore(bench): refresh trend charts ($(date +%Y-%m-%d))"
+          git push origin "$branch"
+
+          gh pr create \
+            --title "chore(bench): refresh trend charts ($(date +%Y-%m-%d))" \
+            --body "Automated chart refresh from the \`bench-charts\` workflow (run ${{ github.run_id }}). Regenerated by \`scripts/run-bench.ps1\` against the current \`samples-data\` corpus and \`bench-data\` history — same script a human runs locally, just scheduled. Review the diff before merging, same as any other chart update (see knowledge/benchmarks/README.md)." \
+            --base main \
+            --head "$branch"

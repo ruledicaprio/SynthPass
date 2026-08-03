@@ -113,37 +113,50 @@ input to `fuzz/corpus/<target>/` as a permanent regression seed, add a matching 
 
 ### Adding a corpus specimen
 
-`samples/` and `crates/synthpass-ocr/examples/mrz_corpus.rs` grow one individually-vetted image at a
-time (see `knowledge/CORPUS_COVERAGE.md` for the current backlog by country). Before adding a new
-specimen, confirm it meets **both**:
+`samples/` images are **not tracked on `main`** — they live on the orphan `samples-data` branch,
+synced locally via `./scripts/sync-samples.ps1` (pull) / `-Push` (the same isolated-`git worktree`
+pattern `bench-data` uses). Bulk corpus growth is automated: `tools/fetch_commons_mrz_specimens_v2.py`
+stages Commons candidates in a gitignored directory, and `./scripts/ingest-fetched-samples.ps1`
+sifts them into `samples/` and pushes to `samples-data` — no human PR review gates a specimen
+entering the corpus anymore.
 
-1. **Provenance.** Either a genuine `SPECIMEN` watermark printed on the document itself, or an
-   established synthetic-placeholder MRZ number already used in this corpus (e.g. `E00000000`,
-   `000000000`, `007007007`) — not a coincidence, an intentional marker that the document is a
-   template. When neither is present, treat the image as unverified and don't add it.
-2. **No real personal data.** Reject anything that reads as an actual person's document: a real
-   name + real photo + a non-placeholder document number with no specimen marking. Also reject
-   images watermarked by novelty/fake-ID-document vendors (e.g. "mrpassports.com"-style sites) —
-   different in kind from an official specimen even if the image itself looks clean.
+That script enforces, automatically, the same provenance rule a human used to apply by eye —
+"never bypass validation" (`CLAUDE.md`) means the check moved, not that it went away. A candidate
+is accepted only if `check_sample` reports **both**:
 
-**Instant first-pass checking.** `./scripts/watch-samples.ps1` watches `samples/` and, the moment
-a new image appears, runs `crates/synthpass-ocr/examples/check_sample.rs` against it (via the
-`synthpass-builder` Docker image) and opens the image for you. It reports whether the file OCRs to a
-checksum-valid MRZ and whether the word "specimen" appears anywhere in the OCR text — a fast,
-non-authoritative signal, not a verdict. It does not replace the provenance/PII judgment above; a
-clean OCR hit is not proof of a genuine specimen, and a miss is not proof it isn't. To check a
-single file by hand instead: `cargo run -p synthpass-ocr --release --example check_sample -- samples/<file>`
-in the Docker image.
+1. **Provenance.** Either a genuine `SPECIMEN` watermark printed on the document (OCR text contains
+   "specimen"), or an established synthetic-placeholder MRZ number already used in this corpus
+   (`E00000000`, `000000000`, `007007007`) — not a coincidence, an intentional marker that the
+   document is a template.
+2. **No known-vendor watermark.** Rejects a small blocklist of novelty/fake-ID-document vendor
+   signatures (e.g. "mrpassports.com"-style sites) even when a specimen-shaped watermark is
+   present — different in kind from an official specimen even if the image looks clean.
 
-When in doubt, ask rather than include. Once accepted: rename to the
-`<Country>_<DocType>_Specimen[_<Variant>].<ext>` convention (full country name, e.g.
-`North_Macedonia` not `North_macedonia`; see [samples/README.md](samples/README.md) for the full
-naming guide), place it in the matching subdirectory (`samples/passports/`, `samples/id_cards/`,
-or `samples/driving_licenses/` — basenames must stay unique across all of `samples/`, since
-lookups are basename-based), run `cargo run -p synthpass-ocr --release --example
-mrz_corpus -- --dump` in the `synthpass-builder` Docker image to confirm a Tier-1 HIT and read the real
-doc number off the MRZ, add it to `CORPUS` (or `NEGATIVE` if the document has no MRZ at all), and
-update the corresponding row in `knowledge/CORPUS_COVERAGE.md`.
+This is a best-effort automated gate, not an infallible one — it cannot detect a real name + real
+photo + a non-placeholder document number with no specimen marking the way a human glancing at the
+image can. `./scripts/ingest-fetched-samples.ps1 -DryRun` reports accept/reject decisions without
+moving anything, and `./scripts/watch-samples.ps1` still exists for anyone who wants to eyeball an
+individual candidate before it's ingested.
+
+**Ground truth stays manual.** `crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS`/`NEGATIVE`
+doc-number ground truth and `samples/ocr_fixtures/*.json` are a separate, smaller, opt-in step —
+reading the real document number off a specimen requires a human, and can't be automated the way
+bulk ingestion was. To add one: pick an already-ingested specimen, run `cargo run -p synthpass-ocr
+--release --example mrz_corpus -- --dump` to confirm a Tier-1 HIT and read the real doc number off
+the MRZ, add it to `CORPUS` (or `NEGATIVE` if the document has no MRZ at all), and update the
+corresponding row in `knowledge/CORPUS_COVERAGE.md`.
+
+Two different things can happen to the file at this point, and they're not the same PR step:
+
+- **It becomes ground truth.** If you're hand-labelling the specimen (writing its
+  `synthpass_core::Extraction` as JSON), the image and its `.json` both move into
+  `samples/ocr_fixtures/` and get `git add`ed — that directory is the only part of `samples/`
+  tracked in git, and required CI depends on specific files in it.
+- **It's an ordinary, unlabelled corpus specimen.** It stays in its usual subdirectory
+  (`samples/passports/`, `samples/id_cards/`, `samples/driving_licenses/`, `samples/misc/`) but is
+  **not committed** — those directories are gitignored, and the file only needs to exist in your
+  own local mirror (and whichever other machine you copy it to) for `mrz_corpus.rs --dump` and
+  `provider-bench --real-specimens` to see it.
 
 Two different things can happen to the file at this point, and they're not the same PR step:
 
