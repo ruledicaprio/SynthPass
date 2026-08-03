@@ -2,6 +2,7 @@
 name = "synthpass-die"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 description = "Document Intelligence Engine: the provider contract, capability model and catalog that MRZ, OCR, LLM and future vision/barcode providers all implement."
 
 # The dependency list is the deliverable, not an accident. This crate defines

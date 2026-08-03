@@ -10,20 +10,37 @@ allow = [
     "BSD-3-Clause",
     "ISC",
     "Zlib",
-    "MPL-2.0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "CC0-1.0",
-    "OpenSSL",
+    "NCSA",                    # libfuzzer-sys (transitive via rav1e/ravif/image)
+    "CDLA-Permissive-2.0",    # webpki-root-certs (transitive via reqwest)
 ]
 confidence-threshold = 0.9
 
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"
+skip = [
+    "bitflags",
+    "cpufeatures",
+    "crypto-common",
+    "getrandom",
+    "itertools",
+    "nom",
+    "r-efi",
+    "rand_core",
+    "shlex",
+    "syn",
+    "windows-sys",
+]
 
 [advisories]
 yanked = "deny"
+ignore = [
+    { id = "RUSTSEC-2024-0436", reason = "paste – used by rav1e/exr/image; no direct fix possible" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile – used by axum-server; migration to rustls-pki-types planned" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser – used by ab_glyph/synthpass-gen; replacing with skrifa tracked" },
+]
 
 [sources]
 unknown-registry = "deny"

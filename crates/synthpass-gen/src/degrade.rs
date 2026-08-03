@@ -32,7 +32,7 @@
 //! photorealism.
 
 use image::{DynamicImage, Rgb, RgbImage};
-use rand::{RngExt, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 /// A named, real-world capture scenario.
