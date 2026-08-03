@@ -197,8 +197,8 @@ fn labels_to_json(
         sex: (&labels.sex).into(),
         date_of_expiry: (&labels.date_of_expiry).into(),
         personal_number: labels.personal_number.as_ref().map(Into::into),
-        mrz_line1: labels.mrz_line1.clone(),
-        mrz_line2: labels.mrz_line2.clone(),
+        mrz_line1: labels.mrz_lines[0].clone(),
+        mrz_line2: labels.mrz_lines[1].clone(),
         mrz_rect: FieldLabelRect {
             x: labels.mrz_rect.x,
             y: labels.mrz_rect.y,
