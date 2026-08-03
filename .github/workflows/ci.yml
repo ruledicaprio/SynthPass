@@ -144,6 +144,16 @@ jobs:
           cargo check -p synthpass-license
           cargo check -p synthpass-license --features vendor
 
+  cargo-deny:
+    name: cargo-deny (advisories & licenses)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        # You can optionally start with advisory‑only:
+        # with:
+        #   command: check advisories
+
   # `mrz` is the published crate, so its stated MSRV has to be enforced rather
   # than asserted. Modeled on `rust-portable` (lightweight) rather than the
   # `rust` job: no OCR model downloads, no system dependencies. The gate is the
