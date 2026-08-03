@@ -6,7 +6,7 @@
 //! public figures) — this crate must never emit real PII.
 
 use mrz::Date;
-use rand::{RngExt, SeedableRng};
+use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
 use crate::model::{GeneratorConfig, Passport, Sex};

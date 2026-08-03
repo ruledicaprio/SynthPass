@@ -2,6 +2,7 @@
 name = "synthpass-pipeline"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 mrz = { path = "../mrz", features = ["serde", "zeroize"] }
