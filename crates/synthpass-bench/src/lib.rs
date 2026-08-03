@@ -522,7 +522,7 @@ fn run_check(
     // formatting difference between the visual zone and the machine-readable
     // one. The labels are correct by construction (M2's DoD), so this parse
     // cannot legitimately fail.
-    let truth = match mrz::parse_td3(&expected.mrz_line1, &expected.mrz_line2) {
+    let truth = match mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]) {
         Ok(truth) => truth,
         Err(e) => {
             return (
