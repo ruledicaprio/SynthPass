@@ -381,7 +381,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
         .map(|doc| {
             let (page, image_path) =
                 ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
-            let truth = mrz::parse_td3(&doc.labels.mrz_line1, &doc.labels.mrz_line2).ok()?;
+            let truth = mrz::parse_td3(&doc.labels.mrz_lines[0], &doc.labels.mrz_lines[1]).ok()?;
             // Read from the OCR text, never from `labels`: the question is
             // what this run's OCR pass actually recovered, which is what a
             // provider had to work with. A generated document always *has*
