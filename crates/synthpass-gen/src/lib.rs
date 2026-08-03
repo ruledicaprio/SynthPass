@@ -45,24 +45,27 @@ mod mrz_line;
 pub mod render;
 
 pub use labels::{FieldLabel, Labels};
-pub use model::{GeneratorConfig, Passport, Sex};
+pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
 
-/// Generate a synthetic TD3 passport data page: a fictional identity drawn
+/// Generate a synthetic document data page: a fictional identity drawn
 /// from `config.seed`, rendered into an image, alongside its ground-truth
 /// [`Labels`].
 ///
 /// The two ethics guardrails described in the module docs (the synthetic
 /// watermark and the generic template) render unconditionally as part of
 /// this call — there is no configuration path that skips them.
+/// 
+/// Supports TD1, TD2, and TD3 document types based on `config.document_type`.
 pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::DynamicImage, Labels) {
-    let _ = config; // reserved for future render options; seed already consumed by data::generate_passport
-    let labels = labels::build_labels(passport);
-    let image = render::render(passport, &labels);
+    let labels = labels::build_labels(passport, config.document_type);
+    let image = render::render(passport, &labels, config.document_type);
     (image, labels)
 }
 
-/// Convenience: generate a fictional passport from `config.seed` and render
+/// Convenience: generate a fictional document from `config.seed` and render
 /// it in one call.
+/// 
+/// The document type is determined by `config.document_type` (defaults to TD3).
 pub fn generate_from_seed(config: &GeneratorConfig) -> (image::DynamicImage, Labels, Passport) {
     let passport = data::generate_passport(config);
     let (image, labels) = generate(&passport, config);
