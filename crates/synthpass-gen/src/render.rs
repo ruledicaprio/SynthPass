@@ -197,7 +197,13 @@ fn draw_text_field(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fo
     draw_placeholder_bar(img, rect);
 }
 
-fn draw_mrz_line(img: &mut RgbImage, rect: Rect, text: &str, mrz_chars: u32, fonts: Option<&Fonts>) {
+fn draw_mrz_line(
+    img: &mut RgbImage,
+    rect: Rect,
+    text: &str,
+    mrz_chars: u32,
+    fonts: Option<&Fonts>,
+) {
     #[cfg(feature = "embedded-fonts")]
     if let Some(fonts) = fonts {
         draw_mrz_glyphs(img, &fonts.mrz, text, rect, mrz_chars);

@@ -2,7 +2,7 @@
 //!
 //! This is a thin adapter over the canonical emitters in the `mrz` crate:
 //! - [`mrz::format_td1`] for TD1 (ID cards)
-//! - [`mrz::format_td2`] for TD2 (official travel documents)  
+//! - [`mrz::format_td2`] for TD2 (official travel documents)
 //! - [`mrz::format_td3`] for TD3 (passports)
 //!
 //! Each function converts the crate's structured [`Passport`] into the

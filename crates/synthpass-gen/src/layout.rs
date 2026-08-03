@@ -79,7 +79,7 @@ pub fn mrz_chars(doc_type: DocumentType) -> u32 {
 /// Get MRZ line rectangles for a document type.
 pub fn mrz_lines(doc_type: DocumentType) -> Vec<Rect> {
     let mrz_width = 1080; // Same width for all types
-    
+
     match doc_type {
         DocumentType::TD1 => {
             // TD1 has 3 lines - start higher to fit within IMAGE_HEIGHT (840px)

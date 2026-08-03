@@ -57,7 +57,7 @@ pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
 
     let mrz_line_strings = build_mrz_lines(passport, doc_type);
     let mrz_rects = crate::layout::mrz_lines(doc_type);
-    
+
     // Calculate the full MRZ bounding box
     let first_line = &mrz_rects[0];
     let last_line = &mrz_rects[mrz_rects.len() - 1];
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn all_label_rects_within_image_bounds() {
         use crate::model::DocumentType;
-        
+
         for seed in 0..20u64 {
             let p = generate_passport(&GeneratorConfig::new(seed));
             // Test all document types
@@ -135,20 +135,20 @@ mod tests {
     #[test]
     fn mrz_lines_match_document_type() {
         use crate::model::DocumentType;
-        
+
         // Test TD3 (default)
         let p = generate_passport(&GeneratorConfig::new(7));
         let labels = build_labels(&p, DocumentType::TD3);
         assert_eq!(labels.mrz_lines.len(), 2);
         assert_eq!(labels.mrz_lines[0].len(), 44);
         assert_eq!(labels.mrz_lines[1].len(), 44);
-        
+
         // Test TD2
         let labels_td2 = build_labels(&p, DocumentType::TD2);
         assert_eq!(labels_td2.mrz_lines.len(), 2);
         assert_eq!(labels_td2.mrz_lines[0].len(), 36);
         assert_eq!(labels_td2.mrz_lines[1].len(), 36);
-        
+
         // Test TD1
         let labels_td1 = build_labels(&p, DocumentType::TD1);
         assert_eq!(labels_td1.mrz_lines.len(), 3);

@@ -70,7 +70,7 @@ fn pick<'a, T>(rng: &mut ChaCha8Rng, pool: &'a [T]) -> &'a T {
 fn random_document_number(rng: &mut ChaCha8Rng, doc_type: DocumentType) -> String {
     // Document number lengths by type:
     // - TD1: up to 9 characters
-    // - TD2: up to 9 characters  
+    // - TD2: up to 9 characters
     // - TD3: up to 9 characters
     let length = match doc_type {
         DocumentType::TD1 | DocumentType::TD2 | DocumentType::TD3 => 9,

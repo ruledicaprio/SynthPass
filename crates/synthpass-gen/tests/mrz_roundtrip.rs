@@ -23,7 +23,6 @@ fn generated_mrz_round_trips_through_mrz_crate() {
             "seed {seed}: MRZ parsed but not checksum-valid: {:?}",
             parsed.checks
         );
-
         assert_eq!(parsed.document_type, passport.document_type, "seed {seed}");
         assert_eq!(
             parsed.issuing_country, passport.issuing_country,

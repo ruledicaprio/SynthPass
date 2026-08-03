@@ -54,7 +54,7 @@ pub struct Passport {
 pub enum DocumentType {
     /// TD1 - ID card format (3 lines × 30 characters)
     TD1,
-    /// TD2 - Official travel document format (2 lines × 36 characters)  
+    /// TD2 - Official travel document format (2 lines × 36 characters)
     TD2,
     /// TD3 - Passport format (2 lines × 44 characters)
     TD3,
@@ -69,7 +69,7 @@ impl DocumentType {
             DocumentType::TD3 => "P",  // Passport
         }
     }
-    
+
     /// Get the number of MRZ lines for this document type.
     pub fn mrz_lines(self) -> usize {
         match self {
@@ -115,7 +115,7 @@ impl GeneratorConfig {
             include_personal_number: true,
         }
     }
-    
+
     /// Create a config for a specific document type.
     pub fn with_document_type(seed: u64, doc_type: DocumentType) -> Self {
         Self {

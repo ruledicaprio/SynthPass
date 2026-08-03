@@ -54,7 +54,7 @@ pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
 /// The two ethics guardrails described in the module docs (the synthetic
 /// watermark and the generic template) render unconditionally as part of
 /// this call — there is no configuration path that skips them.
-/// 
+///
 /// Supports TD1, TD2, and TD3 document types based on `config.document_type`.
 pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::DynamicImage, Labels) {
     let labels = labels::build_labels(passport, config.document_type);
@@ -64,7 +64,7 @@ pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::Dynami
 
 /// Convenience: generate a fictional document from `config.seed` and render
 /// it in one call.
-/// 
+///
 /// The document type is determined by `config.document_type` (defaults to TD3).
 pub fn generate_from_seed(config: &GeneratorConfig) -> (image::DynamicImage, Labels, Passport) {
     let passport = data::generate_passport(config);

@@ -164,6 +164,8 @@ struct LabelsJson {
     personal_number: Option<FieldLabelJson>,
     mrz_line1: String,
     mrz_line2: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mrz_line3: Option<String>,
     mrz_rect: FieldLabelRect,
     seed: u64,
     profile: String,
@@ -199,6 +201,7 @@ fn labels_to_json(
         personal_number: labels.personal_number.as_ref().map(Into::into),
         mrz_line1: labels.mrz_lines[0].clone(),
         mrz_line2: labels.mrz_lines[1].clone(),
+        mrz_line3: labels.mrz_lines.get(2).cloned(),
         mrz_rect: FieldLabelRect {
             x: labels.mrz_rect.x,
             y: labels.mrz_rect.y,
