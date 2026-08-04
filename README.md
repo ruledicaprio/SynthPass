@@ -57,10 +57,9 @@ environment variable are in [knowledge/ARCHITECTURE.md §§2,12](knowledge/ARCHI
 
 ## Make a pass, then read it back
 
-SynthPass **mints its own** documents, so accuracy is graded against ground truth, not
-assumptions — every render carries a mandatory "SYNTHETIC / SPECIMEN" watermark, a generic
-non-country template, and fictional seed-drawn identities (*enforced in code, never a copy of a
-real document*), plus a `.json` sidecar with per-field ground truth and a checksum-valid MRZ.
+SynthPass **mints its own** documents, so accuracy is graded against ground truth rather than
+assumptions — every render ships a `.json` sidecar carrying per-field labels and a checksum-valid
+MRZ.
 
 <img src="knowledge/img/synthetic_pass_example.png" alt="A generated pass — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
 
