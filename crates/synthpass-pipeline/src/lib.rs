@@ -601,7 +601,18 @@ impl Pipeline {
         recognition.portrait = ocr_result.portrait.as_ref().map(portrait_image_ref);
         recognition.rotation = ocr_result.rotation;
         recognition.text_sanity = ocr_result.text_sanity;
-        let ctx = DocumentContext::from_text(&markdown).with_recognition(&recognition);
+        // `with_image(input)`: this is the Tier-1/routing consultation — the
+        // one context a vision-capable provider registered ahead of the
+        // deterministic MrzReader would actually see (`find_reader` returns
+        // the first match, and MrzReader is always registered, so today this
+        // is a no-op for the shipped text-only providers). Without it, a
+        // vision provider consulted here would get `image: None` even though
+        // `input` is sitting right here on disk — the M6 plan's "the Tier-1
+        // context must carry pixels" gap, and the same fix `extract_via_inferer`'s
+        // Tier-2 `ctx` already applies via `.with_image(input)` below.
+        let ctx = DocumentContext::from_text(&markdown)
+            .with_recognition(&recognition)
+            .with_image(input);
         let reader = self
             .catalog
             .find_reader(CostClass::Free, |c| c.deterministic)
@@ -1299,6 +1310,7 @@ mod tests {
     use std::sync::Mutex;
     use synthpass_core::v2::LLM_HEURISTIC_CONFIDENCE;
     use synthpass_die::FieldReader;
+    use synthpass_die::IntelligenceProvider as _;
 
     /// Serializes tests that read or mutate `SYNTHPASS_JSON_V1` — the env var is
     /// process-global, and `cargo test` runs cases on parallel threads.
@@ -2783,5 +2795,122 @@ mod tests {
 
         let _ = tokio::fs::remove_dir_all(&blocking_dir).await;
         let _ = tokio::fs::remove_dir_all(&stream_dir).await;
+    }
+
+    // ── M6 Phase 5a: the Tier-1 context must carry pixels ──
+
+    /// Records whatever `DocumentContext::image` it was given — a
+    /// `Capability::vision = true` test double, the same pattern
+    /// `provider_bench.rs`'s `vision_provider_gets_not_applicable_instead_of_a_rate`
+    /// test uses. No shipped provider declares vision yet
+    /// (`synthpass_die::mrz_reader`'s own test asserts exactly that), so this
+    /// is test-only: it exists to prove the *pipeline* would hand a future
+    /// vision provider the image path if one were registered, without
+    /// waiting for that provider to exist first.
+    struct ImageRecordingReader {
+        capability: Capability,
+        seen_image: std::sync::Mutex<Option<PathBuf>>,
+    }
+
+    impl ImageRecordingReader {
+        fn new() -> Self {
+            Self {
+                capability: Capability::deterministic_reader().with_vision(true),
+                seen_image: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl synthpass_die::IntelligenceProvider for ImageRecordingReader {
+        fn id(&self) -> synthpass_die::ProviderId {
+            synthpass_die::ProviderId("vision-test-double")
+        }
+        fn capability(&self) -> &Capability {
+            &self.capability
+        }
+        fn describe(&self) -> String {
+            "records DocumentContext::image for the M6 Phase 5a test".into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl synthpass_die::FieldReader for ImageRecordingReader {
+        async fn read(
+            &self,
+            ctx: &DocumentContext<'_>,
+        ) -> Result<synthpass_die::Reading, ProviderError> {
+            *self.seen_image.lock().unwrap() = ctx.image.map(Path::to_path_buf);
+            Ok(synthpass_die::Reading {
+                extraction: ExtractionV2::default(),
+                evidence: synthpass_die::Evidence::default(),
+                by: self.id(),
+            })
+        }
+    }
+
+    /// Builds a `Pipeline` identical to `Pipeline::new`'s except its catalog's
+    /// Tier-1 slot is `reader` instead of the real `MrzReader` — a direct
+    /// struct literal (this test module is a child of the module that
+    /// defines every private field) rather than a new public constructor,
+    /// since nothing outside this one test needs to substitute the catalog.
+    fn pipeline_with_reader(
+        ocr: Box<dyn OcrEngine>,
+        infer: Box<dyn InferBackend>,
+        reader: Arc<ImageRecordingReader>,
+    ) -> Pipeline {
+        Pipeline {
+            ocr: Arc::from(ocr),
+            infer: Arc::from(infer),
+            audit_log: None,
+            encrypt_key: None,
+            llm_semaphore: Arc::new(Semaphore::new(1)),
+            ocr_semaphore: Arc::new(Semaphore::new(1)),
+            llm_queue_depth: Arc::new(AtomicUsize::new(0)),
+            metrics: Arc::new(PipelineMetrics::default()),
+            catalog: Arc::new(
+                ProviderCatalog::builder()
+                    .with_reader(reader)
+                    .build()
+                    .expect("single reader, no id collision"),
+            ),
+            jobs: Arc::new(jobs::JobRegistry::new(1)),
+        }
+    }
+
+    #[tokio::test]
+    async fn tier1_context_carries_the_image_path_for_a_vision_capable_provider() {
+        let reader = Arc::new(ImageRecordingReader::new());
+        let pipeline = pipeline_with_reader(
+            Box::new(StaticOcr(HRV_TD3_MARKDOWN)),
+            Box::new(MockBackend),
+            reader.clone(),
+        );
+
+        let (input, dir) = temp_input("tier1-image-context").await;
+        // Calls `ocr_and_tier1` directly, not `process_document` — this
+        // catalog deliberately has no Tier-2 reader registered (only the one
+        // Tier-1 test double), and `ImageRecordingReader::read` always
+        // returns default/empty evidence, so `process_document` would
+        // escalate past this call and panic on its own
+        // `find_reader(...).expect("LlmFieldReader is always registered")`,
+        // which is a different code path than the one this test exists to
+        // check. `find_reader(CostClass::Free, |c| c.deterministic)` inside
+        // `ocr_and_tier1` must resolve to `reader` here (the catalog's only
+        // registered provider) — if it didn't, this call would panic on its
+        // own `.expect(...)`, not silently skip the assertion below.
+        pipeline
+            .ocr_and_tier1(&input)
+            .await
+            .expect("ocr_and_tier1 with a mocked OCR must not fail");
+
+        assert_eq!(
+            reader.seen_image.lock().unwrap().as_deref(),
+            Some(input.as_path()),
+            "a vision-capable provider consulted at Tier 1 must receive the on-disk image path, \
+             not None"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 }
