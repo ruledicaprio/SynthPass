@@ -6,7 +6,7 @@ models, and the people who made the decisions.
 
 Start at the top-level [README.md](../README.md) for install and usage.
 
-The premise, argued in [KNOWLEDGE.md](KNOWLEDGE.md): in a year the competitive
+The premise, argued in [archive/KNOWLEDGE.md](archive/KNOWLEDGE.md): in a year the competitive
 advantage will not be the Rust code — it will be the accumulated engineering
 knowledge and the architecture built around it. That is much harder to replicate
 than swapping in the latest vision model.
@@ -53,7 +53,7 @@ the constraints and the direction before you open a source file:
 ## Subject folders
 
 Each holds short, actionable notes (1–4 pages). The rule is the 80/20 filter from
-[KNOWLEDGE.md](KNOWLEDGE.md): if a finding cannot become a trait, struct,
+[archive/KNOWLEDGE.md](archive/KNOWLEDGE.md): if a finding cannot become a trait, struct,
 algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept.
 
 | Folder | Holds |
@@ -76,21 +76,23 @@ Working notes and creator's remarks that shaped the current direction.
 Opinionated and unedited; where they disagree with `ROADMAP.md` or an ADR, those
 win.
 
-- **[KNOWLEDGE.md](KNOWLEDGE.md)** — why this tree exists and how to maintain it.
-- **[DOCUMENT_INTELLIGENCE_ENGINE.md](DOCUMENT_INTELLIGENCE_ENGINE.md)** and
-  **[SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md](SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md)**
-  — the case for a provider interface rather than a single VLM.
-- **[V_1_3_PROPOSALS.md](V_1_3_PROPOSALS.md)** — the v1.3.0 proposal set.
+- **[DOCUMENT_INTELLIGENCE_ENGINE.md](DOCUMENT_INTELLIGENCE_ENGINE.md)** — the
+  case for a provider interface rather than a single VLM (its one-time duplicate,
+  `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`, is archived — see below).
 
-## Historical / origin records
+## Archive (historical record)
 
-`FOUNDATIONAL_STRATEGY.md` and `synthpass_v2_0.md` are the source notes
-VISION/ROADMAP/BRANDING were distilled from. (The earlier
-`rebranding_identra_synthpass.md` and `mlis_v2_0_0_preliminary_design.md` scratch
-notes and the `REBRAND_MIGRATION.md` execution record have since been removed now
-that the rename is long complete and folded into `CHANGELOG.md`.) Kept for
-provenance; not maintained as living docs — prefer the current documents above
-when they disagree.
+**[archive/](archive/)** — documents superseded by `ROADMAP.md`, `VISION.md`, or an ADR, kept
+for provenance rather than as living docs: `KNOWLEDGE.md` (why this tree exists and how it was
+originally proposed — adopted with variations, see `decisions/ADR-0001-knowledge-tree.md`),
+`FOUNDATIONAL_STRATEGY.md` and `synthpass_v2_0.md` (the source notes VISION/ROADMAP/BRANDING
+were distilled from), `V_1_3_PROPOSALS.md` (the v1.3.0 proposal set, superseded by ROADMAP's
+M7 section), and `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` (the duplicate DIE essay). (The
+earlier `rebranding_identra_synthpass.md` and `mlis_v2_0_0_preliminary_design.md` scratch notes
+and the `REBRAND_MIGRATION.md` execution record have since been removed entirely, now
+that the rename is long complete and folded into `CHANGELOG.md`.) Where an archived document
+disagrees with anything outside `archive/`, the current document wins — see
+[archive/README.md](archive/README.md).
 
 Project-wide (not in this folder): [CONTRIBUTING.md](../CONTRIBUTING.md),
 [SECURITY.md](../SECURITY.md), [CHANGELOG.md](../CHANGELOG.md).

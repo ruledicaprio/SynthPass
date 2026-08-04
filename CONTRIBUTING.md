@@ -47,6 +47,12 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/work" \
   -w /work synthpass-builder:latest bash -c "cargo test --workspace"
 ```
 
+The trailing `cargo test --workspace` is swappable for any cargo invocation — `cargo run -p
+synthpass-cli -- doctor` to preflight without a local toolchain, `cargo run -p synthpass-serve`
+for the web app (drop `-e SYNTHPASS_LICENSE_SKIP=1` and add `-p 8080:8080` if you set that
+environment variable), or any other command in this file. Environment variables set on your host
+shell do not cross into the container on their own — `docker run` needs its own `-e` flag.
+
 ### Cross-compiling to musl locally
 
 `synthpass-builder` ships `x86_64-unknown-linux-musl`'s Rust std, a pinned Zig (the `CC`/`CXX` for

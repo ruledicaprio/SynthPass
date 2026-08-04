@@ -3,7 +3,7 @@
 Not bugs. Not TODOs. Things that work but whose shape will cost us later, with an
 honest severity and an estimate. Reviewed at each milestone close.
 
-Proposed in [KNOWLEDGE.md](KNOWLEDGE.md). Add an entry when you *choose* not to
+Proposed in [archive/KNOWLEDGE.md](archive/KNOWLEDGE.md). Add an entry when you *choose* not to
 fix something — the value of this file is the deferred decisions, not the list of
 known imperfections.
 

@@ -199,5 +199,93 @@ roadmap** in [`knowledge/ROADMAP.md`](ROADMAP.md) (generation, benchmarking, and
 Document Intelligence Engine) rather than a simple patch-release line — that file, not this
 section, is now the current source for in-flight and completed post-1.2.0 work. `docker/docker-compose.yml` and `docker/Dockerfile.serve` remain as an optional, glibc-based convenience packaging path alongside the musl artifact — neither is required for any functional code path.
 
+### Air-gapped deployment, step by step
+
+For a genuine "copy one file to an isolated machine" deployment, both binaries build as
+statically-linked `x86_64-unknown-linux-musl` executables with the OCR models baked in — no
+Docker, no shared libraries, no runtime network access.
+
+```bash
+cargo zigbuild --release --target x86_64-unknown-linux-musl \
+  -p synthpass-cli -p synthpass-serve --features ocr-embedded
+
+file target/x86_64-unknown-linux-musl/release/synthpass   # → "statically linked, stripped"
+```
+
+```mermaid
+flowchart LR
+    SRC["source + Cargo.toml"] -->|"cargo zigbuild<br/>--features ocr-embedded"| BIN["synthpass / synthpass-serve<br/>(~22-26 MB, static)"]
+    RTEN[".rten OCR models<br/>(SHA-256 verified)"] -.->|"include_bytes!"| BIN
+    BIN -->|"copy to target"| AIR["air-gapped machine"]
+    GGUF["qwen2.5 GGUF<br/>(~1 GB, separate)"] -->|"copy alongside"| AIR
+    AIR -->|"synthpass fingerprint"| FP["fingerprint string"]
+    FP -->|"send to vendor"| LIC["license.mlis<br/>(Ed25519-signed)"]
+    LIC -->|"drop beside binary"| AIR
+    AIR -->|"synthpass &lt;file&gt;"| OUT["JSON output"]
+```
+
+Copy the binaries and the GGUF onto the target, run `synthpass fingerprint`, obtain a license
+bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale (why Zig over
+`cross-rs` or manual `musl-gcc`) is above in this section; known limitations are in
+[§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like).
+`docker/Dockerfile.musl` packages the same binaries into a `FROM scratch` image.
+
 ## 11. Getting Started
 See the [README quickstart](../README.md#quickstart).
+
+## 12. Configuration Reference
+
+Every environment variable this workspace reads, grouped by subsystem. `synthpass doctor`
+reports the resolved OCR/inferer/license state at runtime rather than requiring a reader to
+cross-reference this table by hand.
+
+**OCR**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` |
+| `SYNTHPASS_OCR_AUTO_DOWNLOAD` | `1` | Fetch missing `.rten` files automatically; `0` requires pre-staged files |
+| `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
+| `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
+| `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `7` / `45` | Bound the MRZ retry loop |
+| `SYNTHPASS_OCR_VERBOSE` | *(unset)* | `1` logs per-pass timing and region counts |
+| `SYNTHPASS_OCR_ENGINE` | `rust` | Only `rust` since v1.2.0; any other value warns and falls back |
+
+**Tier-2 model**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SYNTHPASS_MODEL_PATH` | `./qwen2.5-1.5b-instruct-q4_k_m.gguf` | GGUF path — any GGUF works |
+| `SYNTHPASS_MODEL_N_CTX` | `2048` | Context window in tokens |
+| `SYNTHPASS_MODEL_SHA256` / `SYNTHPASS_MODEL_SKIP_VERIFY` | *(built-in)* / *(unset)* | Re-pin or skip the integrity check |
+| `SYNTHPASS_LLM_CONTEXTS` | `1` | Concurrent Tier-2 contexts; raise only if the hardware has room |
+
+**Server** (`synthpass-serve`)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `BIND_ADDR` | `127.0.0.1:8080` | Listen address |
+| `SYNTHPASS_TOKEN` | *(unset)* | Require `Authorization: Bearer <token>`; **mandatory for non-loopback binds** |
+| `SYNTHPASS_TLS_CERT` / `SYNTHPASS_TLS_KEY` | *(unset)* | Enable rustls TLS |
+| `SYNTHPASS_MAX_QUEUE_DEPTH` | `4` | Reject uploads with `503` + `Retry-After` once this many Tier-2 requests are queued or in flight |
+| `WORK_DIR` / `KEEP_WORK` | `work` / *(unset)* | Scratch directory; keep intermediates for debugging |
+
+`GET /health` reports OCR engine, inference-backend status and license expiry. It sits outside the
+auth layer deliberately — infrastructure probes rarely carry credentials, and a health check that
+requires auth defeats half its purpose.
+
+**Security and licensing**
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SYNTHPASS_AUDIT_LOG` | *(unset)* | Append PII-free SHA-256 audit records (JSONL) |
+| `SYNTHPASS_KEY` | *(unset)* | Base64 32-byte AES-256 key → encrypt output to `<input>.json.enc` |
+| `SYNTHPASS_LICENSE_PATH` | `license.mlis` | Path to the signed license file |
+| `SYNTHPASS_LICENSE_SKIP` | *(unset)* | `1` bypasses license enforcement (development/CI) |
+| `SYNTHPASS_LICENSE_PUBKEY` | *(embedded)* | Override the embedded verifying key, for testing |
+
+See [`LICENSING.md`'s Configuration section](LICENSING.md#configuration-environment) for the
+licensing-specific subset with the customer/vendor CLI walkthroughs alongside it.
+
+> **Windows note:** the Tier-2 backend needs CMake + LLVM/libclang + MSVC to build
+> `llama-cpp-2`'s bundled `llama.cpp`. The OCR engine needs no native toolchain at all.
