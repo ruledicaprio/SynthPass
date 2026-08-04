@@ -237,6 +237,21 @@ fn td1_layout() -> PageLayout {
     const WIDTH: u32 = 822;
     const HEIGHT: u32 = 518;
     const MARGIN: u32 = 40;
+    // The MRZ band's own bottom margin, deliberately smaller than the top/
+    // VIZ MARGIN above. The M6 TD1 root-cause diagnosis (knowledge/ROADMAP.md
+    // and this crate's --dump-ocr probe) found the watermark and MRZ line 1
+    // separated by only 8px: `draw_watermark` draws a 28px-tall glyph
+    // (`scale = 4` in render.rs) into what was a 26px rect starting at
+    // y=282, and MRZ line 1 started at y=318 — an 8px gap on a canvas where
+    // TD2 gets ~145px and TD3 gets ~190px. Across OCR's internal multi-pass
+    // retry loop that gap was tight enough that some passes' text detector
+    // merged the watermark into (or dropped) the region where line 3 (the
+    // name line) should have been its own detected line — see the probe's
+    // recorded line dumps. Reclaiming a smaller bottom margin here (instead
+    // of shrinking the VIZ rows, which would cost every other field's OCR
+    // legibility) pushes MRZ start down and buys real separation without
+    // touching row_h/row_y below.
+    const MRZ_BOTTOM_MARGIN: u32 = 16;
 
     let portrait = Rect::new(MARGIN, MARGIN, 150, 210);
     let viz_x = portrait.x + portrait.width + 24;
@@ -245,10 +260,21 @@ fn td1_layout() -> PageLayout {
 
     let row_h = 28;
     let row_y = |i: u32| MARGIN + i * 34;
+    // Bottom of the last VIZ row (personal_number, row index 6) — the
+    // watermark band must start at or after this, same as it always has.
+    let viz_bottom = row_y(6) + row_h;
 
     let mrz_width = WIDTH - 2 * MARGIN;
     let mrz_height = 3 * MRZ_LINE_HEIGHT + 2 * MRZ_LINE_SPACING;
-    let mrz_start_y = HEIGHT - MARGIN - mrz_height;
+    let mrz_start_y = HEIGHT - MRZ_BOTTOM_MARGIN - mrz_height;
+
+    // Center the watermark band in the window between the VIZ rows and the
+    // MRZ band. `draw_watermark`'s glyphs are 28px tall (`scale = 4` in
+    // render.rs); this rect is taller than that on purpose, so the glyph
+    // never touches either edge of its own rect the way it did at the old
+    // 26px height.
+    const WATERMARK_HEIGHT: u32 = 32;
+    let watermark_y = viz_bottom + (mrz_start_y - viz_bottom - WATERMARK_HEIGHT) / 2;
 
     PageLayout {
         width: WIDTH,
@@ -264,7 +290,7 @@ fn td1_layout() -> PageLayout {
         sex: Rect::new(viz_x + 310, row_y(4), 60, row_h),
         date_of_expiry: Rect::new(viz_x, row_y(5), 170, row_h),
         personal_number: Rect::new(viz_x, row_y(6), 320, row_h),
-        watermark: Rect::new(MARGIN, 282, mrz_width, 26),
+        watermark: Rect::new(MARGIN, watermark_y, mrz_width, WATERMARK_HEIGHT),
         mrz_lines: vec![
             Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
             Rect::new(
