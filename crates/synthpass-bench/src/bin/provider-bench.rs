@@ -14,19 +14,24 @@
 //! `synthpass-llm`) — the LLM provider has to actually run to be measured.
 //!
 //! ```text
-//! provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH]
+//! provider-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out PATH]
 //!                [--measure-memory] [--real-specimens] [--limit N]
 //!                [--format NAME] [--verbose]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
+//!   --document-type TYPE  td1|td2|td3 — the ICAO 9303 MRZ format to *generate* for the
+//!                      synthetic corpus (default: td3). Not the same axis as --format
+//!                      below (which scopes which real samples/ directory --real-specimens
+//!                      reads) — rejected together with --real-specimens, the same way
+//!                      --format is rejected without it.
 //!   --out PATH         report JSON path (default: provider-bench-report.json)
 //!   --measure-memory   sample process RSS around each provider's loop
 //!                      (requires the `measure-memory` feature; see its doc
 //!                      comment in Cargo.toml for why this is coarse)
 //!   --real-specimens   run over samples/ instead of the synthetic corpus;
 //!                      ground truth is optional per specimen, and
-//!                      --count/--seed/--profile are ignored
+//!                      --count/--seed/--profile/--document-type are ignored
 //!   --limit N          with --real-specimens: run N specimens spread evenly
 //!                      across the (possibly --format-scoped) corpus
 //!   --format NAME      with --real-specimens: restrict to one document
@@ -44,6 +49,7 @@ use synthpass_bench::provider_bench::{
     UnsupportedAssertion,
 };
 use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice, SpecimenClass};
+use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
 
@@ -69,6 +75,16 @@ struct Args {
     /// only, applied before `--limit` so a stride subsamples the already-scoped
     /// population, not the whole corpus.
     format: Option<SpecimenClass>,
+    /// The ICAO 9303 MRZ format to *generate* for the synthetic corpus.
+    /// `None` means "unspecified" (defaults to TD3 where used) — kept as an
+    /// `Option`, not a bare `DocumentType` defaulting to `TD3`, so
+    /// `parse_args` can tell "explicitly TD3" apart from "never mentioned"
+    /// the same way `format: Option<SpecimenClass>` does, and reject
+    /// `--document-type` together with `--real-specimens` accordingly.
+    /// Deliberately named `--document-type`, not `--format`: `--format`
+    /// above already means `SpecimenClass` (which real `samples/` directory
+    /// to read).
+    document_type: Option<DocumentType>,
 }
 
 impl Default for Args {
@@ -83,6 +99,7 @@ impl Default for Args {
             limit: None,
             verbose: false,
             format: None,
+            document_type: None,
         }
     }
 }
@@ -110,6 +127,12 @@ fn usage() {
     eprintln!(
         "  --format NAME      with --real-specimens: restrict to one document class — \
          passport|id_card|driving_license (default: all classes)"
+    );
+    eprintln!(
+        "  --document-type TYPE  td1|td2|td3 — the ICAO 9303 MRZ format to *generate* for the \
+         synthetic corpus (default: td3). Not the same axis as --format, which scopes which \
+         real samples/ directory --real-specimens reads; rejected together with \
+         --real-specimens the same way --format is rejected without it."
     );
 }
 
@@ -184,11 +207,25 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.format = Some(SpecimenClass::parse(v)?);
                 i += 2;
             }
+            "--document-type" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--document-type requires a value".to_string())?;
+                parsed.document_type = Some(DocumentType::parse(v)?);
+                i += 2;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     if parsed.format.is_some() && !parsed.real_specimens {
         return Err("--format is only valid together with --real-specimens".to_string());
+    }
+    if parsed.document_type.is_some() && parsed.real_specimens {
+        return Err(
+            "--document-type generates the synthetic corpus and is not valid together with \
+             --real-specimens (use --format to scope which real samples/ directory is read)"
+                .to_string(),
+        );
     }
     Ok(parsed)
 }
@@ -288,6 +325,12 @@ struct AssertionBucketReport {
 struct DocumentDetailReport {
     name: String,
     mrz_found: bool,
+    /// The document's resolved ICAO 9303 MRZ format ("TD1"/"TD2"/"TD3"/
+    /// "MRVA"/"MRVB"), `null` when none could be resolved — see
+    /// `synthpass_bench::provider_bench::DocumentDetail::mrz_format`'s doc
+    /// for the synthetic-vs-real-specimen resolution rules.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mrz_format: Option<&'static str>,
     read_ok: bool,
     assertions_total: usize,
     assertions_unsupported: usize,
@@ -400,6 +443,7 @@ impl From<ProviderReport> for ProviderRow {
                 .map(|d| DocumentDetailReport {
                     name: d.name,
                     mrz_found: d.mrz_found,
+                    mrz_format: d.mrz_format,
                     read_ok: d.read_ok,
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
@@ -525,7 +569,12 @@ async fn main() {
             None,
         )
     } else {
-        let corpus = generate_corpus(parsed.profile, parsed.seed, parsed.count);
+        let corpus = generate_corpus(
+            parsed.profile,
+            parsed.seed,
+            parsed.count,
+            parsed.document_type.unwrap_or(DocumentType::TD3),
+        );
         let reports =
             run_provider_bench(pipeline.catalog(), &ocr, &corpus, parsed.measure_memory).await;
         (
@@ -594,6 +643,26 @@ async fn main() {
             r.speed.mean.as_millis(),
         );
 
+        // Per-format document counts — the M6 plan's "report the unparsed
+        // population separately; a specimen with no MRZ is not a
+        // TD-anything" applied to this harness: a distribution, not a
+        // hit-rate (this per-document loop has no `check_document`-style hit
+        // boolean to key one by — see `DocumentDetail::mrz_format`'s doc).
+        let mut by_format: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for d in &r.documents_detail {
+            *by_format
+                .entry(d.mrz_format.unwrap_or("unresolved"))
+                .or_default() += 1;
+        }
+        if !by_format.is_empty() {
+            let counts: Vec<String> = by_format
+                .iter()
+                .map(|(fmt, n)| format!("{fmt}={n}"))
+                .collect();
+            println!("    by format: {}", counts.join(", "));
+        }
+
         if parsed.verbose {
             // Worst first. An aggregate tells you a provider made 61
             // unsupported assertions; this tells you which documents produced
@@ -614,8 +683,9 @@ async fn main() {
             });
             for d in rows {
                 let anchor = if d.mrz_found { "mrz" } else { "no-mrz" };
+                let format = d.mrz_format.unwrap_or("?");
                 if !d.read_ok {
-                    println!("    {:<6}  {}  READ FAILED", anchor, d.name);
+                    println!("    {:<6}  {:<5}  {}  READ FAILED", anchor, format, d.name);
                     continue;
                 }
                 let fields = if d.unsupported_fields.is_empty() {
@@ -624,8 +694,8 @@ async fn main() {
                     format!("  [{}]", d.unsupported_fields.join(", "))
                 };
                 println!(
-                    "    {:<6}  {:<52}  {}/{} unsupported{}",
-                    anchor, d.name, d.assertions_unsupported, d.assertions_total, fields,
+                    "    {:<6}  {:<5}  {:<52}  {}/{} unsupported{}",
+                    anchor, format, d.name, d.assertions_unsupported, d.assertions_total, fields,
                 );
             }
         }
@@ -728,6 +798,38 @@ mod tests {
     #[test]
     fn format_rejects_an_unknown_class() {
         let args: Vec<String> = ["--real-specimens", "--format", "visa"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&args).is_err());
+    }
+
+    #[test]
+    fn document_type_parses_for_the_synthetic_corpus() {
+        let args: Vec<String> = ["--document-type", "td1"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&args).expect("valid on its own");
+        assert_eq!(parsed.document_type, Some(DocumentType::TD1));
+        assert!(!parsed.real_specimens);
+    }
+
+    #[test]
+    fn document_type_with_real_specimens_is_rejected() {
+        // `--document-type` generates the synthetic corpus; `--real-specimens`
+        // reads samples/ instead. Combining them is the same category error
+        // `--format` without `--real-specimens` already rejects, mirrored.
+        let args: Vec<String> = ["--real-specimens", "--document-type", "td2"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&args).is_err());
+    }
+
+    #[test]
+    fn document_type_rejects_an_unknown_value() {
+        let args: Vec<String> = ["--document-type", "td4"]
             .iter()
             .map(|s| s.to_string())
             .collect();

@@ -1,6 +1,6 @@
 # SynthPass v2.0 Roadmap (M3 → M5)
 
-> **Superseded (2026-08-02).** Retained as a design record only. [`ROADMAP.md`](ROADMAP.md) is
+> **Superseded (2026-08-02).** Retained as a design record only. [`ROADMAP.md`](../ROADMAP.md) is
 > the current, linear M1–M7 plan and wins wherever the two disagree — see its intro for the
 > reconciliation note.
 

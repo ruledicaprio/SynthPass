@@ -13,7 +13,7 @@ use image::DynamicImage;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use synthpass_gen::degrade::{apply_profile, CaptureProfile};
-use synthpass_gen::{generate_from_seed, GeneratorConfig, Labels};
+use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
 pub mod provider_bench;
@@ -109,14 +109,20 @@ pub struct CorpusDoc {
 
 /// Generates `count` documents deterministically from seeds
 /// `seed_start..seed_start + count`, applying `profile`'s degradation
-/// (round-robining the five real profiles when `profile` is `All`). The
-/// single corpus-generation path shared by every bench binary in this crate.
-pub fn generate_corpus(profile: ProfileChoice, seed_start: u64, count: u64) -> Vec<CorpusDoc> {
+/// (round-robining the five real profiles when `profile` is `All`), all
+/// rendered as `document_type`'s ICAO 9303 MRZ format. The single
+/// corpus-generation path shared by every bench binary in this crate.
+pub fn generate_corpus(
+    profile: ProfileChoice,
+    seed_start: u64,
+    count: u64,
+    document_type: DocumentType,
+) -> Vec<CorpusDoc> {
     (0..count)
         .map(|i| {
             let seed = seed_start + i;
             let resolved = profile.resolve(i);
-            let config = GeneratorConfig::new(seed);
+            let config = GeneratorConfig::with_document_type(seed, document_type);
             let (image, labels, _passport) = generate_from_seed(&config);
             let image = match resolved.capture_profile() {
                 Some(cp) => apply_profile(&image, cp, seed),
@@ -454,6 +460,15 @@ pub struct HitResult {
     /// here, since the checksum never covered `document_type`,
     /// `issuing_country`, `surname`, or `given_names` in the first place.
     pub line1_integrity: Option<synthpass_core::fusion::Verdict>,
+    /// The raw OCR text `mrz::find_and_parse` was handed, whenever OCR
+    /// itself succeeded (`None` only on `MissReason::OcrError`, where there
+    /// is no text to show). Threaded through unconditionally rather than
+    /// gated behind a flag: it costs nothing extra (the OCR pass already ran
+    /// inside `check_document`), and `synthpass-bench --dump-ocr` is the
+    /// only consumer that prints it — see that flag's doc comment for why
+    /// this exists (the M6 TD1 root-cause diagnosis: nothing could show what
+    /// OCR actually returned before the MRZ scanner ate it).
+    pub raw_text: Option<String>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -470,7 +485,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         fastrand_seed()
     ));
     let write_result = image.save(&path);
-    let (reason, fields, line1_integrity) = run_check(&path, write_result, ocr, expected);
+    let (reason, fields, line1_integrity, raw_text) = run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -479,6 +494,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         elapsed: start.elapsed(),
         fields,
         line1_integrity,
+        raw_text,
     }
 }
 
@@ -492,7 +508,30 @@ type CheckOutcome = (
     Option<MissReason>,
     Vec<FieldOutcome>,
     Option<synthpass_core::fusion::Verdict>,
+    Option<String>,
 );
+
+/// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
+/// `expected.mrz_format` — [`mrz::parse_td1`]/[`mrz::parse_td2`]/
+/// [`mrz::parse_td3`], reused directly rather than re-derived from line count
+/// (the labels already carry the format Phase 1 added, so there is no need
+/// to guess it back from the lines themselves the way
+/// `MrzFormat::guess_from_lines` does for data that never recorded it).
+///
+/// `pub(crate)`: also used by [`provider_bench::prep_corpus`], which has the
+/// same "ground truth for the synthetic corpus" job for the M7 multi-provider
+/// harness — one parse-dispatch implementation, not two that could drift.
+pub(crate) fn parse_ground_truth_mrz(expected: &Labels) -> Result<mrz::MrzData, mrz::MrzError> {
+    match expected.mrz_format {
+        DocumentType::TD1 => mrz::parse_td1(
+            &expected.mrz_lines[0],
+            &expected.mrz_lines[1],
+            &expected.mrz_lines[2],
+        ),
+        DocumentType::TD2 => mrz::parse_td2(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+        DocumentType::TD3 => mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+    }
+}
 
 fn run_check(
     path: &std::path::Path,
@@ -507,22 +546,23 @@ fn run_check(
             ))),
             Vec::new(),
             None,
+            None,
         );
     }
 
     let text = match ocr.recognize(path) {
         Ok(text) => text,
-        Err(e) => return (Some(MissReason::OcrError(e)), Vec::new(), None),
+        Err(e) => return (Some(MissReason::OcrError(e)), Vec::new(), None, None),
     };
 
     // Ground truth is the generator's own MRZ lines parsed back through the
-    // same parser the read goes through. Comparing `MrzData` to `MrzData`
-    // keeps both sides in identical formats — dates already century-expanded
-    // to ISO, names already split — so the CER measures the *read*, not a
-    // formatting difference between the visual zone and the machine-readable
-    // one. The labels are correct by construction (M2's DoD), so this parse
-    // cannot legitimately fail.
-    let truth = match mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]) {
+    // matching per-format parser (see `parse_ground_truth_mrz`). Comparing
+    // `MrzData` to `MrzData` keeps both sides in identical formats — dates
+    // already century-expanded to ISO, names already split — so the CER
+    // measures the *read*, not a formatting difference between the visual
+    // zone and the machine-readable one. The labels are correct by
+    // construction (M2's DoD), so this parse cannot legitimately fail.
+    let truth = match parse_ground_truth_mrz(expected) {
         Ok(truth) => truth,
         Err(e) => {
             return (
@@ -532,6 +572,7 @@ fn run_check(
                 ))),
                 Vec::new(),
                 None,
+                Some(text),
             )
         }
     };
@@ -543,6 +584,7 @@ fn run_check(
                 Some(MissReason::NoMrzFound(format!("{e:?}"))),
                 total_loss(&truth),
                 None,
+                Some(text),
             )
         }
     };
@@ -551,7 +593,12 @@ fn run_check(
     let line1_integrity = Some(synthpass_core::fusion::check_line1_integrity(&decoded));
 
     if !decoded.valid() {
-        return (Some(MissReason::ChecksumFailed), fields, line1_integrity);
+        return (
+            Some(MissReason::ChecksumFailed),
+            fields,
+            line1_integrity,
+            Some(text),
+        );
     }
     if decoded.document_number != truth.document_number {
         return (
@@ -561,9 +608,10 @@ fn run_check(
             }),
             fields,
             line1_integrity,
+            Some(text),
         );
     }
-    (None, fields, line1_integrity)
+    (None, fields, line1_integrity, Some(text))
 }
 
 /// The fields compared per document, as `(name, accessor)` pairs. One list so
@@ -732,7 +780,8 @@ mod tests {
     fn a_checksum_invalid_read_still_reports_per_field_detail() {
         let config = GeneratorConfig::new(7);
         let (_image, labels, _passport) = generate_from_seed(&config);
-        let truth = mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
+        let truth =
+            mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
 
         let mut misread = truth.clone();
         misread.surname = format!("{}X", truth.surname);
@@ -758,7 +807,8 @@ mod tests {
     fn an_unparsed_document_is_a_total_loss_not_an_absence() {
         let config = GeneratorConfig::new(11);
         let (_image, labels, _passport) = generate_from_seed(&config);
-        let truth = mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
+        let truth =
+            mrz::parse_td3(&labels.mrz_lines[0], &labels.mrz_lines[1]).expect("labels parse");
 
         let fields = total_loss(&truth);
         assert_eq!(fields.len(), COMPARED_FIELDS.len() + 1);

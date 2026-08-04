@@ -10,14 +10,21 @@
 //! this binary, so it stays an honest reflection of the last real run.
 //!
 //! ```text
-//! synthpass-bench [--count N] [--seed N] [--profile NAME] [--out PATH] [--min-hit-rate F]
-//!   --count N          number of documents to check (default: 100)
-//!   --seed N           base seed; document i uses seed N+i (default: 0)
-//!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|all (default: clean)
-//!                      "all" round-robins the five profiles across the corpus
-//!   --out PATH         report JSON path (default: bench-report.json)
-//!   --min-hit-rate F   exit non-zero if the measured hit rate is below F
-//!                      (e.g. 0.35); unset means "measure and report only"
+//! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
+//!                 [--out PATH] [--min-hit-rate F] [--dump-ocr]
+//!   --count N            number of documents to check (default: 100)
+//!   --seed N             base seed; document i uses seed N+i (default: 0)
+//!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
+//!                        "all" round-robins the five profiles across the corpus
+//!   --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to *generate*
+//!                        (default: td3); a run is always a single format, so
+//!                        the per-format Tier-1 hit rate is one run per type
+//!   --out PATH           report JSON path (default: bench-report.json)
+//!   --min-hit-rate F     exit non-zero if the measured hit rate is below F
+//!                        (e.g. 0.35); unset means "measure and report only"
+//!   --dump-ocr           print every document's raw OCR text (one printed
+//!                        line per detected line) before the summary — a
+//!                        small-`--count` diagnostic, not for a full run
 //! ```
 
 use serde::Serialize;
@@ -25,6 +32,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::{check_document, generate_corpus, MissReason, ProfileChoice};
+use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 
 struct Args {
@@ -33,6 +41,24 @@ struct Args {
     profile: ProfileChoice,
     out: String,
     min_hit_rate: Option<f64>,
+    /// The ICAO 9303 MRZ format to generate — `--document-type`, never
+    /// `--format`: `provider-bench --format` already means `SpecimenClass`
+    /// (which `samples/` directory to read), a different axis entirely (see
+    /// `synthpass_bench::SpecimenClass`'s doc comment).
+    document_type: DocumentType,
+    /// Print the raw OCR text — one printed line per line `mrz::find_and_parse`
+    /// saw — for every document in the run, before the hit/miss summary.
+    ///
+    /// Added for the M6 TD1 root-cause diagnosis: TD1's hit rate was 26.7%
+    /// against TD2/TD3's 76-80%, and nothing in this binary's output showed
+    /// *what OCR actually returned* — only the parsed-or-not result. A wrong
+    /// MRZ-row assignment (the actual TD1 bug: the name line comes back as
+    /// the watermark or a duplicate of line 1) is invisible in a hit/miss
+    /// count and in per-field CER alike; it is only visible in the raw text.
+    /// Meant for a small `--count` (3-10) — this prints unconditionally for
+    /// every document, so it is a diagnostic run, not something to leave on
+    /// for a 100-document corpus.
+    dump_ocr: bool,
 }
 
 impl Default for Args {
@@ -43,19 +69,31 @@ impl Default for Args {
             profile: ProfileChoice::Clean,
             out: "bench-report.json".to_string(),
             min_hit_rate: None,
+            document_type: DocumentType::TD3,
+            dump_ocr: false,
         }
     }
 }
 
 fn usage() {
     eprintln!(
-        "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--out PATH] [--min-hit-rate F]"
+        "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
+         [--out PATH] [--min-hit-rate F] [--dump-ocr]"
     );
-    eprintln!("  --count N          number of documents to check (default: 100)");
-    eprintln!("  --seed N           base seed; document i uses seed N+i (default: 0)");
-    eprintln!("  --profile NAME     clean|mobile|scanner|worn|border-kiosk|all (default: clean)");
-    eprintln!("  --out PATH         report JSON path (default: bench-report.json)");
-    eprintln!("  --min-hit-rate F   exit non-zero if the measured hit rate is below F");
+    eprintln!("  --count N            number of documents to check (default: 100)");
+    eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
+    eprintln!("  --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)");
+    eprintln!(
+        "  --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to *generate* (default: \
+         td3). Not the same axis as provider-bench's --format, which scopes which real \
+         samples/ directory to read."
+    );
+    eprintln!("  --out PATH           report JSON path (default: bench-report.json)");
+    eprintln!("  --min-hit-rate F     exit non-zero if the measured hit rate is below F");
+    eprintln!(
+        "  --dump-ocr           print every document's raw OCR text (one printed line per \
+         detected line) before the summary — meant for a small --count diagnostic run"
+    );
 }
 
 /// Hand-rolled flag parser, consistent with `synthpass-cli`'s style (no
@@ -90,6 +128,13 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.profile = ProfileChoice::parse(v)?;
                 i += 2;
             }
+            "--document-type" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--document-type requires a value".to_string())?;
+                parsed.document_type = DocumentType::parse(v)?;
+                i += 2;
+            }
             "--out" => {
                 let v = args
                     .get(i + 1)
@@ -106,6 +151,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                         .map_err(|_| format!("--min-hit-rate: not a valid number: {v}"))?,
                 );
                 i += 2;
+            }
+            "--dump-ocr" => {
+                parsed.dump_ocr = true;
+                i += 1;
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -166,6 +215,11 @@ fn miss_kind(reason: &MissReason) -> &'static str {
 struct Report {
     timestamp_unix: u64,
     profile: &'static str,
+    /// The ICAO 9303 MRZ format every document in this run was generated as
+    /// (`--document-type`). A single run is always one format — `hit_rate`
+    /// is already that format's Tier-1 hit rate; run once per format to get
+    /// the per-format comparison (see `knowledge/benchmarks/README.md`).
+    document_type: &'static str,
     count: u64,
     seed_start: u64,
     hits: u64,
@@ -191,7 +245,12 @@ fn main() {
     )
     .expect("failed to load OCR models — run from the repo root");
 
-    let corpus = generate_corpus(parsed.profile, parsed.seed, parsed.count);
+    let corpus = generate_corpus(
+        parsed.profile,
+        parsed.seed,
+        parsed.count,
+        parsed.document_type,
+    );
 
     // Deliberately sequential: `NativeOcr::recognize` budgets its MRZ-retry
     // passes against wall-clock time (see synthpass-ocr's `max_duration`).
@@ -204,6 +263,18 @@ fn main() {
         .into_iter()
         .map(|doc| {
             let result = check_document(&ocr, &doc.image, &doc.labels);
+            if parsed.dump_ocr {
+                println!("--- seed {} raw OCR lines ---", doc.seed);
+                match &result.raw_text {
+                    Some(text) if !text.is_empty() => {
+                        for (i, line) in text.lines().enumerate() {
+                            println!("  [{i}] {line:?}");
+                        }
+                    }
+                    Some(_) => println!("  (OCR returned no text)"),
+                    None => println!("  (OCR failed: {:?})", result.reason),
+                }
+            }
             let line1_flagged = matches!(
                 result.line1_integrity,
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
@@ -250,10 +321,11 @@ fn main() {
         }
     }
     println!(
-        "\n{hits}/{} = {:.1}% (profile: {})",
+        "\n{hits}/{} = {:.1}% (profile: {}, document-type: {})",
         parsed.count,
         hit_rate * 100.0,
-        parsed.profile.as_str()
+        parsed.profile.as_str(),
+        parsed.document_type.as_str()
     );
 
     // Miss classes. A hit rate alone cannot distinguish "OCR found no MRZ"
@@ -311,6 +383,7 @@ fn main() {
             .map(|d| d.as_secs())
             .unwrap_or(0),
         profile: parsed.profile.as_str(),
+        document_type: parsed.document_type.as_str(),
         count: parsed.count,
         seed_start: parsed.seed,
         hits,

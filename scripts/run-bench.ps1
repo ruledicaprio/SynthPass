@@ -1,17 +1,50 @@
 <#
 .SYNOPSIS
-Runs provider-bench scoped to one named "track", appends the per-provider
-result to the bench-data branch's results/<track>/history.jsonl, commits,
-and pushes -- then regenerates that track's trend chart locally.
+Runs provider-bench (real-specimen tracks) or synthpass-bench (td1/td2/td3
+synthetic tracks) scoped to one named "track", appends a flattened result to
+the bench-data branch's results/<track>-bench/history.jsonl, commits, and
+pushes -- then regenerates that track's trend chart locally.
 
-Tracks map to provider-bench's real-specimen scoping:
+Real-specimen tracks map to provider-bench's `--format` scoping:
   passport          --format passport   (samples/passports/)
   id_card           --format id_card    (samples/id_cards/)
   driving_license   --format driving_license (samples/driving_licenses/)
   real-specimens    (no --format)       the whole samples/ real corpus
 
+**`passport` above is not the same thing as the synthetic `td3` track
+below, despite both meaning "passport-shaped MRZ" in casual speech.**
+`passport` scores real photographed specimens under `samples/passports/`
+through `provider-bench`; `td3` scores synthpass-gen's own *generated* TD3
+corpus through `synthpass-bench` -- same ICAO format, two entirely
+different corpora and binaries. This exact collision is what M6 spent its
+time untangling (`mrz::Format` vs. `DocumentType::document_code()`, see
+knowledge/ROADMAP.md's M6 execution note) -- do not conflate the two tracks
+here just because the acronym overlaps.
+
+Synthetic tracks map to synthpass-bench's `--document-type` (the M6 per-format
+Tier-1 hit-rate gate, not a real-specimen scope -- see the M6 plan's "Add
+td1-bench / td2-bench tracks" step):
+  td1               --document-type td1   (synthetic TD1 corpus)
+  td2               --document-type td2   (synthetic TD2 corpus)
+  td3               --document-type td3   (synthetic TD3 corpus)
+
+The three synthetic tracks use a different binary and a different report
+shape (synthpass-bench's `hit_rate`, not provider-bench's per-provider
+accuracy stats) -- flattened into the *same* history.jsonl row shape as the
+real-specimen tracks (`hit_rate` -> `read_ok_rate`, `provider_id` fixed at
+`"mrz"`, `field_match_rate`/`mean_cer`/`unsupported_assertion_rate` left
+`$null` since synthpass-bench doesn't measure them) so the one `bench-chart`
+binary still serves every track without new tooling.
+
+`td3` here is a *second*, independent way to measure the same TD3 format
+`.github/workflows/bench-data-collection.yml` already covers nightly into
+`dataset.jsonl` -- that workflow's corpus and this track's
+`results/td3-bench/history.jsonl` are different files serving different
+purposes (a large nightly Tier-1 dataset vs. a small `-Track td1/td2`-shaped
+trend point for the per-format comparison chart), not a duplicate schedule.
+
 This is the local, manual counterpart to .github/workflows/bench-data-
-collection.yml (which runs the *other* bench binary, synthpass-bench, on a
+collection.yml (which runs synthpass-bench against TD3 only, on a
 schedule). Run this by hand whenever you want a fresh data point for a
 track; nothing here is scheduled or automatic.
 
@@ -30,16 +63,29 @@ it. Review the regenerated SVG and commit it yourself on a normal branch/PR
 embedded).
 
 .PARAMETER Track
-Which benchmark track to run: passport, id_card, driving_license, or
-real-specimens.
+Which benchmark track to run: passport, id_card, driving_license,
+real-specimens, td1, td2, or td3. The last three are synthetic
+(synthpass-bench), everything else is a real-specimen provider-bench track
+-- see the module doc comment above for why `passport` and `td3` are not
+the same thing despite both being "passport-shaped MRZ".
 
 .PARAMETER Limit
 Cap on how many specimens to run (provider-bench --limit), applied after
-the track's scoping. Omit to run every specimen in the track.
+the track's scoping. Real-specimen tracks only; omit to run every specimen
+in the track.
+
+.PARAMETER Count
+Synthetic tracks only (td1/td2): how many documents to generate
+(synthpass-bench --count). Default 100, matching synthpass-bench's own
+default.
+
+.PARAMETER Seed
+Synthetic tracks only (td1/td2): base seed (synthpass-bench --seed).
+Default 0.
 
 .PARAMETER MeasureMemory
 Pass through provider-bench --measure-memory (requires building with
---features measure-memory).
+--features measure-memory). Real-specimen tracks only.
 
 .PARAMETER SkipChart
 Skip regenerating knowledge/img/<track>-bench-trend.svg after the push.
@@ -69,14 +115,19 @@ Override the row's recorded invocation string (only meaningful with
 ./scripts/run-bench.ps1 -Track real-specimens -Limit 50
 
 .EXAMPLE
+./scripts/run-bench.ps1 -Track td1 -Count 30 -Seed 42
+
+.EXAMPLE
 ./scripts/run-bench.ps1 -Track real-specimens -FromReport knowledge/benchmarks/qwen-real-50.json -InvocationNote "backfilled from knowledge/benchmarks/qwen-real-50.json"
 #>
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("passport", "id_card", "driving_license", "real-specimens")]
+    [ValidateSet("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3")]
     [string]$Track,
     [int]$Limit = 0,
+    [int]$Count = 100,
+    [int]$Seed = 0,
     [switch]$MeasureMemory,
     [switch]$SkipChart,
     [string]$FromReport,
@@ -84,19 +135,35 @@ param(
     [string]$InvocationNote
 )
 
+# Synthetic (synthpass-bench, per-format Tier-1 hit rate) vs real-specimen
+# (provider-bench, --format-scoped samples/) track -- decides which binary
+# step 1 runs and which report shape step 1.5 flattens.
+$isSyntheticTrack = $Track -in @("td1", "td2", "td3")
+
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $repoRoot
 
-# --- 1. Run provider-bench, scoped to this track -- or reuse an existing ---
-# ---    report via -FromReport.                                        -----
+# --- 1. Run provider-bench (real-specimen tracks) or synthpass-bench -------
+# ---    (td1/td2 synthetic tracks), scoped to this track -- or reuse an ----
+# ---    existing report via -FromReport.                               -----
 
 if ($FromReport) {
     if (-not (Test-Path $FromReport)) {
         throw "-FromReport path not found: $FromReport"
     }
     $reportPath = (Resolve-Path $FromReport).Path
-    Write-Host "Using existing report: $reportPath (skipping provider-bench run)"
+    Write-Host "Using existing report: $reportPath (skipping the bench run)"
+} elseif ($isSyntheticTrack) {
+    $reportPath = Join-Path $repoRoot "synthpass-bench-report.json"  # gitignored
+
+    $benchArgs = @("--document-type", $Track, "--profile", "clean", "--count", "$Count", "--seed", "$Seed", "--out", $reportPath)
+
+    Write-Host "Running: cargo run -p synthpass-bench --release --bin synthpass-bench -- $($benchArgs -join ' ')"
+    & cargo run -p synthpass-bench --release --bin synthpass-bench -- @benchArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "synthpass-bench failed (exit $LASTEXITCODE)"
+    }
 } else {
     $reportPath = Join-Path $repoRoot "provider-bench-report.json"  # gitignored
 
@@ -125,29 +192,59 @@ $invocation = if ($InvocationNote) {
     $InvocationNote
 } elseif ($FromReport) {
     "backfilled from $FromReport"
+} elseif ($isSyntheticTrack) {
+    "synthpass-bench " + ($benchArgs -join " ")
 } else {
     "provider-bench " + ($benchArgs -join " ")
 }
 $runTimestamp = $report.timestamp_unix
 
-# One flattened row per provider -- an aggregate per (run, provider), not a
-# per-document row. Matches results/<track>/history.jsonl's schema
-# documented in knowledge/benchmarks/README.md.
-$rows = foreach ($p in $report.providers) {
-    $readOkCount = ($p.documents_detail | Where-Object { $_.read_ok }).Count
-    $readOkRate = if ($p.documents_detail.Count -gt 0) { $readOkCount / $p.documents_detail.Count } else { $null }
-    [ordered]@{
+if ($isSyntheticTrack) {
+    # synthpass-bench has no per-provider breakdown -- it measures exactly
+    # one thing, the deterministic Tier-1 (OCR + ICAO 9303 checksum) gate --
+    # so this is always a single row, `provider_id` fixed at "mrz" for
+    # consistency with the real-specimen tracks' `provider_id` values.
+    # `hit_rate` -> `read_ok_rate`: both mean "fraction of documents that
+    # produced a usable result," which is what lets `bench-chart` plot every
+    # track's `read_ok_rate` on the same trend axis without new tooling.
+    # `field_match_rate`/`mean_cer`/`unsupported_assertion_rate` are `$null`
+    # (see the module doc comment) rather than fabricated -- synthpass-bench
+    # doesn't measure them, and `HistoryRow`'s fields are `#[serde(default)]`
+    # precisely so an absent metric stays absent, not a false zero.
+    $meanMs = if ($report.results.Count -gt 0) { ($report.results | Measure-Object -Property elapsed_ms -Average).Average } else { $null }
+    $rows = @([ordered]@{
         run_timestamp_unix         = $runTimestamp
         git_sha                    = $sha
         invocation                 = $invocation
-        documents                  = $p.documents
-        provider_id                = $p.provider_id
-        read_ok_rate               = $readOkRate
-        labelled_documents         = $p.accuracy.labelled_documents
-        field_match_rate           = $p.accuracy.field_match_rate
-        mean_cer                   = $p.accuracy.mean_cer
-        unsupported_assertion_rate = $p.unsupported_assertion.overall.rate
-        mean_ms                    = $p.speed.mean_ms
+        documents                  = $report.count
+        provider_id                = "mrz"
+        read_ok_rate               = $report.hit_rate
+        labelled_documents         = $report.count
+        field_match_rate           = $null
+        mean_cer                   = $null
+        unsupported_assertion_rate = $null
+        mean_ms                    = $meanMs
+    })
+} else {
+    # One flattened row per provider -- an aggregate per (run, provider), not
+    # a per-document row. Matches results/<track>-bench/history.jsonl's
+    # schema documented in knowledge/benchmarks/README.md.
+    $rows = foreach ($p in $report.providers) {
+        $readOkCount = ($p.documents_detail | Where-Object { $_.read_ok }).Count
+        $readOkRate = if ($p.documents_detail.Count -gt 0) { $readOkCount / $p.documents_detail.Count } else { $null }
+        [ordered]@{
+            run_timestamp_unix         = $runTimestamp
+            git_sha                    = $sha
+            invocation                 = $invocation
+            documents                  = $p.documents
+            provider_id                = $p.provider_id
+            read_ok_rate               = $readOkRate
+            labelled_documents         = $p.accuracy.labelled_documents
+            field_match_rate           = $p.accuracy.field_match_rate
+            mean_cer                   = $p.accuracy.mean_cer
+            unsupported_assertion_rate = $p.unsupported_assertion.overall.rate
+            mean_ms                    = $p.speed.mean_ms
+        }
     }
 }
 

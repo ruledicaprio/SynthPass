@@ -28,9 +28,23 @@ use crate::{CorpusDoc, RealSpecimenDoc};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use synthpass_core::v2::CoreField;
-use synthpass_die::{Capability, CostClass, DocumentContext, ProviderCatalog};
+use synthpass_core::v2::{CoreField, MrzFormat};
+use synthpass_die::{Capability, CostClass, DocumentContext, Evidence, ProviderCatalog};
 use synthpass_ocr::{NativeOcr, OcrPage};
+
+/// Stable label for a resolved ICAO 9303 MRZ format in a report — mirrors
+/// `synthpass_gen::DocumentType::as_str`'s `"TD1"`/`"TD2"`/`"TD3"` naming for
+/// the three the generator can produce, plus the two real-specimen-only
+/// outcomes (`synthpass-gen` never emits an MRV-A/MRV-B).
+fn mrz_format_str(format: MrzFormat) -> &'static str {
+    match format {
+        MrzFormat::Td1 => "TD1",
+        MrzFormat::Td2 => "TD2",
+        MrzFormat::Td3 => "TD3",
+        MrzFormat::MrvA => "MRVA",
+        MrzFormat::MrvB => "MRVB",
+    }
+}
 
 /// Everything measured for one provider over one corpus run.
 pub struct ProviderReport {
@@ -86,6 +100,22 @@ pub struct DocumentDetail {
     /// Whether `mrz::find_and_parse` recovered an MRZ from this document's
     /// OCR text — which bucket this document counted toward.
     pub mrz_found: bool,
+    /// The document's ICAO 9303 MRZ format, resolved per corpus source —
+    /// the M6 plan's "report Tier-1 hit rate keyed by mrz::Format" applied to
+    /// this harness's own metrics (`read_ok`/`assertions_*` above, not a
+    /// `check_document`-style hit boolean, which this harness's per-document
+    /// loop has no equivalent of):
+    ///
+    /// - Synthetic corpus: always `Some`, the exact format
+    ///   `synthpass_gen::Labels::mrz_format` recorded (Phase 1) — never
+    ///   re-derived from the read.
+    /// - Real specimens: this provider's own Tier-1 read, via
+    ///   `Evidence::mrz_format` (populated only by the deterministic MRZ
+    ///   provider's `mrz_format_of`) when it parsed anything at all; else a
+    ///   best-effort guess from the ground-truth `mrz_line` via
+    ///   `MrzFormat::guess_from_lines`. `None` when neither resolved a
+    ///   format — a specimen with no MRZ is not a TD-anything.
+    pub mrz_format: Option<&'static str>,
     /// Whether the provider returned a reading at all. `false` means it
     /// errored and contributed nothing to any aggregate.
     pub read_ok: bool,
@@ -340,6 +370,17 @@ struct BenchPage {
     /// nothing to be right about — which is what
     /// [`UnsupportedAssertion`]'s split exists to measure separately.
     mrz_found: bool,
+    /// `true` for a synthetic-corpus document (from [`prep_corpus`]), `false`
+    /// for a real specimen (from [`prep_specimens`]) — which of
+    /// [`DocumentDetail::mrz_format`]'s two resolution rules applies.
+    synthetic: bool,
+    /// Precomputed format info [`run_prepped`] resolves into
+    /// [`DocumentDetail::mrz_format`]:
+    /// - synthetic: always `Some`, the exact `Labels::mrz_format`.
+    /// - real specimens: a best-effort guess from the ground-truth
+    ///   `mrz_line` (`MrzFormat::guess_from_lines`), used only when no
+    ///   provider's own Tier-1 read resolves a format for this document.
+    known_or_guessed_format: Option<&'static str>,
 }
 
 /// Writes `image` to a uniquely-named temp file and OCRs it via
@@ -370,9 +411,10 @@ fn ocr_and_keep_path(
 }
 
 /// OCRs every document in the synthetic `corpus`, pairing each with its
-/// always-present ground truth (derived from `Labels`' MRZ lines, parsed
-/// back through `mrz::parse_td3` the same way [`crate::check_document`]
-/// does). `None` at an index means that document's OCR or ground-truth parse
+/// always-present ground truth (derived from `Labels`' MRZ lines, parsed back
+/// through the per-format dispatcher [`crate::parse_ground_truth_mrz`] the
+/// same way [`crate::check_document`] does — TD1/TD2/TD3 alike, not TD3
+/// only). `None` at an index means that document's OCR or ground-truth parse
 /// failed — carried as a hole rather than shrinking the `Vec`, so the
 /// original document count is still recoverable if a caller wants it.
 fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> {
@@ -381,7 +423,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
         .map(|doc| {
             let (page, image_path) =
                 ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
-            let truth = mrz::parse_td3(&doc.labels.mrz_lines[0], &doc.labels.mrz_lines[1]).ok()?;
+            let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
             // Read from the OCR text, never from `labels`: the question is
             // what this run's OCR pass actually recovered, which is what a
             // provider had to work with. A generated document always *has*
@@ -393,6 +435,8 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
                 ground_truth: Some(mrz_ground_truth(&truth)),
                 image_path,
                 mrz_found,
+                synthetic: true,
+                known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
             })
         })
         .collect()
@@ -409,12 +453,25 @@ fn prep_specimens(ocr: &NativeOcr, specimens: &[RealSpecimenDoc]) -> Vec<Option<
             let (page, image_path) = ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
+            // Best-effort fallback only — used in `run_prepped` when no
+            // provider's own Tier-1 read resolves a format for this
+            // document. Reuses `MrzFormat::guess_from_lines` rather than a
+            // new heuristic; `None` when there is no ground-truth `mrz_line`
+            // to guess from at all (most of `samples/`, by construction).
+            let known_or_guessed_format = doc
+                .labels
+                .as_ref()
+                .and_then(|l| l.mrz_line.as_deref())
+                .and_then(MrzFormat::guess_from_lines)
+                .map(mrz_format_str);
             Some(BenchPage {
                 name: doc.name.clone(),
                 page,
                 ground_truth,
                 image_path,
                 mrz_found,
+                synthetic: false,
+                known_or_guessed_format,
             })
         })
         .collect()
@@ -571,6 +628,23 @@ async fn run_prepped(
             let reading = reader.read(&ctx).await;
             elapsed_per_doc.push(started.elapsed());
 
+            // See `DocumentDetail::mrz_format`'s doc: synthetic documents
+            // always resolve to the label's exact format, independent of
+            // whether this read even succeeded; real specimens prefer this
+            // provider's own Tier-1 read (`Evidence::mrz_format`, populated
+            // only by the deterministic MRZ provider) and fall back to the
+            // ground-truth guess computed once in `prep_specimens`.
+            let resolve_format = |evidence: Option<&Evidence>| -> Option<&'static str> {
+                if bench_page.synthetic {
+                    bench_page.known_or_guessed_format
+                } else {
+                    evidence
+                        .and_then(|e| e.mrz_format)
+                        .map(mrz_format_str)
+                        .or(bench_page.known_or_guessed_format)
+                }
+            };
+
             let Ok(reading) = reading else {
                 // Recorded rather than skipped silently: a provider that
                 // errored on a document contributed nothing to any aggregate,
@@ -580,6 +654,7 @@ async fn run_prepped(
                 documents_detail.push(DocumentDetail {
                     name: bench_page.name.clone(),
                     mrz_found: bench_page.mrz_found,
+                    mrz_format: resolve_format(None),
                     read_ok: false,
                     assertions_total: 0,
                     assertions_unsupported: 0,
@@ -587,6 +662,7 @@ async fn run_prepped(
                 });
                 continue;
             };
+            let mrz_format = resolve_format(Some(&reading.evidence));
 
             let mut doc_assertions = 0usize;
             let mut doc_unsupported_fields: Vec<&'static str> = Vec::new();
@@ -654,6 +730,7 @@ async fn run_prepped(
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
                 mrz_found: bench_page.mrz_found,
+                mrz_format,
                 read_ok: true,
                 assertions_total: doc_assertions,
                 assertions_unsupported: doc_unsupported_fields.len(),
@@ -778,9 +855,7 @@ fn sample_rss() -> Option<u64> {
 mod tests {
     use super::*;
     use synthpass_core::v2::ExtractionV2;
-    use synthpass_die::{
-        Evidence, FieldReader, IntelligenceProvider, ProviderError, ProviderId, Reading,
-    };
+    use synthpass_die::{FieldReader, IntelligenceProvider, ProviderError, ProviderId, Reading};
 
     /// A fixed-answer provider for testing the harness's own comparison
     /// logic without needing a real MRZ reader or the GGUF model.
@@ -951,6 +1026,8 @@ mod tests {
                 ground_truth: Some(labelled_truth),
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
                 mrz_found: false,
+                synthetic: false,
+                known_or_guessed_format: None,
             }),
             Some(BenchPage {
                 name: "fixture".to_string(),
@@ -961,6 +1038,8 @@ mod tests {
                 ground_truth: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: false,
+                synthetic: false,
+                known_or_guessed_format: None,
             }),
         ];
 
@@ -992,6 +1071,8 @@ mod tests {
             ground_truth: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            synthetic: false,
+            known_or_guessed_format: None,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;
@@ -1025,6 +1106,8 @@ mod tests {
             ground_truth: None, // deliberately unlabelled — must not block this metric
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            synthetic: false,
+            known_or_guessed_format: None,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;
@@ -1083,6 +1166,8 @@ mod tests {
             ground_truth: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            synthetic: false,
+            known_or_guessed_format: None,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false).await;

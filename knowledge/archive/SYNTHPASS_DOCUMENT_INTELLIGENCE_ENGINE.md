@@ -1,3 +1,8 @@
+> **Archived (M6).** Duplicate of the argument in
+> [`../DOCUMENT_INTELLIGENCE_ENGINE.md`](../DOCUMENT_INTELLIGENCE_ENGINE.md) (a provider
+> interface, not a single VLM) — kept here for provenance, not as a living doc.
+> `../ROADMAP.md`'s M7 section is the shipped, authoritative account.
+
 # Creators remarks
 
 I actually think this is a really good point in the project

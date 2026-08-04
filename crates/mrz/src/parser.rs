@@ -561,6 +561,41 @@ fn repair_td1_line1(l: &str) -> String {
     format!("{}{}", &l[0..15], aggressive_defiller(&defiller(&l[15..])))
 }
 
+/// A second candidate for TD1 line 1, alongside [`repair_td1_line1`]: undoes
+/// a **dropped** (not merely misread) filler at position 1.
+///
+/// Measured via `synthpass-bench --dump-ocr` against the M6 TD1 corpus
+/// (`knowledge/ROADMAP.md`'s M6 execution note): OCR does not misread the
+/// position-1 filler as some lookalike character (that case is
+/// [`fix_doc_code`]'s `K`↔`<` blind spot) — it drops the glyph outright,
+/// which shifts every field from `issuing_country` onward one position left
+/// and reads as e.g. `IBRAFLLF2W1316...` where the truth is `I<BRAFLLF2W1316...`.
+/// `variants`'s own length-fitting (`fit_length`) cannot undo this: a line
+/// that arrives one character short gets padded by *extending its longest
+/// filler run*, which is the trailing run, not by inserting a filler back
+/// at position 1 — so the shift survives unrepaired through the ordinary
+/// pipeline, and TD1 is the one format where that matters: unlike TD3 (whose
+/// only check digits live on line 2), TD1's document-number check digit is
+/// on line 1 itself, so this single dropped character was breaking the
+/// checksum outright, not just cosmetically corrupting `issuing_country`.
+///
+/// Reinserting `<` at position 1 and dropping the now-redundant final
+/// character (the one `fit_length` added to compensate the length deficit)
+/// undoes both steps in one move. Applied *after* [`repair_td1_line1`]'s
+/// ordinary pipeline, so `fix_doc_code`/letterize/digitize/defiller already
+/// ran; a no-op when position 1 already reads `<` (nothing to unshift, and
+/// unshifting an already-correct line would wrongly discard a real
+/// character). Like every repair candidate in this module, this is not an
+/// assumption — `variants` tries it *alongside* the unshifted reading, and
+/// the printed check digits are what decide which one, if either, is real.
+fn repair_td1_line1_unshifted(l: &str) -> String {
+    let repaired = repair_td1_line1(l);
+    if repaired.len() != 30 || repaired.as_bytes().get(1) == Some(&b'<') {
+        return repaired;
+    }
+    format!("{}<{}", &repaired[0..1], &repaired[1..29])
+}
+
 fn repair_td1_line2(l: &str) -> String {
     let l = repair_positions(
         l,
@@ -793,17 +828,69 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
-    // TD1: three consecutive candidate lines, first starting with I/A/C.
-    for i in 0..lines.len().saturating_sub(2) {
-        for l1 in variants(lines[i], 30, repair_td1_line1) {
+    // TD1: three candidate lines starting with I/A/C — tolerating a gap
+    // between them (line 2 within the next 3 detected lines after line 1,
+    // line 3 within the next 3 after line 2), or all three merged into one
+    // ~90-char physical line. Runs before TD2 below deliberately: a genuine
+    // TD1 line 1 starts with 'I' too, and `variants`'s padding tolerance
+    // (+14) is generous enough that a 30-char TD1 line is a valid-shaped TD2
+    // line-1 candidate once padded — see the MRV-B-before-MRV-A comment
+    // above for the same cannibalization hazard, guarded here by running
+    // first rather than by any length check
+    // (`a_genuine_td1_never_parses_as_td2` pins this).
+    //
+    // The gap tolerance exists because this crate's own OCR probe
+    // (`synthpass-bench --dump-ocr`, see knowledge/ROADMAP.md's M6 note)
+    // found TD1's three MRZ rows are not always the *next* three detected
+    // lines: the OCR engine's internal multi-pass retry loop concatenates
+    // several attempts into one text blob, and a pass that fails to detect
+    // line 3 as its own region leaves the watermark or a stray repeated
+    // line sitting where line 3 "should" be, adjacent to a line 1/line 2
+    // pair from a *different* pass. `take(3)`, not an unbounded scan, keeps
+    // this from turning into a scan of the whole page — same bound the
+    // two-line formats below already use for their own gap tolerance.
+    for i in 0..lines.len() {
+        let merged = normalize_line(lines[i]);
+        if matches!(merged.as_bytes().first(), Some(b'I' | b'A' | b'C'))
+            && (86..=94).contains(&merged.len())
+            && is_mrz_charset(&merged)
+        {
+            let head = &merged[0..30];
+            let mid = &merged[30..60];
+            let tail = &merged[60..];
+            for l1 in [
+                repair_td1_line1(head),
+                repair_td1_line1_unshifted(head),
+                head.to_string(),
+            ] {
+                for l2 in [repair_td1_line2(mid), mid.to_string()] {
+                    for l3 in variants(tail, 30, repair_td1_line3) {
+                        if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
+                            if let Some(valid) = consider(data) {
+                                return Ok(valid);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let l1_candidates = variants(lines[i], 30, repair_td1_line1)
+            .into_iter()
+            .chain(variants(lines[i], 30, repair_td1_line1_unshifted));
+        for l1 in l1_candidates {
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
             }
-            for l2 in variants(lines[i + 1], 30, repair_td1_line2) {
-                for l3 in variants(lines[i + 2], 30, repair_td1_line3) {
-                    if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
-                        if let Some(valid) = consider(data) {
-                            return Ok(valid);
+            for (j, l2_raw) in lines.iter().enumerate().skip(i + 1).take(3) {
+                for l2 in variants(l2_raw, 30, repair_td1_line2) {
+                    for l3_raw in lines.iter().skip(j + 1).take(3) {
+                        for l3 in variants(l3_raw, 30, repair_td1_line3) {
+                            if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
+                                if let Some(valid) = consider(data) {
+                                    return Ok(valid);
+                                }
+                            }
                         }
                     }
                 }

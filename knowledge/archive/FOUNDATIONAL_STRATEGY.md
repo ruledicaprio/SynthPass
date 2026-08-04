@@ -2,7 +2,7 @@
 
 > **Superseded (2026-08-02).** This is a generic strategic-advisory draft — its referenced
 > "M1–M6" milestones (Storage & Format Support, Plugin Architecture) do not match this repo's
-> actual M1–M7 roadmap. See [`ROADMAP.md`](ROADMAP.md) for the current, committed milestones.
+> actual M1–M7 roadmap. See [`ROADMAP.md`](../ROADMAP.md) for the current, committed milestones.
 
 ## VISION.md, ROADMAP.md and BRANDING.md core context
 

@@ -1,12 +1,15 @@
 name: Bench charts
 
-# Regenerates the provider-bench trend charts (knowledge/img/*-bench-trend.svg)
-# on a schedule and opens a PR with whatever changed. This is the CI
-# counterpart to a developer running `scripts/run-bench.ps1 -Track <name>` by
-# hand -- same script, same isolated-`git worktree` push to `bench-data`/
-# `samples-data`, same "never touch main directly" rule (main is branch-
-# protected by design, see CONTRIBUTING.md): this workflow only ever opens a
-# PR, exactly like a human would, never pushes to main itself.
+# Regenerates the per-track trend charts (knowledge/img/*-bench-trend.svg,
+# real-specimen provider-bench tracks and the M6 synthetic td1/td2/td3
+# tracks alike) plus the td1/td2/td3 comparison bar chart
+# (knowledge/img/format-comparison.svg), on a schedule, and opens a PR with
+# whatever changed. This is the CI counterpart to a developer running
+# `scripts/run-bench.ps1 -Track <name>` by hand -- same script, same
+# isolated-`git worktree` push to `bench-data`/`samples-data`, same "never
+# touch main directly" rule (main is branch-protected by design, see
+# CONTRIBUTING.md): this workflow only ever opens a PR, exactly like a human
+# would, never pushes to main itself.
 
 on:
   schedule:
@@ -16,7 +19,7 @@ on:
       track:
         description: "Track to run (or 'all')"
         type: choice
-        options: [all, passport, id_card, driving_license, real-specimens]
+        options: [all, passport, id_card, driving_license, real-specimens, td1, td2, td3]
         default: all
       limit:
         description: "Cap on specimens per track (blank = every specimen)"
@@ -92,8 +95,13 @@ jobs:
           TRACK_INPUT: ${{ github.event.inputs.track || 'all' }}
           LIMIT_INPUT: ${{ github.event.inputs.limit }}
         run: |
+          # "all" runs every track: the four real-specimen (provider-bench)
+          # tracks plus the three synthetic (synthpass-bench) M6 tracks.
+          # td1/td2/td3 are a different axis from `passport` -- see
+          # scripts/run-bench.ps1's module doc comment on why the two are
+          # not the same thing despite the acronym overlap.
           $tracks = if ($env:TRACK_INPUT -eq 'all' -or [string]::IsNullOrEmpty($env:TRACK_INPUT)) {
-            @("passport", "id_card", "driving_license", "real-specimens")
+            @("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3")
           } else {
             @($env:TRACK_INPUT)
           }
@@ -107,6 +115,35 @@ jobs:
             ./scripts/run-bench.ps1 @benchArgs
             if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) {
               throw "run-bench.ps1 -Track $track failed (exit $LASTEXITCODE)"
+            }
+          }
+
+          # Regenerate the td1/td2/td3 comparison chart in the same step the
+          # per-track trend charts above were regenerated, so it never goes
+          # stale relative to them -- only when at least one synthetic track
+          # actually ran this time (a passport-only dispatch has no reason to
+          # touch it).
+          $syntheticTracksRun = $tracks | Where-Object { $_ -in @("td1", "td2", "td3") }
+          if ($syntheticTracksRun.Count -gt 0) {
+            Write-Host "=== Regenerating knowledge/img/format-comparison.svg ===" -ForegroundColor Cyan
+            git fetch origin bench-data
+            $histDir = Join-Path $env:RUNNER_TEMP "bench-histories"
+            New-Item -ItemType Directory -Force -Path $histDir | Out-Null
+            $seriesArgs = @()
+            foreach ($fmt in @("td1", "td2", "td3")) {
+              $histFile = Join-Path $histDir "$fmt-history.jsonl"
+              git show "origin/bench-data:results/$fmt-bench/history.jsonl" > $histFile 2>$null
+              if ((Test-Path $histFile) -and (Get-Item $histFile).Length -gt 0) {
+                $seriesArgs += @("--series", "$($fmt.ToUpper())=$histFile")
+              } else {
+                Write-Host "  (no results/$fmt-bench/history.jsonl on bench-data yet -- skipping that bar)"
+              }
+            }
+            if ($seriesArgs.Count -gt 0) {
+              cargo run -p synthpass-bench --release --bin bench-chart -- --bars @seriesArgs --out knowledge/img/format-comparison.svg
+              if ($LASTEXITCODE -ne 0) {
+                throw "bench-chart --bars failed (exit $LASTEXITCODE)"
+              }
             }
           }
 

@@ -9,7 +9,7 @@ use mrz::Date;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::model::{DocumentType, GeneratorConfig, Passport, Sex};
+use crate::model::{GeneratorConfig, Passport, Sex};
 
 /// Fictional given names, split by sex so [`Sex`] and name agree.
 const GIVEN_NAMES_M: &[&str] = &[
@@ -67,15 +67,14 @@ fn pick<'a, T>(rng: &mut ChaCha8Rng, pool: &'a [T]) -> &'a T {
     &pool[rng.random_range(0..pool.len())]
 }
 
-fn random_document_number(rng: &mut ChaCha8Rng, doc_type: DocumentType) -> String {
-    // Document number lengths by type:
-    // - TD1: up to 9 characters
-    // - TD2: up to 9 characters  
-    // - TD3: up to 9 characters
-    let length = match doc_type {
-        DocumentType::TD1 | DocumentType::TD2 | DocumentType::TD3 => 9,
-    };
-    (0..length)
+/// The MRZ document-number field is 9 characters wide in TD1, TD2, and TD3
+/// alike (ICAO 9303 parts 4, 5, 6) — there is no per-format variation to
+/// branch on. A document number that would overflow 9 characters has a
+/// TD1-only escape hatch (the field continues into `optional_data_1`), which
+/// this generator does not use: [`Passport::document_number`] is always
+/// exactly 9 characters, for every [`crate::model::DocumentType`].
+fn random_document_number(rng: &mut ChaCha8Rng) -> String {
+    (0..9)
         .map(|_| ALNUM[rng.random_range(0..ALNUM.len())] as char)
         .collect()
 }
@@ -130,7 +129,7 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
     let date_of_expiry = random_date(&mut rng, 2027, 2036);
     debug_assert!(date_of_birth.to_epoch_days() < date_of_expiry.to_epoch_days());
 
-    let document_number = random_document_number(&mut rng, config.document_type);
+    let document_number = random_document_number(&mut rng);
     let personal_number = if config.include_personal_number {
         Some(random_personal_number(&mut rng))
     } else {
