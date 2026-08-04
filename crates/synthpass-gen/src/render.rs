@@ -19,7 +19,7 @@ use image::{DynamicImage, Rgb, RgbImage};
 
 use crate::fonts::{load_fonts, Fonts};
 use crate::labels::Labels;
-use crate::layout::{self, Rect};
+use crate::layout::{self, PageLayout, Rect};
 use crate::model::{DocumentType, Passport};
 
 const BACKGROUND: Rgb<u8> = Rgb([244, 243, 236]);
@@ -352,13 +352,16 @@ fn draw_bitmap_char(img: &mut RgbImage, c: char, x: u32, y: u32, scale: u32, col
     }
 }
 
-/// Draw "SYNTHETIC / SPECIMEN" from the hand-authored bitmap font in
-/// [`layout::WATERMARK`], tiled to fill the band. This is one of the two
-/// mandatory ethics guardrails: it renders unconditionally, independent of
-/// the `embedded-fonts` feature and not configurable via [`crate::GeneratorConfig`].
-fn draw_watermark(img: &mut RgbImage) {
+/// Draw "SYNTHETIC / SPECIMEN" from the hand-authored bitmap font in `rect`
+/// (that format's [`PageLayout::watermark`]), tiled to fill the band. This is
+/// one of the two mandatory ethics guardrails: it renders unconditionally,
+/// independent of the `embedded-fonts` feature, not configurable via
+/// [`crate::GeneratorConfig`], and — per this function's signature taking
+/// `rect` rather than a hardcoded constant — independent of document format
+/// too: every [`PageLayout`] carries its own watermark band, and `render`
+/// calls this for TD1/TD2/TD3 alike.
+fn draw_watermark(img: &mut RgbImage, rect: Rect) {
     const TEXT: &str = "SYNTHETIC / SPECIMEN ";
-    let rect = layout::WATERMARK;
     let scale = 4u32;
     let glyph_w = 5 * scale;
     let advance = glyph_w + scale;
@@ -378,92 +381,94 @@ fn draw_watermark(img: &mut RgbImage) {
 }
 
 /// Compose the full data-page image for `passport`, using `labels` as the
-/// single source of truth for text content and placement.
+/// single source of truth for text content and placement, on `doc_type`'s
+/// own card canvas ([`layout::for_format`]) — TD1/TD2/TD3 each get their own
+/// `PageLayout` rather than sharing TD3's fixed 1200x840 canvas.
 pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> DynamicImage {
     // `labels` is the single source of drawn text (kept in sync with
     // `passport` by construction, see `labels::build_labels`); `passport` is
     // accepted for API symmetry with `crate::generate` and future per-field
     // render options (e.g. photo synthesis keyed off sex/nationality).
     let _ = passport;
-    let mut img = RgbImage::from_pixel(layout::IMAGE_WIDTH, layout::IMAGE_HEIGHT, BACKGROUND);
+    let page: PageLayout = layout::for_format(doc_type);
+    let mut img = RgbImage::from_pixel(page.width, page.height, BACKGROUND);
 
     // Generic, non-country template: a plain frame only. Deliberately no
     // national emblem, coat of arms, or issuing-country branding — guardrail
     // #2, unconditional regardless of `embedded-fonts`.
-    border_rect(
-        &mut img,
-        Rect::new(0, 0, layout::IMAGE_WIDTH, layout::IMAGE_HEIGHT),
-        FRAME,
-        6,
-    );
+    border_rect(&mut img, Rect::new(0, 0, page.width, page.height), FRAME, 6);
 
     // Portrait placeholder: a plain filled box, never a rendered likeness.
-    fill_rect(&mut img, layout::PORTRAIT, PORTRAIT_FILL);
-    border_rect(&mut img, layout::PORTRAIT, FRAME, 2);
+    fill_rect(&mut img, page.portrait, PORTRAIT_FILL);
+    border_rect(&mut img, page.portrait, FRAME, 2);
 
     let fonts: Option<Fonts> = load_fonts().ok();
     let fonts_ref = fonts.as_ref();
 
     draw_text_field(
         &mut img,
-        layout::DOCUMENT_TYPE,
+        page.document_type,
         &labels.document_type.value,
         fonts_ref,
     );
     draw_text_field(
         &mut img,
-        layout::ISSUING_COUNTRY,
+        page.issuing_country,
         &labels.issuing_country.value,
         fonts_ref,
     );
-    draw_text_field(&mut img, layout::SURNAME, &labels.surname.value, fonts_ref);
+    draw_text_field(&mut img, page.surname, &labels.surname.value, fonts_ref);
     draw_text_field(
         &mut img,
-        layout::GIVEN_NAMES,
+        page.given_names,
         &labels.given_names.value,
         fonts_ref,
     );
     draw_text_field(
         &mut img,
-        layout::DOCUMENT_NUMBER,
+        page.document_number,
         &labels.document_number.value,
         fonts_ref,
     );
     draw_text_field(
         &mut img,
-        layout::NATIONALITY,
+        page.nationality,
         &labels.nationality.value,
         fonts_ref,
     );
     draw_text_field(
         &mut img,
-        layout::DATE_OF_BIRTH,
+        page.date_of_birth,
         &labels.date_of_birth.value,
         fonts_ref,
     );
-    draw_text_field(&mut img, layout::SEX, &labels.sex.value, fonts_ref);
+    draw_text_field(&mut img, page.sex, &labels.sex.value, fonts_ref);
     draw_text_field(
         &mut img,
-        layout::DATE_OF_EXPIRY,
+        page.date_of_expiry,
         &labels.date_of_expiry.value,
         fonts_ref,
     );
     if let Some(pn) = &labels.personal_number {
-        draw_text_field(&mut img, layout::PERSONAL_NUMBER, &pn.value, fonts_ref);
+        draw_text_field(&mut img, page.personal_number, &pn.value, fonts_ref);
     }
 
-    // Draw MRZ lines based on document type
-    let mrz_rects = layout::mrz_lines(doc_type);
-    let mrz_chars_count = layout::mrz_chars(doc_type);
+    // Draw MRZ lines from this format's own PageLayout.
     for (i, mrz_line) in labels.mrz_lines.iter().enumerate() {
-        if i < mrz_rects.len() {
-            draw_mrz_line(&mut img, mrz_rects[i], mrz_line, mrz_chars_count, fonts_ref);
+        if i < page.mrz_lines.len() {
+            draw_mrz_line(
+                &mut img,
+                page.mrz_lines[i],
+                mrz_line,
+                page.mrz_chars,
+                fonts_ref,
+            );
         }
     }
 
     // Guardrail #1: unconditional synthetic watermark, drawn last so it stays
-    // on top of every other element.
-    draw_watermark(&mut img);
+    // on top of every other element — on every format's own watermark band.
+    draw_watermark(&mut img, page.watermark);
 
     DynamicImage::ImageRgb8(img)
 }
@@ -476,7 +481,7 @@ mod tests {
     fn watermark_renders_without_embedded_fonts() {
         let img = RgbImage::from_pixel(layout::IMAGE_WIDTH, layout::IMAGE_HEIGHT, BACKGROUND);
         let mut watermarked = img.clone();
-        draw_watermark(&mut watermarked);
+        draw_watermark(&mut watermarked, layout::WATERMARK);
 
         let rect = layout::WATERMARK;
         let mut differs = false;
@@ -492,5 +497,37 @@ mod tests {
             differs,
             "watermark region must differ from a blank template"
         );
+    }
+
+    /// The M6 plan's per-format watermark guardrail test: every format's
+    /// `render` output must carry a visibly different watermark band from a
+    /// blank canvas of that format's own size, not just TD3's.
+    #[test]
+    fn watermark_renders_on_every_document_format() {
+        use crate::data::generate_passport;
+        use crate::labels::build_labels;
+        use crate::model::GeneratorConfig;
+
+        for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+            let passport = generate_passport(&GeneratorConfig::with_document_type(1, doc_type));
+            let labels = build_labels(&passport, doc_type);
+            let image = render(&passport, &labels, doc_type);
+            let rgb = image.to_rgb8();
+
+            let rect = layout::for_format(doc_type).watermark;
+            let mut differs = false;
+            for y in rect.y..rect.y + rect.height {
+                for x in rect.x..rect.x + rect.width {
+                    if rgb.get_pixel(x, y).0 != BACKGROUND.0 {
+                        differs = true;
+                        break;
+                    }
+                }
+            }
+            assert!(
+                differs,
+                "{doc_type:?}: watermark region must differ from the background fill"
+            );
+        }
     }
 }

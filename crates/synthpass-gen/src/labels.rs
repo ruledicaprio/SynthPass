@@ -39,6 +39,13 @@ pub struct Labels {
     pub mrz_lines: Vec<String>,
     /// Bounding box of the full MRZ band.
     pub mrz_rect: Rect,
+    /// The ICAO 9303 MRZ format this document was built as — the join key
+    /// every downstream consumer (sidecar JSON, the bench corpus, the
+    /// Tier-1 gate) reads to separate TD1/TD2/TD3, since
+    /// [`FieldLabel::value`] on `document_type` (the MRZ document *code*,
+    /// `"I"`/`"P"`) cannot: TD1 and TD2 both correctly emit `"I"`. See
+    /// [`crate::model::DocumentType::document_code`].
+    pub mrz_format: DocumentType,
 }
 
 impl Labels {
@@ -53,10 +60,9 @@ impl Labels {
 /// [`crate::mrz_line::build_mrz_lines`] — the single source of truth also
 /// used by the renderer, so the drawn text and the label always agree.
 pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
-    use crate::layout::*;
-
+    let page = crate::layout::for_format(doc_type);
     let mrz_line_strings = build_mrz_lines(passport, doc_type);
-    let mrz_rects = crate::layout::mrz_lines(doc_type);
+    let mrz_rects = &page.mrz_lines;
 
     // Calculate the full MRZ bounding box
     let first_line = &mrz_rects[0];
@@ -69,21 +75,22 @@ pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
     );
 
     Labels {
-        document_type: FieldLabel::new(passport.document_type.clone(), DOCUMENT_TYPE),
-        issuing_country: FieldLabel::new(passport.issuing_country.clone(), ISSUING_COUNTRY),
-        surname: FieldLabel::new(passport.surname.clone(), SURNAME),
-        given_names: FieldLabel::new(passport.given_names.clone(), GIVEN_NAMES),
-        document_number: FieldLabel::new(passport.document_number.clone(), DOCUMENT_NUMBER),
-        nationality: FieldLabel::new(passport.nationality.clone(), NATIONALITY),
-        date_of_birth: FieldLabel::new(iso_date(&passport.date_of_birth), DATE_OF_BIRTH),
-        sex: FieldLabel::new(passport.sex.as_mrz_char().to_string(), SEX),
-        date_of_expiry: FieldLabel::new(iso_date(&passport.date_of_expiry), DATE_OF_EXPIRY),
+        document_type: FieldLabel::new(passport.document_type.clone(), page.document_type),
+        issuing_country: FieldLabel::new(passport.issuing_country.clone(), page.issuing_country),
+        surname: FieldLabel::new(passport.surname.clone(), page.surname),
+        given_names: FieldLabel::new(passport.given_names.clone(), page.given_names),
+        document_number: FieldLabel::new(passport.document_number.clone(), page.document_number),
+        nationality: FieldLabel::new(passport.nationality.clone(), page.nationality),
+        date_of_birth: FieldLabel::new(iso_date(&passport.date_of_birth), page.date_of_birth),
+        sex: FieldLabel::new(passport.sex.as_mrz_char().to_string(), page.sex),
+        date_of_expiry: FieldLabel::new(iso_date(&passport.date_of_expiry), page.date_of_expiry),
         personal_number: passport
             .personal_number
             .as_ref()
-            .map(|v| FieldLabel::new(v.clone(), PERSONAL_NUMBER)),
+            .map(|v| FieldLabel::new(v.clone(), page.personal_number)),
         mrz_lines: mrz_line_strings,
         mrz_rect,
+        mrz_format: doc_type,
     }
 }
 
@@ -95,7 +102,6 @@ fn iso_date(date: &mrz::Date) -> String {
 mod tests {
     use super::*;
     use crate::data::generate_passport;
-    use crate::layout::{IMAGE_HEIGHT, IMAGE_WIDTH};
     use crate::model::GeneratorConfig;
 
     #[test]
@@ -103,9 +109,13 @@ mod tests {
         use crate::model::DocumentType;
 
         for seed in 0..20u64 {
-            let p = generate_passport(&GeneratorConfig::new(seed));
-            // Test all document types
+            // Test all document types. Each needs its own passport, generated
+            // for that doc_type: `build_labels`/`build_mrz_lines` debug-assert
+            // that `passport.document_type` agrees with the requested
+            // `doc_type`'s MRZ document code, and `generate_passport` is what
+            // sets that field correctly per doc_type.
             for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+                let p = generate_passport(&GeneratorConfig::with_document_type(seed, doc_type));
                 let labels = build_labels(&p, doc_type);
                 let mut rects = vec![
                     labels.document_type.rect,
@@ -122,10 +132,13 @@ mod tests {
                 if let Some(pn) = &labels.personal_number {
                     rects.push(pn.rect);
                 }
+                let page = crate::layout::for_format(doc_type);
                 for r in rects {
                     assert!(
-                        r.within_bounds(IMAGE_WIDTH, IMAGE_HEIGHT),
-                        "{r:?} out of bounds for {doc_type:?}"
+                        r.within_bounds(page.width, page.height),
+                        "{r:?} out of bounds for {doc_type:?}'s {}x{} canvas",
+                        page.width,
+                        page.height
                     );
                 }
             }
@@ -142,18 +155,40 @@ mod tests {
         assert_eq!(labels.mrz_lines.len(), 2);
         assert_eq!(labels.mrz_lines[0].len(), 44);
         assert_eq!(labels.mrz_lines[1].len(), 44);
+        assert_eq!(labels.mrz_format, DocumentType::TD3);
 
-        // Test TD2
-        let labels_td2 = build_labels(&p, DocumentType::TD2);
+        // Test TD2 — needs its own passport (see `build_mrz_lines`'s
+        // debug_assert on `passport.document_type`).
+        let p_td2 = generate_passport(&GeneratorConfig::with_document_type(7, DocumentType::TD2));
+        let labels_td2 = build_labels(&p_td2, DocumentType::TD2);
         assert_eq!(labels_td2.mrz_lines.len(), 2);
         assert_eq!(labels_td2.mrz_lines[0].len(), 36);
         assert_eq!(labels_td2.mrz_lines[1].len(), 36);
+        assert_eq!(labels_td2.mrz_format, DocumentType::TD2);
 
         // Test TD1
-        let labels_td1 = build_labels(&p, DocumentType::TD1);
+        let p_td1 = generate_passport(&GeneratorConfig::with_document_type(7, DocumentType::TD1));
+        let labels_td1 = build_labels(&p_td1, DocumentType::TD1);
         assert_eq!(labels_td1.mrz_lines.len(), 3);
         assert_eq!(labels_td1.mrz_lines[0].len(), 30);
         assert_eq!(labels_td1.mrz_lines[1].len(), 30);
         assert_eq!(labels_td1.mrz_lines[2].len(), 30);
+        assert_eq!(labels_td1.mrz_format, DocumentType::TD1);
+    }
+
+    /// The debug assertion in `build_mrz_lines` is the guardrail that stops
+    /// the labels/pixels divergence bug (a `Passport` carrying `"P"` silently
+    /// rendering TD1's `"I"` under a `"P"` label) from being reintroduced. In
+    /// a debug build, mismatched input must panic rather than silently
+    /// diverge.
+    #[test]
+    #[should_panic(expected = "disagrees with the requested")]
+    #[cfg(debug_assertions)]
+    fn mismatched_document_type_panics_in_debug() {
+        use crate::model::DocumentType;
+
+        // TD3 passport ("P") pushed through TD1 assembly ("I" expected).
+        let p = generate_passport(&GeneratorConfig::new(1));
+        let _ = build_labels(&p, DocumentType::TD1);
     }
 }

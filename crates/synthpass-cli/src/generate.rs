@@ -9,7 +9,7 @@
 
 use serde::Serialize;
 use std::path::Path;
-use synthpass_gen::{generate_from_seed, GeneratorConfig, Labels};
+use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 
 /// Parsed `synthpass generate` arguments.
 #[derive(Debug)]
@@ -18,6 +18,7 @@ struct GenerateArgs {
     seed: u64,
     profile: String,
     out_dir: String,
+    document_type: DocumentType,
 }
 
 impl Default for GenerateArgs {
@@ -27,6 +28,7 @@ impl Default for GenerateArgs {
             seed: 0,
             profile: "clean".to_string(),
             out_dir: ".".to_string(),
+            document_type: DocumentType::TD3,
         }
     }
 }
@@ -40,12 +42,19 @@ const VALID_PROFILES: &[&str] = &[
     "clean",
 ];
 
+const VALID_DOCUMENT_TYPES: &[&str] = &["td1", "td2", "td3"];
+
 fn usage() {
-    eprintln!("Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--out-dir DIR]");
-    eprintln!("  --count N       number of documents to generate (default: 1)");
-    eprintln!("  --seed N        base seed; document i uses seed N+i (default: 0)");
-    eprintln!("  --profile NAME  clean|mobile|scanner|worn|border-kiosk (default: clean)");
-    eprintln!("  --out-dir DIR   output directory (default: .)");
+    eprintln!(
+        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]"
+    );
+    eprintln!("  --count N            number of documents to generate (default: 1)");
+    eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
+    eprintln!("  --profile NAME       clean|mobile|scanner|worn|border-kiosk (default: clean)");
+    eprintln!(
+        "  --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to generate (default: td3)"
+    );
+    eprintln!("  --out-dir DIR        output directory (default: .)");
 }
 
 /// Hand-rolled flag parser, consistent with the rest of this CLI's style
@@ -85,6 +94,25 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
                     ));
                 }
                 parsed.profile = lower;
+                i += 2;
+            }
+            "--document-type" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--document-type requires a value".to_string())?;
+                let lower = v.to_lowercase();
+                if !VALID_DOCUMENT_TYPES.contains(&lower.as_str()) {
+                    return Err(format!(
+                        "--document-type: unknown type '{v}' (valid: {})",
+                        VALID_DOCUMENT_TYPES.join(", ")
+                    ));
+                }
+                // Reuses `DocumentType::parse` rather than hand-mapping the
+                // string to a variant a second time — `VALID_DOCUMENT_TYPES`
+                // above exists only to produce the same "valid: ..." error
+                // shape `--profile` uses, not as a second source of truth.
+                parsed.document_type =
+                    DocumentType::parse(&lower).map_err(|e| format!("--document-type: {e}"))?;
                 i += 2;
             }
             "--out-dir" => {
@@ -162,6 +190,16 @@ struct LabelsJson {
     date_of_expiry: FieldLabelJson,
     #[serde(skip_serializing_if = "Option::is_none")]
     personal_number: Option<FieldLabelJson>,
+    /// The ICAO 9303 MRZ format ("TD1"/"TD2"/"TD3") — the join key for the
+    /// bench corpus and Tier-1 gate to separate formats by, since
+    /// `document_type.value` (the MRZ document code) cannot: TD1 and TD2
+    /// both correctly emit `"I"`. See `synthpass_gen::DocumentType::document_code`.
+    mrz_format: String,
+    /// All MRZ lines for the document (2 for TD2/TD3, 3 for TD1). The
+    /// `mrz_line1`/`mrz_line2`/`mrz_line3` fields below are kept for
+    /// backward compatibility with sidecars already shipped; this array is
+    /// the format-agnostic shape new consumers should read.
+    mrz_lines: Vec<String>,
     mrz_line1: String,
     mrz_line2: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -199,6 +237,8 @@ fn labels_to_json(
         sex: (&labels.sex).into(),
         date_of_expiry: (&labels.date_of_expiry).into(),
         personal_number: labels.personal_number.as_ref().map(Into::into),
+        mrz_format: labels.mrz_format.as_str().to_string(),
+        mrz_lines: labels.mrz_lines.clone(),
         mrz_line1: labels.mrz_lines[0].clone(),
         mrz_line2: labels.mrz_lines[1].clone(),
         mrz_line3: labels.mrz_lines.get(2).cloned(),
@@ -235,13 +275,23 @@ pub fn generate_command(args: &[String]) -> Result<(), Box<dyn std::error::Error
 
     for i in 0..parsed.count {
         let seed = parsed.seed + i;
-        let config = GeneratorConfig::new(seed);
+        let config = GeneratorConfig::with_document_type(seed, parsed.document_type);
         let (image, labels, passport) = generate_from_seed(&config);
         let image = degrade_placeholder(image, &parsed.profile, seed);
         let (width, height) = (image.width(), image.height());
 
-        let png_path = Path::new(&parsed.out_dir).join(format!("synthpass_{seed}.png"));
-        let json_path = Path::new(&parsed.out_dir).join(format!("synthpass_{seed}.json"));
+        // TD3 keeps the exact `synthpass_{seed}.{ext}` shape M3 shipped
+        // (unchanged filename for back-compat with existing consumers/tests).
+        // TD1/TD2 append the format so that generating more than one format
+        // at the same seed — exactly what the M6 verification steps below
+        // do, one format at a time into the same `--out-dir` — cannot
+        // silently overwrite a sibling format's output.
+        let stem = match parsed.document_type {
+            DocumentType::TD3 => format!("synthpass_{seed}"),
+            other => format!("synthpass_{seed}_{}", other.as_str().to_lowercase()),
+        };
+        let png_path = Path::new(&parsed.out_dir).join(format!("{stem}.png"));
+        let json_path = Path::new(&parsed.out_dir).join(format!("{stem}.json"));
 
         image.save(&png_path)?;
 
@@ -318,6 +368,74 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&out_dir).ok();
+    }
+
+    /// `--document-type td1`/`td2` must produce a sidecar whose `mrz_format`
+    /// and MRZ line count/width agree with the requested format (TD1: 3x30,
+    /// TD2: 2x36) — the M6 verification step this test exists to pin down.
+    #[test]
+    fn document_type_flag_produces_matching_sidecar() {
+        let cases = [
+            ("td1", "TD1", 3, 30),
+            ("td2", "TD2", 2, 36),
+            ("td3", "TD3", 2, 44),
+        ];
+        for (flag, expected_format, expected_lines, expected_width) in cases {
+            let out_dir = std::env::temp_dir().join(format!(
+                "synthpass_generate_doctype_smoke_{}_{flag}",
+                std::process::id()
+            ));
+            let out_dir_str = out_dir.to_string_lossy().to_string();
+
+            let args = vec![
+                "--seed".to_string(),
+                "7".to_string(),
+                "--document-type".to_string(),
+                flag.to_string(),
+                "--out-dir".to_string(),
+                out_dir_str.clone(),
+            ];
+            generate_command(&args).expect("generate_command should succeed");
+
+            // TD3 keeps the plain `synthpass_{seed}.json` shape; TD1/TD2 get
+            // a format suffix so co-located outputs at the same seed don't
+            // collide (see `generate_command`).
+            let json_name = if flag == "td3" {
+                "synthpass_7.json".to_string()
+            } else {
+                format!("synthpass_7_{flag}.json")
+            };
+            let json_path = out_dir.join(json_name);
+            let json_str = std::fs::read_to_string(&json_path).expect("read sidecar");
+            let value: serde_json::Value =
+                serde_json::from_str(&json_str).expect("sidecar should be valid JSON");
+
+            assert_eq!(
+                value["mrz_format"].as_str(),
+                Some(expected_format),
+                "flag {flag}"
+            );
+            let lines = value["mrz_lines"]
+                .as_array()
+                .unwrap_or_else(|| panic!("mrz_lines should be an array for flag {flag}"));
+            assert_eq!(lines.len(), expected_lines, "flag {flag}");
+            for l in lines {
+                assert_eq!(
+                    l.as_str().expect("line should be a string").len(),
+                    expected_width,
+                    "flag {flag}"
+                );
+            }
+
+            std::fs::remove_dir_all(&out_dir).ok();
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_document_type() {
+        let args = vec!["--document-type".to_string(), "td4".to_string()];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("unknown type") || err.contains("valid values"));
     }
 
     #[test]

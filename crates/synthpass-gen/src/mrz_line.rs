@@ -48,9 +48,16 @@ pub fn build_td3_lines(passport: &Passport) -> (String, String) {
 
 /// Assemble the three TD1 MRZ lines for `passport` via [`mrz::format_td1`].
 /// TD1 is used for ID cards and has 3 lines of 30 characters each.
+///
+/// Reads `passport.document_type` for the MRZ document-code character —
+/// exactly as [`build_td3_lines`] does — rather than hardcoding
+/// `DocumentType::TD1.document_code()`. Hardcoding it let a `Passport` whose
+/// `document_type` said `"P"` render TD1 pixels that print `"I"`, silently
+/// disagreeing with its own label; see [`build_mrz_lines`]'s debug assertion,
+/// which now catches exactly that mismatch before it can reach a render.
 pub fn build_td1_lines(passport: &Passport) -> (String, String, String) {
     let fields = Td1Fields {
-        document_code: DocumentType::TD1.document_code().to_string(),
+        document_code: passport.document_type.clone(),
         issuing_country: passport.issuing_country.clone(),
         document_number: passport.document_number.clone(),
         optional_data_1: None, // Not used in basic TD1 generation
@@ -74,9 +81,11 @@ pub fn build_td1_lines(passport: &Passport) -> (String, String, String) {
 
 /// Assemble the two TD2 MRZ lines for `passport` via [`mrz::format_td2`].
 /// TD2 is used for official travel documents and has 2 lines of 36 characters each.
+///
+/// Reads `passport.document_type`, same rationale as [`build_td1_lines`].
 pub fn build_td2_lines(passport: &Passport) -> (String, String) {
     let fields = Td2Fields {
-        document_code: DocumentType::TD2.document_code().to_string(),
+        document_code: passport.document_type.clone(),
         issuing_country: passport.issuing_country.clone(),
         document_number: passport.document_number.clone(),
         surname: passport.surname.clone(),
@@ -95,7 +104,26 @@ pub fn build_td2_lines(passport: &Passport) -> (String, String) {
 }
 
 /// Build MRZ lines for the specified document type.
+///
+/// Debug-asserts that `passport.document_type` agrees with `doc_type`'s own
+/// MRZ document code ([`DocumentType::document_code`]) before assembling
+/// anything. This is the guardrail against the labels/pixels divergence
+/// documented on [`build_td1_lines`]: `document_code()` returns `"I"` for
+/// both TD1 and TD2, so this cannot catch a TD1/TD2 mismatch by itself, but
+/// it does catch the case that actually broke — a TD3 `Passport` (`"P"`)
+/// pushed through TD1/TD2 assembly — and callers that build `Passport`
+/// directly (rather than through [`crate::data::generate_passport`], which
+/// always sets `document_type` from the requested `doc_type`) get the same
+/// protection for free.
 pub fn build_mrz_lines(passport: &Passport, doc_type: DocumentType) -> Vec<String> {
+    debug_assert_eq!(
+        passport.document_type,
+        doc_type.document_code(),
+        "Passport.document_type ({:?}) disagrees with the requested {doc_type:?}'s MRZ document \
+         code ({:?}) — labels and pixels would silently diverge",
+        passport.document_type,
+        doc_type.document_code(),
+    );
     match doc_type {
         DocumentType::TD1 => {
             let (l1, l2, l3) = build_td1_lines(passport);

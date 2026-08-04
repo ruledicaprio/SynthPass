@@ -13,7 +13,7 @@ use image::DynamicImage;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use synthpass_gen::degrade::{apply_profile, CaptureProfile};
-use synthpass_gen::{generate_from_seed, GeneratorConfig, Labels};
+use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
 pub mod provider_bench;
@@ -109,14 +109,20 @@ pub struct CorpusDoc {
 
 /// Generates `count` documents deterministically from seeds
 /// `seed_start..seed_start + count`, applying `profile`'s degradation
-/// (round-robining the five real profiles when `profile` is `All`). The
-/// single corpus-generation path shared by every bench binary in this crate.
-pub fn generate_corpus(profile: ProfileChoice, seed_start: u64, count: u64) -> Vec<CorpusDoc> {
+/// (round-robining the five real profiles when `profile` is `All`), all
+/// rendered as `document_type`'s ICAO 9303 MRZ format. The single
+/// corpus-generation path shared by every bench binary in this crate.
+pub fn generate_corpus(
+    profile: ProfileChoice,
+    seed_start: u64,
+    count: u64,
+    document_type: DocumentType,
+) -> Vec<CorpusDoc> {
     (0..count)
         .map(|i| {
             let seed = seed_start + i;
             let resolved = profile.resolve(i);
-            let config = GeneratorConfig::new(seed);
+            let config = GeneratorConfig::with_document_type(seed, document_type);
             let (image, labels, _passport) = generate_from_seed(&config);
             let image = match resolved.capture_profile() {
                 Some(cp) => apply_profile(&image, cp, seed),
@@ -494,6 +500,28 @@ type CheckOutcome = (
     Option<synthpass_core::fusion::Verdict>,
 );
 
+/// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
+/// `expected.mrz_format` — [`mrz::parse_td1`]/[`mrz::parse_td2`]/
+/// [`mrz::parse_td3`], reused directly rather than re-derived from line count
+/// (the labels already carry the format Phase 1 added, so there is no need
+/// to guess it back from the lines themselves the way
+/// `MrzFormat::guess_from_lines` does for data that never recorded it).
+///
+/// `pub(crate)`: also used by [`provider_bench::prep_corpus`], which has the
+/// same "ground truth for the synthetic corpus" job for the M7 multi-provider
+/// harness — one parse-dispatch implementation, not two that could drift.
+pub(crate) fn parse_ground_truth_mrz(expected: &Labels) -> Result<mrz::MrzData, mrz::MrzError> {
+    match expected.mrz_format {
+        DocumentType::TD1 => mrz::parse_td1(
+            &expected.mrz_lines[0],
+            &expected.mrz_lines[1],
+            &expected.mrz_lines[2],
+        ),
+        DocumentType::TD2 => mrz::parse_td2(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+        DocumentType::TD3 => mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+    }
+}
+
 fn run_check(
     path: &std::path::Path,
     write_result: image::ImageResult<()>,
@@ -516,13 +544,13 @@ fn run_check(
     };
 
     // Ground truth is the generator's own MRZ lines parsed back through the
-    // same parser the read goes through. Comparing `MrzData` to `MrzData`
-    // keeps both sides in identical formats — dates already century-expanded
-    // to ISO, names already split — so the CER measures the *read*, not a
-    // formatting difference between the visual zone and the machine-readable
-    // one. The labels are correct by construction (M2's DoD), so this parse
-    // cannot legitimately fail.
-    let truth = match mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]) {
+    // matching per-format parser (see `parse_ground_truth_mrz`). Comparing
+    // `MrzData` to `MrzData` keeps both sides in identical formats — dates
+    // already century-expanded to ISO, names already split — so the CER
+    // measures the *read*, not a formatting difference between the visual
+    // zone and the machine-readable one. The labels are correct by
+    // construction (M2's DoD), so this parse cannot legitimately fail.
+    let truth = match parse_ground_truth_mrz(expected) {
         Ok(truth) => truth,
         Err(e) => {
             return (
