@@ -11,7 +11,7 @@
 //!
 //! ```text
 //! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
-//!                 [--out PATH] [--min-hit-rate F]
+//!                 [--out PATH] [--min-hit-rate F] [--dump-ocr]
 //!   --count N            number of documents to check (default: 100)
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
@@ -22,6 +22,9 @@
 //!   --out PATH           report JSON path (default: bench-report.json)
 //!   --min-hit-rate F     exit non-zero if the measured hit rate is below F
 //!                        (e.g. 0.35); unset means "measure and report only"
+//!   --dump-ocr           print every document's raw OCR text (one printed
+//!                        line per detected line) before the summary — a
+//!                        small-`--count` diagnostic, not for a full run
 //! ```
 
 use serde::Serialize;
@@ -43,6 +46,19 @@ struct Args {
     /// (which `samples/` directory to read), a different axis entirely (see
     /// `synthpass_bench::SpecimenClass`'s doc comment).
     document_type: DocumentType,
+    /// Print the raw OCR text — one printed line per line `mrz::find_and_parse`
+    /// saw — for every document in the run, before the hit/miss summary.
+    ///
+    /// Added for the M6 TD1 root-cause diagnosis: TD1's hit rate was 26.7%
+    /// against TD2/TD3's 76-80%, and nothing in this binary's output showed
+    /// *what OCR actually returned* — only the parsed-or-not result. A wrong
+    /// MRZ-row assignment (the actual TD1 bug: the name line comes back as
+    /// the watermark or a duplicate of line 1) is invisible in a hit/miss
+    /// count and in per-field CER alike; it is only visible in the raw text.
+    /// Meant for a small `--count` (3-10) — this prints unconditionally for
+    /// every document, so it is a diagnostic run, not something to leave on
+    /// for a 100-document corpus.
+    dump_ocr: bool,
 }
 
 impl Default for Args {
@@ -54,6 +70,7 @@ impl Default for Args {
             out: "bench-report.json".to_string(),
             min_hit_rate: None,
             document_type: DocumentType::TD3,
+            dump_ocr: false,
         }
     }
 }
@@ -61,7 +78,7 @@ impl Default for Args {
 fn usage() {
     eprintln!(
         "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
-         [--out PATH] [--min-hit-rate F]"
+         [--out PATH] [--min-hit-rate F] [--dump-ocr]"
     );
     eprintln!("  --count N            number of documents to check (default: 100)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -73,6 +90,10 @@ fn usage() {
     );
     eprintln!("  --out PATH           report JSON path (default: bench-report.json)");
     eprintln!("  --min-hit-rate F     exit non-zero if the measured hit rate is below F");
+    eprintln!(
+        "  --dump-ocr           print every document's raw OCR text (one printed line per \
+         detected line) before the summary — meant for a small --count diagnostic run"
+    );
 }
 
 /// Hand-rolled flag parser, consistent with `synthpass-cli`'s style (no
@@ -130,6 +151,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                         .map_err(|_| format!("--min-hit-rate: not a valid number: {v}"))?,
                 );
                 i += 2;
+            }
+            "--dump-ocr" => {
+                parsed.dump_ocr = true;
+                i += 1;
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -238,6 +263,18 @@ fn main() {
         .into_iter()
         .map(|doc| {
             let result = check_document(&ocr, &doc.image, &doc.labels);
+            if parsed.dump_ocr {
+                println!("--- seed {} raw OCR lines ---", doc.seed);
+                match &result.raw_text {
+                    Some(text) if !text.is_empty() => {
+                        for (i, line) in text.lines().enumerate() {
+                            println!("  [{i}] {line:?}");
+                        }
+                    }
+                    Some(_) => println!("  (OCR returned no text)"),
+                    None => println!("  (OCR failed: {:?})", result.reason),
+                }
+            }
             let line1_flagged = matches!(
                 result.line1_integrity,
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })

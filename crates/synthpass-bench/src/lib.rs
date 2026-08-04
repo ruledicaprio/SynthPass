@@ -460,6 +460,15 @@ pub struct HitResult {
     /// here, since the checksum never covered `document_type`,
     /// `issuing_country`, `surname`, or `given_names` in the first place.
     pub line1_integrity: Option<synthpass_core::fusion::Verdict>,
+    /// The raw OCR text `mrz::find_and_parse` was handed, whenever OCR
+    /// itself succeeded (`None` only on `MissReason::OcrError`, where there
+    /// is no text to show). Threaded through unconditionally rather than
+    /// gated behind a flag: it costs nothing extra (the OCR pass already ran
+    /// inside `check_document`), and `synthpass-bench --dump-ocr` is the
+    /// only consumer that prints it — see that flag's doc comment for why
+    /// this exists (the M6 TD1 root-cause diagnosis: nothing could show what
+    /// OCR actually returned before the MRZ scanner ate it).
+    pub raw_text: Option<String>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -476,7 +485,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         fastrand_seed()
     ));
     let write_result = image.save(&path);
-    let (reason, fields, line1_integrity) = run_check(&path, write_result, ocr, expected);
+    let (reason, fields, line1_integrity, raw_text) = run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -485,6 +494,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         elapsed: start.elapsed(),
         fields,
         line1_integrity,
+        raw_text,
     }
 }
 
@@ -498,6 +508,7 @@ type CheckOutcome = (
     Option<MissReason>,
     Vec<FieldOutcome>,
     Option<synthpass_core::fusion::Verdict>,
+    Option<String>,
 );
 
 /// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
@@ -535,12 +546,13 @@ fn run_check(
             ))),
             Vec::new(),
             None,
+            None,
         );
     }
 
     let text = match ocr.recognize(path) {
         Ok(text) => text,
-        Err(e) => return (Some(MissReason::OcrError(e)), Vec::new(), None),
+        Err(e) => return (Some(MissReason::OcrError(e)), Vec::new(), None, None),
     };
 
     // Ground truth is the generator's own MRZ lines parsed back through the
@@ -560,6 +572,7 @@ fn run_check(
                 ))),
                 Vec::new(),
                 None,
+                Some(text),
             )
         }
     };
@@ -571,6 +584,7 @@ fn run_check(
                 Some(MissReason::NoMrzFound(format!("{e:?}"))),
                 total_loss(&truth),
                 None,
+                Some(text),
             )
         }
     };
@@ -579,7 +593,12 @@ fn run_check(
     let line1_integrity = Some(synthpass_core::fusion::check_line1_integrity(&decoded));
 
     if !decoded.valid() {
-        return (Some(MissReason::ChecksumFailed), fields, line1_integrity);
+        return (
+            Some(MissReason::ChecksumFailed),
+            fields,
+            line1_integrity,
+            Some(text),
+        );
     }
     if decoded.document_number != truth.document_number {
         return (
@@ -589,9 +608,10 @@ fn run_check(
             }),
             fields,
             line1_integrity,
+            Some(text),
         );
     }
-    (None, fields, line1_integrity)
+    (None, fields, line1_integrity, Some(text))
 }
 
 /// The fields compared per document, as `(name, accessor)` pairs. One list so
