@@ -12,29 +12,14 @@
 <!-- Posture -->
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
-**Identity-document intelligence that runs entirely on your own machine.** SynthPass
-*generates* perfectly-labelled synthetic identity documents (TD1/TD2/TD3 — ICAO 9303 ID
-cards, travel documents, and passports), *benchmarks* extraction against that ground
-truth, and *extracts* structured JSON from real documents — with **zero cloud calls** at
-any stage. Extraction validates deterministically via ICAO 9303 MRZ check digits (Tier 1)
-and only falls back to a local quantized LLM (Tier 2) when no valid MRZ exists; every
-generated document carries a mandatory synthetic watermark and a generic, non-country
-template, enforced in code, not a tool for imitating genuine credentials — see
-[knowledge/BRANDING.md](knowledge/BRANDING.md) §4 and
-[knowledge/VISION.md](knowledge/VISION.md) for the full reasoning.
-
-*Formerly `multi-level-id-strip` / `mlis`; see [CHANGELOG.md](CHANGELOG.md) for the crate-rename
-mapping.*
-
-## Contents
-
-- [Quickstart](#quickstart)
-- [Make a pass, then read it back](#make-a-pass-then-read-it-back)
-- [How it works](#how-it-works)
-- [Accuracy](#accuracy)
-- [Repository layout](#repository-layout)
-- [Documentation](#documentation)
-- [License](#license)
+**Identity-document intelligence that runs entirely on your own machine.** SynthPass *generates*
+perfectly-labelled synthetic identity documents (TD1/TD2/TD3 — ICAO 9303 ID cards, travel
+documents, passports), *benchmarks* extraction against that ground truth, and *extracts*
+structured JSON from real documents — **zero cloud calls**, ever. Every generated document
+carries a mandatory synthetic watermark and a generic, non-country template, enforced in code,
+not a tool for imitating genuine credentials — see
+[knowledge/BRANDING.md](knowledge/BRANDING.md) §4 / [knowledge/VISION.md](knowledge/VISION.md).
+*(Formerly `multi-level-id-strip` / `mlis` — see [CHANGELOG.md](CHANGELOG.md).)*
 
 ## Quickstart
 
@@ -42,9 +27,8 @@ Neither Docker nor Python is required to *run* SynthPass. Input is images only �
 TIFF, BMP, GIF. PDF and HEIC/HEIF are deliberately unsupported
 ([why](knowledge/ARCHITECTURE.md#8-known-limitations--what-tier-2-accuracy-actually-looks-like)).
 
-> **Building on Windows:** Tier 2 (`llama-cpp-2`) compiles `llama.cpp`'s C++ and needs CMake,
-> LLVM/libclang and MSVC Build Tools — a heavier ask than plain Rust. A `llama-cpp-sys-2` build
-> error at step 2 is this, not a broken clone; use the Docker path below instead.
+> **Building on Windows:** Tier 2 (`llama-cpp-2`) needs CMake, LLVM/libclang and MSVC Build Tools —
+> or use the Docker path in [CONTRIBUTING.md](CONTRIBUTING.md#building--testing).
 
 ```powershell
 git clone https://github.com/ruledicaprio/SynthPass.git
@@ -66,197 +50,114 @@ cargo run -p synthpass-cli -- samples/ocr_fixtures/Croatian_passport_data_page.j
 cargo run -p synthpass-serve
 ```
 
-```powershell
-# API example, against synthpass-serve from step 4:
-curl -F "file=@samples/ocr_fixtures/Passport_of_Serbia_ID_2009_version.jpg" http://127.0.0.1:8080/api/extract
-```
-
-<details>
-<summary><b>No local toolchain?</b> Run the same steps in the Docker image CI uses</summary>
-
-`docker/Dockerfile.builder` ships Rust + CMake + LLVM/clang, pre-built:
-
-```powershell
-# Windows (PowerShell)
-docker build -f docker/Dockerfile.builder -t synthpass-builder:latest .
-docker run --rm -e SYNTHPASS_LICENSE_SKIP=1 -v "${PWD}:/work" `
-  -v synthpass_target:/work/target -v synthpass_cargo_registry:/usr/local/cargo/registry `
-  -w /work synthpass-builder:latest cargo run -p synthpass-cli -- doctor
-```
-
-```bash
-# Linux / macOS
-docker build -f docker/Dockerfile.builder -t synthpass-builder:latest .
-docker run --rm -e SYNTHPASS_LICENSE_SKIP=1 -v "$PWD:/work" \
-  -v synthpass_target:/work/target -v synthpass_cargo_registry:/usr/local/cargo/registry \
-  -w /work synthpass-builder:latest cargo run -p synthpass-cli -- doctor
-```
-
-Swap the trailing command for any step above. For `synthpass-serve`, drop
-`-e SYNTHPASS_LICENSE_SKIP=1` and add `-p 8080:8080`. Git Bash on Windows needs
-`MSYS_NO_PATHCONV=1` before `docker run`, or it mangles `-w /work` into a Windows path.
-
-**Environment variables do not cross into the container on their own** — setting
-`$env:SYNTHPASS_LICENSE_SKIP = "1"` only affects your host shell; `docker run` needs its own
-`-e` flag, as shown. See [CONTRIBUTING.md](CONTRIBUTING.md#building--testing) for the full
-build/test/cross-compile reference.
-
-</details>
-
-### CLI commands
-
-| Command | What it does |
-| --- | --- |
-| `synthpass <file>` | Extract one document to `<file>.json` |
-| `synthpass generate` | Produce synthetic labelled TD1/TD2/TD3 documents (no license needed) |
-| `synthpass doctor` | Preflight OCR, inferer, license and configuration |
-| `synthpass fingerprint` | Print this machine's license fingerprint |
-| `synthpass verify-license` | Validate a `license.mlis` against the embedded key |
-| `synthpass decrypt <file>` | Decrypt output written with `SYNTHPASS_KEY` |
-
-Every environment variable (OCR, Tier-2 model, server, security/licensing) is documented in
-[knowledge/ARCHITECTURE.md §12](knowledge/ARCHITECTURE.md#12-configuration-reference).
+`synthpass-serve`'s `POST /api/extract` (multipart upload, SSE progress) is documented in
+[knowledge/ARCHITECTURE.md §5](knowledge/ARCHITECTURE.md#5-pipeline-execution-flow); every CLI
+subcommand (`generate`, `doctor`, `fingerprint`, `verify-license`, `decrypt`) and every
+environment variable are in [knowledge/ARCHITECTURE.md §§2,12](knowledge/ARCHITECTURE.md#12-configuration-reference).
 
 ## Make a pass, then read it back
 
-SynthPass doesn't just read documents — it **mints its own**, so accuracy is graded against ground
-truth, not assumptions. `synthpass generate --document-type td1|td2|td3` renders synthetic passes
-in the matching ICAO 9303 card geometry (ID-1/ID-2/ID-3), but every one carries a mandatory
-"SYNTHETIC / SPECIMEN" watermark, a generic non-country template, and fictional seed-drawn
-identities — *enforced in code, never a copy of a real document*. Each render ships a `.json`
-sidecar with per-field ground-truth boxes and a checksum-valid MRZ built by the matching
-`mrz::format_td1`/`format_td2`/`format_td3` emitter, plus an optional capture-degradation pass
-(`clean` | `mobile` | `scanner` | `worn` | `border-kiosk`) that simulates real-world capture.
+SynthPass **mints its own** documents, so accuracy is graded against ground truth, not
+assumptions — every render carries a mandatory "SYNTHETIC / SPECIMEN" watermark, a generic
+non-country template, and fictional seed-drawn identities (*enforced in code, never a copy of a
+real document*), plus a `.json` sidecar with per-field ground truth and a checksum-valid MRZ.
 
 <img src="knowledge/img/synthetic_pass_example.png" alt="A generated pass — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
 
-Then read it **back through the exact same extraction pipeline** — the check digits and labels grade
-the OCR read, closing the loop:
+Then read it back through the **same real pipeline** — the check digits and labels grade the OCR
+read, closing the loop:
 
 ```powershell
 # 1. Mint one synthetic, watermarked, fully-labelled pass (same seed → byte-identical)
 cargo run -p synthpass-cli -- generate --count 1 --seed 42 --profile clean --out-dir out/
-#    → out/synthpass_42.png  (watermarked image)  +  out/synthpass_42.json  (per-field ground truth + MRZ)
-
-# 2. Read it back with the real pipeline — every ICAO check digit re-verified
+# 2. Read it back — every ICAO check digit re-verified
 cargo run -p synthpass-cli -- out/synthpass_42.png
 ```
 
-The `.json` sidecar is the ground truth the read is graded against — fictional by construction, and
-correct because SynthPass built the MRZ itself:
+`out/synthpass_42.json` is the ground truth the read is graded against — fictional, and correct
+because SynthPass built the MRZ itself:
 
 ```json
 { "surname": "ESKANDARI", "given_names": "MAREN", "document_number": "FLLF2W13I",
   "nationality": "BRA", "date_of_birth": "1975-05-18", "sex": "F", "date_of_expiry": "2034-04-18" }
 ```
 
-Scale it up with `synthpass-bench` — it runs a whole generated corpus back through the *real*
-extraction pipeline and reports how much survives, per document format:
+Scale it up with `synthpass-bench` — a whole generated corpus back through the real pipeline:
 
 ```powershell
 cargo run -p synthpass-bench -- --count 100 --seed 1 --profile clean --document-type td3
 ```
 
-Text renders with vendored OFL fonts (OCR-B and PT Sans, embedded by default; `--no-default-features`
-falls back to placeholder bars). Reports are generated, never hand-edited. Methodology in
-[knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md); the degraded-profile red-team corpus in
-[knowledge/ADVERSARIAL.md](knowledge/ADVERSARIAL.md).
+Methodology: [knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md);
+[knowledge/ADVERSARIAL.md](knowledge/ADVERSARIAL.md) for the degraded-profile red-team corpus.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    A["ID photo"] --> B["Read the text<br/>(OCR)"]
-    B --> C{"Machine-readable<br/>zone found?"}
-    C -->|"Yes"| D["Verify checksums<br/>instant, deterministic"]
-    C -->|"No"| E["Local LLM fallback<br/>reads the layout"]
-    D --> F["Structured JSON"]
-    E --> F
+    subgraph Generate["synthpass-gen"]
+        ID["Seeded identity"] --> DOC["TD1 / TD2 / TD3<br/>own ICAO 9303 layout<br/>+ mandatory watermark"]
+    end
+    DOC --> CORPUS["Labelled corpus"] --> GATE["CI accuracy gate<br/>(synthpass-bench)"]
+
+    subgraph Extract["Extraction"]
+        IMG["Document image"] --> LICENSE{"License valid?"}
+        LICENSE -- "no" --> REFUSED["Refused"]
+        LICENSE -- "yes / skipped" --> OCR["OCR"]
+        OCR --> CATALOG["Provider catalog<br/>(synthpass-die)"]
+        CATALOG --> TIER1{"MRZ found &<br/>checksums valid?<br/>(Tier 1)"}
+        TIER1 -- "yes" --> JSON["Structured JSON"]
+        TIER1 -- "no" --> TIER2["Local LLM repair<br/>(Tier 2)"]
+        TIER2 --> JSON
+    end
+
+    GATE -.->|"grades"| OCR
 ```
 
-Every document is checked against its own printed math first — deterministic before probabilistic,
-air-gapped or it does not ship: the two non-negotiable principles behind every design decision here,
-argued in full in [knowledge/VISION.md](knowledge/VISION.md) §1. Engineering rationale and trade-offs
-(pipeline execution flow, licensing design, security posture, known limitations) are in
-[knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md); the offline Ed25519 licensing walkthrough is in
-[knowledge/LICENSING.md](knowledge/LICENSING.md); the air-gapped single-binary deployment path (musl,
-`cargo zigbuild`, "copy one file to an isolated machine") is in
-[knowledge/ARCHITECTURE.md §10](knowledge/ARCHITECTURE.md#10-v100-and-beyond).
-
-The generation half closes the loop: synthetic documents carry labels that are correct by
-construction, so accuracy claims come from a harness, not assumptions.
-
-```mermaid
-flowchart LR
-    GEN["synthpass-gen<br/>seeded, watermarked"] --> CORPUS["labelled corpus"]
-    CORPUS --> BENCH["synthpass-bench"]
-    BENCH --> GATE{"CI accuracy gate"}
-    GATE -->|"regression"| BLOCK["merge blocked"]
-    GATE -->|"pass"| MERGE["merge allowed"]
-```
+Deterministic before probabilistic, air-gapped or it does not ship: argued in full in
+[knowledge/VISION.md](knowledge/VISION.md) §1; the rest of this diagram in
+[knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) and [knowledge/LICENSING.md](knowledge/LICENSING.md).
 
 ## Accuracy
 
 Every number below is measured, never estimated — rendered by `bench-chart` from the run history
-on the `bench-data` branch, so nothing here is hand-drawn or hand-edited.
+on the `bench-data` branch, nothing hand-drawn or hand-edited, unflattering numbers included.
 
-**Tier-1 hit rate on synthetic passports, over time.** Tier 1 is the deterministic path: OCR, then
-ICAO 9303 check-digit verification. A "hit" means the rendered image OCR'd back to a
-checksum-valid MRZ matching the ground truth — no model involved, no partial credit.
-
+**Tier-1 hit rate on synthetic passports, over time** (OCR + ICAO 9303 check digits, no model):
 ![Tier-1 hit rate on the synthetic passport corpus](knowledge/img/passport-bench-trend.svg)
 
-**Real specimens**, which is the harder and more honest population — public specimen documents
-rather than our own renders:
-
+**Real specimens** — the harder, more honest population:
 ![Provider benchmark trend on the real-specimen corpus](knowledge/img/real-specimens-bench-trend.svg)
 
-**TD1 vs. TD2 vs. TD3**, the three ICAO 9303 MRZ formats `synthpass-gen` emits, each track's latest
-run — TD3 joins once its own `bench-data` track exists (see
-[knowledge/benchmarks/README.md](knowledge/benchmarks/README.md)):
-
+**TD1 vs. TD2 vs. TD3**, each track's latest run:
 ![Tier-1 hit rate by MRZ format](knowledge/img/format-comparison.svg)
 
-Full methodology, per-format and real-specimen numbers, and the rest of the live trend charts are
-in [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md) — including the unflattering
-numbers, stated as plainly as the flattering ones; see
-[knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4/M6 execution notes for the full account of how
-each figure was measured.
+Full methodology and per-format numbers: [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md)
+and [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4/M6 execution notes.
 
 ## Repository layout
 
 ```
 ├── crates/
-│   ├── mrz/                Zero-dependency ICAO 9303 engine: TD1/TD2/TD3, checksum-verified
-│   │                       OCR repair, MRZ emission, date plausibility, ISO/ICAO country names
+│   ├── mrz/                Zero-dependency ICAO 9303 engine: TD1/TD2/TD3, checksum-verified OCR repair
 │   ├── mrz-wasm/           wasm-bindgen wrapper powering the browser demo
-│   ├── synthpass-gen/      Synthetic document factory: seeded identities, TD1/TD2/TD3 MRZ,
-│   │                       per-format layout/render/labels, capture-degradation profiles,
-│   │                       mandatory watermark
+│   ├── synthpass-gen/      Synthetic document factory: seeded identities, TD1/TD2/TD3, watermark
 │   ├── synthpass-bench/    Benchmark harness + corpus runner behind the CI accuracy gate
 │   ├── synthpass-core/     Canonical Extraction schema (v1 + v2) and audit/crypto helpers
-│   ├── synthpass-die/      Document Intelligence Engine: provider contract, capability catalog,
-│   │                       deterministic MRZ reader — the M7 routing layer
+│   ├── synthpass-die/      Document Intelligence Engine: provider catalog, MRZ reader (M7 routing)
 │   ├── synthpass-ocr/      In-process pure-Rust OCR: ocrs/rten, preprocessing, model integrity
-│   ├── synthpass-llm/      In-process Tier-2 inference: Qwen GGUF via llama-cpp-2, ChatML
-│   │                       prompting, JSON repair, model integrity check
-│   ├── synthpass-license/  Offline Ed25519 licensing: sign/verify, fingerprint, vendor issuer
-│   │                       (`vendor` feature — never shipped to customers)
-│   ├── synthpass-pipeline/ OcrEngine → Tier 1 MRZ → Tier 2 InferBackend → JSON.
-│   │                       Image-only, license-agnostic.
+│   ├── synthpass-llm/      In-process Tier-2 inference: Qwen GGUF via llama-cpp-2
+│   ├── synthpass-license/  Offline Ed25519 licensing (`vendor` feature never ships to customers)
+│   ├── synthpass-pipeline/ OcrEngine → Tier 1 MRZ → Tier 2 InferBackend → JSON, image-only
 │   ├── synthpass-cli/      CLI front-end (binary `synthpass`)
-│   └── synthpass-serve/    axum web app: upload page, POST /api/extract with SSE progress,
-│                           GET /health, bearer auth, TLS, license enforcement
-├── knowledge/                   Vision, roadmap, branding, architecture, licensing, corpus coverage
+│   └── synthpass-serve/    axum web app: upload page, POST /api/extract with SSE, TLS, auth
+├── knowledge/              Vision, roadmap, branding, architecture, licensing, corpus coverage
 ├── docker/                 Builder, musl and serve images + compose file
 ├── fuzz/                   cargo-fuzz targets for the untrusted OCR ingest path
-├── samples/                Public-domain specimen documents and expected outputs, organized into
-│                           passports/, id_cards/, driving_licenses/, ocr_fixtures/, misc/ —
-│                           only ocr_fixtures/ (the hand-verified subset) is tracked in git; the
-│                           rest is a gitignored local mirror — see samples/README.md
+├── samples/                Public-domain specimens — only ocr_fixtures/ is tracked in git,
+│                           the rest is a gitignored local mirror; see samples/README.md
 ├── scripts/                Development helpers
-├── tools/                  Standalone scripts not themselves test fixtures (e.g. the Wikipedia
-│                           specimen scraper)
+├── tools/                  Standalone scripts (e.g. the Wikipedia specimen scraper)
 └── web/                    GitHub Pages demo (static, client-side only)
 ```
 
@@ -278,18 +179,11 @@ Full index: [knowledge/README.md](knowledge/README.md).
 | [SECURITY.md](SECURITY.md) | Threat model, deployment checklist, vulnerability reporting |
 | [CHANGELOG.md](CHANGELOG.md) | Full version-by-version history |
 
-Questions or bugs: [open an issue](https://github.com/ruledicaprio/SynthPass/issues).
-
 ## License
 
 [MIT](LICENSE) © Rusmir Skopljak. Bundled third-party licenses are in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The MRZ demo's OCR-B model
-(`web/tessdata/mrz.traineddata`) is © [DoubangoTelecom](https://github.com/DoubangoTelecom/tesseractMRZ),
-BSD-3-Clause. Vendored generator fonts (OCR-B, PT Sans) are OFL 1.1 — see
-`crates/synthpass-gen/fonts/README.md`. Acknowledgments and stewardship:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (the MRZ demo's OCR-B model is ©
+[DoubangoTelecom](https://github.com/DoubangoTelecom/tesseractMRZ), BSD-3-Clause; vendored
+generator fonts OCR-B/PT Sans are OFL 1.1). SynthPass is an open-source project under the Identra
+stewardship — trademark and attribution guidance in
 [knowledge/BRANDING.md](knowledge/BRANDING.md).
-
----
-
-*SynthPass is an open-source project under the Identra stewardship. See
-[knowledge/BRANDING.md](knowledge/BRANDING.md) for trademark and attribution guidance.*
