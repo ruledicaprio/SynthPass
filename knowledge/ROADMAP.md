@@ -351,6 +351,60 @@ flowchart LR
   are not in the ground truth at all, rather than misreading the ones that are. The ID-1 canvas is
   the smallest of the three (822×518 against TD3's 1200×840), so absolute glyph resolution in the
   VIZ is the first thing to check. Not diagnosed further here.
+- **M6 follow-up — the TD1 name-line loss, root-caused and fixed.** A `synthpass-bench --dump-ocr`
+  probe (new flag, `--document-type td1 --count 3 --seed 42`) printed the raw OCR text underneath
+  the parse for the first time, confirming the mechanism directly rather than by inference: TD1's
+  third MRZ line — the only place `surname`/`given_names` live — came back as the watermark
+  (`"STNHENLSPELJMENSTNNEL..."`) or a duplicate of line 1, exactly as this note's earlier per-field
+  CER breakdown implied. Two compounding causes, both real:
+
+  1. **The mandatory watermark sat 8px above MRZ line 1** (`layout.rs::td1_layout()`'s watermark
+     rect was `y=282, height=26`, against a 28px-tall glyph and an MRZ band starting at `y=318`) —
+     TD2 gets ~145px of separation, TD3 ~190px. Across OCR's own internal multi-pass retry loop,
+     some passes correctly detected all three MRZ rows as distinct lines; others did not detect
+     line 3 as its own region at all, leaving the watermark or a repeated line 1 in that slot.
+     Fixed by giving the MRZ band a smaller, dedicated bottom margin (16px vs. the 40px top/VIZ
+     margin) and growing the watermark rect to 32px, netting ~21px of real separation on each side
+     without touching VIZ row spacing (so VIZ OCR quality is unaffected). TD3's `PageLayout` stays
+     byte-identical.
+  2. **TD1 was the only format whose three-line scan required strict adjacency** — TD2, TD3,
+     MRV-A and MRV-B all tolerate a gap between candidate lines and all four accept the whole zone
+     merged onto one physical line; TD1 had neither. Fixed: TD1 now searches the next 3 detected
+     lines for line 2 and line 3 (bounded, not a full-page scan), and gained the merged-line
+     branch the other four formats already have.
+
+  A **third, previously undocumented cause** surfaced only once the dump made line 1 itself
+  legible: OCR was dropping TD1's position-1 filler outright (`I<BRA...` read as `IBRA...`),
+  shifting every field from `issuing_country` onward one position left. **Unlike TD3, whose check
+  digits live entirely on line 2, TD1's document-number check digit is on line 1 itself** — so
+  this single dropped character was breaking TD1's own checksum, not merely corrupting
+  `issuing_country` cosmetically the way the equivalent misread does on TD3. `variants`'s
+  length-fitting could not recover it: a line arriving one character short is padded by extending
+  its *longest* filler run (the trailing one), never by reinserting a filler at position 1. Fixed
+  with a new candidate reading, `repair_td1_line1_unshifted`, tried alongside the unrepaired one —
+  checksums decide which, if either, is real.
+
+  Measured before/after (30 documents, `--seed 42 --profile clean`, `./scripts/run-bench.ps1
+  -Track td1 -Count 30 -Seed 42`):
+
+  | | Hit rate | Mean `surname` CER |
+  |---|---|---|
+  | Before (`a2a7f64`) | 26.7% (8/30) | 128.79% |
+  | After (`1cab58c`) | **56.7%** (17/30) | *(not re-measured; the fix targets line 1's checksum, not line 3's content)* |
+
+  More than double, and above the repo's 30% CI floor for the first time. TD2 (80.0%, 24/30) and
+  TD3 (76.7%, 23/30) were re-confirmed unaffected, as expected — neither format's layout or parser
+  path was touched.
+
+  **This does not close the check-digit blind spot, and should not be read as if it did.** Of the
+  17 post-fix hits, 15 (88.2%) still carry a line-1 integrity finding — barely moved from the
+  pre-fix 87.5% (7/8). **TD1's check digits do not cover line 3 at all** (document number, date of
+  birth, expiry, and the composite all read from lines 1–2 only), so a checksum-valid TD1 record
+  can carry a completely fabricated name, and nothing in this fix — or in TD1's format as ICAO
+  defines it — can change that. A TD1 hit rate is a statement about lines 1–2 reading correctly,
+  never a statement about the name. Five regressions in `crates/mrz/tests/td1_line_gap.rs` pin the
+  adjacency/merged-line fix; deliberately, none of them try to prove a parser can pick the "right"
+  line 3 out of two equally check-digit-silent candidates, because it can't.
 - **Check-digit blind spots are compound far more often than they are per-character, and the
   counter we ship only sees the per-character kind.** Over the nightly `dataset.jsonl` corpus
   (2910 rows, TD3): 1804 hits, 987 `checksum invalid`, 53 `no MRZ found`, and **66
