@@ -108,6 +108,33 @@ name-reconstruction check hit (see "Record the rejections" above), caught
 here instead of thrown away because the fix (compare against the
 pre-formatting representation) is cheap and doesn't weaken the check.
 
+## Per-format comparison chart (`bench-chart --bars`)
+
+`bench-chart`'s original mode plots one track's `history.jsonl` as a trend line over
+time (see "Live tracks" below). A second mode, added for the M6 TD1 accuracy
+milestone, draws a **bar chart comparing several tracks' latest numbers side by
+side** — the question "how does TD1 stack up against TD2 and TD3 *right now*" isn't
+answerable from three separate trend charts without holding three numbers in your
+head:
+
+```
+bench-chart --bars --series LABEL=PATH [--series LABEL=PATH ...] --out PATH
+```
+
+Each `--series` names one track's `history.jsonl`; that bar's height is the
+**latest** row's `read_ok_rate` (the same field the trend mode's first panel already
+plots — a track's trend chart and its bar here always read the same number). The
+y-axis is a fixed `0.0`-`1.0` on every render, never cropped to the data's own
+range, so the formats stay honestly comparable to each other and no bar is
+exaggerated by a narrowed axis. Each bar is labelled with its percentage, and the
+caption states every series' document count explicitly (never assumed uniform) —
+a 30-document corpus must not get to look like a larger claim than it is.
+
+`knowledge/img/format-comparison.svg` (embedded on the README) is generated this
+way, from `td1`/`td2`/`td3`'s three `history.jsonl` files, regenerated in the same
+step `run-bench.ps1`/`bench-charts.yml` regenerate the per-track trend charts, so
+it never goes stale relative to them.
+
 ## Live tracks
 
 Each chart is regenerated locally by `scripts/run-bench.ps1`, or on a schedule by

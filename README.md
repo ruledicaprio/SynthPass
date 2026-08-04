@@ -211,6 +211,12 @@ rather than our own renders:
 
 ![Provider benchmark trend on the real-specimen corpus](knowledge/img/real-specimens-bench-trend.svg)
 
+**TD1 vs. TD2 vs. TD3**, the three ICAO 9303 MRZ formats `synthpass-gen` emits, each track's latest
+run — TD3 joins once its own `bench-data` track exists (see
+[knowledge/benchmarks/README.md](knowledge/benchmarks/README.md)):
+
+![Tier-1 hit rate by MRZ format](knowledge/img/format-comparison.svg)
+
 Full methodology, per-format and real-specimen numbers, and the rest of the live trend charts are
 in [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md) — including the unflattering
 numbers, stated as plainly as the flattering ones; see
