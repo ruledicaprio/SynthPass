@@ -58,15 +58,29 @@ Real-specimen tracks map to `provider-bench --format` (via
 | `driving_license` | `driving_license` | `samples/driving_licenses/` |
 | `real-specimens` | *(none)* | the whole `samples/` real corpus |
 
-**Synthetic tracks (M6): `td1`, `td2`.** A different axis entirely —
-`synthpass-bench --document-type td1|td2`, the per-format Tier-1 hit-rate gate
-over the *generated* corpus, not a real-specimen scope. `td3` has no
-dedicated track here because the existing `bench-data-collection.yml`
-scheduled workflow already covers it (TD3-only, run nightly, feeding
-`dataset.jsonl`); `td1`/`td2` have no such schedule yet, so `-Track td1`/
-`-Track td2` are the way to add a data point today. Flattened into the same
-`results/td1-bench/history.jsonl` / `results/td2-bench/history.jsonl` row
-shape as the real-specimen tracks: `hit_rate` → `read_ok_rate`,
+**Synthetic tracks (M6): `td1`, `td2`, `td3`.** A different axis entirely —
+`synthpass-bench --document-type td1|td2|td3`, the per-format Tier-1
+hit-rate gate over the *generated* corpus, not a real-specimen scope. Not
+to be confused with the `passport` track above, which scores real
+photographed specimens through `provider-bench` — same ICAO format as
+`td3`, entirely different corpus and binary; `mrz::Format` vs.
+`DocumentType::document_code()`'s inability to tell TD1 from TD2 is exactly
+the collision M6 spent its time untangling (see
+`knowledge/ROADMAP.md`'s M6 execution note), so the naming stays
+deliberately distinct here too.
+
+`td3` is a *second*, independent way to measure TD3: the existing
+`bench-data-collection.yml` scheduled workflow already covers it (run
+nightly, feeding a large `dataset.jsonl`, no `read_ok_rate`/trend-chart
+shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
+the same small, `-Count`/`-Seed`-controlled shape `td1`/`td2` already use,
+specifically so all three formats land in the same row shape for the
+per-format comparison chart below. The two don't duplicate each other's
+job.
+
+Flattened into `results/td1-bench/history.jsonl` /
+`results/td2-bench/history.jsonl` / `results/td3-bench/history.jsonl` —
+the same row shape as the real-specimen tracks: `hit_rate` → `read_ok_rate`,
 `provider_id` fixed at `"mrz"` (the only thing synthpass-bench measures —
 OCR + ICAO 9303 checksum, no per-provider comparison), and
 `field_match_rate`/`mean_cer`/`unsupported_assertion_rate` left `null` —

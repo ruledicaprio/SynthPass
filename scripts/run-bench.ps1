@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Runs provider-bench (real-specimen tracks) or synthpass-bench (td1/td2
+Runs provider-bench (real-specimen tracks) or synthpass-bench (td1/td2/td3
 synthetic tracks) scoped to one named "track", appends a flattened result to
 the bench-data branch's results/<track>-bench/history.jsonl, commits, and
 pushes -- then regenerates that track's trend chart locally.
@@ -11,19 +11,37 @@ Real-specimen tracks map to provider-bench's `--format` scoping:
   driving_license   --format driving_license (samples/driving_licenses/)
   real-specimens    (no --format)       the whole samples/ real corpus
 
+**`passport` above is not the same thing as the synthetic `td3` track
+below, despite both meaning "passport-shaped MRZ" in casual speech.**
+`passport` scores real photographed specimens under `samples/passports/`
+through `provider-bench`; `td3` scores synthpass-gen's own *generated* TD3
+corpus through `synthpass-bench` -- same ICAO format, two entirely
+different corpora and binaries. This exact collision is what M6 spent its
+time untangling (`mrz::Format` vs. `DocumentType::document_code()`, see
+knowledge/ROADMAP.md's M6 execution note) -- do not conflate the two tracks
+here just because the acronym overlaps.
+
 Synthetic tracks map to synthpass-bench's `--document-type` (the M6 per-format
 Tier-1 hit-rate gate, not a real-specimen scope -- see the M6 plan's "Add
 td1-bench / td2-bench tracks" step):
   td1               --document-type td1   (synthetic TD1 corpus)
   td2               --document-type td2   (synthetic TD2 corpus)
+  td3               --document-type td3   (synthetic TD3 corpus)
 
-The two synthetic tracks use a different binary and a different report
+The three synthetic tracks use a different binary and a different report
 shape (synthpass-bench's `hit_rate`, not provider-bench's per-provider
 accuracy stats) -- flattened into the *same* history.jsonl row shape as the
 real-specimen tracks (`hit_rate` -> `read_ok_rate`, `provider_id` fixed at
 `"mrz"`, `field_match_rate`/`mean_cer`/`unsupported_assertion_rate` left
 `$null` since synthpass-bench doesn't measure them) so the one `bench-chart`
 binary still serves every track without new tooling.
+
+`td3` here is a *second*, independent way to measure the same TD3 format
+`.github/workflows/bench-data-collection.yml` already covers nightly into
+`dataset.jsonl` -- that workflow's corpus and this track's
+`results/td3-bench/history.jsonl` are different files serving different
+purposes (a large nightly Tier-1 dataset vs. a small `-Track td1/td2`-shaped
+trend point for the per-format comparison chart), not a duplicate schedule.
 
 This is the local, manual counterpart to .github/workflows/bench-data-
 collection.yml (which runs synthpass-bench against TD3 only, on a
@@ -46,8 +64,10 @@ embedded).
 
 .PARAMETER Track
 Which benchmark track to run: passport, id_card, driving_license,
-real-specimens, td1, or td2. The last two are synthetic (synthpass-bench),
-everything else is a real-specimen provider-bench track.
+real-specimens, td1, td2, or td3. The last three are synthetic
+(synthpass-bench), everything else is a real-specimen provider-bench track
+-- see the module doc comment above for why `passport` and `td3` are not
+the same thing despite both being "passport-shaped MRZ".
 
 .PARAMETER Limit
 Cap on how many specimens to run (provider-bench --limit), applied after
@@ -103,7 +123,7 @@ Override the row's recorded invocation string (only meaningful with
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("passport", "id_card", "driving_license", "real-specimens", "td1", "td2")]
+    [ValidateSet("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3")]
     [string]$Track,
     [int]$Limit = 0,
     [int]$Count = 100,
@@ -118,7 +138,7 @@ param(
 # Synthetic (synthpass-bench, per-format Tier-1 hit rate) vs real-specimen
 # (provider-bench, --format-scoped samples/) track -- decides which binary
 # step 1 runs and which report shape step 1.5 flattens.
-$isSyntheticTrack = $Track -in @("td1", "td2")
+$isSyntheticTrack = $Track -in @("td1", "td2", "td3")
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
