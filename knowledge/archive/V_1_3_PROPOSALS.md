@@ -1,6 +1,6 @@
 # This document contains proposals that should be implemented along DIE (Document Intelligence Engine)
 
-> **Superseded in part (2026-08-02).** [`ROADMAP.md`](ROADMAP.md)'s M7 section is the current,
+> **Superseded in part (2026-08-02).** [`ROADMAP.md`](../ROADMAP.md)'s M7 section is the current,
 > shipped Document Intelligence Engine plan and explicitly rejects this doc's vision-provider
 > push for v1.3.0 ("No vision-language model in v1.3.0 ... Moondream is a v1.4.0 spike"). Treat
 > the proposals below as historical brainstorming, not a current commitment.

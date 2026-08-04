@@ -2,13 +2,13 @@
 
 > **Editor's note.** This is the original proposal, kept in the author's voice.
 > It was adopted with variations — see
-> [decisions/ADR-0001-knowledge-tree.md](decisions/ADR-0001-knowledge-tree.md)
+> [decisions/ADR-0001-knowledge-tree.md](../decisions/ADR-0001-knowledge-tree.md)
 > for what was actually built and why it differs. Two differences matter when
 > reading the paths below: the proposed `architecture/` folder was not created
-> (that material lives in [ARCHITECTURE.md](ARCHITECTURE.md) and in
+> (that material lives in [ARCHITECTURE.md](../ARCHITECTURE.md) and in
 > `decisions/`), and `benchmarking/` shipped as
-> [benchmarks/](benchmarks/). Where this note and
-> [README.md](README.md) disagree, README.md describes the tree that exists.
+> [benchmarks/](../benchmarks/). Where this note and
+> [README.md](../README.md) disagree, README.md describes the tree that exists.
 
 We're making one of the highest ROI decisions for a long-lived project.
 

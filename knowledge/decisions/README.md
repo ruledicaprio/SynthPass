@@ -34,3 +34,5 @@ the record.
 | [0001](ADR-0001-knowledge-tree.md) | Adopt `knowledge/` as the documentation root | Accepted |
 | [0002](ADR-0002-provider-model-before-layout-plugins.md) | Build the provider model (M7) ahead of M6 | Accepted |
 | [0003](ADR-0003-docs9303-source-of-truth.md) | Adopt `knowledge/docs9303/` as the ICAO spec source of truth | Accepted |
+| [0004](ADR-0004-gpu-acceleration.md) | GPU acceleration as an optional, feature-gated path | Proposed |
+| [0005](ADR-0005-vision-provider-readiness.md) | Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF | Proposed |

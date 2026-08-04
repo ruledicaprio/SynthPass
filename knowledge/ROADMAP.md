@@ -3,9 +3,9 @@
 > **Status:** foundational document. This is the single linear execution blueprint for
 > SynthPass v2. It reconciles the two roadmaps that preceded it — the *Atlas* extraction
 > redesign (the now-removed `mlis_v2_0_0_preliminary_design.md` scratch notes) and the
-> synthetic-generation roadmap ([`synthpass_v2_0.md`](synthpass_v2_0.md)) — into one M1→M7
-> spine. Where those two disagree, **this file wins**; `synthpass_v2_0.md` remains as a design
-> record.
+> synthetic-generation roadmap ([`archive/synthpass_v2_0.md`](archive/synthpass_v2_0.md)) — into
+> one M1→M7 spine. Where those two disagree, **this file wins**; `synthpass_v2_0.md` remains as
+> a design record, archived (see [`archive/README.md`](archive/README.md)).
 >
 > Read [`VISION.md`](VISION.md) first for the *why*, and [`BRANDING.md`](BRANDING.md) for
 > naming and the crate-rename migration.
