@@ -197,8 +197,22 @@ flowchart LR
 
 ## Accuracy
 
-Full methodology, per-format and real-specimen numbers, and the live trend charts are in
-[knowledge/benchmarks/README.md](knowledge/benchmarks/README.md) — including the unflattering
+Every number below is measured, never estimated — rendered by `bench-chart` from the run history
+on the `bench-data` branch, so nothing here is hand-drawn or hand-edited.
+
+**Tier-1 hit rate on synthetic passports, over time.** Tier 1 is the deterministic path: OCR, then
+ICAO 9303 check-digit verification. A "hit" means the rendered image OCR'd back to a
+checksum-valid MRZ matching the ground truth — no model involved, no partial credit.
+
+![Tier-1 hit rate on the synthetic passport corpus](knowledge/img/passport-bench-trend.svg)
+
+**Real specimens**, which is the harder and more honest population — public specimen documents
+rather than our own renders:
+
+![Provider benchmark trend on the real-specimen corpus](knowledge/img/real-specimens-bench-trend.svg)
+
+Full methodology, per-format and real-specimen numbers, and the rest of the live trend charts are
+in [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md) — including the unflattering
 numbers, stated as plainly as the flattering ones; see
 [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4/M6 execution notes for the full account of how
 each figure was measured.
