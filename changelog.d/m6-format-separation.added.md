@@ -45,6 +45,6 @@
   `knowledge/decisions/ADR-0005-vision-provider-readiness.md` (new: `llama-cpp-2` 0.1.151
   already carries a real `mtmd` multimodal Rust API, gated behind an off-by-default feature, no
   version bump required — Moondream-specific support is unconfirmed, not proven). README trimmed
-  from 471 to under 130 lines, with its moved content now living in
+  from 471 to 295 lines, with its moved content now living in
   `knowledge/ARCHITECTURE.md`/`VISION.md`/`LICENSING.md`; several self-declared-superseded
   `knowledge/` docs moved to `knowledge/archive/`.
