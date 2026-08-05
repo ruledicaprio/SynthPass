@@ -115,7 +115,64 @@ block an unrelated milestone on whatever pre-existing findings it surfaces.
 
 ---
 
+### Nothing in CI exercises the real inference engine
+
+Both tests that load the actual GGUF — `synthpass-llm/tests/native_llm_e2e.rs` and
+`tests/parity.rs` — are `#[ignore]`, and the `Native LLM (real model, opt-in)` CI
+job skips. Everything CI runs against `synthpass-llm` type-checks or mocks. So a
+change that alters *what the model produces*, while compiling cleanly and passing
+all 28 unit tests, merges green.
+
+The `llama-cpp-2` 0.1.151 → 0.1.154 bump is the worked example. It vendors a new
+llama.cpp (b10200), decoding is `LlamaSampler::greedy()` and therefore
+deterministic, and new kernels are exactly what moves a greedy decode. CI had
+nothing to say about it. The bump turned out clean — verified by running `parity`
+on both versions on one machine (16/42 either way) — but *that verification was
+manual and nothing required it*. The next engine bump gets the same silence, and
+the person doing it may not think to check.
+
+**Consequence:** the accuracy of the shipped Tier-2 path is unguarded between
+releases. `synthpass-bench`'s CI gate covers Tier 1 (deterministic MRZ) and does
+not run the LLM.
+
+**Fix:** not simply "un-ignore them." They need the ~1 GB GGUF and ~4 minutes,
+which is why they are opt-in, and `SYNTHPASS_MODEL_PATH` bootstrapping is
+deliberately not a runtime fetch. The realistic shapes are a scheduled (not
+per-PR) workflow that provisions the weight and records `parity`'s rate as a
+tracked number, or a required manual checklist item on any PR touching
+`synthpass-llm`'s dependencies. Recording the rate over time is the more valuable
+half — a single pass/fail at a 25% floor would not have caught anything here
+either.
+
+**Estimated effort:** half a day for the scheduled workflow, plus whatever the
+weight-provisioning story costs in CI.
+
 ## Low
+
+### `ROADMAP.md`'s 45.2% parity baseline no longer reproduces
+
+`ROADMAP.md`'s M5 execution note records the GBNF parity run's field match rate
+as **45.2%** (~19/42). Running `parity` on `main` today gives **16/42 (38.1%)**,
+on the same fixtures and the same floor.
+
+This is not a regression from any recent change — it reproduces identically at
+0.1.151 and 0.1.154, so the engine bump is not responsible. The likeliest
+explanation is that the fixture set moved out from under the recorded number when
+`samples/` was reorganised and the corpus gained TD1/TD2 rendering, but **that is
+a guess, and guessing is how the number went stale in the first place.**
+
+**Consequence:** a recorded baseline that does not reproduce reads as a live
+regression to whoever next runs the test. It already cost one investigation: the
+0.1.154 bump was held back from review while a control run ruled the bump out as
+the cause.
+
+**Fix:** re-run `parity`, record the number with the date and the corpus state
+that produced it, and say in `ROADMAP.md` which corpus each figure belongs to.
+Deliberately not folded into the bump PR that found it — that PR's claim is "this
+changes nothing," and quietly editing a baseline inside it would undercut exactly
+that claim.
+
+**Estimated effort:** an hour, most of it the test run.
 
 ### `ProviderId` is `&'static str`
 
