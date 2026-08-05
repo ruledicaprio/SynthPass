@@ -18,6 +18,13 @@ input path.
 - **Open-set recognition** — distilled from `papers/`: what the OSR literature
   offers a document pipeline that must reject the unknown rather than
   force-classify it.
+- **Recognition-engine candidates** — what would replace or sit beside
+  `ocrs`/`rten`, and on what measured evidence. The live proposal is PaddleOCR's
+  PP-OCRv5 converted ONNX → `.rten` (no onnxruntime, so no C++ dependency),
+  wanted less for accuracy than because decoding CTC ourselves is what turns the
+  `text_sanity` proxy above into a real per-character score. See
+  [`../research/long-horizon-parsing.md`](../research/long-horizon-parsing.md) §2
+  — and note it is a bake-off first, not a swap.
 
 ## The question every note answers
 
