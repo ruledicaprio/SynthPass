@@ -182,8 +182,14 @@ if (Test-Path $worktree) {
     git worktree remove $worktree --force 2>$null
 }
 
-git fetch origin samples-data 2>$null
-git ls-remote --exit-code --heads origin samples-data | Out-Null
+# Explicit refspec + a check on the local ref, for the reason spelled out in
+# scripts/run-bench.ps1's matching block: `git ls-remote` asks the server, while
+# `git worktree add origin/samples-data` needs the remote-tracking ref to exist
+# here. Under CI's shallow single-branch checkout those disagree. This script
+# happened to survive that where run-bench.ps1 did not; the difference was luck,
+# not design, so both now do the same thing.
+git fetch origin "+refs/heads/samples-data:refs/remotes/origin/samples-data" 2>$null
+git rev-parse --verify --quiet refs/remotes/origin/samples-data | Out-Null
 $branchExists = ($LASTEXITCODE -eq 0)
 
 if ($branchExists) {
