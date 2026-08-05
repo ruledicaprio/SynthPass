@@ -140,4 +140,13 @@ fn main() {
          country codes, date plausibility, name charset) and hands the rest to Tier-2. The\n  \
          oracle is honest about its own edges."
     );
+    println!(
+        "\n  NOTE: every sweep above substitutes ONE character, by construction. Real misreads\n  \
+         mostly are not — measured on a real corpus, only 25 of 76 document-number mismatches\n  \
+         differed in a single character. Across several positions the shift is the SUM of\n  \
+         weight*delta, so substitutions caught individually can cancel: two O<->0 at weights 7\n  \
+         and 3 give 24*(7+3) = 240 = 0 mod 10, invisible, though each alone is caught. The\n  \
+         cross-class safety this sweep shows is therefore a per-swap property, not a per-\n  \
+         character one. See knowledge/benchmarks/checksum-blindspots-measured-2026-08-05.md."
+    );
 }
