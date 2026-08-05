@@ -257,8 +257,20 @@ if (Test-Path $worktree) {
     git worktree remove $worktree --force 2>$null
 }
 
-git fetch origin bench-data 2>$null
-git ls-remote --exit-code --heads origin bench-data | Out-Null
+# Name the destination ref explicitly. A bare `git fetch origin bench-data`
+# updates refs/remotes/origin/bench-data only when `remote.origin.fetch` happens
+# to cover it, and CI's `actions/checkout` narrows that refspec to main alone
+# (--depth=1, single branch), so the remote-tracking ref is never created there.
+git fetch origin "+refs/heads/bench-data:refs/remotes/origin/bench-data" 2>$null
+
+# Branch on the LOCAL ref, not on `git ls-remote`. ls-remote answers "does this
+# branch exist on the server"; the line below consumes a remote-tracking ref in
+# *this* repo. A shallow single-branch CI checkout makes those two disagree, and
+# the old check took the wrong arm: `git worktree add origin/bench-data` then
+# died with `fatal: invalid reference` — an hour into the run, after the bench
+# had already completed, with the surfaced error being a confusing
+# `Push-Location: cannot find path` from the worktree that was never created.
+git rev-parse --verify --quiet refs/remotes/origin/bench-data | Out-Null
 if ($LASTEXITCODE -eq 0) {
     git worktree add $worktree origin/bench-data | Out-Null
     Push-Location $worktree

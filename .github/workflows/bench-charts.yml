@@ -147,6 +147,22 @@ jobs:
             }
           }
 
+      # `if: always()` is the whole point: the 2026-08-03 failure came *after*
+      # an hour of benching, with the reports written and then thrown away when
+      # the runner was destroyed. Keeping them turns "re-run the whole job" into
+      # `run-bench.ps1 -Track <t> -FromReport <file>`, which the script already
+      # supports for exactly this. Cheap insurance -- these are tens of KB.
+      - name: Preserve the raw bench reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-reports-${{ github.run_id }}
+          path: |
+            synthpass-bench-report.json
+            provider-bench-report.json
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Open a PR if any chart changed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
