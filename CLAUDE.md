@@ -129,13 +129,11 @@ LLMs are the last stage.
 
 They should
 
-repair
+1. repair
+2. infer
+3. normalize
 
-infer
-
-normalize
-
-never replace deterministic parsing.
+LLMs never replace deterministic parsing
 
 ---
 
