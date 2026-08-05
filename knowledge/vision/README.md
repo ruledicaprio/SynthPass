@@ -12,17 +12,18 @@ hidden: the interface exists and has zero vision implementations.
 true image → fields provider is new capability, not a refactor.
 
 **Corrected by [`../decisions/ADR-0005-vision-provider-readiness.md`](../decisions/ADR-0005-vision-provider-readiness.md):**
-this section used to say that because `llama-cpp-2` is pinned at `0.1.151` with
-only the `sampler` feature, "there are no mmproj/mtmd bindings in the tree."
-That conflated *not enabled* with *not present*. ADR-0005 checked the pinned
-crate's own source: `mtmd` is a declared, off-by-default feature **at 0.1.151**,
+this section used to say that because `llama-cpp-2` is pinned with only the
+`sampler` feature, "there are no mmproj/mtmd bindings in the tree." That
+conflated *not enabled* with *not present*. ADR-0005 checked the pinned crate's
+own source: `mtmd` is a declared, off-by-default feature at the pinned version,
 no version bump required, and it is a ~980-line safe Rust wrapper, not a bare
-FFI surface. What is missing is the flag, not the binding.
+FFI surface. What is missing is the flag, not the binding. (Established at
+0.1.151, re-verified when the pin moved to 0.1.154.)
 
 ## What belongs here
 
 - **The mmproj/mtmd spike** — the *paper* half of this is answered: ADR-0005
-  established that `llama-cpp-2` 0.1.151 can, in principle, drive a multimodal
+  established that the pinned `llama-cpp-2` can, in principle, drive a multimodal
   GGUF, with no version bump and no patching of `llama-cpp-sys-2`. What remains
   is the empirical half — enabling the feature and running weights through
   `MtmdContext` on the target CPU envelope.
