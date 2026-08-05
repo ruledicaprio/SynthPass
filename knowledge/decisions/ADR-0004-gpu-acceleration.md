@@ -219,11 +219,14 @@ verification, not folded into this one's LLM-only, verified proposal.
   GPU-equipped runner or manual verification before every release that touches
   `synthpass-llm`'s GPU-feature code — an ongoing maintenance cost this ADR does not yet
   have a concrete answer for.
-- **`llama-cpp-2` is pinned at 0.1.151; 0.1.153 is the latest available on crates.io as of
-  this writing.** Not a blocker — the `cuda`/`vulkan`/`mtmd` features this ADR and
-  ADR-0005 rely on are already present at 0.1.151 — but a version bump should happen
-  before (or as part of) any real implementation PR, checked against that PR's own
-  `cargo update -p llama-cpp-2` diff rather than assumed compatible here.
+- ~~**`llama-cpp-2` is pinned at 0.1.151; 0.1.153 is the latest available on crates.io as
+  of this writing.**~~ **Done — the pin is now 0.1.154** (vendoring llama.cpp b10200).
+  This was never a blocker: the `cuda`/`vulkan`/`mtmd` features this ADR and ADR-0005
+  rely on were already present at 0.1.151 and remain present at 0.1.154. The bump was
+  taken on its own, checked against its own `cargo update -p llama-cpp-2` diff as this
+  note asked — lockfile movement was confined to the two llama crates. 0.1.154's three
+  ported upstream API breaks do not reach this workspace; see the bump's commit message
+  and ADR-0005's version note for the itemised reasoning.
 - **`rten` GPU support remains completely unscoped.** This ADR explicitly does not claim
   a path exists; a customer expecting OCR speedup from "GPU acceleration" would not get
   one from what this ADR proposes.
