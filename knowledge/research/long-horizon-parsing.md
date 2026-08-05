@@ -133,13 +133,24 @@ swap, and not a swap behind a feature flag either.
 
 ---
 
-## 3. Unlimited-OCR as a vision-provider candidate — real, but blocked upstream of itself
+## 3. Unlimited-OCR as a vision-provider candidate — and the runway is shorter than it looks
 
-[`vision/README.md`](../vision/README.md#what-belongs-here) names the open
-question: can `llama-cpp-2` drive a multimodal GGUF at a usable version, or does
-that mean patching `llama-cpp-sys-2`? This model is a legitimate candidate for
-that spike, and it belongs on the candidate list for two reasons the others do
-not share.
+[`vision/README.md`](../vision/README.md#what-belongs-here) framed the open
+question as: can `llama-cpp-2` drive a multimodal GGUF at a usable version, or
+does that mean patching `llama-cpp-sys-2`?
+[`ADR-0005`](../decisions/ADR-0005-vision-provider-readiness.md) has since
+answered the paper half of it, and the answer is more permissive than the
+framing assumed: `mtmd` is a declared **off-by-default feature at the exact
+0.1.151 pin** — no version bump, no patching `llama-cpp-sys-2` — and it ships a
+~980-line safe Rust wrapper (`MtmdContext::init_from_file(mmproj_path)`,
+`support_vision()`, `MtmdBitmap::from_file`, `tokenize`/`encode_chunk`,
+`eval_chunks`), not a bare FFI surface.
+
+So the cost of *trying* a vision provider is enabling a feature flag, not
+building a binding. That changes this item's economics: it is the one proposal
+here whose blocker turned out to be smaller than advertised. This model is a
+legitimate candidate for that spike, and it belongs on the candidate list for
+two reasons the others do not share.
 
 **For.** The weights are **MIT** — no research-licence problem, the thing that
 disqualified Qwen2.5-3B. And it activates **0.5B parameters** of a 3B MoE per
@@ -148,10 +159,11 @@ build that is the difference between a candidate and a curiosity. DeepSeek-OCR
 support reached llama.cpp (PR #17400), and community GGUF quantisations of
 Unlimited-OCR with `mmproj` projectors exist.
 
-**Against.** `llama-cpp-2` is pinned at `0.1.151` with only the `sampler`
-feature, so there are no mtmd bindings in this tree — **the spike is still the
-blocker, and it is a property of our dependency, not of this model.** Picking a
-candidate does not advance it. Separately: whether llama.cpp implements R-SWA is
+**Against.** The remaining unknowns are empirical, not structural. ADR-0005 did
+the source inspection, not a run: nothing has yet loaded weights through
+`MtmdContext` on our CPU envelope, and the ADR is careful that its own module
+doc is flagged *"experimental and subject to breaking changes."* Whether
+llama.cpp implements R-SWA is
 unverified and most likely it does not, so a GGUF run would use ordinary
 attention. For one page that is fine — but be clear that it makes the paper's
 mechanism irrelevant to the deployment, leaving only the DeepSeek-OCR baseline

@@ -8,15 +8,24 @@ As of v1.3.0 there is **no vision provider**. `Capability.vision` is `false` for
 every registered provider, and that is stated as the deliverable rather than
 hidden: the interface exists and has zero vision implementations.
 
-`synthpass-llm` today is text-only — it consumes OCR Markdown, not pixels — and
-`llama-cpp-2` is pinned at `0.1.151` with only the `sampler` feature, so there
-are no mmproj/mtmd bindings in the tree. A true image → fields provider is new
-capability, not a refactor.
+`synthpass-llm` today is text-only — it consumes OCR Markdown, not pixels. A
+true image → fields provider is new capability, not a refactor.
+
+**Corrected by [`../decisions/ADR-0005-vision-provider-readiness.md`](../decisions/ADR-0005-vision-provider-readiness.md):**
+this section used to say that because `llama-cpp-2` is pinned at `0.1.151` with
+only the `sampler` feature, "there are no mmproj/mtmd bindings in the tree."
+That conflated *not enabled* with *not present*. ADR-0005 checked the pinned
+crate's own source: `mtmd` is a declared, off-by-default feature **at 0.1.151**,
+no version bump required, and it is a ~980-line safe Rust wrapper, not a bare
+FFI surface. What is missing is the flag, not the binding.
 
 ## What belongs here
 
-- **The mmproj/mtmd spike** — can `llama-cpp-2` drive a multimodal GGUF at a
-  usable version, or does that mean patching `llama-cpp-sys-2`?
+- **The mmproj/mtmd spike** — the *paper* half of this is answered: ADR-0005
+  established that `llama-cpp-2` 0.1.151 can, in principle, drive a multimodal
+  GGUF, with no version bump and no patching of `llama-cpp-sys-2`. What remains
+  is the empirical half — enabling the feature and running weights through
+  `MtmdContext` on the target CPU envelope.
 - **Candidate models** — Moondream2, Qwen2.5-VL, Gemma3 Vision, SmolVLM,
   InternVL — with weights licence and CPU-decode latency on the target hardware,
   not just leaderboard scores. Add **Unlimited-OCR** (Baidu, Jun 2026) to that
