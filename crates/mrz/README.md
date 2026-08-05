@@ -309,6 +309,19 @@ provably undetectable; any substitution *across* rows is caught.
 empirically — it mutates the ICAO specimen character by character and asks the
 real parser, rather than asserting the algebra at you.
 
+**The table above is per-swap, not per-character.** `blindspot` classifies *one*
+substitution, and real misreads mostly are not one: measured over a corpus of 76
+document-number mismatches, only 25 differed in a single character. Across
+several positions the shift is `Σ Δᵢ·wᵢ (mod 10)`, so substitutions that are
+individually **caught** can cancel each other. Two O↔0 at weights 7 and 3 give
+`24·(7+3) = 240 ≡ 0` — invisible, though each alone is caught. In that corpus
+the undetectable set was in fact *dominated* by pairs this table calls caught,
+O↔0 most of all.
+
+So read the table as "which single swaps are safe", and do not infer that a
+character listed as caught is safe wherever it appears. The closed-form law is
+exact; its scope is a single substitution.
+
 ### Structural guards
 
 Because the arithmetic has a known blind set, the crate layers structural
