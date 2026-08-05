@@ -5,9 +5,17 @@ Source academic material, kept as reference. Distilled findings go in
 
 ## Contents
 
-Five of the six are open-set recognition (OSR). OSR matters here because a
-document pipeline must be able to reject an input rather than force it into the
-nearest known class — the same posture as `fusion::Verdict::NeedsReview`.
+Seven files, two reasons to be here.
+
+**Six are about knowing what you don't know.** Five are open-set recognition
+(OSR) proper; the sixth (crowd counting) reaches the same posture by a different
+route. OSR matters here because a document pipeline must be able to reject an
+input rather than force it into the nearest known class — the same posture as
+`fusion::Verdict::NeedsReview`.
+
+**One is about recognition itself.** `Unlimited_OCR_Works.md` is an end-to-end
+OCR paper, and it is here because the OCR engine is a live design question, not
+because it fits the OSR theme. Do not read the OSR framing onto it.
 
 | File | What it argues |
 |---|---|
@@ -17,10 +25,16 @@ nearest known class — the same posture as `fusion::Verdict::NeedsReview`.
 | `Classification_Reconstruction_Learning_for_OSR.md` | CVPR 2019 (CROSR). Joint classification + reconstruction; rejection distance computed on concatenated prediction and latent representations. |
 | `Understanding_OSR_by_Jacobian_Norm_and_Inter_Class_Separation.md` | Pattern Recognition 2023. Theory for *why* closed-set training alone yields some OSR capability. |
 | `Counting_Objects_by_Spatial_Divide-and-Conquer.md` | S-DCNet (ICCV 2019). Not OSR classification — crowd counting — but the *same* structural move: an unbounded open-set quantity is made tractable by recursively subdividing until every sub-region falls inside the closed set the model was trained on, then summing. Read it for the decomposition strategy, not the counting. |
+| `Unlimited_OCR_Works.md` | Baidu, Jun 2026. **The one non-OSR paper.** Replaces every decoder attention layer with Reference Sliding Window Attention: each generated token sees *all* reference tokens (the visual tokens and prompt) but only the preceding 128 output tokens, so the KV cache stays constant and dozens of pages parse in one forward pass. The headline is long-horizon parsing, which a one-page passport does not need — **the reason to read it is that R-SWA also beat the DeepSeek-OCR baseline on single pages** (+6.22 overall, OmniDocBench v1.5), and that its data-engine section describes exactly the training-corpus format `synthpass-gen` could emit. Code and weights are MIT. Distilled in [`../research/long-horizon-parsing.md`](../research/long-horizon-parsing.md). |
 
 `figures/` holds figures extracted from the papers, prefixed with the filename
 of the paper they came from. (It held only the ICLR paper's figures under the
-name `figures_TOWARDS_UNIFIED_OSR/` until a second paper needed one.)
+name `figures_TOWARDS_UNIFIED_OSR/` until a second paper needed one.) The prefix
+is the rule; what follows it is not. Most files carry a `_pN_figureM` infix
+recording the page they were lifted from, but `Unlimited_OCR_Works_Fig1.png`
+and its two siblings are numbered by the paper's own figure numbering instead,
+which is what that paper labels them. Either is fine — the prefix is what makes
+the folder navigable.
 
 Two files carry `<img src="./figures/...">` references to plots that were never
 extracted — `Understanding_OSR_by_Jacobian_Norm_and_Inter_Class_Separation.md`

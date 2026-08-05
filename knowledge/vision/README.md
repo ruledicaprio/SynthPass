@@ -19,7 +19,13 @@ capability, not a refactor.
   usable version, or does that mean patching `llama-cpp-sys-2`?
 - **Candidate models** — Moondream2, Qwen2.5-VL, Gemma3 Vision, SmolVLM,
   InternVL — with weights licence and CPU-decode latency on the target hardware,
-  not just leaderboard scores.
+  not just leaderboard scores. Add **Unlimited-OCR** (Baidu, Jun 2026) to that
+  list on two facts: its weights are **MIT**, and it activates 0.5B parameters of
+  a 3B MoE per token, which is CPU-plausible where a dense 3B is not. It is also
+  a document *parser* rather than a field extractor, so it lands on the wrong
+  side of the line below — see
+  [`../research/long-horizon-parsing.md`](../research/long-horizon-parsing.md) §3
+  before treating it as a candidate for anything.
 - **The narrow-ask design** — the strongest idea in the design notes: don't send
   a VLM the whole image and ask "extract this document." Send it the OCR text,
   the detected MRZ, bounding boxes, and an explicit list of missing fields, and
