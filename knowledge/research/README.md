@@ -23,10 +23,17 @@ source.
 
 ## Current source material
 
-`../papers/` holds five open-set-recognition papers. OSR is relevant because a
-document pipeline must be able to say *"I don't know"* rather than force a read
-into the nearest known class — the same posture as
-`fusion::Verdict::NeedsReview`. Of the five, the closest to actionable are the
-unified-OSR uncertainty-fusion result and the gradient-based unknown detector.
+`../papers/` holds seven papers: six on open-set recognition and the related
+divide-and-conquer decomposition, and one on end-to-end OCR.
 
-None have been distilled yet.
+OSR is relevant because a document pipeline must be able to say *"I don't know"*
+rather than force a read into the nearest known class — the same posture as
+`fusion::Verdict::NeedsReview`. Of those six, the closest to actionable are the
+unified-OSR uncertainty-fusion result and the gradient-based unknown detector.
+**Neither has been distilled yet.**
+
+## Notes
+
+| Note | Source | The one idea |
+|---|---|---|
+| [long-horizon-parsing.md](long-horizon-parsing.md) | `../papers/Unlimited_OCR_Works.md` | The paper's headline (dozens of pages in one forward pass) is irrelevant to a one-page passport. Its *data engine* is not: it describes the training-corpus format a `synthpass-gen` export should adopt. Carries the PaddleOCR-via-`rten` proposal and the case for Unlimited-OCR as a vision-provider candidate. |
