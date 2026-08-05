@@ -7,9 +7,11 @@ target/
 # Local OCR model weights (ocrs/rten — ~12 MB, auto-downloaded per README)
 *.rten
 
-# synthpass-bench's generated JSON reports — generated, not hand-edited/committed
-bench-report*.json
-provider-bench-report*.json
+# synthpass-bench's generated JSON reports — generated, not hand-edited/committed.
+# Leading wildcard is load-bearing: the runner writes `synthpass-bench-report.json`
+# (scripts/run-bench.ps1), which a bare `bench-report*.json` does not match — that
+# file leaked into `git status` on every run until this was fixed.
+*bench-report*.json
 
 # Web app upload/working directory (may contain uploaded PII)
 work/
