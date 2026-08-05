@@ -33,8 +33,11 @@ ships. Nothing here authorizes writing GPU code today.
   flag below is spelled against `llama-cpp-sys-2`, not `llama-cpp-sys`.
 - Performance budgets: `SYNTHPASS_ENGINEERING_CONSTITUTION.md` §15 — OCR < 700 ms,
   LLM repair < 2 s, end-to-end < 3 s (typical).
-- M4 Tier-1 hit rate: **the original draft's "Currently 68%" line is not a number found
-  anywhere in this repo.** `knowledge/ROADMAP.md`'s M4 entry records the measured,
+- M4 Tier-1 hit rate: **the original draft's "Currently 68%" line is not in version
+  control, and is not the canonical baseline.** (This sentence originally read "is not a
+  number found anywhere in this repo," which was too strong — see the amendment under
+  point 4 below. It was reproducible; it was just never committed.)
+  `knowledge/ROADMAP.md`'s M4 entry records the measured,
   honestly-reported figure as **~55% (100-seed, clean profile) as of PR #30**, with a 30%
   CI floor. This ADR cites that figure and no other. (A much smaller ad hoc sample taken
   while drafting this ADR — 30 seeds, TD3, clean profile, `synthpass-bench` — measured
@@ -66,8 +69,26 @@ than against `rten`'s/`llama-cpp-2`'s documentation in the abstract:
    directly to the matching `llama-cpp-sys-2` feature (e.g. `cuda = ["llama-cpp-sys-2/
    cuda"]`). This is the one part of the original draft's GPU story that was actually
    right, once the crate name is corrected.
-4. **The "68% Tier-1 hit-rate" figure has no citation and does not match ROADMAP.md.**
-   See above.
+4. **The "68% Tier-1 hit-rate" figure is not the canonical baseline and does not match
+   ROADMAP.md.** See above.
+
+   **Amended 2026-08-05.** This point originally read "has no citation and does not match
+   ROADMAP.md," which overshot. The figure was not invented: a `bench-report.json` sat
+   untracked in the repo root — **2026-07-30 00:59:46 UTC, `--count 50 --seed 0 --profile
+   clean`, `hits: 34`, `hit_rate: 0.68`** — reproducing 68% exactly. That is CI's own
+   invocation (`.github/workflows/ci.yml`'s accuracy-gate step), so the draft's author had
+   run the gate locally and quoted the result.
+
+   The substantive objection is unchanged and still correct: a 50-seed clean-profile run
+   is not ROADMAP's 100-seed baseline, so citing it as "currently 68%" was wrong. But the
+   file was gitignored and never committed, which is why nobody could find it — "no
+   citation" was fair as to *provenance in the tree* and unfair as to *fabrication*. The
+   artifact has since been deleted as repo-root clutter; its numbers are recorded here so
+   the provenance survives the file.
+
+   Worth keeping as a method note: "I could not find it" and "it does not exist" are
+   different claims, and an untracked file sitting in the working tree is exactly the gap
+   between them.
 
 The original draft's broken References section (linking
 `SYNTHPASS_ENGINEERING_CONSTITUTION.md` and `ROADMAP.md` as if this file lived at the

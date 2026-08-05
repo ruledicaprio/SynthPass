@@ -18,9 +18,32 @@
 //! 10. The quiet pairs K↔`<`, I↔S, B↔L and A↔K are **blind**, and no amount
 //! of check-digit arithmetic will ever separate them.
 //!
+//! # The law is pairwise; real misreads usually are not
+//!
+//! Everything above is stated for **one** substituted character, which is what
+//! [`blindspot`] takes and all this module can express. Measured against a real
+//! corpus, only about a third of document-number misreads are single-character
+//! (25 of 76; see
+//! `knowledge/benchmarks/checksum-blindspots-measured-2026-08-05.md`).
+//!
+//! Across k substituted positions the sum shifts by `Σ Δᵢ·wᵢ (mod 10)`, so
+//! individually-**caught** substitutions cancel one another. The common case is
+//! two O↔0 at weights 7 and 3: `24·(7+3) = 240 ≡ 0`. Separately each is caught
+//! (`24·7 ≡ 8`, `24·3 ≡ 2`); together they are invisible. In a 9-character
+//! document number the weights run 7,3,1,7,3,1,7,3,1, so that (7,3) pairing
+//! recurs at positions (0,1), (3,4) and (6,7) — structural, not a fluke.
+//!
+//! So read the paragraph above as *"which single swaps are safe"*, not as
+//! *"which characters are safe"*. Empirically the undetectable set is dominated
+//! by the pairs called caught there — O↔0 alone accounts for 44 of those 76 rows
+//! — precisely because they arrive in combinations. Of the quiet pairs named as
+//! the real danger, exactly one K↔`<` appears in the whole corpus.
+//!
 //! This is why the crate layers structural guards on top of the arithmetic
 //! (recognized country codes, date plausibility, name charset): the oracle is
-//! exact, and it is exact about its own edges too.
+//! exact, and it is exact about its own edges too. It is a strong *filter* — it
+//! rejects most misreads — and a weak *oracle*: what it passes is not a random
+//! remainder but specifically what the arithmetic cannot see.
 //!
 //! ```
 //! use mrz::{blindspot, Blindspot};
