@@ -153,3 +153,41 @@ consumer that cares can compare the two itself.
 **Fix:** none planned — adding provenance to v1 would defeat the point of the
 legacy shape. This entry exists so the mixing is a recorded decision rather than
 a surprise.
+
+### We build `llama-cpp-2`'s `common` feature for one try/catch
+
+`common` is on because it is in `llama-cpp-2`'s default feature set, not because
+anything chose it — `crates/synthpass-llm/Cargo.toml` asks only for `sampler`. It
+sets `LLAMA_BUILD_COMMON=ON` in llama.cpp's CMake and compiles the crate's
+`wrapper_common.cpp`, so it is not free in build time or binary size.
+
+From `llama-cpp-2` 0.1.154's `src/sampling.rs`, the only part of it this codebase
+reaches is `LlamaSampler::grammar`, which compiles to a different call per
+feature:
+
+```rust
+#[cfg(feature = "common")]      llama_rs_sampler_init_grammar(...)   // crate shim
+#[cfg(not(feature = "common"))] llama_sampler_init_grammar(...)      // raw upstream
+```
+
+and that shim is `try { llama_sampler_init_grammar(...) } catch (...) { return
+nullptr; }`. Same sampler; the difference is a C++ exception guard. Without
+`common`, an exception thrown during grammar init unwinds across an `extern "C"`
+boundary instead of arriving at `synthpass-llm/src/lib.rs:76` as
+`Err(GrammarError::NullGrammar)`. Since 0.1.154 (PR #1086) the grammar samplers
+work without `common` at all, so dropping it is now merely *possible* — which is
+exactly why this needs writing down before someone reads that release note as an
+invitation.
+
+**Consequence:** we pay build time and binary size — including in the musl
+single-file air-gapped release — for an exception guard on a grammar that
+`grammar.rs` generates from a Rust const and that therefore should never be
+malformed. "Should never" is what the guard is for.
+
+**Decision:** keep `common`. §2's priority order puts correctness and security
+above performance, and binary size is not on the list at all; trading a safety
+net for bytes inverts that. Revisit only with a measured size delta *and* a
+reason the guard is redundant — not on the strength of the size number alone.
+
+**Estimated effort:** 10 minutes to change, which is the trap. The measurement
+and the argument are the work.

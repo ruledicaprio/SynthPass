@@ -29,16 +29,30 @@ reputation for supporting vision models:**
 
 ### Version and feature flags
 
-- `crates/synthpass-llm/Cargo.toml` pins `llama-cpp-2 = { version = "0.1.151", features =
+- `crates/synthpass-llm/Cargo.toml` pins `llama-cpp-2 = { version = "0.1.154", features =
   ["sampler"] }`. No multimodal feature is enabled today.
-- `llama-cpp-2` 0.1.151 declares an `mtmd` feature: `mtmd = ["llama-cpp-sys-2/mtmd"]`.
-  Not on by default; nothing in the current dependency tree activates it. **Enabling it
-  requires no version bump** — `mtmd` already exists at the exact version this repo pins.
-- The latest published `llama-cpp-2` as of this writing is 0.1.153 (`cargo info
-  llama-cpp-2`), two patch releases ahead of the 0.1.151 pin. Not required for anything
-  below — `mtmd` is present at 0.1.151 already — but worth taking as a normal opportunistic
-  bump before any spike work starts, checked against that bump's own diff rather than
-  assumed safe here.
+- `llama-cpp-2` declares an `mtmd` feature: `mtmd = ["llama-cpp-sys-2/mtmd"]`. Not on by
+  default; nothing in the current dependency tree activates it. **Enabling it requires no
+  version bump** — `mtmd` already exists at the exact version this repo pins.
+
+> **Version note (updated when the pin moved 0.1.151 → 0.1.154).** This ADR was written
+> against 0.1.151 and asked for an opportunistic bump before any spike work started. That
+> bump has now happened, and it is worth recording *why it did not invalidate anything
+> below*, because 0.1.154's release notes lead with "port 3 breaking API changes" and two
+> of the three are in mtmd — which reads, at a glance, as though this inventory had rotted.
+>
+> It had not. Those two changes (`mtmd_input_text` gaining a required `text_len`; the
+> bitmap-from-file/buffer helpers returning a wrapper struct instead of a bare pointer)
+> are in the **raw `llama-cpp-sys-2` FFI layer** and were absorbed inside the safe wrapper.
+> `src/mtmd.rs` at 0.1.154 is 987 lines — this ADR said "roughly 980" at 0.1.151 — and
+> every entry point catalogued below still exists under the same name and role. The third
+> break (`use_mlock`/`use_mmap` → a single `load_mode` enum) keeps all four public
+> accessors' signatures and defaults, and is not multimodal at all.
+>
+> The lesson worth keeping is the one this ADR already practised: the answer came from the
+> pinned crate's own vendored source, not from its release notes. Read that way, "3
+> breaking API changes" was a description of upstream churn the wrapper had already
+> handled, not a warning to us.
 
 ### What the `mtmd` feature actually provides
 

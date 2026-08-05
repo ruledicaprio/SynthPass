@@ -141,10 +141,12 @@ does that mean patching `llama-cpp-sys-2`?
 [`ADR-0005`](../decisions/ADR-0005-vision-provider-readiness.md) has since
 answered the paper half of it, and the answer is more permissive than the
 framing assumed: `mtmd` is a declared **off-by-default feature at the exact
-0.1.151 pin** — no version bump, no patching `llama-cpp-sys-2` — and it ships a
-~980-line safe Rust wrapper (`MtmdContext::init_from_file(mmproj_path)`,
+version already pinned** — no version bump, no patching `llama-cpp-sys-2` — and
+it ships a ~980-line safe Rust wrapper (`MtmdContext::init_from_file(mmproj_path)`,
 `support_vision()`, `MtmdBitmap::from_file`, `tokenize`/`encode_chunk`,
-`eval_chunks`), not a bare FFI surface.
+`eval_chunks`), not a bare FFI surface. That was established at the 0.1.151 pin
+and re-verified at 0.1.154 when the pin moved: same entry points, same roles,
+987 lines. The claim is about the crate, not about one version of it.
 
 So the cost of *trying* a vision provider is enabling a feature flag, not
 building a binding. That changes this item's economics: it is the one proposal
