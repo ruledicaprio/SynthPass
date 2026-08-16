@@ -442,6 +442,83 @@ flowchart LR
   date, per this note's own standing advice: future rate changes should be compared against
   *this* number, not the original 45.2%, and any future rerun should likewise record its own
   commit alongside the rate rather than being trusted indefinitely.
+- **M6 — first-ever MRVA/MRVB per-format measurement, and a real cross-format name-parsing bug
+  found and fixed along the way.** `synthpass-gen` has emitted MRV-A/MRV-B since `3637f5d`, and
+  `MrzReader` gained provider-level specimen tests for both (alongside TD1/TD2) in `f36df5c` — but
+  until now no bench run had ever recorded a hit-rate number for either format, unlike
+  TD1/TD2/TD3 above.
+
+  First measurement (30 seeds, `--profile clean`, seed 42), Tier-1 hit rate, alongside a same-day
+  TD3 re-run for a same-commit baseline:
+
+  | Format | Hit rate | |
+  |---|---|---|
+  | MRV-B | **93.3%** (28/30) | 2 `checksum_failed` |
+  | MRV-A | **86.7%** (26/30) | 2 `checksum_failed`, 2 `document_number_mismatch` |
+  | TD3 (`f36df5c`, re-run for comparison) | 76.7% (23/30) | matches the 76.7% recorded above |
+
+  Hit rate lands clean on the first try for both — TD2/TD3's pattern, not TD1's — consistent with
+  `layout.rs`: MRV-A's watermark-to-MRZ-line gap is 191px and MRV-B's is 145px (MRV-B's canvas is
+  byte-for-byte TD2's own geometry), nowhere near TD1's former 8px squeeze, and both formats'
+  two-line scan in `crates/mrz/src/parser.rs` already carried the gap-tolerant/merged-line logic
+  TD1 was missing. Hit rate was never the concern here.
+
+  **Per-field CER was**, and this *was* a fresh finding, not an already-understood one: `given_names`
+  63.5%/76.7% and `surname` 47.0%/64.7% (MRV-A/MRV-B) — high enough to root-cause rather than wave
+  off as "line 1 is never check-digit-covered, so noise is expected." `synthpass-bench --dump-ocr
+  --document-type mrva --count 5 --seed 42` showed the actual mechanism directly: OCR routinely
+  drops **one** of the two `<` filler characters in the `<<` primary/secondary name separator —
+  `ESKANDARI<<MAREN` read as `ESKANDARIMAREN` (both dropped) or `KIRSCHNER<LUCA` (one dropped) — and
+  `clean_name` (`crates/mrz/src/parser.rs`) required a literal `"<<"` to split at all. No match, no
+  split: the *entire* field became `surname`, and `given_names` silently went to `""`. A **distinct**
+  failure mode from the crate's existing `fix_name_separator` repair, which only catches `<`
+  *misread as* `K` (a `KK` pair) — dropped-outright and misread-as-K produce different bytes, and
+  the existing repair only watches for one of them. This is shared code, not MRV-specific:
+  `clean_name` backs TD1/TD2/TD3/MRV-A/MRV-B alike, and the same-day TD3 baseline had the identical
+  mechanism (confirmed via the same `--dump-ocr` comparison against `ESKANDARI`/`MAREN` at the same
+  seed) — it had simply never been chased to a cause before now.
+
+  **Fix**: `clean_name` falls back to a single `<` when no `<<` survives (new fallback branch,
+  `crates/mrz/src/parser.rs`) — recovers the "one filler dropped" case, which dominates the observed
+  failures; the rarer "both dropped" case has no separator evidence left at all and stays
+  unrecoverable by construction (pinned, not silently guessed at — see
+  `a_fully_collapsed_separator_is_not_recoverable_and_must_not_be_silently_guessed` below). Safe for
+  this crate's own synthetic corpus specifically because `synthpass-gen`'s name pools
+  (`SURNAMES`/`GIVEN_NAMES_M`/`GIVEN_NAMES_F`, `crates/synthpass-gen/src/data.rs`) are all
+  single-token — no legitimate internal `<` ever competes with the fallback. Against a real compound
+  name (`DE<LA<CRUZ<<MARIA` losing its `<<`) the fallback is a best-effort guess, not a proof — which
+  is exactly why `FieldConfidence` never rates a name field above `MRZ_STRUCTURAL` (0.9) regardless
+  of which branch produced it, fix or no fix. Four regressions in
+  `crates/mrz/tests/name_separator_collapse.rs` pin this: MRV-A, MRV-B, and TD3 each recover the
+  split after a collapsed separator, and a fourth test pins the known unrecoverable case so a future
+  change doesn't start guessing with zero evidence.
+
+  Measured before/after (30 documents, `--seed 42 --profile clean`, before `f36df5c` / after this
+  fix), mean CER — hit rate is unchanged in every row, as expected, since the name field was never
+  what gated a Tier-1 hit:
+
+  | Format | `given_names` CER | `surname` CER | line-1 integrity findings (of hits) |
+  |---|---|---|---|
+  | MRV-A | 63.5% → **30.7%** | 47.0% → **15.5%** | 46.2% (12/26) → **23.1%** (6/26) |
+  | MRV-B | 76.7% → **24.3%** | 64.7% → **18.7%** | 82.1% (23/28) → **50.0%** (14/28) |
+  | TD3 | 63.9% → **25.1%** | 57.5% → **29.4%** | 87.0% (20/23) → **82.6%** (19/23) |
+
+  More than halved on every format for both fields, without moving hit rate or touching any other
+  field's check digit. **Not closed**: `document_type`/`issuing_country` CER is untouched by this
+  fix (still 6.7%–76.7% across formats, same before and after) — a VIZ-zone single/short-field OCR
+  legibility question, unrelated to the MRZ name-separator mechanism above, and not investigated
+  here. Nor does this fix the fully-collapsed-separator case (both fillers dropped, no `<` left at
+  all) — that remains the same already-documented line-1 blind spot TD1's note describes, just with
+  a smaller share of the failures landing in it now.
+
+  **MRV-A/MRV-B verify a narrower surface than TD1/TD2/TD3, and the hit-rate table above should be
+  read accordingly.** ICAO 9303 Part 7 defines no personal-number check digit and no composite
+  check digit for visas — `crates/mrz/src/parser.rs`'s `parse_mrv_a_with`/`parse_mrv_b_with`
+  hardcode `checks.personal_number = true` and `checks.composite = true` (vacuous, not measured)
+  — so only 3 of the 5 `Field` check digits gate an MRV hit (`document_number`, `date_of_birth`,
+  `date_of_expiry`), against TD1/TD2's 4 and TD3's 5. MRV-A's/MRV-B's higher hit rates are not a
+  claim that these formats are read more reliably than TD3 in any absolute sense — they are a
+  claim over a smaller set of checked fields.
 
 ## M7 — Document Intelligence Engine
 

@@ -134,11 +134,33 @@ fn opt_string(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
+/// Split a name field on the ICAO 9303 primary/secondary identifier
+/// separator `<<`. Falls back to a single `<` when no `<<` survives OCR —
+/// a real, measured failure mode distinct from [`fix_name_separator`]'s `<`
+/// misread as `KK`: OCR sometimes drops one of the two filler characters
+/// outright rather than misreading it, collapsing `SURNAME<<GIVEN` to
+/// `SURNAME<GIVEN` with no `KK` anywhere for that repair to catch. Before
+/// this fallback, that single dropped character sent `given_names` to `""`
+/// unconditionally — first measured on MRV-A/MRV-B (`given_names` CER
+/// 63.5%/76.7% at first measurement, 30 seeds, `--profile clean`, seed 42;
+/// see `knowledge/ROADMAP.md`'s M6 section) but present on every format that
+/// calls this function, since none of them check-digit-cover line 1's name
+/// field to begin with. The fallback is unambiguous for this crate's own
+/// generated corpus (`synthpass-gen`'s `SURNAMES`/`GIVEN_NAMES_M`/
+/// `GIVEN_NAMES_F` are single tokens, never containing an internal `<`), but
+/// is a best-effort guess against a real-world compound name (e.g. `DE<LA
+/// <CRUZ<<MARIA` losing its `<<` down to `<` is indistinguishable from a
+/// compound *surname*'s own internal `<`) — never claimed as proven, since
+/// `FieldConfidence` never rates a name field above `MRZ_STRUCTURAL` (0.9)
+/// regardless of which branch below produced it.
 fn clean_name(field: &str) -> (String, String) {
     let trimmed = field.trim_end_matches('<');
     let (surname, given) = match trimmed.split_once("<<") {
         Some((s, g)) => (s, g),
-        None => (trimmed, ""),
+        None => match trimmed.split_once('<') {
+            Some((s, g)) => (s, g),
+            None => (trimmed, ""),
+        },
     };
     (
         surname.replace('<', " ").trim().to_string(),
