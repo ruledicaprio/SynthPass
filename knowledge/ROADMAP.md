@@ -442,6 +442,136 @@ flowchart LR
   date, per this note's own standing advice: future rate changes should be compared against
   *this* number, not the original 45.2%, and any future rerun should likewise record its own
   commit alongside the rate rather than being trusted indefinitely.
+- **M6 — first-ever MRVA/MRVB per-format measurement, and a real cross-format name-parsing bug
+  found and fixed along the way.** `synthpass-gen` has emitted MRV-A/MRV-B since `3637f5d`, and
+  `MrzReader` gained provider-level specimen tests for both (alongside TD1/TD2) in `f36df5c` — but
+  until now no bench run had ever recorded a hit-rate number for either format, unlike
+  TD1/TD2/TD3 above.
+
+  First measurement (30 seeds, `--profile clean`, seed 42), Tier-1 hit rate, alongside a same-day
+  TD3 re-run for a same-commit baseline:
+
+  | Format | Hit rate | |
+  |---|---|---|
+  | MRV-B | **93.3%** (28/30) | 2 `checksum_failed` |
+  | MRV-A | **86.7%** (26/30) | 2 `checksum_failed`, 2 `document_number_mismatch` |
+  | TD3 (`f36df5c`, re-run for comparison) | 76.7% (23/30) | matches the 76.7% recorded above |
+
+  Hit rate lands clean on the first try for both — TD2/TD3's pattern, not TD1's — consistent with
+  `layout.rs`: MRV-A's watermark-to-MRZ-line gap is 191px and MRV-B's is 145px (MRV-B's canvas is
+  byte-for-byte TD2's own geometry), nowhere near TD1's former 8px squeeze, and both formats'
+  two-line scan in `crates/mrz/src/parser.rs` already carried the gap-tolerant/merged-line logic
+  TD1 was missing. Hit rate was never the concern here.
+
+  **Per-field CER was**, and this *was* a fresh finding, not an already-understood one: `given_names`
+  63.5%/76.7% and `surname` 47.0%/64.7% (MRV-A/MRV-B) — high enough to root-cause rather than wave
+  off as "line 1 is never check-digit-covered, so noise is expected." `synthpass-bench --dump-ocr
+  --document-type mrva --count 5 --seed 42` showed the actual mechanism directly: OCR routinely
+  drops **one** of the two `<` filler characters in the `<<` primary/secondary name separator —
+  `ESKANDARI<<MAREN` read as `ESKANDARIMAREN` (both dropped) or `KIRSCHNER<LUCA` (one dropped) — and
+  `clean_name` (`crates/mrz/src/parser.rs`) required a literal `"<<"` to split at all. No match, no
+  split: the *entire* field became `surname`, and `given_names` silently went to `""`. A **distinct**
+  failure mode from the crate's existing `fix_name_separator` repair, which only catches `<`
+  *misread as* `K` (a `KK` pair) — dropped-outright and misread-as-K produce different bytes, and
+  the existing repair only watches for one of them. This is shared code, not MRV-specific:
+  `clean_name` backs TD1/TD2/TD3/MRV-A/MRV-B alike, and the same-day TD3 baseline had the identical
+  mechanism (confirmed via the same `--dump-ocr` comparison against `ESKANDARI`/`MAREN` at the same
+  seed) — it had simply never been chased to a cause before now.
+
+  **Fix**: `clean_name` falls back to a single `<` when no `<<` survives (new fallback branch,
+  `crates/mrz/src/parser.rs`) — recovers the "one filler dropped" case, which dominates the observed
+  failures; the rarer "both dropped" case has no separator evidence left at all and stays
+  unrecoverable by construction (pinned, not silently guessed at — see
+  `a_fully_collapsed_separator_is_not_recoverable_and_must_not_be_silently_guessed` below). Safe for
+  this crate's own synthetic corpus specifically because `synthpass-gen`'s name pools
+  (`SURNAMES`/`GIVEN_NAMES_M`/`GIVEN_NAMES_F`, `crates/synthpass-gen/src/data.rs`) are all
+  single-token — no legitimate internal `<` ever competes with the fallback. Against a real compound
+  name (`DE<LA<CRUZ<<MARIA` losing its `<<`) the fallback is a best-effort guess, not a proof — which
+  is exactly why `FieldConfidence` never rates a name field above `MRZ_STRUCTURAL` (0.9) regardless
+  of which branch produced it, fix or no fix. Four regressions in
+  `crates/mrz/tests/name_separator_collapse.rs` pin this: MRV-A, MRV-B, and TD3 each recover the
+  split after a collapsed separator, and a fourth test pins the known unrecoverable case so a future
+  change doesn't start guessing with zero evidence.
+
+  Measured before/after (30 documents, `--seed 42 --profile clean`, before `f36df5c` / after this
+  fix), mean CER — hit rate is unchanged in every row, as expected, since the name field was never
+  what gated a Tier-1 hit:
+
+  | Format | `given_names` CER | `surname` CER | line-1 integrity findings (of hits) |
+  |---|---|---|---|
+  | MRV-A | 63.5% → **30.7%** | 47.0% → **15.5%** | 46.2% (12/26) → **23.1%** (6/26) |
+  | MRV-B | 76.7% → **24.3%** | 64.7% → **18.7%** | 82.1% (23/28) → **50.0%** (14/28) |
+  | TD3 | 63.9% → **25.1%** | 57.5% → **29.4%** | 87.0% (20/23) → **82.6%** (19/23) |
+
+  More than halved on every format for both fields, without moving hit rate or touching any other
+  field's check digit. Nor does this fix the fully-collapsed-separator case (both fillers dropped,
+  no `<` left at all) — that remains the same already-documented line-1 blind spot TD1's note
+  describes, just with a smaller share of the failures landing in it now.
+
+  **`document_type`/`issuing_country` CER, corrected: this was never a VIZ-zone question — it was
+  the same TD1 mechanism, ungeneralized.** An earlier version of this note called the elevated
+  CER here (6.7%–76.7% across formats) "a VIZ-zone single/short-field OCR legibility question...
+  not investigated" — wrong, and worth correcting in place rather than leaving standing.
+  `synthpass-bench`'s `document_type`/`issuing_country` accessors (`crates/synthpass-bench/src/
+  lib.rs`) read `mrz::MrzData` fields sourced *entirely* from MRZ line 1 on both the truth and got
+  sides — the VIZ text-box rects in `layout.rs` are never consulted. The real mechanism: TD1
+  already has a fix (`repair_td1_line1_unshifted`) for OCR dropping line 1's position-1 filler
+  outright (`P<BRA...` read as `PBRA...`, shifting `issuing_country` and everything after it one
+  position left) — but TD1 needed the fix because TD1's own document-number check digit lives on
+  line 1, making the shift break checksums. **TD3/TD2/MRV-A/MRV-B have no check digit on line 1 at
+  all**, so the identical corruption was silent — never a checksum failure, just a wrong
+  `document_type`/`issuing_country` sitting behind a passing Tier-1 hit — and the fix was never
+  generalized to them.
+
+  A straight port of TD1's fix doesn't work here, and shipping the first attempt would have been a
+  mistake: TD1 tries the unshifted reading as a *second candidate*, with its own line-1 checksum
+  deciding which one (if either) is real. TD3/TD2/MRV-A/MRV-B have no such checksum to arbitrate
+  with, so `consider()` (`crates/mrz/src/parser.rs`) accepts the *first* checksum-passing
+  line-1/line-2 combination regardless of what line 1 says. A first version applied the unshift
+  *unconditionally inside* `repair_td3_line1`/`repair_mrv_line1` (safe in principle for these three
+  formats specifically, since their document code is unambiguously single-letter-plus-filler, no
+  genuine two-letter variant modeled anywhere in this crate — unlike TD1/TD2's `"ID"`/`"AC"`-style
+  codes). Measured against a real 30-seed TD3 corpus, that version fixed the CER to 0% but
+  **dropped Tier-1 hit rate from 76.7% to 63.3%** — confirmed as a real, reproducible regression
+  (not the run-to-run OCR-timing contention artifact already documented above) via a same-binary
+  A/B env-var toggle. The mechanism: `variants()` (`crates/mrz/src/checksum.rs`) builds
+  `[repaired, fitted, last_resort]` per candidate and deduplicates by exact string equality;
+  mutating what `repaired` is (rather than adding it via a second, independent `variants()` call)
+  also changes what `last_resort = aggressive_defiller(&repaired)` evaluates to, silently dropping
+  a previously-tried, load-bearing candidate in some cases instead of only adding a new one.
+
+  **Shipped fix**: the unshift is a genuine second candidate — `repair_td3_line1_unshifted`/
+  `repair_mrv_a_line1_unshifted`/`repair_mrv_b_line1_unshifted` — tried via its own `variants()`
+  call, *before* the ordinary repair at every TD3/MRV-A/MRV-B call site in `find_and_parse_with`
+  (ordering matters: since nothing arbitrates, whichever candidate is tried first wins whenever
+  both parse). This keeps the search space a strict superset of the unmodified pipeline's, so hit
+  rate cannot regress by construction. TD2 is explicitly excluded (see `repair_td2_line1`'s own
+  doc comment) — it shares TD1's genuine two-letter document-code family with no checksum
+  backstop to disambiguate a wrong unshift, a harder case deferred rather than silently skipped.
+  Four regressions in `crates/mrz/tests/line1_prefix_shift.rs` pin the recovery for TD3/MRV-A/
+  MRV-B and confirm a genuine TD2 two-letter code (`"IP"`) survives untouched.
+
+  Measured before/after (30 documents, `--seed 42 --profile clean`), same day:
+
+  | Format | Hit rate | `document_type` CER | `issuing_country` CER |
+  |---|---|---|---|
+  | TD3 | 76.7% (unchanged) | 76.67% → **23.33%** | 52.22% → **16.67%** |
+  | MRV-A | 86.7% (unchanged) | 6.67% → **0.00%** | 4.44% → **0.00%** |
+  | MRV-B | 93.3% (unchanged) | 40.00% → **3.33%** | 26.67% → **2.22%** |
+
+  Zero hit-rate cost on any format, MRV-A fully closed, TD3/MRV-B substantially improved but not
+  closed — some corrupted readings still win over the unshifted candidate when both parse
+  structurally, since nothing on line 1 discriminates between them once neither fails a checksum.
+  A partial, hit-rate-safe improvement, not a claim of completeness.
+
+  **MRV-A/MRV-B verify a narrower surface than TD1/TD2/TD3, and the hit-rate table above should be
+  read accordingly.** ICAO 9303 Part 7 defines no personal-number check digit and no composite
+  check digit for visas — `crates/mrz/src/parser.rs`'s `parse_mrv_a_with`/`parse_mrv_b_with`
+  hardcode `checks.personal_number = true` and `checks.composite = true` (vacuous, not measured)
+  — so only 3 of the 5 `Field` check digits gate an MRV hit (`document_number`, `date_of_birth`,
+  `date_of_expiry`), against TD1/TD2's 4 and TD3's 5. MRV-A's/MRV-B's higher hit rates are not a
+  claim that these formats are read more reliably than TD3 in any absolute sense — they are a
+  claim over a smaller set of checked fields.
 
 ## M7 — Document Intelligence Engine
 
