@@ -1,11 +1,17 @@
 # duobango_mrz_field_reference.md
 
 Distilled from Doubango's `ultimateMRZ-SDK` docs, MRZ parser page:
-<https://www.doubango.org/SDKs/mrz/docs/MRZ_parser.html>. Kept as a
+<https://www.doubango.org/SDKs/mrz/docs/MRZ_parser.html>, plus the
+check-digit section below from a sibling SDK's docs tree that republishes the
+same content:
+<https://www.doubango.org/SDKs/kyc-documents-verif/docs/MRZ.html>. Kept as a
 **secondary cross-check on a third-party SDK's field layout, not a source of
-truth** — ICAO 9303 remains canonical (`docs/icao9303-source-of-truth`). The
-raw scrape this was distilled from has been deleted; re-fetch the URL above
-if the source page needs rechecking.
+truth** — ICAO 9303 remains canonical ([`knowledge/docs9303/`](../docs9303/)). The
+raw scrapes this was distilled from have been deleted; re-fetch the URLs
+above if the source pages need rechecking. (2026-08-16: mapped the rest of
+doubango.org — everything else is other SDKs (face recognition, ANPR, MICR,
+credit-card OCR), pricing/marketing, or the same Sphinx-templated boilerplate
+repeated across doc trees; nothing else cleared the 80/20 filter.)
 
 ## Document-type detection heuristic
 
@@ -110,3 +116,44 @@ Line 2 — `([A-Z0-9<]{9})([0-9]{1})([A-Z]{3})([0-9]{6})([0-9]{1})([M|F|X|<]{1})
 
 Same shape as MRVA line 2, shorter optional-data field (group 9) to fit the
 36-char line.
+
+## Check-digit algorithm (secondary cross-check)
+
+Doubango republishes the same MRZ content (field tables + a "Data validation"
+section not present on the `MRZ_parser.html` page above) under a second SDK's
+docs tree: <https://www.doubango.org/SDKs/kyc-documents-verif/docs/MRZ.html>.
+Same site template, same underlying content — worth citing only for this one
+addition, the check-digit implementation:
+
+- **Weights**: repeating cycle `7, 3, 1` applied left to right over the
+  digits being checked.
+- **Character mapping**: `0`–`9` → their own value, `A`–`Z` → `10`–`35`,
+  `<` → `0`.
+- **Check digit**: `(sum of digit × weight) mod 10`.
+
+Position ranges (0-indexed, inclusive) each check digit covers, per format —
+useful as a cross-check against `crates/mrz`'s own offsets:
+
+| Format | Field | Line | Positions checked | Check-digit position |
+|---|---|---|---|---|
+| TD1 | Document number | 0 | 5–13 | 14 |
+| TD1 | Date of birth | 1 | 0–5 | 6 |
+| TD1 | Date of expiry | 1 | 8–13 | 14 |
+| TD1 | Composite (upper+middle lines) | 0/1 | line 0: 5–29; line 1: 0–6, 8–14, 18–28 | line 1, position 29 |
+| TD2 | Document number | 1 | 0–8 | 9 |
+| TD2 | Date of birth | 1 | 13–18 | 19 |
+| TD2 | Date of expiry | 1 | 21–26 | 27 |
+| TD2 | Composite | 1 | 0–9, 13–19, 21–34 | 35 |
+| TD3 | Document (passport) number | 1 | 0–8 | 9 |
+| TD3 | Date of birth | 1 | 13–18 | 19 |
+| TD3 | Date of expiry | 1 | 21–26 | 27 |
+| TD3 | Personal/optional number | 1 | 28–41 | 42 |
+| TD3 | Composite | 1 | 0–9, 13–19, 21–42 | 43 |
+| MRVA/MRVB | Document number | 1 | 0–8 | 9 |
+| MRVA/MRVB | Date of birth | 1 | 13–18 | 19 |
+| MRVA/MRVB | Date of expiry | 1 | 21–26 | 27 |
+
+MRVA/MRVB have no composite check digit — consistent with the "no overall
+check digit" note already above. All check digits reduce to the same ICAO
+9303 modulus-10/731-weighting scheme; this table only pins down the exact
+line/offset each one is computed over, per format.
