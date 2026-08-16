@@ -99,20 +99,6 @@ sink abstraction.
 **Estimated effort:** 2 days, and it should wait for a second streaming provider
 to exist so the abstraction is designed against two cases rather than one.
 
-### `deny.toml` and `about.toml` are policy files no CI job runs
-
-Both exist and are well-formed. Neither `cargo deny check` nor
-`cargo about generate` appears in any workflow — so the license allow-list and
-the advisory `yanked = "deny"` rule are enforced by memory.
-
-**Consequence:** a dependency with a disallowed license can land, and
-`THIRD_PARTY_NOTICES.md` can silently go stale.
-
-**Fix:** add a `deny` job. Deliberately not bundled into the M7 work — it would
-block an unrelated milestone on whatever pre-existing findings it surfaces.
-
-**Estimated effort:** 2 hours, plus unknown time to clear findings.
-
 ---
 
 ### Nothing in CI exercises the real inference engine
@@ -148,31 +134,6 @@ either.
 weight-provisioning story costs in CI.
 
 ## Low
-
-### `ROADMAP.md`'s 45.2% parity baseline no longer reproduces
-
-`ROADMAP.md`'s M5 execution note records the GBNF parity run's field match rate
-as **45.2%** (~19/42). Running `parity` on `main` today gives **16/42 (38.1%)**,
-on the same fixtures and the same floor.
-
-This is not a regression from any recent change — it reproduces identically at
-0.1.151 and 0.1.154, so the engine bump is not responsible. The likeliest
-explanation is that the fixture set moved out from under the recorded number when
-`samples/` was reorganised and the corpus gained TD1/TD2 rendering, but **that is
-a guess, and guessing is how the number went stale in the first place.**
-
-**Consequence:** a recorded baseline that does not reproduce reads as a live
-regression to whoever next runs the test. It already cost one investigation: the
-0.1.154 bump was held back from review while a control run ruled the bump out as
-the cause.
-
-**Fix:** re-run `parity`, record the number with the date and the corpus state
-that produced it, and say in `ROADMAP.md` which corpus each figure belongs to.
-Deliberately not folded into the bump PR that found it — that PR's claim is "this
-changes nothing," and quietly editing a baseline inside it would undercut exactly
-that claim.
-
-**Estimated effort:** an hour, most of it the test run.
 
 ### `ProviderId` is `&'static str`
 

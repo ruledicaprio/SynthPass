@@ -3,15 +3,20 @@
 `multi-level-id-strip` (MIT) bundles and builds on third-party open-source components.
 All are permissively licensed (MIT / Apache-2.0 / BSD / ISC) — no copyleft.
 
-> This file is hand-curated and, as of v1.0.0, still not independently verified against
-> `cargo about`'s version-exact output for `llama-cpp-2`/`ocrs`/`rten` — treat the table below as
-> a reliable *category* summary (all permissive, no copyleft), but regenerate the authoritative,
-> version-exact list before a release:
+> This file is hand-curated prose, not `cargo about`'s literal template output — that output is a
+> per-crate license-text dump (182 sections as of this check), useful as a legal artifact but not
+> as something to read. This summary's category claims **were independently verified against a
+> real `cargo about generate` run** (2026-08-16): `llama-cpp-2`/`ocrs`/`rten` are all present and
+> all permissively licensed, matching the table below. CI now runs `cargo about generate` on every
+> push (`.github/workflows/ci.yml`'s `cargo-about` job) and fails if any dependency's license falls
+> outside `about.toml`'s accept-list — that check caught `about.toml` itself being out of sync with
+> `deny.toml` (missing `NCSA`/`CDLA-Permissive-2.0`) the same day this note was last updated.
+>
+> To regenerate the raw per-crate dump yourself (not this file — see above):
 >
 > ```bash
-> cargo install cargo-about cargo-deny
-> cargo about generate about.hbs > THIRD_PARTY_NOTICES.md
-> cargo deny check licenses           # fail the build on any surprise copyleft
+> cargo install cargo-about --locked --features cli
+> cargo about generate about.hbs -o /tmp/third-party-licenses-raw.md
 > ```
 >
 > No Python dependencies remain in this project at all (removed in v0.7.5 along with the legacy

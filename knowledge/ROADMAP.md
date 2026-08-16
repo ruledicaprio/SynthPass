@@ -432,6 +432,16 @@ flowchart LR
   repeatedly in the corpus — `OO94XETJ5`→`0094XETJ5` (positions 1,2) and `OH39SQNOY`→`0H39SQN0Y`
   (positions 1,8) are both exactly this. No fix proposed here; recorded so the counter's blind
   spot is a known quantity rather than a surprise.
+- **The M5 GBNF parity baseline re-measured: 16/42 (38.1%) at commit `493010a` (2026-08-16),
+  not the 45.2% recorded above.** Reproduces identically whether or not the grammar is enabled
+  (`repair fallbacks: 0`), so this is not a regression from the GBNF work itself, and the
+  `llama-cpp-2` 0.1.151 → 0.1.154 bump was already ruled out separately (`technical_debt.md`
+  recorded 16/42 on both versions). The likeliest cause is that the fixture/corpus set moved out
+  from under the recorded 45.2% figure when `samples/` was reorganised and gained TD1/TD2
+  rendering — a guess, not confirmed, same as before. Recording this rerun with its commit and
+  date, per this note's own standing advice: future rate changes should be compared against
+  *this* number, not the original 45.2%, and any future rerun should likewise record its own
+  commit alongside the rate rather than being trusted indefinitely.
 
 ## M7 — Document Intelligence Engine
 
