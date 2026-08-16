@@ -1,15 +1,38 @@
-//! ICAO 9303 Machine Readable Zone parser with check-digit validation.
+//! ICAO 9303 Machine Readable Zone parser, emitter, and check-digit validator.
 //!
 //! Zero runtime dependencies so it compiles to native and `wasm32-unknown-unknown`
 //! targets alike. Supports:
 //! - **TD3** (passports): 2 lines × 44 characters
 //! - **TD2** (official travel documents / ID cards): 2 lines × 36 characters
 //! - **TD1** (ID cards): 3 lines × 30 characters
+//! - **MRV-A** (visas, passport-book size): 2 lines × 44 characters
+//! - **MRV-B** (visas, smaller size): 2 lines × 36 characters
 //!
 //! Check digits use the standard 7-3-1 weighting over the value mapping
 //! `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`. A field checksum that validates
 //! mathematically proves the OCR read is faithful to the printed document —
 //! no probabilistic model involved.
+//!
+//! ```
+//! let doc = mrz::parse_td3(
+//!     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+//!     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+//! ).unwrap();
+//!
+//! assert_eq!(doc.surname, "ERIKSSON");
+//! assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
+//!
+//! // Per-field proof, not a single boolean.
+//! assert!(doc.checks.document_number);
+//! assert!(doc.checks.composite);
+//! assert!(doc.valid()); // every check digit verified
+//! ```
+//!
+//! `parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other
+//! formats. See [`README.md`](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md)
+//! for the full walkthrough — free-text OCR scanning, emitting, long document
+//! numbers, national-character transliteration, and what a check digit
+//! cannot prove.
 //!
 //! The engine is split across (private) modules:
 //! - `checksum` — check-digit math and generic OCR-repair primitives
