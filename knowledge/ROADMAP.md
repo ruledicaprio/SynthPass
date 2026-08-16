@@ -504,12 +504,65 @@ flowchart LR
   | TD3 | 63.9% → **25.1%** | 57.5% → **29.4%** | 87.0% (20/23) → **82.6%** (19/23) |
 
   More than halved on every format for both fields, without moving hit rate or touching any other
-  field's check digit. **Not closed**: `document_type`/`issuing_country` CER is untouched by this
-  fix (still 6.7%–76.7% across formats, same before and after) — a VIZ-zone single/short-field OCR
-  legibility question, unrelated to the MRZ name-separator mechanism above, and not investigated
-  here. Nor does this fix the fully-collapsed-separator case (both fillers dropped, no `<` left at
-  all) — that remains the same already-documented line-1 blind spot TD1's note describes, just with
-  a smaller share of the failures landing in it now.
+  field's check digit. Nor does this fix the fully-collapsed-separator case (both fillers dropped,
+  no `<` left at all) — that remains the same already-documented line-1 blind spot TD1's note
+  describes, just with a smaller share of the failures landing in it now.
+
+  **`document_type`/`issuing_country` CER, corrected: this was never a VIZ-zone question — it was
+  the same TD1 mechanism, ungeneralized.** An earlier version of this note called the elevated
+  CER here (6.7%–76.7% across formats) "a VIZ-zone single/short-field OCR legibility question...
+  not investigated" — wrong, and worth correcting in place rather than leaving standing.
+  `synthpass-bench`'s `document_type`/`issuing_country` accessors (`crates/synthpass-bench/src/
+  lib.rs`) read `mrz::MrzData` fields sourced *entirely* from MRZ line 1 on both the truth and got
+  sides — the VIZ text-box rects in `layout.rs` are never consulted. The real mechanism: TD1
+  already has a fix (`repair_td1_line1_unshifted`) for OCR dropping line 1's position-1 filler
+  outright (`P<BRA...` read as `PBRA...`, shifting `issuing_country` and everything after it one
+  position left) — but TD1 needed the fix because TD1's own document-number check digit lives on
+  line 1, making the shift break checksums. **TD3/TD2/MRV-A/MRV-B have no check digit on line 1 at
+  all**, so the identical corruption was silent — never a checksum failure, just a wrong
+  `document_type`/`issuing_country` sitting behind a passing Tier-1 hit — and the fix was never
+  generalized to them.
+
+  A straight port of TD1's fix doesn't work here, and shipping the first attempt would have been a
+  mistake: TD1 tries the unshifted reading as a *second candidate*, with its own line-1 checksum
+  deciding which one (if either) is real. TD3/TD2/MRV-A/MRV-B have no such checksum to arbitrate
+  with, so `consider()` (`crates/mrz/src/parser.rs`) accepts the *first* checksum-passing
+  line-1/line-2 combination regardless of what line 1 says. A first version applied the unshift
+  *unconditionally inside* `repair_td3_line1`/`repair_mrv_line1` (safe in principle for these three
+  formats specifically, since their document code is unambiguously single-letter-plus-filler, no
+  genuine two-letter variant modeled anywhere in this crate — unlike TD1/TD2's `"ID"`/`"AC"`-style
+  codes). Measured against a real 30-seed TD3 corpus, that version fixed the CER to 0% but
+  **dropped Tier-1 hit rate from 76.7% to 63.3%** — confirmed as a real, reproducible regression
+  (not the run-to-run OCR-timing contention artifact already documented above) via a same-binary
+  A/B env-var toggle. The mechanism: `variants()` (`crates/mrz/src/checksum.rs`) builds
+  `[repaired, fitted, last_resort]` per candidate and deduplicates by exact string equality;
+  mutating what `repaired` is (rather than adding it via a second, independent `variants()` call)
+  also changes what `last_resort = aggressive_defiller(&repaired)` evaluates to, silently dropping
+  a previously-tried, load-bearing candidate in some cases instead of only adding a new one.
+
+  **Shipped fix**: the unshift is a genuine second candidate — `repair_td3_line1_unshifted`/
+  `repair_mrv_a_line1_unshifted`/`repair_mrv_b_line1_unshifted` — tried via its own `variants()`
+  call, *before* the ordinary repair at every TD3/MRV-A/MRV-B call site in `find_and_parse_with`
+  (ordering matters: since nothing arbitrates, whichever candidate is tried first wins whenever
+  both parse). This keeps the search space a strict superset of the unmodified pipeline's, so hit
+  rate cannot regress by construction. TD2 is explicitly excluded (see `repair_td2_line1`'s own
+  doc comment) — it shares TD1's genuine two-letter document-code family with no checksum
+  backstop to disambiguate a wrong unshift, a harder case deferred rather than silently skipped.
+  Four regressions in `crates/mrz/tests/line1_prefix_shift.rs` pin the recovery for TD3/MRV-A/
+  MRV-B and confirm a genuine TD2 two-letter code (`"IP"`) survives untouched.
+
+  Measured before/after (30 documents, `--seed 42 --profile clean`), same day:
+
+  | Format | Hit rate | `document_type` CER | `issuing_country` CER |
+  |---|---|---|---|
+  | TD3 | 76.7% (unchanged) | 76.67% → **23.33%** | 52.22% → **16.67%** |
+  | MRV-A | 86.7% (unchanged) | 6.67% → **0.00%** | 4.44% → **0.00%** |
+  | MRV-B | 93.3% (unchanged) | 40.00% → **3.33%** | 26.67% → **2.22%** |
+
+  Zero hit-rate cost on any format, MRV-A fully closed, TD3/MRV-B substantially improved but not
+  closed — some corrupted readings still win over the unshifted candidate when both parse
+  structurally, since nothing on line 1 discriminates between them once neither fails a checksum.
+  A partial, hit-rate-safe improvement, not a claim of completeness.
 
   **MRV-A/MRV-B verify a narrower surface than TD1/TD2/TD3, and the hit-rate table above should be
   read accordingly.** ICAO 9303 Part 7 defines no personal-number check digit and no composite
