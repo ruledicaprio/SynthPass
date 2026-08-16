@@ -253,6 +253,15 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
 /// Parse a TD2 MRZ: two lines of exactly 36 characters (ICAO 9303 part 6).
 /// Covers identity-card document codes (`I`/`A`/`C`); MRV-B visas share the
 /// geometry but lack a composite check digit and are not handled here.
+///
+/// ```
+/// let doc = mrz::parse_td2(
+///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+///     "D231458907UTO7408122F1204159<<<<<<<6",
+/// ).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_td2_with(line1, line2, &ParseOptions::default())
 }
@@ -319,6 +328,16 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
 
 /// Parse a TD1 (ID card) MRZ: three lines of exactly 30 characters
 /// (ICAO 9303 part 5).
+///
+/// ```
+/// let doc = mrz::parse_td1(
+///     "I<UTOD231458907<<<<<<<<<<<<<<<",
+///     "7408122F1204159UTO<<<<<<<<<<<6",
+///     "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+/// ).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn parse_td1(line1: &str, line2: &str, line3: &str) -> Result<MrzData, MrzError> {
     parse_td1_with(line1, line2, line3, &ParseOptions::default())
 }
@@ -402,6 +421,15 @@ pub fn parse_td1_with(
 /// Parse an MRV-A machine readable visa: two lines of exactly 44 characters
 /// (ICAO 9303 part 7). Geometry mirrors TD3 through the expiry check digit,
 /// but there is no personal-number field and no composite check digit.
+///
+/// ```
+/// let doc = mrz::parse_mrv_a(
+///     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
+/// ).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn parse_mrv_a(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_mrv_a_with(line1, line2, &ParseOptions::default())
 }
@@ -464,6 +492,15 @@ pub fn parse_mrv_a_with(
 /// Parse an MRV-B machine readable visa: two lines of exactly 36 characters
 /// (ICAO 9303 part 7). Geometry mirrors TD2 through the expiry check digit,
 /// but there is no personal-number field and no composite check digit.
+///
+/// ```
+/// let doc = mrz::parse_mrv_b(
+///     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+///     "L898902C<3UTO6908061F9406236ZE184226",
+/// ).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn parse_mrv_b(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_mrv_b_with(line1, line2, &ParseOptions::default())
 }
@@ -819,6 +856,16 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// most passing check digits — is returned with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
 /// escalate. [`MrzError::NotFound`] means nothing MRZ-shaped was found at all.
+///
+/// ```
+/// let text = "## PASSPORT\n\nsome OCR noise\n\n\
+///     P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+///     L898902C36UTO7408122F1204159ZE184226B<<<<<10\n\n\
+///     footer text";
+/// let doc = mrz::find_and_parse(text).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
     find_and_parse_with(text, &ParseOptions::default())
 }

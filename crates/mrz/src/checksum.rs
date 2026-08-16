@@ -22,6 +22,10 @@ pub(crate) fn char_value(c: char) -> Result<u32, MrzError> {
 /// The `mod 10` is what makes the oracle exact *and* bounded — see
 /// [`Blindspot`](crate::Blindspot) for the substitutions it provably cannot
 /// catch.
+///
+/// ```
+/// assert_eq!(mrz::check_digit("L898902C3").unwrap(), 6);
+/// ```
 pub fn check_digit(field: &str) -> Result<u32, MrzError> {
     const WEIGHTS: [u32; 3] = [7, 3, 1];
     let mut sum = 0u32;
@@ -33,6 +37,11 @@ pub fn check_digit(field: &str) -> Result<u32, MrzError> {
 
 /// Verify `field` against its printed check digit character.
 /// A `<` check digit counts as 0 (used for empty optional fields).
+///
+/// ```
+/// assert!(mrz::verify("L898902C3", '6'));
+/// assert!(!mrz::verify("L898902C3", '0'));
+/// ```
 pub fn verify(field: &str, digit: char) -> bool {
     match (check_digit(field), char_value(digit)) {
         (Ok(expected), Ok(got)) => expected == got && (digit.is_ascii_digit() || digit == '<'),

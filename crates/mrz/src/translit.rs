@@ -184,6 +184,14 @@ pub fn transliterate_char(c: char, style: TransliterationStyle) -> Option<&'stat
 /// Uppercase `s` and replace every Table A character with its `style`
 /// transliteration. Characters outside Table A pass through **unchanged**
 /// (uppercased). This performs no MRZ filler handling and no truncation.
+///
+/// ```
+/// use mrz::{transliterate, TransliterationStyle};
+///
+/// // ICAO 9303 Part 3 Appendix B's own worked example.
+/// assert_eq!(transliterate("Térèsa", TransliterationStyle::XxSuffix), "TERESA");
+/// assert_eq!(transliterate("CAÑON", TransliterationStyle::XxSuffix), "CANXXON");
+/// ```
 pub fn transliterate(s: &str, style: TransliterationStyle) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {

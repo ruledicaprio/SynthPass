@@ -25,6 +25,13 @@ use serde::{Deserialize, Serialize};
 /// nothing about which century a two-digit year belongs to — checked, not
 /// assumed: the corpus has no century-inference rule anywhere, for any
 /// document type.
+///
+/// ```
+/// use mrz::expand_date;
+///
+/// assert_eq!(expand_date("740812", true), "1974-08-12"); // birth date
+/// assert_eq!(expand_date("120415", false), "2012-04-15"); // expiry: always 20xx
+/// ```
 pub fn expand_date(yymmdd: &str, is_birth: bool) -> String {
     // Two-digit year pivot for the 19xx/20xx decision on birth dates. Kept as a
     // single constant for auditability; callers wanting an explicit pivot can
@@ -153,12 +160,26 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Date {
+    /// Full (not two-digit) calendar year, e.g. `2026`.
     pub year: i32,
+    /// Month, 1-12. Not validated at construction — see [`is_well_formed`](Date::is_well_formed).
     pub month: u32,
+    /// Day of month, 1-31. Not validated at construction — see [`is_well_formed`](Date::is_well_formed).
     pub day: u32,
 }
 
 impl Date {
+    /// Build a date from its components. Does not validate — an out-of-range
+    /// `month`/`day` constructs successfully; call [`is_well_formed`](Date::is_well_formed)
+    /// to check.
+    ///
+    /// ```
+    /// use mrz::Date;
+    ///
+    /// let d = Date::new(2012, 4, 15);
+    /// assert!(d.is_well_formed());
+    /// assert!(!Date::new(2023, 2, 30).is_well_formed()); // no such day
+    /// ```
     pub fn new(year: i32, month: u32, day: u32) -> Self {
         Self { year, month, day }
     }
