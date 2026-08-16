@@ -265,6 +265,32 @@ mod tests {
     const SPECIMEN: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
                             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
+    /// Same Utopia/Eriksson identity reshaped into TD1's 3-line layout (Part
+    /// 5's own examples are images in the source PDF, not extractable text;
+    /// this zone is corroborated by cross-part agreement with the TD2
+    /// specimen below — same document number, dates, and name). Mirrors
+    /// `crates/mrz/src/lib.rs`'s `TD1_L1`/`TD1_L2`/`TD1_L3`.
+    const TD1_SPECIMEN: &str = "I<UTOD231458907<<<<<<<<<<<<<<<\n\
+                                7408122F1204159UTO<<<<<<<<<<<6\n\
+                                ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+
+    /// The official ICAO 9303 Part 6 TD2 specimen, published verbatim as
+    /// text (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`).
+    /// Mirrors `crates/mrz/src/lib.rs`'s `TD2_L1`/`TD2_L2`.
+    const TD2_SPECIMEN: &str = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\n\
+                                D231458907UTO7408122F1204159<<<<<<<6";
+
+    /// ICAO 9303 Part 7's own published MRV-A specimen
+    /// (`knowledge/docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md`).
+    /// Mirrors `crates/mrz/src/lib.rs`'s `MRV_A_ICAO_L1`/`MRV_A_ICAO_L2`.
+    const MRV_A_SPECIMEN: &str = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+                                  L898902C<3UTO6908061F9406236ZE184226B<<<<<<<";
+
+    /// ICAO 9303 Part 7's own published MRV-B specimen, same appendix as
+    /// above. Mirrors `crates/mrz/src/lib.rs`'s `MRV_B_ICAO_L1`/`MRV_B_ICAO_L2`.
+    const MRV_B_SPECIMEN: &str = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\n\
+                                  L898902C<3UTO6908061F9406236ZE184226";
+
     /// Drives an `async fn` without a runtime — proof, not convenience: a
     /// provider must be usable by a caller that has no executor, which is why
     /// `synthpass-die` does not depend on tokio.
@@ -397,5 +423,90 @@ mod tests {
             observed > 0,
             "the ICAO specimen contains characters with mod-10 collisions"
         );
+    }
+
+    /// `mrz::find_and_parse` is not TD3-scoped — this proves the *provider*
+    /// (not just the underlying parser) correctly reads, tags, and
+    /// checksum-verifies TD1, whose 3-line shape is the one most likely to
+    /// trip up code that assumes 2 lines.
+    #[test]
+    fn reads_the_icao_td1_specimen_and_reports_valid_checksums() {
+        let reading = read(TD1_SPECIMEN);
+        assert!(reading.evidence.mrz_found);
+        assert!(reading.evidence.mrz_checksums_valid);
+        assert_eq!(reading.evidence.mrz_format, Some(MrzFormat::Td1));
+
+        let fields = &reading.extraction.fields;
+        assert_eq!(fields.get(CoreField::Surname), Some("ERIKSSON"));
+        assert_eq!(fields.get(CoreField::DocumentNumber), Some("D23145890"));
+        assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
+        assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
+        assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+    }
+
+    /// TD1's permanent, structural limitation: no check digit covers line 3
+    /// (surname/given_names) or either optional-data field at all — unlike
+    /// TD3, this is not something a future fix changes. A checksum-valid TD1
+    /// record proves the document number/DOB/expiry/composite, never the
+    /// name. See `knowledge/ROADMAP.md`'s M6 execution notes.
+    #[test]
+    fn td1_confidence_never_claims_the_name_is_proven() {
+        let c = read(TD1_SPECIMEN).extraction.confidence;
+        assert_eq!(c.document_number, 1.0);
+        assert_eq!(c.date_of_birth, 1.0);
+        assert_eq!(c.date_of_expiry, 1.0);
+        assert!(
+            c.surname < 1.0,
+            "TD1 line 3 carries no check digit — the name is never proven"
+        );
+    }
+
+    /// Same proof as the TD1 test above, for TD2's 2-line/36-char shape.
+    #[test]
+    fn reads_the_icao_td2_specimen_and_reports_valid_checksums() {
+        let reading = read(TD2_SPECIMEN);
+        assert!(reading.evidence.mrz_found);
+        assert!(reading.evidence.mrz_checksums_valid);
+        assert_eq!(reading.evidence.mrz_format, Some(MrzFormat::Td2));
+
+        let fields = &reading.extraction.fields;
+        assert_eq!(fields.get(CoreField::Surname), Some("ERIKSSON"));
+        assert_eq!(fields.get(CoreField::DocumentNumber), Some("D23145890"));
+        assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
+        assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
+        assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+    }
+
+    /// Same proof for MRV-A (visas): the provider correctly reads a `V`
+    /// document-code, 44-char, 2-line format distinct from TD3 despite the
+    /// identical line width.
+    #[test]
+    fn reads_the_icao_mrv_a_specimen_and_reports_valid_checksums() {
+        let reading = read(MRV_A_SPECIMEN);
+        assert!(reading.evidence.mrz_found);
+        assert!(reading.evidence.mrz_checksums_valid);
+        assert_eq!(reading.evidence.mrz_format, Some(MrzFormat::MrvA));
+
+        let fields = &reading.extraction.fields;
+        assert_eq!(fields.get(CoreField::Surname), Some("ERIKSSON"));
+        assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
+        assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
+        assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+    }
+
+    /// Same proof for MRV-B: 36-char, 2-line, distinct from TD2 despite the
+    /// identical line width.
+    #[test]
+    fn reads_the_icao_mrv_b_specimen_and_reports_valid_checksums() {
+        let reading = read(MRV_B_SPECIMEN);
+        assert!(reading.evidence.mrz_found);
+        assert!(reading.evidence.mrz_checksums_valid);
+        assert_eq!(reading.evidence.mrz_format, Some(MrzFormat::MrvB));
+
+        let fields = &reading.extraction.fields;
+        assert_eq!(fields.get(CoreField::Surname), Some("ERIKSSON"));
+        assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
+        assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
+        assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
     }
 }
