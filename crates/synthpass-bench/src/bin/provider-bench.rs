@@ -48,7 +48,9 @@ use synthpass_bench::provider_bench::{
     run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
     UnsupportedAssertion,
 };
-use synthpass_bench::{generate_corpus, load_real_specimens, ProfileChoice, SpecimenClass};
+use synthpass_bench::{
+    generate_corpus, load_real_specimens, miss_kind, ProfileChoice, SpecimenClass,
+};
 use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
@@ -332,6 +334,13 @@ struct DocumentDetailReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     mrz_format: Option<&'static str>,
     read_ok: bool,
+    mrz_checksums_valid: bool,
+    /// Stable machine-readable miss class (`miss_kind`'s output) — `null` on
+    /// a genuine Tier-1 hit. Never the free-text `MissReason` itself: some
+    /// variants carry an inner detail string (a parse/provider error
+    /// message), which is aggregate-report noise, not report content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    miss_reason: Option<&'static str>,
     assertions_total: usize,
     assertions_unsupported: usize,
     unsupported_fields: Vec<&'static str>,
@@ -397,6 +406,11 @@ struct ProviderRow {
     /// should not have to be repeated because the per-document detail was
     /// only printed and never saved.
     documents_detail: Vec<DocumentDetailReport>,
+    /// Genuine Tier-1 hit rate (MRZ found, checksums valid, document number
+    /// matches when labelled) — see
+    /// `synthpass_bench::provider_bench::ProviderReport::tier1_hit_rate`'s
+    /// doc for why this is a different number from `read_ok`/nothing above.
+    tier1_hit_rate: f64,
 }
 
 impl From<ProviderReport> for ProviderRow {
@@ -445,11 +459,14 @@ impl From<ProviderReport> for ProviderRow {
                     mrz_found: d.mrz_found,
                     mrz_format: d.mrz_format,
                     read_ok: d.read_ok,
+                    mrz_checksums_valid: d.mrz_checksums_valid,
+                    miss_reason: d.miss_reason.as_ref().map(miss_kind),
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
                 })
                 .collect(),
+            tier1_hit_rate: r.tier1_hit_rate,
         }
     }
 }
@@ -635,19 +652,20 @@ async fn main() {
             UnsupportedAssertion::NotApplicable { reason } => format!("n/a ({reason})"),
         };
         println!(
-            "{}: {} docs ({} labelled), field match {field_match}, mean CER {mean_cer}, mean {} \
-             ms, unsupported-assertion rate {unsupported}",
+            "{}: {} docs ({} labelled), Tier-1 hit rate {:.1}%, field match {field_match}, mean \
+             CER {mean_cer}, mean {} ms, unsupported-assertion rate {unsupported}",
             r.provider_id,
             r.documents,
             r.accuracy.labelled_documents,
+            r.tier1_hit_rate * 100.0,
             r.speed.mean.as_millis(),
         );
 
         // Per-format document counts — the M6 plan's "report the unparsed
         // population separately; a specimen with no MRZ is not a
-        // TD-anything" applied to this harness: a distribution, not a
-        // hit-rate (this per-document loop has no `check_document`-style hit
-        // boolean to key one by — see `DocumentDetail::mrz_format`'s doc).
+        // TD-anything" applied to this harness: a distribution, keyed on the
+        // same `mrz_format` the Tier-1 hit rate above and `miss_reason`
+        // below share.
         let mut by_format: std::collections::BTreeMap<&str, usize> =
             std::collections::BTreeMap::new();
         for d in &r.documents_detail {
@@ -661,6 +679,26 @@ async fn main() {
                 .map(|(fmt, n)| format!("{fmt}={n}"))
                 .collect();
             println!("    by format: {}", counts.join(", "));
+        }
+
+        // Misses by kind — mirrors `synthpass-bench`'s own "misses by kind"
+        // summary, so a real-specimen run answers "what kind of failure
+        // dominates this track" from stdout, not just `--verbose` +
+        // manual JSON inspection. Skipped entirely when there is nothing to
+        // report, same as the format breakdown above.
+        let mut by_miss_kind: std::collections::BTreeMap<&str, usize> =
+            std::collections::BTreeMap::new();
+        for d in &r.documents_detail {
+            if let Some(reason) = &d.miss_reason {
+                *by_miss_kind.entry(miss_kind(reason)).or_default() += 1;
+            }
+        }
+        if !by_miss_kind.is_empty() {
+            let counts: Vec<String> = by_miss_kind
+                .iter()
+                .map(|(kind, n)| format!("{kind}={n}"))
+                .collect();
+            println!("    misses by kind: {}", counts.join(", "));
         }
 
         if parsed.verbose {
