@@ -39,18 +39,17 @@ self="scripts/check-doc-links.sh"
 
 # Paths that are cited but deliberately do not exist. Each needs a reason.
 #
-#   docs/V2-DESIGN.md, knowledge/V2-DESIGN.md
-#     Cited by section number in 11 source doc comments but never committed to
-#     this repository (verified: `git log --all -- docs/V2-DESIGN.md` is empty).
-#     Deliberately NOT rewritten to `knowledge/` during the rename — moving a
-#     broken link is not fixing it. The `knowledge/` spelling appears only in
-#     prose explaining that choice. Tracked in knowledge/technical_debt.md.
-#
 #   docs/mlis_v2_0_0_preliminary_design.md, docs/REBRAND_MIGRATION.md,
 #   docs/rebranding_identra_synthpass.md
 #     Removed on purpose once the rebrand completed. Referenced only by
 #     historical CHANGELOG.md prose describing them as removed, where the old
 #     `docs/` path is the historically accurate one.
+#
+#   docs/V2-DESIGN.md
+#     Never committed to this repo — `knowledge/V2-DESIGN.md` is the real file
+#     now (source citations point there). This `docs/` spelling survives only
+#     in CHANGELOG.md and ADR-0001-knowledge-tree.md prose narrating the gap
+#     as history, where the old path is the historically accurate one.
 #
 #   docs/
 #     The bare directory name, in the design notes that argue for `knowledge/`
@@ -68,7 +67,6 @@ allow_missing=(
   "knowledge/architecture/document-fusion.md"
   "knowledge/benchmarking/methodology.md"
   "docs/V2-DESIGN.md"
-  "knowledge/V2-DESIGN.md"
   "docs/mlis_v2_0_0_preliminary_design.md"
   "docs/REBRAND_MIGRATION.md"
   "docs/rebranding_identra_synthpass.md"

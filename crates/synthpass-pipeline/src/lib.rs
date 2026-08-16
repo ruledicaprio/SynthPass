@@ -252,7 +252,7 @@ pub struct PipelineResult {
     pub json_path: PathBuf,
     /// Parsed extraction JSON in the v1 shape (Tier 1 or Tier 2); `None` when
     /// Tier 2 failed. Kept populated for one-release compatibility (breaking
-    /// change B3, `docs/V2-DESIGN.md` §9) — new consumers should read
+    /// change B3, `knowledge/V2-DESIGN.md` §9) — new consumers should read
     /// [`extracted_v2`].
     ///
     /// [`extracted_v2`]: PipelineResult::extracted_v2
@@ -895,7 +895,7 @@ impl Pipeline {
     ///
     /// The persisted shape is **v2 by default**; `SYNTHPASS_JSON_V1=1` writes the
     /// legacy v1 shape instead — a documented deprecation shim for one major
-    /// release (`docs/V2-DESIGN.md` §9, B2/B3).
+    /// release (`knowledge/V2-DESIGN.md` §9, B2/B3).
     async fn write_outputs(
         &self,
         input: &Path,
