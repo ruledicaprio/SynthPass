@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-Runs provider-bench (real-specimen tracks) or synthpass-bench (td1/td2/td3
-synthetic tracks) scoped to one named "track", appends a flattened result to
-the bench-data branch's results/<track>-bench/history.jsonl, commits, and
-pushes -- then regenerates that track's trend chart locally.
+Runs provider-bench (real-specimen tracks) or synthpass-bench (td1/td2/td3/
+mrva/mrvb synthetic tracks) scoped to one named "track", appends a flattened
+result to the bench-data branch's results/<track>-bench/history.jsonl,
+commits, and pushes -- then regenerates that track's trend chart locally.
 
 Real-specimen tracks map to provider-bench's `--format` scoping:
   passport          --format passport   (samples/passports/)
@@ -27,8 +27,10 @@ td1-bench / td2-bench tracks" step):
   td1               --document-type td1   (synthetic TD1 corpus)
   td2               --document-type td2   (synthetic TD2 corpus)
   td3               --document-type td3   (synthetic TD3 corpus)
+  mrva              --document-type mrva  (synthetic MRV-A visa corpus)
+  mrvb              --document-type mrvb  (synthetic MRV-B visa corpus)
 
-The three synthetic tracks use a different binary and a different report
+The five synthetic tracks use a different binary and a different report
 shape (synthpass-bench's `hit_rate`, not provider-bench's per-provider
 accuracy stats) -- flattened into the *same* history.jsonl row shape as the
 real-specimen tracks (`hit_rate` -> `read_ok_rate`, `provider_id` fixed at
@@ -64,7 +66,7 @@ embedded).
 
 .PARAMETER Track
 Which benchmark track to run: passport, id_card, driving_license,
-real-specimens, td1, td2, or td3. The last three are synthetic
+real-specimens, td1, td2, td3, mrva, or mrvb. The last five are synthetic
 (synthpass-bench), everything else is a real-specimen provider-bench track
 -- see the module doc comment above for why `passport` and `td3` are not
 the same thing despite both being "passport-shaped MRZ".
@@ -75,13 +77,13 @@ the track's scoping. Real-specimen tracks only; omit to run every specimen
 in the track.
 
 .PARAMETER Count
-Synthetic tracks only (td1/td2): how many documents to generate
-(synthpass-bench --count). Default 100, matching synthpass-bench's own
-default.
+Synthetic tracks only (td1/td2/td3/mrva/mrvb): how many documents to
+generate (synthpass-bench --count). Default 100, matching synthpass-bench's
+own default.
 
 .PARAMETER Seed
-Synthetic tracks only (td1/td2): base seed (synthpass-bench --seed).
-Default 0.
+Synthetic tracks only (td1/td2/td3/mrva/mrvb): base seed
+(synthpass-bench --seed). Default 0.
 
 .PARAMETER MeasureMemory
 Pass through provider-bench --measure-memory (requires building with
@@ -123,7 +125,7 @@ Override the row's recorded invocation string (only meaningful with
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3")]
+    [ValidateSet("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3", "mrva", "mrvb")]
     [string]$Track,
     [int]$Limit = 0,
     [int]$Count = 100,
@@ -138,7 +140,7 @@ param(
 # Synthetic (synthpass-bench, per-format Tier-1 hit rate) vs real-specimen
 # (provider-bench, --format-scoped samples/) track -- decides which binary
 # step 1 runs and which report shape step 1.5 flattens.
-$isSyntheticTrack = $Track -in @("td1", "td2", "td3")
+$isSyntheticTrack = $Track -in @("td1", "td2", "td3", "mrva", "mrvb")
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path

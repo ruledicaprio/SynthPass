@@ -134,11 +134,33 @@ fn opt_string(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 
+/// Split a name field on the ICAO 9303 primary/secondary identifier
+/// separator `<<`. Falls back to a single `<` when no `<<` survives OCR —
+/// a real, measured failure mode distinct from [`fix_name_separator`]'s `<`
+/// misread as `KK`: OCR sometimes drops one of the two filler characters
+/// outright rather than misreading it, collapsing `SURNAME<<GIVEN` to
+/// `SURNAME<GIVEN` with no `KK` anywhere for that repair to catch. Before
+/// this fallback, that single dropped character sent `given_names` to `""`
+/// unconditionally — first measured on MRV-A/MRV-B (`given_names` CER
+/// 63.5%/76.7% at first measurement, 30 seeds, `--profile clean`, seed 42;
+/// see `knowledge/ROADMAP.md`'s M6 section) but present on every format that
+/// calls this function, since none of them check-digit-cover line 1's name
+/// field to begin with. The fallback is unambiguous for this crate's own
+/// generated corpus (`synthpass-gen`'s `SURNAMES`/`GIVEN_NAMES_M`/
+/// `GIVEN_NAMES_F` are single tokens, never containing an internal `<`), but
+/// is a best-effort guess against a real-world compound name (e.g. `DE<LA
+/// <CRUZ<<MARIA` losing its `<<` down to `<` is indistinguishable from a
+/// compound *surname*'s own internal `<`) — never claimed as proven, since
+/// `FieldConfidence` never rates a name field above `MRZ_STRUCTURAL` (0.9)
+/// regardless of which branch below produced it.
 fn clean_name(field: &str) -> (String, String) {
     let trimmed = field.trim_end_matches('<');
     let (surname, given) = match trimmed.split_once("<<") {
         Some((s, g)) => (s, g),
-        None => (trimmed, ""),
+        None => match trimmed.split_once('<') {
+            Some((s, g)) => (s, g),
+            None => (trimmed, ""),
+        },
     };
     (
         surname.replace('<', " ").trim().to_string(),
@@ -501,10 +523,90 @@ pub fn parse_mrv_b_with(
     })
 }
 
+/// Undo a **dropped** (not merely misread) line-1 position-1 filler —
+/// generalizes [`repair_td1_line1_unshifted`]'s transformation to formats
+/// whose document code can *only* ever be a single letter plus filler, never
+/// a genuine second letter.
+///
+/// **Ordering is load-bearing here, unlike TD1.** TD1 tries its unshifted
+/// reading as a second candidate in either order, because its own line-1
+/// check digit (the document number's) arbitrates which candidate — if
+/// either — is real. TD3/MRV-A/MRV-B have no check digit on line 1 at all,
+/// so `consider()` in `find_and_parse_with` accepts the *first*
+/// checksum-passing line-1/line-2 combination it tries, regardless of what
+/// line 1 says — meaning an unshifted candidate offered only *after* the
+/// unrepaired one is dead code in practice: the unrepaired reading already
+/// satisfies line 2's checksums just as well (line 1 never gates them), so
+/// it always wins first and the unshifted candidate never gets a chance to
+/// matter. The call sites (TD3/MRV-A/MRV-B in `find_and_parse_with`)
+/// therefore try `repair_*_line1_unshifted` *before* `repair_*_line1`.
+///
+/// This is also why the fix is a **second candidate at all**, rather than
+/// applied unconditionally inside `repair_td3_line1`/`repair_mrv_line1`
+/// (the first version of this fix, before either of the two points above
+/// were understood). That version — despite "position 1 isn't `<`" being
+/// unambiguous evidence of the drop, not a guess, for these formats (see
+/// `Td3Fields`'/`MrvAFields`'/`MrvBFields`' doc comments: no diplomatic/
+/// subtype variant with a genuine second letter is modeled anywhere in this
+/// crate) — measured a real, reproducible **Tier-1 hit-rate regression** on
+/// a 30-seed TD3 corpus (`--profile clean --seed 42`): 76.7% → 63.3%,
+/// confirmed via a same-binary A/B env-var toggle to rule out the run-to-run
+/// OCR-timing variance this repo's contention note already documents. The
+/// mechanism: `variants()` builds `[repaired, fitted, last_resort]` per
+/// candidate and deduplicates by exact string equality; mutating what
+/// `repaired` is (rather than adding a second, independent `variants()` call
+/// for it) also changes what `last_resort = aggressive_defiller(&repaired)`
+/// evaluates to, silently removing a previously-tried, load-bearing
+/// candidate string in some cases rather than only adding a new one. Kept as
+/// two separate `variants()` calls — one per repair function — specifically
+/// avoids that collapse: each keeps its own independent `[repaired, fitted,
+/// last_resort]` triplet, so the search space is provably a strict superset
+/// of the unmodified pipeline's.
+///
+/// Net effect, measured 30 seeds, `--profile clean`, seed 42, same-day: hit
+/// rate unchanged for all three formats (TD3 76.7%, MRV-A 86.7%, MRV-B
+/// 93.3% — identical to the pre-fix baseline), `document_type`/
+/// `issuing_country` CER: TD3 76.67%/52.22% → 23.33%/16.67%, MRV-A
+/// 6.67%/4.44% → 0%/0%, MRV-B 40.00%/26.67% → 3.33%/2.22%. Not a full fix
+/// for TD3/MRV-B (some corrupted readings still win over the unshifted
+/// candidate when both parse structurally, since nothing on line 1
+/// discriminates between them) — a partial, hit-rate-safe improvement, not
+/// a claim of completeness.
+///
+/// First measured via `synthpass-bench --dump-ocr` against TD3 and MRV-B
+/// (`knowledge/ROADMAP.md`'s M6 note): the OCR retry loop's internal passes
+/// sometimes drop this filler exactly the way TD1's did, e.g.
+/// `V<BRAESKANDARI...` read as `VBRAESKANDARI...` — shifting
+/// `issuing_country` (and everything after it) one position left. Silent on
+/// these formats specifically because nothing check-digit-covers line 1
+/// here, so it never fails a Tier-1 hit on its own, only corrupts
+/// `document_type`/`issuing_country`/the name behind a passing read.
+///
+/// `target_width` is `l.len()` at the call site (44 for TD3/MRV-A, 36 for
+/// MRV-B) — `variants()` always calls its `repair` function on an
+/// already-`fit_length`-padded string (`checksum.rs`'s `variants`), so the
+/// input is guaranteed to already be at the format's fixed width; the
+/// length check below is a defensive no-op guard, not a real branch, for
+/// the same reason [`repair_td1_line1_unshifted`] carries one.
+fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
+    if repaired.len() != target_width || repaired.as_bytes().get(1) == Some(&b'<') {
+        return repaired;
+    }
+    format!("{}<{}", &repaired[0..1], &repaired[1..target_width - 1])
+}
+
 fn repair_td3_line1(l: &str) -> String {
     // Issuing state must be letters; the name field suffers filler misreads.
     let l = fix_doc_code(&repair_positions(l, &[(2..5, letterize)]));
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
+}
+
+/// Second candidate alongside [`repair_td3_line1`] — see
+/// [`unshift_line1_prefix`]'s doc comment for why this is additive, not a
+/// replacement, and why the call site must try this one *first*.
+fn repair_td3_line1_unshifted(l: &str) -> String {
+    let target_width = l.len();
+    unshift_line1_prefix(repair_td3_line1(l), target_width)
 }
 
 fn repair_td3_line2(l: &str) -> String {
@@ -529,6 +631,21 @@ fn repair_td3_line2(l: &str) -> String {
     )
 }
 
+/// Deliberately does **not** call [`unshift_line1_prefix`], unlike
+/// [`repair_td3_line1`]/[`repair_mrv_line1`]. TD2 shares TD1's ICAO
+/// ID-document-family code space (`"I"`, `"A"`, `"C"`, and genuine
+/// two-real-letter subtypes — `crates/mrz/tests/td1_line_gap.rs`'s own
+/// fixture uses `document_code: "ID"` deliberately, for the sibling
+/// format), so "position 1 isn't `<`" is not unambiguous evidence of a
+/// dropped filler here the way it is for TD3/MRV-A/MRV-B (whose document
+/// code is always a single letter plus filler, no exceptions modeled
+/// anywhere in this crate). TD1 resolves that ambiguity by trying the
+/// unshifted reading as a *second* candidate and letting its own line-1
+/// check digit (the document number's) decide — but TD2 has no check
+/// digit on line 1 either, so there is no signal available to arbitrate
+/// an unshifted TD2 candidate against the unrepaired one. Left as a
+/// harder, deferred case rather than silently applied — see
+/// `knowledge/ROADMAP.md`'s M6 note.
 fn repair_td2_line1(l: &str) -> String {
     let l = fix_doc_code(&repair_positions(l, &[(2..5, letterize)]));
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
@@ -625,6 +742,7 @@ fn repair_td1_line3(l: &str) -> String {
 /// `fix_doc_code` (only ever rewrites index 1) can touch index 0, so the
 /// leading `V` document code always survives repair unchanged — the caller's
 /// `l1.starts_with('V')` check after repair is exactly as strict as before.
+///
 fn repair_mrv_line1(l: &str) -> String {
     let l = fix_doc_code(&repair_positions(l, &[(2..5, letterize)]));
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
@@ -636,6 +754,26 @@ fn repair_mrv_a_line1(l: &str) -> String {
 
 fn repair_mrv_b_line1(l: &str) -> String {
     repair_mrv_line1(l)
+}
+
+/// Second candidate alongside `repair_mrv_a_line1`/`repair_mrv_b_line1` —
+/// see [`unshift_line1_prefix`]'s doc comment for why this is additive, not
+/// a replacement, and why the call site must try this one *first*. MRV-A/
+/// MRV-B's document code is unconditionally `"V"` plus filler (see
+/// `MrvAFields`'/`MrvBFields`' doc comments), so unlike TD2 there is no
+/// genuine two-real-letter document code this could mistakenly "fix" — the
+/// only reason this is a second candidate rather than an in-place mutation,
+/// like the TD3 sibling, is the hit-rate regression documented on
+/// [`unshift_line1_prefix`], not a document-code ambiguity here.
+fn repair_mrv_a_line1_unshifted(l: &str) -> String {
+    let target_width = l.len();
+    unshift_line1_prefix(repair_mrv_a_line1(l), target_width)
+}
+
+/// See [`repair_mrv_a_line1_unshifted`] — identical reasoning, MRV-B side.
+fn repair_mrv_b_line1_unshifted(l: &str) -> String {
+    let target_width = l.len();
+    unshift_line1_prefix(repair_mrv_b_line1(l), target_width)
 }
 
 /// MRV-A line-2 repair: same geometry as TD3 through the expiry check digit,
@@ -726,7 +864,11 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         if merged.starts_with('P') && (84..=92).contains(&merged.len()) && is_mrz_charset(&merged) {
             let head = &merged[0..44];
             let tail = &merged[44..];
-            for l1 in [repair_td3_line1(head), head.to_string()] {
+            for l1 in [
+                repair_td3_line1_unshifted(head),
+                repair_td3_line1(head),
+                head.to_string(),
+            ] {
                 for l2 in variants(tail, 44, repair_td3_line2) {
                     if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
                         if let Some(valid) = consider(data) {
@@ -737,7 +879,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        for l1 in variants(lines[i], 44, repair_td3_line1) {
+        let l1_candidates = variants(lines[i], 44, repair_td3_line1_unshifted)
+            .into_iter()
+            .chain(variants(lines[i], 44, repair_td3_line1));
+        for l1 in l1_candidates {
             if !l1.starts_with('P') {
                 continue;
             }
@@ -765,7 +910,11 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         if merged.starts_with('V') && (68..=76).contains(&merged.len()) && is_mrz_charset(&merged) {
             let head = &merged[0..36];
             let tail = &merged[36..];
-            for l1 in [repair_mrv_b_line1(head), head.to_string()] {
+            for l1 in [
+                repair_mrv_b_line1_unshifted(head),
+                repair_mrv_b_line1(head),
+                head.to_string(),
+            ] {
                 for l2 in variants(tail, 36, repair_mrv_b_line2) {
                     if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
                         if let Some(valid) = consider(data) {
@@ -776,7 +925,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        for l1 in variants(lines[i], 36, repair_mrv_b_line1) {
+        let l1_candidates = variants(lines[i], 36, repair_mrv_b_line1_unshifted)
+            .into_iter()
+            .chain(variants(lines[i], 36, repair_mrv_b_line1));
+        for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
             }
@@ -801,7 +953,11 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         if merged.starts_with('V') && (84..=92).contains(&merged.len()) && is_mrz_charset(&merged) {
             let head = &merged[0..44];
             let tail = &merged[44..];
-            for l1 in [repair_mrv_a_line1(head), head.to_string()] {
+            for l1 in [
+                repair_mrv_a_line1_unshifted(head),
+                repair_mrv_a_line1(head),
+                head.to_string(),
+            ] {
                 for l2 in variants(tail, 44, repair_mrv_a_line2) {
                     if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
                         if let Some(valid) = consider(data) {
@@ -812,7 +968,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        for l1 in variants(lines[i], 44, repair_mrv_a_line1) {
+        let l1_candidates = variants(lines[i], 44, repair_mrv_a_line1_unshifted)
+            .into_iter()
+            .chain(variants(lines[i], 44, repair_mrv_a_line1));
+        for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
             }

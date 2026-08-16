@@ -167,31 +167,47 @@ Tier-1 hit rate
 TD1
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="70,404 70,409 "/>
-<text x="273" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
+<text x="191" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
 TD2
 </text>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="273,404 273,409 "/>
-<text x="476" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="191,404 191,409 "/>
+<text x="313" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
 TD3
 </text>
-<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="476,404 476,409 "/>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="313,404 313,409 "/>
+<text x="435" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
+MRVA
+</text>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="435,404 435,409 "/>
+<text x="557" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
+MRVB
+</text>
+<polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="557,404 557,409 "/>
 <text x="679" y="414" dy="0.76em" text-anchor="middle" font-family="sans-serif" font-size="9.67741935483871" opacity="1" fill="#000000">
 
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="679,404 679,409 "/>
-<rect x="70" y="201" width="203" height="202" opacity="1" fill="#FF0000" stroke="none"/>
-<text x="70" y="190" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-56.7%
+<rect x="70" y="204" width="121" height="199" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="70" y="193" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+56.0%
 </text>
-<rect x="273" y="118" width="203" height="285" opacity="1" fill="#0000FF" stroke="none"/>
-<text x="273" y="107" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-80.0%
+<rect x="191" y="132" width="122" height="271" opacity="1" fill="#0000FF" stroke="none"/>
+<text x="191" y="121" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+76.0%
 </text>
-<rect x="476" y="130" width="203" height="273" opacity="1" fill="#00FF00" stroke="none"/>
-<text x="476" y="119" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-76.7%
+<rect x="313" y="139" width="122" height="264" opacity="1" fill="#00FF00" stroke="none"/>
+<text x="313" y="129" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+74.0%
+</text>
+<rect x="435" y="94" width="122" height="309" opacity="1" fill="#FF00FF" stroke="none"/>
+<text x="435" y="83" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+86.7%
+</text>
+<rect x="557" y="70" width="122" height="333" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="557" y="60" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+93.3%
 </text>
 <text x="20" y="440" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#000000">
-TD1: n=30  ·  TD2: n=30  ·  TD3: n=30
+TD1: n=100  ·  TD2: n=100  ·  TD3: n=100  ·  MRVA: n=30  ·  MRVB: n=30
 </text>
 </svg>
