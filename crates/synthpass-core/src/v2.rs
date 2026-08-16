@@ -1,4 +1,4 @@
-//! Extraction schema v2 — the v2.0.0 keystone (`docs/V2-DESIGN.md` §3).
+//! Extraction schema v2 — the v2.0.0 keystone (`knowledge/V2-DESIGN.md` §3).
 //!
 //! v1's [`Extraction`] is MRZ-shaped: everything the MRZ can't say (per-field
 //! certainty, who produced a value, portrait/barcode slots) has nowhere to
@@ -6,7 +6,8 @@
 //! mathematical proof. [`ExtractionV2`] fixes that without breaking the v1
 //! wire format: v1 stays intact and is still served to legacy clients for one
 //! major release (`?v=1` / `Accept: application/vnd.mlis.v1+json` on
-//! `synthpass-serve`, `SYNTHPASS_JSON_V1=1` for on-disk artifacts — §9 B2/B3).
+//! `synthpass-serve`, `SYNTHPASS_JSON_V1=1` for on-disk artifacts —
+//! `knowledge/V2-DESIGN.md` §9 B2/B3).
 //!
 //! The wire format keeps v1's snake_case; [`ExtractionV2::schema_version`] is
 //! always serialized so a consumer can dispatch on the schema before touching
@@ -71,7 +72,7 @@ const MRZ_STRUCTURAL: f32 = 0.9;
 /// the additions are metadata *about* the extraction (confidence, provenance,
 /// per-check-digit detail) and empty slots for capabilities landing in later
 /// milestones ([`portrait`] in M2, [`barcodes`] decoding, [`documents`] in
-/// M4). See `docs/V2-DESIGN.md` §3 for the full rationale.
+/// M4). See `knowledge/V2-DESIGN.md` §3 for the full rationale.
 ///
 /// [`fields`]: ExtractionV2::fields
 /// [`portrait`]: ExtractionV2::portrait
@@ -94,7 +95,7 @@ pub struct ExtractionV2 {
     /// Per-field certainty. `1.0` means checksum-proven (Tier 1); anything
     /// below is a heuristic model score (Tier 2). Describes extraction
     /// certainty, never document genuineness — forgery detection is an
-    /// explicit non-goal (`docs/V2-DESIGN.md` §11).
+    /// explicit non-goal (`knowledge/V2-DESIGN.md` §11).
     #[zeroize(skip)]
     pub confidence: FieldConfidence,
     /// Which producer created this record — the property that lets downstream
@@ -122,12 +123,12 @@ pub struct ExtractionV2 {
     pub validity: Option<Validity>,
     /// Bounding box of the portrait (face) region in the source image.
     /// Slot only — the cropping heuristic that populates it is M2
-    /// (`docs/V2-DESIGN.md` §4). No face recognition, ever (§11).
+    /// (`knowledge/V2-DESIGN.md` §4). No face recognition, ever (§11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[zeroize(skip)]
     pub portrait: Option<ImageRef>,
     /// Barcode hits (PDF417 etc.). Slot only — no decoder ships in v2.0.0
-    /// (`docs/V2-DESIGN.md` §12: "a slot, not a decoder"). Empty until then.
+    /// (`knowledge/V2-DESIGN.md` §12: "a slot, not a decoder"). Empty until then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub barcodes: Vec<BarcodeHit>,
     /// Which producer created this record: the same vocabulary as v1
@@ -142,7 +143,7 @@ pub struct ExtractionV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[zeroize(skip)]
     pub trace: Option<ExtractionTrace>,
-    /// Reserved for multi-document input (M4, `docs/V2-DESIGN.md` §3). Always
+    /// Reserved for multi-document input (M4, `knowledge/V2-DESIGN.md` §3). Always
     /// empty in v2.0.0; declared now with `default` + `skip_serializing_if` so
     /// the wire format is future-proof — M4 can start emitting it without a
     /// schema bump.
@@ -270,7 +271,7 @@ pub struct ExtractionFields {
 /// Scale: `1.0` = proven by an ICAO 9303 check digit (Tier 1); anything below
 /// is a heuristic model score (Tier 2). These scores describe *extraction
 /// certainty*, not document authenticity — a checksum proves a faithful read,
-/// not a genuine document (`docs/V2-DESIGN.md` §11). Non-PII; `#[zeroize(skip)]`
+/// not a genuine document (`knowledge/V2-DESIGN.md` §11). Non-PII; `#[zeroize(skip)]`
 /// at the parent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

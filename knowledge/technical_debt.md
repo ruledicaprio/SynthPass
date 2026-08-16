@@ -11,27 +11,6 @@ known imperfections.
 
 ## High
 
-### Eleven source citations point at a document that has never existed
-
-`docs/V2-DESIGN.md` is cited by section number in eleven doc comments across
-`synthpass-core` (`lib.rs:28`, `v2.rs:1,74,97,123,128,143,271`),
-`synthpass-pipeline` (`lib.rs:248,816`) and `synthpass-serve` (`main.rs:82`).
-Verified against the full history — `git log --all -- docs/V2-DESIGN.md` returns
-nothing. **The file was never committed to this repo.**
-
-Those citations read as live references ("§11", "§9, B2/B3"), so a reader will go
-looking and find nothing. Deliberately *not* rewritten to `knowledge/V2-DESIGN.md`
-during the docs → knowledge migration: that would move a broken link rather than
-fix it.
-
-**Fix:** either write the document (the design it describes is real and shipped —
-the v2 schema, the B2/B3 breaking changes, the §11 authenticity non-goal) or
-replace each citation with the surviving doc that covers the claim. Writing it is
-better; the content exists, scattered across `CHANGELOG.md` v2 entries and
-`ARCHITECTURE.md`.
-
-**Estimated effort:** 1 day to write, or 2 hours to re-point the citations.
-
 ### OCR confidence is a character-plausibility proxy, not a model score
 
 `geometry::text_sanity` computes "fraction of plausible characters" because
@@ -42,11 +21,28 @@ still reads a field called `confidence`.
 
 **Consequence:** the routing engine's `text_sanity` signal is weaker than its
 name suggests, and no threshold on it can be better than the proxy.
+`RoutingPolicy.sanity_floor` (`synthpass-die/src/routing.rs`) is the one
+place that would act on it, and it is deliberately `None` in
+`v1_2_0_compatible()` — the routing policy's own doc comment cites this exact
+gap as the reason no threshold has been set.
 
-**Fix:** upstream a patch to `ocrs` exposing the decode probabilities, or fork
-the recognition loop. Neither is small.
+**Fix:** not "upstream a patch to `ocrs`, or fork the recognition loop" —
+`ocrs`/`rten` are plain, unmodified crates.io dependencies with no
+`[patch]` or vendor infrastructure in place today, so either option means
+standing up and maintaining a fork before writing a line of the actual fix.
+`knowledge/research/long-horizon-parsing.md` §2 works out a better path that
+avoids upstream negotiation entirely: swap the recognizer to PaddleOCR
+PP-OCRv5 converted to `.rten` (already a direct dependency) and write our
+own CTC decode, so per-character probabilities land in code we control.
+Costs are real and stated there honestly — PP-OCRv5's MRZ/OCR-B accuracy
+vs. `ocrs` is unverified, the MRZ-charset beam-search retry pass would need
+reimplementing against the new engine, and it's a second model to
+download/hash-pin — so the recommended sequencing is a `synthpass-bench`
+bake-off first, not a blind swap.
 
-**Estimated effort:** 3–5 days, mostly upstream negotiation.
+**Estimated effort:** the bake-off is the next concrete step; the 3–5 day
+figure for the full swap (patch/fork framing) is retired along with that
+framing — see `long-horizon-parsing.md` for the actual cost breakdown.
 
 ---
 
