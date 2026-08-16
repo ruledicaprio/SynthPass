@@ -122,6 +122,30 @@ pub enum Finding {
     /// `nationality` entirely (see the module doc comment), so nothing else
     /// in the parser or the checksum math ever looks at this field.
     UnrecognizedNationality { got: String },
+    /// A non-empty `surname` or `given_names` is 1-2 characters. Genuine
+    /// ICAO name fields are essentially never a single stray letter; this is
+    /// the signature of a name reduced to a fragment by OCR without
+    /// triggering [`MissingNameSeparator`], which only fires when
+    /// `given_names` is *empty*. Measured over ~200 real specimens
+    /// (`crates/synthpass-ocr/examples/integrity_survey.rs`): 14 fires,
+    /// zero false positives — every fire co-occurred with independent
+    /// evidence of corruption (an unrecognized country/nationality code, a
+    /// digit in the name, or a non-canonical name field), including two
+    /// checksum-valid records that were previously `Accepted` outright.
+    ///
+    /// [`MissingNameSeparator`]: Self::MissingNameSeparator
+    SuspiciouslyShortNameComponent {
+        field: String,
+        #[zeroize(skip)]
+        len: usize,
+    },
+    /// 4 or more identical consecutive letters appear in `surname` or
+    /// `given_names` — OCR garbage that survives
+    /// `mrz::checksum::defiller`'s narrower K/L-run repair (a different
+    /// repeated letter, or a run under its own ≥4-with-≥3-real-K/L
+    /// threshold). Measured the same way as
+    /// [`SuspiciouslyShortNameComponent`]: 5 fires, zero false positives.
+    DegenerateRepeatedCharacterRun { field: String },
     /// A ASCII digit appears in `surname` or `given_names`. ICAO 9303 names
     /// are alphabetic by convention, but `parser::ensure_charset` accepts
     /// `0-9` across the whole line (it has to — line 2 is mostly digits), so
@@ -180,6 +204,8 @@ pub enum FindingKind {
     IssuingCountryNationalityMismatch,
     MissingNameSeparator,
     UnrecognizedNationality,
+    SuspiciouslyShortNameComponent,
+    DegenerateRepeatedCharacterRun,
     NonAlphabeticName,
     LlmContradictsMrzStructural,
 }
@@ -193,6 +219,8 @@ impl FindingKind {
             Self::IssuingCountryNationalityMismatch => "issuing_country_nationality_mismatch",
             Self::MissingNameSeparator => "missing_name_separator",
             Self::UnrecognizedNationality => "unrecognized_nationality",
+            Self::SuspiciouslyShortNameComponent => "suspiciously_short_name_component",
+            Self::DegenerateRepeatedCharacterRun => "degenerate_repeated_character_run",
             Self::NonAlphabeticName => "non_alphabetic_name",
             Self::LlmContradictsMrzStructural => "llm_contradicts_mrz_structural",
         }
@@ -220,6 +248,12 @@ impl Finding {
             }
             Self::MissingNameSeparator { .. } => FindingKind::MissingNameSeparator,
             Self::UnrecognizedNationality { .. } => FindingKind::UnrecognizedNationality,
+            Self::SuspiciouslyShortNameComponent { .. } => {
+                FindingKind::SuspiciouslyShortNameComponent
+            }
+            Self::DegenerateRepeatedCharacterRun { .. } => {
+                FindingKind::DegenerateRepeatedCharacterRun
+            }
             Self::NonAlphabeticName { .. } => FindingKind::NonAlphabeticName,
             Self::LlmContradictsMrzStructural { .. } => FindingKind::LlmContradictsMrzStructural,
         }
@@ -305,11 +339,56 @@ pub fn check_line1_integrity(m: &MrzData) -> Verdict {
         });
     }
 
+    if !m.surname.is_empty() && m.surname.chars().count() <= 2 {
+        reasons.push(Finding::SuspiciouslyShortNameComponent {
+            field: "surname".to_string(),
+            len: m.surname.chars().count(),
+        });
+    }
+    if !m.given_names.is_empty() && m.given_names.chars().count() <= 2 {
+        reasons.push(Finding::SuspiciouslyShortNameComponent {
+            field: "given_names".to_string(),
+            len: m.given_names.chars().count(),
+        });
+    }
+
+    if has_repeated_letter_run(&m.surname) {
+        reasons.push(Finding::DegenerateRepeatedCharacterRun {
+            field: "surname".to_string(),
+        });
+    }
+    if has_repeated_letter_run(&m.given_names) {
+        reasons.push(Finding::DegenerateRepeatedCharacterRun {
+            field: "given_names".to_string(),
+        });
+    }
+
     if reasons.is_empty() {
         Verdict::Accepted
     } else {
         Verdict::NeedsReview { reasons }
     }
+}
+
+/// `true` if `s` contains a run of 4 or more identical consecutive ASCII
+/// letters — see [`Finding::DegenerateRepeatedCharacterRun`].
+fn has_repeated_letter_run(s: &str) -> bool {
+    const MIN_RUN: usize = 4;
+    let mut run = 0usize;
+    let mut last: Option<u8> = None;
+    for b in s.bytes() {
+        if !b.is_ascii_alphabetic() {
+            run = 0;
+            last = None;
+            continue;
+        }
+        run = if last == Some(b) { run + 1 } else { 1 };
+        last = Some(b);
+        if run >= MIN_RUN {
+            return true;
+        }
+    }
+    false
 }
 
 /// The three transliteration styles [`mrz::transliterate`] can produce for an
@@ -607,6 +686,69 @@ mod tests {
                 }]
             }
         );
+    }
+
+    #[test]
+    fn a_one_character_surname_is_flagged() {
+        let mut m = base();
+        "E".clone_into(&mut m.surname);
+        assert_eq!(
+            check_line1_integrity(&m),
+            Verdict::NeedsReview {
+                reasons: vec![Finding::SuspiciouslyShortNameComponent {
+                    field: "surname".to_string(),
+                    len: 1,
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn a_two_character_given_names_is_flagged() {
+        let mut m = base();
+        "AB".clone_into(&mut m.given_names);
+        assert_eq!(
+            check_line1_integrity(&m),
+            Verdict::NeedsReview {
+                reasons: vec![Finding::SuspiciouslyShortNameComponent {
+                    field: "given_names".to_string(),
+                    len: 2,
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn a_three_character_name_component_is_not_flagged() {
+        // The threshold is deliberately tight (<=2): a real short surname
+        // (e.g. many East Asian romanizations) is more common at 3+
+        // characters than a genuine 1-2 character MRZ name field.
+        let mut m = base();
+        "OTT".clone_into(&mut m.given_names);
+        assert_eq!(check_line1_integrity(&m), Verdict::Accepted);
+    }
+
+    #[test]
+    fn a_repeated_letter_run_in_surname_is_flagged() {
+        let mut m = base();
+        "ERIKKKKSON".clone_into(&mut m.surname); // four consecutive 'K's
+        assert_eq!(
+            check_line1_integrity(&m),
+            Verdict::NeedsReview {
+                reasons: vec![Finding::DegenerateRepeatedCharacterRun {
+                    field: "surname".to_string(),
+                }]
+            }
+        );
+    }
+
+    #[test]
+    fn a_short_run_of_repeated_letters_is_not_flagged() {
+        // Three, not four: real names do carry doubled letters
+        // ("MISSISSIPPI"-style), so the threshold must not fire below it.
+        let mut m = base();
+        "ERIKKKSON".clone_into(&mut m.surname);
+        assert_eq!(check_line1_integrity(&m), Verdict::Accepted);
     }
 
     /// The failure mode a naive filler-count/round-trip check would have hit

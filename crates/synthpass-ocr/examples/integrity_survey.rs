@@ -36,6 +36,18 @@ enum Candidate {
     UnrecognizedNationality,
     NonAlphabeticName,
     NonCanonicalNameField,
+    /// A non-empty `surname`/`given_names` of 1-2 characters — the mirror
+    /// image of `fusion.rs`'s existing `SUSPICIOUSLY_LONG_UNSPLIT_NAME`
+    /// heuristic: genuine ICAO name fields are essentially never a single
+    /// stray letter, and `MissingNameSeparator` only fires when
+    /// `given_names` is *empty*, so a name reduced to a short fragment on
+    /// either side currently produces `Verdict::Accepted`.
+    SuspiciouslyShortNameComponent,
+    /// 4+ identical consecutive letters in `surname`/`given_names` — OCR
+    /// garbage that survived `mrz::checksum::defiller`'s narrower K/L-run
+    /// repair (a different repeated letter, or a run under its
+    /// ≥4-with-≥3-real-K/L threshold).
+    DegenerateRepeatedCharacterRun,
 }
 
 impl Candidate {
@@ -44,8 +56,35 @@ impl Candidate {
             Self::UnrecognizedNationality => "unrecognized_nationality",
             Self::NonAlphabeticName => "non_alphabetic_name",
             Self::NonCanonicalNameField => "non_canonical_name_field",
+            Self::SuspiciouslyShortNameComponent => "suspiciously_short_name_component",
+            Self::DegenerateRepeatedCharacterRun => "degenerate_repeated_character_run",
         }
     }
+}
+
+/// `true` if `s` contains a run of `min_run` or more identical consecutive
+/// ASCII letters.
+fn has_repeated_letter_run(s: &str, min_run: usize) -> bool {
+    let bytes = s.as_bytes();
+    let mut run = 0usize;
+    let mut last: Option<u8> = None;
+    for &b in bytes {
+        if !b.is_ascii_alphabetic() {
+            run = 0;
+            last = None;
+            continue;
+        }
+        if last == Some(b) {
+            run += 1;
+        } else {
+            run = 1;
+            last = Some(b);
+        }
+        if run >= min_run {
+            return true;
+        }
+    }
+    false
 }
 
 /// Mirrors `mrz::emit`'s private `clean`/`field`/`name_field` exactly (see
@@ -114,6 +153,22 @@ fn candidates_fired(m: &MrzData) -> Vec<Candidate> {
                 }
             }
         }
+    }
+
+    let short_component = (!m.surname.is_empty() && m.surname.chars().count() <= 2)
+        || (!m.given_names.is_empty() && m.given_names.chars().count() <= 2);
+    if short_component {
+        if std::env::var("INTEGRITY_SURVEY_DEBUG").is_ok() {
+            eprintln!(
+                "DEBUG suspiciously_short_name_component: surname={:?} given_names={:?}",
+                m.surname, m.given_names
+            );
+        }
+        fired.push(Candidate::SuspiciouslyShortNameComponent);
+    }
+
+    if has_repeated_letter_run(&m.surname, 4) || has_repeated_letter_run(&m.given_names, 4) {
+        fired.push(Candidate::DegenerateRepeatedCharacterRun);
     }
 
     fired
@@ -312,6 +367,8 @@ fn main() {
         Candidate::UnrecognizedNationality.label(),
         Candidate::NonAlphabeticName.label(),
         Candidate::NonCanonicalNameField.label(),
+        Candidate::SuspiciouslyShortNameComponent.label(),
+        Candidate::DegenerateRepeatedCharacterRun.label(),
     ] {
         match candidate_hits.get(label) {
             Some(files) => {
