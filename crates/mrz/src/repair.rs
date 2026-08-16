@@ -113,7 +113,11 @@ pub enum Resolution {
     /// Several readings satisfy both and nothing in the MRZ can separate them
     /// — the check digit's blindspot, made explicit. Sorted, so the output is
     /// stable across runs.
-    Ambiguous { candidates: Vec<String> },
+    Ambiguous {
+        /// Every reading that satisfies both the check digit and the
+        /// field's structural constraint, sorted for a stable order.
+        candidates: Vec<String>,
+    },
     /// No reading satisfies the check digit, or the input was outside what
     /// this solver will attempt (too many unknowns, an unreadable check digit,
     /// non-ASCII input).
@@ -196,6 +200,20 @@ fn push_unique(out: &mut Vec<String>, candidate: String, target: usize) {
 /// `check` is itself [`UNKNOWN`]: a check digit that was not read cannot prove
 /// anything, and recomputing it from the candidate would only prove the
 /// candidate agrees with itself.
+///
+/// ```
+/// use mrz::{solve_field, FieldKind, Resolution, UNKNOWN};
+///
+/// // ICAO 9303 specimen date of birth (740812, check digit 2) with one
+/// // glyph unread. The residue class for that position also contains two
+/// // letters, but `FieldKind::Date` requires six ASCII digits, so only the
+/// // digit reading survives.
+/// let field = format!("740{UNKNOWN}12");
+/// assert_eq!(
+///     solve_field(&field, '2', FieldKind::Date),
+///     Resolution::Unique("740812".to_string()),
+/// );
+/// ```
 pub fn solve_field(field: &str, check: char, kind: FieldKind) -> Resolution {
     if !field.is_ascii() || check == UNKNOWN {
         return Resolution::Unresolvable;

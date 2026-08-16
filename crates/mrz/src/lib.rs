@@ -44,6 +44,8 @@
 //! A valid composite check digit proves a faithful *read*; it does not prove
 //! the document is in date — see [`MrzData::validity`].
 
+#![warn(missing_docs)]
+
 /// Compiles and runs every Rust example in `README.md` as a doctest, so a
 /// README snippet can never drift from the API it demonstrates. `cfg(doctest)`
 /// means this is *only* built while collecting doctests — the README is not
@@ -119,8 +121,11 @@ impl Default for ParseOptions {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub struct Checks {
+    /// The primary document-number field.
     pub document_number: bool,
+    /// The date-of-birth field.
     pub date_of_birth: bool,
+    /// The date-of-expiry field.
     pub date_of_expiry: bool,
     /// TD3 only; `true` for TD1/TD2 (no such check digit exists there).
     pub personal_number: bool,
@@ -147,8 +152,11 @@ impl Checks {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum Format {
+    /// Passport (TD3): 2 lines × 44 characters.
     Td3,
+    /// Official travel document / ID card (TD2): 2 lines × 36 characters.
     Td2,
+    /// ID card (TD1): 3 lines × 30 characters.
     Td1,
     /// Machine readable visa, type A (ICAO 9303 part 7): two 44-char lines,
     /// geometry mirrors TD3 through the expiry check digit, but there is no
@@ -177,12 +185,15 @@ pub enum Format {
 #[cfg_attr(feature = "zeroize", derive(ZeroizeOnDrop))]
 #[non_exhaustive]
 pub struct MrzData {
+    /// Which ICAO 9303 layout this was parsed from.
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub format: Format,
     /// Document code, e.g. "P" (passport), "ID"/"I" (identity card).
     pub document_type: String,
     /// Issuing state or organization (3-letter ICAO code).
     pub issuing_country: String,
+    /// The 9-character document-number field as printed, truncated if the
+    /// real number overflows — see [`document_number_full`](Self::document_number_full).
     pub document_number: String,
     /// The reassembled document number when it overflows the 9-character field
     /// (ICAO 9303 Part 5 note j / §4.2.4 for TD1, Part 6 note j for TD2; Part 4
@@ -198,7 +209,11 @@ pub struct MrzData {
     /// fits its field.
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub document_number_legacy_encoding: bool,
+    /// Primary identifier / surname, as printed (uppercase, `<` runs
+    /// collapsed to single spaces between components).
     pub surname: String,
+    /// Secondary identifier / given names, as printed (same cleanup as
+    /// [`surname`](Self::surname)).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -231,6 +246,7 @@ pub struct MrzData {
     pub personal_number: Option<String>,
     /// The raw MRZ lines, newline-joined, exactly as validated.
     pub mrz_lines: String,
+    /// Per-field check-digit verification results — see [`Checks`].
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub checks: Checks,
 }
@@ -265,10 +281,15 @@ impl MrzData {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub enum Field {
+    /// [`Checks::document_number`].
     DocumentNumber,
+    /// [`Checks::date_of_birth`].
     DateOfBirth,
+    /// [`Checks::date_of_expiry`].
     DateOfExpiry,
+    /// [`Checks::personal_number`].
     PersonalNumber,
+    /// [`Checks::composite`].
     Composite,
 }
 
@@ -314,11 +335,18 @@ impl Checks {
     }
 }
 
+/// Why parsing an MRZ zone failed outright — distinct from a failed check
+/// digit, which `parse_*` reports through [`Checks`] instead of an error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MrzError {
     /// Line has the wrong length for the claimed format.
-    BadLength { expected: usize, got: usize },
+    BadLength {
+        /// The length the claimed format requires.
+        expected: usize,
+        /// The length actually supplied.
+        got: usize,
+    },
     /// Character outside `[A-Z0-9<]`.
     BadCharacter(char),
     /// Document code not recognized for the format.
@@ -329,7 +357,12 @@ pub enum MrzError {
     /// they return an [`MrzData`] whose [`Checks`] report the failure, so a
     /// caller can show the user which digits disagreed. This variant exists
     /// for callers that convert a failed [`Checks`] into an error of their own.
-    BadChecksum { field: Field, position: usize },
+    BadChecksum {
+        /// Which check-digit-bearing field disagreed.
+        field: Field,
+        /// Byte offset of the check digit within the field's line.
+        position: usize,
+    },
     /// No plausible MRZ found in the supplied text.
     NotFound,
 }
