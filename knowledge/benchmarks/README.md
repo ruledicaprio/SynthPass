@@ -58,28 +58,30 @@ Real-specimen tracks map to `provider-bench --format` (via
 | `driving_license` | `driving_license` | `samples/driving_licenses/` |
 | `real-specimens` | *(none)* | the whole `samples/` real corpus |
 
-**Synthetic tracks (M6): `td1`, `td2`, `td3`.** A different axis entirely —
-`synthpass-bench --document-type td1|td2|td3`, the per-format Tier-1
-hit-rate gate over the *generated* corpus, not a real-specimen scope. Not
-to be confused with the `passport` track above, which scores real
-photographed specimens through `provider-bench` — same ICAO format as
-`td3`, entirely different corpus and binary; `mrz::Format` vs.
-`DocumentType::document_code()`'s inability to tell TD1 from TD2 is exactly
-the collision M6 spent its time untangling (see
-`knowledge/ROADMAP.md`'s M6 execution note), so the naming stays
+**Synthetic tracks: `td1`, `td2`, `td3` (M6), `mrva`, `mrvb` (MRV-A/MRV-B
+visas, added alongside M6's own generation/extraction coverage).** A
+different axis entirely — `synthpass-bench --document-type
+td1|td2|td3|mrva|mrvb`, the per-format Tier-1 hit-rate gate over the
+*generated* corpus, not a real-specimen scope. Not to be confused with the
+`passport` track above, which scores real photographed specimens through
+`provider-bench` — same ICAO format as `td3`, entirely different corpus and
+binary; `mrz::Format` vs. `DocumentType::document_code()`'s inability to
+tell TD1 from TD2 is exactly the collision M6 spent its time untangling
+(see `knowledge/ROADMAP.md`'s M6 execution note), so the naming stays
 deliberately distinct here too.
 
 `td3` is a *second*, independent way to measure TD3: the existing
 `bench-data-collection.yml` scheduled workflow already covers it (run
 nightly, feeding a large `dataset.jsonl`, no `read_ok_rate`/trend-chart
 shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
-the same small, `-Count`/`-Seed`-controlled shape `td1`/`td2` already use,
-specifically so all three formats land in the same row shape for the
-per-format comparison chart below. The two don't duplicate each other's
-job.
+the same small, `-Count`/`-Seed`-controlled shape the other synthetic
+tracks already use, specifically so all five formats land in the same row
+shape for the per-format comparison chart below. The two don't duplicate
+each other's job.
 
 Flattened into `results/td1-bench/history.jsonl` /
-`results/td2-bench/history.jsonl` / `results/td3-bench/history.jsonl` —
+`results/td2-bench/history.jsonl` / `results/td3-bench/history.jsonl` /
+`results/mrva-bench/history.jsonl` / `results/mrvb-bench/history.jsonl` —
 the same row shape as the real-specimen tracks: `hit_rate` → `read_ok_rate`,
 `provider_id` fixed at `"mrz"` (the only thing synthpass-bench measures —
 OCR + ICAO 9303 checksum, no per-provider comparison), and
@@ -127,9 +129,9 @@ pre-formatting representation) is cheap and doesn't weaken the check.
 `bench-chart`'s original mode plots one track's `history.jsonl` as a trend line over
 time (see "Live tracks" below). A second mode, added for the M6 TD1 accuracy
 milestone, draws a **bar chart comparing several tracks' latest numbers side by
-side** — the question "how does TD1 stack up against TD2 and TD3 *right now*" isn't
-answerable from three separate trend charts without holding three numbers in your
-head:
+side** — the question "how does TD1 stack up against TD2, TD3, MRV-A, and MRV-B
+*right now*" isn't answerable from five separate trend charts without holding five
+numbers in your head:
 
 ```
 bench-chart --bars --series LABEL=PATH [--series LABEL=PATH ...] --out PATH
@@ -145,9 +147,14 @@ caption states every series' document count explicitly (never assumed uniform) �
 a 30-document corpus must not get to look like a larger claim than it is.
 
 `knowledge/img/format-comparison.svg` (embedded on the README) is generated this
-way, from `td1`/`td2`/`td3`'s three `history.jsonl` files, regenerated in the same
-step `run-bench.ps1`/`bench-charts.yml` regenerate the per-track trend charts, so
-it never goes stale relative to them.
+way, from `td1`/`td2`/`td3`/`mrva`/`mrvb`'s five `history.jsonl` files — ID
+documents and visas side by side on one chart, a deliberate choice: all five
+measure the identical thing (Tier-1 hit rate over `synthpass-bench`'s generated
+corpus, same checksum-based methodology), so one chart answers "how does the MRZ
+parser do across every format it supports" without implying visas and ID documents
+are the same *kind* of document, just the same *measurement*. Regenerated in the
+same step `run-bench.ps1`/`bench-charts.yml` regenerate the per-track trend
+charts, so it never goes stale relative to them.
 
 ## Live tracks
 
@@ -171,3 +178,23 @@ The first four `real-specimens` data points (2026-08-01) are backfilled from
 (no `read_ok_rate`) and predate per-row `git_sha` tracking (recorded as
 `"unknown (backfilled from ...)"` rather than attributed to a commit they
 weren't actually measured against).
+
+### `td1` — synthetic TD1 corpus (`synthpass-bench --document-type td1`)
+
+![TD1 bench trend](../img/td1-bench-trend.svg)
+
+### `td2` — synthetic TD2 corpus (`synthpass-bench --document-type td2`)
+
+![TD2 bench trend](../img/td2-bench-trend.svg)
+
+### `td3` — synthetic TD3 corpus (`synthpass-bench --document-type td3`)
+
+![TD3 bench trend](../img/td3-bench-trend.svg)
+
+### `mrva` — synthetic MRV-A visa corpus (`synthpass-bench --document-type mrva`)
+
+![MRV-A bench trend](../img/mrva-bench-trend.svg)
+
+### `mrvb` — synthetic MRV-B visa corpus (`synthpass-bench --document-type mrvb`)
+
+![MRV-B bench trend](../img/mrvb-bench-trend.svg)
