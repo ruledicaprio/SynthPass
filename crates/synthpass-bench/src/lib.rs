@@ -413,6 +413,19 @@ impl std::fmt::Display for MissReason {
     }
 }
 
+/// Stable, machine-readable name for a miss class — shared by both bench
+/// binaries (`synthpass-bench`'s synthetic-corpus reporting and
+/// `provider-bench`'s real-specimen reporting) so "checksum_failed" means the
+/// same string in both, rather than two hand-written copies that could drift.
+pub fn miss_kind(reason: &MissReason) -> &'static str {
+    match reason {
+        MissReason::OcrError(_) => "ocr_error",
+        MissReason::NoMrzFound(_) => "no_mrz_found",
+        MissReason::ChecksumFailed => "checksum_failed",
+        MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
+    }
+}
+
 /// Per-field read quality for one document.
 ///
 /// The point of this type: a binary hit tells you *that* a document failed,

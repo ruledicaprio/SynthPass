@@ -31,7 +31,7 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use synthpass_bench::{check_document, generate_corpus, MissReason, ProfileChoice};
+use synthpass_bench::{check_document, generate_corpus, miss_kind, ProfileChoice};
 use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 
@@ -199,16 +199,6 @@ struct FieldReport {
     expected: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     got: Option<String>,
-}
-
-/// Stable, machine-readable name for a miss class.
-fn miss_kind(reason: &MissReason) -> &'static str {
-    match reason {
-        MissReason::OcrError(_) => "ocr_error",
-        MissReason::NoMrzFound(_) => "no_mrz_found",
-        MissReason::ChecksumFailed => "checksum_failed",
-        MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
-    }
 }
 
 #[derive(Serialize)]

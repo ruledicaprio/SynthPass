@@ -206,9 +206,12 @@ if ($isSyntheticTrack) {
     # one thing, the deterministic Tier-1 (OCR + ICAO 9303 checksum) gate --
     # so this is always a single row, `provider_id` fixed at "mrz" for
     # consistency with the real-specimen tracks' `provider_id` values.
-    # `hit_rate` -> `read_ok_rate`: both mean "fraction of documents that
-    # produced a usable result," which is what lets `bench-chart` plot every
-    # track's `read_ok_rate` on the same trend axis without new tooling.
+    # `hit_rate` -> `read_ok_rate`: both mean the genuine Tier-1 gate
+    # (MRZ found, ICAO checksums valid, document number matches ground truth
+    # when labelled) -- see the real-specimen branch below, which as of
+    # 2026-08-16 computes the same thing via `provider-bench`'s
+    # `tier1_hit_rate`, so `bench-chart` plots every track's `read_ok_rate`
+    # on the same genuine axis without new chart tooling.
     # `field_match_rate`/`mean_cer`/`unsupported_assertion_rate` are `$null`
     # (see the module doc comment) rather than fabricated -- synthpass-bench
     # doesn't measure them, and `HistoryRow`'s fields are `#[serde(default)]`
@@ -231,16 +234,27 @@ if ($isSyntheticTrack) {
     # One flattened row per provider -- an aggregate per (run, provider), not
     # a per-document row. Matches results/<track>-bench/history.jsonl's
     # schema documented in knowledge/benchmarks/README.md.
+    #
+    # `read_ok_rate` = `tier1_hit_rate` (2026-08-16 onward), NOT a
+    # `documents_detail[].read_ok` fraction. `read_ok` only means "the
+    # provider returned without erroring" -- for the deterministic `mrz`
+    # provider that is unconditionally true (`MrzReader::read` never returns
+    # `Err`; a document with no MRZ is a legitimate answer, not an error), so
+    # a `read_ok`-based rate was ~1.0 on every real-specimen track regardless
+    # of whether Tier-1 actually succeeded. `tier1_hit_rate` is the real gate
+    # -- MRZ found, checksums valid, document number matches ground truth
+    # when labelled -- the same thing `hit_rate` already measures for the
+    # synthetic tracks above. Rows recorded before this date used the old,
+    # vacuous definition; see knowledge/benchmarks/README.md for the cutover
+    # note before comparing across that boundary on one trend line.
     $rows = foreach ($p in $report.providers) {
-        $readOkCount = ($p.documents_detail | Where-Object { $_.read_ok }).Count
-        $readOkRate = if ($p.documents_detail.Count -gt 0) { $readOkCount / $p.documents_detail.Count } else { $null }
         [ordered]@{
             run_timestamp_unix         = $runTimestamp
             git_sha                    = $sha
             invocation                 = $invocation
             documents                  = $p.documents
             provider_id                = $p.provider_id
-            read_ok_rate               = $readOkRate
+            read_ok_rate               = $p.tier1_hit_rate
             labelled_documents         = $p.accuracy.labelled_documents
             field_match_rate           = $p.accuracy.field_match_rate
             mean_cer                   = $p.accuracy.mean_cer
