@@ -287,6 +287,11 @@ const CODES: &[(&str, &str)] = &[
 
 /// Map a 3-letter ICAO/ISO 3166-1 code to a country or entity name.
 /// Returns `None` for codes not in the table.
+///
+/// ```
+/// assert_eq!(mrz::country_name("DEU"), Some("Germany"));
+/// assert_eq!(mrz::country_name("ZZZ"), None);
+/// ```
 pub fn country_name(code: &str) -> Option<&'static str> {
     CODES
         .iter()
@@ -301,6 +306,11 @@ pub fn country_name(code: &str) -> Option<&'static str> {
 /// `"Croatia"`). Returns `None` for names not in the table; when a name has
 /// more than one legitimate code (Kosovo, Germany — see `CODES`'s doc
 /// comment), the first (primary) code in table order wins.
+///
+/// ```
+/// assert_eq!(mrz::code_for_name("Germany"), Some("DEU"));
+/// assert_eq!(mrz::code_for_name("CROATIA"), mrz::code_for_name("Croatia"));
+/// ```
 pub fn code_for_name(name: &str) -> Option<&'static str> {
     CODES
         .iter()
@@ -321,6 +331,11 @@ pub fn code_for_name(name: &str) -> Option<&'static str> {
 /// Unrecognized codes compare by case-insensitive equality only: with no
 /// table entry there is nothing to resolve them through, and two unknown
 /// strings being equal is the most that can honestly be said about them.
+///
+/// ```
+/// assert!(mrz::codes_equivalent("D", "DEU")); // legacy German code
+/// assert!(!mrz::codes_equivalent("DEU", "AUT"));
+/// ```
 pub fn codes_equivalent(a: &str, b: &str) -> bool {
     if a.eq_ignore_ascii_case(b) {
         return true;

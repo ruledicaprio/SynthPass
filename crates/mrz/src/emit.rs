@@ -76,7 +76,11 @@ pub struct Td3Fields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
+    /// Primary identifier / surname, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub surname: String,
+    /// Secondary identifier / given names, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -393,6 +397,26 @@ fn digit_char(field: &str) -> char {
 /// All four field check digits and the composite check digit are computed
 /// from `fields` — the result always round-trips through
 /// [`crate::parse_td3`] with `valid() == true` (see `tests/roundtrip.rs`).
+///
+/// ```
+/// use mrz::{format_td3, parse_td3, Td3Fields};
+///
+/// let fields = Td3Fields {
+///     document_code: "P".into(),
+///     issuing_country: "UTO".into(),
+///     document_number: "L898902C3".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "740812".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "120415".into(),
+///     personal_number: Some("ZE184226B".into()),
+/// };
+/// let mrz = format_td3(&fields);
+/// let (l1, l2) = mrz.split_once('\n').unwrap();
+/// assert!(parse_td3(l1, l2).unwrap().valid());
+/// ```
 pub fn format_td3(fields: &Td3Fields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);
@@ -462,7 +486,11 @@ pub struct Td2Fields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
+    /// Primary identifier / surname, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub surname: String,
+    /// Secondary identifier / given names, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -500,6 +528,24 @@ impl Default for Td2Fields {
 /// digits are computed from `fields` — the result always round-trips through
 /// [`crate::parse_td2`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// TD2 has no separate check digit over the optional-data field.
+///
+/// ```
+/// use mrz::{format_td2, parse_td2, Td2Fields};
+///
+/// let fields = Td2Fields {
+///     document_number: "D23145890".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "740812".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "120415".into(),
+///     ..Td2Fields::default()
+/// };
+/// let mrz = format_td2(&fields);
+/// let (l1, l2) = mrz.split_once('\n').unwrap();
+/// assert!(parse_td2(l1, l2).unwrap().valid());
+/// ```
 pub fn format_td2(fields: &Td2Fields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);
@@ -571,7 +617,11 @@ pub struct Td1Fields {
     /// Optional data on line 1, up to 15 characters. TD1 has no separate
     /// check digit over this field on its own — it only feeds the composite.
     pub optional_data_1: Option<String>,
+    /// Primary identifier / surname, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub surname: String,
+    /// Secondary identifier / given names, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -610,6 +660,27 @@ impl Default for Td1Fields {
 /// digits are computed from `fields` — the result always round-trips through
 /// [`crate::parse_td1`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// TD1 has no separate check digit over either optional-data field.
+///
+/// ```
+/// use mrz::{format_td1, parse_td1, Td1Fields};
+///
+/// let fields = Td1Fields {
+///     document_number: "D23145890".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "740812".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "120415".into(),
+///     ..Td1Fields::default()
+/// };
+/// let mrz = format_td1(&fields);
+/// let mut lines = mrz.lines();
+/// let l1 = lines.next().unwrap();
+/// let l2 = lines.next().unwrap();
+/// let l3 = lines.next().unwrap();
+/// assert!(parse_td1(l1, l2, l3).unwrap().valid());
+/// ```
 pub fn format_td1(fields: &Td1Fields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);
@@ -682,7 +753,11 @@ pub struct MrvAFields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
+    /// Primary identifier / surname, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub surname: String,
+    /// Secondary identifier / given names, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -721,6 +796,24 @@ impl Default for MrvAFields {
 /// computed from `fields` — the result always round-trips through
 /// [`crate::parse_mrv_a`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// MRV-A has no personal-number check digit and no composite check digit.
+///
+/// ```
+/// use mrz::{format_mrv_a, parse_mrv_a, MrvAFields};
+///
+/// let fields = MrvAFields {
+///     document_number: "L898902C".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "690806".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "940623".into(),
+///     ..MrvAFields::default()
+/// };
+/// let mrz = format_mrv_a(&fields);
+/// let (l1, l2) = mrz.split_once('\n').unwrap();
+/// assert!(parse_mrv_a(l1, l2).unwrap().valid());
+/// ```
 pub fn format_mrv_a(fields: &MrvAFields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);
@@ -765,7 +858,11 @@ pub struct MrvBFields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
+    /// Primary identifier / surname, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub surname: String,
+    /// Secondary identifier / given names, per this module's name-field
+    /// punctuation and transliteration rules (see the module docs).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -804,6 +901,24 @@ impl Default for MrvBFields {
 /// computed from `fields` — the result always round-trips through
 /// [`crate::parse_mrv_b`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// MRV-B has no personal-number check digit and no composite check digit.
+///
+/// ```
+/// use mrz::{format_mrv_b, parse_mrv_b, MrvBFields};
+///
+/// let fields = MrvBFields {
+///     document_number: "L898902C".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "690806".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "940623".into(),
+///     ..MrvBFields::default()
+/// };
+/// let mrz = format_mrv_b(&fields);
+/// let (l1, l2) = mrz.split_once('\n').unwrap();
+/// assert!(parse_mrv_b(l1, l2).unwrap().valid());
+/// ```
 pub fn format_mrv_b(fields: &MrvBFields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);

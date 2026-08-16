@@ -70,10 +70,17 @@ pub enum Blindspot {
     Identical,
     /// Values differ mod 10: any check digit covering the position rejects
     /// the swap. `delta_mod10` is the (non-zero) shift it would induce.
-    Caught { delta_mod10: u32 },
+    Caught {
+        /// The (non-zero) shift mod 10 the swap would induce in a check
+        /// digit covering this position.
+        delta_mod10: u32,
+    },
     /// Values are congruent mod 10: the swap is provably undetectable by
     /// check digits alone. `residue` is the shared value class.
-    Blind { residue: u32 },
+    Blind {
+        /// The value class (0-9) both characters share mod 10.
+        residue: u32,
+    },
     /// One or both characters lie outside the ICAO 9303 MRZ alphabet.
     NotMrzCharset,
 }
