@@ -20,7 +20,7 @@
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
-//!   --document-type TYPE  td1|td2|td3 — the ICAO 9303 MRZ format to *generate* for the
+//!   --document-type TYPE  td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to *generate* for the
 //!                      synthetic corpus (default: td3). Not the same axis as --format
 //!                      below (which scopes which real samples/ directory --real-specimens
 //!                      reads) — rejected together with --real-specimens, the same way
@@ -129,9 +129,9 @@ fn usage() {
          passport|id_card|driving_license (default: all classes)"
     );
     eprintln!(
-        "  --document-type TYPE  td1|td2|td3 — the ICAO 9303 MRZ format to *generate* for the \
-         synthetic corpus (default: td3). Not the same axis as --format, which scopes which \
-         real samples/ directory --real-specimens reads; rejected together with \
+        "  --document-type TYPE  td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to *generate* \
+         for the synthetic corpus (default: td3). Not the same axis as --format, which scopes \
+         which real samples/ directory --real-specimens reads; rejected together with \
          --real-specimens the same way --format is rejected without it."
     );
 }

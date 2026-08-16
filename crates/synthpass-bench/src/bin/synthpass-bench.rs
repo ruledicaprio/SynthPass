@@ -16,8 +16,8 @@
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
 //!                        "all" round-robins the five profiles across the corpus
-//!   --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to *generate*
-//!                        (default: td3); a run is always a single format, so
+//!   --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to
+//!                        *generate* (default: td3); a run is always a single format, so
 //!                        the per-format Tier-1 hit rate is one run per type
 //!   --out PATH           report JSON path (default: bench-report.json)
 //!   --min-hit-rate F     exit non-zero if the measured hit rate is below F
@@ -84,9 +84,9 @@ fn usage() {
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
     eprintln!("  --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)");
     eprintln!(
-        "  --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to *generate* (default: \
-         td3). Not the same axis as provider-bench's --format, which scopes which real \
-         samples/ directory to read."
+        "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to *generate* \
+         (default: td3). Not the same axis as provider-bench's --format, which scopes which \
+         real samples/ directory to read."
     );
     eprintln!("  --out PATH           report JSON path (default: bench-report.json)");
     eprintln!("  --min-hit-rate F     exit non-zero if the measured hit rate is below F");
