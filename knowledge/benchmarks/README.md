@@ -58,6 +58,39 @@ Real-specimen tracks map to `provider-bench --format` (via
 | `driving_license` | `driving_license` | `samples/driving_licenses/` |
 | `real-specimens` | *(none)* | the whole `samples/` real corpus |
 
+**Known corpus defect, found 2026-08-16: 13 of 61 `samples/id_cards/`
+specimens are misplaced passport bio-data pages, not ID cards** — Iceland
+(×2), India (×2), Indonesia (×3), Iran (×2), Iraq (×1), Israel (×3), all
+named `<Country>_Passport_Specimen_*`. Visually confirmed for Iceland/Iraq/
+Israel: each is a two-line 44-character `P<...` TD3 MRZ passport data page,
+not the country's actual ID card format. `provider-bench`'s own per-document
+`mrz_format` (new this session — see `miss_reason`/`tier1_hit_rate` above)
+corroborates it mechanically: both `Iceland_Passport_Specimen_*` files parse
+as checksum-valid **TD3** — genuine Tier-1 hits, meaning the `id_card`
+track's `tier1_hit_rate` is currently *inflated* by counting misplaced
+passport successes as ID-card successes, not just diluted by noise.
+`classify_specimen` (`crates/synthpass-bench/src/lib.rs:230`) classifies
+purely by directory — "directory wins over a disagreeing label" is
+deliberate for the common case (a real label disagreeing with a
+correctly-placed file), but has no defense against a file placed in the
+wrong directory to begin with. Not yet moved: relocating a specimen is a
+`samples-data` orphan-branch operation (see `CONTRIBUTING.md`'s "Adding a
+corpus specimen"), a different process from this session's Tier-1
+diagnostics/metric work, and deliberately deferred rather than folded in
+here. The filename pattern (`*_Passport_Specimen_*` outside `passports/`) is
+a reliable first-pass check for more of the same; the per-document
+`mrz_format` `provider-bench --verbose`/report JSON now records (see
+"Per-format comparison chart" below) is the exhaustive one.
+
+A second, unrelated finding from the same data: 4 *correctly-placed*
+`id_card` specimens (Italy CIE 2022, two Switzerland ID crops, one unlabelled
+Bosnia-format card) resolve to **TD2**/**MRV-B** — ICAO formats no ID card
+should parse as — rather than the ID-card-shaped TD1, and all four fail
+checksum. This is a genuine cross-format-confusion weak spot in the
+deterministic pipeline, not a corpus placement error, and is a candidate for
+the "weak-spot findings" writeup once all four real-specimen tracks have a
+current `tier1_hit_rate` run.
+
 **Synthetic tracks: `td1`, `td2`, `td3` (M6), `mrva`, `mrvb` (MRV-A/MRV-B
 visas, added alongside M6's own generation/extraction coverage).** A
 different axis entirely — `synthpass-bench --document-type
@@ -92,6 +125,23 @@ synthpass-bench doesn't measure them, and a fabricated `0.0` would read as
 `-FromReport PATH` flattens an existing report instead of running
 provider-bench again — used both for folding in a slow manual run without
 redoing it, and to backfill historical reports (see below).
+
+**`read_ok_rate` cutover, 2026-08-16.** Before this date, the real-specimen
+tracks' `read_ok_rate` was computed from `provider-bench`'s
+`documents_detail[].read_ok` — which only means "the provider returned
+without erroring." For the deterministic `mrz` provider that is
+unconditionally `true` (`MrzReader::read` is documented to never return
+`Err`: a document with no MRZ is a legitimate answer, not an error), so the
+old `read_ok_rate` sat at ~1.0 on every real-specimen track regardless of
+whether Tier-1 actually succeeded — not a useful signal, and not comparable
+to the synthetic tracks' `hit_rate`-derived numbers on the same chart despite
+sharing a field name. `provider-bench` now computes a genuine
+`tier1_hit_rate` (MRZ found, ICAO checksums valid, document number matches
+ground truth when labelled — mirroring `synthpass-bench`'s own hit
+definition) and `run-bench.ps1` records that as `read_ok_rate` for
+real-specimen tracks from this date onward. Rows recorded before the cutover
+are not comparable to rows after it on the same trend line — a real
+correctness signal appearing for the first time, not a regression.
 
 Row shape (one JSON object per `(run, provider)` — an aggregate, not a
 per-document row, since the point is a trend line across runs, not a
@@ -168,6 +218,22 @@ changed SVG; a local `run-bench.ps1` run leaves the regenerated file for you to 
 
 ![Passport bench trend](../img/passport-bench-trend.svg)
 
+### `id_card` — `samples/id_cards/`
+
+![ID card bench trend](../img/id_card-bench-trend.svg)
+
+### `driving_license` — `samples/driving_licenses/`
+
+![Driving license bench trend](../img/driving_license-bench-trend.svg)
+
+Corpus is small (3 specimens as of 2026-08-16) and has **zero labelled ground
+truth** — no `samples/ocr_fixtures/` entries exist for this class, so
+`field_match_rate`/`mean_cer` are `null` on every row, not a bug. A known,
+deliberately deferred gap (see `knowledge/ROADMAP.md`'s M6 execution notes for
+the parallel TD2 deferral pattern this follows): growing this corpus and
+labelling at least a few specimens is separate, open-ended work, not scoped
+into the Tier-1 diagnostics/metric work that added this track's chart.
+
 ### `real-specimens` — the whole `samples/` real corpus
 
 ![Real-specimens bench trend](../img/real-specimens-bench-trend.svg)
@@ -198,3 +264,51 @@ weren't actually measured against).
 ### `mrvb` — synthetic MRV-B visa corpus (`synthpass-bench --document-type mrvb`)
 
 ![MRV-B bench trend](../img/mrvb-bench-trend.svg)
+
+## Weak-spot findings
+
+Dated entries surfaced by a corpus run, kept here rather than only in a commit
+message so the next person doesn't have to re-derive them from raw numbers —
+same "Record the rejections" discipline as above, applied to what a
+measurement *found* rather than only to what it rejected.
+
+### 2026-08-16 — first genuine real-specimen Tier-1 numbers
+
+The first `tier1_hit_rate` run (see the `read_ok_rate` cutover note above)
+over the full local corpus, deterministic `mrz` provider, no `-Limit`:
+
+| Track | Documents | Tier-1 hit rate | `no_mrz_found` | `checksum_failed` |
+| --- | --- | --- | --- | --- |
+| `passport` | 131 | 53.4% | 24 | 37 |
+| `id_card` | 63 | 17.5% | 25 | 27 |
+| `driving_license` | 3 | 0.0% | 2 | 1 |
+| `real-specimens` (union) | 203 | 42.4% | 51 | 66 |
+
+Over `real-specimens`, `checksum_failed` (66) outnumbers `no_mrz_found` (51)
+as the dominant miss kind. That split matters: `no_mrz_found` conflates two
+very different populations — a genuinely MRZ-less document (many real ID
+cards and driving licenses have no machine-readable zone at all, a fact the
+`unsupported_assertion`'s `with_mrz_anchor`/`without_mrz_anchor` split
+already exists to separate) and an actual band-detection failure on a
+document that does carry one. `checksum_failed` carries no such ambiguity: it
+means OCR found MRZ-*shaped* text and got at least one character wrong inside
+it — a clean, unambiguous OCR weak spot, and now the larger of the two miss
+kinds on the real corpus. Follow-up (not done in this pass): pull the
+`checksum_failed` documents' raw OCR text the way the M6 TD1 root-cause
+investigation did — `synthpass-bench --dump-ocr` has no real-specimen
+equivalent today (`provider-bench` has no `--dump-ocr` flag at all) — and
+look for a systematic character confusion the way the name-separator and
+line-1-prefix bugs were found this session, rather than guessing from the
+aggregate alone. `knowledge/technical_debt.md`'s separate finding that OCR
+confidence is a character-plausibility proxy, not a real per-character model
+score, is the reason a confidence-based shortcut to the same answer isn't
+available either — the aggregate `checksum_failed` count is genuinely the
+best signal there is right now.
+
+Two more specific findings from the same run, detailed above under "The local
+bench loop (tracks)": a **corpus placement defect** (13 passport pages
+misplaced into `samples/id_cards/`, inflating that track's hit rate by
+counting misplaced passport hits as ID-card hits) and a **cross-format
+confusion** (4 correctly-placed ID cards resolving to TD2/MRV-B instead of
+their expected shape, all `checksum_failed`) — both candidates for follow-up
+investigation, neither actioned this pass.

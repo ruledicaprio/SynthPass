@@ -24,7 +24,7 @@
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
 
-use crate::{CorpusDoc, RealSpecimenDoc};
+use crate::{CorpusDoc, MissReason, RealSpecimenDoc};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -81,6 +81,22 @@ pub struct ProviderReport {
     /// integers per document — and rendered only on request
     /// (`provider-bench --verbose`).
     pub documents_detail: Vec<DocumentDetail>,
+    /// Fraction of documents that were a genuine Tier-1 hit: MRZ found, ICAO
+    /// checksums valid, and (when ground truth exists for the document)
+    /// document number matches. `documents_detail.iter().filter(|d|
+    /// d.miss_reason.is_none())`'s count over its length.
+    ///
+    /// **Not the same thing as `read_ok`/`read_ok_rate`.** `read_ok` only
+    /// means "the provider returned without erroring" — for the deterministic
+    /// `mrz` provider that is unconditionally `true` (`MrzReader::read` is
+    /// documented to never return `Err`: a document with no MRZ is a
+    /// legitimate answer, not an error), so `read_ok_rate` alone cannot tell
+    /// a clean specimen from one where OCR found nothing at all. This field
+    /// is the actual "did Tier-1 work" gate — the same one
+    /// `synthpass-bench`'s `hit_rate` already is for the synthetic corpus —
+    /// so real-specimen and synthetic tracks are finally comparable on the
+    /// same axis.
+    pub tier1_hit_rate: f64,
 }
 
 /// What one provider did on one document. **Shape only, never content**:
@@ -102,9 +118,8 @@ pub struct DocumentDetail {
     pub mrz_found: bool,
     /// The document's ICAO 9303 MRZ format, resolved per corpus source —
     /// the M6 plan's "report Tier-1 hit rate keyed by mrz::Format" applied to
-    /// this harness's own metrics (`read_ok`/`assertions_*` above, not a
-    /// `check_document`-style hit boolean, which this harness's per-document
-    /// loop has no equivalent of):
+    /// this harness's own metrics (see `miss_reason` for the
+    /// `check_document`-style hit/miss equivalent this loop now has):
     ///
     /// - Synthetic corpus: always `Some`, the exact format
     ///   `synthpass_gen::Labels::mrz_format` recorded (Phase 1) — never
@@ -117,8 +132,19 @@ pub struct DocumentDetail {
     ///   format — a specimen with no MRZ is not a TD-anything.
     pub mrz_format: Option<&'static str>,
     /// Whether the provider returned a reading at all. `false` means it
-    /// errored and contributed nothing to any aggregate.
+    /// errored and contributed nothing to any aggregate. **Not** a Tier-1
+    /// signal — see `miss_reason` for that.
     pub read_ok: bool,
+    /// `Evidence::mrz_checksums_valid` passthrough — `false` whenever
+    /// `read_ok` is `false` too (nothing to check), since a provider that
+    /// errored produced no MRZ to validate.
+    pub mrz_checksums_valid: bool,
+    /// Why this document is not a Tier-1 hit. `None` on a genuine hit: MRZ
+    /// found, checksums valid, and (when labelled) document number matches
+    /// ground truth. Mirrors `synthpass-bench`'s own miss classification
+    /// (`crate::MissReason`) so real-specimen and synthetic-corpus misses
+    /// aggregate the same way — see `crate::miss_kind`.
+    pub miss_reason: Option<MissReason>,
     pub assertions_total: usize,
     pub assertions_unsupported: usize,
     /// Which fields were asserted but absent from the OCR text. Names only.
@@ -645,22 +671,27 @@ async fn run_prepped(
                 }
             };
 
-            let Ok(reading) = reading else {
-                // Recorded rather than skipped silently: a provider that
-                // errored on a document contributed nothing to any aggregate,
-                // and a per-document view that simply omitted the row would
-                // make that indistinguishable from a document it handled
-                // cleanly with no assertions.
-                documents_detail.push(DocumentDetail {
-                    name: bench_page.name.clone(),
-                    mrz_found: bench_page.mrz_found,
-                    mrz_format: resolve_format(None),
-                    read_ok: false,
-                    assertions_total: 0,
-                    assertions_unsupported: 0,
-                    unsupported_fields: Vec::new(),
-                });
-                continue;
+            let reading = match reading {
+                Ok(reading) => reading,
+                Err(e) => {
+                    // Recorded rather than skipped silently: a provider that
+                    // errored on a document contributed nothing to any
+                    // aggregate, and a per-document view that simply omitted
+                    // the row would make that indistinguishable from a
+                    // document it handled cleanly with no assertions.
+                    documents_detail.push(DocumentDetail {
+                        name: bench_page.name.clone(),
+                        mrz_found: bench_page.mrz_found,
+                        mrz_format: resolve_format(None),
+                        read_ok: false,
+                        mrz_checksums_valid: false,
+                        miss_reason: Some(MissReason::OcrError(e.to_string())),
+                        assertions_total: 0,
+                        assertions_unsupported: 0,
+                        unsupported_fields: Vec::new(),
+                    });
+                    continue;
+                }
             };
             let mrz_format = resolve_format(Some(&reading.evidence));
 
@@ -727,11 +758,41 @@ async fn run_prepped(
                 }
             }
 
+            // Mirrors `run_check`'s miss classification in `lib.rs` exactly:
+            // no MRZ found, then checksum validity, then — only when this
+            // document is labelled — a document-number check against ground
+            // truth. A specimen with no label that clears the first two gets
+            // no third check at all, since there is no truth to compare
+            // against; that is a hit, not an unknown.
+            let miss_reason = if !bench_page.mrz_found {
+                Some(MissReason::NoMrzFound(String::new()))
+            } else if !reading.evidence.mrz_checksums_valid {
+                Some(MissReason::ChecksumFailed)
+            } else {
+                bench_page
+                    .ground_truth
+                    .as_ref()
+                    .and_then(|gt| gt.get(&CoreField::DocumentNumber))
+                    .and_then(|expected| {
+                        let got = reading
+                            .extraction
+                            .fields
+                            .get(CoreField::DocumentNumber)
+                            .unwrap_or("");
+                        (got != expected).then(|| MissReason::DocumentNumberMismatch {
+                            got: got.to_string(),
+                            expected: expected.clone(),
+                        })
+                    })
+            };
+
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
                 mrz_found: bench_page.mrz_found,
                 mrz_format,
                 read_ok: true,
+                mrz_checksums_valid: reading.evidence.mrz_checksums_valid,
+                miss_reason,
                 assertions_total: doc_assertions,
                 assertions_unsupported: doc_unsupported_fields.len(),
                 unsupported_fields: doc_unsupported_fields,
@@ -779,6 +840,16 @@ async fn run_prepped(
             }
         };
 
+        let tier1_hits = documents_detail
+            .iter()
+            .filter(|d| d.miss_reason.is_none())
+            .count();
+        let tier1_hit_rate = if documents_detail.is_empty() {
+            0.0
+        } else {
+            tier1_hits as f64 / documents_detail.len() as f64
+        };
+
         reports.push(ProviderReport {
             provider_id: reader.id().as_str().to_string(),
             documents: ocr_documents,
@@ -800,6 +871,7 @@ async fn run_prepped(
             unsupported_assertion,
             declared_resident_bytes: capability.estimated_resident_bytes,
             documents_detail,
+            tier1_hit_rate,
             measured_rss_delta_bytes: match (rss_before, rss_after) {
                 (Some(before), Some(after)) => Some(after as i64 - before as i64),
                 _ => None,
