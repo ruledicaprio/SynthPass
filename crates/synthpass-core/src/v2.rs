@@ -333,6 +333,16 @@ impl FieldConfidence {
                     "given_names" => self.given_names = IMPLAUSIBLE,
                     _ => {}
                 },
+                Finding::SuspiciouslyShortNameComponent { field, .. } => match field.as_str() {
+                    "surname" => self.surname = IMPLAUSIBLE,
+                    "given_names" => self.given_names = IMPLAUSIBLE,
+                    _ => {}
+                },
+                Finding::DegenerateRepeatedCharacterRun { field } => match field.as_str() {
+                    "surname" => self.surname = IMPLAUSIBLE,
+                    "given_names" => self.given_names = IMPLAUSIBLE,
+                    _ => {}
+                },
                 // Only the Tier-2/`fields` side drops — the MRZ structural
                 // value this was compared against isn't itself downgraded,
                 // it's the thing the contradiction was measured against.
