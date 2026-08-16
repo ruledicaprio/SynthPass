@@ -530,6 +530,8 @@ pub(crate) fn parse_ground_truth_mrz(expected: &Labels) -> Result<mrz::MrzData, 
         ),
         DocumentType::TD2 => mrz::parse_td2(&expected.mrz_lines[0], &expected.mrz_lines[1]),
         DocumentType::TD3 => mrz::parse_td3(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+        DocumentType::MrvA => mrz::parse_mrv_a(&expected.mrz_lines[0], &expected.mrz_lines[1]),
+        DocumentType::MrvB => mrz::parse_mrv_b(&expected.mrz_lines[0], &expected.mrz_lines[1]),
     }
 }
 

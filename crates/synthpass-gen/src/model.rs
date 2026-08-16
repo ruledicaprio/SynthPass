@@ -44,8 +44,12 @@ pub struct Passport {
     pub date_of_birth: Date,
     pub sex: Sex,
     pub date_of_expiry: Date,
-    /// TD3 personal-number field; `None` when left blank (an all-filler field
-    /// is a legitimate, checksum-valid TD3 MRZ — see `mrz::parser`).
+    /// The format's trailing optional/personal-number field — TD3's
+    /// personal-number, TD1's `optional_data_2`, TD2's/MRV-A's/MRV-B's
+    /// `optional_data`, all reused as one field since they play the same
+    /// structural role. `None` when left blank (an all-filler field is a
+    /// legitimate, checksum-valid MRZ for every one of these formats — see
+    /// `mrz::parser`).
     pub personal_number: Option<String>,
 }
 
@@ -58,6 +62,10 @@ pub enum DocumentType {
     TD2,
     /// TD3 - Passport format (2 lines × 44 characters)
     TD3,
+    /// MRV-A - Machine readable visa, type A (2 lines × 44 characters)
+    MrvA,
+    /// MRV-B - Machine readable visa, type B (2 lines × 36 characters)
+    MrvB,
 }
 
 impl DocumentType {
@@ -72,9 +80,10 @@ impl DocumentType {
     /// `From<DocumentType> for mrz::Format` bridge below.
     pub fn document_code(self) -> &'static str {
         match self {
-            DocumentType::TD1 => "I", // Identity card
+            DocumentType::TD1 => "I",                       // Identity card
             DocumentType::TD2 => "I", // Official travel document (also uses 'I')
             DocumentType::TD3 => "P", // Passport
+            DocumentType::MrvA | DocumentType::MrvB => "V", // Visa
         }
     }
 
@@ -84,6 +93,8 @@ impl DocumentType {
             DocumentType::TD1 => 3,
             DocumentType::TD2 => 2,
             DocumentType::TD3 => 2,
+            DocumentType::MrvA => 2,
+            DocumentType::MrvB => 2,
         }
     }
 
@@ -94,6 +105,8 @@ impl DocumentType {
             DocumentType::TD1 => "TD1",
             DocumentType::TD2 => "TD2",
             DocumentType::TD3 => "TD3",
+            DocumentType::MrvA => "MRVA",
+            DocumentType::MrvB => "MRVB",
         }
     }
 
@@ -106,32 +119,38 @@ impl DocumentType {
             "td1" => Ok(Self::TD1),
             "td2" => Ok(Self::TD2),
             "td3" => Ok(Self::TD3),
+            "mrva" => Ok(Self::MrvA),
+            "mrvb" => Ok(Self::MrvB),
             other => Err(format!(
-                "unknown document type '{other}' (valid: td1, td2, td3)"
+                "unknown document type '{other}' (valid: td1, td2, td3, mrva, mrvb)"
             )),
         }
     }
 }
 
 /// The generator's MRZ format is a subset of the parser's: [`mrz::Format`]
-/// is `#[non_exhaustive]` and also names `MrvA`/`MrvB` (machine-readable
-/// visas), which this generator does not render. This conversion is
-/// infallible in the direction the generator actually needs.
+/// is `#[non_exhaustive]`, so a future parser-only variant this generator
+/// was never taught to render can still exist on that side. This conversion
+/// is infallible in the direction the generator actually needs — every
+/// variant this generator can produce (TD1/TD2/TD3/MrvA/MrvB) has a
+/// corresponding `mrz::Format`.
 impl From<DocumentType> for mrz::Format {
     fn from(doc_type: DocumentType) -> Self {
         match doc_type {
             DocumentType::TD1 => mrz::Format::Td1,
             DocumentType::TD2 => mrz::Format::Td2,
             DocumentType::TD3 => mrz::Format::Td3,
+            DocumentType::MrvA => mrz::Format::MrvA,
+            DocumentType::MrvB => mrz::Format::MrvB,
         }
     }
 }
 
-/// The reverse bridge is fallible: a checksum-valid read can come back as
-/// `MrvA`/`MrvB`, or (since `mrz::Format` is `#[non_exhaustive]`) some future
-/// variant this generator was never taught to render. Both must be errors,
-/// not silently coerced to the nearest TDn — the generator must never claim
-/// it produced a format it did not.
+/// The reverse bridge is fallible: since `mrz::Format` is `#[non_exhaustive]`,
+/// a checksum-valid read can come back as some future variant this generator
+/// was never taught to render. That must be an error, not silently coerced
+/// to the nearest known format — the generator must never claim it produced
+/// a format it did not.
 impl TryFrom<mrz::Format> for DocumentType {
     type Error = String;
 
@@ -140,9 +159,11 @@ impl TryFrom<mrz::Format> for DocumentType {
             mrz::Format::Td1 => Ok(Self::TD1),
             mrz::Format::Td2 => Ok(Self::TD2),
             mrz::Format::Td3 => Ok(Self::TD3),
+            mrz::Format::MrvA => Ok(Self::MrvA),
+            mrz::Format::MrvB => Ok(Self::MrvB),
             other => Err(format!(
                 "{other:?} has no synthpass_gen::DocumentType equivalent — this generator only \
-                 renders TD1/TD2/TD3"
+                 renders TD1/TD2/TD3/MRV-A/MRV-B"
             )),
         }
     }

@@ -80,7 +80,13 @@ fn random_document_number(rng: &mut ChaCha8Rng) -> String {
 }
 
 fn random_personal_number(rng: &mut ChaCha8Rng) -> String {
-    // TD3 personal-number field is up to 14 characters.
+    // TD3 personal-number field is up to 14 characters. This value is also
+    // reused for every other format's trailing optional field (see
+    // `Passport::personal_number`'s doc comment): TD1/TD2/MRV-A have room to
+    // spare, but MRV-B's `optional_data` field is only 8 characters, so
+    // `mrz::emit`'s `field()` helper silently truncates this to 8 there.
+    // That truncation is safe by construction — no check digit covers
+    // MRV-B's optional-data field (see `mrz::emit`'s MRV-B docs).
     (0..14)
         .map(|_| ALNUM[rng.random_range(0..ALNUM.len())] as char)
         .collect()

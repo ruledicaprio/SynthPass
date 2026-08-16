@@ -114,7 +114,13 @@ mod tests {
             // that `passport.document_type` agrees with the requested
             // `doc_type`'s MRZ document code, and `generate_passport` is what
             // sets that field correctly per doc_type.
-            for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+            for doc_type in [
+                DocumentType::TD1,
+                DocumentType::TD2,
+                DocumentType::TD3,
+                DocumentType::MrvA,
+                DocumentType::MrvB,
+            ] {
                 let p = generate_passport(&GeneratorConfig::with_document_type(seed, doc_type));
                 let labels = build_labels(&p, doc_type);
                 let mut rects = vec![
@@ -174,6 +180,22 @@ mod tests {
         assert_eq!(labels_td1.mrz_lines[1].len(), 30);
         assert_eq!(labels_td1.mrz_lines[2].len(), 30);
         assert_eq!(labels_td1.mrz_format, DocumentType::TD1);
+
+        // Test MRV-A
+        let p_mrva = generate_passport(&GeneratorConfig::with_document_type(7, DocumentType::MrvA));
+        let labels_mrva = build_labels(&p_mrva, DocumentType::MrvA);
+        assert_eq!(labels_mrva.mrz_lines.len(), 2);
+        assert_eq!(labels_mrva.mrz_lines[0].len(), 44);
+        assert_eq!(labels_mrva.mrz_lines[1].len(), 44);
+        assert_eq!(labels_mrva.mrz_format, DocumentType::MrvA);
+
+        // Test MRV-B
+        let p_mrvb = generate_passport(&GeneratorConfig::with_document_type(7, DocumentType::MrvB));
+        let labels_mrvb = build_labels(&p_mrvb, DocumentType::MrvB);
+        assert_eq!(labels_mrvb.mrz_lines.len(), 2);
+        assert_eq!(labels_mrvb.mrz_lines[0].len(), 36);
+        assert_eq!(labels_mrvb.mrz_lines[1].len(), 36);
+        assert_eq!(labels_mrvb.mrz_format, DocumentType::MrvB);
     }
 
     /// The debug assertion in `build_mrz_lines` is the guardrail that stops

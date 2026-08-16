@@ -42,7 +42,7 @@ const VALID_PROFILES: &[&str] = &[
     "clean",
 ];
 
-const VALID_DOCUMENT_TYPES: &[&str] = &["td1", "td2", "td3"];
+const VALID_DOCUMENT_TYPES: &[&str] = &["td1", "td2", "td3", "mrva", "mrvb"];
 
 fn usage() {
     eprintln!(
@@ -52,7 +52,7 @@ fn usage() {
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
     eprintln!("  --profile NAME       clean|mobile|scanner|worn|border-kiosk (default: clean)");
     eprintln!(
-        "  --document-type TYPE td1|td2|td3 — the ICAO 9303 MRZ format to generate (default: td3)"
+        "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to generate (default: td3)"
     );
     eprintln!("  --out-dir DIR        output directory (default: .)");
 }
@@ -379,6 +379,8 @@ mod tests {
             ("td1", "TD1", 3, 30),
             ("td2", "TD2", 2, 36),
             ("td3", "TD3", 2, 44),
+            ("mrva", "MRVA", 2, 44),
+            ("mrvb", "MRVB", 2, 36),
         ];
         for (flag, expected_format, expected_lines, expected_width) in cases {
             let out_dir = std::env::temp_dir().join(format!(

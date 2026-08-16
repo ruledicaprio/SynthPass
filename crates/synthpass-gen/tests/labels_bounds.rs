@@ -7,7 +7,13 @@ use synthpass_gen::{data::generate_passport, generate, DocumentType, GeneratorCo
 #[test]
 fn all_bounding_boxes_are_within_image_bounds() {
     for seed in 0..30u64 {
-        for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+        for doc_type in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
             let cfg = GeneratorConfig::with_document_type(seed, doc_type);
             let passport = generate_passport(&cfg);
             let (image, labels) = generate(&passport, &cfg);
