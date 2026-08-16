@@ -154,6 +154,27 @@ jobs:
         # with:
         #   command: check advisories
 
+  # cargo-deny (above) checks each dependency's license against deny.toml's
+  # own accept-list; this job separately exercises about.toml's accept-list —
+  # the one that actually governs THIRD_PARTY_NOTICES.md — since the two
+  # files are independent and can drift (they already had: about.toml was
+  # missing the NCSA/CDLA-Permissive-2.0 entries deny.toml already allowed).
+  # `cargo about generate` fails outright on any dependency whose license
+  # isn't in that list. THIRD_PARTY_NOTICES.md itself is intentionally
+  # hand-curated prose, not this template's literal output (see its own
+  # header), so this step does not diff against it.
+  cargo-about:
+    name: cargo-about (license notices)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked --features cli
+      - name: Check every dependency's license is in about.toml's accept-list
+        run: cargo about generate about.hbs -o /tmp/THIRD_PARTY_NOTICES_generated.md
+
   # `mrz` is the published crate, so its stated MSRV has to be enforced rather
   # than asserted. Modeled on `rust-portable` (lightweight) rather than the
   # `rust` job: no OCR model downloads, no system dependencies. The gate is the

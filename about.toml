@@ -15,4 +15,6 @@ accepted = [
     "Unicode-DFS-2016",
     "CC0-1.0",
     "OpenSSL",
+    "NCSA",                   # rav1e/ravif (transitive via image), also libfuzzer-sys
+    "CDLA-Permissive-2.0",    # webpki-root-certs (transitive via reqwest)
 ]
