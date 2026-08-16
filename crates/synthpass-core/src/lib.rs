@@ -25,7 +25,7 @@ pub mod v2;
 /// confidence, provenance, and per-check-digit detail. This type stays fully
 /// intact for the v1 wire format — legacy clients (`?v=1` on `synthpass-serve`,
 /// `SYNTHPASS_JSON_V1=1` for on-disk JSON) are served this shape for one major
-/// release (see `docs/V2-DESIGN.md` §9, B2/B3). New code should produce and
+/// release (see `knowledge/V2-DESIGN.md` §9, B2/B3). New code should produce and
 /// consume [`v2::ExtractionV2`]; `From<Extraction>` lifts v1 → v2.
 ///
 /// The core ICAO fields are `Option` because the LLM tier may legitimately fail

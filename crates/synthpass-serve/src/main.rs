@@ -79,8 +79,8 @@ const QUEUE_FULL_RETRY_AFTER_SECS: u64 = 5;
 /// The vendor media type legacy clients can send to keep the v1 response shape.
 const LEGACY_V1_ACCEPT: &str = "application/vnd.mlis.v1+json";
 
-/// Legacy-client version negotiation (breaking change B2, `docs/V2-DESIGN.md`
-/// §9): the `/api/extract` SSE `result` event carries `extracted_v2` by
+/// Legacy-client version negotiation (breaking change B2,
+/// `knowledge/V2-DESIGN.md` §9): the `/api/extract` SSE `result` event carries `extracted_v2` by
 /// default; a client asking for `?v=1` or sending
 /// `Accept: application/vnd.mlis.v1+json` gets the v1-only shape for one
 /// major release. Pure function of the request parts so it's unit-testable.
