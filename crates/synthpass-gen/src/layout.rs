@@ -5,9 +5,10 @@
 //! accurate by construction: the generator knows exactly where it is about to
 //! draw a field before it draws it.
 //!
-//! Supports TD1 (3×30 chars), TD2 (2×36 chars), and TD3 (2×44 chars) MRZ
-//! formats, each on its **own** ICAO card canvas via [`for_format`] — not the
-//! TD3 passport page with a shorter MRZ band swapped in. See [`PageLayout`].
+//! Supports TD1 (3×30 chars), TD2 (2×36 chars), TD3 (2×44 chars), MRV-A
+//! (2×44 chars), and MRV-B (2×36 chars) MRZ formats, each on its **own**
+//! ICAO card/label canvas via [`for_format`] — not the TD3 passport page
+//! with a shorter MRZ band swapped in. See [`PageLayout`].
 //!
 //! This generator renders one composite image per document — portrait, VIZ
 //! fields, and MRZ together — the same convention TD3's own passport data
@@ -20,6 +21,12 @@
 //! not model separately. Chosen for consistency with TD2/TD3 and because
 //! nothing downstream (the bench corpus, the Tier-1 gate) needs a two-sided
 //! artifact to grade the MRZ.
+//!
+//! MRV-A/MRV-B are a further simplification in kind: ICAO 9303-7 describes a
+//! visa **label/sticker** affixed into a passport page, not a standalone
+//! card, but this generator renders it the same way it renders TD1/TD2/TD3
+//! — as its own single, self-contained canvas — since nothing downstream
+//! needs it composited onto a passport-page background to grade the MRZ.
 
 use crate::model::DocumentType;
 
@@ -102,6 +109,8 @@ fn td3_mrz_lines() -> Vec<Rect> {
 pub const TD1_MRZ_CHARS: u32 = 30;
 pub const TD2_MRZ_CHARS: u32 = 36;
 pub const TD3_MRZ_CHARS: u32 = 44;
+pub const MRVA_MRZ_CHARS: u32 = 44;
+pub const MRVB_MRZ_CHARS: u32 = 36;
 
 /// The MRZ band's per-line height/spacing — shared across all three formats
 /// so the MRZ font size (which `render.rs` derives from line height) is
@@ -138,26 +147,33 @@ pub struct PageLayout {
     pub mrz_chars: u32,
 }
 
-/// Real ICAO 9303 card geometry per format, all at TD3's existing
-/// ~9.6 px/mm so the three canvases are directly comparable:
+/// Real ICAO 9303 card/label geometry per format, all at TD3's existing
+/// ~9.6 px/mm so the canvases are directly comparable:
 ///
 /// - TD3 (ID-3, 125mm x 88mm) → 1200x840 — unchanged from before this
 ///   function existed.
 /// - TD2 (ID-2, 105mm x 74mm) → 1008x710.
 /// - TD1 (ID-1, 85.6mm x 54mm) → 822x518, landscape card proportions.
+/// - MRV-A (9303-7 §3.3, 120mm x 80mm) → 1152x768.
+/// - MRV-B (9303-7 §3.3, 105mm x 74mm — explicitly "based on ISO/IEC 7810,
+///   ID-2 Type Card") → 1008x710, the same canvas as TD2, deliberately: the
+///   physical size is identical per that ICAO citation, not a copy-paste
+///   duplicate.
 ///
-/// TD1 and TD2 are genuinely different canvases, not the TD3 passport page
-/// with a shorter MRZ band — each gets its own VIZ arrangement: portrait at
-/// the left edge (ICAO 9303-5 §3.3 / 9303-6 §3.3: the portrait's left edge
-/// is coincident with the card's left edge on both formats), VIZ text
-/// fields in a column to its right, and the MRZ spanning the full card
-/// width in a band at the bottom (9303-6 Figure 3's "Zone VII at bottom";
-/// see this module's doc comment for the TD1 front/back simplification).
+/// Every format gets its own VIZ arrangement: portrait at the left edge
+/// (ICAO 9303-5 §3.3 / 9303-6 §3.3 / 9303-7's Zone V rule all state the
+/// portrait's left edge is coincident with the card/label's own left edge),
+/// VIZ text fields in a column to its right, and the MRZ spanning the full
+/// width in a band at the bottom (9303-6 Figure 3 / 9303-7 Zone VII; see
+/// this module's doc comment for the TD1 front/back and MRV
+/// label-vs-standalone-canvas simplifications).
 pub fn for_format(doc_type: DocumentType) -> PageLayout {
     match doc_type {
         DocumentType::TD3 => td3_layout(),
         DocumentType::TD2 => td2_layout(),
         DocumentType::TD1 => td1_layout(),
+        DocumentType::MrvA => mrva_layout(),
+        DocumentType::MrvB => mrvb_layout(),
     }
 }
 
@@ -310,6 +326,110 @@ fn td1_layout() -> PageLayout {
     }
 }
 
+/// MRV-A (ICAO 9303-7 §3.3, nominal 120mm x 80mm) → 1152x768. Portrait at
+/// the left edge — Zone V's own rule ("the left edge of the identification
+/// feature shall be coincident with the left edge of the MRV"), not just
+/// this module's TD1/TD2 convention — VIZ column to its right, 2-line MRZ
+/// band (Zone VII) at the bottom, same arrangement as `td2_layout()` since
+/// MRV-A is also a 2-line MRZ format.
+fn mrva_layout() -> PageLayout {
+    const WIDTH: u32 = 1152;
+    const HEIGHT: u32 = 768;
+    const MARGIN: u32 = 50;
+
+    let portrait = Rect::new(MARGIN, MARGIN, 240, 320);
+    let viz_x = portrait.x + portrait.width + 30;
+    let viz_right = WIDTH - MARGIN;
+    let viz_width = viz_right - viz_x;
+
+    let row_h = 34;
+    let row_y = |i: u32| MARGIN + i * 46;
+
+    let mrz_width = WIDTH - 2 * MARGIN;
+    let mrz_height = 2 * MRZ_LINE_HEIGHT + MRZ_LINE_SPACING;
+    let mrz_start_y = HEIGHT - MARGIN - mrz_height;
+
+    PageLayout {
+        width: WIDTH,
+        height: HEIGHT,
+        portrait,
+        document_type: Rect::new(viz_x, row_y(0), 130, row_h),
+        issuing_country: Rect::new(viz_x + 150, row_y(0), 130, row_h),
+        surname: Rect::new(viz_x, row_y(1), viz_width, row_h),
+        given_names: Rect::new(viz_x, row_y(2), viz_width, row_h),
+        document_number: Rect::new(viz_x, row_y(3), 280, row_h),
+        nationality: Rect::new(viz_x, row_y(4), 160, row_h),
+        date_of_birth: Rect::new(viz_x + 180, row_y(4), 210, row_h),
+        sex: Rect::new(viz_x + 410, row_y(4), 75, row_h),
+        date_of_expiry: Rect::new(viz_x, row_y(5), 210, row_h),
+        personal_number: Rect::new(viz_x, row_y(6), 420, row_h),
+        watermark: Rect::new(MARGIN, row_y(7), mrz_width, 50),
+        mrz_lines: vec![
+            Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
+            Rect::new(
+                MARGIN,
+                mrz_start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING,
+                mrz_width,
+                MRZ_LINE_HEIGHT,
+            ),
+        ],
+        mrz_chars: MRVA_MRZ_CHARS,
+    }
+}
+
+/// MRV-B (ICAO 9303-7 §3.3, nominal 105mm x 74mm — explicitly "based on
+/// ISO/IEC 7810, ID-2 Type Card") → 1008x710, the same canvas
+/// [`td2_layout`] returns. That is deliberate, not accidental duplication:
+/// MRV-B is physically an ID-2-sized label per that ICAO citation. It stays
+/// a distinct function (not a `td2_layout()` alias) because its field
+/// semantics differ — visa fields, no personal-number check digit, no
+/// composite check digit (see `mrz::emit`'s MRV-B docs) — even though the
+/// canvas dimensions coincide.
+fn mrvb_layout() -> PageLayout {
+    const WIDTH: u32 = 1008;
+    const HEIGHT: u32 = 710;
+    const MARGIN: u32 = 50;
+
+    let portrait = Rect::new(MARGIN, MARGIN, 190, 260);
+    let viz_x = portrait.x + portrait.width + 30;
+    let viz_right = WIDTH - MARGIN;
+    let viz_width = viz_right - viz_x;
+
+    let row_h = 32;
+    let row_y = |i: u32| MARGIN + i * 42;
+
+    let mrz_width = WIDTH - 2 * MARGIN;
+    let mrz_height = 2 * MRZ_LINE_HEIGHT + MRZ_LINE_SPACING;
+    let mrz_start_y = HEIGHT - MARGIN - mrz_height;
+
+    PageLayout {
+        width: WIDTH,
+        height: HEIGHT,
+        portrait,
+        document_type: Rect::new(viz_x, row_y(0), 120, row_h),
+        issuing_country: Rect::new(viz_x + 140, row_y(0), 120, row_h),
+        surname: Rect::new(viz_x, row_y(1), viz_width, row_h),
+        given_names: Rect::new(viz_x, row_y(2), viz_width, row_h),
+        document_number: Rect::new(viz_x, row_y(3), 260, row_h),
+        nationality: Rect::new(viz_x, row_y(4), 150, row_h),
+        date_of_birth: Rect::new(viz_x + 170, row_y(4), 200, row_h),
+        sex: Rect::new(viz_x + 390, row_y(4), 70, row_h),
+        date_of_expiry: Rect::new(viz_x, row_y(5), 200, row_h),
+        personal_number: Rect::new(viz_x, row_y(6), 400, row_h),
+        watermark: Rect::new(MARGIN, 360, mrz_width, 50),
+        mrz_lines: vec![
+            Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
+            Rect::new(
+                MARGIN,
+                mrz_start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING,
+                mrz_width,
+                MRZ_LINE_HEIGHT,
+            ),
+        ],
+        mrz_chars: MRVB_MRZ_CHARS,
+    }
+}
+
 /// Get MRZ character rectangle for a specific line and index.
 pub fn mrz_char_rect_for_line(line: Rect, mrz_chars: u32, index: u32) -> Rect {
     debug_assert!(index < mrz_chars);
@@ -347,7 +467,13 @@ mod tests {
 
     #[test]
     fn mrz_char_cells_fit_within_the_line() {
-        for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+        for doc_type in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
             let layout = for_format(doc_type);
             for rect in &layout.mrz_lines {
                 for i in 0..layout.mrz_chars {
@@ -387,7 +513,13 @@ mod tests {
     /// format's own canvas. The M6 plan's per-format verification step.
     #[test]
     fn every_format_page_layout_fits_its_own_canvas() {
-        for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+        for doc_type in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
             let layout = for_format(doc_type);
             let (w, h) = (layout.width, layout.height);
             let mut rects = vec![
@@ -443,6 +575,20 @@ mod tests {
                 for_format(DocumentType::TD1).height
             ),
             (822, 518)
+        );
+        assert_eq!(
+            (
+                for_format(DocumentType::MrvA).width,
+                for_format(DocumentType::MrvA).height
+            ),
+            (1152, 768)
+        );
+        assert_eq!(
+            (
+                for_format(DocumentType::MrvB).width,
+                for_format(DocumentType::MrvB).height
+            ),
+            (1008, 710)
         );
     }
 }

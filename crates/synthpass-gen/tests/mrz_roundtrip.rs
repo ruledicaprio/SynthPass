@@ -117,6 +117,54 @@ fn generated_td2_mrz_round_trips() {
 }
 
 #[test]
+fn generated_mrva_mrz_round_trips() {
+    for seed in 0..50u64 {
+        let cfg = GeneratorConfig::with_document_type(seed, DocumentType::MrvA);
+        let passport = generate_passport(&cfg);
+        let (_image, labels) = generate(&passport, &cfg);
+
+        let mrz_string = labels.mrz_string();
+        let mut lines = mrz_string.lines();
+        let line1 = lines.next().expect("line1");
+        let line2 = lines.next().expect("line2");
+
+        let parsed = mrz::parse_mrv_a(line1, line2)
+            .unwrap_or_else(|e| panic!("seed {seed}: MRV-A MRZ failed to parse: {e}"));
+        assert!(
+            parsed.valid(),
+            "seed {seed}: MRV-A MRZ parsed but not checksum-valid: {:?}",
+            parsed.checks
+        );
+        assert_eq!(parsed.surname, passport.surname, "seed {seed}");
+        assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+    }
+}
+
+#[test]
+fn generated_mrvb_mrz_round_trips() {
+    for seed in 0..50u64 {
+        let cfg = GeneratorConfig::with_document_type(seed, DocumentType::MrvB);
+        let passport = generate_passport(&cfg);
+        let (_image, labels) = generate(&passport, &cfg);
+
+        let mrz_string = labels.mrz_string();
+        let mut lines = mrz_string.lines();
+        let line1 = lines.next().expect("line1");
+        let line2 = lines.next().expect("line2");
+
+        let parsed = mrz::parse_mrv_b(line1, line2)
+            .unwrap_or_else(|e| panic!("seed {seed}: MRV-B MRZ failed to parse: {e}"));
+        assert!(
+            parsed.valid(),
+            "seed {seed}: MRV-B MRZ parsed but not checksum-valid: {:?}",
+            parsed.checks
+        );
+        assert_eq!(parsed.surname, passport.surname, "seed {seed}");
+        assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+    }
+}
+
+#[test]
 fn generated_mrz_round_trips_without_personal_number() {
     let cfg = GeneratorConfig {
         seed: 999,

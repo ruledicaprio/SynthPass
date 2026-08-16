@@ -1,16 +1,21 @@
-//! MRZ line assembly for generated documents (TD1, TD2, TD3).
+//! MRZ line assembly for generated documents (TD1, TD2, TD3, MRV-A, MRV-B).
 //!
 //! This is a thin adapter over the canonical emitters in the `mrz` crate:
 //! - [`mrz::format_td1`] for TD1 (ID cards)
 //! - [`mrz::format_td2`] for TD2 (official travel documents)
 //! - [`mrz::format_td3`] for TD3 (passports)
+//! - [`mrz::format_mrv_a`] for MRV-A (visas)
+//! - [`mrz::format_mrv_b`] for MRV-B (visas)
 //!
 //! Each function converts the crate's structured [`Passport`] into the
 //! MRZ-native fields and splits the emitter's output into the lines the
 //! renderer and labels need. All check-digit math lives in the `mrz` crate
 //! — this module owns none of it.
 
-use mrz::{format_td1, format_td2, format_td3, Td1Fields, Td2Fields, Td3Fields};
+use mrz::{
+    format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, MrvAFields, MrvBFields,
+    Td1Fields, Td2Fields, Td3Fields,
+};
 
 use crate::model::{DocumentType, Passport};
 
@@ -103,6 +108,57 @@ pub fn build_td2_lines(passport: &Passport) -> (String, String) {
     (line1.to_string(), line2.to_string())
 }
 
+/// Assemble the two MRV-A MRZ lines for `passport` via [`mrz::format_mrv_a`].
+/// MRV-A is used for visas and has 2 lines of 44 characters each. MRV-A has
+/// no personal-number check digit and no composite check digit — see
+/// `mrz::emit`'s MRV-A docs.
+///
+/// Reads `passport.document_type`, same rationale as [`build_td1_lines`].
+pub fn build_mrv_a_lines(passport: &Passport) -> (String, String) {
+    let fields = MrvAFields {
+        document_code: passport.document_type.clone(),
+        issuing_country: passport.issuing_country.clone(),
+        document_number: passport.document_number.clone(),
+        surname: passport.surname.clone(),
+        given_names: passport.given_names.clone(),
+        nationality: passport.nationality.clone(),
+        date_of_birth: yymmdd(&passport.date_of_birth),
+        sex: passport.sex.as_mrz_char().to_string(),
+        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        optional_data: passport.personal_number.clone(),
+    };
+    let emitted = format_mrv_a(&fields);
+    let (line1, line2) = emitted
+        .split_once('\n')
+        .expect("format_mrv_a always returns two newline-joined lines");
+    (line1.to_string(), line2.to_string())
+}
+
+/// Assemble the two MRV-B MRZ lines for `passport` via [`mrz::format_mrv_b`].
+/// MRV-B is used for visas and has 2 lines of 36 characters each. Same as
+/// MRV-A: no personal-number check digit and no composite check digit.
+///
+/// Reads `passport.document_type`, same rationale as [`build_td1_lines`].
+pub fn build_mrv_b_lines(passport: &Passport) -> (String, String) {
+    let fields = MrvBFields {
+        document_code: passport.document_type.clone(),
+        issuing_country: passport.issuing_country.clone(),
+        document_number: passport.document_number.clone(),
+        surname: passport.surname.clone(),
+        given_names: passport.given_names.clone(),
+        nationality: passport.nationality.clone(),
+        date_of_birth: yymmdd(&passport.date_of_birth),
+        sex: passport.sex.as_mrz_char().to_string(),
+        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        optional_data: passport.personal_number.clone(),
+    };
+    let emitted = format_mrv_b(&fields);
+    let (line1, line2) = emitted
+        .split_once('\n')
+        .expect("format_mrv_b always returns two newline-joined lines");
+    (line1.to_string(), line2.to_string())
+}
+
 /// Build MRZ lines for the specified document type.
 ///
 /// Debug-asserts that `passport.document_type` agrees with `doc_type`'s own
@@ -135,6 +191,14 @@ pub fn build_mrz_lines(passport: &Passport, doc_type: DocumentType) -> Vec<Strin
         }
         DocumentType::TD3 => {
             let (l1, l2) = build_td3_lines(passport);
+            vec![l1, l2]
+        }
+        DocumentType::MrvA => {
+            let (l1, l2) = build_mrv_a_lines(passport);
+            vec![l1, l2]
+        }
+        DocumentType::MrvB => {
+            let (l1, l2) = build_mrv_b_lines(passport);
             vec![l1, l2]
         }
     }
@@ -175,6 +239,32 @@ mod tests {
             let p = crate::data::generate_passport(&cfg);
             let (l1, l2) = build_td3_lines(&p);
             let parsed = mrz::parse_td3(&l1, &l2).expect("parses");
+            assert!(parsed.valid(), "seed {seed}: checks {:?}", parsed.checks);
+        }
+    }
+
+    #[test]
+    fn mrv_a_parses_back_valid_for_generated_identities() {
+        for seed in 0..50u64 {
+            let cfg = GeneratorConfig::with_document_type(seed, DocumentType::MrvA);
+            let p = crate::data::generate_passport(&cfg);
+            let (l1, l2) = build_mrv_a_lines(&p);
+            assert_eq!(l1.len(), 44);
+            assert_eq!(l2.len(), 44);
+            let parsed = mrz::parse_mrv_a(&l1, &l2).expect("parses");
+            assert!(parsed.valid(), "seed {seed}: checks {:?}", parsed.checks);
+        }
+    }
+
+    #[test]
+    fn mrv_b_parses_back_valid_for_generated_identities() {
+        for seed in 0..50u64 {
+            let cfg = GeneratorConfig::with_document_type(seed, DocumentType::MrvB);
+            let p = crate::data::generate_passport(&cfg);
+            let (l1, l2) = build_mrv_b_lines(&p);
+            assert_eq!(l1.len(), 36);
+            assert_eq!(l2.len(), 36);
+            let parsed = mrz::parse_mrv_b(&l1, &l2).expect("parses");
             assert!(parsed.valid(), "seed {seed}: checks {:?}", parsed.checks);
         }
     }

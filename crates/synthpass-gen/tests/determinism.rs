@@ -27,7 +27,13 @@ fn same_seed_yields_identical_identity_and_pixels() {
 /// for every format") extended past TD3.
 #[test]
 fn same_seed_yields_byte_identical_pixels_for_every_format() {
-    for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+    for doc_type in [
+        DocumentType::TD1,
+        DocumentType::TD2,
+        DocumentType::TD3,
+        DocumentType::MrvA,
+        DocumentType::MrvB,
+    ] {
         let cfg = GeneratorConfig::with_document_type(4321, doc_type);
         let passport_a = generate_passport(&cfg);
         let passport_b = generate_passport(&cfg);

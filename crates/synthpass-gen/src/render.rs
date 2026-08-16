@@ -508,7 +508,13 @@ mod tests {
         use crate::labels::build_labels;
         use crate::model::GeneratorConfig;
 
-        for doc_type in [DocumentType::TD1, DocumentType::TD2, DocumentType::TD3] {
+        for doc_type in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
             let passport = generate_passport(&GeneratorConfig::with_document_type(1, doc_type));
             let labels = build_labels(&passport, doc_type);
             let image = render(&passport, &labels, doc_type);
