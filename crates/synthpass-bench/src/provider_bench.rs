@@ -96,7 +96,10 @@ pub struct ProviderReport {
     /// `synthpass-bench`'s `hit_rate` already is for the synthetic corpus —
     /// so real-specimen and synthetic tracks are finally comparable on the
     /// same axis.
-    pub tier1_hit_rate: f64,
+    ///
+    /// `NotApplicable` for a non-`capability.deterministic` provider — see
+    /// [`Tier1HitRate`]'s doc for why.
+    pub tier1_hit_rate: Tier1HitRate,
 }
 
 /// What one provider did on one document. **Shape only, never content**:
@@ -284,6 +287,29 @@ impl AssertionBucket {
 const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-text predicate \
     assumes a text-only provider and would misreport a correct pixel-grounded read as an \
     unsupported assertion";
+
+/// Whether [`ProviderReport::tier1_hit_rate`] could be computed for a given provider.
+///
+/// The rate is defined in terms of ICAO checksum validity
+/// (`Evidence::mrz_checksums_valid`), which only a deterministic, MRZ-format-aware
+/// reader ever computes. A provider that doesn't set `capability.deterministic`
+/// never asserts checksum validity at all — not even correctly — so treating its
+/// `mrz_checksums_valid: false` default as a real miss would fabricate a rate of
+/// exactly `0.0` regardless of how accurate the provider actually is. That's the
+/// same shape of bug [`AssertionBucket::rate`]'s `Option` and
+/// [`UnsupportedAssertion::NotApplicable`] both exist to prevent, one metric over.
+pub enum Tier1HitRate {
+    /// Computed over a `capability.deterministic` provider's `documents_detail`:
+    /// the fraction with `miss_reason.is_none()`.
+    Computed(f64),
+    /// Not computed. `capability.deterministic` was `false` for this provider.
+    NotApplicable { reason: &'static str },
+}
+
+const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — this provider never \
+    asserts ICAO checksum validity, so a checksum-validated Tier-1 hit rate can't be computed for \
+    it; its Evidence::mrz_checksums_valid defaulting to false would otherwise fabricate a rate of \
+    exactly 0.0 regardless of actual accuracy";
 
 pub struct SpeedStats {
     pub mean: Duration,
@@ -878,14 +904,20 @@ async fn run_prepped(
             }
         };
 
-        let tier1_hits = documents_detail
-            .iter()
-            .filter(|d| d.miss_reason.is_none())
-            .count();
-        let tier1_hit_rate = if documents_detail.is_empty() {
-            0.0
+        let tier1_hit_rate = if !capability.deterministic {
+            Tier1HitRate::NotApplicable {
+                reason: NOT_DETERMINISTIC_REASON,
+            }
         } else {
-            tier1_hits as f64 / documents_detail.len() as f64
+            let tier1_hits = documents_detail
+                .iter()
+                .filter(|d| d.miss_reason.is_none())
+                .count();
+            Tier1HitRate::Computed(if documents_detail.is_empty() {
+                0.0
+            } else {
+                tier1_hits as f64 / documents_detail.len() as f64
+            })
         };
 
         reports.push(ProviderReport {
@@ -1287,6 +1319,91 @@ mod tests {
             }
             UnsupportedAssertion::Computed { .. } => {
                 panic!("a vision-capable provider must not get a verbatim-substring rate")
+            }
+        }
+    }
+
+    /// A deterministic provider's `tier1_hit_rate` is `Computed`, not
+    /// skipped — mirrors `non_vision_provider_gets_a_computed_unsupported_assertion_rate`
+    /// but for the `tier1_hit_rate` carve-out, which is gated on
+    /// `capability.deterministic` rather than `capability.vision`.
+    #[tokio::test]
+    async fn deterministic_provider_gets_a_computed_tier1_hit_rate() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "SMITH",
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
+            page: OcrPage {
+                text: "surname DOE, birth date 1990".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        match reports[0].tier1_hit_rate {
+            // `FixedReader::read` always returns `Evidence::default()` and
+            // this fixture has no MRZ at all, so the one document is a
+            // genuine miss (`NoMrzFound`) — the rate is still `Computed`,
+            // just `Computed(0.0)`. That's the point: the *type* must stay
+            // `Computed` for a deterministic provider even when the number
+            // happens to be zero.
+            Tier1HitRate::Computed(rate) => assert_eq!(rate, 0.0),
+            Tier1HitRate::NotApplicable { .. } => {
+                panic!("a deterministic provider must get a computed tier1_hit_rate")
+            }
+        }
+    }
+
+    /// A non-deterministic (e.g. LLM) provider's `tier1_hit_rate` is
+    /// `NotApplicable`, not a fabricated `0.0` — the bug this carve-out
+    /// fixes. `FixedReader`'s `Evidence::default()` never sets
+    /// `mrz_checksums_valid`, which previously made every non-deterministic
+    /// provider look like it hit zero Tier-1 documents regardless of actual
+    /// accuracy.
+    #[tokio::test]
+    async fn non_deterministic_provider_gets_not_applicable_tier1_hit_rate() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::model_reader(CostClass::Expensive),
+            surname: "SMITH",
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
+            page: OcrPage {
+                text: "surname DOE, birth date 1990".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        match &reports[0].tier1_hit_rate {
+            Tier1HitRate::NotApplicable { reason } => assert!(!reason.is_empty()),
+            Tier1HitRate::Computed(rate) => {
+                panic!(
+                    "a non-deterministic provider must not get a computed \
+                     tier1_hit_rate, got {rate}"
+                )
             }
         }
     }

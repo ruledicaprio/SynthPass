@@ -52,7 +52,7 @@ use serde::Serialize;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
+    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport, Tier1HitRate,
     UnsupportedAssertion,
 };
 use synthpass_bench::{
@@ -398,6 +398,26 @@ impl From<UnsupportedAssertion> for UnsupportedAssertionReport {
     }
 }
 
+/// Mirrors `synthpass_bench::provider_bench::Tier1HitRate` for JSON: either
+/// `{"status": "computed", "rate": ...}` or `{"status": "not_applicable",
+/// "reason": "..."}` — never a bare number that would look identical whether
+/// it was measured or skipped for a non-`capability.deterministic` provider.
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum Tier1HitRateReport {
+    Computed { rate: f64 },
+    NotApplicable { reason: &'static str },
+}
+
+impl From<Tier1HitRate> for Tier1HitRateReport {
+    fn from(t: Tier1HitRate) -> Self {
+        match t {
+            Tier1HitRate::Computed(rate) => Self::Computed { rate },
+            Tier1HitRate::NotApplicable { reason } => Self::NotApplicable { reason },
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct SpeedReport {
     mean_ms: u128,
@@ -435,7 +455,9 @@ struct ProviderRow {
     /// matches when labelled) — see
     /// `synthpass_bench::provider_bench::ProviderReport::tier1_hit_rate`'s
     /// doc for why this is a different number from `read_ok`/nothing above.
-    tier1_hit_rate: f64,
+    /// `NotApplicable` for a non-`capability.deterministic` provider — see
+    /// `Tier1HitRate`'s doc.
+    tier1_hit_rate: Tier1HitRateReport,
 }
 
 impl From<ProviderReport> for ProviderRow {
@@ -491,7 +513,7 @@ impl From<ProviderReport> for ProviderRow {
                     unsupported_fields: d.unsupported_fields,
                 })
                 .collect(),
-            tier1_hit_rate: r.tier1_hit_rate,
+            tier1_hit_rate: r.tier1_hit_rate.into(),
         }
     }
 }
@@ -681,13 +703,17 @@ async fn main() {
             }
             UnsupportedAssertion::NotApplicable { reason } => format!("n/a ({reason})"),
         };
+        let tier1_hit_rate = match &r.tier1_hit_rate {
+            Tier1HitRate::Computed(rate) => format!("{:.1}%", rate * 100.0),
+            Tier1HitRate::NotApplicable { reason } => format!("n/a ({reason})"),
+        };
         println!(
-            "{}: {} docs ({} labelled), Tier-1 hit rate {:.1}%, field match {field_match}, mean \
-             CER {mean_cer}, mean {} ms, unsupported-assertion rate {unsupported}",
+            "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, field match \
+             {field_match}, mean CER {mean_cer}, mean {} ms, unsupported-assertion rate \
+             {unsupported}",
             r.provider_id,
             r.documents,
             r.accuracy.labelled_documents,
-            r.tier1_hit_rate * 100.0,
             r.speed.mean.as_millis(),
         );
 

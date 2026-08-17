@@ -247,6 +247,16 @@ if ($isSyntheticTrack) {
     # synthetic tracks above. Rows recorded before this date used the old,
     # vacuous definition; see knowledge/benchmarks/README.md for the cutover
     # note before comparing across that boundary on one trend line.
+    #
+    # `tier1_hit_rate` is a tagged enum as of the non-deterministic-provider
+    # carve-out (2026-08-17 onward): `{status: "computed", rate: ...}` for a
+    # `capability.deterministic` provider (currently just `mrz`), or
+    # `{status: "not_applicable", reason: ...}` for one that never asserts
+    # ICAO checksum validity (currently `llm`) -- that provider previously
+    # recorded a fabricated `read_ok_rate` of exactly 0.0 on every run
+    # regardless of actual accuracy. `.rate` below is `$null` for the latter,
+    # same as `$p.unsupported_assertion.overall.rate` already is for a
+    # `NotApplicable` unsupported-assertion, not a false zero.
     $rows = foreach ($p in $report.providers) {
         [ordered]@{
             run_timestamp_unix         = $runTimestamp
@@ -254,7 +264,7 @@ if ($isSyntheticTrack) {
             invocation                 = $invocation
             documents                  = $p.documents
             provider_id                = $p.provider_id
-            read_ok_rate               = $p.tier1_hit_rate
+            read_ok_rate               = $p.tier1_hit_rate.rate
             labelled_documents         = $p.accuracy.labelled_documents
             field_match_rate           = $p.accuracy.field_match_rate
             mean_cer                   = $p.accuracy.mean_cer
