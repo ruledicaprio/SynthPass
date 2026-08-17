@@ -459,10 +459,14 @@ fn collapse_spaces(s: &str) -> String {
 /// defines as the document class. The MRZ field is two characters wide and
 /// its second position is issuer-discretionary: `PO` (official), `PD`
 /// (diplomatic), `PS` (service) are all passports, and most TD1/TD2 national
-/// identity cards print `ID`. [`crate::normalize::document_type`] can only
-/// ever produce the single letters `P`/`I`/`V`, so a whole-string comparison
-/// reported a contradiction on every one of those documents — the model and
-/// the MRZ agreeing that it is a passport was recorded as them disagreeing.
+/// identity cards print `ID`. Canada and — effective 15 December 2025 —
+/// Cyprus print an ordinary citizen passport as `PP` for the same reason
+/// (confirmed against real specimens in `samples/passports/`; see
+/// <https://www.gov.cy/moi/en/documents/passports/passport-specimens/>).
+/// [`crate::normalize::document_type`] can only ever produce the single
+/// letters `P`/`I`/`V`, so a whole-string comparison reported a contradiction
+/// on every one of those documents — the model and the MRZ agreeing that it
+/// is a passport was recorded as them disagreeing.
 ///
 /// `I` and `ID` are the same class under this rule. A genuine disagreement
 /// (`P` vs `ID`) still differs in the first character and is still flagged.

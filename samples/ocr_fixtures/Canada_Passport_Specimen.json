@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1985-01-01",
+  "date_of_expiry": "2023-01-14",
+  "document_number": "ZE001355",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "SARAH",
+  "issuing_country": "CAN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<CANMARTIN<<SARAH<<<<<<<<<<<<<<<<<<<<<<<<<<\nZE001355<3CAN8501019F2301147<<<<<<<<<<<<<<00",
+  "nationality": "CAN",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "MARTIN"
+}
