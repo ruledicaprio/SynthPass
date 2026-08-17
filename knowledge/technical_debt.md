@@ -105,6 +105,14 @@ job skips. Everything CI runs against `synthpass-llm` type-checks or mocks. So a
 change that alters *what the model produces*, while compiling cleanly and passing
 all 28 unit tests, merges green.
 
+This now applies identically to the optional `cuda` feature
+(`knowledge/decisions/ADR-0004-gpu-acceleration.md`): both tests were run
+manually against `--features cuda` on a GTX 970 and produced byte-identical
+output to the CPU run, but that check is a one-time manual pass on one machine,
+not a CI gate. A future engine bump that changes CUDA-path output specifically
+(e.g. a kernel numerics change) gets exactly the same silence this entry
+already describes for the CPU path.
+
 The `llama-cpp-2` 0.1.151 → 0.1.154 bump is the worked example. It vendors a new
 llama.cpp (b10200), decoding is `LlamaSampler::greedy()` and therefore
 deterministic, and new kernels are exactly what moves a greedy decode. CI had
