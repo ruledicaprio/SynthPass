@@ -1,0 +1,53 @@
+{
+  "schema_version": 2,
+  "document": {
+    "kind": "passport"
+  },
+  "fields": {
+    "document_type": "P",
+    "issuing_country": "BEL",
+    "document_number": "BE818",
+    "surname": "BSELE",
+    "given_names": "AU",
+    "nationality": "Belgian",
+    "date_of_birth": "1931-01-05",
+    "sex": "M",
+    "date_of_expiry": "1951-01-05",
+    "personal_number": null
+  },
+  "confidence": {
+    "document_type": 0.65,
+    "issuing_country": 0.65,
+    "document_number": 0.65,
+    "surname": 0.65,
+    "given_names": 0.65,
+    "nationality": 0.3,
+    "date_of_birth": 0.65,
+    "sex": 0.65,
+    "date_of_expiry": 0.65,
+    "personal_number": 0.5
+  },
+  "provenance": {
+    "kind": "llm",
+    "model": "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+  },
+  "portrait": {
+    "x": 42,
+    "y": 75,
+    "width": 116,
+    "height": 165
+  },
+  "extraction_method": "llm",
+  "trace": {
+    "providers": [
+      "mrz",
+      "llm"
+    ],
+    "escalation": "mrz_not_found",
+    "prompt": {
+      "id": "qwen2.5-fields",
+      "version": 2,
+      "digest": "086095b6"
+    }
+  }
+}

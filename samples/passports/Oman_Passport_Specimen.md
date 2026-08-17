@@ -1,0 +1,22 @@
+$
+F
+BD
+i
+BE
+A
+Au
+MVE
+29
+31
+1
+TE818
+B S#ELE
+A
+d
+1
+O
+5
+i
+W
+1
+WR
