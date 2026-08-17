@@ -312,3 +312,35 @@ counting misplaced passport hits as ID-card hits) and a **cross-format
 confusion** (4 correctly-placed ID cards resolving to TD2/MRV-B instead of
 their expected shape, all `checksum_failed`) — both candidates for follow-up
 investigation, neither actioned this pass.
+
+### 2026-08-17 — a full-corpus real-OCR scan found and fixed a real parser bug
+
+The corpus grew substantially this session (contributor additions across dozens of
+countries — Türkiye ×6, the UK ×4, Cyprus ×3, and many more), and the id_cards/passports
+cover-vs-biodata placement defect above was fixed by hand. Scanning the whole thing with
+`mrz_corpus.rs`'s fixed `CORPUS` list would have meant hand-verifying a document number for
+every new specimen first; `crates/synthpass-ocr/examples/integrity_survey.rs` doesn't need
+that (no fixed corpus list, just walks a directory), but scanning it unfiltered was pacing
+toward ~70 minutes. Added `--dir <subpath>` (scope the walk instead of all of `samples/`) and
+`--mrz-only` (skip files this corpus already tags `no_mrz` in the filename) — cut a full
+`passports/` pass to ~20 minutes.
+
+That scan (`--dir passports --mrz-only`, ~125 real specimens) found `UnrecognizedIssuingCountry`
+firing on 57 checksum-valid documents. Cross-checking the garbled values against each
+specimen's real ICAO code found 34 of them (60%, across 24 distinct countries) sharing one
+exact shape: a single spurious character inserted right after line 1's position-1 filler,
+shifting `issuing_country` one position right and losing its real third letter — e.g. Czechia
+(`CZE`) read as `SCZ`, Iceland (`ISL`) as `AIS`, the UK (`GBR`) as `SGB`, the USA (`USA`) as
+`SUS`. Not scattered noise — one mechanism, the mirror image of an already-shipped
+dropped-filler fix whose own doc comment had already flagged this direction as incomplete.
+Fixed in PR #138 (`crates/mrz/src/parser.rs`'s `shift_line1_right_at_country`, composed with
+the existing fix via `shift_or_unshift_line1` — full writeup in `knowledge/ROADMAP.md`'s M6
+section). Re-scanning post-fix: `UnrecognizedIssuingCountry` fires dropped from 57 to 20, zero
+new false positives, all 34 matching specimens now resolve correctly. Synthetic-corpus
+same-binary A/B showed zero hit-rate impact on any format (this specific seed's OCR noise
+model doesn't happen to produce the artifact — the same conclusion the `fusion.rs`
+line-1-integrity work reached earlier this session).
+
+`knowledge/CORPUS_COVERAGE.md`'s per-country table was rewritten from this same pair of scans
+(pre- and post-fix) — most of its previous "specimen present, not yet wired" placeholders now
+carry a real, measured HIT/MISS status instead.
