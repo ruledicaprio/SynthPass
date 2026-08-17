@@ -8,14 +8,14 @@
 ![ICAO 9303](https://img.shields.io/badge/ICAO%209303-MRZ%20checksums-0B7261?style=flat)
 ![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-11%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-56%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 <!-- Posture -->
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 **Identity-document intelligence that runs entirely on your own machine.** SynthPass *generates*
-perfectly-labelled synthetic identity documents (TD1/TD2/TD3 — ICAO 9303 ID cards, travel
-documents, passports), *benchmarks* extraction against that ground truth, and *extracts*
-structured JSON from real documents — **zero cloud calls**, ever. Every generated document
+perfectly-labelled synthetic identity documents (TD1/TD2/TD3 ID cards and passports, plus
+MRV-A/MRV-B visas — all ICAO 9303 formats), *benchmarks* extraction against that ground truth,
+and *extracts* structured JSON from real documents — **zero cloud calls**, ever. Every generated document
 carries a mandatory synthetic watermark and a generic, non-country template, enforced in code,
 not a tool for imitating genuine credentials — see
 [knowledge/BRANDING.md](knowledge/BRANDING.md) §4 / [knowledge/VISION.md](knowledge/VISION.md).
@@ -28,7 +28,10 @@ TIFF, BMP, GIF. PDF and HEIC/HEIF are deliberately unsupported
 ([why](knowledge/ARCHITECTURE.md#8-known-limitations--what-tier-2-accuracy-actually-looks-like)).
 
 > **Building on Windows:** Tier 2 (`llama-cpp-2`) needs CMake, LLVM/libclang and MSVC Build Tools —
-> or use the Docker path in [CONTRIBUTING.md](CONTRIBUTING.md#building--testing).
+> or use the Docker path in [CONTRIBUTING.md](CONTRIBUTING.md#building--testing). An optional
+> `cuda` feature on `synthpass-llm` offloads Tier-2 inference to an NVIDIA GPU when one's
+> available; CPU-only remains the default so the appliance target keeps working with no discrete
+> GPU at all.
 
 ```powershell
 git clone https://github.com/ruledicaprio/SynthPass.git
@@ -94,28 +97,19 @@ Methodology: [knowledge/SYNTHPASS.md](knowledge/SYNTHPASS.md);
 
 ```mermaid
 flowchart LR
-    subgraph Generate["synthpass-gen"]
-        ID["Seeded identity"] --> DOC["TD1 / TD2 / TD3<br/>own ICAO 9303 layout<br/>+ mandatory watermark"]
-    end
-    DOC --> CORPUS["Labelled corpus"] --> GATE["CI accuracy gate<br/>(synthpass-bench)"]
-
-    subgraph Extract["Extraction"]
-        IMG["Document image"] --> LICENSE{"License valid?"}
-        LICENSE -- "no" --> REFUSED["Refused"]
-        LICENSE -- "yes / skipped" --> OCR["OCR"]
-        OCR --> CATALOG["Provider catalog<br/>(synthpass-die)"]
-        CATALOG --> TIER1{"MRZ found &<br/>checksums valid?<br/>(Tier 1)"}
-        TIER1 -- "yes" --> JSON["Structured JSON"]
-        TIER1 -- "no" --> TIER2["Local LLM repair<br/>(Tier 2)"]
-        TIER2 --> JSON
-    end
-
-    GATE -.->|"grades"| OCR
+    GEN["Generate: seeded<br/>synthetic document"] --> IMG["Document image"]
+    IMG --> OCR["OCR + provider<br/>catalog"]
+    OCR --> TIER1{"MRZ checksums<br/>valid? (Tier 1)"}
+    TIER1 -- "yes" --> JSON["Structured JSON"]
+    TIER1 -- "no" --> TIER2["Local LLM repair<br/>(Tier 2)"]
+    TIER2 --> JSON
 ```
 
 Deterministic before probabilistic, air-gapped or it does not ship: argued in full in
-[knowledge/VISION.md](knowledge/VISION.md) §1; the rest of this diagram in
-[knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) and [knowledge/LICENSING.md](knowledge/LICENSING.md).
+[knowledge/VISION.md](knowledge/VISION.md) §1. The CI accuracy gate that grades every OCR pass
+against the generated ground truth, and the license check that guards real-document extraction,
+are both covered in [knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) and
+[knowledge/LICENSING.md](knowledge/LICENSING.md).
 
 ## Accuracy
 
