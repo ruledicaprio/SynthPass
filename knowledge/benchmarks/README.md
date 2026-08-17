@@ -143,6 +143,19 @@ real-specimen tracks from this date onward. Rows recorded before the cutover
 are not comparable to rows after it on the same trend line — a real
 correctness signal appearing for the first time, not a regression.
 
+**`tier1_hit_rate` `NotApplicable` carve-out, 2026-08-17.** `provider-bench`'s
+`tier1_hit_rate` was itself a fabricated zero for the `llm` (Tier-2) provider
+on every run: `LlmFieldReader` never sets `Evidence::mrz_checksums_valid`
+(correctly — it doesn't compute ICAO check-digit validity), so every LLM
+document was classified as a checksum-failed miss regardless of actual
+accuracy. `tier1_hit_rate` in `provider-bench`'s JSON output is now a tagged
+enum, `{"status": "computed", "rate": ...}` for a `capability.deterministic`
+provider or `{"status": "not_applicable", "reason": ...}` otherwise, mirroring
+`unsupported_assertion`'s existing `NotApplicable` shape for `vision`
+providers. `run-bench.ps1` records `read_ok_rate` as `$null` (not `0.0`) for
+an `llm` row from this date onward — an absent metric, not a measured-and-zero
+one.
+
 Row shape (one JSON object per `(run, provider)` — an aggregate, not a
 per-document row, since the point is a trend line across runs, not a
 document-level dataset):
