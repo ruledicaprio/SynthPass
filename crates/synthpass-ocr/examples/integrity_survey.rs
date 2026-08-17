@@ -13,6 +13,10 @@
 //! ```powershell
 //! cargo run -p synthpass-ocr --release --example integrity_survey -- --batch 5
 //! ```
+//! `--dir <subpath>` scopes the walk to `samples/<subpath>` instead of all of
+//! `samples/` (e.g. `--dir id_cards`). `--only <substr>` filters by filename
+//! substring. `--mrz-only` skips files whose name is explicitly tagged
+//! `no_mrz` by this corpus's own ID-card front/back naming convention.
 
 use image::GenericImageView;
 use mrz::{find_and_parse, Format, MrzData};
@@ -241,14 +245,35 @@ fn main() {
         .position(|a| a == "--only")
         .and_then(|i| std::env::args().nth(i + 1));
 
+    let dir: Option<String> = std::env::args()
+        .position(|a| a == "--dir")
+        .and_then(|i| std::env::args().nth(i + 1));
+
+    let mrz_only = std::env::args().any(|a| a == "--mrz-only");
+
     let mut files = Vec::new();
-    walk_samples(&root.join("samples"), &mut files);
+    let scan_root = match &dir {
+        Some(sub) => root.join("samples").join(sub),
+        None => root.join("samples"),
+    };
+    walk_samples(&scan_root, &mut files);
     files.sort();
     if let Some(substr) = &only {
         files.retain(|p| {
             p.file_name()
                 .and_then(|f| f.to_str())
                 .is_some_and(|f| f.contains(substr.as_str()))
+        });
+    }
+    // This corpus already tags ID-card front/back pairs with "_mrz"/
+    // "_no_mrz" in the filename (only one side of an ID typically carries
+    // the MRZ strip) — skip the ones explicitly marked as not carrying one,
+    // which would otherwise burn several seconds of OCR to confirm nothing.
+    if mrz_only {
+        files.retain(|p| {
+            p.file_name()
+                .and_then(|f| f.to_str())
+                .is_none_or(|f| !f.to_ascii_lowercase().contains("no_mrz"))
         });
     }
 
