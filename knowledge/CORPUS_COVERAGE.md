@@ -28,21 +28,28 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| Tier-1 HIT in `mrz_corpus.rs` | 10 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 56 |
+| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 19 |
 | Stale (was HIT, now reproducibly MISS against current OCR/parser — 2026-08-17) | 2 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
-| Negative-control specimen only (no MRZ on that page/document) | 1 |
-| Specimen in `samples/`, not yet wired into the automated corpus | 9 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 214 |
+| No specimen yet | 159 |
 | **Total tracked codes** | **238** |
+
+Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
+`samples/passports/` and `samples/id_cards/` (`integrity_survey.rs --mrz-only`, added this
+session — see `knowledge/benchmarks/README.md`'s dated finding) replaced most of the
+previous "specimen present, not yet wired" placeholders with a real, measured HIT/MISS
+status. `Passport`/`ID card`/etc. counts inside a single country's `Note` column (e.g.
+"HIT (x2 specimens) (+ 1 checksum-failed)") are per-specimen, not per-country — see each
+row for the exact breakdown.
 
 ## Full table
 
 | Code | Country/Entity | Document type(s) | Status | Note |
 |---|---|---|---|---|
-| DZA | Algeria | -- | No specimen yet | -- |
-| AGO | Angola | -- | No specimen yet | -- |
+| DZA | Algeria | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| AGO | Angola | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | BEN | Benin | -- | No specimen yet | -- |
 | BWA | Botswana | -- | No specimen yet | -- |
 | BFA | Burkina Faso | -- | No specimen yet | -- |
@@ -56,14 +63,14 @@ here to corpus coverage instead of a benchmark number).
 | COD | Congo (Democratic Republic of the) | -- | No specimen yet | -- |
 | CIV | Côte d'Ivoire | -- | No specimen yet | -- |
 | DJI | Djibouti | -- | No specimen yet | -- |
-| EGY | Egypt | -- | No specimen yet | -- |
+| EGY | Egypt | Passport | HIT (+ 2 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GNQ | Equatorial Guinea | -- | No specimen yet | -- |
 | ERI | Eritrea | -- | No specimen yet | -- |
 | SWZ | Eswatini | -- | No specimen yet | -- |
 | ETH | Ethiopia | -- | No specimen yet | -- |
 | GAB | Gabon | -- | No specimen yet | -- |
 | GMB | Gambia | -- | No specimen yet | -- |
-| GHA | Ghana | -- | No specimen yet | -- |
+| GHA | Ghana | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GIN | Guinea | -- | No specimen yet | -- |
 | GNB | Guinea-Bissau | -- | No specimen yet | -- |
 | KEN | Kenya | -- | No specimen yet | -- |
@@ -73,9 +80,9 @@ here to corpus coverage instead of a benchmark number).
 | MDG | Madagascar | -- | No specimen yet | -- |
 | MWI | Malawi | -- | No specimen yet | -- |
 | MLI | Mali | -- | No specimen yet | -- |
-| MRT | Mauritania | -- | No specimen yet | -- |
+| MRT | Mauritania | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MUS | Mauritius | -- | No specimen yet | -- |
-| MAR | Morocco | -- | No specimen yet | -- |
+| MAR | Morocco | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MOZ | Mozambique | -- | No specimen yet | -- |
 | NAM | Namibia | -- | No specimen yet | -- |
 | NER | Niger | -- | No specimen yet | -- |
@@ -83,7 +90,7 @@ here to corpus coverage instead of a benchmark number).
 | RWA | Rwanda | -- | No specimen yet | -- |
 | STP | Sao Tome and Principe | -- | No specimen yet | -- |
 | SEN | Senegal | -- | No specimen yet | -- |
-| SYC | Seychelles | -- | No specimen yet | -- |
+| SYC | Seychelles | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SLE | Sierra Leone | -- | No specimen yet | -- |
 | SOM | Somalia | -- | No specimen yet | -- |
 | ZAF | South Africa | -- | No specimen yet | -- |
@@ -91,21 +98,21 @@ here to corpus coverage instead of a benchmark number).
 | SDN | Sudan | Passport | Candidate rejected | No SPECIMEN watermark, read as real personal data -- excluded per vetting checklist |
 | TZA | Tanzania | -- | No specimen yet | -- |
 | TGO | Togo | -- | No specimen yet | -- |
-| TUN | Tunisia | -- | No specimen yet | -- |
+| TUN | Tunisia | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | UGA | Uganda | -- | No specimen yet | -- |
 | ZMB | Zambia | -- | No specimen yet | -- |
 | ZWE | Zimbabwe | -- | No specimen yet | -- |
 | ESH | Western Sahara | -- | No specimen yet | -- |
 | ATG | Antigua and Barbuda | -- | No specimen yet | -- |
-| ARG | Argentina | -- | No specimen yet | -- |
+| ARG | Argentina | Passport | MISS (checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | BHS | Bahamas | -- | No specimen yet | -- |
 | BRB | Barbados | -- | No specimen yet | -- |
 | BLZ | Belize | -- | No specimen yet | -- |
 | BOL | Bolivia | -- | No specimen yet | -- |
-| BRA | Brazil | -- | No specimen yet | -- |
-| CAN | Canada | Passport | HIT (x3 specimens) | Contributor-supplied specimens (SPECIMEN watermark) |
+| BRA | Brazil | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| CAN | Canada | Passport | HIT (x3 specimens) | Contributor-supplied specimens (SPECIMEN watermark); a 4th specimen (2023-issue) found no MRZ in the real-OCR scan, 2026-08-17 |
 | CHL | Chile | -- | No specimen yet | -- |
-| COL | Colombia | -- | No specimen yet | -- |
+| COL | Colombia | Passport | MISS (x2, checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | CRI | Costa Rica | -- | No specimen yet | -- |
 | CUB | Cuba | -- | No specimen yet | -- |
 | DMA | Dominica | -- | No specimen yet | -- |
@@ -118,7 +125,7 @@ here to corpus coverage instead of a benchmark number).
 | HTI | Haiti | -- | No specimen yet | -- |
 | HND | Honduras | -- | No specimen yet | -- |
 | JAM | Jamaica | -- | No specimen yet | -- |
-| MEX | Mexico | -- | No specimen yet | -- |
+| MEX | Mexico | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | NIC | Nicaragua | -- | No specimen yet | -- |
 | PAN | Panama | -- | No specimen yet | -- |
 | PRY | Paraguay | -- | No specimen yet | -- |
@@ -128,47 +135,47 @@ here to corpus coverage instead of a benchmark number).
 | VCT | Saint Vincent and the Grenadines | -- | No specimen yet | -- |
 | SUR | Suriname | -- | No specimen yet | -- |
 | TTO | Trinidad and Tobago | -- | No specimen yet | -- |
-| USA | United States of America | -- | No specimen yet | -- |
-| URY | Uruguay | -- | No specimen yet | -- |
-| VEN | Venezuela | -- | No specimen yet | -- |
-| AFG | Afghanistan | -- | No specimen yet | -- |
+| USA | United States of America | Passport, ID card | HIT (x4 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| URY | Uruguay | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| VEN | Venezuela | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| AFG | Afghanistan | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | ARM | Armenia | -- | No specimen yet | -- |
-| AZE | Azerbaijan | -- | No specimen yet | -- |
-| BHR | Bahrain | -- | No specimen yet | -- |
-| BGD | Bangladesh | -- | No specimen yet | -- |
+| AZE | Azerbaijan | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| BHR | Bahrain | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| BGD | Bangladesh | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | BTN | Bhutan | -- | No specimen yet | -- |
 | BRN | Brunei Darussalam | -- | No specimen yet | -- |
 | KHM | Cambodia | -- | No specimen yet | -- |
-| CHN | China | Passport | HIT | Contributor-supplied specimen (SPECIMEN watermark) |
+| CHN | China | Passport | HIT (x2 specimens) (+ 2 checksum-failed) | Contributor-supplied specimen (SPECIMEN watermark); corpus grew to 4 total in the real-OCR scan, 2026-08-17 |
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
 | HKG | Hong Kong | -- | No specimen yet | -- |
-| IND | India | -- | No specimen yet | -- |
-| IDN | Indonesia | -- | No specimen yet | -- |
-| IRN | Iran | -- | No specimen yet | -- |
-| IRQ | Iraq | -- | No specimen yet | -- |
-| ISR | Israel | Passport | Known MISS (documented) | Public specimen, physically redacted MRZ -- kept local-only, not committed |
-| JPN | Japan | -- | No specimen yet | -- |
+| IND | India | Passport | MISS (x2, no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IDN | Indonesia | Passport | MISS (x2, checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IRN | Iran | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IRQ | Iraq | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| ISR | Israel | Passport | Known MISS (documented) + HIT (+ 1 checksum-failed) | Public specimen, physically redacted MRZ -- kept local-only, not committed; 2 more (unrelated, unredacted) specimens found in the real-OCR scan, 2026-08-17, one a clean HIT |
+| JPN | Japan | Passport | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | JOR | Jordan | -- | No specimen yet | -- |
-| KAZ | Kazakhstan | Passport | Specimen in samples/, not wired | Public-domain specimens |
-| PRK | Korea (Democratic People's Republic of) | -- | No specimen yet | -- |
-| KOR | Korea (Republic of) | -- | No specimen yet | -- |
-| KWT | Kuwait | -- | No specimen yet | -- |
+| KAZ | Kazakhstan | Passport | HIT (+ 2 checksum-failed) | Public-domain specimens; real-OCR scan, 2026-08-17 |
+| PRK | Korea (Democratic People's Republic of) | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| KOR | Korea (Republic of) | Passport | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| KWT | Kuwait | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | KGZ | Kyrgyzstan | -- | No specimen yet | -- |
 | LAO | Lao People's Democratic Republic | -- | No specimen yet | -- |
 | LBN | Lebanon | -- | No specimen yet | -- |
 | MAC | Macao | -- | No specimen yet | -- |
-| MYS | Malaysia | -- | No specimen yet | -- |
+| MYS | Malaysia | Passport | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MDV | Maldives | -- | No specimen yet | -- |
 | MNG | Mongolia | -- | No specimen yet | -- |
-| MMR | Myanmar | -- | No specimen yet | -- |
-| NPL | Nepal | -- | No specimen yet | -- |
+| MMR | Myanmar | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| NPL | Nepal | Passport | MISS (x2, checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | OMN | Oman | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
 | PAK | Pakistan | -- | No specimen yet | -- |
 | PSE | Palestine | -- | No specimen yet | -- |
 | PHL | Philippines | -- | No specimen yet | -- |
 | QAT | Qatar | -- | No specimen yet | -- |
-| SAU | Saudi Arabia | -- | No specimen yet | -- |
+| SAU | Saudi Arabia | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SGP | Singapore | -- | No specimen yet | -- |
 | LKA | Sri Lanka | -- | No specimen yet | -- |
 | SYR | Syrian Arab Republic | -- | No specimen yet | -- |
@@ -176,61 +183,61 @@ here to corpus coverage instead of a benchmark number).
 | TJK | Tajikistan | -- | No specimen yet | -- |
 | THA | Thailand | -- | No specimen yet | -- |
 | TLS | Timor-Leste | -- | No specimen yet | -- |
-| TUR | Türkiye | -- | No specimen yet | -- |
+| TUR | Türkiye | Passport, ID card | HIT (x5 specimens) (+ 5 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | TKM | Turkmenistan | -- | No specimen yet | -- |
 | ARE | United Arab Emirates | Passport | HIT | Contributor-supplied specimen (watermarked reference) |
 | UZB | Uzbekistan | -- | No specimen yet | -- |
 | VNM | Viet Nam | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
 | YEM | Yemen | -- | No specimen yet | -- |
-| ALB | Albania | -- | No specimen yet | -- |
+| ALB | Albania | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | AND | Andorra | -- | No specimen yet | -- |
-| AUT | Austria | ID card front | Specimen in samples/, not wired | MRZ is on the card back, not supplied yet |
-| BLR | Belarus | -- | No specimen yet | -- |
-| BEL | Belgium | -- | No specimen yet | -- |
-| BIH | Bosnia and Herzegovina | ID card, Passport | Specimen in samples/, not wired | Public-domain specimens |
-| BGR | Bulgaria | ID card front | Negative control (no MRZ on this page) | Public-domain specimen |
-| HRV | Croatia | Passport | HIT | Public-domain specimen |
-| CZE | Czechia | -- | No specimen yet | -- |
-| DNK | Denmark | Passport | Specimen in samples/, not wired | Public-domain specimens |
+| AUT | Austria | ID card front, Passport | HIT (passport) + ID card front not wired (MRZ on card back) | Public-domain specimens; passport HIT in real-OCR scan, 2026-08-17 |
+| BLR | Belarus | Passport | MISS (checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| BEL | Belgium | Passport, ID card | HIT (x3 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| BIH | Bosnia and Herzegovina | ID card, Passport | HIT (x2 specimens) (+ 1 checksum-failed) | Public-domain specimens; real-OCR scan, 2026-08-17 |
+| BGR | Bulgaria | ID card front, Passport | HIT (passport) + negative control (ID card front) | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
+| HRV | Croatia | Passport, ID card | HIT (x2 specimens) (+ 1 checksum-failed) | Public-domain specimen; ID card added in real-OCR scan, 2026-08-17 |
+| CZE | Czechia | Passport | HIT (x2 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| DNK | Denmark | Passport | HIT (x3 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | EST | Estonia | Passport | HIT | Public-domain specimen |
-| FIN | Finland | -- | No specimen yet | -- |
-| FRA | France | -- | No specimen yet | -- |
-| DEU | Germany | -- | No specimen yet | -- |
+| FIN | Finland | Passport | HIT (x2 specimens) (+ 2 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| FRA | France | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| DEU | Germany | Passport | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | D | Germany | -- | No specimen yet | Legacy single-letter code, Doc 9303 Part 3 §5 Part A |
-| GRC | Greece | -- | No specimen yet | -- |
-| HUN | Hungary | -- | No specimen yet | -- |
-| ISL | Iceland | -- | No specimen yet | -- |
-| IRL | Ireland | ID card front | Specimen in samples/, not wired | Public-domain specimen |
-| ITA | Italy | -- | No specimen yet | -- |
-| XKX | Kosovo | Passport | Specimen in samples/, not wired | Public-domain specimens |
+| GRC | Greece | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| HUN | Hungary | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| ISL | Iceland | Passport | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IRL | Ireland | ID card front, Passport | HIT (passport) + ID card front not wired | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
+| ITA | Italy | Passport, ID card | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| XKX | Kosovo | Passport | HIT (x3 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | LVA | Latvia | -- | No specimen yet | -- |
-| LIE | Liechtenstein | -- | No specimen yet | -- |
+| LIE | Liechtenstein | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | LTU | Lithuania | -- | No specimen yet | -- |
-| LUX | Luxembourg | -- | No specimen yet | -- |
-| MLT | Malta | -- | No specimen yet | -- |
+| LUX | Luxembourg | ID card | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| MLT | Malta | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MDA | Moldova | -- | No specimen yet | -- |
-| MCO | Monaco | ID card, Passport | Specimen in samples/, not wired | Public-domain specimens |
+| MCO | Monaco | ID card, Passport | HIT (passport) + ID card no MRZ found | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | MNE | Montenegro | -- | No specimen yet | -- |
-| NLD | Netherlands | Driving license (no MRZ) | Specimen in samples/, not wired | Public-domain specimen |
-| MKD | North Macedonia | Passport | Specimen in samples/, not wired | Public-domain specimens |
-| NOR | Norway | -- | No specimen yet | -- |
-| POL | Poland | -- | No specimen yet | -- |
-| PRT | Portugal | -- | No specimen yet | -- |
-| ROU | Romania | -- | No specimen yet | -- |
+| NLD | Netherlands | Driving license (no MRZ), Passport | HIT (passport) + driving license not wired | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
+| MKD | North Macedonia | Passport | HIT (x2 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
+| NOR | Norway | Passport, ID card | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| POL | Poland | Passport, ID card | HIT (x2 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| PRT | Portugal | Passport, ID card | HIT (+ 1 checksum-failed, 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| ROU | Romania | Passport, ID card | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | RUS | Russian Federation | -- | No specimen yet | -- |
 | SMR | San Marino | -- | No specimen yet | -- |
-| SRB | Serbia | Passport, ID card (TD1) | HIT (+ negative control) | Public-domain specimens |
-| SVK | Slovakia | Passport, Service Passport | HIT (x2) + negative control | Contributor-supplied specimens (Specimen/Vzorka placeholder name) |
-| SVN | Slovenia | ID card (TD1) | HIT (+ negative control) | Public-domain specimen |
-| ESP | Spain | Passport | HIT (x2) | Contributor-supplied specimens (ESPECIMEN watermark / placeholder name) |
+| SRB | Serbia | Passport, ID card (TD1) | HIT (x2 specimens) (+ negative control, 1 no-MRZ) | Public-domain specimens; real-OCR scan, 2026-08-17 |
+| SVK | Slovakia | Passport, Service Passport | HIT (x2) + negative control | Contributor-supplied specimens (Specimen/Vzorka placeholder name); corpus includes additional unlabelled specimens per real-OCR scan, 2026-08-17 |
+| SVN | Slovenia | ID card (TD1), Passport | HIT (x2, ID card + passport) (+ negative control) | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
+| ESP | Spain | Passport | HIT (x2) | Contributor-supplied specimens (ESPECIMEN watermark / placeholder name); confirmed still HIT in real-OCR scan, 2026-08-17 |
 | SWE | Sweden | -- | No specimen yet | -- |
-| CHE | Switzerland | -- | No specimen yet | -- |
-| UKR | Ukraine | -- | No specimen yet | -- |
-| GBR | United Kingdom | -- | No specimen yet | -- |
+| CHE | Switzerland | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| UKR | Ukraine | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| GBR | United Kingdom | Passport | HIT (x3 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | VAT | Holy See (Vatican City State) | -- | No specimen yet | -- |
-| AUS | Australia | -- | No specimen yet | -- |
+| AUS | Australia | Passport | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | FJI | Fiji | -- | No specimen yet | -- |
-| KIR | Kiribati | -- | No specimen yet | -- |
+| KIR | Kiribati | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MHL | Marshall Islands | -- | No specimen yet | -- |
 | FSM | Micronesia (Federated States of) | -- | No specimen yet | -- |
 | NRU | Nauru | -- | No specimen yet | -- |
