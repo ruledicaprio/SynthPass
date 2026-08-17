@@ -10,7 +10,7 @@ use crate::checksum::{
     is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
 };
 use crate::dates::{date_completeness, expand_date_with_pivot};
-use crate::{Checks, Format, MrzData, MrzError, ParseOptions};
+use crate::{country_name, Checks, Format, MrzData, MrzError, ParseOptions};
 
 /// A document number that overflowed its 9-character field.
 struct Overflow {
@@ -632,18 +632,116 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
     format!("{}<{}", &repaired[0..1], &repaired[1..target_width - 1])
 }
 
+/// Undo a spurious extra character **inserted** at line-1 position 2, right
+/// after `document_type`'s filler and before `issuing_country` — the mirror
+/// image of [`unshift_line1_prefix`]'s dropped-filler case, and the missing
+/// half [`unshift_line1_prefix`]'s own doc comment already flags ("not a
+/// full fix... a partial, hit-rate-safe improvement, not a claim of
+/// completeness").
+///
+/// Measured on real specimens (`crates/synthpass-ocr/examples/
+/// integrity_survey.rs --dir passports --mrz-only`, 2026-08-17): 34 of 57
+/// `UnrecognizedIssuingCountry` findings across 24 distinct countries shared
+/// this exact shape — one garbage character prepended, the real third
+/// letter lost, e.g. Czechia (`CZE`) read as `SCZ`, Iceland (`ISL`) as
+/// `AIS`, Slovakia (`SVK`) as `SSV`, the UK (`GBR`) as `SGB`, the USA
+/// (`USA`) as `SUS`.
+///
+/// **Why this needs a content-based guard, unlike the drop case.**
+/// `unshift_line1_prefix` self-limits purely from shape: position 1 not
+/// being `<` is unambiguous evidence of the drop, since a correctly-formed
+/// line always has `<` there. This corruption leaves position 1 alone — the
+/// filler survives — so shape alone can't distinguish a genuine insertion
+/// from a correctly-formed line (both have `<` at position 1). Worse, some
+/// real ICAO document codes genuinely have a second real letter there
+/// (`PS` = service passport, `PP` = Canada/Cyprus's ordinary-passport code
+/// since 2025-12-15 — see `synthpass_core::fusion::document_types_agree`) —
+/// a `fix_doc_code`-style "no real code has X there" blocklist would be
+/// simply wrong for this position. [`crate::country_name`] is the
+/// discriminator instead: only apply the shift when the as-read
+/// `issuing_country` fails to resolve to a real code but the
+/// one-position-right-shifted read does. A line with a genuine two-letter
+/// document code and a genuinely correct `issuing_country` already resolves
+/// on the first check and is returned unchanged.
+fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String {
+    if repaired.len() != target_width
+        || target_width < 6
+        || repaired.as_bytes().get(1) != Some(&b'<')
+    {
+        return repaired;
+    }
+    if country_name(&repaired[2..5]).is_some() {
+        return repaired;
+    }
+    if country_name(&repaired[3..6]).is_none() {
+        return repaired;
+    }
+    format!("{}{}<", &repaired[0..2], &repaired[3..target_width])
+}
+
+/// Tries [`shift_line1_right_at_country`] first, falling back to
+/// [`unshift_line1_prefix`] when it doesn't apply.
+///
+/// The two can't be registered as independent `variants()` candidates in a
+/// fixed order the way `repair_td3_line1`/`repair_td3_line1_unshifted` are:
+/// each is a **no-op passthrough of the other's trigger case**. A dropped
+/// filler (position 1 not `<`) is exactly `shift_line1_right_at_country`'s
+/// guard condition for skipping — it returns the corrupted string
+/// unchanged. An inserted character (position 1 still `<`) is exactly
+/// `unshift_line1_prefix`'s guard condition for skipping — same thing.
+/// TD3/MRV-A/MRV-B carry no check digit on line 1, so `consider()` accepts
+/// whichever checksum-passing candidate it's offered first regardless of
+/// what line 1 says — an unhelpful no-op tried first would silently outrun
+/// the real fix for the *other* corruption, exactly the failure mode this
+/// composition avoids by trying both, in order, inside one candidate.
+///
+/// The unshift fallback is additionally gated on [`country_name`] —
+/// shared across all three callers, though only TD3 actually needs it:
+/// TD3's document code genuinely has real two-letter forms (`PS` = service
+/// passport, `PP` = Canada's and — effective 15 December 2025 — Cyprus's
+/// ordinary-passport code; see `synthpass_core::fusion::document_types_agree`'s
+/// doc comment), which [`unshift_line1_prefix`]'s shape-only guard cannot
+/// tell apart from a genuine drop (both leave position 1 as a real letter,
+/// not `<`). Applying the transform unconditionally would silently corrupt
+/// those — pinned by `crates/mrz/tests/line1_right_shift.rs`'s
+/// `a_genuine_two_letter_document_code_is_unaffected`, which caught this
+/// pre-existing gap in `unshift_line1_prefix` itself (present before this
+/// fix, on the raw candidate — this composition is the first place it's
+/// actually guarded). MRV-A/MRV-B's document code is unconditionally `V`
+/// plus filler (see `MrvAFields`'/`MrvBFields`' doc comments), so the gate
+/// is a no-op there — a genuine drop always resolves to a real country once
+/// unshifted, same as before. Only accept the unshifted reading when it
+/// actually resolves to a real country; otherwise there's no positive
+/// evidence it helped, so leave the line as
+/// `repair_td3_line1`/`repair_mrv_*_line1` already produced it.
+fn shift_or_unshift_line1(repaired: String, target_width: usize) -> String {
+    let shifted = shift_line1_right_at_country(repaired.clone(), target_width);
+    if shifted != repaired {
+        return shifted;
+    }
+    let unshifted = unshift_line1_prefix(repaired.clone(), target_width);
+    if unshifted != repaired && target_width >= 5 && country_name(&unshifted[2..5]).is_some() {
+        return unshifted;
+    }
+    repaired
+}
+
 fn repair_td3_line1(l: &str) -> String {
     // Issuing state must be letters; the name field suffers filler misreads.
     let l = fix_doc_code(&repair_positions(l, &[(2..5, letterize)]));
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
 }
 
-/// Second candidate alongside [`repair_td3_line1`] — see
-/// [`unshift_line1_prefix`]'s doc comment for why this is additive, not a
-/// replacement, and why the call site must try this one *first*.
-fn repair_td3_line1_unshifted(l: &str) -> String {
+/// Second candidate alongside [`repair_td3_line1`] — composes both
+/// [`shift_line1_right_at_country`] and [`unshift_line1_prefix`], see
+/// [`shift_or_unshift_line1`]'s doc comment for why they can't be two
+/// independently-ordered candidates the way TD1's are, and why the unshift
+/// half is gated on [`country_name`] here specifically (TD3's document code
+/// has genuine two-letter forms `unshift_line1_prefix`'s shape-only guard
+/// can't tell apart from a real drop — the whole reason for the gate).
+fn repair_td3_line1_shifted(l: &str) -> String {
     let target_width = l.len();
-    unshift_line1_prefix(repair_td3_line1(l), target_width)
+    shift_or_unshift_line1(repair_td3_line1(l), target_width)
 }
 
 fn repair_td3_line2(l: &str) -> String {
@@ -813,6 +911,21 @@ fn repair_mrv_b_line1_unshifted(l: &str) -> String {
     unshift_line1_prefix(repair_mrv_b_line1(l), target_width)
 }
 
+/// Third candidate alongside `repair_mrv_a_line1`/`repair_mrv_a_line1_unshifted`
+/// — see [`shift_line1_right_at_country`]'s doc comment, and
+/// [`repair_td3_line1_shifted`]'s for why the call site must try this one
+/// *before* `repair_mrv_a_line1_unshifted`.
+fn repair_mrv_a_line1_shifted(l: &str) -> String {
+    let target_width = l.len();
+    shift_or_unshift_line1(repair_mrv_a_line1(l), target_width)
+}
+
+/// See [`repair_mrv_a_line1_shifted`] — identical reasoning, MRV-B side.
+fn repair_mrv_b_line1_shifted(l: &str) -> String {
+    let target_width = l.len();
+    shift_or_unshift_line1(repair_mrv_b_line1(l), target_width)
+}
+
 /// MRV-A line-2 repair: same geometry as TD3 through the expiry check digit,
 /// but positions 28..44 are free-form optional data with no check digit of
 /// its own — unlike `repair_td3_line2`, we must NOT digitize/defiller the
@@ -912,7 +1025,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             let head = &merged[0..44];
             let tail = &merged[44..];
             for l1 in [
-                repair_td3_line1_unshifted(head),
+                repair_td3_line1_shifted(head),
                 repair_td3_line1(head),
                 head.to_string(),
             ] {
@@ -926,7 +1039,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_td3_line1_unshifted)
+        let l1_candidates = variants(lines[i], 44, repair_td3_line1_shifted)
             .into_iter()
             .chain(variants(lines[i], 44, repair_td3_line1));
         for l1 in l1_candidates {
@@ -958,6 +1071,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             let head = &merged[0..36];
             let tail = &merged[36..];
             for l1 in [
+                repair_mrv_b_line1_shifted(head),
                 repair_mrv_b_line1_unshifted(head),
                 repair_mrv_b_line1(head),
                 head.to_string(),
@@ -972,8 +1086,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 36, repair_mrv_b_line1_unshifted)
+        let l1_candidates = variants(lines[i], 36, repair_mrv_b_line1_shifted)
             .into_iter()
+            .chain(variants(lines[i], 36, repair_mrv_b_line1_unshifted))
             .chain(variants(lines[i], 36, repair_mrv_b_line1));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
@@ -1001,6 +1116,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             let head = &merged[0..44];
             let tail = &merged[44..];
             for l1 in [
+                repair_mrv_a_line1_shifted(head),
                 repair_mrv_a_line1_unshifted(head),
                 repair_mrv_a_line1(head),
                 head.to_string(),
@@ -1015,8 +1131,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_mrv_a_line1_unshifted)
+        let l1_candidates = variants(lines[i], 44, repair_mrv_a_line1_shifted)
             .into_iter()
+            .chain(variants(lines[i], 44, repair_mrv_a_line1_unshifted))
             .chain(variants(lines[i], 44, repair_mrv_a_line1));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
