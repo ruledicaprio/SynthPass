@@ -585,6 +585,38 @@ flowchart LR
   structurally, since nothing on line 1 discriminates between them once neither fails a checksum.
   A partial, hit-rate-safe improvement, not a claim of completeness.
 
+  **The missing other half — an inserted character, not just a dropped one — closed 2026-08-17.**
+  `crates/synthpass-ocr/examples/integrity_survey.rs --dir passports --mrz-only` (real specimens,
+  not synthetic) found 34 of 57 `UnrecognizedIssuingCountry` findings across 24 distinct countries
+  sharing one exact shape: a single spurious character *inserted* right after line 1's position-1
+  filler, shifting `issuing_country` one position *right* — the mirror image of the dropped-filler
+  case above, e.g. Czechia (`CZE`) read as `SCZ`, Iceland (`ISL`) as `AIS`, the UK (`GBR`) as `SGB`,
+  the USA (`USA`) as `SUS`. `shift_line1_right_at_country` (`crates/mrz/src/parser.rs`) fixes it,
+  using [`country_name`] as the discriminator rather than a shape-only guard — unlike the drop case,
+  position 1 stays `<` either way, so shape alone can't tell a genuine insertion from an undamaged
+  line. The two repairs can't be independent `variants()` candidates in either order (each is a
+  no-op passthrough of the *other's* trigger case, and since line 1 carries no check digit,
+  whichever is tried first wins even when it did nothing useful) — `shift_or_unshift_line1` composes
+  them into one candidate instead. Implementing this also surfaced a real, pre-existing gap in the
+  original fix: TD3's document code genuinely has two-letter forms (`PS` service, `PP` — Canada's
+  and, effective 15 December 2025, Cyprus's ordinary-passport code), which the shape-only unshift
+  guard couldn't tell apart from a real drop; the unshift fallback is now gated on `country_name`
+  too, closing that gap alongside this one. Five new regressions in
+  `crates/mrz/tests/line1_right_shift.rs` (insertion recovery for TD3/MRV-A/MRV-B, an undamaged-zone
+  guard, and a genuine-two-letter-code guard using Cyprus's real `PP`).
+
+  Real-specimen verification (not just synthetic): re-running the same `--dir passports --mrz-only`
+  scan after the fix dropped `UnrecognizedIssuingCountry` fires from 57 to 20, with zero new false
+  positives — every one of the 34 matching specimens now resolves correctly, and the 23 that didn't
+  fit the pattern (different corruption shapes, e.g. `BIH`→`SIA`, genuinely garbled OCR) are
+  unaffected either way. Synthetic-corpus check (30 seeds, `--seed 42 --profile clean`, same-binary
+  A/B against pre-fix `main`) reproduced the exact pre-fix numbers byte-for-byte on all three
+  formats (TD3 76.7%/23.33%/16.67%, MRV-A 86.7%/0%/0%, MRV-B 93.3%/3.33%/2.22%) — this specific
+  seed's synthetic OCR noise model doesn't happen to produce the inserted-character artifact, the
+  same conclusion reached earlier this session for the `fusion.rs` line-1-integrity heuristics.
+  Hit rate unchanged on every format either way, confirming zero regression risk from the fix
+  itself, independent of whether a given corpus exercises it.
+
   **MRV-A/MRV-B verify a narrower surface than TD1/TD2/TD3, and the hit-rate table above should be
   read accordingly.** ICAO 9303 Part 7 defines no personal-number check digit and no composite
   check digit for visas — `crates/mrz/src/parser.rs`'s `parse_mrv_a_with`/`parse_mrv_b_with`
