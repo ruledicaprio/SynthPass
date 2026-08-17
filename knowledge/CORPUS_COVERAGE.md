@@ -28,12 +28,13 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| Tier-1 HIT in `mrz_corpus.rs` | 11 |
+| Tier-1 HIT in `mrz_corpus.rs` | 10 |
+| Stale (was HIT, now reproducibly MISS against current OCR/parser — 2026-08-17) | 2 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Negative-control specimen only (no MRZ on that page/document) | 1 |
 | Specimen in `samples/`, not yet wired into the automated corpus | 9 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 215 |
+| No specimen yet | 214 |
 | **Total tracked codes** | **238** |
 
 ## Full table
@@ -139,7 +140,7 @@ here to corpus coverage instead of a benchmark number).
 | BRN | Brunei Darussalam | -- | No specimen yet | -- |
 | KHM | Cambodia | -- | No specimen yet | -- |
 | CHN | China | Passport | HIT | Contributor-supplied specimen (SPECIMEN watermark) |
-| CYP | Cyprus | -- | No specimen yet | -- |
+| CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
 | HKG | Hong Kong | -- | No specimen yet | -- |
 | IND | India | -- | No specimen yet | -- |
@@ -162,7 +163,7 @@ here to corpus coverage instead of a benchmark number).
 | MNG | Mongolia | -- | No specimen yet | -- |
 | MMR | Myanmar | -- | No specimen yet | -- |
 | NPL | Nepal | -- | No specimen yet | -- |
-| OMN | Oman | Passport | HIT | Contributor-supplied specimen (SPECIMEN watermark) |
+| OMN | Oman | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
 | PAK | Pakistan | -- | No specimen yet | -- |
 | PSE | Palestine | -- | No specimen yet | -- |
 | PHL | Philippines | -- | No specimen yet | -- |
@@ -179,7 +180,7 @@ here to corpus coverage instead of a benchmark number).
 | TKM | Turkmenistan | -- | No specimen yet | -- |
 | ARE | United Arab Emirates | Passport | HIT | Contributor-supplied specimen (watermarked reference) |
 | UZB | Uzbekistan | -- | No specimen yet | -- |
-| VNM | Viet Nam | Passport | HIT | Contributor-supplied specimen (placeholder MRZ number) |
+| VNM | Viet Nam | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
 | YEM | Yemen | -- | No specimen yet | -- |
 | ALB | Albania | -- | No specimen yet | -- |
 | AND | Andorra | -- | No specimen yet | -- |

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-01-01",
+  "date_of_expiry": "2025-01-01",
+  "document_number": "ZAB000221",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "CARMEN",
+  "issuing_country": "ESP",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<ESPESPANOLA<ESPANOLA<<CARMEN<<<<<<<<<<<<<<\nZAB0002217ESP8001014F2501017A9999999900<<<48",
+  "nationality": "ESP",
+  "personal_number": "A9999999900",
+  "sex": "F",
+  "surname": "ESPANOLA ESPANOLA"
+}

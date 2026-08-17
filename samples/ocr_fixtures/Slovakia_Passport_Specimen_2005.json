@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1911-11-11",
+  "date_of_expiry": "2015-01-04",
+  "document_number": "P0000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "VZOR",
+  "issuing_country": "SVK",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<SVKSPECIMEN<<VZOR<<<<<<<<<<<<<<<<<<<<<<<<<\nP0000000<5SVK1111112M1501043<<<<<<<<<<<<<<00",
+  "nationality": "SVK",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SPECIMEN"
+}
