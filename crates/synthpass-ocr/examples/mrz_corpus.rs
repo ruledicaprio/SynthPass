@@ -24,16 +24,29 @@ const CORPUS: &[(&str, &str)] = &[
     ("SerbianID_back.png", "955555546"),
     ("Slovenian_ID_Card_2022_-_Rear.jpg", "IE9876543"),
     ("China_Passport_Specimen.webp", "E00000000"),
+    // Stale as of 2026-08-17: both reproducibly return "no MRZ found in
+    // text" against the current OCR/parser, despite the recorded doc
+    // numbers below (presumably accurate against some earlier version).
+    // Left in CORPUS rather than deleted so they keep counting as misses
+    // in the denominator instead of silently vanishing — a real regression
+    // or a flaky one-off hit when these were added, not yet root-caused.
     ("Vietnam_Passport_Specimen.webp", "E00000000"),
     ("Oman_Passport_Specimen.jpg", "JL5989824"),
     ("United_Arab_Emirates_Passport_Specimen.jpg", "ZK8K81404"),
     ("Canada_Passport_Specimen.jpg", "ZE001355"),
     ("Canada_Passport_Specimen_2.jpg", "P001756ZA"),
     ("Canada_Passport_Specimen_3.webp", "P001678ZA"),
-    ("Slovakia_Passport_Specimen_2.png", "P0000000"),
+    ("Slovakia_Passport_Specimen_2005.png", "P0000000"),
     ("Slovakia_Passport_Specimen_3.jpg", "XE7207436"),
-    ("Spain_Passport_Specimen.webp", "ZAB000221"),
-    ("Spain_Passport_Specimen_2.jpg", "PA000000"),
+    ("Spain_Passport_Specimen_2015_mrz_colored.webp", "ZAB000221"),
+    ("Spain_Passport_Specimen_2013.jpg", "PA000000"),
+    // Cyprus's document-type code changed from "P" to "PP" for an ordinary
+    // citizen passport effective 15 December 2025 — see
+    // <https://www.gov.cy/moi/en/documents/passports/passport-specimens/>
+    // and `synthpass_core::fusion::document_types_agree`'s doc comment.
+    ("Cyprus_Passport_Specimen_2010_Cypriot.png", "K00000220"),
+    ("Cyprus_Passport_Specimen_2020_Cypriot.jpg", "L00000000"),
+    ("Cyprus_Passport_Specimen_2026_Cypriot.png", "LA0000000"),
     // Known-MISS baseline (see Phase 0 of the multiscript-MRZ-robustness
     // plan), NOT a real ground-truth doc number: this specimen is a
     // publicly-posted "redacted sample" scan whose surname/given-name/

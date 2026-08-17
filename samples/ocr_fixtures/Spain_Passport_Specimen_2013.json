@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1975-06-04",
+  "date_of_expiry": "2014-01-01",
+  "document_number": "PA000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "JUAN",
+  "issuing_country": "ESP",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<ESPESPANOL<ESPANOL<<JUAN<<<<<<<<<<<<<<<<<<\nPA000000<5ESP7506040M1401017RE00000000000014",
+  "nationality": "ESP",
+  "personal_number": "RE000000000000",
+  "sex": "M",
+  "surname": "ESPANOL ESPANOL"
+}

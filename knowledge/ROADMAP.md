@@ -262,6 +262,27 @@ flowchart LR
   dropped space in two specimens' `given_names`, and a century-pivot misread on a `11`
   year-of-birth specimen — see `scripts/check-century-pivot.sh`). Expanding beyond 8 remains future
   work; each label needs the same one-by-one visual check, not a batch script.
+
+  **Grew from 8 to 13, 2026-08-17.** `crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS` list
+  already had 16 real specimens confirmed as checksum-valid Tier-1 hits with a hand-verified
+  `document_number`; diffing against the 8 labelled passports left 7 not yet promoted to full
+  `Extraction` ground truth. Two (`Vietnam_Passport_Specimen.webp`, `Oman_Passport_Specimen.jpg`)
+  turned out to be **stale `CORPUS` entries** — both now reproducibly return "no MRZ found" against
+  the current OCR/parser despite being listed as hits, a real regression or drift worth its own
+  follow-up, not folded into this pass. The remaining 5
+  (`Canada_Passport_Specimen`, `Canada_Passport_Specimen_3`, `Slovakia_Passport_Specimen_2`,
+  `Spain_Passport_Specimen`, `Spain_Passport_Specimen_2`) were promoted after the same one-by-one
+  visual check: even on genuine checksum-valid hits, the OCR's raw read of the non-checksummed
+  fields is frequently badly garbled (e.g. `surname` merged with `document_type` and duplicated —
+  `"PESPANOLASESPANOLA"` for a specimen actually reading `ESPANOLA<ESPANOLA`), confirming the same
+  fact PR #134's line-1-integrity work established. `Slovakia_Passport_Specimen_2` repeats the
+  known century-pivot trap on its `11`-year-of-birth field (correct value `1911-11-11`, matching
+  its sibling `Slovakia_Passport_Specimen_3` fixture) — and separately, its MRZ-encoded
+  `date_of_expiry` (`2015-01-04`) doesn't match the VIZ's printed `01.04.2015`
+  (day/month swapped): a genuine inconsistency baked into that specimen template, not an OCR
+  error. Ground truth here follows the MRZ zone (what `extraction_method: "mrz-deterministic"`
+  actually reads), consistent with every other fixture, and the mismatch is recorded here rather
+  than silently resolved one way. Expanding beyond 13 remains future work, same caveat as above.
 - **Post-M7 real-world validation surfaced a Tier-1/Tier-2 fusion gap.** A private Turkish
   passport specimen (`samples/ocr_fixtures/Turkiye_Passport_private.jpeg`) escalated to Tier-2
   on a single misread MRZ character (`document_number`'s leading glyph), which threw away
