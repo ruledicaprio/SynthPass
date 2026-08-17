@@ -12,3 +12,10 @@ encoding_rs = "0.8"
 zeroize = "1"
 
 [dev-dependencies]
+
+[features]
+# Offload Tier-2 inference to an NVIDIA GPU via llama-cpp-2's existing CUDA
+# backend. Off by default — CPU stays the only path a normal build ships.
+# Requires the CUDA Toolkit + a C++ toolchain on the *build* machine (see
+# knowledge/decisions/ADR-0004-gpu-acceleration.md).
+cuda = ["llama-cpp-2/cuda"]
