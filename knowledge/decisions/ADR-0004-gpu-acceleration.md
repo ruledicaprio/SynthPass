@@ -1,6 +1,6 @@
 # ADR-0004 — GPU acceleration as an optional, feature-gated path
 
-**Status:** Proposed
+**Status:** Accepted (2026-08-17, `cuda` only — see amendment below)
 **Date:** 2026-08-04 (supersedes the unnumbered `ADR-00XX-GPU-Integration.md` draft of
 2026-08-03, which was never indexed and contained several unverified claims — see
 "What changed from the original draft" below)
@@ -251,6 +251,101 @@ verification, not folded into this one's LLM-only, verified proposal.
 - **`rten` GPU support remains completely unscoped.** This ADR explicitly does not claim
   a path exists; a customer expecting OCR speedup from "GPU acceleration" would not get
   one from what this ADR proposes.
+
+## Amendment 2026-08-17 — Accepted, `cuda` only, validated on real hardware
+
+This ADR moves to **Accepted** for the `cuda` feature only. `vulkan` stays
+proposed-but-unimplemented — nothing in this amendment validates it, and there
+is no reason to ship an unverified path alongside a verified one.
+
+**What changed since Proposed:** a customer machine running this workspace
+turned out to have the exact hardware this ADR's motivating case named — an
+NVIDIA GTX 970 (Maxwell, compute capability 5.2, 4 GB VRAM) — plus the full
+build chain `llama-cpp-sys-2`'s CMake build needs on Windows: CUDA Toolkit
+13.3, driver 582.28, cmake 4.4.0, and Visual Studio 2022 Community's C++
+(VC.Tools.x86.x64) workload. That closes the ADR's two biggest listed gaps —
+"nothing here is benchmarked" and "determinism is unverified across
+backends" — with real measurements instead of projections; see
+`crates/synthpass-llm/Cargo.toml`'s `cuda` feature and
+`crates/synthpass-llm/src/lib.rs`'s `#[cfg(feature = "cuda")]` GPU-layer-offload
+wiring in `NativeLlm::load` for what actually shipped.
+
+**Determinism result: confirmed identical.** `tests/parity.rs --ignored
+--nocapture` run against the same 6-fixture sample set, CPU vs `--features
+cuda`: field match rate **16/42 (38.1%) on both**, and the actual (not just
+matched/mismatched) extracted text is character-for-character identical
+across every field on every fixture (e.g. the malformed date renderings
+`"13 ABR/AVR 90"` and `"1JUL/JUI/JUL31"` on the `2022_cetis_terra_condifea...`
+fixture appear verbatim on both backends). Greedy decoding (`build_sampler`'s
+`LlamaSampler::greedy()`) is stable across the CPU/CUDA split on this
+`llama-cpp-2` 0.1.154 build. This does not generalize to future engine
+bumps — see `knowledge/technical_debt.md`'s existing "Nothing in CI exercises
+the real inference engine" entry, unchanged by this finding.
+
+**Benchmark result: real, measured, on a card with no Tensor Cores.** The
+GTX 970 is Maxwell — FP32 ALUs only, no Tensor Cores, no native FP16 math —
+so this is not a "modern GPU" number, but it is a real one:
+
+| Test | CPU | CUDA (GTX 970) | Speedup |
+|---|---|---|---|
+| `native_llm_e2e` (1 unary + 1 streaming extract) | 51.49s | 20.22s | ~2.5x |
+| `parity` (6 documents) | 181.33s (3m01s) | 73.67s | ~2.46x |
+
+All 28 transformer layers offloaded to `CUDA0` (confirmed via llama.cpp's own
+`load_tensors: layer N assigned to device CUDA0` logging), well within the
+970's fast 3.5 GB VRAM segment (model + KV cache measured at ~991 MiB
+resident on-device).
+
+A larger real-world sample confirms the same shape: `provider-bench
+--real-specimens --features cuda` (no `--limit`, the full 221-document
+`samples/` corpus) reports the `llm` provider's mean latency at **11.4s/doc**
+on this card — slower than the clean 6-fixture parity set's per-doc average
+(longer, messier real-world OCR text), but the full run (both providers,
+221 docs) still completed in 1h37m wall time, a corpus size that would not
+have been practical to run to completion on CPU in one sitting at the
+30-60s/doc rate observed earlier. Field-match rate on this larger, unfiltered
+sample (37.6%) lines up with the 6-fixture parity harness's 38.1%, i.e. the
+GPU path isn't quietly producing worse extractions at scale.
+
+**Build-chain notes for anyone repeating this** (not part of the shipped
+code, but real friction hit during validation, worth recording so the next
+person doesn't re-derive it):
+- **CUDA 13.0+ dropped Maxwell/Pascal/Volta support entirely** — `nvcc
+  -arch=sm_52` fails with `Unsupported gpu architecture 'sm_52'` on the
+  13.3 toolkit this machine had installed. CUDA 12.9 is the last release
+  that still targets `sm_52`; a second toolkit install (compiler/libraries
+  only, no display-driver component — the existing driver already supports
+  the newer CUDA runtime and must not be touched) was required alongside
+  the existing 13.3 install.
+- **`llama-cpp-sys-2`'s CMake build must be pointed at the right toolkit
+  explicitly.** With the default Visual Studio generator, CMake's CUDA
+  compiler detection picked the newest installed toolkit (13.3) regardless
+  of the `CUDA_PATH` environment variable, because MSBuild's CUDA
+  "BuildCustomizations" props/targets resolve independently of the process
+  environment. Switching the generator to Ninja (`CMAKE_GENERATOR=Ninja`,
+  via `pip install ninja`) made the build respect `CUDA_PATH`/`PATH`
+  correctly.
+- **`CUDAARCHS=52`** (a CMake ≥3.20 environment-variable seed for
+  `CMAKE_CUDA_ARCHITECTURES`, no source changes needed) keeps the build from
+  compiling kernels for architectures this card can't use.
+- A stale CMake cache directory from a prior (wrong-toolkit) build attempt
+  silently kept using the old toolkit's headers even after `CUDA_PATH` was
+  corrected — `cargo clean -p llama-cpp-sys-2 -p llama-cpp-2` (the package
+  name only, not `--features`, which `cargo clean` does not accept) is
+  required after any toolkit change, not just a plain rebuild.
+
+**Still open:**
+- `vulkan` remains unimplemented and unverified.
+- No CI runner has this hardware — the GPU path is manually validated per this
+  amendment, not continuously tested. `knowledge/technical_debt.md`'s "Nothing
+  in CI exercises the real inference engine" entry still applies to both
+  backends.
+- `rten`/OCR GPU support remains completely out of scope, unchanged from the
+  original proposal.
+- The CUDA 12.9 vs. 13.3 toolkit split is a real, ongoing maintenance cost on
+  Maxwell-class hardware specifically — newer cards would build cleanly
+  against whatever toolkit is already installed. This is hardware-specific
+  friction, not something the crate/feature-flag design can absorb.
 
 ## References
 

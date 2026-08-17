@@ -100,9 +100,18 @@ impl NativeLlm {
     /// Load the GGUF at `model_path` and prepare a warm, reusable model.
     /// `n_ctx` is the context window size (2048 for the Qwen fine-tune this
     /// workspace ships, matching the Python inferer).
+    ///
+    /// Built with `--features cuda`, every transformer layer is offloaded to
+    /// the GPU (see `knowledge/decisions/ADR-0004-gpu-acceleration.md`); a
+    /// default build stays CPU-only and this call is behaviorally unchanged.
     pub fn load(model_path: &Path, n_ctx: u32) -> Result<Self, String> {
         let backend = LlamaBackend::init().map_err(|e| format!("llama backend init: {e}"))?;
-        let model_params = LlamaModelParams::default();
+        #[cfg_attr(not(feature = "cuda"), allow(unused_mut))]
+        let mut model_params = LlamaModelParams::default();
+        #[cfg(feature = "cuda")]
+        {
+            model_params = model_params.with_n_gpu_layers(u32::MAX);
+        }
         let model = LlamaModel::load_from_file(&backend, model_path, &model_params)
             .map_err(|e| format!("failed to load GGUF at {}: {e}", model_path.display()))?;
         let n_ctx = NonZeroU32::new(n_ctx).ok_or("n_ctx must be non-zero")?;

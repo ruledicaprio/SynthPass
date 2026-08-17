@@ -54,6 +54,11 @@ sysinfo = { version = "0.32", optional = true }
 plotters = { version = "0.3", default-features = false, features = ["svg_backend", "line_series"] }
 
 [features]
+# Passthrough so `provider-bench --features cuda` builds its LLM/Tier-2
+# provider with GPU offload (see crates/synthpass-llm/Cargo.toml's `cuda`
+# feature and knowledge/decisions/ADR-0004-gpu-acceleration.md). Off by
+# default — no effect on a normal build.
+cuda = ["synthpass-llm/cuda"]
 # Opt-in real memory sampling for `provider-bench`. Off by default: everyone
 # else gets `Capability::estimated_resident_bytes` (the provider's own
 # declared figure, already designed to be the benchmark's memory column) with
