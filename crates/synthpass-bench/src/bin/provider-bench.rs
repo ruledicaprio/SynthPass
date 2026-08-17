@@ -16,7 +16,7 @@
 //! ```text
 //! provider-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out PATH]
 //!                [--measure-memory] [--real-specimens] [--limit N]
-//!                [--format NAME] [--verbose]
+//!                [--format NAME] [--verbose] [--dump-ocr]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
@@ -39,6 +39,13 @@
 //!                      all classes), applied before --limit
 //!   --verbose, -v      print the per-document breakdown behind each
 //!                      provider's aggregates
+//!   --dump-ocr         with --real-specimens: for every document whose miss
+//!                      reason is checksum_failed, print its raw MRZ zone
+//!                      text and which check digit(s) failed — the
+//!                      real-specimen equivalent of synthpass-bench's own
+//!                      --dump-ocr, scoped to this one miss kind since a
+//!                      real-specimen run is much larger than a synthetic
+//!                      diagnostic one
 //! ```
 
 use serde::Serialize;
@@ -72,6 +79,12 @@ struct Args {
     limit: Option<usize>,
     /// Print the per-document breakdown behind each provider's aggregates.
     verbose: bool,
+    /// With `real_specimens`: dump the raw MRZ zone text (and which check
+    /// digit(s) failed) for every `checksum_failed` miss — see
+    /// `synthpass_bench::provider_bench::run_prepped`'s doc for why this is
+    /// scoped to that one miss kind rather than every document the way
+    /// `synthpass-bench --dump-ocr` is.
+    dump_ocr: bool,
     /// Restrict `--real-specimens` to one `samples/` document class (e.g.
     /// `passport`) via `synthpass_bench::classify_specimen`. `--real-specimens`
     /// only, applied before `--limit` so a stride subsamples the already-scoped
@@ -100,6 +113,7 @@ impl Default for Args {
             real_specimens: false,
             limit: None,
             verbose: false,
+            dump_ocr: false,
             format: None,
             document_type: None,
         }
@@ -135,6 +149,10 @@ fn usage() {
          for the synthetic corpus (default: td3). Not the same axis as --format, which scopes \
          which real samples/ directory --real-specimens reads; rejected together with \
          --real-specimens the same way --format is rejected without it."
+    );
+    eprintln!(
+        "  --dump-ocr         with --real-specimens: for every checksum_failed miss, print its \
+         raw MRZ zone text and which check digit(s) failed"
     );
 }
 
@@ -189,6 +207,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.verbose = true;
                 i += 1;
             }
+            "--dump-ocr" => {
+                parsed.dump_ocr = true;
+                i += 1;
+            }
             "--limit" => {
                 let v = args
                     .get(i + 1)
@@ -221,6 +243,9 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     }
     if parsed.format.is_some() && !parsed.real_specimens {
         return Err("--format is only valid together with --real-specimens".to_string());
+    }
+    if parsed.dump_ocr && !parsed.real_specimens {
+        return Err("--dump-ocr is only valid together with --real-specimens".to_string());
     }
     if parsed.document_type.is_some() && parsed.real_specimens {
         return Err(
@@ -575,9 +600,14 @@ async fn main() {
             specimens.len(),
             specimens.len() - labelled,
         );
-        let reports =
-            run_provider_bench_real(pipeline.catalog(), &ocr, &specimens, parsed.measure_memory)
-                .await;
+        let reports = run_provider_bench_real(
+            pipeline.catalog(),
+            &ocr,
+            &specimens,
+            parsed.measure_memory,
+            parsed.dump_ocr,
+        )
+        .await;
         (
             reports,
             "real-specimens",
@@ -830,6 +860,25 @@ mod tests {
         assert!(
             parse_args(&args).is_err(),
             "--format only makes sense scoping --real-specimens"
+        );
+    }
+
+    #[test]
+    fn dump_ocr_parses_alongside_real_specimens() {
+        let args: Vec<String> = ["--real-specimens", "--dump-ocr"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&args).expect("valid combination");
+        assert!(parsed.dump_ocr);
+    }
+
+    #[test]
+    fn dump_ocr_without_real_specimens_is_rejected() {
+        let args: Vec<String> = ["--dump-ocr"].iter().map(|s| s.to_string()).collect();
+        assert!(
+            parse_args(&args).is_err(),
+            "--dump-ocr only makes sense scoping --real-specimens"
         );
     }
 

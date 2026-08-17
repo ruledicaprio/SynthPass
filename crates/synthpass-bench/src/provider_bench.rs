@@ -515,7 +515,7 @@ pub async fn run_provider_bench(
     measure_memory: bool,
 ) -> Vec<ProviderReport> {
     let prepped = prep_corpus(ocr, corpus);
-    run_prepped(catalog, &prepped, measure_memory).await
+    run_prepped(catalog, &prepped, measure_memory, false).await
 }
 
 /// Runs every reader in `catalog` against every real specimen in
@@ -528,9 +528,10 @@ pub async fn run_provider_bench_real(
     ocr: &NativeOcr,
     specimens: &[RealSpecimenDoc],
     measure_memory: bool,
+    dump_ocr: bool,
 ) -> Vec<ProviderReport> {
     let prepped = prep_specimens(ocr, specimens);
-    run_prepped(catalog, &prepped, measure_memory).await
+    run_prepped(catalog, &prepped, measure_memory, dump_ocr).await
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
@@ -581,10 +582,24 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
 /// [`run_provider_bench_real`] funnel into — the one place accuracy and
 /// unsupported-assertion are computed, so the two corpus sources cannot
 /// silently diverge in what "correct" or "unsupported" means.
+///
+/// `dump_ocr`: when a document's `miss_reason` resolves to
+/// `MissReason::ChecksumFailed`, print its raw MRZ zone text (debug-quoted,
+/// so a misread or invisible character is visible) and which check digit(s)
+/// failed. Mirrors `synthpass-bench`'s own `--dump-ocr`, but scoped to this
+/// one miss kind rather than every document: `checksum_failed` is the
+/// unambiguous signal (OCR found MRZ-shaped text and misread a character in
+/// it — unlike `no_mrz_found`, which also catches genuinely MRZ-less
+/// documents), and a real-specimen run is large enough that dumping every
+/// hit would be noise a synthetic diagnostic run never has to contend with.
+/// `synthpass_bench::CorpusDoc` runs (`run_provider_bench`) never pass
+/// `true` here — `synthpass-bench`'s own `--dump-ocr` already covers that
+/// path.
 async fn run_prepped(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
     measure_memory: bool,
+    dump_ocr: bool,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
     let labelled_documents = prepped
@@ -785,6 +800,29 @@ async fn run_prepped(
                         })
                     })
             };
+
+            if dump_ocr && matches!(miss_reason, Some(MissReason::ChecksumFailed)) {
+                println!(
+                    "--- {} ({}) raw MRZ zone ---",
+                    bench_page.name,
+                    reader.id().as_str()
+                );
+                match &read_mrz {
+                    Some(data) => {
+                        for (i, line) in data.mrz_lines.lines().enumerate() {
+                            println!("  [{i}] {line:?}");
+                        }
+                        let failed: Vec<String> =
+                            data.checks.failed().iter().map(|f| f.to_string()).collect();
+                        println!("  failed check digit(s): {}", failed.join(", "));
+                    }
+                    // read_mrz is None here only if mrz::find_and_parse found no
+                    // candidate at all despite bench_page.mrz_found being true —
+                    // shouldn't happen (both are the same call on the same text),
+                    // but printed rather than silently skipped if it ever does.
+                    None => println!("  (no parsed MRZ data despite mrz_found)"),
+                }
+            }
 
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
@@ -1115,7 +1153,7 @@ mod tests {
             }),
         ];
 
-        let reports = run_prepped(&catalog, &prepped, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 1);
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
@@ -1147,7 +1185,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 0);
         assert_eq!(report.accuracy.field_match_rate, None);
@@ -1182,7 +1220,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1242,7 +1280,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::NotApplicable { reason } => {
                 assert!(!reason.is_empty());
