@@ -1,18 +1,18 @@
 # Security Policy
 
-`multi-level-id-strip` processes **personally identifiable information** (passports, ID cards).
-Security is a first-class concern; this document describes the posture and how to report issues.
+**SynthPass** processes **personally identifiable information** (passports, ID cards).
+*(Formerly `multi-level-id-strip` / `mlis`.)* Security is a first-class concern; this document
+describes the posture and how to report issues.
 
 ## Supported versions
 
-Solo-maintained project, patch releases only — the latest `1.1.x` release is the only supported
-one. Pre-1.0 versions (roadmap milestones `v0.4.0` through `v0.9.0`) are unmaintained; upgrade to
-`1.1.x` for any security-relevant fix.
+Solo-maintained project, patch releases only — the latest `1.3.x` release is the only supported
+one. Pre-1.3 versions are unmaintained; upgrade to `1.3.x` for any security-relevant fix.
 
 | Version | Supported |
 | --- | --- |
-| 1.1.x | ✅ |
-| < 1.1 | ❌ |
+| 1.3.x | ✅ |
+| < 1.3 | ❌ |
 
 ## Reporting a vulnerability
 
