@@ -21,6 +21,11 @@ not a tool for imitating genuine credentials — see
 [knowledge/BRANDING.md](knowledge/BRANDING.md) §4 / [knowledge/VISION.md](knowledge/VISION.md).
 *(Formerly `multi-level-id-strip` / `mlis` — see [CHANGELOG.md](CHANGELOG.md).)*
 
+<img src="knowledge/img/screenshot-web-mrz-validator.png" alt="The live MRZ Validator demo confirming every ICAO 9303 check digit is valid for a pasted MRZ" width="420">
+
+*The [live demo](https://ruledicaprio.github.io/SynthPass/) — WebAssembly, runs entirely in your
+browser, nothing uploaded.*
+
 ## Quickstart
 
 Neither Docker nor Python is required to *run* SynthPass. Input is images only — JPEG, PNG, WebP,
@@ -52,6 +57,8 @@ cargo run -p synthpass-cli -- samples/ocr_fixtures/Croatian_passport_data_page.j
 # 4. ...or run the web app — upload page + JSON API on http://127.0.0.1:8080
 cargo run -p synthpass-serve
 ```
+
+<img src="knowledge/img/screenshot-synthpass-serve.png" alt="synthpass-serve's upload page showing a Tier-1 checksum-proven extraction result with a per-field confidence table" width="420">
 
 `synthpass-serve`'s `POST /api/extract` (multipart upload, SSE progress) is documented in
 [knowledge/ARCHITECTURE.md §5](knowledge/ARCHITECTURE.md#5-pipeline-execution-flow); every CLI
