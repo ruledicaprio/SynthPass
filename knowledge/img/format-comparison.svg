@@ -199,15 +199,15 @@ MRVB
 <text x="313" y="129" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
 74.0%
 </text>
-<rect x="435" y="94" width="122" height="309" opacity="1" fill="#FF00FF" stroke="none"/>
-<text x="435" y="83" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-86.7%
+<rect x="435" y="89" width="122" height="314" opacity="1" fill="#FF00FF" stroke="none"/>
+<text x="435" y="79" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+88.0%
 </text>
-<rect x="557" y="70" width="122" height="333" opacity="1" fill="#FF0000" stroke="none"/>
-<text x="557" y="60" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-93.3%
+<rect x="557" y="96" width="122" height="307" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="557" y="86" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+86.0%
 </text>
 <text x="20" y="440" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#000000">
-TD1: n=100  ·  TD2: n=100  ·  TD3: n=100  ·  MRVA: n=30  ·  MRVB: n=30
+TD1: n=100  ·  TD2: n=100  ·  TD3: n=100  ·  MRVA: n=100  ·  MRVB: n=100
 </text>
 </svg>
