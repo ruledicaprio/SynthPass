@@ -155,7 +155,7 @@ jobs:
       # supports for exactly this. Cheap insurance -- these are tens of KB.
       - name: Preserve the raw bench reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bench-reports-${{ github.run_id }}
           path: |
