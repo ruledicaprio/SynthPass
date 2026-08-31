@@ -2,8 +2,8 @@
 
 Identity-document specimen images used as test/example fixtures for the OCR,
 LLM, and pipeline crates. Files are organized by document kind into
-subdirectories; **no file has been renamed** when moved between them (see
-"Naming convention" below for why).
+subdirectories and follow a single filename convention (see "Naming
+convention" below).
 
 **Only `ocr_fixtures/` is tracked in git.** It's the hand-verified,
 ground-truth-labelled subset, and required CI (`native_ocr_e2e`,
@@ -50,35 +50,40 @@ since it is not itself a test fixture.
 | `driving_licenses/`   | Driving licence              | No MRZ — not a machine-readable travel document |
 | `ocr_fixtures/`       | Mixed (passport/ID pages used for docling OCR ground-truth) | Varies; see each fixture's `.md`/`.json` |
 
-## Naming convention for FUTURE additions
+## Naming convention
 
-Existing filenames are used as lookup keys by several tests (`find_sample`
-/ `walk_samples` helpers walk `samples/` recursively and match by
-**basename**), so **existing files are intentionally left un-renamed** when
-moved into subdirectories — renaming any of them would break those test
-references. For the gitignored portion of the corpus this is no longer
-something CI can check (nothing there is tracked), so treat it as an
-honor-system convention enforced by the fetch script's own naming, plus
-whatever discipline you bring to a hand-maintained local mirror.
-
-New files added going forward should follow:
+Filenames are lookup keys: the `find_sample` / `walk_samples` test helpers
+walk `samples/` recursively and match by **basename**, and
+`crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS`/`NEGATIVE` lists
+name specimens by basename too. Every file — tracked or gitignored — follows:
 
 ```
-Country_DocType_Detail.ext
+Country_DocType_Specimen[_YYYY][_N][_side]_mrz.ext
 ```
 
-- `Country` — the issuing country/territory, `Snake_Case` or `Title_Case`
-  matching existing entries (e.g. `Croatia`, `North_Macedonia`).
-- `DocType` — one of `Passport`, `ID_Card`, `Driving_License`, matching the
-  subdirectory the file will be placed in.
-- `Detail` (optional) — page/variant qualifier, e.g. `Specimen`,
-  `Specimen_2`, `Biodata`, `Front`, `Back`, `Cover`.
-- `ext` — prefer `jpg`/`png`; avoid `webp`/`gif` unless that is the only
-  source format available.
+- `Country` — issuing country/territory, `Snake_Case` or `Title_Case`
+  (e.g. `Croatia`, `North_Macedonia`). Adjective forms survive where already
+  established (`Slovenian_ID_…`).
+- `DocType` — `Passport` or `ID`, matching the subdirectory.
+- `Specimen` — always present; these are specimen/void documents, never real.
+- `YYYY` (optional) — issue year, when known from the document.
+- `N` (optional) — disambiguator when the same country/year has more than one
+  specimen (`_2`, `_3`, …).
+- `side` (optional) — `front`, `back`, or `inner_page` for a multi-page/side
+  document; omit for a single-side passport datapage.
+- `_mrz` / `_no_mrz` — tags whether this image carries the MRZ. `_redacted_mrz`
+  when the MRZ is physically blacked out on the source. This tag keys the
+  `integrity_survey.rs --mrz-only` filter (`filename.contains("_mrz")`), so it
+  is not optional.
+- `ext` — prefer `jpg`/`png`; `webp` only when that is the source format.
 
 Basenames must stay **unique across all of `samples/`**, regardless of
-which subdirectory they end up in, since lookups are basename-based and do
-not disambiguate by directory.
+subdirectory, since lookups are basename-based and do not disambiguate by
+directory.
+
+Renaming a tracked `ocr_fixtures/` file means updating its `CORPUS`/`NEGATIVE`
+entry and any `find_sample("…")` literal in the same change — `grep -r` the
+old basename first.
 
 ## Provenance
 

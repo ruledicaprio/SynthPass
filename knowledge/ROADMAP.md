@@ -252,7 +252,7 @@ flowchart LR
   chart inline).
 
   Passport ground truth also grew from 4 (one of which, on inspection, turned out to be malformed —
-  `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json` was missing `extraction_method`
+  `Cetis_Sample_Passport_Specimen_2022_inner_page_mrz.json` was missing `extraction_method`
   and had several wrong fields, e.g. `issuing_country: "CETIS d.d."`, the *printer's* name, not an
   ICAO code) to 8 good labelled specimens (fixed that one; added UAE, Slovakia Service passport, a
   second Canada specimen, China) — each hand-verified against the image rather than trusted from
@@ -266,18 +266,18 @@ flowchart LR
   **Grew from 8 to 13, 2026-08-17.** `crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS` list
   already had 16 real specimens confirmed as checksum-valid Tier-1 hits with a hand-verified
   `document_number`; diffing against the 8 labelled passports left 7 not yet promoted to full
-  `Extraction` ground truth. Two (`Vietnam_Passport_Specimen.webp`, `Oman_Passport_Specimen.jpg`)
+  `Extraction` ground truth. Two (`Vietnam_Passport_Specimen_2023_mrz.webp`, `Oman_Passport_Specimen_2004_mrz.jpg`)
   turned out to be **stale `CORPUS` entries** — both now reproducibly return "no MRZ found" against
   the current OCR/parser despite being listed as hits, a real regression or drift worth its own
   follow-up, not folded into this pass. The remaining 5
-  (`Canada_Passport_Specimen`, `Canada_Passport_Specimen_3`, `Slovakia_Passport_Specimen_2`,
-  `Spain_Passport_Specimen`, `Spain_Passport_Specimen_2`) were promoted after the same one-by-one
+  (`Canada_Passport_Specimen_2013_mrz`, `Canada_Passport_Specimen_2023_2_mrz`, `Slovakia_Passport_Specimen_2005_mrz`,
+  `Spain_Passport_Specimen_2013_mrz`, `Spain_Passport_Specimen_2015_colored_mrz`) were promoted after the same one-by-one
   visual check: even on genuine checksum-valid hits, the OCR's raw read of the non-checksummed
   fields is frequently badly garbled (e.g. `surname` merged with `document_type` and duplicated —
   `"PESPANOLASESPANOLA"` for a specimen actually reading `ESPANOLA<ESPANOLA`), confirming the same
-  fact PR #134's line-1-integrity work established. `Slovakia_Passport_Specimen_2` repeats the
+  fact PR #134's line-1-integrity work established. `Slovakia_Passport_Specimen_2005_mrz` repeats the
   known century-pivot trap on its `11`-year-of-birth field (correct value `1911-11-11`, matching
-  its sibling `Slovakia_Passport_Specimen_3` fixture) — and separately, its MRZ-encoded
+  its sibling `Slovakia_Passport_Specimen_2014_mrz` fixture) — and separately, its MRZ-encoded
   `date_of_expiry` (`2015-01-04`) doesn't match the VIZ's printed `01.04.2015`
   (day/month swapped): a genuine inconsistency baked into that specimen template, not an OCR
   error. Ground truth here follows the MRZ zone (what `extraction_method: "mrz-deterministic"`

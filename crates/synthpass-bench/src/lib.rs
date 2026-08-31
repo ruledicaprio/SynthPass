@@ -141,7 +141,7 @@ pub fn generate_corpus(
 /// One real specimen loaded from `samples/`: its file stem, the decoded
 /// image, and OPTIONAL ground truth read from a sibling
 /// `samples/ocr_fixtures/<stem>.json` label file (the v1 `Extraction` shape
-/// — verified against `samples/ocr_fixtures/SerbianID_back.json` before
+/// — verified against `samples/ocr_fixtures/Serbia_ID_Specimen_2008_back_with_mrz.json` before
 /// writing this loader).
 ///
 /// This exists because [`CorpusDoc`] cannot represent a real specimen:
@@ -866,15 +866,16 @@ mod tests {
     }
 
     /// Ground truth loads and parses correctly when a `samples/ocr_fixtures/
-    /// <stem>.json` label file exists. `SerbianID_back` is the specimen the
-    /// task brief pointed at to confirm the v1 `Extraction` shape before any
-    /// code was written, so it doubles as the loader's own confirmation.
+    /// <stem>.json` label file exists. `Serbia_ID_Specimen_2008_back_with_mrz`
+    /// is the specimen the task brief pointed at to confirm the v1
+    /// `Extraction` shape before any code was written, so it doubles as the
+    /// loader's own confirmation.
     #[test]
     fn specimen_loader_finds_labels_when_present() {
         let root = repo_root();
         let samples = root.join("samples");
-        let truth = load_ground_truth(&samples, "SerbianID_back")
-            .expect("samples/ocr_fixtures/SerbianID_back.json should parse");
+        let truth = load_ground_truth(&samples, "Serbia_ID_Specimen_2008_back_with_mrz")
+            .expect("samples/ocr_fixtures/Serbia_ID_Specimen_2008_back_with_mrz.json should parse");
         assert_eq!(truth.document_number.as_deref(), Some("955555546"));
         assert_eq!(truth.surname.as_deref(), Some("TEST"));
         assert_eq!(truth.given_names.as_deref(), Some("MILICA"));
@@ -912,7 +913,7 @@ mod tests {
     /// `ocr_fixtures/` and `misc/` mix formats, so classification falls back
     /// to the specimen's own labelled `document_type` — both the ICAO short
     /// code (`P`, `ID`, `I`) and the unnormalized long form seen in one real
-    /// fixture (`PASSPORT`, see `2022_cetis_terra_condifea_passport_datapage3rd_inner_page.json`).
+    /// fixture (`PASSPORT`, see `Cetis_Sample_Passport_Specimen_2022_inner_page_mrz.json`).
     #[test]
     fn classify_specimen_falls_back_to_label_for_mixed_directories() {
         let passport_short = extraction_with_document_type("P");
@@ -968,7 +969,7 @@ mod tests {
     /// is the common case in `samples/`: every MRZ-less ID-card front has no
     /// label file at all, and the loader has to treat that as "unlabelled,"
     /// per this crate's whole reason for existing (see `RealSpecimenDoc`'s
-    /// doc). `Bulgaria_ID_Card_specimen.png` has no sibling JSON under
+    /// doc). `Bulgaria_ID_Specimen_2024_front_no_mrz.png` has no sibling JSON under
     /// `samples/ocr_fixtures/` as of this writing.
     /// A label file that exists but is malformed reads as unlabelled rather
     /// than aborting the load — but is not silently identical to "no label

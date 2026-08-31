@@ -49,7 +49,7 @@ fn native_ocr_recognizes_mrz_fragment_from_sample_passport() {
     let (detection_path, recognition_path) = require_models();
     let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
 
-    let image_path = find_sample("Canada_Passport_Specimen_2.jpg");
+    let image_path = find_sample("Canada_Passport_Specimen_2023_mrz.jpg");
     let text = ocr.recognize(&image_path).expect("recognition succeeds");
 
     assert!(!text.is_empty(), "expected non-empty OCR output");
@@ -76,7 +76,7 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
     let (detection_path, recognition_path) = require_models();
     let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
 
-    let source_path = find_sample("Canada_Passport_Specimen_2.jpg");
+    let source_path = find_sample("Canada_Passport_Specimen_2023_mrz.jpg");
     let upright = image::open(&source_path)
         .expect("sample image opens")
         .into_rgb8();

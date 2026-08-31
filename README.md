@@ -52,7 +52,7 @@ cargo run -p synthpass-cli -- doctor
 
 # 3. Extract a document (skip the license gate for local development).
 $env:SYNTHPASS_LICENSE_SKIP = "1"
-cargo run -p synthpass-cli -- samples/ocr_fixtures/Croatian_passport_data_page.jpg
+cargo run -p synthpass-cli -- samples/ocr_fixtures/Croatia_Passport_Specimen_2009_mrz.jpg
 
 # 4. ...or run the web app — upload page + JSON API on http://127.0.0.1:8080
 cargo run -p synthpass-serve

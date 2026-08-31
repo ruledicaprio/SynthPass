@@ -15,38 +15,41 @@ use synthpass_ocr::NativeOcr;
 /// number from its checked-in `.json` ground truth.
 const CORPUS: &[(&str, &str)] = &[
     (
-        "2022_cetis_terra_condifea_passport_datapage3rd_inner_page.jpg",
+        "Cetis_Sample_Passport_Specimen_2022_inner_page_mrz.jpg",
         "SD9990322",
     ),
-    ("Croatian_passport_data_page.jpg", "007007007"),
-    ("Estonia_PASSPORT_face.png", "KS0000182"),
-    ("Passport_of_Serbia_ID_2009_version.jpg", "000000000"),
-    ("SerbianID_back.png", "955555546"),
-    ("Slovenian_ID_Card_2022_-_Rear.jpg", "IE9876543"),
-    ("China_Passport_Specimen.webp", "E00000000"),
+    ("Croatia_Passport_Specimen_2009_mrz.jpg", "007007007"),
+    ("Estonia_Passport_Specimen_2020_mrz.png", "KS0000182"),
+    ("Serbia_Passport_Specimen_2012_mrz.jpg", "000000000"),
+    ("Serbia_ID_Specimen_2008_back_with_mrz.png", "955555546"),
+    ("Slovenian_ID_Specimen_2022_back_mrz.jpg", "IE9876543"),
+    ("China_Passport_Specimen_2012_mrz.webp", "E00000000"),
     // Stale as of 2026-08-17: both reproducibly return "no MRZ found in
     // text" against the current OCR/parser, despite the recorded doc
     // numbers below (presumably accurate against some earlier version).
     // Left in CORPUS rather than deleted so they keep counting as misses
     // in the denominator instead of silently vanishing — a real regression
     // or a flaky one-off hit when these were added, not yet root-caused.
-    ("Vietnam_Passport_Specimen.webp", "E00000000"),
-    ("Oman_Passport_Specimen.jpg", "JL5989824"),
-    ("United_Arab_Emirates_Passport_Specimen.jpg", "ZK8K81404"),
-    ("Canada_Passport_Specimen.jpg", "ZE001355"),
-    ("Canada_Passport_Specimen_2.jpg", "P001756ZA"),
-    ("Canada_Passport_Specimen_3.webp", "P001678ZA"),
-    ("Slovakia_Passport_Specimen_2005.png", "P0000000"),
-    ("Slovakia_Passport_Specimen_3.jpg", "XE7207436"),
-    ("Spain_Passport_Specimen_2015_mrz_colored.webp", "ZAB000221"),
-    ("Spain_Passport_Specimen_2013.jpg", "PA000000"),
+    ("Vietnam_Passport_Specimen_2023_mrz.webp", "E00000000"),
+    ("Oman_Passport_Specimen_2004_mrz.jpg", "JL5989824"),
+    (
+        "United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg",
+        "ZK8K81404",
+    ),
+    ("Canada_Passport_Specimen_2013_mrz.jpg", "ZE001355"),
+    ("Canada_Passport_Specimen_2023_mrz.jpg", "P001756ZA"),
+    ("Canada_Passport_Specimen_2023_2_mrz.webp", "P001678ZA"),
+    ("Slovakia_Passport_Specimen_2005_mrz.png", "P0000000"),
+    ("Slovakia_Passport_Specimen_2014_mrz.jpg", "XE7207436"),
+    ("Spain_Passport_Specimen_2015_colored_mrz.webp", "ZAB000221"),
+    ("Spain_Passport_Specimen_2013_mrz.jpg", "PA000000"),
     // Cyprus's document-type code changed from "P" to "PP" for an ordinary
     // citizen passport effective 15 December 2025 — see
     // <https://www.gov.cy/moi/en/documents/passports/passport-specimens/>
     // and `synthpass_core::fusion::document_types_agree`'s doc comment.
-    ("Cyprus_Passport_Specimen_2010_Cypriot.png", "K00000220"),
-    ("Cyprus_Passport_Specimen_2020_Cypriot.jpg", "L00000000"),
-    ("Cyprus_Passport_Specimen_2026_Cypriot.png", "LA0000000"),
+    ("Cyprus_Passport_Specimen_2010_mrz.png", "K00000220"),
+    ("Cyprus_Passport_Specimen_2020_mrz.jpg", "L00000000"),
+    ("Cyprus_Passport_Specimen_2026_mrz.png", "LA0000000"),
     // Known-MISS baseline (see Phase 0 of the multiscript-MRZ-robustness
     // plan), NOT a real ground-truth doc number: this specimen is a
     // publicly-posted "redacted sample" scan whose surname/given-name/
@@ -61,7 +64,7 @@ const CORPUS: &[(&str, &str)] = &[
     // isolation — not for the hit-rate, which cannot reach 100% while this
     // entry is present. The placeholder value below can never match.
     (
-        "Israel_Passport_Specimen.jpg",
+        "Israel_Passport_Specimen_2003_redacted_mrz.jpg",
         "REDACTED-NO-GROUND-TRUTH-MRZ",
     ),
 ];
@@ -69,12 +72,12 @@ const CORPUS: &[(&str, &str)] = &[
 /// Samples with no MRZ at all: the retry passes run in full (worst-case
 /// latency) and must never produce a checksum-valid MRZ.
 const NEGATIVE: &[&str] = &[
-    "Bulgaria_ID_Card_specimen.png",
-    "Serbian_ID_Specimen_face.png",
-    "Slovenian_ID_Card_2022_-_Front.jpg",
+    "Bulgaria_ID_Specimen_2024_front_no_mrz.png",
+    "Serbia_ID_Specimen_2008_face_no_mrz.png",
+    "Slovenian_ID_Specimen_2022_front_no_mrz.jpg",
     // Genuine Slovak passport specimen, but this particular crop doesn't
     // include the bottom MRZ strip at all -- correctly must not validate.
-    "Slovakia_Passport_Specimen.webp",
+    "Slovakia_Passport_Specimen_no_mrz.webp",
 ];
 
 fn main() {

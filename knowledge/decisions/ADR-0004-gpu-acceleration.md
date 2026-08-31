@@ -275,8 +275,9 @@ wiring in `NativeLlm::load` for what actually shipped.
 cuda`: field match rate **16/42 (38.1%) on both**, and the actual (not just
 matched/mismatched) extracted text is character-for-character identical
 across every field on every fixture (e.g. the malformed date renderings
-`"13 ABR/AVR 90"` and `"1JUL/JUI/JUL31"` on the `2022_cetis_terra_condifea...`
-fixture appear verbatim on both backends). Greedy decoding (`build_sampler`'s
+`"13 ABR/AVR 90"` and `"1JUL/JUI/JUL31"` on the
+`Cetis_Sample_Passport_Specimen_2022_inner_page_mrz` fixture appear verbatim
+on both backends). Greedy decoding (`build_sampler`'s
 `LlamaSampler::greedy()`) is stable across the CPU/CUDA split on this
 `llama-cpp-2` 0.1.154 build. This does not generalize to future engine
 bumps — see `knowledge/technical_debt.md`'s existing "Nothing in CI exercises

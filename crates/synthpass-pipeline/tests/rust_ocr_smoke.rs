@@ -84,7 +84,7 @@ async fn rust_ocr_engine_reaches_a_terminal_pipeline_result() {
 
     // Copy the sample into a scratch dir so this test's `.md`/`.json` output
     // never lands in the tracked `samples/` directory.
-    let src = find_sample("Canada_Passport_Specimen_2.jpg");
+    let src = find_sample("Canada_Passport_Specimen_2023_mrz.jpg");
     let dst = std::env::temp_dir().join(format!(
         "synthpass-pipeline-rust-ocr-smoke-{}.jpg",
         std::process::id()
@@ -121,7 +121,7 @@ async fn rust_ocr_engine_reaches_a_terminal_pipeline_result() {
             from https://ocrs-models.s3-accelerate.amazonaws.com/"]
 async fn rust_ocr_engine_handles_common_phone_image_formats() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let src = find_sample("Canada_Passport_Specimen_2.jpg");
+    let src = find_sample("Canada_Passport_Specimen_2023_mrz.jpg");
     let img = image::open(&src).expect("sample image decodes");
 
     for (format, ext) in [
