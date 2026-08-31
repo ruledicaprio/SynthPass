@@ -47,7 +47,7 @@ jobs:
           cp -r web/* _site/
           cp crates/mrz-wasm/pkg/mrz_wasm.js crates/mrz-wasm/pkg/mrz_wasm_bg.wasm _site/pkg/
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
 
