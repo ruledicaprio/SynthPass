@@ -4,9 +4,9 @@ ICAO Doc 9303 (*Machine Readable Travel Documents*, Eighth Edition, 2021),
 Parts 1–13, converted to clean Markdown. This is the source of truth behind
 `crates/mrz` and the M7 `synthpass-die` provider work, and supersedes the
 informal, partial ICAO references that used to be scattered across
-`crates/mrz/README.md` and the constitution's §10 "MRZ Standards" — those
-stay as the project's *policy* on MRZ handling; this tree is the *spec* they
-implement.
+`crates/mrz/README.md` and the MRZ-handling policy in
+`knowledge/ARCHITECTURE.md` §13 — those stay as the project's *policy* on MRZ
+handling; this tree is the *spec* they implement.
 
 ## Contents
 

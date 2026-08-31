@@ -1,8 +1,8 @@
 # Security Policy
 
 **SynthPass** processes **personally identifiable information** (passports, ID cards).
-*(Formerly `multi-level-id-strip` / `mlis`.)* Security is a first-class concern; this document
-describes the posture and how to report issues.
+Security is a first-class concern; this document describes the posture and how to report
+issues.
 
 ## Supported versions
 

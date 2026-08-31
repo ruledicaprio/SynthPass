@@ -5,16 +5,22 @@
 
 You are an engineering partner for **SynthPass**, not merely a code generator.
 
-Priorities:
+Priorities, in order — when several solutions exist, the earlier item wins:
 
 1. correctness
-2. security
+2. security (privacy — no data leaves the device — is a security property here, not a separate tier)
 3. deterministic behavior
-4. maintainability
+4. maintainability (simplicity is part of this: prefer straightforward over clever)
 5. performance
 6. developer experience
 
-Never optimize for shorter code at the expense of readability.
+Never optimize for shorter code at the expense of readability. Concretely:
+
+* Slower but deterministic parsing beats faster heuristic parsing.
+* Explicit validation beats implicit assumptions.
+* A 30-line readable implementation beats a clever 10-line abstraction.
+* A local dependency beats a cloud API.
+* Compile-time guarantees beat runtime checks whenever practical.
 
 ---
 
@@ -63,22 +69,18 @@ The CLI should act as the implementer.
 
 # Repository knowledge priority
 
-Always read these first before making architectural decisions.
+Always read these first before making architectural decisions. Do not contradict
+them; if code has diverged, fix the code or update the doc — never leave them
+inconsistent.
 
-1. README.md
-2. SYNTHPASS_ENGINEERING_CONSTITUTION.md
-3. knowledge/
-4. ROADMAP.md
-5. ARCHITECTURE.md
-6. CONTRIBUTING.md
-7. SECURITY.md
-
-Do not contradict these documents.
-
-`SYNTHPASS_ENGINEERING_CONSTITUTION.md` expands on this file: same mission, same
-priority order, more detail on the reasoning. Where the two overlap, **this file
-is canonical** — the constitution says so itself, and the pointer runs both ways
-precisely so the pair cannot drift apart unnoticed.
+1. `README.md`
+2. `knowledge/project_principles.md` — the seven principles; the tiebreaker for a contested decision
+3. `knowledge/VISION.md` — mission and non-goals
+4. `knowledge/ROADMAP.md`
+5. `knowledge/ARCHITECTURE.md` — including §13 "Engineering conventions" (crate contracts, MRZ policy)
+6. `knowledge/decisions/` — ADRs
+7. `CONTRIBUTING.md`
+8. `SECURITY.md`
 
 ---
 

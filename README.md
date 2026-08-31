@@ -1,16 +1,13 @@
 # SynthPass
 
-<!-- ML / inference -->
-![llama.cpp](https://img.shields.io/badge/llama.cpp-in--process-555555?style=flat)
-![Qwen 2.5](https://img.shields.io/badge/Qwen%202.5-1.5B%20q4__k__m-6236FF?style=flat)
-![ocrs](https://img.shields.io/badge/ocrs%2Frten-OCR%20in--process-FF6600?style=flat)
-<!-- Standards / demo -->
-![ICAO 9303](https://img.shields.io/badge/ICAO%209303-MRZ%20checksums-0B7261?style=flat)
-![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=flat&logo=webassembly&logoColor=white)
+[![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
+[![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
 [![Corpus coverage](https://img.shields.io/badge/world%20coverage-56%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
-<!-- Posture -->
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
+
+Stack: `llama.cpp` + Qwen 2.5 1.5B (q4\_k\_m) for Tier-2 repair · `ocrs`/`rten` OCR, in-process ·
+ICAO 9303 MRZ check digits · WebAssembly browser demo. All local, no network.
 
 **Identity-document intelligence that runs entirely on your own machine.** SynthPass *generates*
 perfectly-labelled synthetic identity documents (TD1/TD2/TD3 ID cards and passports, plus
@@ -19,7 +16,6 @@ and *extracts* structured JSON from real documents — **zero cloud calls**, eve
 carries a mandatory synthetic watermark and a generic, non-country template, enforced in code,
 not a tool for imitating genuine credentials — see
 [knowledge/BRANDING.md](knowledge/BRANDING.md) §4 / [knowledge/VISION.md](knowledge/VISION.md).
-*(Formerly `multi-level-id-strip` / `mlis` — see [CHANGELOG.md](CHANGELOG.md).)*
 
 <img src="knowledge/img/screenshot-web-mrz-validator.png" alt="The live MRZ Validator demo confirming every ICAO 9303 check digit is valid for a pasted MRZ" width="420">
 
@@ -42,10 +38,14 @@ TIFF, BMP, GIF. PDF and HEIC/HEIF are deliberately unsupported
 git clone https://github.com/ruledicaprio/SynthPass.git
 cd SynthPass
 
-# 1. Download the Tier-2 model (~1 GB, not tracked in git).
-curl -L -o qwen2.5-1.5b-instruct-q4_k_m.gguf `
+# 1. Download the Tier-2 model (~1 GB, not tracked in git). models/ is the
+#    convention (gitignored); the repo root also works if you prefer.
+mkdir models
+curl -L -o models/qwen2.5-1.5b-instruct-q4_k_m.gguf `
   https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
-# The two OCR .rten weights (~12 MB) download and SHA-256-verify on first run.
+$env:SYNTHPASS_MODEL_PATH = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+$env:SYNTHPASS_OCR_MODEL_DIR = "models"
+# The two OCR .rten weights (~12 MB) download and SHA-256-verify into that dir on first run.
 
 # 2. Preflight: checks OCR, inferer, license and config before a real run.
 cargo run -p synthpass-cli -- doctor

@@ -1,4 +1,4 @@
-//! synthpass-serve — web front-end for the multi-level-id-strip pipeline.
+//! synthpass-serve — web front-end for the SynthPass pipeline.
 //!
 //! GET  /             → embedded upload page
 //! GET  /health       → liveness + OCR/inference backend + license status (no auth)

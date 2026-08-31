@@ -786,9 +786,9 @@ above has somewhere to point once it's time to scope the work, rather than stayi
   it isn't rediscovered from scratch later, and so it doesn't get assumed away as "just another
   barcode format" the way AAMVA licences are, when it is not.
 
-Neither item changes `SYNTHPASS_ENGINEERING_CONSTITUTION.md` §3's Project Goals or the M1–M7
-milestones above; §4's "non-ICAO documents" non-goal is scoped to the currently committed
-milestones for exactly this reason — see §25 there.
+Neither item changes `knowledge/VISION.md`'s mission or the M1–M7 milestones above;
+VISION's "non-ICAO documents" non-goal is scoped to the currently committed milestones for
+exactly this reason — this "Beyond ICAO 9303" section is where that longer horizon lives.
 
 These reassure long-term contributors and partners that SynthPass is a platform with sustained
 momentum, not a fixed-scope tool — while keeping the committed roadmap honest about what M1–M6
