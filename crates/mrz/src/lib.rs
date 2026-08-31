@@ -443,12 +443,34 @@ mod tests {
         assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
     }
 
+    // Mrz_Field_Layout.md §2.3: an unused TD3 personal number's check digit
+    // may be issued as either '0' or '<' — both are zero-valued under the
+    // ICAO 7-3-1 arithmetic (`char_value('<') == char_value('0') == 0`), so
+    // the composite digit is identical either way. These two tests pin both
+    // issuer-option forms independently through the real parser, not just
+    // the `checksum::verify` primitive.
+
     #[test]
-    fn td3_empty_personal_number_with_filler_check() {
-        // Personal number all fillers and check digit '<' is valid (value 0).
-        let l2 = "L898902C36UTO7408122F1204159<<<<<<<<<<<<<<06";
+    fn td3_empty_personal_number_with_filler_check_digit_zero() {
+        // Personal number all fillers, check digit '0' (value 0). Composite
+        // recomputed independently of the crate (not copied from TD3_L2,
+        // whose personal number differs): 8, not the '6' this fixture
+        // originally carried unasserted — see the comment above.
+        let l2 = "L898902C36UTO7408122F1204159<<<<<<<<<<<<<<08";
         let d = parse_td3(TD3_L1, l2).unwrap();
         assert!(d.checks.personal_number);
+        assert!(d.checks.composite);
+        assert_eq!(d.personal_number, None);
+    }
+
+    #[test]
+    fn td3_empty_personal_number_with_filler_check_digit_filler() {
+        // Same fixture, check digit '<' instead of '0' — same composite
+        // digit, since both digit characters have ICAO value 0.
+        let l2 = "L898902C36UTO7408122F1204159<<<<<<<<<<<<<<<8";
+        let d = parse_td3(TD3_L1, l2).unwrap();
+        assert!(d.checks.personal_number);
+        assert!(d.checks.composite);
         assert_eq!(d.personal_number, None);
     }
 
