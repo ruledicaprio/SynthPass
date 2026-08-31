@@ -204,3 +204,21 @@ Avoid speculative abstractions.
 * **Claude Code Web** = planner, architect, GitHub reviewer, PR reviewer, issue triager, CI investigator.
 * **Claude Code CLI** = implementer, debugger, refactorer, test runner, documentation updater.
 
+### Model & effort defaults
+
+Role split (Web = architect/reviewer, CLI = implementer) stays as above. Model and effort
+level are a separate, orthogonal choice layered on top of that split:
+
+* **Claude Code CLI** — default **Sonnet 5, high effort**. This is the execution surface:
+  implementing, debugging, running cargo/tests, committing locally. Push/PR mechanics follow
+  the GitHub workflow section above; this default doesn't change them.
+* **Claude Code Web** — default **Opus 5, medium effort** as the baseline for planning,
+  architecture review, and PR/issue triage. Scale with task complexity rather than treating
+  the default as fixed:
+  - Lighter (Opus 5 low, or Sonnet 5) for routine PR review, issue triage, CI investigation.
+  - Heavier (Opus 5 high, or Fable) for hard architecture calls, cross-cutting redesigns, or
+    ambiguous/high-stakes tradeoffs where a wrong plan is expensive to unwind.
+
+Neither default is a hard rule — pick up or down from it when a specific task's complexity
+warrants it, and say so when you do.
+
