@@ -719,11 +719,22 @@ fn shift_or_unshift_line1(repaired: String, target_width: usize) -> String {
     if shifted != repaired {
         return shifted;
     }
+    unshift_if_country_resolves(repaired, target_width)
+}
+
+/// [`unshift_line1_prefix`], accepted only when the *unshifted* reading's
+/// issuing-country slot (positions 2..5) resolves to a real [`country_name`].
+/// Factored out of [`shift_or_unshift_line1`] so [`repair_td2_line1_shifted`]
+/// can reuse the exact same gate without also pulling in
+/// [`shift_line1_right_at_country`]'s independent insertion-repair, which is
+/// out of scope for TD2 (see that function's call site).
+fn unshift_if_country_resolves(repaired: String, target_width: usize) -> String {
     let unshifted = unshift_line1_prefix(repaired.clone(), target_width);
     if unshifted != repaired && target_width >= 5 && country_name(&unshifted[2..5]).is_some() {
-        return unshifted;
+        unshifted
+    } else {
+        repaired
     }
-    repaired
 }
 
 fn repair_td3_line1(l: &str) -> String {
@@ -777,13 +788,54 @@ fn repair_td3_line2(l: &str) -> String {
 /// anywhere in this crate). TD1 resolves that ambiguity by trying the
 /// unshifted reading as a *second* candidate and letting its own line-1
 /// check digit (the document number's) decide — but TD2 has no check
-/// digit on line 1 either, so there is no signal available to arbitrate
-/// an unshifted TD2 candidate against the unrepaired one. Left as a
-/// harder, deferred case rather than silently applied — see
-/// `knowledge/ROADMAP.md`'s M6 note.
+/// digit on line 1 either, so a checksum can't arbitrate an unshifted TD2
+/// candidate against the unrepaired one the way TD1's can. See
+/// [`repair_td2_line1_shifted`] for the fix: an issuing-country-based gate,
+/// not a checksum, arbitrates instead.
 fn repair_td2_line1(l: &str) -> String {
     let l = fix_doc_code(&repair_positions(l, &[(2..5, letterize)]));
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
+}
+
+/// Second candidate alongside [`repair_td2_line1`]: undoes a dropped
+/// position-1 filler, TD2's version of the drop
+/// [`repair_td3_line1_shifted`]/[`repair_mrv_a_line1_shifted`] already fix
+/// for their formats — see [`repair_td2_line1`]'s doc comment for why TD2
+/// couldn't get this for free the way those formats did, and why this one
+/// works anyway.
+///
+/// **The document-code dictionary this crate's own MRZ_SEQUENCE_COMPLETENESS
+/// plan proposed for this doesn't exist.** ICAO 9303 Part 5 §Note k / Part 6
+/// §Note k are explicit: the document code's second character is "at the
+/// discretion of the issuing State or organization" — only `V`, and `C`
+/// immediately after `A`, are excluded. That's not a closed enumerable set;
+/// building a "known-legitimate TD2 code" table would mean guessing at
+/// real-world issuer choices with no normative ground truth, exactly the
+/// kind of unproven heuristic `crate::repair::solve_substitution`'s "prove
+/// it or don't touch it" discipline (and `synthpass_core::fusion.rs`'s
+/// reverted 69.5%→61.5% heuristic) argue against.
+///
+/// The fix is [`unshift_if_country_resolves`] instead — the exact
+/// country-name gate [`shift_or_unshift_line1`] already ships and has
+/// measured for TD3/MRV-A/MRV-B (`crates/mrz/tests/line1_prefix_shift.rs`).
+/// TD2's line-1 layout puts `issuing_country` at the same positions 2..5 as
+/// TD3's, and [`crate::country_name`] — unlike a document-code table — *is*
+/// a genuine closed ICAO/ISO registry already in production use. Only the
+/// unshift half is reused (not [`shift_line1_right_at_country`]'s insertion
+/// repair, the mirror-image corruption): this chunk's scope is the dropped
+/// filler only, per `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`'s Chunk 6.
+///
+/// Correctly leaves a genuine two-letter document code alone: unshifting
+/// `"IPBRA..."` (document code `IP`, country `BRA`) produces
+/// `"I<PBR..."`, whose positions 2..5 read `PBR` — not a real country — so
+/// the gate fails and the original is returned untouched (pinned by
+/// `crates/mrz/tests/line1_prefix_shift.rs`'s
+/// `td2_with_a_genuine_two_letter_document_code_is_unaffected`). A genuinely
+/// dropped filler (`"IBRA..."` from `"I<BRA..."`) unshifts to `"I<BRA..."`,
+/// whose positions 2..5 read `BRA` — a real country — so the gate passes.
+fn repair_td2_line1_shifted(l: &str) -> String {
+    let target_width = l.len();
+    unshift_if_country_resolves(repair_td2_line1(l), target_width)
 }
 
 fn repair_td2_line2(l: &str) -> String {
@@ -1231,7 +1283,11 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         {
             let head = &merged[0..36];
             let tail = &merged[36..];
-            for l1 in [repair_td2_line1(head), head.to_string()] {
+            for l1 in [
+                repair_td2_line1_shifted(head),
+                repair_td2_line1(head),
+                head.to_string(),
+            ] {
                 for l2 in variants(tail, 36, repair_td2_line2) {
                     if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
                         if let Some(valid) = consider(data) {
@@ -1243,7 +1299,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
     for i in 0..lines.len().saturating_sub(1) {
-        for l1 in variants(lines[i], 36, repair_td2_line1) {
+        let l1_candidates = variants(lines[i], 36, repair_td2_line1_shifted)
+            .into_iter()
+            .chain(variants(lines[i], 36, repair_td2_line1));
+        for l1 in l1_candidates {
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
             }
