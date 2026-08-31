@@ -222,3 +222,22 @@ level are a separate, orthogonal choice layered on top of that split:
 Neither default is a hard rule — pick up or down from it when a specific task's complexity
 warrants it, and say so when you do.
 
+### Git artifact ownership
+
+The Web/CLI boundary is drawn by **which artifact a surface owns**, not by which git
+commands it is capable of running:
+
+| Surface | Owns |
+| :--- | :--- |
+| **CLI** | local branch, commits, push of *its own feature branch*, opening the PR |
+| **Web** | PR review, CI failure triage, issue/roadmap/milestone, **merge decision** |
+
+Branch, commit, push, and `gh pr create` are one atomic unit — the session holding the diff
+does all four. Splitting them means pushing a branch you cannot see the working tree of.
+Neither surface pushes to `main` directly; feature branches only.
+
+This split is **discipline, not enforcement** — a Web session has the same Bash/gh tooling
+and can do CLI work. It is kept because a session that just wrote the code is the worst
+reviewer of it: handing the diff to a fresh session forces the reviewer to read what was
+actually written rather than what it remembers intending.
+
