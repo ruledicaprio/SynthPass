@@ -9,8 +9,8 @@ use wasm_bindgen::prelude::*;
 /// Scan free-form OCR text for an ICAO 9303 MRZ (TD3 passport or TD1 ID card),
 /// parse it and verify every check digit.
 ///
-/// Returns a JSON string: `{"ok": true, ...MrzData}` on success or
-/// `{"ok": false, "error": "..."}` when no valid MRZ is found.
+/// Returns a JSON string: `{"ok": true, "valid": bool, "sequence_completeness": {...},
+/// ...MrzData}` on success or `{"ok": false, "error": "..."}` when no valid MRZ is found.
 #[wasm_bindgen]
 pub fn parse_mrz_text(text: &str) -> String {
     match mrz::find_and_parse(text) {
@@ -18,6 +18,8 @@ pub fn parse_mrz_text(text: &str) -> String {
             let mut v = serde_json::to_value(&data).expect("MrzData serializes");
             v["ok"] = serde_json::Value::Bool(true);
             v["valid"] = serde_json::Value::Bool(data.valid());
+            v["sequence_completeness"] = serde_json::to_value(data.sequence_completeness())
+                .expect("SequenceCompleteness serializes");
             v.to_string()
         }
         Err(e) => serde_json::json!({ "ok": false, "error": e.to_string() }).to_string(),

@@ -144,6 +144,87 @@ impl Checks {
     }
 }
 
+/// A single, coordinated completeness signal spanning both outcomes of a
+/// [`find_and_parse`](crate::find_and_parse) attempt — the "several
+/// separate vocabularies for 'is this record complete'" gap
+/// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 5 exists to close.
+///
+/// Deliberately **not** a struct that duplicates [`MrzData`]'s own fields
+/// (a second, independently-stale source of truth for the same facts):
+/// [`Complete`](Self::Complete) is built from the values already on
+/// `MrzData` via [`MrzData::sequence_completeness`], and
+/// [`Partial`](Self::Partial) mirrors [`MrzError::IncompleteSequence`]'s
+/// own fields exactly. This type's only job is to be the *one* thing a
+/// caller can hold instead of separately branching on
+/// `Result<MrzData, MrzError>`'s two differently-shaped arms —
+/// [`from_parse_result`](Self::from_parse_result) is the constructor meant
+/// for that.
+///
+/// `lines_found`/`lines_expected` never actually differ inside `Complete`:
+/// an `MrzData` cannot exist at all without every line the format's
+/// fixed-offset `parse_*` needs already having been found, so a *complete*
+/// read has nothing left to report on that axis — which is exactly why
+/// those two fields live only on `Partial`, not duplicated onto `Complete`
+/// as a pair of always-equal constants.
+///
+/// Deliberately does **not** fold in
+/// `synthpass_core::fusion::check_line1_integrity`'s verdict — that
+/// heuristic layer (`document_type`/`issuing_country`/`surname`/
+/// `given_names` carry no check digit at all) lives one layer up in
+/// `synthpass-core` on purpose; this type unifies only the vocabularies
+/// that already live inside `crates/mrz` itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
+pub enum SequenceCompleteness {
+    /// Every line the format needs was found and parsed into an
+    /// [`MrzData`]. Whether every *field* is proven is a separate
+    /// question — see `checks`/`date_of_birth`.
+    Complete {
+        /// Per-field check-digit proof — see [`MrzData::checks`].
+        checks: Checks,
+        /// Date-of-birth field completeness — see
+        /// [`MrzData::date_of_birth_completeness`]. No analogous signal
+        /// exists for date-of-expiry today; that asymmetry is inherited
+        /// from [`DateCompleteness`] itself, not introduced here.
+        date_of_birth: DateCompleteness,
+    },
+    /// Fewer than `lines_expected` lines were found — mirrors
+    /// [`MrzError::IncompleteSequence`] exactly.
+    Partial {
+        /// The format whose line 1 was recognized.
+        format: Format,
+        /// How many of `lines_expected` lines were actually located.
+        lines_found: u8,
+        /// How many lines `format` requires.
+        lines_expected: u8,
+    },
+}
+
+impl SequenceCompleteness {
+    /// Builds the coordinated signal from either arm of a
+    /// [`find_and_parse`](crate::find_and_parse) result. `None` when the
+    /// error carries no completeness signal of its own — a bare
+    /// [`MrzError::NotFound`] (nothing MRZ-shaped at all) or one of the
+    /// other structural/checksum error variants, which are about a
+    /// *specific* zone a caller already had in hand, not a free-text scan.
+    pub fn from_parse_result(result: &Result<MrzData, MrzError>) -> Option<Self> {
+        match result {
+            Ok(data) => Some(data.sequence_completeness()),
+            Err(MrzError::IncompleteSequence {
+                format,
+                lines_found,
+                lines_expected,
+            }) => Some(Self::Partial {
+                format: *format,
+                lines_found: *lines_found,
+                lines_expected: *lines_expected,
+            }),
+            Err(_) => None,
+        }
+    }
+}
+
 /// `#[non_exhaustive]`: ICAO 9303 defines formats this crate does not parse yet
 /// (MRP-style variants, future parts), so `match` on this must carry a `_` arm
 /// and gaining a variant is not a breaking change. Adding MRV-A/MRV-B in 0.3.0
@@ -273,6 +354,20 @@ impl MrzData {
     /// Human-readable name of the nationality, if the code is recognized.
     pub fn nationality_name(&self) -> Option<&'static str> {
         country_name(&self.nationality)
+    }
+
+    /// This record's [`SequenceCompleteness`] — always
+    /// [`SequenceCompleteness::Complete`], computed from `self.checks`/
+    /// `self.date_of_birth_completeness` rather than stored separately.
+    /// [`SequenceCompleteness::Partial`] only ever comes from
+    /// [`SequenceCompleteness::from_parse_result`] on the `Err` side of a
+    /// [`find_and_parse`](crate::find_and_parse) call, since a `Partial`
+    /// read has no `MrzData` to hang this method off of in the first place.
+    pub fn sequence_completeness(&self) -> SequenceCompleteness {
+        SequenceCompleteness::Complete {
+            checks: self.checks.clone(),
+            date_of_birth: self.date_of_birth_completeness,
+        }
     }
 }
 
