@@ -363,6 +363,23 @@ pub enum MrzError {
         /// Byte offset of the check digit within the field's line.
         position: usize,
     },
+    /// [`find_and_parse`]/[`find_and_parse_with`] only: a line matching one
+    /// format's document-code prefix and charset was found, but no companion
+    /// line ever combined with it into a full parse — distinct from
+    /// [`NotFound`](Self::NotFound), which means nothing MRZ-shaped was seen
+    /// at all. `lines_found` is always `1` today: only line 1's document-code
+    /// prefix is a reliably shape-checkable signal on its own (a format's
+    /// other lines carry no distinguishing prefix to detect in isolation).
+    /// See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 4.
+    IncompleteSequence {
+        /// The format whose line 1 was recognized.
+        format: Format,
+        /// How many of `lines_expected` lines were actually located.
+        lines_found: u8,
+        /// How many lines `format` requires (2 for TD2/TD3/MRV-A/MRV-B, 3
+        /// for TD1).
+        lines_expected: u8,
+    },
     /// No plausible MRZ found in the supplied text.
     NotFound,
 }
@@ -377,6 +394,16 @@ impl core::fmt::Display for MrzError {
             Self::BadDocumentCode(c) => write!(f, "unrecognized document code: {c:?}"),
             Self::BadChecksum { field, position } => {
                 write!(f, "check digit failed for {field} at position {position}")
+            }
+            Self::IncompleteSequence {
+                format,
+                lines_found,
+                lines_expected,
+            } => {
+                write!(
+                    f,
+                    "incomplete {format:?} sequence: found {lines_found} of {lines_expected} lines"
+                )
             }
             Self::NotFound => write!(f, "no MRZ found in text"),
         }
