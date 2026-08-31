@@ -372,7 +372,7 @@ jobs:
           " | tee /tmp/doctor-output.txt
           grep -q 'OCR (rust) detection+recognition models embedded in binary' /tmp/doctor-output.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: synthpass-musl-x86_64
           path: |
