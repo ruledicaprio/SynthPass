@@ -53,9 +53,10 @@ convention (`<id>.<category>.md`, `id` = PR number once known). **Do not batch
 multiple chunks into one PR.** Each chunk below is meant to be self-contained: file
 paths, a design sketch, measurement command, and acceptance criteria. Line numbers
 cited are a starting point, not gospel — **re-verify with Grep before editing**,
-since they drift as the crate changes. Chunks 6 and 7 are marked **[GATED]** —
-do not merge (chunk 6) or even start implementation (chunk 7) without the
-checkpoint described in that chunk's own section.
+since they drift as the crate changes. Chunk 7 is marked **[GATED]** — do not
+start implementation without the checkpoint described in its own section. Chunk 6
+was also gated; see its section for why the originally-proposed design was
+dropped at design time and what shipped instead, cleared by measurement.
 
 Suggested order and parallelism:
 
@@ -70,8 +71,9 @@ Sequential (5 needs 4's real shape, not a guess):
        ↓
   5. SequenceCompleteness unified type
 
-Last, both independent of each other, both [GATED]:
-  6. TD2 line-1 repair (needs a go/no-go after real-specimen measurement)
+Last, independent of each other:
+  6. TD2 line-1 repair — done (see its section: design pivoted away from the
+     originally-proposed document-code dictionary, measured, cleared)
   7. MrzReader partial-read surfacing (needs a product sign-off BEFORE starting)
 ```
 
@@ -337,70 +339,108 @@ guessed in isolation.
 
 ---
 
-## Chunk 6 — [GATED] TD2 line-1 repair via document-code dictionary
+## Chunk 6 — [DONE, revised] TD2 line-1 repair via issuing-country arbitration
 
-**Status: gated.** Do not merge without the real-specimen checkpoint described
-below, even if the code compiles and unit tests pass.
+**Status: implemented, measured, not the originally-proposed design.** The
+document-code-dictionary arbitration this section originally specified turned out
+to rest on a false premise, caught at design time (before writing the dictionary)
+by checking ICAO 9303 directly rather than assuming it existed. What actually
+shipped, why, and the measurement that cleared the gate are below; the original
+proposal is kept struck through afterward for the record.
 
 **Goal.** Give TD2 the line-1 dropped-filler repair TD3/TD1/MRV-A/MRV-B already
 have.
 
 **Why deferred, and why harder than its siblings.** `repair_td2_line1`
-(`crates/mrz/src/parser.rs`, ~line 769-787) deliberately does not call
-`unshift_line1_prefix`, unlike TD3/MRV-A/MRV-B (which have an unambiguous
-single-letter-plus-filler document-code shape) and unlike TD1 (which arbitrates
-via its line-1 document-number check digit). TD2 shares TD1's genuine two-letter
-document-code family (e.g. `"ID"`, `"AC"` — see `crates/mrz/tests/td1_line_gap.rs`'s
-own `"ID"` fixture) so "position 1 isn't `<`" is not unambiguous evidence of a
-dropped filler — but unlike TD1, **TD2 has no check digit anywhere on line 1** to
-arbitrate between the shifted and unshifted reading.
+(`crates/mrz/src/parser.rs`) deliberately did not call `unshift_line1_prefix`,
+unlike TD3/MRV-A/MRV-B (unambiguous single-letter-plus-filler document code) and
+unlike TD1 (arbitrates via its line-1 document-number check digit). TD2 shares
+TD1's genuine two-letter document-code family (e.g. `"ID"`, `"IP"`) so "position 1
+isn't `<`" is not unambiguous evidence of a dropped filler — but unlike TD1, TD2
+has no check digit anywhere on line 1 to arbitrate between the shifted and
+unshifted reading.
+
+**The dictionary premise didn't survive contact with the spec.** Before writing a
+"known-legitimate TD2 document code" table, ICAO 9303 Part 5 §Note k / Part 6
+§Note k were checked directly: *"The second character shall be at the discretion
+of the issuing State or organization except that ... V shall not be used, and C
+shall not be used after A."* That's not a closed enumerable set — it's
+issuer-discretionary with two exclusions. There is no normative registry to build
+a dictionary from, and a table assembled from guessed/observed real-world codes
+would be exactly the unproven heuristic this crate's "prove it or don't touch it"
+discipline (`repair.rs::solve_substitution`) and `synthpass-core/src/fusion.rs`'s
+reverted 69.5%→61.5% heuristic both argue against. This chunk's implementation-time
+task ("confirm whether ... a closed registry ... already enumerates valid TD2
+document codes") resolved to **no**, and the dictionary approach was dropped
+before any table was written — not measured and rejected, ruled out at design
+time.
+
+**What shipped instead: reuse the issuing-country gate, not a new dictionary.**
+TD3/MRV-A/MRV-B's own drop-repair (`shift_or_unshift_line1`) already arbitrates
+its *insertion*-repair half without a document-code table, using
+[`country_name`] on the unshifted reading's issuing-country slot (positions 2..5)
+as a content-based gate. TD2's line-1 layout puts `issuing_country` at those same
+offsets, and `country_name` — unlike a document-code table — *is* a genuine
+closed ICAO/ISO registry already in production use. `repair_td2_line1_shifted`
+reuses that exact gate (factored out as `unshift_if_country_resolves`, shared
+with `shift_or_unshift_line1`): unshift line 1, accept the unshifted reading only
+if its issuing-country slot resolves to a real country. A genuine two-letter code
+(`"IP"` + `"BRA"`) unshifts to a garbage country slot (`"PBR"`) and is correctly
+left untouched; a genuine drop (`"I<"` + `"BRA"` corrupted to `"IBRA..."`) unshifts
+back to a resolving country slot (`"BRA"`) and is correctly recovered. Scope is
+the dropped-filler direction only — `shift_line1_right_at_country`'s
+insertion-repair mirror image is not wired in for TD2, matching this chunk's
+original goal statement.
+
+**Measurement (the gate this section originally specified).**
+1. *Real-specimen re-scan: not applicable.* `samples/` has no TD2 ("official
+   travel document") real-specimen directory — only `passports/`, `id_cards/`,
+   `driving_licenses/` exist, matching what this section already anticipated
+   ("once TD2 real specimens exist"). Re-run this step if/when a TD2 real corpus
+   is added.
+2. *Same-binary A/B, synthetic TD2 corpus* (`--document-type td2 --profile clean
+   --count 30 --seed 42`, matching `unshift_line1_prefix`'s own measurement
+   convention): **hit rate unchanged, 80.0% → 80.0%** (24/30 both builds — no
+   regression, the gate's hard requirement). Among the 24 Tier-1 hits, records
+   still carrying a line-1 integrity finding dropped **100% (24/24) → 37.5%
+   (9/24)**. `document_type` CER **100.00% → 26.67%**; `issuing_country` CER
+   **68.89% → 20.00%** — the same shape and magnitude of improvement already
+   measured for TD3/MRV-A/MRV-B's sibling fix.
+3. New regression tests: `crates/mrz/tests/td2_line1_repair.rs` pins both the
+   recovery case (`a_dropped_line_1_filler_position_is_recovered`) and a no-op
+   guard (`an_undamaged_td2_zone_is_not_spuriously_unshifted`); the pre-existing
+   genuine-two-letter-code guard
+   (`crates/mrz/tests/line1_prefix_shift.rs`'s
+   `td2_with_a_genuine_two_letter_document_code_is_unaffected`) was re-verified,
+   not just re-run — traced through the fix's own gate logic in its doc comment.
+
+**Go/no-go outcome:** zero hit-rate regression, no real-specimen corpus exists to
+false-positive against. Cleared to merge.
+
+**Size.** Was expected to be the riskiest chunk in this doc; turned out small once
+the dictionary premise was dropped for a reused, already-measured gate.
+**Dependencies.** None — implemented directly on `main`, independent of chunks 4/5.
+
+<details>
+<summary>Original proposal (superseded — kept for the record, not followed)</summary>
 
 **Proposed arbitration strategy.** A closed-dictionary document-code match, since
 check-digit arbitration is unavailable: if the *unshifted* reading's putative
 document-code slot matches a known-legitimate TD2 code from a closed registry
 **and** the *shifted* (as-read) slot does not, prefer unshift; if both match, or
-neither does, leave the reading as-is — do not guess. This mirrors the "prove it
-or don't touch it" discipline `repair.rs::solve_substitution` already applies
-(never guesses; returns `Ambiguous`/`Unresolvable` instead of picking).
-Implementation-time task: confirm whether ICAO 9303 Part 6 or this crate's
-existing registry (`crates/mrz/src/countries.rs`, or the Part 3 §5 registry cited
-in `ROADMAP.md`) already enumerates valid TD2 document codes, or whether a new
-small table needs building.
+neither does, leave the reading as-is — do not guess. Implementation-time task:
+confirm whether ICAO 9303 Part 6 or this crate's existing registry already
+enumerates valid TD2 document codes, or whether a new small table needs building.
+(Resolution: no such registry exists — see above.)
 
-**Why this is genuinely risky — read before implementing.** The arbitration signal
-here (dictionary match) is strictly weaker than a check digit: a corrupted read
-can *happen* to land on another legitimate code in a way arithmetic checksums
-cannot be fooled by. This is exactly the failure mode
-`synthpass-core/src/fusion.rs` (~line 22-39) hit and reverted: a "prefer a
-checksum-valid candidate whose line 1 also passes integrity" heuristic, tried
-without checksum backing, measured hit rate **69.5% → 61.5% (worse)** and was
-recorded specifically "so it isn't retried blind." Treat this chunk with the same
-suspicion until measurement says otherwise.
+**Why this was flagged as genuinely risky.** The arbitration signal (dictionary
+match) is strictly weaker than a check digit: a corrupted read can *happen* to
+land on another legitimate code in a way arithmetic checksums cannot be fooled
+by — the same failure mode `synthpass-core/src/fusion.rs`'s reverted heuristic
+hit. This suspicion is why the premise got checked against the spec before any
+table was written, rather than after a bad measurement.
 
-**Files.** `crates/mrz/src/parser.rs` (`repair_td2_line1`); possibly
-`crates/mrz/src/countries.rs` or a new small registry module; new
-`crates/mrz/tests/td2_line1_repair.rs`.
-
-**Measurement — the actual gate.**
-1. Real-specimen re-scan (`integrity_survey.rs --dir <td2-specimens> --mrz-only`
-   or equivalent, once TD2 real specimens exist) measuring how many
-   `UnrecognizedIssuingCountry`/`NonAlphabeticName`-flagged real TD2 documents
-   this fix resolves, with **zero new false positives** as the bar.
-2. Same-binary A/B on the synthetic TD2 corpus (`--document-type td2`, per the
-   `m6-format-separation` fragment's flags) confirming hit rate never regresses —
-   same pattern PR #138's fragment used.
-3. New regression tests pinning both a genuine two-letter code (must survive
-   untouched) and a synthetically-shifted case (must recover), mirroring
-   `line1_right_shift.rs`'s structure.
-
-**Go/no-go checkpoint:** after step 1-2 above, before merge — if real-specimen
-false positives appear, or the A/B shows any regression, **do not merge**; report
-the measurement and stop, the same way the `fusion.rs` heuristic was recorded and
-abandoned rather than force-fit.
-
-**Size.** Large — the riskiest chunk in this doc. **Dependencies.** Benefits from
-chunk 4's `IncompleteSequence` typing (to distinguish "TD2 line 1 present but
-ambiguous" from "TD2 line 1 missing") but isn't blocked by it.
+</details>
 
 ---
 
