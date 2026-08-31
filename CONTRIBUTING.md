@@ -150,7 +150,10 @@ reading the real document number off a specimen requires a human, and can't be a
 bulk ingestion was. To add one: pick an already-ingested specimen, run `cargo run -p synthpass-ocr
 --release --example mrz_corpus -- --dump` to confirm a Tier-1 HIT and read the real doc number off
 the MRZ, add it to `CORPUS` (or `NEGATIVE` if the document has no MRZ at all), and update the
-corresponding row in `knowledge/CORPUS_COVERAGE.md`.
+corresponding row in `knowledge/CORPUS_COVERAGE.md`. Name the fixture per
+[samples/README.md](samples/README.md)'s convention
+(`Country_DocType_Specimen[_YYYY][_side]_mrz.ext`) and keep its basename identical to the
+specimen image's.
 
 Two different things can happen to the file at this point, and they're not the same PR step:
 

@@ -778,8 +778,8 @@ extraction.
   come out of that sweep rather than out of intuition. `BAND_FLIP_MARGIN` (1.2×, mirroring
   `ROTATION_MARGIN`'s existing "ties default to leaving it alone" bias) is cleared comfortably by
   every genuine correction — narrowest real win 1.27×, most 2–5× — while suppressing the corpus's
-  single wrong-direction vote (`Passport_of_Serbia_ID_2009_version.jpg`, a 1.18× lead) and all
-  four exact ties. Serbia 2009 is consequently the one page here that stays mis-oriented: an
+  single wrong-direction vote (`Serbia_Passport_Specimen_2012_mrz.jpg`, a 1.18× lead) and all
+  four exact ties. That Serbia passport specimen is consequently the one page here that stays mis-oriented: an
   honest miss rather than a silent wrong answer. `geometry::MRZ_BAND_CONFIDENT_SCORE` (0.75)
   skips the probe entirely when the upright band is already strong — no upside-down page in the
   corpus scored above 0.7132, so the flip could not have won — which keeps the common case at
