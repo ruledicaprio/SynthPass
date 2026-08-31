@@ -35,6 +35,16 @@ the corpus's known defects (the §4.2.3.3c length discrepancy, Part 8's
 Appendix B transcription damage). Living document, extended as later
 conformance segments lean on new passages.
 
+## Field layout
+
+[`Mrz_Field_Layout.md`](Mrz_Field_Layout.md) is a machine-actionable distillation of Parts 3–7's
+field-position tables for all five formats this crate handles (TD1, TD2, TD3, MRV-A, MRV-B) —
+1-based ICAO positions alongside 0-based Rust-usable slices, the check-digit algorithm, composite
+coverage ranges, and issuer options (e.g. an unused check digit printed as `0` or `<`), with a
+normative JSON block in its §4 as the tiebreaker when its own human-rendered tables disagree.
+Derived from the Part files above, not a replacement for them — read it for "what position is
+this field at," and the Part files for the surrounding normative prose.
+
 ## Figures
 
 `figures/` holds diagrams rendered from the source PDFs, prefixed with the
