@@ -243,7 +243,7 @@ cross-reference this table by hand.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` |
+| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`) |
 | `SYNTHPASS_OCR_AUTO_DOWNLOAD` | `1` | Fetch missing `.rten` files automatically; `0` requires pre-staged files |
 | `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
 | `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
@@ -255,7 +255,7 @@ cross-reference this table by hand.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_MODEL_PATH` | `./qwen2.5-1.5b-instruct-q4_k_m.gguf` | GGUF path — any GGUF works |
+| `SYNTHPASS_MODEL_PATH` | `./qwen2.5-1.5b-instruct-q4_k_m.gguf` | GGUF path — any GGUF works (README quickstart convention: `models/`) |
 | `SYNTHPASS_MODEL_N_CTX` | `2048` | Context window in tokens |
 | `SYNTHPASS_MODEL_SHA256` / `SYNTHPASS_MODEL_SKIP_VERIFY` | *(built-in)* / *(unset)* | Re-pin or skip the integrity check |
 | `SYNTHPASS_LLM_CONTEXTS` | `1` | Concurrent Tier-2 contexts; raise only if the hardware has room |
@@ -289,3 +289,48 @@ licensing-specific subset with the customer/vendor CLI walkthroughs alongside it
 
 > **Windows note:** the Tier-2 backend needs CMake + LLVM/libclang + MSVC to build
 > `llama-cpp-2`'s bundled `llama.cpp`. The OCR engine needs no native toolchain at all.
+
+## 13. Engineering conventions
+
+Contract-level rules that are not obvious from the code alone. Each crate's own
+rustdoc (`cargo doc --workspace --open`) is the source of truth for its API; this
+section records the cross-crate policies.
+
+### 13.1 Crate responsibilities
+
+| Crate | Responsibility |
+| --- | --- |
+| `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer. The JSON key set is locked by `tests/schema_keys.rs`. |
+| `mrz` | Zero-dependency ICAO 9303 MRZ parser / emitter / check-digit validator (TD1/TD2/TD3, MRV-A/MRV-B). Published standalone and consumed outside this workspace, so it must stay dependency-free and `wasm32`-clean. |
+| `mrz-wasm` | `wasm-bindgen` wrapper around `mrz` for the GitHub Pages demo. |
+| `synthpass-ocr` | In-process pure-Rust OCR (`ocrs`/`rten`). Emits raw observations (text + confidence + position); does not interpret fields semantically. |
+| `synthpass-llm` | In-process `llama.cpp` (Qwen2.5-1.5B GGUF via `llama-cpp-2`). Tier 2 only — repairs / normalizes; never invents data absent from the input. |
+| `synthpass-die` | Document Intelligence Engine: provider contract, capability model, catalog, `RoutingPolicy`. See 13.2. |
+| `synthpass-pipeline` | Orchestrates OCR → Tier 1 MRZ validation → Tier 2 fallback → structured JSON. A checksum-valid MRZ skips Tier 2 entirely. |
+| `synthpass-gen` | Deterministic synthetic document factory (TD1/TD2/TD3 + MRV-A/MRV-B) with per-field ground truth. |
+| `synthpass-bench` | Measures whether generated / real specimens survive the real Tier-1 pipeline. Not a `benches/` directory — a workspace member. |
+| `synthpass-cli` / `synthpass-serve` | Thin front-ends (arg parsing / HTTP handlers) over `synthpass-pipeline`; no business logic of their own. |
+| `synthpass-license` | Offline Ed25519-signed licensing for metered enterprise binaries; no phone-home. |
+
+### 13.2 `synthpass-die` dependency boundary
+
+`synthpass-die` **must not** depend on `tokio`, an OCR engine, `llama.cpp`, or
+`tracing` — enforced in CI by a `cargo tree`-based check, so that writing a
+third-party provider never starts with "install llama.cpp".
+
+`Reading` and `Evidence` derive **no** `Serialize`: a routing signal cannot reach
+the document JSON by any path. A routing score may be uncalibrated; a number next
+to `confidence` may not (see [`project_principles.md`](project_principles.md) P2).
+
+### 13.3 MRZ handling policy
+
+- A checksum-valid MRZ is **authoritative**. When visual OCR conflicts with a
+  valid MRZ, prefer the MRZ.
+- A checksum failure is never silently accepted: attempt bounded repair
+  (`crates/mrz` single-substitution search), record the repair's confidence,
+  explain the failure in the output metadata, and never fabricate a value.
+- Names are transliterated per ICAO 9303 Part 3 transliteration rules
+  (`crates/mrz` `transliterate`).
+- The five MRZ formats are tried in a fixed priority order (TD3 → MRV-B → MRV-A →
+  TD1 → TD2) to avoid cross-format cannibalization; every candidate is
+  check-digit-verified before it is accepted.

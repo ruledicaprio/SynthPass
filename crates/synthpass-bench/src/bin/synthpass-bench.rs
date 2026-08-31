@@ -19,7 +19,7 @@
 //!   --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to
 //!                        *generate* (default: td3); a run is always a single format, so
 //!                        the per-format Tier-1 hit rate is one run per type
-//!   --out PATH           report JSON path (default: bench-report.json)
+//!   --out PATH           report JSON path (default: artifacts/bench-report.json)
 //!   --min-hit-rate F     exit non-zero if the measured hit rate is below F
 //!                        (e.g. 0.35); unset means "measure and report only"
 //!   --dump-ocr           print every document's raw OCR text (one printed
@@ -67,7 +67,7 @@ impl Default for Args {
             count: 100,
             seed: 0,
             profile: ProfileChoice::Clean,
-            out: "bench-report.json".to_string(),
+            out: "artifacts/bench-report.json".to_string(),
             min_hit_rate: None,
             document_type: DocumentType::TD3,
             dump_ocr: false,
@@ -88,7 +88,7 @@ fn usage() {
          (default: td3). Not the same axis as provider-bench's --format, which scopes which \
          real samples/ directory to read."
     );
-    eprintln!("  --out PATH           report JSON path (default: bench-report.json)");
+    eprintln!("  --out PATH           report JSON path (default: artifacts/bench-report.json)");
     eprintln!("  --min-hit-rate F     exit non-zero if the measured hit rate is below F");
     eprintln!(
         "  --dump-ocr           print every document's raw OCR text (one printed line per \
@@ -381,6 +381,11 @@ fn main() {
         results,
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
+    if let Some(parent) = std::path::Path::new(&parsed.out).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).expect("create report directory");
+        }
+    }
     std::fs::write(&parsed.out, json).expect("write report");
     println!("report written to {}", parsed.out);
 

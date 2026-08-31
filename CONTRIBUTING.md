@@ -1,7 +1,7 @@
 # Contributing
 
-Thanks for your interest in `multi-level-id-strip` (SynthPass). This is a pure-Rust workspace (no
-Python, no Docker required for any functional path as of v0.7.5) plus a WASM browser demo.
+Thanks for your interest in SynthPass. This is a pure-Rust workspace (no Python, and no Docker
+required for any functional path) plus a WASM browser demo.
 
 ## Layout
 
@@ -167,18 +167,6 @@ Two different things can happen to the file at this point, and they're not the s
   own local mirror (and whichever other machine you copy it to) for `mrz_corpus.rs --dump` and
   `provider-bench --real-specimens` to see it.
 
-Two different things can happen to the file at this point, and they're not the same PR step:
-
-- **It becomes ground truth.** If you're hand-labelling the specimen (writing its
-  `synthpass_core::Extraction` as JSON), the image and its `.json` both move into
-  `samples/ocr_fixtures/` and get `git add`ed — that directory is the only part of `samples/`
-  tracked in git, and required CI depends on specific files in it.
-- **It's an ordinary, unlabelled corpus specimen.** It stays in its usual subdirectory
-  (`samples/passports/`, `samples/id_cards/`, `samples/driving_licenses/`, `samples/misc/`) but is
-  **not committed** — those directories are gitignored, and the file only needs to exist in your
-  own local mirror (and whichever other machine you copy it to) for `mrz_corpus.rs --dump` and
-  `provider-bench --real-specimens` to see it.
-
 **PRADO (`consilium.europa.eu/prado`) is never a source for specimens or any other data in this
 repo.** Its copyright notice explicitly prohibits harvesting, copying, or redistributing PRADO
 section material outside official, non-commercial use. It may be consulted manually as a human
@@ -198,9 +186,11 @@ already writes to on a schedule), not `main`, so it's safe to run without openin
 PR — nothing lands on a protected branch. See `knowledge/benchmarks/README.md` for
 the row schema and the live per-track charts.
 
-Prerequisites: the OCR `.rten` models and the shipped GGUF present at the repo root
-(same as any other bench run — see "Building & testing" above), and `git` on `PATH`
-(no `jq` needed; the flattening step is native PowerShell).
+Prerequisites: the OCR `.rten` models and the GGUF weight reachable — either in
+`models/` with `SYNTHPASS_OCR_MODEL_DIR=models` / `SYNTHPASS_MODEL_PATH=models/…`
+set (the README quickstart convention), or at the repo root (the compiled default)
+— and `git` on `PATH` (no `jq` needed; the flattening step is native PowerShell).
+`run-bench.ps1` writes its report into `artifacts/` (gitignored).
 
 ```powershell
 ./scripts/run-bench.ps1 -Track passport               # whole samples/passports/ corpus

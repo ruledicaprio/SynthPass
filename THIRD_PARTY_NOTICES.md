@@ -1,8 +1,7 @@
 # Third-Party Notices
 
 **SynthPass** (MIT) bundles and builds on third-party open-source components.
-*(Formerly `multi-level-id-strip` / `mlis`.)* All are permissively licensed
-(MIT / Apache-2.0 / BSD / ISC) — no copyleft.
+All are permissively licensed (MIT / Apache-2.0 / BSD / ISC) — no copyleft.
 
 > This file is hand-curated prose, not `cargo about`'s literal template output — that output is a
 > per-crate license-text dump (182 sections as of this check), useful as a legal artifact but not

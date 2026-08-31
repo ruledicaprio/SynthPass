@@ -75,7 +75,7 @@ fn print_usage() {
     println!("{}", banner());
     println!();
     println!(
-        "synthpass v{}  |  github.com/ruledicaprio/multi-level-id-strip",
+        "synthpass v{}  |  github.com/ruledicaprio/SynthPass",
         env!("CARGO_PKG_VERSION")
     );
     println!("{}", "-".repeat(BOX_WIDTH + 2));

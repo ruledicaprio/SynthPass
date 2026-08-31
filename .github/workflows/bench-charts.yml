@@ -159,8 +159,8 @@ jobs:
         with:
           name: bench-reports-${{ github.run_id }}
           path: |
-            synthpass-bench-report.json
-            provider-bench-report.json
+            artifacts/synthpass-bench-report.json
+            artifacts/provider-bench-report.json
           if-no-files-found: ignore
           retention-days: 30
 
