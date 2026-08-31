@@ -11,8 +11,8 @@ comments — down to `part N §M.M.M`, e.g. `checksum.rs`'s "ICAO 9303 part 3
 §4.9: 7-3-1 repeating weights" or `mrz_reader.rs`'s "The ICAO 9303 Part 4 TD3
 specimen." That precision has nowhere to point *from*: the closest thing to
 a consolidated reference was `crates/mrz/README.md` (a crate-consumer
-primer, not a spec) and the constitution's §10 "MRZ Standards" (project
-policy on handling MRZ, not the spec itself). Neither is precise enough to
+primer, not a spec) and the MRZ-handling policy in `knowledge/ARCHITECTURE.md`
+(project policy on handling MRZ, not the spec itself). Neither is precise enough to
 plan a redesign of the MRZ/document-intelligence architecture against.
 
 Thirteen raw, machine-converted Markdown files for ICAO Doc 9303 Parts 1–13
@@ -90,7 +90,7 @@ would.
   files with no consolidated index.
 - The redesign work this corpus exists to support can cite ICAO text
   directly and verifiably, rather than through the crate README's
-  paraphrase or the constitution's policy language.
+  paraphrase or the project's policy language.
 
 **Negative**
 

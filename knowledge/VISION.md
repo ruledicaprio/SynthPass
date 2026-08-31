@@ -97,7 +97,9 @@ Concretely, the long arc is:
 > **Non-goals, permanently.** SynthPass crops a portrait region; it never *identifies* a
 > person — no face recognition, no biometric matching, no liveness. It proves a faithful
 > *read*; it does not judge document *authenticity* — forgery and tamper detection are out of
-> scope. It does not do cloud anything. These lines do not move.
+> scope. It does not do cloud anything. It does not train OCR or LLM models — it consumes
+> them. It processes a still image, not a live video stream. CLI and library come first; a
+> GUI is secondary. These lines do not move.
 
 ## 3. Commercial Positioning
 

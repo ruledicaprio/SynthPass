@@ -1,8 +1,8 @@
 # Project principles
 
-The constitution. Seven principles, each with the place in the codebase where it
-is already enforced — because a principle nothing checks is a preference, not a
-principle. When a design decision is contested, this file is the tiebreaker.
+The project's constitution. Seven principles, each with the place in the codebase
+where it is already enforced — because a principle nothing checks is a preference,
+not a principle. When a design decision is contested, this file is the tiebreaker.
 
 Proposed in [archive/KNOWLEDGE.md](archive/KNOWLEDGE.md); grounded here against the tree.
 

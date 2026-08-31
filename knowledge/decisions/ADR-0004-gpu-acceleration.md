@@ -5,13 +5,14 @@
 2026-08-03, which was never indexed and contained several unverified claims — see
 "What changed from the original draft" below)
 
-## Relationship to the constitution
+## Relationship to project principles and roadmap
 
-`SYNTHPASS_ENGINEERING_CONSTITUTION.md` §4.1 lists **GPU acceleration for OCR and LLM**
-under "Future Vision" and is otherwise silent on GPU support one way or the other — the
-constitution's actual non-goals (§4) name cloud integration, model training, real-time
-video, and non-ICAO documents (for the currently committed milestones); GPU acceleration
-is not among them. This ADR does not contradict or override anything currently in force:
+`knowledge/ROADMAP.md`'s "Beyond ICAO 9303" / Future Work section lists **GPU
+acceleration for OCR and LLM** as a longer-horizon direction and is otherwise silent on
+GPU support one way or the other — `knowledge/VISION.md`'s non-goals name cloud
+integration, model training, real-time video, and non-ICAO documents (for the currently
+committed milestones); GPU acceleration is not among them. This ADR does not contradict
+or override anything currently in force:
 it **proposes** filling in that Future Vision item, with CPU staying the default and only
 path until a follow-up ADR (or this one, amended) records it as Accepted and something
 ships. Nothing here authorizes writing GPU code today.
@@ -31,8 +32,8 @@ ships. Nothing here authorizes writing GPU code today.
   depends on `llama-cpp-sys-2` (a different, actively maintained sys crate, currently
   pinned at the matching 0.1.151). Getting this name right matters because every feature
   flag below is spelled against `llama-cpp-sys-2`, not `llama-cpp-sys`.
-- Performance budgets: `SYNTHPASS_ENGINEERING_CONSTITUTION.md` §15 — OCR < 700 ms,
-  LLM repair < 2 s, end-to-end < 3 s (typical).
+- Performance posture: `knowledge/ARCHITECTURE.md` §4 (CPU-only, single-binary; there is
+  no CI-enforced latency budget — see `knowledge/benchmarks/README.md` Principle 6).
 - M4 Tier-1 hit rate: **the original draft's "Currently 68%" line is not in version
   control, and is not the canonical baseline.** (This sentence originally read "is not a
   number found anywhere in this repo," which was too strong — see the amendment under
@@ -90,8 +91,7 @@ than against `rten`'s/`llama-cpp-2`'s documentation in the abstract:
    different claims, and an untracked file sitting in the working tree is exactly the gap
    between them.
 
-The original draft's broken References section (linking
-`SYNTHPASS_ENGINEERING_CONSTITUTION.md` and `ROADMAP.md` as if this file lived at the
+The original draft's broken References section (linking docs as if this file lived at the
 repo root, when it lives in `knowledge/decisions/`) is also fixed below —
 `scripts/check-doc-links.sh` now passes against this file.
 
@@ -132,9 +132,9 @@ vulkan = ["llama-cpp-2/vulkan"]
 No new dependency is added — `cuda`/`vulkan` are features of the dependency already in
 the tree. Enabling either requires the matching system-level toolkit (CUDA Toolkit /
 Vulkan SDK + driver) to be present on the *build* machine; neither is vendored, matching
-`SYNTHPASS_ENGINEERING_CONSTITUTION.md` §13's "no external dependencies except those
-vetted and pinned" — a system toolkit is not a new Rust dependency, but it is a new build
-precondition, which is why this stays feature-gated and off by default rather than
+`knowledge/project_principles.md`'s "no new dependency without written justification" — a
+system toolkit is not a new Rust dependency, but it is a new build precondition, which is
+why this stays feature-gated and off by default rather than
 becoming a default build requirement.
 
 Runtime selection (sketch, **not implemented, not compiled, and not asserted to be
@@ -185,18 +185,18 @@ proposes evaluating it, not committing to ship it; see Consequences for what has
 true first.
 
 **Ship GPU as the default backend, falling back to CPU.** Rejected. Breaks the "same
-input → same output, regardless of environment" expectation implicit in
-`SYNTHPASS_ENGINEERING_CONSTITUTION.md` §2's determinism priority the moment two machines
-resolve to different backends by default, and makes every user's first run depend on
-undocumented system-toolkit detection succeeding. Feature-gated and explicit stays
-closer to "a local dependency beats a cloud API" — the constitution's own worked
-example — read as "the simplest correct default beats an auto-detected one."
+input → same output, regardless of environment" expectation implicit in `CLAUDE.md`'s
+determinism-over-performance priority the moment two machines resolve to different
+backends by default, and makes every user's first run depend on undocumented
+system-toolkit detection succeeding. Feature-gated and explicit stays closer to "a local
+dependency beats a cloud API" — one of `CLAUDE.md`'s worked examples — read as "the
+simplest correct default beats an auto-detected one."
 
 **Vendor/statically link CUDA or Vulkan into the binary.** Rejected. Both toolkits are
-large, platform- and driver-version-specific, and would turn a ~50 MB binary-size budget
-(§15) into a multi-GB one, or require runtime dynamic loading of system libraries the
-build didn't control — the opposite of this project's offline-first, single-binary
-posture (`SYNTHPASS_ENGINEERING_CONSTITUTION.md` §3/§13).
+large, platform- and driver-version-specific, and would bloat the ~50 MB release binary
+into a multi-GB one, or require runtime dynamic loading of system libraries the build
+didn't control — the opposite of this project's offline-first, single-binary posture
+(`SECURITY.md` / `knowledge/project_principles.md`).
 
 **Write a new pure-Rust GPU backend instead of using `llama-cpp-2`'s existing features.**
 Rejected. `llama-cpp-2`/`llama.cpp` already carries mature CUDA and Vulkan backends,
@@ -231,8 +231,8 @@ verification, not folded into this one's LLM-only, verified proposal.
   6 in `knowledge/benchmarks/README.md`: "a constant with no measurement behind it does
   not ship." A real number requires a GPU-equipped CI runner or a manual run on hardware
   like the customer's GTX 970, neither of which exists today.
-- **Determinism is unverified across backends.** `SYNTHPASS_ENGINEERING_CONSTITUTION.md`
-  §2 ranks deterministic behavior above performance; floating-point reduction order
+- **Determinism is unverified across backends.** `CLAUDE.md` ranks deterministic
+  behavior above performance; floating-point reduction order
   commonly differs between CPU and GPU kernels, which can change LLM sampling outcomes at
   the margin even at temperature 0. This has to be checked (same prompt, same seed, CPU
   vs. GPU output) before this ADR could move to Accepted, not assumed.
@@ -350,9 +350,11 @@ person doesn't re-derive it):
 
 ## References
 
-- [`SYNTHPASS_ENGINEERING_CONSTITUTION.md`](../../SYNTHPASS_ENGINEERING_CONSTITUTION.md)
-  — §2 (priority order), §3/§13 (offline-first, dependency vetting), §15 (performance
-  budgets).
+- [`../../CLAUDE.md`](../../CLAUDE.md) — priority order (correctness → security →
+  determinism → maintainability → performance).
+- [`../project_principles.md`](../project_principles.md) — offline-first, dependency
+  vetting.
+- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) §4 — CPU-only single-binary posture.
 - [`../ROADMAP.md`](../ROADMAP.md) — M4's measured Tier-1 hit-rate baseline (~55%,
   100-seed, clean profile, PR #30) and the M6 GPU/Future Vision context.
 - [`knowledge/benchmarks/README.md`](../benchmarks/README.md) — "Principle 6: a constant

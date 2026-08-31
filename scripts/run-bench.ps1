@@ -146,6 +146,9 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $repoRoot
 
+# Bench reports land in artifacts/ (gitignored) rather than at the repo root.
+New-Item -ItemType Directory -Force -Path (Join-Path $repoRoot "artifacts") | Out-Null
+
 # --- 1. Run provider-bench (real-specimen tracks) or synthpass-bench -------
 # ---    (td1/td2 synthetic tracks), scoped to this track -- or reuse an ----
 # ---    existing report via -FromReport.                               -----
@@ -157,7 +160,7 @@ if ($FromReport) {
     $reportPath = (Resolve-Path $FromReport).Path
     Write-Host "Using existing report: $reportPath (skipping the bench run)"
 } elseif ($isSyntheticTrack) {
-    $reportPath = Join-Path $repoRoot "synthpass-bench-report.json"  # gitignored
+    $reportPath = Join-Path $repoRoot "artifacts/synthpass-bench-report.json"  # gitignored
 
     $benchArgs = @("--document-type", $Track, "--profile", "clean", "--count", "$Count", "--seed", "$Seed", "--out", $reportPath)
 
@@ -167,7 +170,7 @@ if ($FromReport) {
         throw "synthpass-bench failed (exit $LASTEXITCODE)"
     }
 } else {
-    $reportPath = Join-Path $repoRoot "provider-bench-report.json"  # gitignored
+    $reportPath = Join-Path $repoRoot "artifacts/provider-bench-report.json"  # gitignored
 
     $benchArgs = @("--real-specimens")
     if ($Track -ne "real-specimens") { $benchArgs += @("--format", $Track) }

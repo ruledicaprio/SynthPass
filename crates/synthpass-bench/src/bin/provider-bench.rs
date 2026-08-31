@@ -25,7 +25,7 @@
 //!                      below (which scopes which real samples/ directory --real-specimens
 //!                      reads) — rejected together with --real-specimens, the same way
 //!                      --format is rejected without it.
-//!   --out PATH         report JSON path (default: provider-bench-report.json)
+//!   --out PATH         report JSON path (default: artifacts/provider-bench-report.json)
 //!   --measure-memory   sample process RSS around each provider's loop
 //!                      (requires the `measure-memory` feature; see its doc
 //!                      comment in Cargo.toml for why this is coarse)
@@ -108,7 +108,7 @@ impl Default for Args {
             count: 20,
             seed: 0,
             profile: ProfileChoice::Clean,
-            out: "provider-bench-report.json".to_string(),
+            out: "artifacts/provider-bench-report.json".to_string(),
             measure_memory: false,
             real_specimens: false,
             limit: None,
@@ -130,7 +130,9 @@ fn usage() {
     eprintln!(
         "  --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)"
     );
-    eprintln!("  --out PATH         report JSON path (default: provider-bench-report.json)");
+    eprintln!(
+        "  --out PATH         report JSON path (default: artifacts/provider-bench-report.json)"
+    );
     eprintln!("  --measure-memory   sample process RSS around each provider's loop (coarse)");
     eprintln!(
         "  --real-specimens   run over samples/ instead of the synthetic corpus (ground truth \
@@ -808,6 +810,11 @@ async fn main() {
         providers: reports.into_iter().map(ProviderRow::from).collect(),
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
+    if let Some(parent) = std::path::Path::new(&parsed.out).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).expect("create report directory");
+        }
+    }
     std::fs::write(&parsed.out, json).expect("write report");
     println!("report written to {}", parsed.out);
 }

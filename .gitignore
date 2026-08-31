@@ -1,16 +1,25 @@
 # Rust
 target/
 
-# Local LLM weights (~1 GB — download per README)
+# Claude Code local settings and locks — never commit. The shared workflow skill
+# under .claude/skills/ IS tracked and is re-included below.
+.claude/*
+!.claude/skills/
+
+# Local LLM weights (~1 GB — download per README) and OCR model weights
+# (ocrs/rten — ~12 MB, auto-downloaded per README). Convention is to keep them
+# in models/ (README quickstart); the extension globs are the belt-and-braces.
 *.gguf
-
-# Local OCR model weights (ocrs/rten — ~12 MB, auto-downloaded per README)
 *.rten
+/models/
 
-# synthpass-bench's generated JSON reports — generated, not hand-edited/committed.
-# Leading wildcard is load-bearing: the runner writes `synthpass-bench-report.json`
-# (scripts/run-bench.ps1), which a bare `bench-report*.json` does not match — that
-# file leaked into `git status` on every run until this was fixed.
+# Local build artifacts: bench-report JSON, and anything a script drops here.
+# scripts/run-bench.ps1 and the two bench binaries default to artifacts/.
+# The leading-wildcard entry below stays as a catch-all: CI (ci.yml,
+# bench-data-collection.yml) still writes `bench-report.json` at the repo root
+# via an explicit --out, and that file leaked into `git status` until it was
+# ignored.
+/artifacts/
 *bench-report*.json
 
 # Web app upload/working directory (may contain uploaded PII)
