@@ -808,7 +808,16 @@ async fn run_prepped(
             let miss_reason = if !bench_page.mrz_found {
                 Some(MissReason::NoMrzFound(String::new()))
             } else if !reading.evidence.mrz_checksums_valid {
-                Some(MissReason::ChecksumFailed)
+                // `read_mrz` (this harness's own independent parse of the OCR
+                // text, computed once per document above) is the same source
+                // `--dump-ocr` already uses a few lines below to print which
+                // check digit(s) failed — reused here for the same reason.
+                Some(MissReason::ChecksumFailed {
+                    failing: read_mrz
+                        .as_ref()
+                        .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
+                        .unwrap_or_default(),
+                })
             } else {
                 bench_page
                     .ground_truth
@@ -827,7 +836,7 @@ async fn run_prepped(
                     })
             };
 
-            if dump_ocr && matches!(miss_reason, Some(MissReason::ChecksumFailed)) {
+            if dump_ocr && matches!(miss_reason, Some(MissReason::ChecksumFailed { .. })) {
                 println!(
                     "--- {} ({}) raw MRZ zone ---",
                     bench_page.name,
