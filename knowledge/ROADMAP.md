@@ -694,6 +694,11 @@ place, with a suggested order, before any of it becomes code.
   is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
   same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
   M7 section above for the contract itself.
+- **MRZ sequence completeness (Tier-1 accuracy).** Independent of the generator-format-expansion
+  track above — a diagnostic/completeness-typing/TD2-repair backlog for `crates/mrz` and the
+  `synthpass-die` pipeline layer around it, since `checksum_failed` is already the largest
+  real-specimen miss category. Full scoping, chunk-by-chunk, in
+  [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md).
 - **Declarative document layout plugins.** A third-party layout definition drives generation
   without a code change — the M6 DoD criterion the milestone table already states.
 - **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
