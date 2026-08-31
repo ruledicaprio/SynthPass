@@ -2,7 +2,7 @@
 name = "mrz-wasm"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
