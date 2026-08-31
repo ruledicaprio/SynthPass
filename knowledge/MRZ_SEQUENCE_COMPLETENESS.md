@@ -188,10 +188,10 @@ drops one fragment. Two merged PRs don't have one:
   mirror-image *shift* (inserted-character) direction and has no fragment of its
   own.
 - **PR #142** (`938f075`, "docs: professionalize root docs, app polish, and
-  screenshots") is mostly docs/README/favicon/screenshots, but its diff also
-  bumps `h2` to 0.4.16, fixing `RUSTSEC-2026-0258` (GHSA-q83h-524g-xf6h, unbounded
-  empty DATA frame handling) — a real `security`-category, user-visible change
-  with no fragment.
+  screenshots") is mostly README/SECURITY.md/favicon/screenshot polish, but its
+  diff also bumps `h2` to 0.4.16, fixing `RUSTSEC-2026-0258` (GHSA-q83h-524g-xf6h,
+  unbounded empty DATA frame handling) — a real `security`-category, user-visible
+  change with no fragment.
 
 **Files.** Two new files under `changelog.d/`: `138.fixed.md`, `142.security.md`
 (naming per `changelog.d/README.md`'s `<id>.<category>.md` convention — these are
