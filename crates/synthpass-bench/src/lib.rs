@@ -390,7 +390,12 @@ pub enum MissReason {
     /// OCR produced text, but nothing MRZ-shaped could be parsed out of it.
     NoMrzFound(String),
     /// An MRZ parsed, but its ICAO 9303 check digits did not validate.
-    ChecksumFailed,
+    /// `failing` names which ones, via [`mrz::Checks::failed`] — e.g.
+    /// `["composite"]` or `["document_number", "composite"]` — so
+    /// `checksum_failed` (the largest real-specimen miss bucket measured so
+    /// far, see `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1) stops being
+    /// one undifferentiated count.
+    ChecksumFailed { failing: Vec<&'static str> },
     /// A checksum-valid MRZ that disagrees with the ground truth. Rare and
     /// interesting: the check digits can validate over a misread that
     /// happens to stay self-consistent.
@@ -402,7 +407,9 @@ impl std::fmt::Display for MissReason {
         match self {
             Self::OcrError(e) => write!(f, "OCR error: {e}"),
             Self::NoMrzFound(e) => write!(f, "no MRZ found: {e}"),
-            Self::ChecksumFailed => write!(f, "checksum invalid"),
+            Self::ChecksumFailed { failing } => {
+                write!(f, "checksum invalid: {}", failing.join(", "))
+            }
             Self::DocumentNumberMismatch { got, expected } => {
                 write!(
                     f,
@@ -421,7 +428,7 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
     match reason {
         MissReason::OcrError(_) => "ocr_error",
         MissReason::NoMrzFound(_) => "no_mrz_found",
-        MissReason::ChecksumFailed => "checksum_failed",
+        MissReason::ChecksumFailed { .. } => "checksum_failed",
         MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
     }
 }
@@ -609,7 +616,9 @@ fn run_check(
 
     if !decoded.valid() {
         return (
-            Some(MissReason::ChecksumFailed),
+            Some(MissReason::ChecksumFailed {
+                failing: decoded.checks.failed().iter().map(|f| f.as_str()).collect(),
+            }),
             fields,
             line1_integrity,
             Some(text),
@@ -813,6 +822,34 @@ mod tests {
         for f in fields.iter().filter(|f| f.field != "surname") {
             assert_eq!(f.cer, 0.0, "{} should be a clean read", f.field);
         }
+    }
+
+    /// `MissReason::ChecksumFailed`'s `failing` payload, `miss_kind`, and
+    /// `Display` — the diagnostic chunk 1 of
+    /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` adds. No OCR needed: an ICAO
+    /// specimen with one date tampered (same fixture shape `crates/mrz`'s own
+    /// tests use) fails exactly `date_of_birth` and `composite`, since the
+    /// composite range covers the date-of-birth field.
+    #[test]
+    fn checksum_failed_names_the_failing_fields() {
+        let l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        let l2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+        let tampered = l2.replacen("740812", "750812", 1);
+        let decoded = mrz::parse_td3(l1, &tampered).expect("shape is still valid TD3");
+        assert!(!decoded.valid());
+
+        let failing: Vec<&'static str> =
+            decoded.checks.failed().iter().map(|f| f.as_str()).collect();
+        assert_eq!(failing, vec!["date_of_birth", "composite"]);
+
+        let reason = MissReason::ChecksumFailed {
+            failing: failing.clone(),
+        };
+        assert_eq!(miss_kind(&reason), "checksum_failed");
+        assert_eq!(
+            reason.to_string(),
+            "checksum invalid: date_of_birth, composite"
+        );
     }
 
     /// A document whose MRZ never parsed must count as a total loss in every

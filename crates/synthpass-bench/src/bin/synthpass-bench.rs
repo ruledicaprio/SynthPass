@@ -173,6 +173,16 @@ struct SeedResult {
     /// misses can be counted by kind without parsing prose.
     #[serde(skip_serializing_if = "Option::is_none")]
     miss_kind: Option<&'static str>,
+    /// Which check digit(s) failed, only present when `miss_kind` is
+    /// `"checksum_failed"` — `mrz::Field::as_str()` names
+    /// (`"document_number"`, `"date_of_birth"`, `"date_of_expiry"`,
+    /// `"personal_number"`, `"composite"`), one or more since a single
+    /// misread character can fail both its own field and the composite.
+    /// Turns the single largest, previously undifferentiated miss bucket
+    /// into an actionable breakdown — see
+    /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failing_checks: Vec<&'static str>,
     elapsed_ms: u128,
     /// Per-field character error rates, keyed by field name. Reported for
     /// every document that produced a parseable MRZ *and* for those that did
@@ -269,11 +279,16 @@ fn main() {
                 result.line1_integrity,
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
             );
+            let failing_checks = match &result.reason {
+                Some(synthpass_bench::MissReason::ChecksumFailed { failing }) => failing.clone(),
+                _ => Vec::new(),
+            };
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
                 hit: result.hit,
                 miss_kind: result.reason.as_ref().map(miss_kind),
+                failing_checks,
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
                 line1_flagged,
@@ -329,6 +344,24 @@ fn main() {
         println!("\nmisses by kind:");
         for (kind, n) in &kinds {
             println!("  {n:>4}  {kind}");
+        }
+    }
+
+    // Sub-breakdown of the checksum_failed bucket specifically — it has been
+    // the single largest real-specimen miss kind, and was previously one
+    // undifferentiated count. A document can fail more than one check digit
+    // at once, so this tallies occurrences, not documents; it will not sum
+    // to `kinds["checksum_failed"]`.
+    let mut failing_field_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for r in &results {
+        for field in &r.failing_checks {
+            *failing_field_counts.entry(field).or_default() += 1;
+        }
+    }
+    if !failing_field_counts.is_empty() {
+        println!("\nchecksum_failed, by failing field:");
+        for (field, n) in &failing_field_counts {
+            println!("  {n:>4}  {field}");
         }
     }
 

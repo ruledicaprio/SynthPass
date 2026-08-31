@@ -56,7 +56,7 @@ use synthpass_bench::provider_bench::{
     UnsupportedAssertion,
 };
 use synthpass_bench::{
-    generate_corpus, load_real_specimens, miss_kind, ProfileChoice, SpecimenClass,
+    generate_corpus, load_real_specimens, miss_kind, MissReason, ProfileChoice, SpecimenClass,
 };
 use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
@@ -368,6 +368,12 @@ struct DocumentDetailReport {
     /// message), which is aggregate-report noise, not report content.
     #[serde(skip_serializing_if = "Option::is_none")]
     miss_reason: Option<&'static str>,
+    /// Which check digit(s) failed, only present when `miss_reason` is
+    /// `"checksum_failed"` — `mrz::Field::as_str()` names. Field names only,
+    /// same discipline as `unsupported_fields` above — see this struct's
+    /// module doc. See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    failing_checks: Vec<&'static str>,
     assertions_total: usize,
     assertions_unsupported: usize,
     unsupported_fields: Vec<&'static str>,
@@ -510,6 +516,10 @@ impl From<ProviderReport> for ProviderRow {
                     read_ok: d.read_ok,
                     mrz_checksums_valid: d.mrz_checksums_valid,
                     miss_reason: d.miss_reason.as_ref().map(miss_kind),
+                    failing_checks: match &d.miss_reason {
+                        Some(MissReason::ChecksumFailed { failing }) => failing.clone(),
+                        _ => Vec::new(),
+                    },
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
@@ -757,6 +767,31 @@ async fn main() {
                 .map(|(kind, n)| format!("{kind}={n}"))
                 .collect();
             println!("    misses by kind: {}", counts.join(", "));
+
+            // Sub-breakdown of checksum_failed specifically — see
+            // `synthpass-bench.rs`'s identical summary and
+            // `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1. Tallies
+            // occurrences, not documents, so this need not sum to
+            // `by_miss_kind["checksum_failed"]`.
+            let mut by_failing_field: std::collections::BTreeMap<&str, usize> =
+                std::collections::BTreeMap::new();
+            for d in &r.documents_detail {
+                if let Some(MissReason::ChecksumFailed { failing }) = &d.miss_reason {
+                    for field in failing {
+                        *by_failing_field.entry(field).or_default() += 1;
+                    }
+                }
+            }
+            if !by_failing_field.is_empty() {
+                let counts: Vec<String> = by_failing_field
+                    .iter()
+                    .map(|(field, n)| format!("{field}={n}"))
+                    .collect();
+                println!(
+                    "    checksum_failed, by failing field: {}",
+                    counts.join(", ")
+                );
+            }
         }
 
         if parsed.verbose {
