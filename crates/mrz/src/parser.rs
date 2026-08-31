@@ -1017,6 +1017,21 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         None
     };
 
+    // The first format whose line-1 document-code prefix was recognized
+    // among the *split-line* candidates below, even though no companion line
+    // ever combined with it into a full parse — kept only from the
+    // split-line loops, never the merged-single-token fast path just above
+    // each one: a merged token already carries the full byte length for
+    // every field the format has, so if nothing there validates that is a
+    // checksum/repair problem, not a missing-line one. Consulted only if
+    // `fallback` is still `None` at the very end, to distinguish
+    // [`MrzError::IncompleteSequence`] from a bare
+    // [`MrzError::NotFound`] — see `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`
+    // chunk 4. Purely additive bookkeeping: it never influences which
+    // `MrzData` is returned, only which error variant is returned when none
+    // is.
+    let mut shape_seen: Option<Format> = None;
+
     // TD3: a line starting with 'P' followed by a candidate line — or both
     // 44-char lines merged into one ~88-char physical line.
     for i in 0..lines.len() {
@@ -1046,6 +1061,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             if !l1.starts_with('P') {
                 continue;
             }
+            shape_seen.get_or_insert(Format::Td3);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_td3_line2) {
                     if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
@@ -1094,6 +1110,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             if !l1.starts_with('V') {
                 continue;
             }
+            shape_seen.get_or_insert(Format::MrvB);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 36, repair_mrv_b_line2) {
                     if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
@@ -1139,6 +1156,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             if !l1.starts_with('V') {
                 continue;
             }
+            shape_seen.get_or_insert(Format::MrvA);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_mrv_a_line2) {
                     if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
@@ -1205,6 +1223,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
             }
+            shape_seen.get_or_insert(Format::Td1);
             for (j, l2_raw) in lines.iter().enumerate().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 30, repair_td1_line2) {
                     for l3_raw in lines.iter().skip(j + 1).take(3) {
@@ -1247,6 +1266,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
             }
+            shape_seen.get_or_insert(Format::Td2);
             for l2 in variants(lines[i + 1], 36, repair_td2_line2) {
                 if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
                     if let Some(valid) = consider(data) {
@@ -1270,7 +1290,24 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
-    fallback.ok_or(MrzError::NotFound)
+    fallback.ok_or_else(|| match shape_seen {
+        Some(format) => MrzError::IncompleteSequence {
+            format,
+            lines_found: 1,
+            lines_expected: expected_lines(format),
+        },
+        None => MrzError::NotFound,
+    })
+}
+
+/// How many MRZ lines `format` requires — the one place that count lives,
+/// so [`MrzError::IncompleteSequence`] doesn't hardcode it at its one call
+/// site above.
+fn expected_lines(format: Format) -> u8 {
+    match format {
+        Format::Td1 => 3,
+        Format::Td2 | Format::Td3 | Format::MrvA | Format::MrvB => 2,
+    }
 }
 
 /// A two-line format's parse entry point, as [`damaged_pass`]'s table stores it.
