@@ -46,7 +46,7 @@ async-trait = "0.1"
 tokio = { workspace = true }
 # Coarse process-RSS measurement for `provider-bench --measure-memory`, never
 # built by default — see the `measure-memory` feature below.
-sysinfo = { version = "0.32", optional = true }
+sysinfo = { version = "0.39", optional = true }
 # `bench-chart`'s SVG renderer. Pure Rust, no C dependency: only the
 # `svg_backend` (a thin wrapper over the `svg` crate's XML text generation)
 # and `line_series` features are enabled — the default `bitmap` backend pulls
