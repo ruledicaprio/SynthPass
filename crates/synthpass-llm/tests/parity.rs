@@ -44,12 +44,12 @@ fn find_sample(name: &str) -> Option<PathBuf> {
 
 /// Samples with both OCR Markdown and a ground-truth extraction fixture.
 const FIXTURES: &[&str] = &[
-    "Croatian_passport_data_page",
-    "Estonia_PASSPORT_face",
-    "Passport_of_Serbia_ID_2009_version",
-    "SerbianID_back",
-    "Slovenian_ID_Card_2022_-_Rear",
-    "2022_cetis_terra_condifea_passport_datapage3rd_inner_page",
+    "Croatia_Passport_Specimen_2009_mrz",
+    "Estonia_Passport_Specimen_2020_mrz",
+    "Serbia_Passport_Specimen_2012_mrz",
+    "Serbia_ID_Specimen_2008_back_with_mrz",
+    "Slovenian_ID_Specimen_2022_back_mrz",
+    "Cetis_Sample_Passport_Specimen_2022_inner_page_mrz",
 ];
 
 /// Fields worth comparing: present in the prompt schema and stable enough
@@ -177,7 +177,8 @@ fn native_llm_field_accuracy_over_sample_set() {
     );
     // Measured baseline with qwen2.5-1.5b-instruct-q4_k_m: ~33% (date-format
     // normalized). The model is weak on rear-side ID cards and heavily
-    // garbled MRZ blocks (SerbianID_back, Slovenian rear) — that's expected
+    // garbled MRZ blocks (Serbia_ID_Specimen_2008_back_with_mrz, Slovenian
+    // rear) — that's expected
     // for a 1.5B model and is exactly why Tier 1 (deterministic MRZ) exists;
     // this floor exists to catch a regression (e.g. a broken prompt or a
     // repair-JSON bug), not to gate on model quality.

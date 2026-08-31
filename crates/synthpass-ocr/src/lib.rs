@@ -113,7 +113,7 @@ const MAX_RETRY_VARIANTS: usize = 8;
 /// `recognize` call when the env var is unset or invalid. Measured
 /// (`examples/mrz_corpus.rs`, post-Phase-1 variants, reference hardware): a
 /// full negative-control sweep (all retry variants run, none validate) costs
-/// ~15-27s, and `Slovenian_ID_Card_2022_-_Rear.jpg` — whose checksum-valid
+/// ~15-27s, and `Slovenian_ID_Specimen_2022_back_mrz.jpg` — whose checksum-valid
 /// MRZ only assembles once enough variants have each contributed a line —
 /// needs close to 30s of its own. 45s keeps clearance above that measured
 /// worst case while still bounding the multi-minute-per-document blowup
@@ -500,7 +500,7 @@ const ROTATION_MARGIN: f64 = 1.2;
 /// orientations, this margin gets the direction right on 41 of 42 with zero
 /// false flips. Every genuine correction clears it comfortably (the smallest
 /// winning ratio is 1.27, most are 2–5×). It also suppresses the corpus's
-/// only wrong-direction vote — `Passport_of_Serbia_ID_2009_version.jpg`
+/// only wrong-direction vote — `Serbia_Passport_Specimen_2012_mrz.jpg`
 /// scores 0.4474 upside-down vs 0.3804 upright, a 1.18× lead that falls just
 /// short of this bar — and the four exact ties, where both orientations
 /// score identically and there is nothing to choose between them. Serbia
@@ -788,8 +788,8 @@ mod tests {
         // Genuine corrections: the page as given is upside-down, flipping it
         // recovers the real MRZ. (fixture-as-given, flipped) band scores.
         for (upright, flipped, name) in [
-            (0.1765, 0.7318, "Croatian_passport_data_page"),
-            (0.0301, 0.9216, "Canada_Passport_Specimen_2"),
+            (0.1765, 0.7318, "Croatia_Passport_Specimen_2009_mrz"),
+            (0.0301, 0.9216, "Canada_Passport_Specimen_2023_mrz"),
             (0.7132, 0.9080, "North_Macedonia_Passport_Specimen"), // narrowest real win, 1.27x
             (0.3608, 0.6149, "Kosovo_Passport_Specimen_2"),
             (0.0000, 0.6105, "Croatia_Border_Pass_Specimen_Back"),
@@ -805,7 +805,7 @@ mod tests {
         // score the same and there is nothing to choose between them.
         assert!(
             !should_flip_180(0.3804, 0.4474),
-            "Passport_of_Serbia_ID_2009: a 1.18x lead is below the margin"
+            "Serbia_Passport_Specimen_2012_mrz: a 1.18x lead is below the margin"
         );
         assert!(
             !should_flip_180(0.3781, 0.3781),
