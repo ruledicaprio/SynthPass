@@ -5,8 +5,8 @@
 //! instead of plaintext. A fresh random 96-bit nonce is prepended per message,
 //! and GCM authenticates the ciphertext (tamper-evident).
 
-use aes_gcm::aead::{Aead, OsRng};
-use aes_gcm::{AeadCore, Aes256Gcm, KeyInit, Nonce};
+use aes_gcm::aead::{Aead, Generate};
+use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use std::fmt;
@@ -54,7 +54,7 @@ pub fn key_from_base64(s: &str) -> Result<Zeroizing<[u8; 32]>, CryptError> {
 /// Encrypt `plaintext` with AES-256-GCM. Output = `nonce (12B) ‖ ciphertext`.
 pub fn encrypt(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, CryptError> {
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptError::BadKey)?;
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = Nonce::generate();
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
         .map_err(|_| CryptError::Encrypt)?;
@@ -70,9 +70,10 @@ pub fn decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, CryptError> {
         return Err(CryptError::Malformed);
     }
     let (nonce, ciphertext) = data.split_at(NONCE_LEN);
+    let nonce = Nonce::try_from(nonce).map_err(|_| CryptError::Malformed)?;
     let cipher = Aes256Gcm::new_from_slice(key).map_err(|_| CryptError::BadKey)?;
     cipher
-        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|_| CryptError::Decrypt)
 }
 
