@@ -32,7 +32,7 @@ ocr-native-rust = ["dep:synthpass-ocr"]
 ocr-embedded = ["synthpass-pipeline/ocr-embedded"]
 
 [dev-dependencies]
-base64 = "0.22"
+base64 = "0.23"
 # Signs throwaway test licenses directly (not via synthpass-license's `vendor`
 # feature — synthpass-cli must never build with that active, in any mode, so the
 # shipped binary's dependency tree stays provably signing-free; see
