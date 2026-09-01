@@ -288,8 +288,17 @@ const CODES: &[(&str, &str)] = &[
 /// Map a 3-letter ICAO/ISO 3166-1 code to a country or entity name.
 /// Returns `None` for codes not in the table.
 ///
+/// The table covers the full Doc 9303 Part 3 §5 registry — ISO 3166-1 codes
+/// plus the ICAO extensions, United Nations codes, stateless/refugee codes,
+/// deprecated codes kept for backward compatibility, and the specimen code
+/// `UTO`. Because a check digit has a known blind set (see [`crate::Blindspot`]),
+/// recognizing the code is one of the structural guards the crate layers on
+/// top of the arithmetic.
+///
 /// ```
 /// assert_eq!(mrz::country_name("DEU"), Some("Germany"));
+/// assert_eq!(mrz::country_name("UTO"), Some("Utopia (ICAO specimen)"));
+/// assert_eq!(mrz::country_name("XXA"), Some("Stateless person (1954 Convention)"));
 /// assert_eq!(mrz::country_name("ZZZ"), None);
 /// ```
 pub fn country_name(code: &str) -> Option<&'static str> {

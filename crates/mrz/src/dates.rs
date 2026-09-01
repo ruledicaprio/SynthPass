@@ -122,6 +122,21 @@ pub enum DateCompleteness {
 /// - all six `<` → [`DateCompleteness::Unknown`]
 /// - only ASCII digits and `<`, at least one of each → [`DateCompleteness::PartiallyUnknown`]
 /// - anything else → [`DateCompleteness::Malformed`]
+///
+/// Part 3 §4.8 lets an issuer complete an unknown date with filler characters,
+/// and §4.9 gives a filler the value zero. An entirely unknown date of birth
+/// carrying check digit `0` is therefore a **valid** field, not a corrupt read:
+///
+/// ```
+/// use mrz::{check_digit, date_completeness, DateCompleteness};
+///
+/// assert_eq!(check_digit("<<<<<<").unwrap(), 0);
+///
+/// assert_eq!(date_completeness("740812"), DateCompleteness::Complete);
+/// assert_eq!(date_completeness("7408<<"), DateCompleteness::PartiallyUnknown);
+/// assert_eq!(date_completeness("<<<<<<"), DateCompleteness::Unknown);
+/// assert_eq!(date_completeness("7X0812"), DateCompleteness::Malformed);
+/// ```
 pub fn date_completeness(yymmdd: &str) -> DateCompleteness {
     if yymmdd.len() != 6 {
         return DateCompleteness::Malformed;
@@ -276,6 +291,30 @@ impl crate::MrzData {
     /// A valid MRZ composite proves a faithful *read* of the printed zone, not
     /// that the document is in date or its dates are consistent — that separate
     /// judgement is computed here from the already-expanded ISO date fields.
+    ///
+    /// `today` is an explicit reference date rather than a reading of the system
+    /// clock, so the answer is deterministic and the crate stays clock-free:
+    /// the same `MrzData` and the same `today` always agree, in a test, in a
+    /// replay, or on a machine whose clock is wrong.
+    ///
+    /// ```
+    /// use mrz::{parse_td3, Date};
+    ///
+    /// // The ICAO specimen (Utopia / Anna Maria Eriksson): expires 2012-04-15.
+    /// let doc = parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    /// assert!(doc.valid()); // the read is checksum-proven ...
+    ///
+    /// let report = doc.validity(Date::new(2010, 1, 1));
+    /// assert!(report.in_date); // ... and, as of 2010, still in date
+    /// assert!(report.dob_before_expiry);
+    ///
+    /// // The same faithful read, judged against a later day: still valid(), expired.
+    /// assert!(!doc.validity(Date::new(2020, 1, 1)).in_date);
+    /// ```
     pub fn validity(&self, today: Date) -> DateValidity {
         let dob = parse_iso(&self.date_of_birth);
         let exp = parse_iso(&self.date_of_expiry);
