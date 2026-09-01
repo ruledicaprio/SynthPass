@@ -145,7 +145,7 @@ impl Checks {
 }
 
 /// A single, coordinated completeness signal spanning both outcomes of a
-/// [`find_and_parse`](crate::find_and_parse) attempt — the "several
+/// [`find_and_parse`] attempt — the "several
 /// separate vocabularies for 'is this record complete'" gap
 /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 5 exists to close.
 ///
@@ -203,7 +203,7 @@ pub enum SequenceCompleteness {
 
 impl SequenceCompleteness {
     /// Builds the coordinated signal from either arm of a
-    /// [`find_and_parse`](crate::find_and_parse) result. `None` when the
+    /// [`find_and_parse`] result. `None` when the
     /// error carries no completeness signal of its own — a bare
     /// [`MrzError::NotFound`] (nothing MRZ-shaped at all) or one of the
     /// other structural/checksum error variants, which are about a
@@ -361,7 +361,7 @@ impl MrzData {
     /// `self.date_of_birth_completeness` rather than stored separately.
     /// [`SequenceCompleteness::Partial`] only ever comes from
     /// [`SequenceCompleteness::from_parse_result`] on the `Err` side of a
-    /// [`find_and_parse`](crate::find_and_parse) call, since a `Partial`
+    /// [`find_and_parse`] call, since a `Partial`
     /// read has no `MrzData` to hang this method off of in the first place.
     pub fn sequence_completeness(&self) -> SequenceCompleteness {
         SequenceCompleteness::Complete {

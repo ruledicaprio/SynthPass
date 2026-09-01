@@ -284,7 +284,8 @@ const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
 ///
 /// Each entry is bidirectional: `('0', "ODQ")` means `0` may be misread as
 /// `O`, `D`, or `Q` *and* that any of `O`, `D`, `Q` may be misread as `0` —
-/// [`confusable_alternatives`] walks the table both ways, so the digit and
+/// the crate's internal `confusable_alternatives` walks the table both ways,
+/// so the digit and
 /// its lookalike letters do not each need their own row.
 ///
 /// Deliberately small and shape-driven (round vs. round, vertical stroke vs.
@@ -326,13 +327,15 @@ fn confusable_alternatives(c: char) -> Vec<char> {
 /// Every single-glyph substitution of `field` under [`CONFUSABLES`].
 ///
 /// Sweeps positions left to right; at each position, tries every plausible
-/// confusable in place of the character actually there ([`MAX_SUBSTITUTIONS`]
-/// keeps this to one changed position per candidate — never two at once).
+/// confusable in place of the character actually there (an internal
+/// `MAX_SUBSTITUTIONS` cap keeps this to one changed position per candidate —
+/// never two at once).
 /// Non-ASCII input or a field still carrying [`UNKNOWN`] yields nothing: a
 /// position this module cannot read is [`solve_field`]'s problem, not this
 /// one's. The identity reading (`field` itself, unchanged) is never included
 /// — this function only proposes *different* readings for [`solve_substitution`]
-/// to test. Bounded by [`MAX_SUBSTITUTION_CANDIDATES`], in a stable order.
+/// to test. Bounded by an internal `MAX_SUBSTITUTION_CANDIDATES` cap, in a
+/// stable order.
 pub fn substitution_candidates(field: &str) -> Vec<String> {
     if !field.is_ascii() || field.contains(UNKNOWN) {
         return Vec::new();

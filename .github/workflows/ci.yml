@@ -190,6 +190,28 @@ jobs:
       - name: Zero-dependency build on the declared MSRV
         run: cargo check -p mrz --no-default-features
 
+  # `#![warn(missing_docs)]` (crates/mrz/src/lib.rs) ratchets docs *coverage*;
+  # nothing ratcheted their *correctness*, so nine rustdoc warnings accumulated
+  # between 0.6.4 and 0.6.5 — six of them public docs linking to private items,
+  # which rustdoc silently drops, rendering as dead cross-references on
+  # docs.rs. `--all-features` because that is what docs.rs builds with
+  # (crates/mrz/Cargo.toml's [package.metadata.docs.rs]): a link that resolves
+  # in the default build can still be dead on the rendered page.
+  #
+  # Modeled on `msrv` above — the crate is zero-dependency, so no OCR model
+  # downloads and no system dependencies.
+  docs:
+    name: mrz rustdoc
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rustdoc builds clean at the docs.rs feature set
+        run: cargo doc -p mrz --all-features --no-deps
+
   # Every breaking release `mrz` has ever shipped was an accidental addition to
   # a public type — `Format` gained MrvA/MrvB in 0.3.0, `MrzData` gained
   # `document_number_full` in 0.4.0 — and each forced downstream Cargo.toml

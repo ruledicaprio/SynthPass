@@ -139,14 +139,15 @@ fn field(s: &str, width: usize) -> String {
 /// Clean one half (primary or secondary identifier) of a name field per
 /// ICAO 9303 Part 3 §4.6
 /// (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:509-535`).
-/// Unlike [`clean`], this does **not** map every non-alphanumeric character
+/// Unlike `clean`, this does **not** map every non-alphanumeric character
 /// to the filler `<` — names get their own punctuation rules:
 ///
 /// - Each character is first uppercased via `char::to_uppercase()` (not
 ///   `to_ascii_uppercase`), then, for **each** resulting char `u` (usually
 ///   one, but see `ß`→`SS` below):
 ///   1. if `u` is a Table A national character (Part 3 §6,
-///      `:703-807`), it is replaced by its [`TransliterationStyle::Expanded`]
+///      `:703-807`), it is replaced by its
+///      [`Expanded`](crate::TransliterationStyle::Expanded)
 ///      transliteration — e.g. `Ü`→`UE`, `Ñ`→`N` — with **no** separator
 ///      pushed around it. This is the transliteration Part 3 `:493` mandates
 ///      ("The issuing State or organization shall transliterate national
@@ -168,7 +169,7 @@ fn field(s: &str, width: usize) -> String {
 ///   mapping for one that shows up anyway. Silently rewriting a digit to a
 ///   filler would erase information with no textual basis in the spec, so
 ///   this function instead preserves digits verbatim, matching the
-///   "alphanumeric survives untouched" behavior [`clean`] already applies
+///   "alphanumeric survives untouched" behavior `clean` already applies
 ///   to the document-number and optional-data fields. A digit reaching this
 ///   function means the caller handed it a name that isn't spec-clean;
 ///   per CLAUDE.md's OCR philosophy ("every field should be validated"),
