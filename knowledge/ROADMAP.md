@@ -9,6 +9,13 @@
 >
 > Read [`VISION.md`](VISION.md) first for the *why*, and [`BRANDING.md`](BRANDING.md) for
 > naming and the crate-rename migration.
+>
+> **Where truth lives in this file.** The *Execution notes* are the current state and are kept
+> current as work lands. The milestone table and the per-milestone scoping notes are **planning
+> text**, written before the work and not always revised after — they drifted a month behind the
+> Execution notes twice, both times claiming `synthpass-gen` emitted TD3 only, long after all five
+> formats shipped. When the two disagree, the Execution notes win, and the planning text is the
+> thing to fix. Check a claim against them (or against `git log`) before planning on it.
 
 The evolution is **linear, M1 through M7** — no parallel tracks. Each milestone builds on the
 last and ships with a **Definition of Done (DoD)**: specific, measurable criteria, in the
@@ -49,7 +56,7 @@ exception above. The numbering follows dependency, not schedule.)*
 | **M4 — Regression & Benchmarking** | ✅ Done | Q1 2027 | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented — **honestly measured at ~55% (100-seed, clean profile) as of PR #30, not the originally-aspirational 95%; CI gates at 30% as a floor with margin for cross-platform variance, see the execution note below** |
 | **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Q1 2027 | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
 | **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | Q2 2027 | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Expansion & Enterprise readiness** | 🔜 Kickoff/scoping | Q2 2027 | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — all five MRZ formats generate, render and benchmark; layout plugins, dataset exports, air-gapped guide and Pro beta still open | Q2 2027 | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 *("Target" quarters are the original planning targets and are left as-is for historical record; the new "Status" column reflects what's actually landed, per the Execution notes below.)*
 
@@ -176,9 +183,10 @@ flowchart LR
   - It assumes `ocrs`'s per-word angle is meaningful for near-horizontal text; verify empirically
     against the corpus before replacing the existing probe rather than adding alongside it.
 - **M6 scoping note — document classes are not interchangeable.** M6's `TD1 / TD2 / MRVA / MRVB`
-  line covers ID cards and residence permits (TD1, 3×30; TD2, 2×36) and visas (MRVA/MRVB), which
-  is the real generator gap: `synthpass-gen` emits **TD3 only** today, so every accuracy number in
-  this file is measured against synthetic passports and nothing else. **Driving licences are a
+  line covers ID cards and residence permits (TD1, 3×30; TD2, 2×36) and visas (MRVA/MRVB).
+  **The generator gap this note originally described is closed** — `synthpass-gen` has emitted all
+  five formats since `6783045` (TD1/TD2) and `3637f5d` (MRV-A/MRV-B), and every one has a per-format
+  hit rate recorded in the Execution notes below. **Driving licences remain a
   different mechanism, not a lower priority**: EU licences carry no MRZ at all, and US ones encode
   their data in an AAMVA PDF417 barcode. No amount of MRZ work reads one. They belong to
   `ExtractionV2.barcodes` — a declared slot with no decoder behind it — and should be scoped as a
@@ -685,11 +693,11 @@ place, with a suggested order, before any of it becomes code.
 
 **What ships**
 
-- **The generator gap, not just the extraction gap.** `synthpass-gen` emits **TD3 only** today —
-  every accuracy number in this file, M1 through M7, is measured against synthetic passports and
-  nothing else. TD1 (3×30 ID cards / residence permits), TD2 (2×36), and MRVA/MRVB (visas) need to
-  exist on the *generation* side before the extraction side has anything real to measure against.
-  This is the actual bottleneck, not the provider wiring below — do this first.
+- **~~The generator gap, not just the extraction gap.~~ DONE — this was the stated bottleneck and
+  it is cleared.** `synthpass-gen` emits all five formats onto their own ICAO card geometry, and
+  `--document-type td1|td2|td3|mrva|mrvb` reaches it from `synthpass generate` and both bench
+  binaries. Per-format Tier-1 hit rates and the defects the first measurements exposed are in the
+  Execution notes above; they are no longer measured against synthetic passports alone.
 - **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Once the generator produces them, extraction
   is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
   same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
