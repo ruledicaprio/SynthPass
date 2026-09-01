@@ -112,6 +112,18 @@ impl Evidence {
     pub fn line1_flagged(&self) -> bool {
         !self.line1_findings.is_empty()
     }
+
+    /// `true` when an MRZ was found, its overall checksum did **not**
+    /// verify, but the *only* failing digit was the composite —
+    /// `mrz::Checks::only_composite_failed`. Narrower than
+    /// `!mrz_checksums_valid` on purpose: `mrz_checksums_valid` keeps its
+    /// exact existing meaning (the whole record's proof), this is the
+    /// separate, weaker signal `RoutingPolicy`'s gated
+    /// `accept_composite_only_failure` (Chunk 7 of
+    /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`) can act on.
+    pub fn checksum_partially_valid(&self) -> bool {
+        self.mrz_found && !self.mrz_checksums_valid && self.mrz_failed == [mrz::Field::Composite]
+    }
 }
 
 #[cfg(test)]
@@ -158,5 +170,34 @@ mod tests {
 
         // The PII the finding carried did not survive the projection.
         assert!(!format!("{:?}", e.line1_findings).contains("XXX"));
+    }
+
+    #[test]
+    fn checksum_partially_valid_is_true_only_for_a_composite_only_failure() {
+        // No MRZ at all: never partially valid.
+        assert!(!Evidence::default().checksum_partially_valid());
+
+        // Fully valid: not "partially" anything.
+        let mut e = Evidence {
+            mrz_found: true,
+            mrz_checksums_valid: true,
+            ..Evidence::default()
+        };
+        assert!(!e.checksum_partially_valid());
+
+        // Composite is the only failure.
+        e.mrz_checksums_valid = false;
+        e.mrz_failed = vec![mrz::Field::Composite];
+        assert!(e.checksum_partially_valid());
+
+        // Composite plus another field: no longer the narrow case.
+        e.mrz_failed = vec![mrz::Field::DateOfBirth, mrz::Field::Composite];
+        assert!(!e.checksum_partially_valid());
+
+        // A single non-composite field failing alone (can't happen in
+        // practice -- composite re-covers the same data -- but the guard
+        // must still hold if it ever did).
+        e.mrz_failed = vec![mrz::Field::DateOfBirth];
+        assert!(!e.checksum_partially_valid());
     }
 }

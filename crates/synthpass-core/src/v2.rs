@@ -66,6 +66,26 @@ const IMPLAUSIBLE: f32 = 0.3;
 /// make up for the missing arithmetic.
 const MRZ_STRUCTURAL: f32 = 0.9;
 
+/// A field whose **own** ICAO check digit verified, in a record whose
+/// **composite** check digit did not — `mrz::Checks::only_composite_failed`.
+/// Gated experiment (Chunk 7 of `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`,
+/// off by default): `synthpass_die::MrzReader` only ever produces this band
+/// when explicitly opted into partial-read surfacing.
+///
+/// Deliberately **not** [`PROVEN`]: the composite re-covers the exact same
+/// characters this field's own digit already verified, just at a different
+/// weight-phase across the whole concatenation (see `only_composite_failed`'s
+/// doc comment) — a genuinely independent check, and it failed. That is real
+/// evidence something in the read is off, even though it cannot implicate
+/// this specific field. Deliberately **above** [`MRZ_STRUCTURAL`]: this field
+/// still carries a real, independently-passing arithmetic proof that a
+/// structural-only field (no check digit at all) never has. Where exactly
+/// between the two belongs is a judgement call, not a measurement — same
+/// honesty [`MRZ_STRUCTURAL`]'s own doc comment already applies to itself —
+/// placed at the midpoint pending the same-binary A/B this chunk's own gate
+/// requires before any default ever changes.
+const CHECKSUM_PARTIAL: f32 = 0.95;
+
 /// A single extracted identity / travel document record, schema v2.
 ///
 /// Relationship to v1: every v1 scalar field lives verbatim under [`fields`];
@@ -406,6 +426,29 @@ impl FieldConfidence {
             sex: MRZ_STRUCTURAL,
             date_of_expiry: PROVEN,
             personal_number: PROVEN,
+        }
+    }
+
+    /// [`Self::mrz_checksum_scope`]'s sibling for a record whose *composite*
+    /// check digit failed while every individually check-digited field still
+    /// verified (`mrz::Checks::only_composite_failed`) — Chunk 7's gated
+    /// experiment. The four individually-proven fields get [`CHECKSUM_PARTIAL`]
+    /// instead of [`PROVEN`]; every other field is governed exactly as
+    /// [`Self::mrz_checksum_scope`] already governs it — a composite failure
+    /// says nothing new about fields the composite doesn't localize to, so
+    /// there is nothing to change there.
+    pub fn mrz_checksum_scope_partial() -> Self {
+        Self {
+            document_type: MRZ_STRUCTURAL,
+            issuing_country: MRZ_STRUCTURAL,
+            document_number: CHECKSUM_PARTIAL,
+            surname: MRZ_STRUCTURAL,
+            given_names: MRZ_STRUCTURAL,
+            nationality: MRZ_STRUCTURAL,
+            date_of_birth: CHECKSUM_PARTIAL,
+            sex: MRZ_STRUCTURAL,
+            date_of_expiry: CHECKSUM_PARTIAL,
+            personal_number: CHECKSUM_PARTIAL,
         }
     }
 
@@ -1216,5 +1259,31 @@ mod tests {
         assert_eq!(confidence.sex, IMPLAUSIBLE);
         // An unrelated field must survive at its prior score, untouched.
         assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
+    }
+
+    /// Chunk 7's confidence band: individually-proven fields sit strictly
+    /// between `MRZ_STRUCTURAL` and `PROVEN`, never equal to either — a
+    /// composite-only failure is real evidence (unlike an unchecked field)
+    /// but not the same proof a fully-valid record carries.
+    #[test]
+    fn mrz_checksum_scope_partial_sits_between_structural_and_proven() {
+        let full = FieldConfidence::mrz_checksum_scope();
+        let partial = FieldConfidence::mrz_checksum_scope_partial();
+
+        assert!(partial.document_number > MRZ_STRUCTURAL);
+        assert!(partial.document_number < PROVEN);
+        assert_eq!(partial.date_of_birth, partial.document_number);
+        assert_eq!(partial.date_of_expiry, partial.document_number);
+        assert_eq!(partial.personal_number, partial.document_number);
+
+        // Every field with no check digit at all is governed identically to
+        // the fully-valid scope -- a composite failure says nothing new
+        // about fields it doesn't cover.
+        assert_eq!(partial.document_type, full.document_type);
+        assert_eq!(partial.issuing_country, full.issuing_country);
+        assert_eq!(partial.surname, full.surname);
+        assert_eq!(partial.given_names, full.given_names);
+        assert_eq!(partial.nationality, full.nationality);
+        assert_eq!(partial.sex, full.sex);
     }
 }

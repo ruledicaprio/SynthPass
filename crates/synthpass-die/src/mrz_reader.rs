@@ -32,11 +32,13 @@ pub const MRZ_PROVIDER_ID: ProviderId = ProviderId("mrz");
 
 /// Deterministic ICAO 9303 MRZ reader.
 ///
-/// Zero configuration and zero state: the whole provider is a pure function of
-/// the text it is given, which is what `deterministic: true` promises.
+/// Zero configuration and zero state, with one opt-in exception —
+/// `surface_partial_reads` — which is itself a pure function of the text
+/// given, so `deterministic: true` still holds.
 #[derive(Debug, Clone)]
 pub struct MrzReader {
     capability: Capability,
+    surface_partial_reads: bool,
 }
 
 impl Default for MrzReader {
@@ -51,6 +53,28 @@ impl MrzReader {
             // No `with_weights_license`: there is no model here to license.
             // That absence is the point of this provider.
             capability: Capability::deterministic_reader(),
+            surface_partial_reads: false,
+        }
+    }
+
+    /// **Gated experiment (Chunk 7 of `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`),
+    /// off by default.** When the *only* failing check digit is the
+    /// composite (`mrz::Checks::only_composite_failed`), report the four
+    /// individually-proven fields at
+    /// `synthpass_core::v2::FieldConfidence::mrz_checksum_scope_partial`
+    /// instead of discarding the whole record. Every other case — no MRZ,
+    /// or any individual field's own digit failing — is completely
+    /// unaffected: this only changes behavior for the one narrow,
+    /// explicitly-checked scenario.
+    ///
+    /// Not wired into `synthpass-pipeline`'s production catalog
+    /// (`MrzReader::new()` there stays the plain, flag-off constructor) —
+    /// this exists so the same-binary A/B the plan doc's gate requires can
+    /// be run before any default changes, not to ship a new default.
+    pub fn with_partial_read_surfacing() -> Self {
+        Self {
+            surface_partial_reads: true,
+            ..Self::new()
         }
     }
 }
@@ -105,7 +129,18 @@ impl FieldReader for MrzReader {
         evidence.mrz_format = Some(mrz_format_of(&data));
         evidence.blind_positions = Some(blind_positions(&data.mrz_lines));
 
-        if !data.valid() {
+        let extraction = if data.valid() {
+            extraction_v2_from_mrz(&data)
+        } else if self.surface_partial_reads && data.checks.only_composite_failed() {
+            // Gated experiment (Chunk 7, off unless constructed via
+            // `with_partial_read_surfacing`): the composite is the only
+            // failure, so the four individually check-digited fields are
+            // still worth reporting -- at `CHECKSUM_PARTIAL`, not full
+            // proof; see `extraction_v2_from_mrz_partial`'s doc comment.
+            // `evidence.mrz_checksums_valid` stays `false`, correctly: the
+            // record as a whole still did not verify.
+            extraction_v2_from_mrz_partial(&data)
+        } else {
             // A record whose check digits do not verify is not a Tier-1 result.
             // Its *evidence* is still valuable — which digits failed is the
             // most actionable escalation reason there is — but the fields are
@@ -116,14 +151,12 @@ impl FieldReader for MrzReader {
                 evidence,
                 by: self.id(),
             });
-        }
-
-        let extraction = extraction_v2_from_mrz(&data);
+        };
         evidence.observe_line1(
             extraction
                 .line1_integrity
                 .as_ref()
-                .expect("extraction_v2_from_mrz always sets line1_integrity"),
+                .expect("extraction_v2_from_mrz/_partial always sets line1_integrity"),
         );
         evidence.missing = extraction.fields.missing();
 
@@ -199,7 +232,15 @@ fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
         date_of_expiry: Some(m.date_of_expiry.clone()),
         personal_number: m.personal_number.clone(),
         mrz_line: Some(m.mrz_lines.clone()),
-        mrz_checksums_valid: Some(true),
+        // Was hardcoded `Some(true)`: harmless while this function's only
+        // caller only ever ran on an already-valid `m` (this v1 shape's
+        // `mrz_checksums_valid` is consumed transiently inside
+        // `ExtractionV2::from`, immediately overwritten by
+        // `extraction_v2_from_mrz{,_partial}`'s own `v2.mrz = Some(block)`,
+        // so it never actually leaked a wrong value) -- but honest now that
+        // `extraction_v2_from_mrz_partial` also calls this on a
+        // composite-only-failed `m`.
+        mrz_checksums_valid: Some(m.valid()),
         validity: Some(Validity {
             dates_well_formed: v.dates_well_formed,
             in_date: v.in_date,
@@ -240,10 +281,40 @@ pub fn mrz_block_from(m: &mrz::MrzData) -> MrzBlock {
 /// Moved verbatim from `synthpass-pipeline`'s private
 /// `extraction_v2_from_mrz`. Byte-for-byte the same output — that equivalence
 /// is what makes wiring the provider into the pipeline a refactor rather than
-/// a behaviour change.
+/// a behaviour change. Only ever called on a fully-valid `m`
+/// (`m.valid()` is `true`) — see [`extraction_v2_from_mrz_partial`] for the
+/// composite-only-failure sibling.
 pub fn extraction_v2_from_mrz(m: &mrz::MrzData) -> ExtractionV2 {
+    extraction_v2_scoped(m, synthpass_core::v2::FieldConfidence::mrz_checksum_scope())
+}
+
+/// **Gated experiment (Chunk 7), off unless `MrzReader` was built via
+/// [`MrzReader::with_partial_read_surfacing`].** [`extraction_v2_from_mrz`]'s
+/// sibling for a record whose composite check digit failed while every
+/// individually check-digited field still verified
+/// (`m.checks.only_composite_failed()` — callers must check this themselves,
+/// this function does not re-verify it). Identical field extraction and
+/// `line1_integrity` downgrade; the only difference is the confidence scope
+/// (`mrz_checksum_scope_partial` instead of `mrz_checksum_scope`) — the four
+/// individually-proven fields get `synthpass_core::v2`'s private
+/// `CHECKSUM_PARTIAL` band, not full proof, because the record's own
+/// composite digit did not verify it.
+fn extraction_v2_from_mrz_partial(m: &mrz::MrzData) -> ExtractionV2 {
+    extraction_v2_scoped(
+        m,
+        synthpass_core::v2::FieldConfidence::mrz_checksum_scope_partial(),
+    )
+}
+
+/// Shared body of [`extraction_v2_from_mrz`]/[`extraction_v2_from_mrz_partial`]
+/// — everything both need is identical except which confidence scope applies.
+fn extraction_v2_scoped(
+    m: &mrz::MrzData,
+    confidence: synthpass_core::v2::FieldConfidence,
+) -> ExtractionV2 {
     let block = mrz_block_from(m);
     let mut v2 = ExtractionV2::from(&extraction_from_mrz(m));
+    v2.confidence = confidence;
     v2.provenance = Provenance::MrzChecksum;
     v2.document.mrz_format = Some(block.format);
     v2.mrz = Some(block);
@@ -391,6 +462,95 @@ mod tests {
             reading.extraction.fields.get(CoreField::Surname).is_none(),
             "an unverified record reports no fields, exactly as before"
         );
+    }
+
+    /// Corrupts only the composite check digit — line 2's last character —
+    /// leaving all four individually check-digited fields untouched. The
+    /// narrowest possible input for Chunk 7's gate: `only_composite_failed()`
+    /// must be `true`.
+    fn composite_only_corrupted() -> String {
+        let mut corrupted = SPECIMEN.to_string();
+        assert!(
+            corrupted.ends_with('0'),
+            "must actually change the composite digit"
+        );
+        corrupted.pop();
+        corrupted.push('A');
+        corrupted
+    }
+
+    /// The default constructor must behave exactly as before even for the
+    /// narrow composite-only-failure case the gated flag targets — this is
+    /// the same-binary half of the A/B: one build, flag off, no behavior
+    /// change.
+    #[test]
+    fn composite_only_failure_is_fully_discarded_when_the_flag_is_off() {
+        let reading = read(&composite_only_corrupted());
+        assert!(reading.evidence.mrz_found);
+        assert!(!reading.evidence.mrz_checksums_valid);
+        assert!(reading.evidence.checksum_partially_valid());
+        assert!(
+            reading
+                .extraction
+                .fields
+                .get(CoreField::DocumentNumber)
+                .is_none(),
+            "the flag is off by default -- a composite failure still discards everything"
+        );
+        assert_eq!(reading.missing().len(), CoreField::ALL.len());
+    }
+
+    /// The flag on, the narrow case: the four individually-proven fields
+    /// surface at the new partial-proof band (strictly between
+    /// `MRZ_STRUCTURAL` and full `PROVEN`), `mrz_checksums_valid` stays
+    /// honestly `false`, and only the fields with no check digit at all that
+    /// also came back empty remain in `missing`.
+    #[test]
+    fn composite_only_failure_surfaces_proven_fields_when_the_flag_is_on() {
+        let reader = MrzReader::with_partial_read_surfacing();
+        let reading =
+            block_on(reader.read(&DocumentContext::from_text(&composite_only_corrupted())))
+                .expect("never errs");
+
+        assert!(reading.evidence.mrz_found);
+        assert!(
+            !reading.evidence.mrz_checksums_valid,
+            "the record as a whole still did not verify"
+        );
+
+        let fields = &reading.extraction.fields;
+        assert_eq!(fields.get(CoreField::DocumentNumber), Some("L898902C3"));
+        assert_eq!(fields.get(CoreField::Surname), Some("ERIKSSON"));
+
+        let c = reading.extraction.confidence;
+        assert!(c.document_number > 0.9 && c.document_number < 1.0);
+        assert_eq!(c.date_of_birth, c.document_number);
+        assert_eq!(c.date_of_expiry, c.document_number);
+        assert_eq!(c.personal_number, c.document_number);
+        // Unchanged from the fully-valid case -- composite failing says
+        // nothing new about a field it doesn't localize to.
+        assert_eq!(c.surname, 0.9);
+
+        assert!(
+            reading.missing().is_empty(),
+            "every field parsed structurally in this specimen"
+        );
+    }
+
+    /// The flag on, but a *different* check digit also failed (not just
+    /// composite): must still fully discard. The flag only ever changes
+    /// behavior for the one narrow, explicitly-checked scenario.
+    #[test]
+    fn a_non_composite_failure_is_unaffected_by_the_flag() {
+        let corrupted = SPECIMEN.replace("L898902C36UTO", "L898902C35UTO");
+        let reader = MrzReader::with_partial_read_surfacing();
+        let reading =
+            block_on(reader.read(&DocumentContext::from_text(&corrupted))).expect("never errs");
+
+        assert!(!reading.evidence.mrz_checksums_valid);
+        assert!(!reading.evidence.checksum_partially_valid());
+        assert!(reading.extraction.fields.get(CoreField::Surname).is_none());
+        assert_eq!(reading.missing().len(), CoreField::ALL.len());
     }
 
     #[test]
