@@ -428,40 +428,6 @@ impl Checks {
     pub(crate) fn score(&self) -> u8 {
         5 - self.failed().len() as u8
     }
-
-    /// `true` when the *composite* check digit is the only one that failed —
-    /// every individually check-digited field (`document_number`/
-    /// `date_of_birth`/`date_of_expiry`/`personal_number`) independently
-    /// verified. A narrower, stronger claim than `!all_valid()`: the
-    /// composite covers exactly the same data those four fields already
-    /// cover (their own digits included), just re-weighted with a different
-    /// 7-3-1 phase across the whole concatenation — so it is a genuinely
-    /// independent check, not a redundant one, and can fail even when no
-    /// individual field's own arithmetic does (e.g. OCR misreads the
-    /// composite check-digit character itself, or a substitution elsewhere
-    /// happens to be blind to a field's own phase but not composite's).
-    /// This does **not** mean the record is otherwise trustworthy — fields
-    /// with no check digit at all (`issuing_country`, the name, `nationality`,
-    /// `sex`) are unconstrained either way. See
-    /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`'s Chunk 7.
-    pub fn only_composite_failed(&self) -> bool {
-        Self::is_only_composite(&self.failed())
-    }
-
-    /// [`Self::only_composite_failed`] over an already-extracted
-    /// [`Self::failed`] list, for a consumer that stored the list rather than
-    /// the [`Checks`] it came from.
-    ///
-    /// Exists so that predicate has exactly **one** implementation.
-    /// `synthpass_die::Evidence` keeps `mrz_failed: Vec<Field>` (a PII-free
-    /// projection, not the whole record) and its
-    /// `checksum_partially_valid` gate must agree with
-    /// [`Self::only_composite_failed`], which `MrzReader` gates on — the two
-    /// are required to be used together, so they must not be able to drift
-    /// apart. They previously encoded the same comparison independently.
-    pub fn is_only_composite(failed: &[Field]) -> bool {
-        failed == [Field::Composite]
-    }
 }
 
 /// Why parsing an MRZ zone failed outright — distinct from a failed check
@@ -580,46 +546,6 @@ mod tests {
         assert!(!d.checks.date_of_birth);
         assert!(!d.checks.composite);
         assert!(!d.valid());
-        // A DOB corruption breaks composite too (it re-covers the same
-        // characters), so this is NOT the composite-only case the test below
-        // pins — `only_composite_failed` must correctly say so.
-        assert!(!d.checks.only_composite_failed());
-    }
-
-    /// The exact scenario `Checks::only_composite_failed` exists for: OCR
-    /// misreads the composite check-digit character itself (line 2's last
-    /// byte). Nothing else moves, so all four individually check-digited
-    /// fields still verify — this is the narrowest possible corruption that
-    /// makes `!valid()` true while every individual digit stays honest.
-    #[test]
-    fn td3_composite_only_failure_is_correctly_identified() {
-        let mut l2 = TD3_L2.as_bytes().to_vec();
-        let last = l2.len() - 1;
-        assert_ne!(l2[last], b'A', "must actually change the character");
-        l2[last] = b'A';
-        let l2 = String::from_utf8(l2).unwrap();
-
-        let d = parse_td3(TD3_L1, &l2).unwrap();
-        assert!(d.checks.document_number);
-        assert!(d.checks.date_of_birth);
-        assert!(d.checks.date_of_expiry);
-        assert!(d.checks.personal_number);
-        assert!(!d.checks.composite);
-        assert!(!d.valid());
-        assert!(d.checks.only_composite_failed());
-    }
-
-    /// The guard case: a record where more than the composite failed (or
-    /// nothing did) must not be misreported.
-    #[test]
-    fn only_composite_failed_is_false_when_everything_passes_or_more_fails() {
-        let valid = parse_td3(TD3_L1, TD3_L2).unwrap();
-        assert!(valid.valid());
-        assert!(!valid.checks.only_composite_failed());
-
-        let dob_and_composite_broken = TD3_L2.replacen("740812", "750812", 1);
-        let d = parse_td3(TD3_L1, &dob_and_composite_broken).unwrap();
-        assert!(!d.checks.only_composite_failed());
     }
 
     #[test]
