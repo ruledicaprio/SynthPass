@@ -445,7 +445,22 @@ impl Checks {
     /// `sex`) are unconstrained either way. See
     /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`'s Chunk 7.
     pub fn only_composite_failed(&self) -> bool {
-        self.failed() == [Field::Composite]
+        Self::is_only_composite(&self.failed())
+    }
+
+    /// [`Self::only_composite_failed`] over an already-extracted
+    /// [`Self::failed`] list, for a consumer that stored the list rather than
+    /// the [`Checks`] it came from.
+    ///
+    /// Exists so that predicate has exactly **one** implementation.
+    /// `synthpass_die::Evidence` keeps `mrz_failed: Vec<Field>` (a PII-free
+    /// projection, not the whole record) and its
+    /// `checksum_partially_valid` gate must agree with
+    /// [`Self::only_composite_failed`], which `MrzReader` gates on — the two
+    /// are required to be used together, so they must not be able to drift
+    /// apart. They previously encoded the same comparison independently.
+    pub fn is_only_composite(failed: &[Field]) -> bool {
+        failed == [Field::Composite]
     }
 }
 
