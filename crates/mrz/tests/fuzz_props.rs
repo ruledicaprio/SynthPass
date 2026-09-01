@@ -13,9 +13,10 @@
 //! `src/lib.rs`/`src/parser.rs` already cover that against real specimens).
 
 use mrz::{
-    find_and_parse, format_td1, format_td2, format_td3, parse_mrv_a, parse_mrv_b, parse_td1,
-    parse_td2, parse_td3, substitution_candidates, transliterate, transliterations, Td1Fields,
-    Td2Fields, Td3Fields, TransliterationStyle,
+    find_and_parse, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
+    parse_mrv_b, parse_td1, parse_td2, parse_td3, substitution_candidates, transliterate,
+    transliterations, MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
+    TransliterationStyle,
 };
 use proptest::prelude::*;
 
@@ -194,28 +195,125 @@ proptest! {
         prop_assert_eq!(l2.chars().count(), 44);
     }
 
-    /// The one rule ICAO 9303 Part 4 §4.2.3 makes normative about truncation
-    /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:467`): whenever a name
-    /// is truncated, the name field's last character must be alphabetic
-    /// `A`-`Z`. `surname`/`given_names` are both drawn from a 20-40 char
-    /// letters-only range, so their combined length (>= 20 + 2 + 20 = 42) is
-    /// always past TD3's 39-char name field, guaranteeing truncation fires on
-    /// every case `emit::truncate_name_components` handles.
+    /// The sibling of the test above for the other four formats — `name_field`
+    /// and `truncate_name_components` are shared by all five emitters at four
+    /// different widths (TD1 30, TD2/MRV-B 31, TD3/MRV-A 39), so a name-field
+    /// panic or a wrong line length would otherwise only ever be caught on TD3.
+    /// The narrow widths are where an off-by-one in the reserve arithmetic
+    /// would surface first.
     #[test]
-    fn truncated_td3_name_field_always_ends_alphabetic(
-        surname in "[A-Z]{20,40}",
-        given_names in "[A-Z]{20,40}",
+    fn name_field_never_panics_on_any_format(
+        surname in prop::collection::vec(mrz_ish_char(), 0..80).prop_map(|c| c.into_iter().collect::<String>()),
+        given_names in prop::collection::vec(mrz_ish_char(), 0..80).prop_map(|c| c.into_iter().collect::<String>()),
     ) {
-        let fields = Td3Fields {
+        let td1 = format_td1(&Td1Fields {
+            surname: surname.clone(),
+            given_names: given_names.clone(),
+            ..Td1Fields::default()
+        });
+        for line in td1.lines() {
+            prop_assert_eq!(line.chars().count(), 30);
+        }
+
+        let td2 = format_td2(&Td2Fields {
+            surname: surname.clone(),
+            given_names: given_names.clone(),
+            ..Td2Fields::default()
+        });
+        for line in td2.lines() {
+            prop_assert_eq!(line.chars().count(), 36);
+        }
+
+        let mrv_a = format_mrv_a(&MrvAFields {
+            surname: surname.clone(),
+            given_names: given_names.clone(),
+            ..MrvAFields::default()
+        });
+        for line in mrv_a.lines() {
+            prop_assert_eq!(line.chars().count(), 44);
+        }
+
+        let mrv_b = format_mrv_b(&MrvBFields {
             surname,
             given_names,
+            ..MrvBFields::default()
+        });
+        for line in mrv_b.lines() {
+            prop_assert_eq!(line.chars().count(), 36);
+        }
+    }
+
+    /// ICAO 9303 Part 4's normative truncation rules
+    /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407`, the Data Element
+    /// Directory row §4.2.3 cross-references), asserted end-to-end through
+    /// emit -> parse.
+    ///
+    /// **Multi-token** strategies on purpose. The predecessor of this test drew
+    /// both halves from a single `[A-Z]{20,40}` run and asserted only that the
+    /// last character was alphabetic — so it forced truncation on every case
+    /// and still could not see that `<<` and the entire secondary identifier
+    /// were being dropped. That is exactly how the defect this replaces
+    /// shipped. Multi-token names are also what makes the primary's
+    /// component-shrinking path reachable at all.
+    ///
+    /// **Why no per-component prefix assertion here**, when
+    /// `icao_vectors.rs::truncation_respects_icao_invariants` does make one:
+    /// `emit::fill_components` has a long-standing edge case, untouched by this
+    /// fix and outside its scope. When exactly one position is left it appends
+    /// the next component's first letter *without* its `<` separator — chosen
+    /// so the field ends on a letter (rule 2) rather than on a filler that
+    /// would tell the reader nothing was truncated. The cost is a fabricated
+    /// component boundary: `<<AAA` + `A` reads back as the single token
+    /// `AAAA`, which is a prefix of no source token. The ICAO worked examples
+    /// never land on that boundary, so the stricter per-component assertion is
+    /// made there, against real spec vectors, instead of here against
+    /// arbitrary generated ones.
+    #[test]
+    fn truncated_td3_names_keep_the_secondary_identifier(
+        surname_tokens in prop::collection::vec("[A-Z]{3,12}", 1..6),
+        given_tokens in prop::collection::vec("[A-Z]{2,10}", 1..4),
+    ) {
+        let surname = surname_tokens.join(" ");
+        let given_names = given_tokens.join(" ");
+        let fields = Td3Fields {
+            surname: surname.clone(),
+            given_names: given_names.clone(),
             issuing_country: "UTO".to_string(),
             ..Td3Fields::default()
         };
         let mrz = format_td3(&fields);
-        let (l1, _l2) = mrz.split_once('\n').unwrap();
-        let last = l1.chars().next_back().unwrap();
-        prop_assert!(last.is_ascii_alphabetic(), "name field ended in {last:?}, not A-Z: {l1:?}");
+        let (l1, l2) = mrz.split_once('\n').unwrap();
+
+        // 1. Layout, and rule 2 when truncation actually fired.
+        prop_assert_eq!(l1.chars().count(), 44);
+        let name_field = &l1[5..];
+        if !name_field.ends_with('<') {
+            let last = name_field.chars().next_back().unwrap();
+            prop_assert!(last.is_ascii_alphabetic(), "ended in {last:?}: {l1:?}");
+        }
+
+        // 2. It still round-trips as a valid record.
+        let parsed = parse_td3(l1, l2).unwrap();
+        prop_assert!(parsed.valid(), "emitted zone failed its own check digits: {mrz:?}");
+
+        // 3. Rule 3 — the assertion that would have caught the original defect.
+        prop_assert!(
+            !parsed.given_names.is_empty(),
+            "secondary identifier vanished: {surname:?} / {given_names:?} -> {l1:?}"
+        );
+
+        // 4. Fixpoint: truncation is lossy but stable. Re-emitting from what
+        // the parser recovered reproduces the identical line, so a record that
+        // survives one round trip survives every subsequent one. This is the
+        // strongest statement available given that equality with the source is
+        // impossible by construction.
+        let reemitted = format_td3(&Td3Fields {
+            surname: parsed.surname.clone(),
+            given_names: parsed.given_names.clone(),
+            issuing_country: "UTO".to_string(),
+            ..Td3Fields::default()
+        });
+        prop_assert_eq!(reemitted.split_once('\n').unwrap().0, l1, "not a fixpoint");
     }
 }
 

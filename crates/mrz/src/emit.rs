@@ -229,33 +229,56 @@ fn clean_name_half(s: &str) -> String {
 /// their combined length exceeds it.
 ///
 /// ICAO 9303 Part 4 §4.2.3 (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`)
-/// documents *several* issuer-discretionary truncation strategies —
+/// illustrates *several* issuer-discretionary truncation strategies —
 /// truncating trailing components to initials, truncating components to a
-/// shorter fixed length, or (this function's choice) dropping whole
-/// components from the end and, if needed, cutting the last one short. Part
-/// 4 does not prefer any one of these; there is no single "the" ICAO
-/// truncation algorithm, so this is one conformant choice among several,
-/// not a canonical behavior.
+/// shorter fixed length, or dropping whole components from the end. Part 4
+/// does not prefer any one of these, so *which* characters get removed is a
+/// genuine choice.
 ///
-/// What Part 4 *does* make normative (`:465`, `:467`) is:
-/// - a name that fits within `width` is never truncated — callers only
-///   reach this function when it does not fit;
-/// - when truncation happens, the **last character of the name field**
-///   must be alphabetic `A`-`Z`, as the reader's only signal that
-///   truncation occurred.
+/// **What is not a choice** is the `shall` in the Data Element Directory row
+/// that §4.2.3 itself cross-references
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407`, repeated verbatim
+/// in Part 5:346, Part 6:299, Part 7:282 and Part 7:640):
 ///
-/// This function guarantees the second rule by construction: it assembles
-/// whole `<`-or-`<<`-separated components until the next one would overflow
-/// `width`, then — since every component is letters-only (guaranteed by
-/// [`clean_name_half`]) — either takes a letters-only prefix of that next
-/// component to land exactly on `width`, or (if there is no room left even
-/// for the separator that would precede it) borrows straight from the next
-/// component's letters instead of emitting a separator nothing follows.
-/// Either way the character written last is always a letter, and the
-/// returned string is always exactly `width` characters (as long as
-/// `primary`/`secondary` together contain at least `width` characters,
-/// which holds whenever this function is called, since it's only invoked
-/// when the combined length exceeds `width`).
+/// > "Characters **shall** be removed from one or more components of the
+/// > primary identifier until three character positions are freed, and two
+/// > filler characters (`<<`) and the first character of the first component
+/// > of the secondary identifier can be inserted. The last character shall be
+/// > an alphabetic character (A through Z). ... **Further** truncation of the
+/// > primary identifier **may** be carried out to allow characters of the
+/// > secondary identifier to be included ... When the name consists of only a
+/// > primary identifier which exceeds [the width], characters shall be removed
+/// > from one or more components of the name until the last character in the
+/// > name field is an alphabetic character."
+///
+/// So the normative rules this function guarantees are:
+/// 1. a name that fits within `width` is never truncated — callers only reach
+///    this function when it does not fit (`:465`);
+/// 2. the **last character of the name field** is alphabetic `A`-`Z`, the
+///    reader's only signal that truncation occurred (`:467`);
+/// 3. when a secondary identifier exists, `<<` **and at least the first
+///    character of its first component always survive** — the primary is
+///    shortened to make room, never the other way around (`:407`);
+/// 4. when there is no secondary identifier, the primary is shortened until
+///    the field ends on a letter (`:407`).
+///
+/// Rule 3 is the one this function got wrong until the fix recorded in
+/// `changelog.d/mrz-name-truncation-icao.fixed.md`: it filled left-to-right
+/// and stopped at the first overflow, so a primary identifier that reached
+/// `width` on its own consumed the whole field and the `<<` separator was
+/// never emitted. `parse_*` then split on the single `<`
+/// fallback and silently reported the *first* primary component as `surname`
+/// with the remaining primary components as `given_names` — corruption, not
+/// merely loss.
+///
+/// The strategy chosen for rule 3 reproduces ICAO's own §4.2.3.3(b) worked
+/// example byte-for-byte (see [`shrink_primary`]). The narrower formats
+/// (TD1 width 30, TD2/MRV-B width 31) run the same width-parameterised
+/// algorithm and satisfy rules 1-4, but do **not** reproduce ICAO's
+/// narrow-field illustrations byte-for-byte — those illustrations contradict
+/// each other at the same width 31 (Part 6 §4.2.3.2(b) shows `<<D<P`, Part 7
+/// §7.2.3.2(b) shows `<<DINGO`), so they are drawings of the discretion in
+/// rule 3's "further truncation may", not an algorithm to match.
 ///
 /// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:585-587` documents that
 /// this ambiguity runs both ways:
@@ -268,28 +291,78 @@ fn clean_name_half(s: &str) -> String {
 /// case, and is pinned as a non-truncating golden vector in
 /// `tests/icao_vectors.rs` for that reason.
 fn truncate_name_components(primary: &str, secondary: &str, width: usize) -> String {
-    // (separator-before, component) pairs, in emission order. The very
-    // first component (if any) has an empty separator; primary/primary and
-    // secondary/secondary components are joined by `<`; primary/secondary
-    // is joined by `<<`.
-    let mut parts: Vec<(&str, &str)> = Vec::new();
-    let mut primary_components = primary.split('<').filter(|c| !c.is_empty());
-    if let Some(first) = primary_components.next() {
-        parts.push(("", first));
-    }
-    for component in primary_components {
-        parts.push(("<", component));
-    }
-    let mut secondary_components = secondary.split('<').filter(|c| !c.is_empty());
-    if let Some(first) = secondary_components.next() {
-        parts.push(("<<", first));
-    }
-    for component in secondary_components {
-        parts.push(("<", component));
+    let primary_parts: Vec<&str> = primary.split('<').filter(|c| !c.is_empty()).collect();
+    let secondary_parts: Vec<&str> = secondary.split('<').filter(|c| !c.is_empty()).collect();
+
+    // The primary identifier's length if every component were kept whole,
+    // `<`-separated. Rule 3 needs three more positions than this (`<<` plus
+    // one secondary letter) for the secondary identifier to survive.
+    let primary_whole = joined_len(&primary_parts);
+
+    if secondary_parts.is_empty() || primary_whole + 3 <= width {
+        // Either there is no secondary identifier to protect (rule 4), or the
+        // primary already leaves room for `<<` and at least one secondary
+        // letter, so the plain left-to-right fill cannot violate rule 3. This
+        // is the path ICAO's §4.2.3.2(a)/(b) secondary-truncation examples
+        // take, and it reproduces them byte-for-byte — do not "simplify" it
+        // into the reserve path below.
+        return fill_components(&component_pairs(&primary_parts, &secondary_parts), width);
     }
 
+    // Rule 3, the case this function used to get wrong: the primary would
+    // consume the whole field. Reserve the secondary's share *first*, then
+    // shrink the primary into what is left.
+    let first_secondary = secondary_parts[0];
+    // At least one primary character must survive, so the reserve can never
+    // take the whole field.
+    let reserve_len = (2 + first_secondary.len()).min(width.saturating_sub(1));
+    let primary_budget = width - reserve_len;
+
+    let primary_text = shrink_primary(&primary_parts, primary_budget);
+    // Whatever the primary could not use goes back to the secondary — which
+    // is exactly rule 3's "further truncation ... to allow characters of the
+    // secondary identifier to be included". Slack is zero for every ICAO
+    // worked example; it is non-zero only when the primary's components are
+    // too short and too many to land on `primary_budget` exactly.
+    let tail_budget = width - primary_text.len();
+    let tail = fill_components(&secondary_pairs(&secondary_parts), tail_budget);
+    format!("{primary_text}{tail}")
+}
+
+/// Length of `parts` joined by a single `<`, without building the string.
+fn joined_len(parts: &[&str]) -> usize {
+    let letters: usize = parts.iter().map(|c| c.len()).sum();
+    letters + parts.len().saturating_sub(1)
+}
+
+/// (separator-before, component) pairs in emission order: the first component
+/// has an empty separator, same-half components are joined by `<`, and the
+/// primary/secondary boundary by `<<`.
+fn component_pairs<'a>(primary: &[&'a str], secondary: &[&'a str]) -> Vec<(&'static str, &'a str)> {
+    let mut pairs: Vec<(&'static str, &'a str)> = Vec::new();
+    for (i, component) in primary.iter().enumerate() {
+        pairs.push((if i == 0 { "" } else { "<" }, component));
+    }
+    pairs.extend(secondary_pairs(secondary));
+    pairs
+}
+
+/// [`component_pairs`] for a secondary identifier emitted on its own — the
+/// first component carries the `<<` boundary separator.
+fn secondary_pairs<'a>(secondary: &[&'a str]) -> Vec<(&'static str, &'a str)> {
+    secondary
+        .iter()
+        .enumerate()
+        .map(|(i, component)| (if i == 0 { "<<" } else { "<" }, *component))
+        .collect()
+}
+
+/// Emit `pairs` left-to-right into at most `width` characters, cutting the
+/// last component short rather than emitting a separator nothing follows, so
+/// the result always ends on a letter (rule 2).
+fn fill_components(pairs: &[(&str, &str)], width: usize) -> String {
     let mut out = String::with_capacity(width);
-    for (separator, component) in parts {
+    for (separator, component) in pairs {
         let remaining = width.saturating_sub(out.len());
         if remaining == 0 {
             break;
@@ -314,6 +387,83 @@ fn truncate_name_components(primary: &str, secondary: &str, width: usize) -> Str
             out.push_str(&component[..take]);
         }
         break;
+    }
+    out
+}
+
+/// Shorten the primary identifier's `parts` to at most `budget` characters,
+/// `<`-separated, always ending on a letter.
+///
+/// Reproduces ICAO 9303 Part 4 §4.2.3.3(b)
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:559-566`) byte-for-byte,
+/// which is the only width-39 worked example of "one or more components
+/// truncated" and therefore the only place ICAO pins actual per-component
+/// lengths. Those lengths are what fix the strategy below; they are not
+/// derivable from the prose:
+///
+/// ```text
+/// BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL  ->  lengths [9, 12, 10, 10]
+/// budget 32 (= 39 - len("<<DINGO"))
+///   keep the first component whole                 head = 9
+///   water-fill the rest over 29 - 9 = 20:
+///     cap 6 -> 6+6+6 = 18 <= 20      cap 7 -> 21 > 20      so cap = 6
+///     spread the remaining 2 one at a time, left to right  -> [7, 7, 6]
+///   BENNELONG<WOOLOOM<WARRAND<WARNAM                       = 32
+/// ```
+///
+/// The one-at-a-time spread is load-bearing: handing the whole remainder to
+/// the first component that can take it yields `[8, 6, 6]`
+/// (`BENNELONG<WOOLOOMOO<WARRAN<WARNAM`), which is a *conformant* reading but
+/// not ICAO's, and the golden vector would fail.
+fn shrink_primary(parts: &[&str], budget: usize) -> String {
+    if parts.is_empty() || budget == 0 {
+        return String::new();
+    }
+    // Each component needs at least one letter and `k` components need `k-1`
+    // separators, so `2k - 1 <= budget` caps how many can appear at all.
+    let k = parts.len().min(budget.div_ceil(2));
+    let content = budget - (k - 1); // positions left for letters
+    let rest = &parts[1..k];
+    // Keep the first component whole when it fits, leaving at least one
+    // letter for each of the others.
+    let head = parts[0].len().min(content - rest.len());
+    let room = content - head;
+
+    // Largest equal per-component cap that fits in `room`.
+    let mut cap = 0;
+    for candidate in 1..=room {
+        let used: usize = rest.iter().map(|c| c.len().min(candidate)).sum();
+        if used > room {
+            break;
+        }
+        cap = candidate;
+    }
+    let mut alloc: Vec<usize> = rest.iter().map(|c| c.len().min(cap)).collect();
+
+    // Spread what the cap left over one character at a time, left to right.
+    let mut left = room - alloc.iter().sum::<usize>();
+    while left > 0 {
+        let mut progressed = false;
+        for (allocated, component) in alloc.iter_mut().zip(rest) {
+            if left == 0 {
+                break;
+            }
+            if *allocated < component.len() {
+                *allocated += 1;
+                left -= 1;
+                progressed = true;
+            }
+        }
+        if !progressed {
+            break; // every component is already whole
+        }
+    }
+
+    let mut out = String::with_capacity(budget);
+    out.push_str(&parts[0][..head]);
+    for (component, allocated) in rest.iter().zip(&alloc) {
+        out.push('<');
+        out.push_str(&component[..*allocated]);
     }
     out
 }
