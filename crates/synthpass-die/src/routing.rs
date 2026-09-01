@@ -160,6 +160,24 @@ mod tests {
     /// Every combination of the opt-in-independent signals, so
     /// `RoutingPolicy::default()` is checked against the whole space rather
     /// than a handful of hand-picked cases.
+    ///
+    /// `mrz_failed` is swept for the same reason `blind_positions` is, and the
+    /// sibling test `blind_positions_never_influences_a_decision` states it
+    /// directly: the policy must be provably *independent* of the signals it
+    /// does not consult. `mrz_failed` is populated on every parsed record by
+    /// `Evidence::observe_mrz` (from `Checks::failed`), so "routing ignores it"
+    /// is a property worth pinning rather than assuming.
+    ///
+    /// It was added while a since-reverted opt-in
+    /// (`accept_composite_only_failure`, Chunk 7 of
+    /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`) *did* consult it, where every
+    /// case leaving `mrz_failed` empty via `..Evidence::default()` meant "the
+    /// opt-in is off" and "the opt-in was never offered a case to act on" were
+    /// indistinguishable here. That opt-in is gone — the measurement that
+    /// removed it is in that doc's Chunk 7 section — but the dimension stays:
+    /// it costs one loop, it makes the sweep's "whole space" claim honest, and
+    /// any future signal that reads `mrz_failed` starts out covered instead of
+    /// silently uncovered.
     #[test]
     fn default_policy_is_exactly_the_v1_2_0_predicate() {
         let bools = [false, true];
@@ -169,6 +187,13 @@ mod tests {
         let missing_options: [Vec<CoreField>; 2] =
             [Vec::new(), vec![CoreField::Surname, CoreField::DateOfBirth]];
         let blind_options = [None, Some(0_u32), Some(40_u32)];
+        // Empty, a single-digit failure, and a multi-field one — the shapes
+        // `Checks::failed` actually produces.
+        let failed_options: [Vec<mrz::Field>; 3] = [
+            Vec::new(),
+            vec![mrz::Field::Composite],
+            vec![mrz::Field::DateOfBirth, mrz::Field::Composite],
+        ];
 
         for &mrz_found in &bools {
             for &mrz_checksums_valid in &bools {
@@ -176,26 +201,29 @@ mod tests {
                     for &text_sanity in &sanity_options {
                         for missing in &missing_options {
                             for &blind_positions in &blind_options {
-                                let ev = Evidence {
-                                    mrz_found,
-                                    mrz_checksums_valid,
-                                    line1_findings: line1_findings.clone(),
-                                    text_sanity,
-                                    missing: missing.clone(),
-                                    blind_positions,
-                                    ..Evidence::default()
-                                };
+                                for mrz_failed in &failed_options {
+                                    let ev = Evidence {
+                                        mrz_found,
+                                        mrz_checksums_valid,
+                                        line1_findings: line1_findings.clone(),
+                                        text_sanity,
+                                        missing: missing.clone(),
+                                        blind_positions,
+                                        mrz_failed: mrz_failed.clone(),
+                                        ..Evidence::default()
+                                    };
 
-                                // This predicate is exactly today's Tier-1
-                                // gate: `mrz::find_and_parse(t).ok()
-                                // .filter(|m| m.valid()).is_some()`.
-                                let expected = mrz_found && mrz_checksums_valid;
-                                let decision = RoutingPolicy::default().decide(&ev);
-                                assert_eq!(
-                                    matches!(decision, Decision::Accept),
-                                    expected,
-                                    "ev={ev:?} decision={decision:?}"
-                                );
+                                    // This predicate is exactly today's Tier-1
+                                    // gate: `mrz::find_and_parse(t).ok()
+                                    // .filter(|m| m.valid()).is_some()`.
+                                    let expected = mrz_found && mrz_checksums_valid;
+                                    let decision = RoutingPolicy::default().decide(&ev);
+                                    assert_eq!(
+                                        matches!(decision, Decision::Accept),
+                                        expected,
+                                        "ev={ev:?} decision={decision:?}"
+                                    );
+                                }
                             }
                         }
                     }
