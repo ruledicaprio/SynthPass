@@ -17,8 +17,9 @@
 //! `knowledge/docs9303/CONFORMANCE_BASIS.md`.
 
 use mrz::{
-    check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, verify,
-    MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
+    check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
+    parse_mrv_b, parse_td1, parse_td2, parse_td3, verify, MrvAFields, MrvBFields, MrzData,
+    Td1Fields, Td2Fields, Td3Fields,
 };
 
 /// `(field, expected_check_digit, source)`.
@@ -350,6 +351,29 @@ const TD3_NAME_VECTORS: &[NameVector] = &[
         viz: "PAPANDROPOULOUS, JONATHON WARREN TREVOR",
         expected_line: "PPUTOPAPANDROPOULOUS<<JONATHON<WARREN<TREVOR",
     },
+    // ---- Truncation. See `truncate_name_components`' doc comment for why
+    // only the width-39 examples are pinned as equality: ICAO's narrow-field
+    // illustrations contradict each other, these do not.
+    NameVector {
+        source: "9303 pt4 §4.2.3.2(a):542 — secondary truncated to an initial",
+        viz: "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+        expected_line: "PPUTONILAVADHANANANDA<<CHAYAPA<DEJTHAMRONG<K",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.2(b):550 — secondary's last component cut short",
+        viz: "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+        expected_line: "PPUTONILAVADHANANANDA<<ARNPOL<PETCH<CHARONGU",
+    },
+    NameVector {
+        source: "9303 pt4 §4.2.3.3(b):568 — PRIMARY truncated so `<<` plus the \
+                  secondary survive. The regression this whole change exists \
+                  for: before the fix this emitted \
+                  `PPUTOBENNELONG<WOOLOOMOOLOO<WARRANDYTE<WARNA` — no `<<`, \
+                  and `parse_td3` then reported surname `BENNELONG` with the \
+                  rest of the *surname* as given names.",
+        viz: "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO",
+        expected_line: "PPUTOBENNELONG<WOOLOOM<WARRAND<WARNAM<<DINGO",
+    },
 ];
 
 /// `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`. Bare 30-character name
@@ -447,6 +471,25 @@ const MRV_A_NAME_VECTORS: &[NameVector] = &[
                   NOT truncated",
         viz: "PAPANDROPOULOUS, JONATHON WARREN TREVOR",
         expected_line: "V<UTOPAPANDROPOULOUS<<JONATHON<WARREN<TREVOR",
+    },
+    // ---- Truncation. MRV-A shares TD3's 39-character name field, and Part 7
+    // reprints Part 4's worked examples verbatim at that width — so the same
+    // three vectors must hold here, through a different emitter.
+    NameVector {
+        source: "9303 pt7 §4.2.3.1(a):370 — secondary truncated to an initial",
+        viz: "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+        expected_line: "V<UTONILAVADHANANANDA<<CHAYAPA<DEJTHAMRONG<K",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3.1(b):376 — secondary's last component cut short",
+        viz: "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+        expected_line: "V<UTONILAVADHANANANDA<<ARNPOL<PETCH<CHARONGU",
+    },
+    NameVector {
+        source: "9303 pt7 §4.2.3.2(b):390 — primary truncated so `<<` plus the \
+                  secondary survive",
+        viz: "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO",
+        expected_line: "V<UTOBENNELONG<WOOLOOM<WARRAND<WARNAM<<DINGO",
     },
 ];
 
@@ -577,6 +620,247 @@ fn name_encoding_matches_icao_worked_examples() {
             .expect("format_mrv_b emits two lines")
             .0;
         assert_eq!(line1, v.expected_line, "{}: VIZ {:?}", v.source, v.viz);
+    }
+}
+
+/// Which emitter/parser pair a truncation case exercises.
+#[derive(Clone, Copy, Debug)]
+enum Fmt {
+    Td1,
+    Td2,
+    Td3,
+    MrvA,
+    MrvB,
+}
+
+impl Fmt {
+    /// Width of the name field, per this format's own Part.
+    fn name_width(self) -> usize {
+        match self {
+            Fmt::Td1 => 30,
+            Fmt::Td2 | Fmt::MrvB => 31,
+            Fmt::Td3 | Fmt::MrvA => 39,
+        }
+    }
+
+    /// Emit, then return `(name_field, parsed)`. The name field is the whole
+    /// line for TD1 (its third line carries nothing else) and the tail after
+    /// the 5-character document-code/country prefix for the other four.
+    fn emit_and_parse(self, surname: &str, given_names: &str) -> (String, MrzData) {
+        let (lines, parsed) = match self {
+            Fmt::Td1 => {
+                let out = format_td1(&Td1Fields {
+                    surname: surname.into(),
+                    given_names: given_names.into(),
+                    ..Default::default()
+                });
+                let l: Vec<&str> = out.lines().collect();
+                let p = parse_td1(l[0], l[1], l[2]).expect("emitted TD1 must parse");
+                (out.clone(), p)
+            }
+            Fmt::Td2 => {
+                let out = format_td2(&Td2Fields {
+                    document_code: "I".into(),
+                    issuing_country: "UTO".into(),
+                    surname: surname.into(),
+                    given_names: given_names.into(),
+                    ..Default::default()
+                });
+                let l: Vec<&str> = out.lines().collect();
+                let p = parse_td2(l[0], l[1]).expect("emitted TD2 must parse");
+                (out.clone(), p)
+            }
+            Fmt::Td3 => {
+                let out = format_td3(&Td3Fields {
+                    document_code: "PP".into(),
+                    issuing_country: "UTO".into(),
+                    surname: surname.into(),
+                    given_names: given_names.into(),
+                    ..Default::default()
+                });
+                let l: Vec<&str> = out.lines().collect();
+                let p = parse_td3(l[0], l[1]).expect("emitted TD3 must parse");
+                (out.clone(), p)
+            }
+            Fmt::MrvA => {
+                let out = format_mrv_a(&MrvAFields {
+                    issuing_country: "UTO".into(),
+                    surname: surname.into(),
+                    given_names: given_names.into(),
+                    ..Default::default()
+                });
+                let l: Vec<&str> = out.lines().collect();
+                let p = parse_mrv_a(l[0], l[1]).expect("emitted MRV-A must parse");
+                (out.clone(), p)
+            }
+            Fmt::MrvB => {
+                let out = format_mrv_b(&MrvBFields {
+                    issuing_country: "UTO".into(),
+                    surname: surname.into(),
+                    given_names: given_names.into(),
+                    ..Default::default()
+                });
+                let l: Vec<&str> = out.lines().collect();
+                let p = parse_mrv_b(l[0], l[1]).expect("emitted MRV-B must parse");
+                (out.clone(), p)
+            }
+        };
+        let name_field = match self {
+            Fmt::Td1 => lines
+                .lines()
+                .nth(2)
+                .expect("TD1 has three lines")
+                .to_string(),
+            _ => lines.lines().next().expect("two-line format")[5..].to_string(),
+        };
+        (name_field, parsed)
+    }
+}
+
+/// Every ICAO truncation example, at every width — including the narrow
+/// formats whose published output this crate deliberately does **not**
+/// reproduce byte-for-byte, because ICAO's own narrow-field illustrations
+/// contradict each other (Part 6 §4.2.3.2(b) shows `<<D<P` where Part 7
+/// §7.2.3.2(b) shows `<<DINGO`, at the same width 31).
+///
+/// So this table asserts the four *normative* rules from
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407` rather than string
+/// equality. The width-39 cases that ICAO does pin unambiguously are checked
+/// for equality too, by `name_encoding_matches_icao_worked_examples` above.
+const TRUNCATION_CASES: &[(&str, Fmt, &str)] = &[
+    // Secondary identifier overflows; primary fits.
+    (
+        "pt4 §4.2.3.2(a)",
+        Fmt::Td3,
+        "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+    ),
+    (
+        "pt4 §4.2.3.2(b)",
+        Fmt::Td3,
+        "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+    ),
+    (
+        "pt5 §4.2.3.1(a)",
+        Fmt::Td1,
+        "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+    ),
+    (
+        "pt5 §4.2.3.1(b)",
+        Fmt::Td1,
+        "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+    ),
+    (
+        "pt6 §4.2.3.1(a)",
+        Fmt::Td2,
+        "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+    ),
+    (
+        "pt6 §4.2.3.1(b)",
+        Fmt::Td2,
+        "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+    ),
+    (
+        "pt7 §7.2.3.1(a)",
+        Fmt::MrvB,
+        "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
+    ),
+    (
+        "pt7 §7.2.3.1(b)",
+        Fmt::MrvB,
+        "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
+    ),
+    // PRIMARY identifier overflows — the case rule 3 governs and the one
+    // this crate used to get wrong on every format at once.
+    ("pt4 §4.2.3.3", Fmt::Td3, PRIMARY_OVERFLOW_VIZ),
+    ("pt5 §4.2.3.2", Fmt::Td1, PRIMARY_OVERFLOW_VIZ),
+    ("pt6 §4.2.3.2", Fmt::Td2, PRIMARY_OVERFLOW_VIZ),
+    ("pt7 §4.2.3.2", Fmt::MrvA, PRIMARY_OVERFLOW_VIZ),
+    ("pt7 §7.2.3.2", Fmt::MrvB, PRIMARY_OVERFLOW_VIZ),
+    // Primary-only overflow (rule 4): no secondary to protect.
+    (
+        "rule 4, no secondary",
+        Fmt::Td3,
+        "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL",
+    ),
+    (
+        "rule 4, no secondary",
+        Fmt::Td1,
+        "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL",
+    ),
+    (
+        "rule 4, no secondary",
+        Fmt::MrvB,
+        "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL",
+    ),
+];
+
+const PRIMARY_OVERFLOW_VIZ: &str = "BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO";
+
+/// The four normative truncation rules, on every format and every ICAO
+/// example — the assertion set that survives where byte-equality cannot.
+#[test]
+fn truncation_respects_icao_invariants() {
+    for (source, format, viz) in TRUNCATION_CASES {
+        let (surname, given_names) = split_viz(viz);
+        let (name_field, parsed) = format.emit_and_parse(surname, given_names);
+        let width = format.name_width();
+        let ctx = format!("{source} {format:?} {viz:?} -> {name_field:?}");
+
+        // Rule 1/2: the field is exactly `width`, and because every case here
+        // genuinely overflows, its last character is alphabetic.
+        assert_eq!(name_field.chars().count(), width, "width: {ctx}");
+        let last = name_field.chars().next_back().expect("non-empty");
+        assert!(last.is_ascii_uppercase(), "rule 2 (ends alphabetic): {ctx}");
+
+        // Rule 3: `<<` survives whenever there is a secondary identifier to
+        // protect, and the parser therefore attributes the halves correctly.
+        if given_names.is_empty() {
+            // Rule 4: primary-only. The emitter must not invent a `<<` that
+            // ICAO's assembly rules give it no reason to write.
+            //
+            // Deliberately asserted on the *emitted field*, not on `parsed`:
+            // a `<<`-less name field is genuinely ambiguous, and `clean_name`
+            // resolves it toward "the first `<` is a collapsed separator" so
+            // that OCR-damaged zones still yield given names (see
+            // `tests/name_separator_collapse.rs`). That heuristic reads a
+            // conformant primary-only field as surname + given names. It is a
+            // parser trade-off, long-standing and unchanged by this fix — not
+            // an emitter conformance failure, and not this test's subject.
+            assert!(
+                !name_field.contains("<<"),
+                "rule 4 (no spurious `<<` for a primary-only name): {ctx}"
+            );
+            continue;
+        } else {
+            assert!(name_field.contains("<<"), "rule 3 (`<<` survives): {ctx}");
+            assert!(
+                !parsed.given_names.is_empty(),
+                "rule 3 (secondary survives the round trip): {ctx}"
+            );
+            let want_first = given_names.split(' ').next().expect("non-empty");
+            let got_first = parsed.given_names.split(' ').next().expect("non-empty");
+            assert!(
+                want_first.starts_with(got_first),
+                "first given name is a prefix of the source: {ctx}"
+            );
+        }
+
+        // Truncation only ever shortens or drops components — it must never
+        // invent, reorder, or redistribute them. This is what caught the
+        // original defect's *worst* symptom: primary components silently
+        // migrating into `given_names`.
+        let want: Vec<&str> = surname.split(' ').collect();
+        let got: Vec<&str> = parsed.surname.split(' ').collect();
+        assert!(
+            got.len() <= want.len(),
+            "no surname components invented: {ctx}"
+        );
+        for (g, w) in got.iter().zip(&want) {
+            assert!(
+                w.starts_with(g),
+                "surname component {g:?} is a prefix of {w:?}: {ctx}"
+            );
+        }
     }
 }
 
