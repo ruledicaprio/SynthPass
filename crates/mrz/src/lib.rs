@@ -29,12 +29,17 @@
 //! ```
 //!
 //! `parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other
-//! formats. See [`README.md`](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md)
-//! for the full walkthrough — free-text OCR scanning, emitting, long document
-//! numbers, national-character transliteration, and what a check digit
-//! cannot prove.
+//! formats. From there:
 //!
-//! The engine is split across (private) modules:
+//! - [`find_and_parse`] — scan free-form OCR text for an MRZ
+//! - [`format_td3`] and its siblings — emit an MRZ, national characters and all
+//! - [`MrzData::full_document_number`] — numbers too long for the printed field
+//! - [`transliterate`] — Doc 9303 Part 3 §6 A, including its multi-valued cells
+//! - [`MrzData::validity`] — why a proven *read* is not a valid *document*
+//! - [`Blindspot`] — the substitutions no check digit can ever catch
+//!
+//! The engine is split across (private) modules, whose public items are all
+//! re-exported at the crate root:
 //! - `checksum` — check-digit math and generic OCR-repair primitives
 //! - `blindspot` — the substitutions check digits provably cannot catch
 //! - `parser` — the TD1/TD2/TD3 parsers and the free-text scanner
@@ -340,6 +345,37 @@ impl MrzData {
 
     /// The complete document number: the overflow reassembly when there is
     /// one, otherwise the 9-character field as printed.
+    ///
+    /// When a document number exceeds the 9-character field, Doc 9303 puts the
+    /// nine principal characters in the field, a filler in the check-digit
+    /// position, and the remainder plus its own check digit at the front of the
+    /// optional-data field. See [`MrzData::document_number_full`] for the
+    /// normative scope of that rule and the TD3 caveat; when the remainder does
+    /// not fit the optional field, the number truncates to nine characters
+    /// instead.
+    ///
+    /// ```
+    /// use mrz::{format_td3, Td3Fields};
+    ///
+    /// let lines = format_td3(&Td3Fields {
+    ///     issuing_country: "UTO".into(),
+    ///     document_number: "L898902C31234".into(), // 13 chars, overflows the 9-char field
+    ///     surname: "ERIKSSON".into(),
+    ///     given_names: "ANNA MARIA".into(),
+    ///     nationality: "UTO".into(),
+    ///     date_of_birth: "740812".into(),
+    ///     sex: "F".into(),
+    ///     date_of_expiry: "120415".into(),
+    ///     ..Default::default()
+    /// });
+    ///
+    /// let (l1, l2) = lines.split_once('\n').unwrap();
+    /// let doc = mrz::parse_td3(l1, l2).unwrap();
+    /// assert!(doc.valid());
+    /// assert_eq!(doc.document_number, "L898902C3");            // the printed 9-char field
+    /// assert_eq!(doc.full_document_number(), "L898902C31234"); // the reassembled number
+    /// assert!(!doc.document_number_legacy_encoding);           // read as the Doc 9303 form
+    /// ```
     pub fn full_document_number(&self) -> &str {
         self.document_number_full
             .as_deref()

@@ -568,6 +568,28 @@ fn digit_char(field: &str) -> char {
 /// let (l1, l2) = mrz.split_once('\n').unwrap();
 /// assert!(parse_td3(l1, l2).unwrap().valid());
 /// ```
+///
+/// # National characters
+///
+/// Doc 9303 Part 3 §6 A defines a recommended transliteration for Latin
+/// national characters that do not fit the MRZ's `[A-Z0-9<]` alphabet. It is
+/// applied automatically, so accented letters survive instead of being
+/// silently deleted — see [`crate::transliterate`] for the cases where the
+/// standard admits more than one correct answer.
+///
+/// ```
+/// use mrz::{format_td3, Td3Fields};
+///
+/// let lines = format_td3(&Td3Fields {
+///     issuing_country: "DEU".into(),
+///     surname: "MÜLLER".into(),
+///     given_names: "TÉRÈSA".into(),
+///     ..Default::default()
+/// });
+/// let line1 = lines.split_once('\n').unwrap().0;
+/// assert!(line1.contains("MUELLER"));
+/// assert!(line1.contains("TERESA"));
+/// ```
 pub fn format_td3(fields: &Td3Fields) -> String {
     let doc_code = field(&fields.document_code, 2);
     let issuing = field(&fields.issuing_country, 3);

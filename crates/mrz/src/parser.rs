@@ -1036,6 +1036,22 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
 }
 
 /// [`find_and_parse`] with an explicit [`ParseOptions`].
+///
+/// Both entry points normalize the input the same way before scanning, which is
+/// what lets a Markdown-escaped MRZ and one collapsed onto a single physical
+/// line still read as the document they came from:
+///
+/// ```
+/// use mrz::{find_and_parse_with, ParseOptions};
+///
+/// // `&lt;` as produced by docling's Markdown, and both lines merged into one.
+/// let text = "P&lt;UTOERIKSSON&lt;&lt;ANNA&lt;MARIA&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;\
+///             L898902C36UTO7408122F1204159ZE184226B&lt;&lt;&lt;&lt;&lt;10";
+///
+/// let doc = find_and_parse_with(text, &ParseOptions::default()).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert!(doc.valid());
+/// ```
 pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
     // Markdown/HTML pipelines escape the filler character.
     let text = text.replace("&lt;", "<");

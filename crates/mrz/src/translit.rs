@@ -185,12 +185,28 @@ pub fn transliterate_char(c: char, style: TransliterationStyle) -> Option<&'stat
 /// transliteration. Characters outside Table A pass through **unchanged**
 /// (uppercased). This performs no MRZ filler handling and no truncation.
 ///
+/// Five of Table A's 95 characters have **more than one** ICAO-recommended
+/// transliteration, and the issuing State chooses among them. This function
+/// exposes that choice through `style` rather than pretending to a single
+/// canonical answer — which is why the crate can *produce* a conformant
+/// transliteration but cannot *validate* one: the standard admits several
+/// correct answers for the same input, and nothing in the MRZ records which
+/// the issuer picked.
+///
+/// Only Latin-based characters (§6 A) are implemented. Cyrillic (§6 B) and
+/// Arabic (§6 C) are out of scope.
+///
 /// ```
 /// use mrz::{transliterate, TransliterationStyle};
 ///
 /// // ICAO 9303 Part 3 Appendix B's own worked example.
 /// assert_eq!(transliterate("Térèsa", TransliterationStyle::XxSuffix), "TERESA");
 /// assert_eq!(transliterate("CAÑON", TransliterationStyle::XxSuffix), "CANXXON");
+///
+/// // The multi-valued cells: same input, two conformant answers.
+/// assert_eq!(transliterate("Ñ", TransliterationStyle::Expanded), "N");
+/// assert_eq!(transliterate("Ñ", TransliterationStyle::XxSuffix), "NXX");
+/// assert_eq!(transliterate("ß", TransliterationStyle::Simple), "SS"); // only one ICAO answer
 /// ```
 pub fn transliterate(s: &str, style: TransliterationStyle) -> String {
     let mut out = String::with_capacity(s.len());
