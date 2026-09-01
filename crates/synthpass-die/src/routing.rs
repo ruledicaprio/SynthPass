@@ -52,21 +52,6 @@ pub struct RoutingPolicy {
     /// would invent a number this policy cannot justify; the field exists so
     /// that once the measurement exists, there is somewhere to put it.
     pub sanity_floor: Option<f32>,
-    /// **Gated experiment (Chunk 7 of `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`),
-    /// off by default.** When `true`, a checksum failure where
-    /// [`Evidence::checksum_partially_valid`] holds — the composite is the
-    /// *only* failing digit — does not by itself trigger
-    /// [`EscalationKind::MrzChecksumFailed`]; the decision falls through to
-    /// clauses 3-5 below instead (which stay independently opt-in). Requires
-    /// pairing with a reader built via
-    /// `MrzReader::with_partial_read_surfacing` — otherwise `ev.missing`
-    /// stays `CoreField::ALL` and clause 5, if enabled, escalates anyway.
-    ///
-    /// `false` reproduces [`Self::v1_2_0_compatible`] exactly. This exists so
-    /// the same-binary A/B the plan doc's gate requires (Tier-2 escalation
-    /// rate, hit rate, per-field CER) can be run before any default changes
-    /// — not to ship a new default.
-    pub accept_composite_only_failure: bool,
     /// The most expensive provider an escalation under this policy may reach
     /// for. Every `Decision::Escalate` this policy produces carries a budget
     /// no higher than this.
@@ -94,7 +79,6 @@ impl RoutingPolicy {
             escalate_on_missing_fields: false,
             escalate_on_line1_flagged: false,
             sanity_floor: None,
-            accept_composite_only_failure: false,
             max_budget: CostClass::Expensive,
         }
     }
@@ -108,10 +92,7 @@ impl RoutingPolicy {
     /// outcome:
     ///
     /// 1. no MRZ found at all → [`EscalationKind::MrzNotFound`]
-    /// 2. an MRZ parsed but a check digit failed → [`EscalationKind::MrzChecksumFailed`],
-    ///    **unless** (opt-in, Chunk 7) `accept_composite_only_failure` is set and
-    ///    [`Evidence::checksum_partially_valid`] holds — then this clause is
-    ///    skipped and evaluation continues to clause 3
+    /// 2. an MRZ parsed but a check digit failed → [`EscalationKind::MrzChecksumFailed`]
     /// 3. (opt-in) line 1 integrity flagged the record → [`EscalationKind::Line1Flagged`]
     /// 4. (opt-in) text sanity fell below the floor → [`EscalationKind::OcrBelowSanityFloor`]
     /// 5. (opt-in) one or more fields came back empty → [`EscalationKind::FieldsMissing`]
@@ -138,14 +119,10 @@ impl RoutingPolicy {
             };
         }
         if !ev.mrz_checksums_valid {
-            let composite_only_accepted =
-                self.accept_composite_only_failure && ev.checksum_partially_valid();
-            if !composite_only_accepted {
-                return Decision::Escalate {
-                    reason: EscalationKind::MrzChecksumFailed,
-                    budget: self.max_budget,
-                };
-            }
+            return Decision::Escalate {
+                reason: EscalationKind::MrzChecksumFailed,
+                budget: self.max_budget,
+            };
         }
         if self.escalate_on_line1_flagged && ev.line1_flagged() {
             return Decision::Escalate {
@@ -325,96 +302,6 @@ mod tests {
             Decision::Escalate {
                 reason: EscalationKind::FieldsMissing,
                 budget: missing_on.max_budget,
-            }
-        );
-    }
-
-    /// A composite-only failure with the new opt-in off must escalate
-    /// exactly as `v1_2_0_compatible` always has — the same-binary half of
-    /// Chunk 7's A/B.
-    #[test]
-    fn composite_only_failure_escalates_when_the_new_opt_in_is_off() {
-        let ev = Evidence {
-            mrz_found: true,
-            mrz_checksums_valid: false,
-            mrz_failed: vec![mrz::Field::Composite],
-            ..Evidence::default()
-        };
-        assert_eq!(
-            RoutingPolicy::default().decide(&ev),
-            Decision::Escalate {
-                reason: EscalationKind::MrzChecksumFailed,
-                budget: RoutingPolicy::default().max_budget,
-            }
-        );
-    }
-
-    /// The opt-in on, paired with the narrow evidence it's meant for: clause
-    /// 2 is skipped, and with every other opt-in still off, the record is
-    /// accepted rather than escalated.
-    #[test]
-    fn composite_only_failure_is_accepted_when_the_new_opt_in_is_on() {
-        let ev = Evidence {
-            mrz_found: true,
-            mrz_checksums_valid: false,
-            mrz_failed: vec![mrz::Field::Composite],
-            missing: Vec::new(), // MrzReader::with_partial_read_surfacing narrowed this
-            ..Evidence::default()
-        };
-        let policy = RoutingPolicy {
-            accept_composite_only_failure: true,
-            ..RoutingPolicy::default()
-        };
-        assert_eq!(policy.decide(&ev), Decision::Accept);
-    }
-
-    /// The opt-in on, but the failure isn't the narrow composite-only case
-    /// (`Evidence::checksum_partially_valid` is false): clause 2 must still
-    /// fire. The opt-in is not "trust any checksum failure."
-    #[test]
-    fn a_broader_checksum_failure_still_escalates_even_with_the_opt_in_on() {
-        let ev = Evidence {
-            mrz_found: true,
-            mrz_checksums_valid: false,
-            mrz_failed: vec![mrz::Field::DateOfBirth, mrz::Field::Composite],
-            ..Evidence::default()
-        };
-        let policy = RoutingPolicy {
-            accept_composite_only_failure: true,
-            ..RoutingPolicy::default()
-        };
-        assert_eq!(
-            policy.decide(&ev),
-            Decision::Escalate {
-                reason: EscalationKind::MrzChecksumFailed,
-                budget: policy.max_budget,
-            }
-        );
-    }
-
-    /// The opt-in on, composite-only evidence, but `escalate_on_missing_fields`
-    /// also on and genuinely-missing fields remain: clause 2 is skipped, but
-    /// clause 5 still catches it. The composite-only opt-in only ever removes
-    /// clause 2's automatic veto — it does not disable the later clauses.
-    #[test]
-    fn falls_through_to_missing_fields_when_that_opt_in_is_also_on() {
-        let ev = Evidence {
-            mrz_found: true,
-            mrz_checksums_valid: false,
-            mrz_failed: vec![mrz::Field::Composite],
-            missing: vec![CoreField::IssuingCountry],
-            ..Evidence::default()
-        };
-        let policy = RoutingPolicy {
-            accept_composite_only_failure: true,
-            escalate_on_missing_fields: true,
-            ..RoutingPolicy::default()
-        };
-        assert_eq!(
-            policy.decide(&ev),
-            Decision::Escalate {
-                reason: EscalationKind::FieldsMissing,
-                budget: policy.max_budget,
             }
         );
     }

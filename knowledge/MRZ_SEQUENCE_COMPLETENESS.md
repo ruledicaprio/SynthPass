@@ -53,11 +53,10 @@ convention (`<id>.<category>.md`, `id` = PR number once known). **Do not batch
 multiple chunks into one PR.** Each chunk below is meant to be self-contained: file
 paths, a design sketch, measurement command, and acceptance criteria. Line numbers
 cited are a starting point, not gospel — **re-verify with Grep before editing**,
-since they drift as the crate changes. Chunks 6 and 7 were both gated — chunk 6
-on a go/no-go after real-specimen measurement, chunk 7 on a product sign-off
-before implementation even started. Both are now done; see each section for
-what actually shipped (both diverged from the original proposal) and the
-measurement that cleared them.
+since they drift as the crate changes. Chunk 7 is marked **[GATED]** — do not
+start implementation without the checkpoint described in its own section. Chunk 6
+was also gated; see its section for why the originally-proposed design was
+dropped at design time and what shipped instead, cleared by measurement.
 
 Suggested order and parallelism:
 
@@ -75,7 +74,7 @@ Sequential (5 needs 4's real shape, not a guess):
 Last, independent of each other:
   6. TD2 line-1 repair — done (see its section: design pivoted away from the
      originally-proposed document-code dictionary, measured, cleared)
-  7. MrzReader partial-read surfacing — done, narrowed, off by default (see its section)
+  7. MrzReader partial-read surfacing (needs a product sign-off BEFORE starting)
 ```
 
 ---
@@ -445,94 +444,111 @@ table was written, rather than after a bad measurement.
 
 ---
 
-## Chunk 7 — [DONE, narrowed] `MrzReader` partial-read surfacing experiment
+## Chunk 7 — [CLOSED: measured, rejected, reverted] `MrzReader` partial-read surfacing
 
-**Status: sign-off received, implemented, flag-gated and off by default.**
-Product-risk sign-off: **yes, add the new `FieldConfidence` band**, flag-gated,
-same-binary A/B before merge — obtained before any code was written, per this
-chunk's own gate. What shipped is **narrower** than this section originally
-proposed; the narrowing and why are below, along with the measurement.
+**Status: do not re-open without reading this section.** This chunk was
+sign-off-gated, implemented flag-off (PR #173), measured, and **reverted**. The
+premise is wrong, and the measurement says so at 97.6%.
+
+**What was measured** (`synthpass-bench --escalation-report`, 300 documents per
+format, `--profile all --seed 0`):
+
+| Format | escalation (default) | escalation (+opt-in) | delta | newly accepted | carrying a wrong check-digited field |
+|---|---|---|---|---|---|
+| TD1 | 42.7% | 34.0% | −8.67pp | 26 | **26/26** |
+| TD2 | 21.7% | 17.0% | −4.67pp | 14 | **13/14** |
+| TD3 | 30.0% | 29.7% | −0.33pp | 1 | **1/1** |
+
+**Why the premise is wrong.** The chunk assumed that when the composite is the
+only failing digit, every individually check-digited field "independently
+verified", so surfacing them is safe. On **four of the five formats that is
+vacuous**: `Checks::personal_number` is hardcoded `true` for
+TD1/TD2/MRV-A/MRV-B (`parser.rs:386`, `:299`, `:467`, `:538`) because no such
+check digit exists there. `Checks::failed()` lists only fields whose bool is
+`false`, so a corrupted optional-data field can never appear in it — while the
+TD1/TD2 composite digit *does* cover that field.
+
+So `only_composite_failed()` on those formats is largely the signature of *"the
+one field with no independent check is wrong, and the composite — the only digit
+covering it — caught that."* The observed substitutions are the classic OCR
+pairs (`0↔O`, `5↔S`), not congruent mod 10, hence caught by the composite and by
+nothing else.
+
+TD3 confirms the mechanism rather than contradicting it: its `personal_number`
+genuinely is check-digited (`parser.rs:223`), reachability collapses to 1 in 300,
+and that one document is wrong in `document_number` via `Q`→`G` — 26 and 16,
+congruent mod 10, therefore invisible to the field's own digit. The composite is
+the only reason it was flagged.
+
+**The generalisation worth keeping:** a composite-only failure is evidence that
+something in the zone is wrong, not evidence that everything except the composite
+digit is right. The composite is an *independent* check; an independent check
+failing is information, and the most likely explanation for it failing alone is
+either a misread composite character **or** an error the other digits are
+structurally blind to. `only_composite_failed()` cannot distinguish those, and
+the second case dominates in practice.
+
+**Also invalidated:** `FieldConfidence::mrz_checksum_scope_partial`'s stated
+basis for its 0.95 band — "this field still carries a real,
+independently-passing arithmetic proof that a structural-only field never has" —
+does not hold for `personal_number` on TD1/TD2/MRV-A/MRV-B. Any future revival
+needs a different justification, not a different threshold.
+
+The original proposal follows, unchanged, for the record.
 
 **Goal.** Determine whether surfacing `find_and_parse`'s already-computed partial
-read reduces unnecessary Tier-2 escalation without hurting accuracy.
+read (some check digits pass, some fail) to the pipeline reduces unnecessary
+Tier-2 escalation without hurting accuracy.
 
-**Current behavior (before this chunk).** `MrzReader::read()`
-(`crates/synthpass-die/src/mrz_reader.rs`) called `evidence.observe_mrz(&data)`
-(recording per-field evidence including which check digits passed) before the
-validity gate, then discarded everything whenever even one check digit failed.
+**Current behavior (confirmed live this session).**
+`MrzReader::read()` (`crates/synthpass-die/src/mrz_reader.rs`, function ~line
+83-135) calls `evidence.observe_mrz(&data)` (~line 104, recording per-field
+evidence including which check digits passed) **before** the validity gate at
+~line 108-119, then discards everything —
+`evidence.missing = synthpass_core::v2::CoreField::ALL.to_vec()`,
+`extraction: ExtractionV2::default()` — whenever even one check digit fails. The
+doc comment at that gate is explicit this is deliberate, pre-refactor-preserved
+behavior ("the fields are not reported, exactly as before"), not a re-measured
+decision.
 
-**What shipped — narrower than "partially valid," and deliberately so.** The
-original proposal said "when check digits are *partially* valid." Implemented
-instead: only when `mrz::Checks::only_composite_failed()` is true — the
-composite is the *only* failing digit, and all four individually
-check-digited fields (`document_number`/`date_of_birth`/`date_of_expiry`/
-`personal_number`) independently verified. A looser "any individual field's
-digit failed but let's surface the others anyway" reading of "partially valid"
-would report a field sitting *right next to a proven-wrong one* as if nothing
-were amiss — the four fields share no arithmetic independence from each other
-the way this crate's own repair machinery already assumes elsewhere. The
-composite-only case has no such problem: every individual digit that exists
-genuinely passed; the only thing wrong is the *separate*, differently-weighted
-whole-zone check (`Checks::only_composite_failed`'s doc comment has the exact
-arithmetic reasoning — composite recovers the same characters at a different
-7-3-1 phase, so it is a real independent check, not a redundant one).
+**Proposed experiment (flag-gated, opt-in only).** A constructor flag or env var
+(this project's documented same-binary A/B convention) that, when check digits are
+*partially* valid, still calls `extraction_v2_from_mrz(&data)` and reports
+**only** the `CoreField`s backed by their own passing check digit
+(`document_number`/`date_of_birth`/`date_of_expiry`/`personal_number`, via
+`Checks`; fields with no check digit at all stay governed by
+`fusion::check_line1_integrity`, unchanged). `evidence.missing` becomes the
+genuinely-still-missing subset instead of `CoreField::ALL`.
 
-**Confidence band.** `FieldConfidence::mrz_checksum_scope_partial()`
-(`crates/synthpass-core/src/v2.rs`) — the private `CHECKSUM_PARTIAL = 0.95`
-constant, strictly between `MRZ_STRUCTURAL` (0.9) and `PROVEN` (1.0). Exact
-placement is a judgement call, explicitly documented as one (no calibration
-curve exists, same honesty `MRZ_STRUCTURAL`'s own doc comment already applies
-to itself) — a future real-world sweep may move it, not this chunk.
+**Why this needs sign-off before code, not just before merge.** Surfacing a
+partial record changes what confidence guarantee a downstream consumer believes
+they're receiving — this is a trust-boundary/licensing question, independent of
+whether the benchmark numbers look favorable. Specifically:
+1. Does a **new `FieldConfidence` band** ("this field's own check digit passed,
+   but the record overall didn't") get introduced? This is not equivalent to
+   `MRZ_STRUCTURAL` (unchecked fields) or full checksum-verified — it's a
+   genuinely new tier.
+2. Is any A/B result here strong enough to change a *default*, given
+   `RoutingPolicy::v1_2_0_compatible()`'s explicit design principle that behavior
+   changes require prior measurement, not plausibility
+   (`crates/synthpass-die/src/routing.rs:71-76`)?
 
-**Flag surface.** `MrzReader::with_partial_read_surfacing()` (constructor,
-default `MrzReader::new()` unaffected) and
-`RoutingPolicy::accept_composite_only_failure` (field, `false` in
-`v1_2_0_compatible()`) — both off by default, both required together for the
-narrow case to actually change a routing decision (the reader narrows
-`evidence.missing`; the policy is what stops clause 2 auto-escalating on it).
-Neither is wired into `synthpass-pipeline`'s production catalog
-(`MrzReader::new()`/`RoutingPolicy::default()` there are untouched) — this
-ships as a measurable primitive, not a new default.
+**Get that answer from the user/product owner before starting this chunk.**
 
-**Measurement.**
-1. *Same-binary, flag off:* `cargo test -p synthpass-die` — the exhaustive
-   `default_policy_is_exactly_the_v1_2_0_predicate` test (all opt-in
-   combinations) and dedicated composite-only-failure tests in both
-   `mrz_reader.rs` and `routing.rs` all pass; flag-off behavior is provably
-   byte-identical to before for every case, not just spot-checked.
-2. *Reachability, synthetic corpus* (`--profile all --count 150 --seed 0`,
-   150 documents × 5 OCR-noise profiles each): how often the narrow
-   composite-only case actually occurs, counted from `failing_checks`
-   (Chunk 1's diagnostic) on every `checksum_failed` miss:
-   - **TD3: 0 of 150 (0%).** Every observed composite failure co-occurred
-     with `document_number` or `personal_number` also failing.
-   - **TD1: 11 of 150 (7.3%).**
-   - **TD2: 7 of 150 (4.7%).**
-   - **MRV-A/MRV-B: not applicable** — `composite` is hardcoded `true` for
-     both formats (no composite check digit exists at all per ICAO 9303
-     Part 7), so `only_composite_failed()` can never be true there.
+**Files (once approved).** `crates/synthpass-die/src/mrz_reader.rs` (the gate at
+~line 108-119); `crates/synthpass-die/src/routing.rs` (possible new
+`escalate_on_*` knob, mirroring the existing unset `sanity_floor` pattern at
+~line 41-52).
 
-   This is real signal, not noise: the scenario this chunk targets is
-   near-absent for TD3 under this corpus's noise model, but a meaningful
-   single-digit percentage of TD1/TD2 documents. Whether that is worth
-   pursuing further depends on TD1/TD2's real-world traffic share, which
-   this measurement doesn't have.
-3. *Full pipeline-level Tier-2-escalation-rate A/B — not done, and
-   deliberately not bundled into this PR.* Running it for real requires
-   wiring `with_partial_read_surfacing`/`accept_composite_only_failure`
-   through `synthpass-pipeline`'s catalog construction and exposing a
-   `provider-bench`/`synthpass-bench` toggle — a separate, materially larger
-   integration task than "the code change is small" scoped for this chunk.
-   Recommended as the next step before ever flipping either default, using
-   the reachability numbers above to decide whether TD1/TD2 alone justify it.
+**Measurement (once approved).** Same-binary A/B, one build, toggle the flag, run
+`provider-bench`/`synthpass-bench` twice against the same corpus and real-specimen
+set. Compare: (a) Tier-2 escalation rate; (b) final hit rate / per-field CER —
+does surfacing partial fields introduce wrong-but-plausible values a downstream
+consumer might trust without knowing they're checksum-unbacked; (c) whether the
+new confidence band from the sign-off above needs adjustment based on real
+numbers.
 
-**Files.** `crates/mrz/src/lib.rs` (`Checks::only_composite_failed`);
-`crates/synthpass-core/src/v2.rs` (`CHECKSUM_PARTIAL`,
-`FieldConfidence::mrz_checksum_scope_partial`); `crates/synthpass-die/src/evidence.rs`
-(`Evidence::checksum_partially_valid`); `crates/synthpass-die/src/mrz_reader.rs`
-(`MrzReader::with_partial_read_surfacing`, `extraction_v2_from_mrz_partial`);
-`crates/synthpass-die/src/routing.rs` (`RoutingPolicy::accept_composite_only_failure`).
-
-**Size.** Was scoped as medium (small code, real measurement work); the actual
-code stayed small and additive as expected. **Dependencies.** Used chunk 1's
-`failing_checks` diagnostic for the reachability measurement, as anticipated.
+**Size.** Medium (the code change is small; the measurement design and required
+confidence-band decision are the real work). **Dependencies.** Benefits from
+chunk 1's diagnostic split to interpret which check digits typically fail in
+partial reads — do chunk 1 first regardless of when 7 gets its sign-off.
