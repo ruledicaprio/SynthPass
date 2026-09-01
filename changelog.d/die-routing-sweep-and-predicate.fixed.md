@@ -1,26 +1,23 @@
-- **`mrz` gains `Checks::is_only_composite`, and `synthpass-die`'s two Chunk 7 gates stop
-  encoding the same predicate twice (no behaviour change).** `MrzReader` gates partial-read
-  surfacing on `mrz::Checks::only_composite_failed`, while `RoutingPolicy` gates its half on
-  `Evidence::checksum_partially_valid` — which re-derived the identical comparison as
-  `mrz_failed == [Field::Composite]`. The two are required to be enabled *together* for the
-  gated experiment to change any routing decision, so two independent copies of the test were
-  a standing invitation to drift. `Checks::is_only_composite(&[Field])` is the single
-  implementation both now use; `Evidence` keeps `mrz_failed: Vec<Field>` (a PII-free
-  projection) and defers to it.
-
 - **`default_policy_is_exactly_the_v1_2_0_predicate` now sweeps `mrz_failed`, and its doc
   comment no longer claims more than it proves.** The test enumerates the evidence space to
-  show `RoutingPolicy::default()` accepts exactly `mrz_found && mrz_checksums_valid`, but
-  every case was built with `..Evidence::default()`, leaving `mrz_failed` empty — so "the
-  Chunk 7 opt-in is off" and "the opt-in was never offered a case it could act on" were
-  indistinguishable. Chunk 7's commit message cited this test as proof that flag-off
-  behaviour was byte-identical; that proof actually came from the `&&` short-circuit in
-  routing clause 2.
+  show `RoutingPolicy::default()` accepts exactly `mrz_found && mrz_checksums_valid`, but every
+  case was built with `..Evidence::default()`, leaving `mrz_failed` empty — so the sweep's
+  "whole space" claim excluded a signal that `Evidence::observe_mrz` populates on every parsed
+  record. `mrz_failed` is now swept over `[]`, a single-digit failure, and a multi-field one,
+  pinning that routing is provably *independent* of it — the same property the sibling
+  `blind_positions_never_influences_a_decision` states for the other signal the policy does not
+  consult.
 
-  Sweeping `mrz_failed` over `[]`, `[Composite]`, and `[DateOfBirth, Composite]` makes an
-  accidental flip of `accept_composite_only_failure`'s default fail *in this test* —
-  verified by flipping it and confirming the failing case is `mrz_failed: [Composite]`, an
-  input the previous sweep never generated. The doc comment now also states what the sweep
-  does **not** do: it never reaches `Evidence::checksum_partially_valid`, because clause 2
-  short-circuits before consulting it, so that function's own behaviour stays pinned by
-  `checksum_partially_valid_is_true_only_for_a_composite_only_failure` in `evidence.rs`.
+  The dimension was added while a since-reverted opt-in (`accept_composite_only_failure`,
+  Chunk 7) *did* consult `mrz_failed`, where its absence made "the opt-in is off"
+  indistinguishable from "the opt-in was never offered a case to act on". That opt-in is gone;
+  the dimension stays, because it costs one loop and any future signal reading `mrz_failed`
+  starts out covered rather than silently uncovered.
+
+  The de-duplication of the composite-only predicate that originally shipped alongside this
+  (`mrz::Checks::is_only_composite`, added so `Evidence::checksum_partially_valid` and
+  `Checks::only_composite_failed` could not drift apart) is **withdrawn**: the measurement in
+  `--escalation-report` rejected Chunk 7, both of those functions are reverted, and a helper
+  whose only two callers are gone would be dead public API on a published crate. Neither
+  function ever reached a release — `mrz`'s published version is still 0.6.4 — so nothing
+  user-visible was added and then removed.
