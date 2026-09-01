@@ -172,21 +172,56 @@ occurrences (TD3 `:504`, MRV-B `:708`) and the `PAPANDROPOULOUS` "fits
 exactly, must be assumed truncated" case (TD3 `:584`, MRV-A `:402`, MRV-B
 `:760`, TD1/TD2 equivalents `:427`/`:399`).
 
-Truncation itself (the §4.2.3.2/§4.2.3.3-family worked examples, and Part 7's
-equivalents) is **not** pinned as emit assertions: Part 4 §4.2.3
-(`Doc_9303_Part4...:463-587`) documents several issuer-discretionary
-truncation strategies with no single canonical algorithm. `emit.rs`'s
-`truncate_name_components` implements one conformant choice (whole
-`<`/`<<`-separated components, cutting the last one short when needed) and
-documents it as such, not as "the" ICAO behavior. It guarantees the two rules
-Part 4 *does* make normative — a name that fits is never truncated; a
-truncated field's last character is always alphabetic `A`-`Z`
-(`Doc_9303_Part4...:465`, `:467`) — the latter checked both by the pinned
-`PAPANDROPOULOUS` non-truncating vectors above and by a dedicated property
-test, `truncated_td3_name_field_always_ends_alphabetic`
-(`crates/mrz/tests/fuzz_props.rs`), which forces truncation on every case via
-oversized random surname/given_names and asserts the field's last character
-is always a letter.
+Truncation is **partly** pinned as emit assertions, and this entry's stance
+changed once a normative rule that had been missed was found.
+
+**What was missed.** §4.2.3's prose
+(`Doc_9303_Part4...:463-470`) states only two rules — a name that fits is
+never truncated, and a truncated field's last character is alphabetic — and
+its §4.2.3.2/§4.2.3.3 examples show several issuer-discretionary strategies.
+This entry, and `emit.rs`'s own doc comment, previously concluded from that
+alone that no truncation behaviour was normative. But §4.2.3 cross-references
+the Data Element Directory ("see the Data Element Directory of the MRZ in
+4.2.2"), whose `Truncation of the name` row
+(`Doc_9303_Part4...:407`, repeated verbatim in Part 5 `:346`, Part 6 `:299`,
+Part 7 `:282` and `:640`) carries a third `shall`:
+
+> "Characters **shall** be removed from one or more components of the primary
+> identifier until three character positions are freed, and two filler
+> characters (`<<`) and the first character of the first component of the
+> secondary identifier can be inserted. ... **Further** truncation of the
+> primary identifier **may** be carried out to allow characters of the
+> secondary identifier to be included."
+
+So the discretion is real but bounded: it governs *which* characters are
+removed and *how many extra* secondary characters are kept — not whether the
+secondary identifier survives at all. The emitter violated this for any name
+whose primary identifier alone reached the field width; see the changelog
+fragment for the failure it caused.
+
+**Now pinned as worked-example equality** (width 39, where ICAO's examples are
+unambiguous): Part 4 §4.2.3.2(a) `:542`, §4.2.3.2(b) `:550`, §4.2.3.3(b)
+`:568`, and Part 7's MRV-A reprints of the same three at `:370`, `:376`,
+`:390` — six vectors in `crates/mrz/tests/icao_vectors.rs`.
+
+**Still not pinned as equality**, correctly: the to-initials and fixed-length
+strategies (§4.2.3.3(a)/(c)), and every narrow-field example. ICAO's narrow
+illustrations contradict each other at the same width 31 — Part 6 §4.2.3.2(b)
+shows `<<D<P` where Part 7 §7.2.3.2(b) shows `<<DINGO` — so they illustrate
+the "further truncation may" discretion rather than define an algorithm.
+Those are verified against the four normative rules instead, by
+`truncation_respects_icao_invariants` (`crates/mrz/tests/icao_vectors.rs`)
+across all five formats and by the
+`truncated_td3_names_keep_the_secondary_identifier` property test
+(`crates/mrz/tests/fuzz_props.rs`), which replaced a predecessor that forced
+truncation on every case yet asserted only the last character — which is why
+the violation above went unnoticed.
+
+One documented wrinkle, pre-existing and out of scope for that fix:
+`fill_components` may append a component's first letter without its `<`
+separator when exactly one position remains, preferring rule 2's alphabetic
+terminator over a filler that would falsely signal "not truncated". The cost
+is a fabricated component boundary. ICAO's worked examples never land on it.
 
 Numeric characters are forbidden in MRZ name fields
 (`Doc_9303_Part3...:507`), but the corpus defines no mapping for one that
@@ -196,11 +231,12 @@ reasoning (mirrors `clean()`'s existing "alphanumeric survives untouched"
 behavior on the document-number/optional-data fields; upstream validation is
 this crate's answer, not a silent rewrite inside emission).
 
-**Status: worked example reproduced** for all 33 golden vectors (the
-non-truncating cases). **Not applicable** for truncation — Part 4 licenses
-no single canonical algorithm to reproduce, so this crate's own documented
-choice is verified against its own two normative constraints instead, via
-property test rather than a worked example.
+**Status: worked example reproduced** for all 33 non-truncating golden vectors
+**and** for the six width-39 truncation vectors listed above. **Invariant-only**
+for the narrow-field and alternative-strategy truncation examples, where ICAO
+licenses no single algorithm and its own illustrations disagree — verified
+against the four normative rules by invariant driver and property test rather
+than by equality.
 
 ### Part 3 §6 A — transliteration of multinational Latin-based characters
 
