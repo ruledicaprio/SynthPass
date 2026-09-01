@@ -1,65 +1,69 @@
 //! What a check digit provably *cannot* catch.
 //!
-//! An ICAO 9303 check digit (part 3 §4.9) is the 7-3-1 weighted sum of the
-//! character values `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`, taken **mod 10**.
-//! Every weight is odd and coprime to nothing in particular — what matters is
-//! the final `mod 10`. A single-character substitution therefore shifts the
-//! sum by `weight × (value(a) - value(b))`, and that shift vanishes mod 10 for
-//! *every* weight exactly when the two values are congruent mod 10.
-//!
-//! That gives a complete, closed-form law:
-//!
-//! > Two MRZ characters are indistinguishable to every check digit **iff**
-//! > their ICAO values are congruent mod 10.
-//!
-//! The consequence inverts most people's intuition. The OCR confusions that
-//! get worried about most — O↔0, I↔1, B↔8, S↔5, Z↔2 — are all **caught**,
-//! because letters sit 10..35 and their digit lookalikes do not line up mod
-//! 10. The quiet pairs K↔`<`, I↔S, B↔L and A↔K are **blind**, and no amount
-//! of check-digit arithmetic will ever separate them.
-//!
-//! # The law is pairwise; real misreads usually are not
-//!
-//! Everything above is stated for **one** substituted character, which is what
-//! [`blindspot`] takes and all this module can express. Measured against a real
-//! corpus, only about a third of document-number misreads are single-character
-//! (25 of 76; see
-//! `knowledge/benchmarks/checksum-blindspots-measured-2026-08-05.md`).
-//!
-//! Across k substituted positions the sum shifts by `Σ Δᵢ·wᵢ (mod 10)`, so
-//! individually-**caught** substitutions cancel one another. The common case is
-//! two O↔0 at weights 7 and 3: `24·(7+3) = 240 ≡ 0`. Separately each is caught
-//! (`24·7 ≡ 8`, `24·3 ≡ 2`); together they are invisible. In a 9-character
-//! document number the weights run 7,3,1,7,3,1,7,3,1, so that (7,3) pairing
-//! recurs at positions (0,1), (3,4) and (6,7) — structural, not a fluke.
-//!
-//! So read the paragraph above as *"which single swaps are safe"*, not as
-//! *"which characters are safe"*. Empirically the undetectable set is dominated
-//! by the pairs called caught there — O↔0 alone accounts for 44 of those 76 rows
-//! — precisely because they arrive in combinations. Of the quiet pairs named as
-//! the real danger, exactly one K↔`<` appears in the whole corpus.
-//!
-//! This is why the crate layers structural guards on top of the arithmetic
-//! (recognized country codes, date plausibility, name charset): the oracle is
-//! exact, and it is exact about its own edges too. It is a strong *filter* — it
-//! rejects most misreads — and a weak *oracle*: what it passes is not a random
-//! remainder but specifically what the arithmetic cannot see.
-//!
-//! ```
-//! use mrz::{blindspot, Blindspot};
-//!
-//! // The classic OCR worry is not the dangerous one.
-//! assert!(matches!(blindspot('O', '0'), Blindspot::Caught { .. }));
-//! // This one is invisible to every check digit ever printed.
-//! assert!(blindspot('K', '<').is_blind());
-//! ```
-//!
-//! See `cargo run -p mrz --example checksum_blindspots` for the same law
-//! demonstrated empirically against the real parser.
+//! The closed-form law, its inversion of the usual OCR intuition, and what
+//! changes once a misread spans more than one character are documented on
+//! [`Blindspot`], which is the public face of this module.
 
 use crate::checksum::char_value;
 
 /// Whether a check digit can distinguish two MRZ characters.
+///
+/// An ICAO 9303 check digit (Part 3 §4.9) is the 7-3-1 weighted sum of the
+/// character values `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`, taken **mod 10**.
+/// A single-character substitution shifts the sum by
+/// `weight × (value(a) - value(b))`, and that shift vanishes mod 10 for
+/// *every* weight exactly when the two values are congruent mod 10.
+///
+/// That gives a complete, closed-form law:
+///
+/// > Two MRZ characters are indistinguishable to every check digit **iff**
+/// > their ICAO values are congruent mod 10.
+///
+/// The consequence inverts most people's intuition. The OCR confusions that
+/// get worried about most — O↔0, I↔1, B↔8, S↔5, Z↔2 — are all **caught**,
+/// because letters sit 10..35 and their digit lookalikes do not line up mod
+/// 10. The quiet pairs K↔`<`, I↔S, B↔L and A↔K are **blind**, and no amount
+/// of check-digit arithmetic will ever separate them.
+///
+/// ```
+/// use mrz::{blindspot, Blindspot};
+///
+/// // The classic OCR worry is not the dangerous one.
+/// assert!(matches!(blindspot('O', '0'), Blindspot::Caught { .. }));
+/// // This one is invisible to every check digit ever printed.
+/// assert!(blindspot('K', '<').is_blind());
+/// ```
+///
+/// [`CLASSES`] is the complete atlas of the blind pairs, and
+/// `cargo run -p mrz --example checksum_blindspots` demonstrates the same law
+/// empirically against the real parser rather than asserting the algebra.
+///
+/// # The law is pairwise; real misreads usually are not
+///
+/// Everything above is stated for **one** substituted character, which is what
+/// [`blindspot`] takes and all this type can express. Measured against a real
+/// corpus, only about a third of document-number misreads are single-character
+/// (25 of 76; see
+/// `knowledge/benchmarks/checksum-blindspots-measured-2026-08-05.md`).
+///
+/// Across k substituted positions the sum shifts by `Σ Δᵢ·wᵢ (mod 10)`, so
+/// individually-**caught** substitutions cancel one another. The common case is
+/// two O↔0 at weights 7 and 3: `24·(7+3) = 240 ≡ 0`. Separately each is caught
+/// (`24·7 ≡ 8`, `24·3 ≡ 2`); together they are invisible. In a 9-character
+/// document number the weights run 7,3,1,7,3,1,7,3,1, so that (7,3) pairing
+/// recurs at positions (0,1), (3,4) and (6,7) — structural, not a fluke.
+///
+/// So read the law as *"which single swaps are safe"*, not as *"which
+/// characters are safe"*. Empirically the undetectable set is dominated by the
+/// pairs it calls caught — O↔0 alone accounts for 44 of those 76 rows —
+/// precisely because they arrive in combinations. Of the quiet pairs named as
+/// the real danger, exactly one K↔`<` appears in the whole corpus.
+///
+/// This is why the crate layers structural guards on top of the arithmetic
+/// (recognized country codes, date plausibility, name charset): the oracle is
+/// exact, and it is exact about its own edges too. It is a strong *filter* — it
+/// rejects most misreads — and a weak *oracle*: what it passes is not a random
+/// remainder but specifically what the arithmetic cannot see.
 ///
 /// Obtain one from [`blindspot`]. `#[non_exhaustive]`: a future variant (e.g.
 /// for a format whose check digit is not mod 10) must not be a breaking change.
