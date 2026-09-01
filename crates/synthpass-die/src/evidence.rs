@@ -121,8 +121,17 @@ impl Evidence {
     /// separate, weaker signal `RoutingPolicy`'s gated
     /// `accept_composite_only_failure` (Chunk 7 of
     /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md`) can act on.
+    ///
+    /// The composite-only test itself is **not** re-encoded here — it defers
+    /// to `mrz::Checks::is_only_composite`, the same predicate
+    /// `mrz::Checks::only_composite_failed` uses. `MrzReader` gates on the
+    /// latter and `RoutingPolicy` on this one, and Chunk 7 requires both to be
+    /// enabled together, so two independent copies of the comparison were a
+    /// standing invitation to drift.
     pub fn checksum_partially_valid(&self) -> bool {
-        self.mrz_found && !self.mrz_checksums_valid && self.mrz_failed == [mrz::Field::Composite]
+        self.mrz_found
+            && !self.mrz_checksums_valid
+            && mrz::Checks::is_only_composite(&self.mrz_failed)
     }
 }
 
