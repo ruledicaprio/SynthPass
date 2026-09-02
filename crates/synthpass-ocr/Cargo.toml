@@ -19,6 +19,12 @@ sha2 = "0.11"
 
 [dev-dependencies]
 serde_json = "1"
+# Already a build-dependency above (build.rs verifies the .rten model
+# checksums) and already in the lockfile, so this adds nothing to the shipped
+# crate's dependency graph. examples/corpus_manifest.rs uses it to key each
+# corpus row by content, which is what lets a rerun skip re-OCRing an image
+# that has not changed — a full pass over the corpus is tens of minutes.
+sha2 = "0.11"
 
 [features]
 # Bakes both .rten weight files into the binary via `include_bytes!` instead
