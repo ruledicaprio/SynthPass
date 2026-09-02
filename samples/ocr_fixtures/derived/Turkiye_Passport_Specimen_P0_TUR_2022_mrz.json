@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-08-14",
+  "date_of_expiry": "2032-09-15",
+  "document_number": "U12345678",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MEHMET",
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<TURORNEK<MEHMET<<<<<<<<<<<<<<<<<<<<<<<<<<<\nU123456784TUR8408141M320915801234567890<<<76",
+  "nationality": "TUR",
+  "personal_number": "01234567890",
+  "sex": "M",
+  "surname": "ORNEK"
+}

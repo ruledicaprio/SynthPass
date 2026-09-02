@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1988-05-04",
+  "date_of_expiry": "2023-09-15",
+  "document_number": "XN5004216",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "LAUREN",
+  "issuing_country": "IRL",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSIRLOSULLIVAN<<LAUREN<<<<<<<<<<<<<<<<<<<<<<\nXN50042162IRL8805049F2309154<<<<<<<<<<<<<<<6",
+  "nationality": "IRL",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "OSULLIVAN"
+}

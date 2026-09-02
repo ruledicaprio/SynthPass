@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2000-10-14",
+  "date_of_expiry": "2032-12-27",
+  "document_number": "N2924341",
+  "document_type": "PN",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "WIITON VIEGAS",
+  "issuing_country": "AGO",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PNAGOMIRANDA<<WIITON<VIEGAS<<<<<<<<<<<<<<<<<\nN2924341<6AGO0010148M32122750315131<N02<2274",
+  "nationality": "AGO",
+  "personal_number": "0315131<N02<22",
+  "sex": "M",
+  "surname": "MIRANDA"
+}

@@ -29,6 +29,15 @@ working tree -- safe to run with uncommitted changes on your current branch.
 .PARAMETER Push
 Push the current local corpus to `samples-data` instead of pulling.
 
+.PARAMETER DryRun
+With -Push: stage the mirrored corpus and print the rename-detected diffstat,
+then stop without committing or pushing. The worktree is left in place so the
+staged change can be inspected further.
+
+Worth using before any large push. `Copy-Mirror` deletes by *filename*, so a
+renamed specimen reads as a delete plus an add; a diffstat without `-M` makes a
+lossless rename look like data loss, and a genuine loss look like a rename.
+
 .PARAMETER Message
 Override the commit message for a -Push run.
 
@@ -37,12 +46,17 @@ Override the commit message for a -Push run.
 Pull the corpus down into local samples/ (e.g. after a fresh clone).
 
 .EXAMPLE
+./scripts/sync-samples.ps1 -Push -DryRun
+Show what a push would do, without touching the remote.
+
+.EXAMPLE
 ./scripts/sync-samples.ps1 -Push
 Push whatever is currently in local samples/ to samples-data.
 #>
 
 param(
     [switch]$Push,
+    [switch]$DryRun,
     [string]$Message
 )
 
@@ -268,6 +282,30 @@ Push-Location $worktree
 git add samples
 git diff --cached --quiet
 $hasChanges = ($LASTEXITCODE -ne 0)
+
+if ($DryRun) {
+    if ($hasChanges) {
+        # -M is the point of the exercise: without rename detection a corpus-wide
+        # rename reads as hundreds of deletions.
+        Write-Host "--- staged change (dry run, nothing committed or pushed) ---"
+        git diff --cached -M --stat
+        Write-Host ""
+        $renamed = (git diff --cached -M --name-status | Select-String -Pattern '^R' | Measure-Object -Line).Lines
+        $added = (git diff --cached -M --name-status | Select-String -Pattern '^A' | Measure-Object -Line).Lines
+        $deleted = (git diff --cached -M --name-status | Select-String -Pattern '^D' | Measure-Object -Line).Lines
+        $modified = (git diff --cached -M --name-status | Select-String -Pattern '^M' | Measure-Object -Line).Lines
+        Write-Host "renamed=$renamed added=$added deleted=$deleted modified=$modified"
+        Write-Host "A deletion here is real data loss unless the same content is"
+        Write-Host "present under another name -- check before re-running without -DryRun."
+    } else {
+        Write-Host "No changes -- a push would be a no-op."
+    }
+    Pop-Location
+    Write-Host "Worktree left at $worktree for inspection; remove it with:"
+    Write-Host "  git worktree remove `"$worktree`" --force"
+    exit 0
+}
+
 if ($hasChanges) {
     $fileCount = (git ls-files samples | Measure-Object -Line).Lines
     $commitMessage = if ($Message) { $Message } else { "data: sync samples corpus from main@$((git -C $repoRoot rev-parse HEAD).Trim()) ($fileCount files total)" }

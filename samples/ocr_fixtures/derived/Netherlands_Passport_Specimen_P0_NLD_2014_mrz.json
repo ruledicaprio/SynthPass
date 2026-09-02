@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1965-03-10",
+  "date_of_expiry": "2024-03-09",
+  "document_number": "SPECI2014",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "WILLEKE LISELOTTEX  K",
+  "issuing_country": "NLD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<NLDDE<BRUIJN<<<<<<<<WILLEKE<LISELOTTEX<<K<\nSPECI20142NLD6503101F2403096999999990<<<<<84",
+  "nationality": "NLD",
+  "personal_number": "999999990",
+  "sex": "F",
+  "surname": "DE BRUIJN"
+}

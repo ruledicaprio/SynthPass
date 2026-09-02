@@ -125,6 +125,20 @@ the person doing it may not think to check.
 releases. `synthpass-bench`'s CI gate covers Tier 1 (deterministic MRZ) and does
 not run the LLM.
 
+**Partly addressed 2026-09-02, and the unaddressed half is now the whole
+entry.** `parity` is no longer six documents — it is 72, and it reports a
+per-field breakdown plus separate rates for hand-verified and generated fixtures
+(`crates/synthpass-bench/examples/ground_truth_candidates.rs`,
+`knowledge/ROADMAP.md` for the baseline). So the "16/42 either way" check that
+cleared the 0.1.151 → 0.1.154 bump would now be a 162-field measurement with
+visible per-field movement, which is the difference between a number that can
+detect a regression and one that cannot. What has *not* changed is the part this
+entry is actually about: it still requires someone to remember to run it. The
+fix below — a scheduled workflow that provisions the weight and records the rate
+as a tracked number — is unbuilt, and the entry stays open until it exists.
+Note the run now takes ~31 minutes, not ~4, which makes "just un-ignore them"
+even less viable than when this was written.
+
 **Fix:** not simply "un-ignore them." They need the ~1 GB GGUF and ~4 minutes,
 which is why they are opt-in, and `SYNTHPASS_MODEL_PATH` bootstrapping is
 deliberately not a runtime fetch. The realistic shapes are a scheduled (not

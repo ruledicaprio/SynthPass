@@ -44,6 +44,14 @@ samples/misc/
 samples/ocr_fixtures/*
 !samples/ocr_fixtures/*.json
 !samples/ocr_fixtures/*.md
+# derived/ holds machine-generated parity candidates (see
+# crates/synthpass-bench/examples/ground_truth_candidates.rs). The directory
+# itself has to be re-included before its contents can be: git does not descend
+# into an ignored directory, so a negation for files inside one never fires.
+!samples/ocr_fixtures/derived/
+samples/ocr_fixtures/derived/*
+!samples/ocr_fixtures/derived/*.json
+!samples/ocr_fixtures/derived/*.md
 
 # "No PII in logs or fixtures" (CONTRIBUTING.md) still applies to whatever
 # lands in samples-data: refuse anything marked Private by name, as a second

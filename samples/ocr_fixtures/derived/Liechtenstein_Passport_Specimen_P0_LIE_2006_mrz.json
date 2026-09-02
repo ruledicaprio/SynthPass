@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1953-09-05",
+  "date_of_expiry": "2016-12-26",
+  "document_number": "R00000",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "HANS PETER",
+  "issuing_country": "LIE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSLIEWALCH<<HANS<PETER<<<<<<<<<<<<<<<<<<<<<<\nR00000<<<9LIE5309052M1612262<<<<<<<<<<<<<<<0",
+  "nationality": "LIE",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "WALCH"
+}

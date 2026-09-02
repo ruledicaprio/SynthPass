@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-03-15",
+  "date_of_expiry": "2024-05-25",
+  "document_number": "EA0853094",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "IQBAL",
+  "issuing_country": "BGD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<BGDHOSSAIN<<IQBAL<<<<<<<<<<<<<<<<<<<<<<<<<\nEA08530943BGD8403157M2405252<<<<<<<<<<<<<<04",
+  "nationality": "BGD",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "HOSSAIN"
+}

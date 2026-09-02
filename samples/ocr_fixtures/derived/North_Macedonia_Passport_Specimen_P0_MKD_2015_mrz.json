@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-05-09",
+  "date_of_expiry": "2025-07-14",
+  "document_number": "K0000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MERITA",
+  "issuing_country": "MKD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<MKDELEZI<<MERITA<<<<<<<<<<<<<<<<<<<<<<<<<<\nK0000000<0MKD8005090F25071450905980475003<24",
+  "nationality": "MKD",
+  "personal_number": "0905980475003",
+  "sex": "F",
+  "surname": "ELEZI"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1968-11-11",
+  "date_of_expiry": "2020-06-26",
+  "document_number": "0981489",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "GIOVANN",
+  "issuing_country": "MLT",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSMLTMICALLEF<GIOVANN<<<<<<<<<<<<<<<<<<<<<<<\n0981489<<5MLT6811118M2006268<<<<<<<<<<<<<<06",
+  "nationality": "MLT",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "MICALLEF"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1947-03-15",
+  "date_of_expiry": "2030-02-06",
+  "document_number": "C1384741",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "CMAZEM",
+  "issuing_country": "MKD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSMKDKECHIDJI<CMAZEM<<<<<<<<<<<<<<<<<<<<<<<<\nC1384741<6MKD4703158F30020611503947418012<74",
+  "nationality": "MKD",
+  "personal_number": "1503947418012",
+  "sex": "F",
+  "surname": "KECHIDJI"
+}

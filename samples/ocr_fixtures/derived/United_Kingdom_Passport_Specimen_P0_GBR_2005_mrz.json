@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-12-03",
+  "date_of_expiry": "2018-06-28",
+  "document_number": "107192637",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": null,
+  "issuing_country": "GBR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<GBRALEXXGORDIEV<<<<<<<<<<<<<<<<<<<<<<<<<<<\n1071926378GBR8412036M1806287<<<<<<<<<<<<<<02",
+  "nationality": "GBR",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "ALEXXGORDIEV"
+}

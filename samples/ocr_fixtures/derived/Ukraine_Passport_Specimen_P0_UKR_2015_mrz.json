@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1991-08-24",
+  "date_of_expiry": "2025-01-12",
+  "document_number": "XX000000",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MARIANA",
+  "issuing_country": "UKR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSUKRTKACHENKO<<MARIANA<<<<<<<<<<<<<<<<<<<<<\nXX000000<0UKR9108242F25011211991082400026<86",
+  "nationality": "UKR",
+  "personal_number": "1991082400026",
+  "sex": "F",
+  "surname": "TKACHENKO"
+}

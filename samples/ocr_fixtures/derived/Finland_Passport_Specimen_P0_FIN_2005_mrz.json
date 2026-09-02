@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1971-12-21",
+  "date_of_expiry": "2011-08-21",
+  "document_number": "XP8271602",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MARTAOITVTA",
+  "issuing_country": "FIN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<FINVIRTANEN<<MARTAOITVTA<<<<<<<<<<<<<<<<<<\nXP82716024FIN7112214F1108213211271<426U<<<04",
+  "nationality": "FIN",
+  "personal_number": "211271<426U",
+  "sex": "F",
+  "surname": "VIRTANEN"
+}

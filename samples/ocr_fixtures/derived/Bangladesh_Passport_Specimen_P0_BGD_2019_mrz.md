@@ -1,0 +1,75 @@
+PERSONAL DATA AND EMERGENCY CONTACT
+Name: 1ORAL HORSA
+Fathor's Name SHAHIAHAN KABIR
+BAN?
+Spou' MameMOR.TINA ACTER
+PeranentAddress:  EAST KHAIYA CHARA WARD NO-nS BOR
+TAKIA. MIRSHARAL CHATTOGRAM
+Relationshia: MOTHER
+FAST KHAIYACHARA WARD NO-O5, BOR TAKIA.
+MIRSHARAL CHATTOCRAL
+nitsZ473324
+ABNA
+CIR OSSAIN
+DEPT OF IMMIGRAHION& PASSTORTS
+GOYERNMENT OF THE PEOrLE
+REPURLIC OF BANGLADESH
+c
+CHITTAGONG
+stejersoatazonicwsl People's Republic of Bangladesh
+Ge e TN e13 CountV CNd PESG aR/PassDort No.
+YDe U4 s
+BCD
+S
+TEvan
+"Mame
+Natinality
+RANGLADESHI
+uifaut /Date of Ridh
+MAR 1984
+preta/piare of Birth
+MCHATTOGRAM
+toitat Date of /ssuo
+26 MAY 2019
+735
+CACT eTs3 Diaul (Date of EXDiS
+25 MAY 2024
+SLGRHA
+P<BGDHOSSAIN<<IQBAL<<<<<<<<<<<<<<<<<<<<<<<<<
+EA08530943BGD8403157M2405252<<<<<<<<<<<<<<04
+3
+Mother's Name: HASNA
+Contact:
+Name HASNA BANU
+Addross:
+Tolapho no
+Is
+P
+i
+E<
+U
+Emergency
+B
+:
+ROK
+15
+2
+TE
+PAICG
+PASSPORT
+S
+EA0853094
+HOSSAIN
+IQBAL
+HSV
+MA
+"ascbort Nd.
+?e  Personar No
+9841515347011108
+Saau araceHs at f Provous
+BJ0020784
+DIP/ DHAKA
+ett
+Aoled CaTH
+O
+T

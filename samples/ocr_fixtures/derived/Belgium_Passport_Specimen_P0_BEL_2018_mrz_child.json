@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2014-07-02",
+  "date_of_expiry": "2022-08-22",
+  "document_number": "EP100477",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "SAMIR         E",
+  "issuing_country": "BEL",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<BELSEKANDAR<<SAMIR<<<<<<<<<E<<<<<<<<<<<<<<\nEP100477<8BEL1407020M2208224<<<<<<<<<<<<<<04",
+  "nationality": "BEL",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SEKANDAR"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1981-01-02",
+  "date_of_expiry": "2032-03-03",
+  "document_number": "ZF4000499",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "JAN",
+  "issuing_country": "POL",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSPOLKOWALSKI<<JAN<<<<<<<<<<<<<<<<<<<<<<<<<<\nZF40004998POL8101028M3203031<<<<<<<<<<<<<<00",
+  "nationality": "POL",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "KOWALSKI"
+}

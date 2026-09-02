@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2002-06-25",
+  "date_of_expiry": "2024-06-30",
+  "document_number": "C469262",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MOHAMED IHED",
+  "issuing_country": "TUN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSTUNMAJDOUB<<MOHAMED<IHED<<<<<<<<<<<<<<<<<<\nC469262<<1TUN0206259M240630700000000<0303<06",
+  "nationality": "TUN",
+  "personal_number": "00000000<0303",
+  "sex": "M",
+  "surname": "MAJDOUB"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2011-01-01",
+  "date_of_expiry": "2012-07-04",
+  "document_number": "99003853",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "VZOR",
+  "issuing_country": "CZE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSCZESPECIMEN<<VZOR<<<<<<<<<<<<<<<<<<<<<<<<<\n99003853<1CZE1101018M1207046110101111<<<<<94",
+  "nationality": "CZE",
+  "personal_number": "110101111",
+  "sex": "M",
+  "surname": "SPECIMEN"
+}

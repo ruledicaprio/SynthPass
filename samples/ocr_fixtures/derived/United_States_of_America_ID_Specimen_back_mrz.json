@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1981-01-01",
+  "date_of_expiry": "2019-11-29",
+  "document_number": "C03005988",
+  "document_type": "IP",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "HAPPY",
+  "issuing_country": "USA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "IPUSAC030059887<<10<30<B22<498\n8101017M1911297USA<<0754052294\nTRAVELER<HAPPY<<<<<<<<<<<<<<<<",
+  "nationality": "USA",
+  "personal_number": "<<10<30<B22<498 <<075405229",
+  "sex": "M",
+  "surname": "TRAVELER"
+}
