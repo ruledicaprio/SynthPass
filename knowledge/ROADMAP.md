@@ -753,8 +753,12 @@ Beyond M6 and M7, and deliberately not committed:
   No code is required to try one: `SYNTHPASS_MODEL_PATH` selects the GGUF and
   `SYNTHPASS_MODEL_SHA256` re-pins the integrity check (`synthpass-llm/src/verify.rs`), so a model
   swap stays an explicit, checksum-verified bootstrap step and never becomes runtime fetching.
-  Shipping weights remains out of scope. Note that actual **GPU offload** is a separate unlock:
-  `llama-cpp-2` is built CPU-only here, and design-record §11 keeps GPU builds out of scope.
+  Shipping weights remains out of scope. **GPU offload shipped separately** and is no longer the
+  blocker this paragraph originally described: the default build is still CPU-only, but the
+  additive `cuda` feature (`ADR-0004`, accepted 2026-08-17) offloads all layers via
+  `llama-cpp-2/cuda` and measured ~2.5x on a GTX 970 with byte-identical output. Benchmark it with
+  `./scripts/run-bench.ps1 -Track real-specimens -Cuda`, which records the run as an `llm-cuda`
+  series on the track's normal trend chart.
 - **Deterministic field normalization before a bigger model.** The GBNF parity run (see the M5 note
   above) shows part of the Tier-2 gap is *scoring*, not comprehension — the model read
   `nationality` correctly and was marked wrong for format: `"CROATIA"` vs `HRV`,
