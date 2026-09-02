@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1969-06-22",
+  "date_of_expiry": "2016-07-29",
+  "document_number": "99009054",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "VZOR",
+  "issuing_country": "CZE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<CZESPECIMEN<<VZOR<<<<<<<<<<<<<<<<<<<<<<<<<\n99009054<4CZE6906229F16072996956220612<<<<74",
+  "nationality": "CZE",
+  "personal_number": "6956220612",
+  "sex": "F",
+  "surname": "SPECIMEN"
+}

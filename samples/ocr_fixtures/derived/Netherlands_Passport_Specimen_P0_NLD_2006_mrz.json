@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1971-12-24",
+  "date_of_expiry": "2011-08-26",
+  "document_number": "XS038L247",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "GERARDCROBBERTCMARTI",
+  "issuing_country": "NLD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<NLDVANSNIEUNENHUIZEN<<GERARDCROBBERTCMARTI\nXS038L2474NLD7112247M1108268<<<<<<<<<<<<<<<4",
+  "nationality": "NLD",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "VANSNIEUNENHUIZEN"
+}

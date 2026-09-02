@@ -419,6 +419,54 @@ impl FieldConfidence {
         *self == Self::proven()
     }
 
+    /// Read a single field's score — [`Self::prove`]'s read-side counterpart,
+    /// and the only way to ask a `FieldConfidence` about a field chosen at
+    /// runtime rather than named in source.
+    ///
+    /// The question that motivated it is *"which fields does an ICAO check
+    /// digit actually prove?"*, asked by anything that must treat a
+    /// mathematically verified field differently from a structurally parsed
+    /// one — [`Self::mrz_checksum_scope`] is the answer, and this makes it
+    /// readable instead of forcing every caller to restate the four field
+    /// names and drift from it later:
+    ///
+    /// ```
+    /// use synthpass_core::v2::{CoreField, FieldConfidence};
+    ///
+    /// let scope = FieldConfidence::mrz_checksum_scope();
+    /// let proven: Vec<CoreField> = CoreField::ALL
+    ///     .into_iter()
+    ///     .filter(|f| scope.score(*f) >= 1.0)
+    ///     .collect();
+    ///
+    /// assert_eq!(
+    ///     proven,
+    ///     [
+    ///         CoreField::DocumentNumber,
+    ///         CoreField::DateOfBirth,
+    ///         CoreField::DateOfExpiry,
+    ///         CoreField::PersonalNumber,
+    ///     ]
+    /// );
+    /// // Not the name, and not the nationality: no check digit covers them.
+    /// assert!(scope.score(CoreField::Surname) < 1.0);
+    /// assert!(scope.score(CoreField::Nationality) < 1.0);
+    /// ```
+    pub fn score(&self, field: CoreField) -> f32 {
+        match field {
+            CoreField::DocumentType => self.document_type,
+            CoreField::IssuingCountry => self.issuing_country,
+            CoreField::DocumentNumber => self.document_number,
+            CoreField::Surname => self.surname,
+            CoreField::GivenNames => self.given_names,
+            CoreField::Nationality => self.nationality,
+            CoreField::DateOfBirth => self.date_of_birth,
+            CoreField::Sex => self.sex,
+            CoreField::DateOfExpiry => self.date_of_expiry,
+            CoreField::PersonalNumber => self.personal_number,
+        }
+    }
+
     /// Mark a single field as checksum-proven ([`PROVEN`]), independent of
     /// which tier produced the record. Used when a deterministic MRZ
     /// check digit individually verifies a field a Tier-2 (LLM) record
@@ -1025,6 +1073,34 @@ mod tests {
         assert!(v2.portrait.is_none());
         assert!(v2.barcodes.is_empty());
         assert!(v2.documents.is_empty());
+    }
+
+    /// `score` must agree with the struct fields for every variant, because
+    /// callers use it to *decide what a check digit proves* — a mis-wired arm
+    /// would silently score an unproven field as verified. Cross-checked
+    /// against `prove`, the write-side counterpart, so the two can't address
+    /// different slots for the same `CoreField`.
+    #[test]
+    fn score_reads_the_same_slot_prove_writes() {
+        let scope = FieldConfidence::mrz_checksum_scope();
+        for field in CoreField::ALL {
+            let mut one = FieldConfidence::uniform(0.0);
+            one.prove(field);
+            // Exactly one slot moved, and `score` finds it.
+            assert_eq!(one.score(field), PROVEN, "{field:?}");
+            for other in CoreField::ALL.into_iter().filter(|f| *f != field) {
+                assert_eq!(one.score(other), 0.0, "{field:?} leaked into {other:?}");
+            }
+            // And the value read back is the one the constructor set.
+            let expected = match field {
+                CoreField::DocumentNumber
+                | CoreField::DateOfBirth
+                | CoreField::DateOfExpiry
+                | CoreField::PersonalNumber => PROVEN,
+                _ => MRZ_STRUCTURAL,
+            };
+            assert_eq!(scope.score(field), expected, "{field:?}");
+        }
     }
 
     #[test]

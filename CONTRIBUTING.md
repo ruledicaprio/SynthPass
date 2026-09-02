@@ -205,6 +205,20 @@ Two different things can happen to the file at this point, and they're not the s
   `synthpass_core::Extraction` as JSON), the image and its `.json` both move into
   `samples/ocr_fixtures/` and get `git add`ed — that directory is the only part of `samples/`
   tracked in git, and required CI depends on specific files in it.
+
+  A checksum-valid specimen does not need labelling by hand from scratch. Run
+
+  ```powershell
+  cargo run -p synthpass-bench --release --example ground_truth_candidates
+  ```
+
+  and it writes a candidate `.json` plus the OCR `.md` into
+  `samples/ocr_fixtures/derived/`. That candidate is scored on the four
+  check-digited fields only. Hand-labelling then reduces to checking the fields
+  no check digit covers — document type, issuing country, both name fields,
+  nationality, sex — against the image, and `git mv`ing the pair up one level.
+  See [samples/README.md](samples/README.md)'s "Ground truth: reviewed vs.
+  derived".
 - **It's an ordinary, unlabelled corpus specimen.** It stays in its usual subdirectory
   (`samples/passports/`, `samples/id_cards/`, `samples/driving_licenses/`, `samples/misc/`) but is
   **not committed** — those directories are gitignored, and the file only needs to exist in your

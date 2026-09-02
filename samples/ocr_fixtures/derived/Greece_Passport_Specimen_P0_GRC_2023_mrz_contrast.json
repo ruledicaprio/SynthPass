@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1975-05-15",
+  "date_of_expiry": "2033-12-10",
+  "document_number": "AA1234567",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "GFORGIOS",
+  "issuing_country": "GRC",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSGRCELLTNAS<<GFORGIOS<<<<<<<<<<<<<<<<<<<<<<\nAA12345678GRC7505157M3312108<<<<<<<<<<<<<<06",
+  "nationality": "GRC",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "ELLTNAS"
+}

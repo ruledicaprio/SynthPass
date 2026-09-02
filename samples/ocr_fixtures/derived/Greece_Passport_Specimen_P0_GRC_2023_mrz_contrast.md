@@ -1,0 +1,39 @@
+AIABATHPIO
+PASSPORT
+G
+Ap. AicBarnpiou/Passport No. 
+AA1234567
+HELLAS
+Xioa I Countrv
+GRC
+TIOC
+ETOVUO
+EMHNAS
+ELLINAS
+Ovopd
+EOPFIOS
+GEORGIOS
+va/Notionality EMAHNIKH/ HELLENIC
+nSorM
+"unonC Date of Birh.15 MA Y 1975
+T?TOS FEWnOnSAOHNA
+ihATHINA
+Fxoans/Ise Date 11 DEC 2023
+Antns/ Dete of Explry:  10 DEC 2033
+A.EAIAAEA
+H.P.H.IPSDD
+TYDn
+Siimame
+Name
+Anin:
+Authonty
+?
+B
+6
+10. Yuos /Helght 1.80
+GRC
+15.05.75
+Fa T
+DO
+PSGRCELLTNAS<<GFORGIOS<<<<<<<<<<<<<<<<<<<<<<
+AA12345678GRC7505157M3312108<<<<<<<<<<<<<<06

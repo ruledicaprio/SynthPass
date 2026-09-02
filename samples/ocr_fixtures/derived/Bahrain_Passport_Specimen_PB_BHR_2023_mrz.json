@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1990-01-28",
+  "date_of_expiry": "2032-12-16",
+  "document_number": "B0000000",
+  "document_type": "PB",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ABDULLAYOUSIE",
+  "issuing_country": "BHR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PBBHREBRAHIMMOHAMMED<ABDULLAYOUSIE<<<<<<<<<<\nB0000000<7BHR9001284M3212161000000000<<<<<04",
+  "nationality": "BHR",
+  "personal_number": "000000000",
+  "sex": "M",
+  "surname": "EBRAHIMMOHAMMED"
+}

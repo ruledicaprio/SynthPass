@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1978-11-18",
+  "date_of_expiry": "2026-12-12",
+  "document_number": "PB9006321",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ANAZ",
+  "issuing_country": "SVN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<SVNVZOREC<<ANAZ<<<<<<<<<<<<<<<<<<<<<<<<<<<\nPB90063211SVN7811182F26121221811978505602<16",
+  "nationality": "SVN",
+  "personal_number": "1811978505602",
+  "sex": "F",
+  "surname": "VZOREC"
+}

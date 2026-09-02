@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-08-14",
+  "date_of_expiry": "2024-01-25",
+  "document_number": "K146245",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "TIO",
+  "issuing_country": "KIR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSKIRCITIZEN<<TIO<<<<<<<<<<<<<<<<<<<<<<<<<<<\nK146245<<4KIR8408141M2401254<<<<<<<<<<<<<<00",
+  "nationality": "KIR",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "CITIZEN"
+}

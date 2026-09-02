@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1991-05-04",
+  "date_of_expiry": "2032-08-01",
+  "document_number": "RA0123456",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "JANE",
+  "issuing_country": "AUS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<AUSCITIZEN<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<\nRA01234564AUS9105045F3208014<9999900O7<<<<86",
+  "nationality": "AUS",
+  "personal_number": "<9999900O7",
+  "sex": "F",
+  "surname": "CITIZEN"
+}

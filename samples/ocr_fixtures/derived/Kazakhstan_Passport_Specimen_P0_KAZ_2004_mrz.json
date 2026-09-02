@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-01-01",
+  "date_of_expiry": "2034-11-04",
+  "document_number": "N00000000",
+  "document_type": "PE",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ERKKEKKEKEECCC",
+  "issuing_country": "KAZ",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PEKAZSURNAMEECIIRSTNAMECCCKC<<ERKKEKKEKEECCC\nN000000001KAZ800101413411045800101300007<<20",
+  "nationality": "KAZ",
+  "personal_number": "800101300007",
+  "sex": "X",
+  "surname": "SURNAMEECIIRSTNAMECCCKC"
+}

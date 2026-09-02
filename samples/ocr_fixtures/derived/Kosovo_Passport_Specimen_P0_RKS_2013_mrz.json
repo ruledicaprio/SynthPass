@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1989-06-12",
+  "date_of_expiry": "2023-03-15",
+  "document_number": "P00000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": null,
+  "issuing_country": "RKS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<RKSHOXHAMERITAC<<<<<<<<<<<<<<<<<<<<<<<<<<<\nP000000005RKS8906120F2303152<<<<<<<<<<<<<<06",
+  "nationality": "RKS",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "HOXHAMERITAC"
+}

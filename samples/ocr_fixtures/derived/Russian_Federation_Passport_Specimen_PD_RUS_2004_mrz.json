@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-08-04",
+  "date_of_expiry": "2009-02-27",
+  "document_number": "110000000",
+  "document_type": "PD",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "VALENTINAC",
+  "issuing_country": "RUS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PDRUSSMIRNOVA<<<<<<<<<<<<<<<VALENTINAC<<<<<<\n1100000000RUS8008046F0902274<<<<<<<<<<<<<<08",
+  "nationality": "RUS",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "SMIRNOVA"
+}

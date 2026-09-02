@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1950-01-01",
+  "date_of_expiry": "2034-04-01",
+  "document_number": "426349253",
+  "document_type": "I",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ANACAROLINA",
+  "issuing_country": "PRT",
+  "mrz_checksums_valid": true,
+  "mrz_line": "I<PRT426349253<ZY89<<<<<<<<<<<\n5001013F3404012PRT<<<<<<<<<<<0\nBARROSFREITAS<<<<<<ANACAROLINA",
+  "nationality": "PRT",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "BARROSFREITAS"
+}

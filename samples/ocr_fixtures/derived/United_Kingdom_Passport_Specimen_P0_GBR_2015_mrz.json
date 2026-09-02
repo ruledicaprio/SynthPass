@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1988-12-04",
+  "date_of_expiry": "2025-09-28",
+  "document_number": "533475514",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ANGELA ZOE",
+  "issuing_country": "GBR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<GBRUKSPECIMEN<<ANGELA<ZOE<<<<<<<<<<<<<<<<<\n5334755143GBR8812049F2509286<<<<<<<<<<<<<<04",
+  "nationality": "GBR",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "UKSPECIMEN"
+}

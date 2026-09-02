@@ -1,79 +1,48 @@
-COPOVA24 CELJE
-
-<!-- image -->
-
-PASSPORT PASSEPORT PASAPORTE
-
-<!-- image -->
-
-<!-- image -->
-
-Authonty/Autonite/Autoridad
-
-CETIS d.d.
-
-Holderssigture/igntedutulirmdeltt
-
-ample ana
-
-Permanent residence/Domicile/Residencia
-
-## TERRACONFIDEA
-
-<!-- image -->
-
-Sumame/Nom/Apelidos
-
-Type/Type/Tipo
-
-Code/Code/Codigo
-
-P
-
+4
+i
+2
+WC
+H
+L
+O
+L
+i
+J
+I
+2
+i
+A
+S
+?O
+:
+oshiy
+E PASSPORT ddl/ype/lype/lioo. Code/Code/c?digo
+PASSEPORT PTRC
+PASAPORTE 
+TERRA CONFDEA
+Sumame/Nom/Apellidos
+SAMPLE L
+Given nam?s/Pr?noms/Nombres
+LANA 
+Nationality/Nationalit?/Nacionalidad
 TRC
-
-SAMPLE
-
-Given names/Prenoms/Nombres
-
-LANA
-
-Nationality/Nationalite/Nacionalidad
-
-TRC
-
-Dateof birth/Datedenaissance/Fecha denacimiento
-
+Date of birth/Date de naissance/Fecha de nacimiento
 13 ABR/AVR 90
-
-Sex/Sexe/Sexo Passport No./Passeport No./Pasaporte No.
-
-<!-- image -->
-
+Sex/Sexe/SexoPlace of birth/Lieu de naissance/Lugar de nacmient
+FULT Celie Tr&
+Date of issue/Date de d?livance/Fecha de emisi?nAuthority/Autont?/Autoridad.
+1 JUL/ JUI/JUL 21 P CETIS dd
+Date of expiry/Date dexpiration/Fecha de vencimiento Holder's sianature/Signature du titulaire/ Firma del fitulo
+1 JJUL/JUI/ JUL 31
+SSample Lana
+e
+T
+Passport No./Passeport N /Pasanorte No.
 SD9990322
-
-<!-- image -->
-
-<!-- image -->
-
-Personal registrationNo./Npersonnel didentite/Documento deidentidadNo.
-
+HH
+Personal registration No./N? personnel didentit?/ Documento de identidad No.
 1304990505603
-
-Pace of birth/Lieu denaissance/Lugar de nacimiento
-
-F
-
-Celje
-
-Date of issue/Datededelivrance/Fecha de emision
-
-1JUL/JUI/JUL21
-
-Dateofexpiry/Datedexpiration/Fechadevencimiento
-
-1JUL/JUI/JUL31
-
-<!-- image -->
-
-P&lt;TRCSAMPE&lt;&lt;LANA&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;
+L
+T
+PTRCSAMPLEZZLANACZETTLTTETEETEEE<E<<<
+SD99903223TRC9004137F3107014<<<<<<<<00

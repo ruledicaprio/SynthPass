@@ -13,12 +13,38 @@ are force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`)
 panics without them and does not sync the corpus first.
 
 Tracked under `samples/` on `main`: this README, `corpus.jsonl` (the manifest),
-`ocr_fixtures/*.json` + `*.md` (the hand-verified ground truth), and those four
-images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every**
+`ocr_fixtures/*.json` + `*.md` (the hand-verified ground truth),
+`ocr_fixtures/derived/*.json` + `*.md` (generated parity candidates), and those
+four images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every**
 mirrored directory, so ground truth cannot drift onto `samples-data` even when
 it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
 section and `knowledge/benchmarks/README.md`'s "local bench loop" for how the
 corpus grows now.
+
+## Ground truth: reviewed vs. derived
+
+`ocr_fixtures/` holds pairs — an `.md` (the OCR text a Tier-2 prompt receives)
+and a `.json` (a `synthpass_core::Extraction` to score against). Both
+directories hold the same file format; the difference is **who vouched for it**.
+
+| Directory | Origin | What `parity.rs` scores |
+| :-- | :-- | :-- |
+| `ocr_fixtures/` | a person compared it against the image | all nine prompt fields |
+| `ocr_fixtures/derived/` | generated from a checksum-valid MRZ | `document_number`, `date_of_birth`, `date_of_expiry` |
+
+The split exists because an ICAO check digit covers only four fields. A derived
+fixture's *name* is one OCR pass's reading of characters nothing arbitrates, so
+scoring a model against it would penalise a model that read the printed name
+correctly. Regenerate both with:
+
+```powershell
+cargo run -p synthpass-bench --release --example ground_truth_candidates
+```
+
+To promote a candidate, check its unproven fields against the image, then
+`git mv samples/ocr_fixtures/derived/<stem>.json samples/ocr_fixtures/` (and its
+`.md` with it). Nothing in the generator ever writes a `.json` into the reviewed
+directory.
 
 ## Layout
 
@@ -28,6 +54,7 @@ samples/
   id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
   driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
   ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
+    derived/            generated, unreviewed parity candidates (.md + .json) — tracked
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
   corpus.jsonl          one row per image: MRZ document code, issuing state, provenance, ground-truth link — tracked
   README.md
@@ -46,7 +73,7 @@ since it is not itself a test fixture.
 | `passports/`          | Passport                    | TD3 (2 lines x 44 chars, on the biodata page) |
 | `id_cards/`           | National identity card      | TD1 (3 x 30) or TD2 (2 x 36); MRZ is often on the *back/rear* image of a front+back pair |
 | `driving_licenses/`   | Driving licence              | No MRZ — not a machine-readable travel document |
-| `ocr_fixtures/`       | Mixed (passport/ID pages used for docling OCR ground-truth) | Varies; see each fixture's `.md`/`.json` |
+| `ocr_fixtures/`       | Mixed (passport/ID pages used as OCR ground truth) | Varies; see each fixture's `.md`/`.json` |
 
 ## Naming convention
 

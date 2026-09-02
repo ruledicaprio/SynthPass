@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1989-12-01",
+  "date_of_expiry": "2026-11-15",
+  "document_number": "A26171466",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MOHAMEDSOLIMAN IBRAHTMSOLIMAN",
+  "issuing_country": "EGY",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSEGYWAHSH<<<<<MOHAMEDSOLIMAN<IBRAHTMSOLIMAN\nA261714663EGY8912019M2611158<<<<<<<<<<<<<<02",
+  "nationality": "EGY",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "WAHSH"
+}

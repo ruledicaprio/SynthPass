@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1985-02-11",
+  "date_of_expiry": "2023-03-01",
+  "document_number": "TT1300005",
+  "document_type": "ID",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "AZRA MARINA",
+  "issuing_country": "BIH",
+  "mrz_checksums_valid": true,
+  "mrz_line": "IDBIHTT13000057<<<300005<<<<<<\n8502119F2303015BIH8<<<<<<<<<<<\nKOVACEVIC<AZRA<MARINA<<<<<<<<<",
+  "nationality": "BIH",
+  "personal_number": "<<<300005 8",
+  "sex": "F",
+  "surname": "KOVACEVIC"
+}

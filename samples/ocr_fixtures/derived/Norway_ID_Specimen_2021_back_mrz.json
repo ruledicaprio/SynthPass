@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1956-04-23",
+  "date_of_expiry": "2026-06-11",
+  "document_number": "GDC000001",
+  "document_type": "CA",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "AASAMUND SPECIMEN",
+  "issuing_country": "NOR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "CANORGDC0000014230456<12345<<<\n5604230M2606118NOR<<<<<<<<<<<7\nOESTENBYEN<<AASAMUND<SPECIMEN<",
+  "nationality": "NOR",
+  "personal_number": "230456<12345",
+  "sex": "M",
+  "surname": "OESTENBYEN"
+}

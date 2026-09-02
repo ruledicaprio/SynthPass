@@ -62,7 +62,7 @@ fn argentina_emergency_passport_shifts_the_name_field_one_right() {
 /// "prove it or don't touch it" discipline exists to prevent.
 #[test]
 fn a_passport_with_no_issuing_state_reads_the_name_into_positions_3_to_5() {
-    // samples/passports/Spain_Passport_Specimen_P0_2022_mrz.png
+    // samples/passports/Spain_Passport_Specimen_P0_2022_mrz.jpg
     let l1 = "P<TAPIA<JUAN<DASEC<<<<<<<<<<<<<<<<<<<<<<<<<<";
     let l2 = "KV24247253ESP7809062M3202193A3064941000<<<30";
     let data = find_and_parse(&format!("{l1}\n{l2}")).expect("a missing state field still parses");

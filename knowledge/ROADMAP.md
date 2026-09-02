@@ -358,6 +358,62 @@ flowchart LR
   routinely when visual-zone text lands in an MRZ-shaped line.
   `crates/synthpass-bench/tests/corpus_manifest.rs` now fails if any `no_mrz` row records a
   checksum-valid observation.
+- **2026-09-02: Tier-2 accuracy has a baseline. The parity harness went from 6 documents to 72, and
+  the first thing it measured was that its own fixtures were wrong.**
+  `crates/synthpass-bench/examples/ground_truth_candidates.rs` derives a candidate `Extraction` from
+  every corpus specimen whose MRZ reads with valid check digits *and* survives
+  `fusion::check_line1_integrity` plus the two date judgements that don't depend on today. Fixtures
+  split by review status: `samples/ocr_fixtures/` (hand-verified, all nine prompt fields scored) and
+  `samples/ocr_fixtures/derived/` (generated, the check-digited fields only). The split is not
+  bureaucracy — ICAO check-digits exactly four fields, so a generated fixture's *name* is one OCR
+  pass's reading of characters nothing arbitrates. Scoring a model against those inverts the
+  measurement: a model reading the printed name correctly is marked wrong for disagreeing with an
+  OCR error, so visual-zone work would register as a regression precisely when it worked.
+
+  **Measured baseline** (`qwen2.5-1.5b-instruct-q4_k_m`, greedy, ~31 min): reviewed **43/162
+  (26.5%)** over 18 documents; derived **47/162 (29.0%)** over 54; legacy seven-field rate over the
+  reviewed set **38/126 (30.2%)**; repair fallbacks **0**. Per field, reviewed:
+  `document_number` 50%, `given_names` 39%, `date_of_expiry` 28%, `sex` 28%, `surname` 28%,
+  `issuing_country` 22%, `nationality` 22%, `date_of_birth` 17%, `document_type` 6%. The two sets
+  agree closely on the only field both score (`document_number`, 50% vs 54%), which is the check
+  that the generated half is not systematically easier than the hand-verified half.
+
+  `document_type` (6%) and `issuing_country` (22%) are **format disagreements, not wrong answers** —
+  the model returns `PASSPORT` where the MRZ says `P`, and `CROATIA` where it says `HRV`. The
+  harness deliberately does not normalise them away, since that would raise the number without
+  changing what the pipeline receives. It is the clearest evidence for the narrow-ask work in
+  `knowledge/VIZ_TIER2_DESIGN.md` §2.3: the prompt never states which form it wants.
+- **2026-09-02: the parity fixtures had been feeding the model an input shape production no longer
+  produces, and it cost half the measured accuracy.** The six `.md` files the harness used came from
+  `docling`, the Python engine retired in v0.7.5 — HTML-escaped (`P&lt;HRV…`), with `##` headings
+  and `<!-- image -->` placeholders. The shipped pipeline feeds Tier 2 `NativeOcr::recognize`'s
+  plain text. A same-binary A/B over the *same six documents*, changing only where the `.md` came
+  from: docling **9/54 (16.7%)**, `NativeOcr` **18/54 (33.3%)** — and on the legacy seven-field
+  basis, 9/42 vs 15/42. `document_number` alone went 1/6 → 4/6. The docling arm was re-run and
+  reproduced byte-identically (zero differing per-field lines), so the delta is real rather than
+  sampling noise. Every `.md` is now generated from the engine that ships.
+
+  **Unreconciled:** that docling run scores 9/42, while `knowledge/technical_debt.md` records 16/42
+  and `knowledge/prompts/README.md` records 19/42 for what should be the same six fixtures.
+  Reproducibility within a session is exact, so the divergence is outside it — engine version, model
+  file, or machine. Recorded rather than explained; the A/B above is internally valid regardless,
+  because both arms ran on one machine minutes apart.
+- **2026-09-02: three corpus specimens had a file extension that lied about their bytes, and were
+  invisible to every OCR walk in the repo.** `Spain_Passport_Specimen_P0_2022_mrz.png`,
+  `Sweden_ID_Specimen_2022_back_mrz.png` and
+  `North_Macedonia_Passport_Specimen_P0_MKD_2009_redacted_mrz.webp` are all JPEG (`ff d8 ff`).
+  `image::open` dispatches on the extension rather than sniffing content, so all three failed with
+  `Invalid PNG signature` and were silently skipped by `mrz_corpus`, both surveys, the manifest
+  generator and `synthpass-bench`. Confirmed by the narrowest possible A/B: the same bytes under a
+  `.jpg` name return `MRZ HIT doc_number=KV2424725 format=Td3`. Renamed to `.jpg`; a corpus-wide
+  magic-byte sweep found exactly these three of 232.
+
+  Spain matters beyond the count. Its line 1 is pinned in `crates/mrz/tests/line1_nonconformance.rs`
+  as the specimen with **no issuing state** — and that had only ever been a hand transcription,
+  because OCR could not open the file. It now reads `P<TAP` TD3 with valid checksums: live
+  confirmation that positions 3-5 hold the start of the surname, and that
+  `fusion::check_line1_integrity` correctly refuses it as `unrecognized_issuing_country`. It is also
+  correctly *rejected* as unreviewed ground truth, since nothing may infer `ESP` from line 2.
 - **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
   helps, at no measurable latency cost once measured on an uncontended machine.**
   `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new

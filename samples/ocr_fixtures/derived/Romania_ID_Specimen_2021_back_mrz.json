@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1983-07-03",
+  "date_of_expiry": "2031-07-27",
+  "document_number": "SS1234567",
+  "document_type": "ID",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "IOANA",
+  "issuing_country": "ROU",
+  "mrz_checksums_valid": true,
+  "mrz_line": "IDROUSS1234567<891<<<<<<<<<<<<\n8307037F3107276ROU<<<<<<<<<<<6\nMANOLECORINA<IOANA<<<<<<<<<<<<",
+  "nationality": "ROU",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "MANOLECORINA"
+}

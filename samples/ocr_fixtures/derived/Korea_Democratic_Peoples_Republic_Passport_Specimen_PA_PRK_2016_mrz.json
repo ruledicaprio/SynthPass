@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1971-11-30",
+  "date_of_expiry": "2021-10-01",
+  "document_number": "654210177",
+  "document_type": "PA",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MYONG CHOL",
+  "issuing_country": "PRK",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PAPRKKIM<<MYONG<CHOL<<<<<<<<<<<<<<<<<<<<<<<<\n6542101773PRK7111309M2110019<<<<<<<<<<<<<<<0",
+  "nationality": "PRK",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "KIM"
+}

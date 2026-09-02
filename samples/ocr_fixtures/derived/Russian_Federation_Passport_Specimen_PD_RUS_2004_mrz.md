@@ -1,0 +1,39 @@
+POCCH?CKA? ?E?EPA??? /RUSSIAN FEDERATION
+TACOPT /PASSPORT
+HoMed
+11
+Passoont 
+0000000
+Ten/Type sn rocvsaoera/Code d suate
+RUS
+auk Sunamne
+C??PHOBA
+SMIRNOVA
+Ho/Cyen 
+BA?EHT??A ?E?OPOBHA
+VALENTINA
+Teautngrno/Natonadty
+POCCH?CKAS ?EAEPALMA/ RUSSIAN FEDERATION
+Aata pounee Date
+04.08 1980
+Tloa/SexMeCTO
+X/F MOCKBA
+MA Da
+27.02.2004
+DeTs ocnieue cpouaDate
+INCTIH
+27.02,2009
+lbrth
+STHAS CATHEH
+MOSCOW
+eriry
+Onca
+??? POCC??
+Donnucs ademsfHolder's signatuce
+Signature
+PDRUSSMIRNOVA<<VALENTINA<<<<<<<<<<<<<<<<<<<<
+?00000000RUS8008046F0902274<<<<<<<<<<<<<<08
+PoeyUuAHT/ADOnly
+ROTSOCOSMRCODYCOFCON
+PDRUSSMIRNOVA<<VALENTINACKKKKK<
+1100000000RUS8008046F0902274<<<<<<<<<<<<<08

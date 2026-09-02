@@ -1,69 +1,52 @@
-<!-- image -->
-
-SPECIMEN
-
-## EESTI/ESTONIA/ESTONIE
-
-Rugkood/Counlrycnle Code cu pays
-
+Pass
+Passport / Passeport
+EESTI/ESTONIA/ ESTONIE
+Dokandiimbor
+Numn?ro
+KS0000182
+Dncument mber
+Rood
+Cnde du pays
 EST
-
-Lik/Type Type
-
-P
-
-1.Penconnanimi /Sumare/Nom
-
-JOEORG
-
-- 2.Eesnmi Givenname/Prenom
-
-JAAK-KRISTJAN
-
-- 3skukood /Patsonalcodedontifsantpcrsonne
-
+om
+Feenmi/ Given name/Prenom
+Pren
+AAK-KRISTJAN
+Isikukoad/ Pessonel code/ Identifsant personnel
 38001085718
-
-- 5.Sunniaeg/DateofbirttDntede naissance
-
+Siioniaeo/Date of hirth/Date de naissance
 08.01.1980
-
-6Suge/Sex/See7SunnikohyPace gfbrlh/Lleudenaissance
-
-M/M
-
+Sugu/ Sex/Sece 7 Slionikohe Place of birth/ Uleu de naissancn
 EST
-
-- 8.Veenartud/DateoEissu/Datede-delvranoe
-
-21.11.2020
-
-Bkeftivuni/DateGfexpiy/Datedepiraton
-
+Date
+Wehtiu ni/Date of evoirv/ Date d'expiration
 21.11.2030
-
-ttValaanda/Authority/Autorite
-
+Valiaan
 PPA/PBGB
-
-<!-- image -->
-
-Dokumendrumbor/Dooumentrumber Numero de.documont
-
-## KS0000182
-
-A.kodakondsu Ctizenship/Nationalite
-
+Country:
+ocie
+Lak/Type
+ITUDE
+Sennanar
+Pefticonanimi/ Sumame
+?EORG
+Givon
+Vaaantud/Date nfissuen
+Date
+21 11.2020
+thority
+BJE
+Modakonds
+Hizenship/Nationalite
 EST
-
-<!-- image -->
-
-- T0Kasuala aliri /Hodersgnatuire Signature du Luiaire
-
-<!-- image -->
-
-<!-- image -->
-
-P&lt;ESTJOEORG&lt;&lt;JAAK&lt;KRISTJAN&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt; KS00001827EST8001081M301121638001085718&lt;&lt;&lt;76
-
-<!-- image -->
+ddllvrance
+i
+A
+S
+Kasutala alkini/ Holder?s signaluire
+nandaire
+Joror
+Sinratute
+Autorit
+PESTJOEORG<<JAAKCKRISTJAN<<<<<<<<<<<<<<<<<
+KS00001827EST8001081M301121638001085718<<<76

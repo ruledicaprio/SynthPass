@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1974-10-24",
+  "date_of_expiry": "2031-05-05",
+  "document_number": "BB01540",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MOHAMMED IBRAHIMAC",
+  "issuing_country": "SAU",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<SAUABANEMIY<<MOHAMMED<IBRAHIMAC<<<<<<<<<<<\nBB01540<<6SAU7410242M3105054<<<<<<<<<<<<<<00",
+  "nationality": "SAU",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "ABANEMIY"
+}

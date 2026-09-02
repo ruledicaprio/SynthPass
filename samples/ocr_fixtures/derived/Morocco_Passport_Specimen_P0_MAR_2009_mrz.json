@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1964-04-25",
+  "date_of_expiry": "2014-12-07",
+  "document_number": "SP8615351",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MOHAMED          KE   EZ",
+  "issuing_country": "MAR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<MARBEN<AHMED<<MOHAMED<<<<<<<<<<KE<<<EZ<<<<\nSP86153516MAR6404253M1412071A400400<<<<<<<42",
+  "nationality": "MAR",
+  "personal_number": "A400400",
+  "sex": "M",
+  "surname": "BEN AHMED"
+}

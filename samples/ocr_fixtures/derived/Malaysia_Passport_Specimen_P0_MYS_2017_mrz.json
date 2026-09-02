@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1993-02-16",
+  "date_of_expiry": "2024-08-31",
+  "document_number": "A00000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "IDRUS",
+  "issuing_country": "MYS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<MYSMAHATHIRBIN<IDRUS<<<<<<<<<<<<<<<<<<<<<<\nA000000000MYS9302165M2408312930216146007<<72",
+  "nationality": "MYS",
+  "personal_number": "930216146007",
+  "sex": "M",
+  "surname": "MAHATHIRBIN"
+}

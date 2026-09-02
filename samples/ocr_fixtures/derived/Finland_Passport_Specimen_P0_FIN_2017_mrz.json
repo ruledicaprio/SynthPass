@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1971-12-21",
+  "date_of_expiry": "2022-01-01",
+  "document_number": "FX1234567",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MARIACOLIVIA",
+  "issuing_country": "FIN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<FINVIRTANEN<MARIACOLIVIA<<<<<<<<<<<<<<<<<<\nFX12345672FIN7112214F2201018211271<426U<<<00",
+  "nationality": "FIN",
+  "personal_number": "211271<426U",
+  "sex": "F",
+  "surname": "VIRTANEN"
+}

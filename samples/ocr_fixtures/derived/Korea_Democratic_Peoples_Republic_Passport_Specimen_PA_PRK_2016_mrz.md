@@ -1,0 +1,45 @@
+2
+25
+C
+##410174 #
+Signature of Authority
+1:
+Democratic People's Republic of Korea
+#u/ Country Code 49533 allt/ Pasenon
+PRK 654210177
+417 Sex 4/ Nationality
+CEN
+M  DPR KOREA
+Given Namo
+MYONG CHOL
+#4?/ Place of Birth
+PYONGYANG
++?1/ Dat of Expiry
+01 OCT 2021
+MINISTRY OF FOREIGN AFFAIRS 71 4
+TUS01113?
+8$/ Type
+PA
+e
+7a
+Suramne
+KIM
+111/ Date of Bith
+30 NOV 1971
+WX
+01 OCT 2016
+1 issuing Authority
+itma
+PASSPORT
+(FOR PUBLIC AFFAIRS)
+Datn
+jecuc
+#el 4g Holers Signatuto
+PAPRKKIM?<MYONG<CHOL<<<<<<<<<<<<<<<<<<<<<<<<
+6542101773PRK7111309M2110019<<<<<<<<<<<<<<<0
+MINISTRYOFEOREIGNAFFAIRS
+PAPRKKIM<MYONG<CHOLKKKKKK
+6542101773PRK7111309M2110019<<<<<<0
+MINISTRYOFFOREIGNAFFAIRS212441
+PAPRKKIM<<MYONG<CHOL<<<<<<<<<<<<<<<<<<<<<<<<<<<
+6542101773PRK7111309M2110019<<<<<<<<<<<<<<<0
