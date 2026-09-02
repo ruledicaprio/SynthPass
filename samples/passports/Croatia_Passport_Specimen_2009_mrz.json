@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1982-12-25",
+  "date_of_expiry": "2014-07-01",
+  "document_number": "007007007",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "SPECIMEN",
+  "issuing_country": "HRV",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06",
+  "nationality": "HRV",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "SPECIMEN"
+}
