@@ -313,7 +313,11 @@ fn main() {
             let ext = extension_of(path);
 
             let decode_start = Instant::now();
-            let dims = image::open(path).ok().map(|img| img.dimensions());
+            // Same decoder the engine uses, so a survey row can never report
+            // "failed to decode" for a file the OCR pass reads fine.
+            let dims = synthpass_ocr::decode_image(path)
+                .ok()
+                .map(|img| img.dimensions());
             let decode_ms = decode_start.elapsed().as_secs_f64() * 1000.0;
 
             let Some((w, h)) = dims else {
