@@ -15,11 +15,13 @@ Pull (default): fetches `origin/samples-data` and copies its contents into
 local `samples/`, additively -- it never deletes a local file, so it's safe
 to run against a working tree that already has extra/staged specimens.
 
--Push: mirrors local `samples/{passports,id_cards,driving_licenses,misc}/`
-(whole directories -- every file in them is an image) plus the image files
-under `samples/ocr_fixtures/` (everything except `*.json`/`*.md`, which stay
-on `main`) into the worktree, commits, and pushes. Uses a cross-platform
-mirror so a local deletion is reflected on `samples-data` too.
+-Push: mirrors the image files under
+`samples/{passports,id_cards,driving_licenses,misc,ocr_fixtures}/` into the
+worktree, commits, and pushes. `*.json`/`*.md` are excluded from **every** one
+of those directories -- hand-verified ground truth is reviewed text that stays
+on `main`, wherever in `samples/` it happens to sit next to its image. Uses a
+cross-platform mirror, so a local deletion is reflected on `samples-data` too,
+and ground truth previously pushed there is cleaned up as an orphan.
 
 All git writes happen inside an isolated worktree, never in this repo's own
 working tree -- safe to run with uncommitted changes on your current branch.
@@ -51,6 +53,33 @@ Set-Location $repoRoot
 # Whole directories: every file in them is a corpus image.
 $imageDirs = @("passports", "id_cards", "driving_licenses", "misc")
 
+# Hand-verified ground truth (`synthpass_core::Extraction` JSON, and the OCR
+# Markdown its parity fixtures read) is reviewed text that lives on `main`, not
+# image data. It is excluded from *every* mirrored directory, not just
+# `ocr_fixtures/` -- ground truth relocated next to its image would otherwise be
+# pushed to `samples-data` and silently become the only copy.
+$groundTruthPatterns = @("*.json", "*.md")
+
+# ----------------------------------------------------------------------------
+# Glob -> anchored regex over a file's *name*.
+#
+# Escape first, then re-open only `*`, then anchor. Doing it the other way round
+# (`$pattern -replace '\*', '.*'`) leaves every other regex metacharacter live:
+# "*.json" became ".*.json", where the `.` is a wildcard and the match is
+# unanchored, so "Foo_json.jpg" and "xjsonx.png" were excluded too.
+# ----------------------------------------------------------------------------
+function ConvertTo-NameExcludeRegex {
+    param([string[]]$Patterns)
+
+    if ($Patterns.Count -eq 0) { return $null }
+
+    $alternatives = foreach ($p in $Patterns) {
+        # [regex]::Escape turns "*.json" into "\*\.json"; reopen the escaped star.
+        ([regex]::Escape($p) -replace '\\\*', '.*')
+    }
+    '^(?:' + ($alternatives -join '|') + ')$'
+}
+
 # ----------------------------------------------------------------------------
 # Cross-platform replacement for robocopy /E /XO (additive copy, newer wins)
 # ----------------------------------------------------------------------------
@@ -71,11 +100,7 @@ function Copy-Additive {
     }
 
     # Build exclusion filter for file names (e.g. "*.json", "*.md")
-    $excludeRegex = if ($ExcludePatterns.Count -gt 0) {
-        ($ExcludePatterns -join '|') -replace '\*', '.*'
-    } else {
-        $null
-    }
+    $excludeRegex = ConvertTo-NameExcludeRegex -Patterns $ExcludePatterns
 
     # Recursively get all files from source
     $sourceFiles = Get-ChildItem -Path $Source -File -Recurse
@@ -132,13 +157,14 @@ function Copy-Mirror {
     }
 
     # Build exclusion filter for file names
-    $excludeRegex = if ($ExcludePatterns.Count -gt 0) {
-        ($ExcludePatterns -join '|') -replace '\*', '.*'
-    } else {
-        $null
-    }
+    $excludeRegex = ConvertTo-NameExcludeRegex -Patterns $ExcludePatterns
 
     # ---- 1. Remove files/dirs in destination that are not in source ----
+    #
+    # Deliberately ignores $ExcludePatterns: an excluded file that is already on
+    # the branch (e.g. ground truth pushed there before the exclusion was
+    # applied to every directory) is an orphan and should be removed. Honouring
+    # the exclusion here would strand it on `samples-data` forever.
     $destItems = Get-ChildItem -Path $Destination -Recurse
     foreach ($destItem in $destItems) {
         $relPath = $destItem.FullName.Substring($Destination.Length).TrimStart('\', '/')
@@ -214,12 +240,11 @@ if (-not $Push) {
             $src = Join-Path $worktree "samples\$dir"
             $dst = Join-Path $repoRoot "samples\$dir"
             # Cross-platform additive copy (like robocopy /E /XO)
-            Copy-Additive -Source $src -Destination $dst
+            Copy-Additive -Source $src -Destination $dst -ExcludePatterns $groundTruthPatterns
         }
         $src = Join-Path $worktree "samples\ocr_fixtures"
         $dst = Join-Path $repoRoot "samples\ocr_fixtures"
-        # Exclude JSON and Markdown files (they stay on main)
-        Copy-Additive -Source $src -Destination $dst -ExcludePatterns @("*.json", "*.md")
+        Copy-Additive -Source $src -Destination $dst -ExcludePatterns $groundTruthPatterns
         Write-Host "Pulled samples-data into local samples/."
     }
     git worktree remove $worktree --force
@@ -232,13 +257,12 @@ foreach ($dir in $imageDirs) {
     $src = Join-Path $repoRoot "samples\$dir"
     $dst = Join-Path $worktree "samples\$dir"
     # Cross-platform mirror (like robocopy /MIR)
-    Copy-Mirror -Source $src -Destination $dst
+    Copy-Mirror -Source $src -Destination $dst -ExcludePatterns $groundTruthPatterns
 }
 
 $src = Join-Path $repoRoot "samples\ocr_fixtures"
 $dst = Join-Path $worktree "samples\ocr_fixtures"
-# Exclude JSON and Markdown files from the mirror (they stay on main)
-Copy-Mirror -Source $src -Destination $dst -ExcludePatterns @("*.json", "*.md")
+Copy-Mirror -Source $src -Destination $dst -ExcludePatterns $groundTruthPatterns
 
 Push-Location $worktree
 git add samples
