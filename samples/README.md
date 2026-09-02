@@ -2,26 +2,23 @@
 
 Identity-document specimen images used as test/example fixtures for the OCR,
 LLM, and pipeline crates. Files are organized by document kind into
-subdirectories and follow a single filename convention (see "Naming
-convention" below).
-
-**Only `ocr_fixtures/` is tracked in git.** It's the hand-verified,
-ground-truth-labelled subset, and required CI (`native_ocr_e2e`,
-`rust_ocr_smoke`) depends on specific files in it. Everything else —
-`passports/`, `id_cards/`, `driving_licenses/`, `misc/` — is a gitignored
-local corpus: git keeps every committed byte forever, and a corpus this size
-mirrored by hand across machines doesn't need git for that. Populate it by
-running `tools/fetch_commons_mrz_specimens_v2.py` or by copying an existing
-`samples/` tree from another machine.
+subdirectories and follow a filename convention (see "Naming convention"
+below), with the per-file metadata recorded in `corpus.jsonl`.
 
 **Images are not tracked on `main`.** They live on the orphan `samples-data`
 branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
 you want the latest corpus) to populate this directory locally; it's
-`.gitignore`d otherwise. `samples/README.md` and `samples/ocr_fixtures/*.json`
-/ `*.md` (the hand-verified OCR ground truth) are the only things under
-`samples/` still tracked here. See CONTRIBUTING.md's "Adding a corpus
-specimen" section and `knowledge/benchmarks/README.md`'s "local bench loop"
-for how the corpus grows now.
+`.gitignore`d otherwise. Four `ocr_fixtures/` images are the exception: they
+are force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`)
+panics without them and does not sync the corpus first.
+
+Tracked under `samples/` on `main`: this README, `corpus.jsonl` (the manifest),
+`ocr_fixtures/*.json` + `*.md` (the hand-verified ground truth), and those four
+images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every**
+mirrored directory, so ground truth cannot drift onto `samples-data` even when
+it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
+section and `knowledge/benchmarks/README.md`'s "local bench loop" for how the
+corpus grows now.
 
 ## Layout
 
@@ -30,8 +27,9 @@ samples/
   passports/          passport specimen images (TD3 MRZ format) — gitignored, local mirror
   id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
   driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
-  ocr_fixtures/         docling OCR test fixtures, each an image + .md + .json triple — tracked, required by CI
+  ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
+  corpus.jsonl          one row per image: MRZ document code, issuing state, provenance, ground-truth link — tracked
   README.md
 ```
 
@@ -52,38 +50,68 @@ since it is not itself a test fixture.
 
 ## Naming convention
 
-Filenames are lookup keys: the `find_sample` / `walk_samples` test helpers
-walk `samples/` recursively and match by **basename**, and
-`crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS`/`NEGATIVE` lists
-name specimens by basename too. Every file — tracked or gitignored — follows:
+Filenames are lookup keys: the `find_sample` / `walk_samples` test helpers walk
+`samples/` recursively and match by **basename**. Passports follow:
 
 ```
-Country_DocType_Specimen[_YYYY][_N][_side]_mrz.ext
+Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ext
 ```
 
 - `Country` — issuing country/territory, `Snake_Case` or `Title_Case`
-  (e.g. `Croatia`, `North_Macedonia`). Adjective forms survive where already
-  established (`Slovenian_ID_…`).
-- `DocType` — `Passport` or `ID`, matching the subdirectory.
-- `Specimen` — always present; these are specimen/void documents, never real.
-- `YYYY` (optional) — issue year, when known from the document.
-- `N` (optional) — disambiguator when the same country/year has more than one
-  specimen (`_2`, `_3`, …).
-- `side` (optional) — `front`, `back`, or `inner_page` for a multi-page/side
-  document; omit for a single-side passport datapage.
-- `_mrz` / `_no_mrz` — tags whether this image carries the MRZ. `_redacted_mrz`
-  when the MRZ is physically blacked out on the source. This tag keys the
-  `integrity_survey.rs --mrz-only` filter (`filename.contains("_mrz")`), so it
-  is not optional.
+  (e.g. `Croatia`, `North_Macedonia`).
+- `DocType` — `Passport` or `ID`, matching the subdirectory. That agreement is
+  load-bearing: `synthpass_bench::classify_specimen` reads the document class
+  off the directory, never the filename.
+- `Specimen` / `Private` — provenance.
+- `Code` — MRZ line 1 positions 1–2, the ICAO document code, with `0` standing
+  in for the filler `<` (a path cannot hold `<`). So `P0` is `P<`, `PP` is
+  `PP`. **`PO` with a letter O is a different code** and genuinely occurs.
+- `State` — MRZ line 1 positions 3–5, the issuing state, same `0`→`<`
+  substitution. Germany's legacy `D<<` is written `D00`.
+- `YYYY` — the year. Which year it means is recorded per file in the manifest's
+  `year.kind`, because it is the issue year in most names and the expiry year
+  in at least one.
+- `_redacted` — the MRZ is physically blacked out on the source.
+- `_mrz` / `_no_mrz` — whether this image carries an MRZ at all. Not optional:
+  it keys `integrity_survey.rs --mrz-only`, which skips names containing
+  `no_mrz` (a *negative* filter — an image with no `_mrz` tag at all is kept).
+- `variant…` — free-form tags for how the image is degraded or framed:
+  `blur`, `rotated`, `highlight`, `contrast`, `pixelated`, `wide`, `child`,
+  `emergency`, `inner_page`.
 - `ext` — prefer `jpg`/`png`; `webp` only when that is the source format.
+
+`id_cards/` and `driving_licenses/` predate the `Code`/`State` slots and keep
+the older `Country_DocType_Specimen[_YYYY][_side]_mrz.ext` form.
 
 Basenames must stay **unique across all of `samples/`**, regardless of
 subdirectory, since lookups are basename-based and do not disambiguate by
 directory.
 
-Renaming a tracked `ocr_fixtures/` file means updating its `CORPUS`/`NEGATIVE`
-entry and any `find_sample("…")` literal in the same change — `grep -r` the
-old basename first.
+### The manifest, not the filename, is the source of truth
+
+`samples/corpus.jsonl` (tracked on `main`) carries one row per image, and it —
+not the name — is what code reads. A filename cannot be validated; the manifest
+is checked on every `cargo test --workspace` by
+`crates/synthpass-bench/tests/corpus_manifest.rs`, which reads only the
+manifest and so runs even in a clone that has no images.
+
+Regenerate it after adding or renaming a specimen:
+
+```powershell
+cargo run -p synthpass-ocr --release --example corpus_manifest
+cargo run -p synthpass-ocr --release --example corpus_manifest -- --check   # report only
+```
+
+Rows are keyed by content hash, so an unchanged image is never re-read. Note
+that `mrz.document_code` / `mrz.issuing_state` come from the **filename**, and
+`mrz.observed` from OCR: line 1 positions 1–5 carry no check digit in any ICAO
+format, and the recogniser misreads them on most passports (`PS` for `P<`,
+`OOO` for `SVK`). Where the two disagree the human who named the file wins, and
+the generator prints the disagreement for review.
+
+`mrz_corpus.rs`'s positive and negative sets and `parity.rs`'s fixture list are
+both derived from the manifest, so a rename no longer strands them — which it
+previously did, silently, for 16 of 21 corpus entries and all 6 parity fixtures.
 
 ## Provenance
 

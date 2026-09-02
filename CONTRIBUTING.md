@@ -173,16 +173,31 @@ image can. `./scripts/ingest-fetched-samples.ps1 -DryRun` reports accept/reject 
 moving anything, and `./scripts/watch-samples.ps1` still exists for anyone who wants to eyeball an
 individual candidate before it's ingested.
 
-**Ground truth stays manual.** `crates/synthpass-ocr/examples/mrz_corpus.rs`'s `CORPUS`/`NEGATIVE`
-doc-number ground truth and `samples/ocr_fixtures/*.json` are a separate, smaller, opt-in step —
-reading the real document number off a specimen requires a human, and can't be automated the way
-bulk ingestion was. To add one: pick an already-ingested specimen, run `cargo run -p synthpass-ocr
---release --example mrz_corpus -- --dump` to confirm a Tier-1 HIT and read the real doc number off
-the MRZ, add it to `CORPUS` (or `NEGATIVE` if the document has no MRZ at all), and update the
-corresponding row in `knowledge/CORPUS_COVERAGE.md`. Name the fixture per
-[samples/README.md](samples/README.md)'s convention
-(`Country_DocType_Specimen[_YYYY][_side]_mrz.ext`) and keep its basename identical to the
-specimen image's.
+**Ground truth stays manual, but the corpus lists no longer are.**
+`crates/synthpass-ocr/examples/mrz_corpus.rs`'s positive and negative sets and
+`crates/synthpass-llm/tests/parity.rs`'s fixture list are all derived from `samples/corpus.jsonl`,
+so adding or renaming a specimen means regenerating the manifest, not editing three `const` arrays.
+They used to be hand-written basenames, and a rename stranded them silently — 16 of 21 corpus
+entries and all 6 parity fixtures were stale by the time this changed.
+
+After adding or renaming anything under `samples/`:
+
+```powershell
+cargo run -p synthpass-ocr --release --example corpus_manifest
+```
+
+The generator prints every place OCR disagrees with a filename. **Read those**: the filename wins
+by design (line 1 positions 1-5 carry no check digit, and the recogniser misreads them on most
+passports), so a disagreement usually means the OCR is wrong — but occasionally it means the name
+is, and the only way to tell is to look at the image. Reading the real document number off a
+specimen still requires a human. To promote one to a corpus entry: run
+`cargo run -p synthpass-ocr --release --example mrz_corpus -- --dump` to confirm a Tier-1 HIT,
+write the hand-verified `synthpass_core::Extraction` to `samples/ocr_fixtures/<image stem>.json`
+(the stem must match the image exactly — that join is how the two are linked), regenerate the
+manifest, and update the corresponding row in `knowledge/CORPUS_COVERAGE.md`. A specimen whose
+document number is known without a full label can instead have `expected_document_number` filled
+in directly in the manifest. Name the file per [samples/README.md](samples/README.md)'s
+convention.
 
 Two different things can happen to the file at this point, and they're not the same PR step:
 
