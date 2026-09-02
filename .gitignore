@@ -28,9 +28,15 @@ work/
 # samples/ specimen IMAGES are not tracked on main -- they live on the
 # orphan `samples-data` branch (see scripts/sync-samples.ps1), the same
 # isolated-worktree pattern bench-data uses, so a bulk corpus refresh never
-# grows main's history. Only the small hand-verified ground truth stays
-# tracked here: samples/README.md and samples/ocr_fixtures/*.json + *.md.
-# Run `./scripts/sync-samples.ps1` after a fresh clone to populate images.
+# grows main's history. git keeps every byte forever, and a multi-machine
+# local mirror doesn't need git for that. Run `./scripts/sync-samples.ps1`
+# after a fresh clone to populate images, or regenerate with
+# tools/fetch_commons_mrz_specimens_v2.py.
+#
+# Only the small hand-verified ground truth stays tracked here:
+# samples/README.md and samples/ocr_fixtures/*.json + *.md -- plus the four
+# fixture images below, force-added because required CI (native_ocr_e2e,
+# rust_ocr_smoke) panics without them and does not sync the corpus first.
 samples/passports/
 samples/id_cards/
 samples/driving_licenses/
@@ -47,15 +53,6 @@ samples/ocr_fixtures/*
 # a stray manual `git add -A` inside the samples-data worktree is exactly the
 # accident this guards against.
 samples/**/*Private*
-
-# The real-specimen corpus (except samples/ocr_fixtures/, which is committed —
-# see samples/README.md) is not tracked: git keeps every byte forever, and a
-# multi-machine local mirror doesn't need git for that. Fetch/regenerate via
-# tools/fetch_commons_mrz_specimens_v2.py, or copy from another machine.
-samples/passports/
-samples/id_cards/
-samples/driving_licenses/
-samples/misc/
 
 # v0.3.0 work-in-progress drafts (not yet wired into the build)
 drafts/
