@@ -15,11 +15,12 @@ not new per-country code. `scripts/watch-samples.ps1` + `synthpass-ocr`'s `check
 example give an instant first-pass check when a new candidate specimen is dropped into
 `samples/` — see CONTRIBUTING.md.
 
-**Only `samples/ocr_fixtures/` is tracked in git.** `samples/passports/`, `samples/id_cards/`,
-and `samples/driving_licenses/` are gitignored local mirrors (see `samples/README.md`), so a
-per-country row below reflects a contributor's locally-verified corpus at the time it was
-checked, not something a fresh clone of this repository can reproduce on its own — only the
-`ocr_fixtures/` subset survives a clone. This repo already treats prose-recorded verification
+**Specimen images are not tracked in git** — they live on the orphan `samples-data` branch (see
+`samples/README.md`), so a per-country row below reflects a contributor's locally-verified corpus
+at the time it was checked, not something a fresh clone can reproduce without first running
+`./scripts/sync-samples.ps1`. What *does* survive a clone is `samples/corpus.jsonl`, the tracked
+manifest: it records every image's ICAO document code, issuing state, provenance and
+ground-truth link, so the shape of the corpus is reviewable even when the pictures are absent. This repo already treats prose-recorded verification
 as legitimate without the backing artifact being committed (`knowledge/benchmarks/README.md`'s
 "a constant with no measurement behind it does not ship" principle is the same idea, applied
 here to corpus coverage instead of a benchmark number).
