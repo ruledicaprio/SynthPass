@@ -69,6 +69,7 @@ mod blindspot;
 mod checksum;
 mod countries;
 mod dates;
+mod doccode;
 mod emit;
 mod parser;
 mod repair;
@@ -81,6 +82,7 @@ pub use dates::{
     date_completeness, expand_date, expand_date_with_pivot, Date, DateCompleteness, DateValidity,
     CURRENT_YY,
 };
+pub use doccode::{passport_type, PassportType};
 pub use emit::{
     encode_name_component, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3,
     MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
@@ -385,6 +387,25 @@ impl MrzData {
     /// Human-readable name of the issuing state, if the code is recognized.
     pub fn issuing_country_name(&self) -> Option<&'static str> {
         country_name(&self.issuing_country)
+    }
+
+    /// The passport type this document's code designates, per ICAO 9303
+    /// Part 4 §4.4.
+    ///
+    /// `None` covers three cases the caller usually wants to tell apart, and
+    /// which this method deliberately does not distinguish on its own:
+    ///
+    /// * the document is not a passport (`Format::Td1`, `Td2`, `MrvA`, `MrvB`);
+    /// * it is a passport carrying the `P<` filler form, i.e. no secondary
+    ///   code — conformant today, and the most common case in real corpora;
+    /// * the second character is outside the §4.4 table.
+    ///
+    /// Check [`format`](Self::format) and [`document_type`](Self::document_type)
+    /// when the difference matters. A code outside the table never makes a
+    /// document unparseable — see the [`doccode`](crate::PassportType) docs for
+    /// why recognition here is deliberately not rejection.
+    pub fn passport_type(&self) -> Option<PassportType> {
+        passport_type(&self.document_type)
     }
 
     /// Human-readable name of the nationality, if the code is recognized.

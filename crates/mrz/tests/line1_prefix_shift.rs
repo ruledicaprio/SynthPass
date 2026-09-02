@@ -164,3 +164,58 @@ fn td2_with_a_genuine_two_letter_document_code_is_unaffected() {
     );
     assert_eq!(data.issuing_country, "BRA");
 }
+
+/// Germany's legacy MRZ issuing-state code is the single letter `D`, which the
+/// MRZ pads to `D<<`. Recovering a dropped position-1 filler on such a document
+/// requires the repair gate to look the state up *after* trimming that padding.
+///
+/// It did not. All three gates passed the raw 3-byte slice to `country_name`,
+/// which is exact string equality against a table storing `("D", "Germany")`,
+/// so `country_name("D<<")` was `None` and the correct repair was produced and
+/// then discarded. Nothing caught it: the synthetic generator only ever emits
+/// `DEU`, and no corpus specimen exercised the path until
+/// `Germany_Passport_Specimen_P0_D00_2018_mrz.webp` — whose line 1 reads
+/// `P<D<<HEINKEL<<REYNALD` — was read against the manifest.
+#[test]
+fn td3_recovers_a_filler_padded_single_letter_issuing_state() {
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "D".to_string(),
+        document_number: "G28P5FV81".to_string(),
+        surname: "HEINKEL".to_string(),
+        given_names: "REYNALD".to_string(),
+        nationality: "D".to_string(),
+        date_of_birth: "980628".to_string(),
+        sex: "M".to_string(),
+        date_of_expiry: "281201".to_string(),
+        personal_number: None,
+    });
+    let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+    assert!(
+        l1.starts_with("P<D<<"),
+        "the emitter must filler-pad a single-letter state: {l1}"
+    );
+
+    let damaged = drop_position_1(l1);
+    let text = format!("{damaged}\n{l2}");
+    let data =
+        find_and_parse(&text).expect("a dropped position-1 filler must still parse for `D<<`");
+
+    assert_eq!(data.format, Format::Td3);
+    assert_eq!(data.document_type, "P");
+    assert_eq!(
+        data.issuing_country, "D",
+        "the repair gate must resolve `D<<` to Germany, not discard the repair"
+    );
+    assert_eq!(data.issuing_country_name(), Some("Germany"));
+    assert!(data.valid(), "line 2's real check digits are untouched");
+}
+
+/// The trimming above must not make an all-filler state resolve: `<<<` trims to
+/// the empty string, which is not in the table, so a genuinely damaged zone is
+/// still left alone rather than "repaired" into nonsense.
+#[test]
+fn an_all_filler_issuing_state_still_does_not_resolve() {
+    assert_eq!(mrz::country_name(""), None);
+    assert_eq!(mrz::country_name("<<<"), None);
+}
