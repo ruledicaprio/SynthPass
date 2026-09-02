@@ -13,6 +13,23 @@
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
 //!
+//! Measured baseline, 2026-09-02, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
+//! **reviewed 43/162 (26.5%) over 18 documents, derived 47/162 (29.0%) over
+//! 54.** The two sets agree closely on the one field they both score
+//! (`document_number`: 50% reviewed, 54% derived), which is the check that the
+//! generated half behaves like the hand-verified half rather than being easier.
+//! Per-field numbers and the full record are in `knowledge/ROADMAP.md`.
+//!
+//! Two of the nine fields are weak for a reason worth reading before treating
+//! them as model failure: `document_type` scores 6% because the model answers
+//! `"PASSPORT"` where the MRZ says `"P"`, and `issuing_country` 22% because it
+//! answers `"CROATIA"` where the MRZ says `"HRV"`. Those are format
+//! disagreements, not wrong answers, and they are exactly what the narrow-ask
+//! work in `knowledge/VIZ_TIER2_DESIGN.md` §2.3 addresses — the prompt never
+//! says which form it wants. The harness deliberately does **not** normalise
+//! them away: doing so would raise the number without changing what the
+//! pipeline actually receives.
+//!
 //! # Two fixture sets, because ground truth is not uniform
 //!
 //! Fixtures come in two kinds, and conflating them would make this harness lie:
@@ -207,6 +224,32 @@ impl Tally {
         self.matched as f64 / self.total as f64
     }
 
+    /// Fails when the match rate drops below `floor`.
+    ///
+    /// An **empty** set is skipped rather than failed. A rate of zero over zero
+    /// fields is not a regression — it means the fixtures aren't on disk, which
+    /// is a checkout problem and deserves to say so instead of masquerading as a
+    /// model that got worse. (Reported rather than silent: a set that quietly
+    /// stops contributing is how a measurement rots.)
+    fn assert_floor(&self, label: &str, floor: f64) {
+        if self.total == 0 {
+            println!(
+                "\n{label} fixtures: none found — floor not checked. \
+                 Regenerate with `cargo run -p synthpass-bench --release \
+                 --example ground_truth_candidates`."
+            );
+            return;
+        }
+        assert!(
+            self.rate() >= floor,
+            "{label}-fixture accuracy regressed: {}/{} ({:.1}%) below the {:.0}% floor",
+            self.matched,
+            self.total,
+            self.rate() * 100.0,
+            floor * 100.0
+        );
+    }
+
     fn print(&self, label: &str) {
         println!(
             "\n{label}: {} document(s), {}/{} fields ({:.1}%)",
@@ -332,25 +375,22 @@ fn native_llm_field_accuracy_over_sample_set() {
     );
 
     // Two floors, because the two sets ask different questions and pooling them
-    // would let a large easy set hide a regression in a small hard one. Both are
-    // set below the measured baseline recorded in `knowledge/ROADMAP.md`, and
-    // exist to catch a broken prompt or a repair-JSON bug — not to gate on model
-    // quality. A 1.5B model reading garbled OCR is expected to be wrong often;
-    // that is why Tier 1 exists.
-    assert!(
-        reviewed.rate() >= 0.25,
-        "reviewed-fixture accuracy regressed: {}/{} ({:.1}%) below the 25% floor",
-        reviewed.matched,
-        reviewed.total,
-        reviewed.rate() * 100.0
-    );
-    assert!(
-        derived.rate() >= 0.20,
-        "derived-fixture accuracy regressed: {}/{} ({:.1}%) below the 20% floor",
-        derived.matched,
-        derived.total,
-        derived.rate() * 100.0
-    );
+    // would let a large easy set hide a regression in a small hard one.
+    //
+    // Both sit far below the measured baseline (26.5% / 29.0%, recorded in
+    // `knowledge/ROADMAP.md`), and that distance is deliberate. These catch a
+    // *broken* prompt or a repair-JSON bug — failures that take the rate to
+    // near zero — not drift. `knowledge/technical_debt.md` reached the same
+    // conclusion from the other direction: "a single pass/fail at a 25% floor
+    // would not have caught anything here either. Recording the rate over time
+    // is the more valuable half."
+    //
+    // The old floor was 0.25 against a then-measured 35.7% over seven fields.
+    // Keeping 0.25 while widening the scored set to nine would have *tightened*
+    // the gate by accident — 26.5% leaves it barely two fields of headroom on a
+    // 162-field denominator, which is a tripwire, not a floor.
+    reviewed.assert_floor("reviewed", 0.15);
+    derived.assert_floor("derived", 0.15);
 }
 
 fn repo_root() -> PathBuf {

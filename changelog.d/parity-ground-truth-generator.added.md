@@ -38,11 +38,34 @@
   `ground_truth_stem` links: a fixture pair is self-contained, and listing the directory picks up a
   promotion with no manifest regeneration.
 
-- **Every `.md` fixture is regenerated from the engine that actually ships.** The six that existed
-  came from `docling`, retired in v0.7.5 — HTML-escaped (`P&lt;HRV…`), with `##` headings and
-  `<!-- image -->` placeholders. The pipeline feeds Tier 2 `NativeOcr::recognize`'s plain text,
-  which is none of those, so the harness had been measuring the model against an input shape
-  production no longer produces.
+- **Every `.md` fixture is regenerated from the engine that actually ships, and it was worth half
+  the measured accuracy.** The six that existed came from `docling`, retired in v0.7.5 —
+  HTML-escaped (`P&lt;HRV…`), with `##` headings and `<!-- image -->` placeholders. The pipeline
+  feeds Tier 2 `NativeOcr::recognize`'s plain text, which is none of those, so the harness had been
+  measuring the model against an input shape production no longer produces. A same-binary A/B over
+  the same six documents, changing only the `.md` source: docling **9/54 (16.7%)**, `NativeOcr`
+  **18/54 (33.3%)**; `document_number` alone 1/6 → 4/6. The docling arm reproduced byte-identically
+  on a repeat run, so the delta is not sampling noise.
+
+- **Measured baseline over the full set** (`qwen2.5-1.5b-instruct-q4_k_m`, greedy, ~31 min):
+  reviewed **43/162 (26.5%)** over 18 documents, derived **47/162 (29.0%)** over 54, repair
+  fallbacks **0**. The two sets agree on the one field both score (`document_number`: 50% vs 54%),
+  which is the check that generated fixtures are not systematically easier than hand-verified ones.
+  The floors move from 0.25 to 0.15 — keeping 0.25 while widening the scored set from seven fields
+  to nine would have tightened the gate by accident, leaving barely two fields of headroom. These
+  catch a broken prompt, not drift; `knowledge/technical_debt.md` already concluded that the
+  recorded rate, not the pass/fail, is the half that detects a regression.
+
+- **Three corpus specimens had a file extension that lied about their bytes.**
+  `Spain_Passport_Specimen_P0_2022_mrz.png`, `Sweden_ID_Specimen_2022_back_mrz.png` and
+  `North_Macedonia_Passport_Specimen_P0_MKD_2009_redacted_mrz.webp` are all JPEG. `image::open`
+  dispatches on the extension rather than sniffing content, so all three failed with
+  `Invalid PNG signature` and were silently skipped by every OCR walk in the repo — `mrz_corpus`,
+  both surveys, the manifest generator and `synthpass-bench`. Renamed to `.jpg`; a magic-byte sweep
+  found exactly these three of 232. Spain's line 1 is pinned in
+  `crates/mrz/tests/line1_nonconformance.rs` as the specimen with no issuing state, which until now
+  had only ever been a hand transcription — it reads `P<TAP` TD3 with valid checksums, confirming
+  both the transcription and that `fusion::check_line1_integrity` correctly refuses it.
 
 - **`knowledge/VIZ_TIER2_DESIGN.md`** — the written design for visual-zone work in Tier 2, and the
   correction that motivates it: the model already receives the full-page text, VIZ included, so the
