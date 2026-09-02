@@ -663,6 +663,21 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
 /// one-position-right-shifted read does. A line with a genuine two-letter
 /// document code and a genuinely correct `issuing_country` already resolves
 /// on the first check and is returned unchanged.
+/// Whether an issuing-state slice resolves to a known state once its filler
+/// padding is removed.
+///
+/// The repair gates below take a raw 3-byte slice off line 1, and
+/// [`country_name`] is exact string equality. A state shorter than three
+/// characters is filler-padded in the MRZ -- Germany's legacy code is `D<<` --
+/// so passing the untrimmed slice asked the table for `"D<<"`, got `None`, and
+/// silently discarded an otherwise correct repair for every German document
+/// whose line 1 had lost its position-1 filler. `D` is the only sub-3-character
+/// code in the table, so trimming cannot make any other slice newly resolve;
+/// `<<<` trims to the empty string, which still does not resolve.
+fn country_resolves(slice: &str) -> bool {
+    country_name(slice.trim_end_matches('<')).is_some()
+}
+
 fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String {
     if repaired.len() != target_width
         || target_width < 6
@@ -670,10 +685,10 @@ fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String
     {
         return repaired;
     }
-    if country_name(&repaired[2..5]).is_some() {
+    if country_resolves(&repaired[2..5]) {
         return repaired;
     }
-    if country_name(&repaired[3..6]).is_none() {
+    if !country_resolves(&repaired[3..6]) {
         return repaired;
     }
     format!("{}{}<", &repaired[0..2], &repaired[3..target_width])
@@ -730,7 +745,7 @@ fn shift_or_unshift_line1(repaired: String, target_width: usize) -> String {
 /// out of scope for TD2 (see that function's call site).
 fn unshift_if_country_resolves(repaired: String, target_width: usize) -> String {
     let unshifted = unshift_line1_prefix(repaired.clone(), target_width);
-    if unshifted != repaired && target_width >= 5 && country_name(&unshifted[2..5]).is_some() {
+    if unshifted != repaired && target_width >= 5 && country_resolves(&unshifted[2..5]) {
         unshifted
     } else {
         repaired

@@ -375,6 +375,41 @@ document codes") resolved to **no**, and the dictionary approach was dropped
 before any table was written — not measured and rejected, ruled out at design
 time.
 
+**Amended 2026-09-02 — that decision was about TD1/TD2, and it still stands.
+TD3 is decided differently, because Part 4 has the registry Parts 5 and 6 do
+not.** The reasoning above quotes Part 5 §Note k and Part 6 §Note k, which make
+the second character issuer-discretionary with two exclusions. There is no
+registry to build a TD1/TD2 dictionary from, and none has been built.
+
+ICAO 9303 **Part 4 §4.4** is the exception, and it is already in this
+repository at
+[`docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md`](docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md):
+a closed normative table of ten secondary passport codes (`PP`, `PE`, `PD`,
+`PO`, `PR`, `PT`, `PS`, `PL`, `PM`, plus `PU` from Part 8). That is a
+registry, so `crates/mrz/src/doccode.rs` transcribes it — a spec table, not a
+set of observed codes, which is the distinction the decision above turns on.
+
+Two properties keep this consistent with the reasoning it amends:
+
+* **It is recognition, never rejection.** `parse_td3` still accepts any
+  character the MRZ alphabet allows at position 2, and an unrecognised code
+  does not make a document unparseable. §4.4's own effective dates make that
+  mandatory: secondary codes become required for newly issued MRPs on
+  1 January 2028, and passports issued without one stay valid until 1 January
+  2038. The overwhelmingly common `P<` filler form is conformant today, and
+  `passport_type` reports `None` for it — meaning "no secondary code", which is
+  deliberately not the same signal as "unknown code".
+* **Nothing repairs on it.** No gate, no candidate ranking, and no substitution
+  consults the table. It answers what a code *means*; it never decides what a
+  document *is*.
+
+The corpus that motivated this carries 15 distinct second characters —
+`P<` ×132, `PP` ×8, `PM` ×4, `PA`/`PC` ×3, and one each of `PB`, `PD`, `PE`,
+`PN`, `PO`, `PS`, `PV`, `PX` — none of which any test asserted before this
+change. Note that several of those (`PA`, `PB`, `PC`, `PN`, `PV`, `PX`) are
+*not* in §4.4's table, which is precisely why the table is advisory: real
+documents in circulation predate the harmonisation §4.4 is phasing in.
+
 **What shipped instead: reuse the issuing-country gate, not a new dictionary.**
 TD3/MRV-A/MRV-B's own drop-repair (`shift_or_unshift_line1`) already arbitrates
 its *insertion*-repair half without a document-code table, using
