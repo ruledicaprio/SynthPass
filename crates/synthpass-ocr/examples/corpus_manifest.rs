@@ -120,7 +120,7 @@ fn main() {
     // Hand-labelled ground truth is keyed by file stem under ocr_fixtures/.
     // Recording the link here is what lets a caller stop hard-coding that join
     // and lets the coverage gap be counted rather than guessed at.
-    let ground_truth = ground_truth_stems(&samples);
+    let ground_truth = GroundTruth::load(&samples);
     println!("ground-truth labels available: {}", ground_truth.len());
 
     let mut rows: BTreeMap<String, serde_json::Value> = BTreeMap::new();
@@ -467,7 +467,7 @@ fn build_row(
     claims: &FilenameClaims,
     observed: &ObservedMrz,
     previous: Option<&serde_json::Value>,
-    ground_truth: &std::collections::BTreeSet<String>,
+    ground_truth: &GroundTruth,
 ) -> serde_json::Value {
     // Human-authored fields survive regeneration untouched.
     let carried = |key: &str| -> serde_json::Value {
@@ -535,36 +535,79 @@ fn build_row(
         },
         "year": { "value": claims.year, "kind": year_kind },
         "variants": claims.variants,
-        "ground_truth_stem": ground_truth_stem(filename, ground_truth),
+        "ground_truth_stem": ground_truth.stem_for(filename),
+        "expected_document_number": ground_truth.expected_document_number(filename, previous),
         "notes": carried("notes"),
     })
 }
 
-/// Stems under `samples/ocr_fixtures/` that have a hand-labelled `.json`.
-fn ground_truth_stems(samples: &Path) -> std::collections::BTreeSet<String> {
-    let Ok(entries) = std::fs::read_dir(samples.join("ocr_fixtures")) else {
-        return std::collections::BTreeSet::new();
-    };
-    entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
-        .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(str::to_string))
-        .collect()
-}
-
-/// The ground-truth stem for an image, if one exists.
+/// The hand-labelled ground truth available under `samples/ocr_fixtures/`,
+/// and the lookups that resolve an image to it.
 ///
 /// `synthpass_bench::load_ground_truth` joins `ocr_fixtures/<image stem>.json`,
 /// so the link holds only while the two names agree. The corpus rename broke
-/// most of them -- recording the survivors here turns a silent `None` at
-/// lookup time into a countable coverage number.
-fn ground_truth_stem(
-    filename: &str,
-    available: &std::collections::BTreeSet<String>,
-) -> Option<String> {
-    let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
-    available.contains(stem).then(|| stem.to_string())
+/// 13 of 18 of them -- recording the survivors turns a silent `None` at lookup
+/// time into a countable coverage number.
+struct GroundTruth {
+    dir: PathBuf,
+    stems: std::collections::BTreeSet<String>,
+}
+
+impl GroundTruth {
+    fn load(samples: &Path) -> Self {
+        let dir = samples.join("ocr_fixtures");
+        let stems = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("json"))
+            .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(str::to_string))
+            .collect();
+        Self { dir, stems }
+    }
+
+    fn len(&self) -> usize {
+        self.stems.len()
+    }
+
+    /// The label stem for an image, if one exists.
+    fn stem_for(&self, filename: &str) -> Option<String> {
+        let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
+        self.stems.contains(stem).then(|| stem.to_string())
+    }
+
+    /// The document number `mrz_corpus` should expect from this specimen.
+    ///
+    /// Read from the label when there is one; otherwise the value already in
+    /// the manifest is carried forward, so a specimen can be a corpus entry
+    /// without a full `Extraction` label -- which the old hard-coded `CORPUS`
+    /// array supported and this must not quietly drop. Three entries (Oman
+    /// 2004, Viet Nam 2023, Israel 2003) had a known document number and no
+    /// `.json`; deriving purely from labels would have removed them, and since
+    /// all three were *known misses* that would have moved the reported hit
+    /// rate from 18/21 to a flattering 18/18 by shrinking the denominator --
+    /// the exact failure `mrz_corpus`'s own comment warns against.
+    fn expected_document_number(
+        &self,
+        filename: &str,
+        previous: Option<&serde_json::Value>,
+    ) -> serde_json::Value {
+        if let Some(stem) = self.stem_for(filename) {
+            let label = self.dir.join(format!("{stem}.json"));
+            if let Ok(bytes) = std::fs::read(&label) {
+                if let Ok(gt) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    if let Some(doc) = gt.get("document_number").and_then(|v| v.as_str()) {
+                        return serde_json::Value::String(doc.to_string());
+                    }
+                }
+            }
+        }
+        previous
+            .and_then(|p| p.get("expected_document_number"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null)
+    }
 }
 
 fn load_previous(path: &Path) -> BTreeMap<String, serde_json::Value> {

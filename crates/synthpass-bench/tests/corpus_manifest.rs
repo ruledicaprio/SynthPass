@@ -277,6 +277,38 @@ fn provenance_is_one_of_the_known_classes() {
 }
 
 #[test]
+fn the_directory_agrees_with_the_document_type_in_the_name() {
+    // `synthpass_bench::classify_specimen` reads the document class off the
+    // immediate parent directory and never the filename, deliberately — a
+    // directory is stable under a rename. That only holds while the two agree.
+    // A reorganisation once left passport specimens under `id_cards/`, where
+    // they classified as ID cards and made `--format passport` under-count.
+    for row in &manifest_rows() {
+        let name = row["filename"].as_str().unwrap_or_default();
+        let dir = row["dir"].as_str().unwrap_or_default();
+        let parts: Vec<&str> = stem_of(name).split('_').collect();
+        let claimed = if parts.contains(&"Passport") {
+            Some("passports")
+        } else if parts.contains(&"ID") {
+            Some("id_cards")
+        } else {
+            None
+        };
+        // `ocr_fixtures/` and `misc/` deliberately mix formats.
+        if dir == "ocr_fixtures" || dir == "misc" {
+            continue;
+        }
+        if let Some(expected) = claimed {
+            assert_eq!(
+                dir, expected,
+                "{name}: the name says {expected}, but the file is filed under {dir}/ — \
+                 classify_specimen reads the directory, so it would report the wrong class"
+            );
+        }
+    }
+}
+
+#[test]
 fn an_unrecognized_issuing_state_carries_a_note_explaining_why() {
     // Kosovo's RKS, Germany's specimen-only BDR, and the genuinely
     // non-conformant line-1 documents all land here. Each is legitimate, and

@@ -7,78 +7,83 @@
 //! cargo run -p synthpass-ocr --release --example mrz_corpus
 //! ```
 //! Pass `--dump` to print the raw OCR text for each miss.
+//!
+//! # Where the corpus comes from
+//!
+//! Both sets are derived from `samples/corpus.jsonl` rather than hard-coded:
+//!
+//! * **Positive** — every row carrying an `expected_document_number`, which is
+//!   normally the `document_number` from that specimen's hand-labelled `.json`.
+//! * **Negative** — every row with `mrz.present == false`: a document that
+//!   physically has no machine-readable zone, and so must never yield a valid
+//!   MRZ.
+//!
+//! The two lists used to be `const` arrays of basenames, which meant a rename
+//! stranded an entry silently: the harness reported a lower hit rate instead of
+//! an error, and 16 of 21 entries were stale by the time this changed. Deriving
+//! them removes that failure mode entirely — a renamed specimen keeps its link
+//! because the manifest is regenerated from the corpus itself.
 
 use std::path::{Path, PathBuf};
 use synthpass_ocr::NativeOcr;
 
-/// Every sample that physically carries an MRZ, with the expected document
-/// number from its checked-in `.json` ground truth.
-const CORPUS: &[(&str, &str)] = &[
-    (
-        "Cetis_Sample_Passport_Specimen_2022_inner_page_mrz.jpg",
-        "SD9990322",
-    ),
-    ("Croatia_Passport_Specimen_2009_mrz.jpg", "007007007"),
-    ("Estonia_Passport_Specimen_2020_mrz.png", "KS0000182"),
-    ("Serbia_Passport_Specimen_2012_mrz.jpg", "000000000"),
-    ("Serbia_ID_Specimen_2008_back_with_mrz.png", "955555546"),
-    ("Slovenian_ID_Specimen_2022_back_mrz.jpg", "IE9876543"),
-    ("China_Passport_Specimen_2012_mrz.webp", "E00000000"),
-    // Stale as of 2026-08-17: both reproducibly return "no MRZ found in
-    // text" against the current OCR/parser, despite the recorded doc
-    // numbers below (presumably accurate against some earlier version).
-    // Left in CORPUS rather than deleted so they keep counting as misses
-    // in the denominator instead of silently vanishing — a real regression
-    // or a flaky one-off hit when these were added, not yet root-caused.
-    ("Vietnam_Passport_Specimen_2023_mrz.webp", "E00000000"),
-    ("Oman_Passport_Specimen_2004_mrz.jpg", "JL5989824"),
-    (
-        "United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg",
-        "ZK8K81404",
-    ),
-    ("Canada_Passport_Specimen_2013_mrz.jpg", "ZE001355"),
-    ("Canada_Passport_Specimen_2023_mrz.jpg", "P001756ZA"),
-    ("Canada_Passport_Specimen_2023_2_mrz.webp", "P001678ZA"),
-    ("Slovakia_Passport_Specimen_2005_mrz.png", "P0000000"),
-    ("Slovakia_Passport_Specimen_2014_mrz.jpg", "XE7207436"),
-    ("Spain_Passport_Specimen_2015_colored_mrz.webp", "ZAB000221"),
-    ("Spain_Passport_Specimen_2013_mrz.jpg", "PA000000"),
-    // Cyprus's document-type code changed from "P" to "PP" for an ordinary
-    // citizen passport effective 15 December 2025 — see
-    // <https://www.gov.cy/moi/en/documents/passports/passport-specimens/>
-    // and `synthpass_core::fusion::document_types_agree`'s doc comment.
-    ("Cyprus_Passport_Specimen_2010_mrz.png", "K00000220"),
-    ("Cyprus_Passport_Specimen_2020_mrz.jpg", "L00000000"),
-    ("Cyprus_Passport_Specimen_2026_mrz.png", "LA0000000"),
-    // Known-MISS baseline (see Phase 0 of the multiscript-MRZ-robustness
-    // plan), NOT a real ground-truth doc number: this specimen is a
-    // publicly-posted "redacted sample" scan whose surname/given-name/
-    // passport-number/ID-number/date fields — and every MRZ character
-    // position — are physically blacked out with solid boxes on the source
-    // image, not merely OCR-garbled. No amount of OCR/preprocessing
-    // improvement can recover a checksum-valid MRZ from this file because
-    // the ICAO check-digit data was never printed on the visible page in
-    // the first place. It stays in the corpus as a stress test for the
-    // pass-budget/graceful-degradation behavior (Phase 1) and as a
-    // Hebrew-dense photographic-scan case for the row-density band
-    // isolation — not for the hit-rate, which cannot reach 100% while this
-    // entry is present. The placeholder value below can never match.
-    (
-        "Israel_Passport_Specimen_2003_redacted_mrz.jpg",
-        "REDACTED-NO-GROUND-TRUTH-MRZ",
-    ),
-];
+/// One expected result: a specimen basename and the document number its
+/// hand-verified ground truth records.
+struct CorpusEntry {
+    file: String,
+    expected_doc: String,
+}
 
-/// Samples with no MRZ at all: the retry passes run in full (worst-case
-/// latency) and must never produce a checksum-valid MRZ.
-const NEGATIVE: &[&str] = &[
-    "Bulgaria_ID_Specimen_2024_front_no_mrz.png",
-    "Serbia_ID_Specimen_2008_face_no_mrz.png",
-    "Slovenian_ID_Specimen_2022_front_no_mrz.jpg",
-    // Genuine Slovak passport specimen, but this particular crop doesn't
-    // include the bottom MRZ strip at all -- correctly must not validate.
-    "Slovakia_Passport_Specimen_no_mrz.webp",
-];
+/// Loads the positive set: every manifest row that records an expected
+/// document number.
+///
+/// That field is normally the `document_number` from a hand-labelled `.json`,
+/// but it can also be filled in by hand for a specimen whose number is known
+/// without a full `Extraction` label. Three entries are in that second group
+/// (Oman 2004, Viet Nam 2023) or deliberately excluded (Israel 2003, whose MRZ
+/// is physically redacted) — see their `notes`. Keying on ground truth alone
+/// would have silently dropped the first two, and since both are *known
+/// misses* that would have moved the reported rate from 18/21 to 18/18 purely
+/// by shrinking the denominator.
+fn load_corpus(root: &Path) -> Vec<CorpusEntry> {
+    let mut out: Vec<CorpusEntry> = manifest_rows(root)
+        .into_iter()
+        .filter_map(|row| {
+            let file = row["filename"].as_str()?.to_string();
+            let expected_doc = row["expected_document_number"].as_str()?.to_string();
+            Some(CorpusEntry { file, expected_doc })
+        })
+        .collect();
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
+}
+
+/// Loads the negative set: every specimen the manifest records as carrying no
+/// MRZ at all.
+fn load_negative(root: &Path) -> Vec<String> {
+    let mut out: Vec<String> = manifest_rows(root)
+        .into_iter()
+        .filter(|row| row["mrz"]["present"].as_bool() == Some(false))
+        .filter_map(|row| row["filename"].as_str().map(str::to_string))
+        .collect();
+    out.sort();
+    out
+}
+
+fn manifest_rows(root: &Path) -> Vec<serde_json::Value> {
+    let path = root.join("samples").join("corpus.jsonl");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "cannot read {} ({e}) — it is tracked on main; regenerate it with the \
+             corpus_manifest example",
+            path.display()
+        )
+    });
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
 
 fn main() {
     let dump = std::env::args().any(|a| a == "--dump");
@@ -89,9 +94,12 @@ fn main() {
     )
     .expect("failed to load OCR models — run from the repo root");
 
+    let corpus = load_corpus(&root);
+    let negative = load_negative(&root);
+
     let mut hits = 0usize;
     let mut missing = 0usize;
-    for (file, expected_doc) in CORPUS {
+    for CorpusEntry { file, expected_doc } in &corpus {
         let Some(path) = find_sample(file) else {
             println!("SKIP  {file}: not found under samples/ — stale corpus entry");
             missing += 1;
@@ -145,7 +153,7 @@ fn main() {
     // Denominator is the whole declared corpus, not just what was found: a
     // stale entry is a gap in coverage, and hiding it by shrinking the
     // denominator would quietly inflate the rate this harness exists to report.
-    let total = CORPUS.len();
+    let total = corpus.len();
     let pct = 100.0 * hits as f64 / total as f64;
     println!("\nTier-1 hit rate: {hits}/{total} = {pct:.0}%");
     if missing > 0 {
@@ -155,7 +163,7 @@ fn main() {
     }
 
     println!("\nNegative controls (no MRZ present — must not validate):");
-    for file in NEGATIVE {
+    for file in &negative {
         let Some(path) = find_sample(file) else {
             println!("SKIP  {file}: not found under samples/ — stale corpus entry");
             continue;
@@ -189,18 +197,22 @@ fn repo_root() -> PathBuf {
 }
 
 /// Locates `name` (a bare filename, no path) anywhere under `samples/`,
-/// searching recursively — so this survives `samples/` being reorganized
-/// into continent/class subfolders without every `CORPUS`/`NEGATIVE` entry
-/// needing its exact subpath hardcoded.
+/// searching recursively — so this survives `samples/` being reorganized into
+/// continent/class subfolders without any entry needing its exact subpath.
 ///
 /// Returns `None` rather than panicking on a name that no longer exists.
-/// The recursive search above only absorbs a specimen being *moved*; a
-/// *rename* still strands the entry, and that is what happened to two of them
-/// (`Israel_Biometric_Passport.jpg`, `BulgariaID_face.png`) when `samples/`
-/// was reorganized. Panicking made the first stranded name abort the whole
-/// run — including, because the `CORPUS` loop runs first, the negative-control
-/// sweep that never got reached. A skipped specimen should cost one line of
-/// output and one entry off the denominator, not the entire harness.
+/// Panicking made the first stranded name abort the whole run — including,
+/// because the positive loop runs first, the negative-control sweep that never
+/// got reached. A skipped specimen should cost one line of output and one entry
+/// off the denominator, not the entire harness.
+///
+/// A *rename* used to strand an entry here, because the two sets were `const`
+/// arrays of basenames written by hand: the recursive search absorbed a
+/// specimen being moved but not renamed, and 16 of 21 entries had gone stale
+/// that way. Both sets now come from `samples/corpus.jsonl`, which is
+/// regenerated from the corpus itself, so a rename carries the link with it.
+/// A `SKIP` now means the manifest is genuinely out of date — regenerate it
+/// with the `corpus_manifest` example.
 fn find_sample(name: &str) -> Option<PathBuf> {
     fn search(dir: &Path, name: &str) -> Option<PathBuf> {
         for entry in std::fs::read_dir(dir).ok()?.flatten() {

@@ -186,6 +186,13 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Image extensions this survey will decode.
+///
+/// The walk below used to take every file it found, which meant the 19 loose
+/// `samples/*.json` bench reports and `samples/README.md` were handed to the
+/// OCR engine -- several seconds each, to produce nothing.
+const SURVEY_IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
+
 fn walk_samples(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -195,7 +202,14 @@ fn walk_samples(dir: &Path, out: &mut Vec<PathBuf>) {
         if path.is_dir() {
             walk_samples(&path, out);
         } else if path.is_file() {
-            out.push(path);
+            let is_image = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase())
+                .is_some_and(|e| SURVEY_IMAGE_EXTENSIONS.contains(&e.as_str()));
+            if is_image {
+                out.push(path);
+            }
         }
     }
 }

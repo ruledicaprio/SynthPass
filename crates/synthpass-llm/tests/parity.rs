@@ -43,14 +43,38 @@ fn find_sample(name: &str) -> Option<PathBuf> {
 }
 
 /// Samples with both OCR Markdown and a ground-truth extraction fixture.
-const FIXTURES: &[&str] = &[
-    "Croatia_Passport_Specimen_2009_mrz",
-    "Estonia_Passport_Specimen_2020_mrz",
-    "Serbia_Passport_Specimen_2012_mrz",
-    "Serbia_ID_Specimen_2008_back_with_mrz",
-    "Slovenian_ID_Specimen_2022_back_mrz",
-    "Cetis_Sample_Passport_Specimen_2022_inner_page_mrz",
-];
+///
+/// Derived from `samples/corpus.jsonl` rather than hard-coded: every row that
+/// carries a `ground_truth_stem` whose `.md` also exists. The list used to be a
+/// `const` array of stems, and the corpus rename stranded **all six** of them —
+/// each one hit the `missing fixture files` branch below and was skipped, which
+/// leaves `total == 0` and turns the accuracy assertion into `NaN >= 0.25`.
+/// Deriving the set means a rename carries the link with it.
+fn fixtures() -> Vec<String> {
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let manifest = repo_root.join("samples").join("corpus.jsonl");
+    let Ok(text) = std::fs::read_to_string(&manifest) else {
+        panic!(
+            "cannot read {} — it is tracked on main; regenerate it with the              corpus_manifest example",
+            manifest.display()
+        )
+    };
+    let mut out: Vec<String> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|row| row["ground_truth_stem"].as_str().map(str::to_string))
+        .filter(|stem| {
+            repo_root
+                .join("samples")
+                .join("ocr_fixtures")
+                .join(format!("{stem}.md"))
+                .exists()
+        })
+        .collect();
+    out.sort();
+    out
+}
 
 /// Fields worth comparing: present in the prompt schema and stable enough
 /// across documents to be a meaningful accuracy signal.
@@ -113,7 +137,8 @@ fn native_llm_field_accuracy_over_sample_set() {
     let mut total = 0usize;
     let mut matched = 0usize;
 
-    for name in FIXTURES {
+    let fixtures = fixtures();
+    for name in &fixtures {
         let (Some(md_path), Some(json_path)) = (
             find_sample(&format!("{name}.md")),
             find_sample(&format!("{name}.json")),

@@ -330,6 +330,26 @@ flowchart LR
   upscale/contrast/threshold/deskew treatment `preprocess.rs` already applies to the MRZ band (see
   its module docs and e.g. `preprocess::mrz_variants`), rather than treating the MRZ-band retry
   passes as the only place OCR quality gets a second chance.
+- **Re-measured 2026-09-02 on the regenerated corpus: the #103 conclusion holds, and holds harder.**
+  `visual_zone_survey.rs` was re-run after the corpus rename and manifest work, over **229**
+  specimens with at least one non-MRZ line (up from 135). Corpus-wide noise-line fraction:
+  **median 0.237, IQR [0.146, 0.386]** — against the original median 0.243, IQR [0.111, 0.455].
+  The median moved by 0.006 on a corpus 70% larger, which is the strongest form the original
+  finding could take: visual-zone noise is a systematic property of this corpus, not an artefact
+  of which specimens happened to be in it. The survey now covers 14 Türkiye specimens rather than
+  one, and the highest (`Turkiye_Passport_Specimen_P0_TUR_2011_mrz.jpg`, 0.534) sits below the
+  0.652 originally reported for the private candidate. The proposed follow-up is unchanged:
+  extend `preprocess.rs`'s deterministic treatment to the non-MRZ zone. Data:
+  `knowledge/visual-zone-survey.jsonl`.
+- **Also 2026-09-02: a Tier-1 false positive, found by expanding the negative controls from 4 to 42.**
+  `mrz_corpus.rs`'s negative set is now derived from `samples/corpus.jsonl` (every row recording
+  `mrz.present == false`). On its first run it caught `Monaco_ID_Specimen_XXXX_front_no_mrz.png`
+  — the front of an ID card, carrying no machine-readable zone — returning a **checksum-valid**
+  Td1 record with document number `029067`, read out of visual-zone text. This is not confined to
+  the harness: `RoutingPolicy::decide` escalates only when
+  `!(mrz_found && mrz_checksums_valid)`, so a hallucinated valid MRZ is treated as authoritative
+  and never reaches Tier 2. Not yet diagnosed or fixed; recorded in the manifest's `notes` for
+  that specimen.
 - **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
   helps, at no measurable latency cost once measured on an uncontended machine.**
   `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new

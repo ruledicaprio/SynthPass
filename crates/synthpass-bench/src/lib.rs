@@ -221,12 +221,14 @@ impl SpecimenClass {
 /// (`ocr_fixtures/`, which holds specimens hand-labelled from more than one
 /// directory, and `misc/`).
 ///
-/// KNOWN GAP, not fixed here: an in-progress `samples/` reorg has, as of this
-/// writing, left several passport specimens misfiled under `id_cards/`
-/// (their names still say `..._Passport_Specimen_...`). Those classify as
-/// `IdCard` until the reorg moves them — `--format passport` will
-/// under-count during that window, never over-count, since nothing under
-/// `passports/` is anything other than a passport.
+/// The gap that used to be documented here — passport specimens misfiled under
+/// `id_cards/`, which classified as `IdCard` and made `--format passport`
+/// under-count — is closed: the corpus reorganisation moved them, and
+/// `crates/synthpass-bench/tests/corpus_manifest.rs`'s
+/// `the_directory_agrees_with_the_document_type_in_the_name` now fails if a
+/// specimen is ever refiled into a directory that contradicts its own name.
+/// Directory-first classification is therefore load-bearing on a checked
+/// invariant rather than on the corpus happening to be tidy.
 pub fn classify_specimen(
     image_path: &Path,
     labels: Option<&synthpass_core::Extraction>,
