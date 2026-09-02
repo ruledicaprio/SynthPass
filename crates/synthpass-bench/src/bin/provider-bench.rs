@@ -46,9 +46,14 @@
 //!                      --dump-ocr, scoped to this one miss kind since a
 //!                      real-specimen run is much larger than a synthetic
 //!                      diagnostic one
+//!   --progress         force the per-document stderr progress log on even
+//!                      when stderr is redirected. It is already on by
+//!                      default whenever stderr is a terminal, so this flag
+//!                      is only needed to keep it when piping to a file
 //! ```
 
 use serde::Serialize;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
@@ -85,6 +90,13 @@ struct Args {
     /// scoped to that one miss kind rather than every document the way
     /// `synthpass-bench --dump-ocr` is.
     dump_ocr: bool,
+    /// Force the per-document progress log on even when stderr is not a
+    /// terminal. Progress is *already* on by default for an interactive run
+    /// (see `show_progress` in `main`) — a full real-specimen pass takes over
+    /// an hour and being silent for it is the complaint this exists to fix.
+    /// The flag only matters when stderr is redirected, where the default is
+    /// off so a captured log or a CI step stays clean.
+    progress: bool,
     /// Restrict `--real-specimens` to one `samples/` document class (e.g.
     /// `passport`) via `synthpass_bench::classify_specimen`. `--real-specimens`
     /// only, applied before `--limit` so a stride subsamples the already-scoped
@@ -114,6 +126,7 @@ impl Default for Args {
             limit: None,
             verbose: false,
             dump_ocr: false,
+            progress: false,
             format: None,
             document_type: None,
         }
@@ -155,6 +168,10 @@ fn usage() {
     eprintln!(
         "  --dump-ocr         with --real-specimens: for every checksum_failed miss, print its \
          raw MRZ zone text and which check digit(s) failed"
+    );
+    eprintln!(
+        "  --progress         force the per-document stderr progress log on when stderr is \
+         redirected (already on by default when stderr is a terminal)"
     );
 }
 
@@ -211,6 +228,14 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--dump-ocr" => {
                 parsed.dump_ocr = true;
+                i += 1;
+            }
+            // Deliberately not gated on --real-specimens the way --dump-ocr
+            // is: the synthetic corpus is slow enough to want progress too,
+            // and a flag that only forces on an already-default behaviour has
+            // no invalid combination to reject.
+            "--progress" => {
+                parsed.progress = true;
                 i += 1;
             }
             "--limit" => {
@@ -586,6 +611,13 @@ async fn main() {
         std::process::exit(1);
     }
 
+    // On by default for an interactive run, off when stderr is redirected —
+    // a captured log or a CI step (`bench-charts.yml` runs this in a pwsh
+    // step) stays exactly as clean as it is today, while a developer watching
+    // a 1h37m real-specimen pass sees it advance. `--progress` forces it back
+    // on for the redirected case.
+    let show_progress = parsed.progress || std::io::stderr().is_terminal();
+
     let root = repo_root();
     let ocr = NativeOcr::load(
         &root.join("text-detection.rten"),
@@ -640,6 +672,7 @@ async fn main() {
             &specimens,
             parsed.measure_memory,
             parsed.dump_ocr,
+            show_progress,
         )
         .await;
         (
@@ -656,8 +689,14 @@ async fn main() {
             parsed.count,
             parsed.document_type.unwrap_or(DocumentType::TD3),
         );
-        let reports =
-            run_provider_bench(pipeline.catalog(), &ocr, &corpus, parsed.measure_memory).await;
+        let reports = run_provider_bench(
+            pipeline.catalog(),
+            &ocr,
+            &corpus,
+            parsed.measure_memory,
+            show_progress,
+        )
+        .await;
         (
             reports,
             "synthetic-corpus",
@@ -948,6 +987,32 @@ mod tests {
             parse_args(&args).is_err(),
             "--dump-ocr only makes sense scoping --real-specimens"
         );
+    }
+
+    #[test]
+    fn progress_parses_on_its_own() {
+        // Unlike --dump-ocr, --progress carries no --real-specimens
+        // precondition: it forces on a log that is already the default for an
+        // interactive run, over either corpus source.
+        let args: Vec<String> = ["--progress"].iter().map(|s| s.to_string()).collect();
+        assert!(parse_args(&args).expect("--progress parses alone").progress);
+    }
+
+    #[test]
+    fn progress_parses_alongside_real_specimens() {
+        let args: Vec<String> = ["--real-specimens", "--progress"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&args).expect("--progress parses").progress);
+    }
+
+    #[test]
+    fn progress_flag_defaults_off() {
+        // The *flag* defaults off; the effective behaviour is
+        // `parsed.progress || stderr().is_terminal()`, resolved in `main` so
+        // that a redirected run stays silent unless asked.
+        assert!(!Args::default().progress);
     }
 
     #[test]
