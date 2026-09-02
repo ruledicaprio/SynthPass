@@ -121,6 +121,11 @@ $checkSampleExe = "target/release/examples/check_sample.exe"
 
 $accepted = 0
 $rejected = 0
+# Accepted files carrying neither a specimen watermark nor a placeholder
+# document number. Collected so the run ends with an explicit review list
+# instead of burying them in the per-file log -- these are the ones no
+# automated signal vouched for.
+$unmarked = @()
 
 foreach ($file in $imageFiles) {
     $output = & $checkSampleExe $file.FullName 2>&1 | Out-String
@@ -155,11 +160,24 @@ foreach ($file in $imageFiles) {
     }
     $hitsVendorBlocklist = $output -match 'VENDOR\s+BLOCKED'
 
-    $accept = ($hasSpecimenText -or $hasPlaceholderDoc) -and (-not $hitsVendorBlocklist)
+    # A printed SPECIMEN watermark is ADVISORY, not required (policy change,
+    # 2026-09-02). Many states publish genuine specimen pages -- foreign-ministry
+    # and border-authority document galleries especially -- with no watermark on
+    # the image at all, so requiring one rejected a large share of legitimate
+    # material and made bulk collection impractical. The blocking bar is now
+    # "carries no known novelty/fake-document vendor signature"; the watermark
+    # and placeholder-number signals are still computed, still reported, and
+    # still the thing to eyeball, they just no longer veto.
+    #
+    # This deliberately moves provenance judgement back to a human for the
+    # unmarked majority, which is why every unmarked accept is listed again in
+    # a review block at the end of the run rather than scrolling past.
+    $accept = -not $hitsVendorBlocklist
+    $hasProvenanceMarker = $hasSpecimenText -or $hasPlaceholderDoc
 
     if (-not $accept) {
         $rejected++
-        Write-Host "REJECT  $($file.Name)  (specimen_text=$hasSpecimenText placeholder_doc=$hasPlaceholderDoc vendor_blocklist=$hitsVendorBlocklist)" -ForegroundColor DarkYellow
+        Write-Host "REJECT  $($file.Name)  (known vendor signature in OCR text)" -ForegroundColor Red
         continue
     }
 
@@ -173,7 +191,13 @@ foreach ($file in $imageFiles) {
     $destDir = Join-Path $repoRoot "samples\$docTypeDir"
     $destPath = Join-Path $destDir $file.Name
 
-    Write-Host "ACCEPT  $($file.Name) -> samples/$docTypeDir/" -ForegroundColor Green
+    if ($hasProvenanceMarker) {
+        $marker = if ($hasSpecimenText) { "specimen watermark" } else { "placeholder doc number" }
+        Write-Host "ACCEPT  $($file.Name) -> samples/$docTypeDir/  [$marker]" -ForegroundColor Green
+    } else {
+        Write-Host "ACCEPT  $($file.Name) -> samples/$docTypeDir/  [no provenance marker -- review]" -ForegroundColor Yellow
+        $unmarked += "samples/$docTypeDir/$($file.Name)"
+    }
     $accepted++
     $existingBasenames.Add($file.Name.ToLowerInvariant()) | Out-Null
 
@@ -184,6 +208,16 @@ foreach ($file in $imageFiles) {
 }
 
 Write-Host "`n$accepted accepted, $rejected rejected (of $($imageFiles.Count) candidates)."
+
+# The whole point of relaxing the watermark requirement is that a human takes
+# that judgement back. Print the list they need to act on, rather than leaving
+# it scattered through a 100-line log.
+if ($unmarked.Count -gt 0) {
+    Write-Host "`n$($unmarked.Count) accepted file(s) carry NO specimen watermark and NO placeholder document number." -ForegroundColor Yellow
+    Write-Host "Nothing automated vouched for these -- open each and confirm it is a specimen, not a real person's document:" -ForegroundColor Yellow
+    foreach ($u in $unmarked) { Write-Host "  $u" }
+    Write-Host "`n./scripts/watch-samples.ps1 opens candidates one at a time if you want to page through them." -ForegroundColor Yellow
+}
 
 if ($DryRun) {
     Write-Host "Dry run -- no files moved, nothing pushed."
