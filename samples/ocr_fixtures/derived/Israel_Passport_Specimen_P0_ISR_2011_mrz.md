@@ -1,0 +1,43 @@
+C
+PASSPORT HNTKAEL D DITN
+Type a1D
+Pal
+Sumame
+BEN DAVID
+Giveniname
+HADAR
+ASPECIMEN 
+ISRAELR
+Date of binth atDINn
+19/01/19783-1999991-8
+Sex/Pn PHceothin hmmpn
+EI ISRAEL
+Date of issied ANyn TAn
+TOMTIT20/09?2011
+A?thonty o Passport at:
+JERUSALEM
+P<ISRBEN<DAVID<<HADAR<<<<<<<<<<<<<<<<<<<
+00000000<0TSR7801192 F21091923<1999991<8<<<68
+STATE OF ISRAEL TN?E
+Passport No./ mT "n
+00000000
+naUn Dw
+TI 12
+avt pu
+nmI
+TTIN
+ni7NNU
+7UI
+Date Bexply 19pm ms mn
+9/09/2021
+mnn andn-mnp
+D"U
+Code of state/ auin TnD
+ERAISR
+TATEOFN EL NTO DTD
+SNON
+Holders sinare/ltaa
+PISRBEN<DAVID<HADARKKKK
+00000000<0ISR7801192F21091923<1999991<8<<<68
+P<ISRBEN<DAVID<<HADAR<<<<<<<<<<<<<<<<<<<<<<<
+00000000<0ISR7801192F21091923<1999991<8<<<68

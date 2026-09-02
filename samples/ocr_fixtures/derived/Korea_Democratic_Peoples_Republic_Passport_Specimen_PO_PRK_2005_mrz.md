@@ -1,0 +1,48 @@
+TP0
+TMTCO
+BCA
+R
+S
+Doon
+EE
+ FIMA
+T
+ed
+N
+TL
+SEOAE
+aR
+SAERO
+LED
+IOD
+HVT
+CH
+3X /Signature of Authority
+E1z?01?1 ?18?=eDemocratic People
+4F
+TypeLernertrv
+PO PRK
+294
+JANGMYONG SUNDPR KOREA
+Twte of Bich
+30 SEP 1966PYONGYANG
+Tate of  7 x/T60f Expmn
+esac
+14 MAR 200514 MAR 2010
+oiine
+MINISTRY OF FOREIGN AFFAIRS
+AGN ERASNC
+Republic of Korea
+KALIP
+645133138
+Num
+Civen
+Nationalit
+ Holder  Sieneture
+Am
+66
+POPRKJANG<<MYONGSUN<<<<<<<<<<<<<<<<<<<<<<<<<
+6451331382PRK6609302 F1003145<<<<<<<<<<<<<<<4
+MINISTRYOFFOREIGNAFFAIRS
+POPRKJANG<<MYONGSUN<<<<<K<<<<<<<<<<<<<<<<<
+6451331382PRK6609302F1003145<<<<<<<<<<<<<<<4

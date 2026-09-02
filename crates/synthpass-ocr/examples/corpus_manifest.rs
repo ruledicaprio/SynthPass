@@ -11,7 +11,7 @@
 //! job, and it has already failed in four distinct ways:
 //!
 //! * **arity** — `PE0_ARG` carries three characters where two are expected;
-//!   `Spain_Passport_Specimen_P0_2022_mrz.png` lost a whole field.
+//!   `Spain_Passport_Specimen_P0_2022_mrz.jpg` lost a whole field.
 //! * **homoglyphs** — `PO` (letter O, genuinely used by the DPRK) versus `P0`
 //!   (the `P<` filler form) differ by one pixel and decide correctness.
 //! * **contradiction** — several files carry a document code *and* `no_mrz`.

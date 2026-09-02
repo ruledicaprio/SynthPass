@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1953-04-28",
+  "date_of_expiry": "2031-02-14",
+  "document_number": "A000060",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "JEAN MICHEL",
+  "issuing_country": "MCO",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<MCODUPONT<<JEAN<MICHEL<<<<<<<<<<<<<<<<<<<<\nA000060<<6MCO5304286M3102145<<<<<<<<<<<<<<<0",
+  "nationality": "MCO",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "DUPONT"
+}

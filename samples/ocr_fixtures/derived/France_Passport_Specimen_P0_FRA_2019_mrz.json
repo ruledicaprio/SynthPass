@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1973-07-12",
+  "date_of_expiry": "2029-03-03",
+  "document_number": "90RF02331",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "NATACHA",
+  "issuing_country": "FRA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<FRASPECIMENABB<<<<<<<<<<<<<NATACHA<<<<<<<<\n90RF023318FRA7307122F2903035<<<<<<<<<<<<<<02",
+  "nationality": "FRA",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "SPECIMENABB"
+}

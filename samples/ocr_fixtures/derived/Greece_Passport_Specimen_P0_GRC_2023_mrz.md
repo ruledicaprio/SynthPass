@@ -1,0 +1,39 @@
+AABATHPIO
+PASSPORT
+2N
++
+HELLAS
+Timc/ Tye
+LEiM
+EMHNAZ
+ELLINAS
+Dyoua
+TE?PIOE
+GEORGIOS
+Mvee
+Natoratt
+riwoan
+THrIoX
+rtvinonc
+Pce af B
+Fuconc!
+Mins+Date of Eiipiry: 10 DEC 2033
+A.E.A??EA
+H.PHIP.S.D.D.
+PSGRCELLINAS<<GEORGIOS<<<<<<<<<<<<<<<<<<<<<<
+AA12345678GRC7505157M3312108<<<<<<<<<<<<<<06
+x?e  Counbry 
+GRC
+AA1234567
+e
+9 Ead Aom-
+Aumarty
+Yeoc Heie 1.80
+GRC
+EMHNIKH/HELLENIC
+MAY 1975
+AQHNA
+ATHINA
+DEC 2023
+So
+in575

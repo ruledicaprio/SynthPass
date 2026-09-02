@@ -1,101 +1,160 @@
-//! Field-level parity harness: compares `NativeLlm` extraction against the
-//! known-good ground truth in `samples/*.json` (produced by the deterministic
-//! MRZ pipeline, so these are exact-answer fixtures, not another model's
-//! opinion). Ignored by default — needs the ~1 GB GGUF at the repo root; run
-//! explicitly with:
+//! Field-level parity harness: compares `NativeLlm` extraction against
+//! MRZ-derived ground truth under `samples/ocr_fixtures/`. Ignored by default —
+//! needs the ~1 GB GGUF at the repo root; run explicitly with:
 //!
 //! ```sh
 //! cargo test -p synthpass-llm --test parity -- --ignored --nocapture
 //! ```
 //!
-//! This is a regression smoke check, not a accuracy gate: a small 1.5B model
-//! reading OCR'd Markdown will not hit 100% field accuracy (e.g. it may return
+//! This is a regression smoke check, not an accuracy gate: a small 1.5B model
+//! reading OCR'd text will not hit 100% field accuracy (e.g. it may return
 //! `"CROATIA"` where the fixture has the ISO code `"HRV"`), so this asserts a
 //! minimum per-field match rate across the whole sample set rather than exact
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
+//!
+//! # Two fixture sets, because ground truth is not uniform
+//!
+//! Fixtures come in two kinds, and conflating them would make this harness lie:
+//!
+//! | Directory | Origin | Fields scored |
+//! | :-- | :-- | :-- |
+//! | `samples/ocr_fixtures/` | hand-verified against the image | all nine prompt fields |
+//! | `samples/ocr_fixtures/derived/` | generated from a checksum-valid MRZ | the check-digited fields only |
+//!
+//! ICAO 9303 check-digits exactly `document_number`, `date_of_birth`,
+//! `date_of_expiry` and `personal_number`. A derived fixture's *name* is
+//! therefore not truth — it is one OCR pass's reading of characters no check
+//! digit covers, on exactly the positions this corpus shows the recogniser
+//! getting wrong. Scoring a model against those would invert the measurement:
+//! a model that read the visual zone correctly would be marked wrong for
+//! disagreeing with an OCR error, so improving visual-zone handling — the whole
+//! point of `knowledge/VIZ_TIER2_DESIGN.md` — would show up here as a
+//! regression. The split is what keeps that from happening while still letting
+//! the denominator grow from six documents to a hundred.
+//!
+//! Promoting a candidate is `git mv samples/ocr_fixtures/derived/<stem>.json
+//! samples/ocr_fixtures/`, once a person has compared its name fields against
+//! the image. Every promotion moves seven more fields into the scored set.
+//!
+//! # A known bias in this corpus
+//!
+//! Every fixture here has a checksum-valid MRZ — that is where the ground truth
+//! comes from. But Tier 2 only runs when Tier 1 *fails*, so in production this
+//! model never sees a document like these. The harness measures "can the model
+//! extract fields from an ID document's OCR text", which is the right question
+//! for a regression check and the wrong one for predicting escalation accuracy.
+//! `knowledge/VIZ_TIER2_DESIGN.md` §5 describes the MRZ-holdout variant that
+//! closes the gap: strip the MRZ lines from the input and keep the ground truth,
+//! which turns a Tier-1 success into an honest Tier-2 test case.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use synthpass_core::v2::{CoreField, ExtractionV2, FieldConfidence};
 use synthpass_core::Extraction;
 use synthpass_llm::NativeLlm;
 
-/// Locates `name` (a bare filename, no path) anywhere under `samples/`,
-/// searching recursively — so this survives `samples/` being reorganized
-/// into continent/class subfolders without every `FIXTURES` entry needing
-/// its exact subpath hardcoded. Returns `None` rather than panicking, since
-/// callers here treat a missing fixture as "skip", not a hard failure.
-fn find_sample(name: &str) -> Option<PathBuf> {
-    fn search(dir: &Path, name: &str) -> Option<PathBuf> {
-        for entry in std::fs::read_dir(dir).ok()?.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(found) = search(&path, name) {
-                    return Some(found);
-                }
-            } else if path.file_name().and_then(|f| f.to_str()) == Some(name) {
-                return Some(path);
-            }
-        }
-        None
-    }
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    search(&repo_root.join("samples"), name)
+/// The fields `prompt::build_prompt` actually asks the model for, minus
+/// `mrz_line` (a raw zone, not a field). Scoring anything it never requested
+/// would measure the harness, not the model.
+const SCORED: [CoreField; 9] = [
+    CoreField::DocumentType,
+    CoreField::IssuingCountry,
+    CoreField::DocumentNumber,
+    CoreField::Surname,
+    CoreField::GivenNames,
+    CoreField::Nationality,
+    CoreField::DateOfBirth,
+    CoreField::Sex,
+    CoreField::DateOfExpiry,
+];
+
+/// The seven fields this harness scored before the fixture set was split, kept
+/// as a second reported figure so the historical baseline stays comparable
+/// across the change. Dropping it once a run or two has been recorded against
+/// the nine-field number is fine; silently changing what the number means is
+/// not.
+const LEGACY_SCORED: [CoreField; 7] = [
+    CoreField::DocumentNumber,
+    CoreField::Surname,
+    CoreField::GivenNames,
+    CoreField::Nationality,
+    CoreField::DateOfBirth,
+    CoreField::Sex,
+    CoreField::DateOfExpiry,
+];
+
+/// True when an ICAO check digit mathematically covers this field, so a
+/// generated fixture may assert it without a human having looked.
+///
+/// Read from [`FieldConfidence::mrz_checksum_scope`] rather than restated:
+/// that constructor is the crate's single answer to "what does a check digit
+/// prove", and a second copy of the answer here would eventually disagree with
+/// it. `PROVEN` is 1.0 and the maximum, so the comparison is exact.
+fn is_checksum_proven(field: CoreField) -> bool {
+    FieldConfidence::mrz_checksum_scope().score(field) >= 1.0
 }
 
-/// Samples with both OCR Markdown and a ground-truth extraction fixture.
+/// One `.md` (the model's input) plus the `.json` it is scored against.
+struct Fixture {
+    stem: String,
+    markdown: PathBuf,
+    truth: PathBuf,
+    /// A person compared this fixture's unproven fields against the image.
+    reviewed: bool,
+}
+
+impl Fixture {
+    fn scored_fields(&self) -> Vec<CoreField> {
+        SCORED
+            .into_iter()
+            .filter(|f| self.reviewed || is_checksum_proven(*f))
+            .collect()
+    }
+}
+
+/// Collects every fixture pair under `samples/ocr_fixtures/`.
 ///
-/// Derived from `samples/corpus.jsonl` rather than hard-coded: every row that
-/// carries a `ground_truth_stem` whose `.md` also exists. The list used to be a
-/// `const` array of stems, and the corpus rename stranded **all six** of them —
-/// each one hit the `missing fixture files` branch below and was skipped, which
-/// leaves `total == 0` and turns the accuracy assertion into `NaN >= 0.25`.
-/// Deriving the set means a rename carries the link with it.
-fn fixtures() -> Vec<String> {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest = repo_root.join("samples").join("corpus.jsonl");
-    let Ok(text) = std::fs::read_to_string(&manifest) else {
-        panic!(
-            "cannot read {} — it is tracked on main; regenerate it with the              corpus_manifest example",
-            manifest.display()
-        )
-    };
-    let mut out: Vec<String> = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
-        .filter_map(|row| row["ground_truth_stem"].as_str().map(str::to_string))
-        .filter(|stem| {
-            repo_root
-                .join("samples")
-                .join("ocr_fixtures")
-                .join(format!("{stem}.md"))
-                .exists()
-        })
-        .collect();
-    out.sort();
+/// Read from the directories rather than from `samples/corpus.jsonl`'s
+/// `ground_truth_stem` links, which is where this list came from before. Both
+/// survive a corpus rename — the reason that link was introduced — but a
+/// fixture pair is self-contained: the `.md` is the model's input and the
+/// `.json` is the answer, and neither needs the image to exist. Listing the
+/// directory also picks up a promotion (`git mv` out of `derived/`) with no
+/// second step, where the manifest route would silently keep scoring the
+/// promoted fixture as unreviewed until someone regenerated the manifest.
+fn fixtures() -> Vec<Fixture> {
+    let dir = repo_root().join("samples").join("ocr_fixtures");
+    let mut out = Vec::new();
+    for (base, reviewed) in [(dir.clone(), true), (dir.join("derived"), false)] {
+        let Ok(entries) = std::fs::read_dir(&base) else {
+            continue;
+        };
+        for path in entries.flatten().map(|e| e.path()) {
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let markdown = base.join(format!("{stem}.md"));
+            if !markdown.is_file() {
+                // A label with no OCR text has nothing to feed the model.
+                // Regenerate with `cargo run -p synthpass-bench --release
+                // --example ground_truth_candidates`.
+                eprintln!("skipping {stem}: no {stem}.md beside the label");
+                continue;
+            }
+            out.push(Fixture {
+                stem: stem.to_string(),
+                markdown,
+                truth: path.clone(),
+                reviewed,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.stem.cmp(&b.stem));
     out
 }
-
-/// Fields worth comparing: present in the prompt schema and stable enough
-/// across documents to be a meaningful accuracy signal.
-const FIELDS: &[fn(&Extraction) -> &Option<String>] = &[
-    |e| &e.document_number,
-    |e| &e.surname,
-    |e| &e.given_names,
-    |e| &e.nationality,
-    |e| &e.date_of_birth,
-    |e| &e.sex,
-    |e| &e.date_of_expiry,
-];
-const FIELD_NAMES: &[&str] = &[
-    "document_number",
-    "surname",
-    "given_names",
-    "nationality",
-    "date_of_birth",
-    "sex",
-    "date_of_expiry",
-];
 
 fn normalize(s: &str) -> String {
     s.trim().to_uppercase()
@@ -113,12 +172,59 @@ fn normalize_date(s: &str) -> String {
     normalize(s)
 }
 
-fn fields_match(a: &Option<String>, b: &Option<String>, is_date: bool) -> bool {
+fn fields_match(a: Option<&str>, b: Option<&str>, field: CoreField) -> bool {
+    let is_date = matches!(field, CoreField::DateOfBirth | CoreField::DateOfExpiry);
     match (a, b) {
         (Some(a), Some(b)) if is_date => normalize_date(a) == normalize_date(b),
         (Some(a), Some(b)) => normalize(a) == normalize(b),
         (None, None) => true,
         _ => false,
+    }
+}
+
+/// Running match tally, per field and overall.
+#[derive(Default)]
+struct Tally {
+    documents: usize,
+    matched: usize,
+    total: usize,
+    per_field: std::collections::BTreeMap<&'static str, (usize, usize)>,
+}
+
+impl Tally {
+    fn record(&mut self, field: CoreField, ok: bool) {
+        self.total += 1;
+        self.matched += ok as usize;
+        let entry = self.per_field.entry(field.as_str()).or_default();
+        entry.0 += ok as usize;
+        entry.1 += 1;
+    }
+
+    fn rate(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        self.matched as f64 / self.total as f64
+    }
+
+    fn print(&self, label: &str) {
+        println!(
+            "\n{label}: {} document(s), {}/{} fields ({:.1}%)",
+            self.documents,
+            self.matched,
+            self.total,
+            self.rate() * 100.0
+        );
+        for (field, (ok, n)) in &self.per_field {
+            println!(
+                "  {field:<16} {ok:>3}/{n:<3} ({:.0}%)",
+                if *n == 0 {
+                    0.0
+                } else {
+                    *ok as f64 / *n as f64 * 100.0
+                }
+            );
+        }
     }
 }
 
@@ -134,25 +240,25 @@ fn native_llm_field_accuracy_over_sample_set() {
     );
     let llm = NativeLlm::load(&model_path, 2048).expect("model loads");
 
-    let mut total = 0usize;
-    let mut matched = 0usize;
-
     let fixtures = fixtures();
-    for name in &fixtures {
-        let (Some(md_path), Some(json_path)) = (
-            find_sample(&format!("{name}.md")),
-            find_sample(&format!("{name}.json")),
-        ) else {
-            eprintln!("skipping {name}: missing fixture files");
-            continue;
-        };
+    assert!(
+        !fixtures.is_empty(),
+        "no fixtures found — samples/ocr_fixtures/ is tracked on main, and \
+         `cargo run -p synthpass-bench --release --example ground_truth_candidates` \
+         regenerates it"
+    );
 
-        let markdown = std::fs::read_to_string(&md_path).expect("markdown reads");
+    let mut reviewed = Tally::default();
+    let mut derived = Tally::default();
+    let mut legacy = Tally::default();
+
+    for fixture in &fixtures {
+        let markdown = std::fs::read_to_string(&fixture.markdown).expect("markdown reads");
         // Ground-truth fixtures predate `extraction_method` being required;
         // backfill it the same way `repair::parse_extraction` does for model
         // output, so this harness doesn't need its own fixture format.
         let mut expected_value: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&json_path).expect("json reads"))
+            serde_json::from_str(&std::fs::read_to_string(&fixture.truth).expect("json reads"))
                 .expect("fixture is valid JSON");
         expected_value
             .as_object_mut()
@@ -163,28 +269,52 @@ fn native_llm_field_accuracy_over_sample_set() {
             serde_json::from_value(expected_value).expect("fixture parses as Extraction");
         let actual = llm.extract(&markdown, None).expect("extraction succeeds");
 
-        println!("--- {name} ---");
-        for (i, get) in FIELDS.iter().enumerate() {
-            let exp = get(&expected);
-            let act = get(&actual);
-            let is_date = FIELD_NAMES[i] == "date_of_birth" || FIELD_NAMES[i] == "date_of_expiry";
-            let ok = fields_match(exp, act, is_date);
-            total += 1;
-            matched += ok as usize;
+        // Field lookup goes through the v2 lift so this file holds no third
+        // copy of the `CoreField` -> struct-field mapping.
+        let expected = ExtractionV2::from(&expected);
+        let actual = ExtractionV2::from(&actual);
+
+        let tally = if fixture.reviewed {
+            &mut reviewed
+        } else {
+            &mut derived
+        };
+        tally.documents += 1;
+        println!(
+            "--- {} ({}) ---",
+            fixture.stem,
+            if fixture.reviewed {
+                "reviewed"
+            } else {
+                "derived"
+            }
+        );
+        for field in fixture.scored_fields() {
+            let exp = expected.fields.get(field);
+            let act = actual.fields.get(field);
+            let ok = fields_match(exp, act, field);
+            tally.record(field, ok);
+            if fixture.reviewed && LEGACY_SCORED.contains(&field) {
+                legacy.record(field, ok);
+            }
             println!(
                 "  {:<16} expected={:?} actual={:?} {}",
-                FIELD_NAMES[i],
+                field.as_str(),
                 exp,
                 act,
                 if ok { "OK" } else { "MISMATCH" }
             );
         }
     }
+    legacy.documents = reviewed.documents;
 
-    let rate = matched as f64 / total as f64;
+    reviewed.print("reviewed fixtures (all nine prompt fields)");
+    derived.print("derived fixtures (check-digited fields only)");
     println!(
-        "\nfield match rate: {matched}/{total} ({:.1}%)",
-        rate * 100.0
+        "\nlegacy seven-field rate over reviewed fixtures: {}/{} ({:.1}%)",
+        legacy.matched,
+        legacy.total,
+        legacy.rate() * 100.0
     );
     // The Atlas §8 acceptance criterion, reported rather than asserted: with
     // grammar-constrained decoding on, model output should already be a valid
@@ -200,16 +330,29 @@ fn native_llm_field_accuracy_over_sample_set() {
             "enabled"
         }
     );
-    // Measured baseline with qwen2.5-1.5b-instruct-q4_k_m: ~33% (date-format
-    // normalized). The model is weak on rear-side ID cards and heavily
-    // garbled MRZ blocks (Serbia_ID_Specimen_2008_back_with_mrz, Slovenian
-    // rear) — that's expected
-    // for a 1.5B model and is exactly why Tier 1 (deterministic MRZ) exists;
-    // this floor exists to catch a regression (e.g. a broken prompt or a
-    // repair-JSON bug), not to gate on model quality.
+
+    // Two floors, because the two sets ask different questions and pooling them
+    // would let a large easy set hide a regression in a small hard one. Both are
+    // set below the measured baseline recorded in `knowledge/ROADMAP.md`, and
+    // exist to catch a broken prompt or a repair-JSON bug — not to gate on model
+    // quality. A 1.5B model reading garbled OCR is expected to be wrong often;
+    // that is why Tier 1 exists.
     assert!(
-        rate >= 0.25,
-        "native LLM field accuracy regressed: {matched}/{total} ({:.1}%) below the 25% floor",
-        rate * 100.0
+        reviewed.rate() >= 0.25,
+        "reviewed-fixture accuracy regressed: {}/{} ({:.1}%) below the 25% floor",
+        reviewed.matched,
+        reviewed.total,
+        reviewed.rate() * 100.0
     );
+    assert!(
+        derived.rate() >= 0.20,
+        "derived-fixture accuracy regressed: {}/{} ({:.1}%) below the 20% floor",
+        derived.matched,
+        derived.total,
+        derived.rate() * 100.0
+    );
+}
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }

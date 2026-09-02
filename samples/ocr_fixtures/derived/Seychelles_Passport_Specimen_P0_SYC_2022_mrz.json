@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1986-01-13",
+  "date_of_expiry": "2032-03-10",
+  "document_number": "NS000004",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ORDINARY",
+  "issuing_country": "SYC",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<SYCSAMPLE<ORDINARY<<<<<<<<<<<<<<<<<<<<<<<<\nNS000004<7SYC8601137F3203101<<<<<<<<<<<<<<<0",
+  "nationality": "SYC",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "SAMPLE"
+}

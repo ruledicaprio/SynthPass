@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1978-01-19",
+  "date_of_expiry": "2021-09-19",
+  "document_number": "00000000",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "HADAR",
+  "issuing_country": "ISR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<ISRBEN<DAVID<<HADAR<<<<<<<<<<<<<<<<<<<<<<<\n00000000<0ISR7801192F21091923<1999991<8<<<68",
+  "nationality": "ISR",
+  "personal_number": "3<1999991<8",
+  "sex": "F",
+  "surname": "BEN DAVID"
+}

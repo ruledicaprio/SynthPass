@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1966-09-30",
+  "date_of_expiry": "2010-03-14",
+  "document_number": "645133138",
+  "document_type": "PO",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MYONGSUN     K",
+  "issuing_country": "PRK",
+  "mrz_checksums_valid": true,
+  "mrz_line": "POPRKJANG<<MYONGSUN<<<<<K<<<<<<<<<<<<<<<<<<<\n6451331382PRK6609302F1003145<<<<<<<<<<<<<<<4",
+  "nationality": "PRK",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "JANG"
+}

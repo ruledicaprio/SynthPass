@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1978-02-22",
+  "date_of_expiry": "2022-03-01",
+  "document_number": "BD0002028",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ROZALIA IRMA",
+  "issuing_country": "HUN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<HUNHANDRA<ROZALIA<IRMA<<<<<<<<<<<<<<<<<<<<\nBD00020282HUN7802225F2203012<<<<<<<<<<<<<<06",
+  "nationality": "HUN",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "HANDRA"
+}

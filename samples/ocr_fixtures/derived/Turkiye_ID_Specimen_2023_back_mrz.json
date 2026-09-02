@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2003-09-12",
+  "date_of_expiry": "2028-06-09",
+  "document_number": "A11R81293",
+  "document_type": "I",
+  "extraction_method": "mrz-deterministic",
+  "given_names": null,
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": true,
+  "mrz_line": "I<TURA11R812932<40096016028<<<\n0309127M2806099TUR<<<<<<<<<<<8\nGURBUZBARIS<<<<<<<<<<<<<<<<<<<",
+  "nationality": "TUR",
+  "personal_number": "<40096016028",
+  "sex": "M",
+  "surname": "GURBUZBARIS"
+}

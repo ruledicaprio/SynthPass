@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2004-03-16",
+  "date_of_expiry": "2025-07-05",
+  "document_number": "AA000261",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "RODRIGO",
+  "issuing_country": "BRA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<BRAFARIAS<DOS<SANTOS<<RODRIGO<<<<<<<<<<<<<\nAA000261<7BRA0403162M2507053<<<<<<<<<<<<<<00",
+  "nationality": "BRA",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "FARIAS DOS SANTOS"
+}

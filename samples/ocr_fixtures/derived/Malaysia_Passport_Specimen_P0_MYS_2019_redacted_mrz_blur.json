@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1999-09-12",
+  "date_of_expiry": "2024-03-15",
+  "document_number": "K52883471",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": null,
+  "issuing_country": "MYS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<MYSYIPK<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nK528834710MYS9909128F2403155990912136126<<90",
+  "nationality": "MYS",
+  "personal_number": "990912136126",
+  "sex": "F",
+  "surname": "YIPK"
+}

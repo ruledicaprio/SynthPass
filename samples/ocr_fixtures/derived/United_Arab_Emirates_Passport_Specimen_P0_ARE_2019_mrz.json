@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1981-06-29",
+  "date_of_expiry": "2019-11-04",
+  "document_number": "PC5278223",
+  "document_type": "PS",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "WASEEM YOUSEF AHMAD SHEHADEH",
+  "issuing_country": "ARE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PSARESHEHADEH<<WASEEM<YOUSEF<AHMAD<SHEHADEH<\nPC52782232ARE8106296M1911046<<<<<<<<<<<<<<<8",
+  "nationality": "ARE",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SHEHADEH"
+}

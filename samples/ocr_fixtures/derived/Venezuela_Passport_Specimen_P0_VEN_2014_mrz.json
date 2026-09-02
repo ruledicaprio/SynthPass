@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1957-10-24",
+  "date_of_expiry": "2019-07-09",
+  "document_number": "098120707",
+  "document_type": "P",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "PEDROSANTONIO",
+  "issuing_country": "VEN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<VENVAIFROS<PEDROSANTONIO<<<<<<<<<<<<<<<<<<\n0981207074VEN5710247M19070926060119<<<<<<<52",
+  "nationality": "VEN",
+  "personal_number": "6060119",
+  "sex": "M",
+  "surname": "VAIFROS"
+}
