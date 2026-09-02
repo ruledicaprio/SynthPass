@@ -136,7 +136,17 @@ is accepted only if `check_sample` reports **both**:
    document is a template.
 2. **No known-vendor watermark.** Rejects a small blocklist of novelty/fake-ID-document vendor
    signatures (e.g. "mrpassports.com"-style sites) even when a specimen-shaped watermark is
-   present — different in kind from an official specimen even if the image looks clean.
+   present — different in kind from an official specimen even if the image looks clean. The
+   blocklist lives in `check_sample.rs`'s `VENDOR_BLOCKLIST`, which is where the OCR text is;
+   the script reads the `VENDOR CLEAR`/`VENDOR BLOCKED` verdict line it prints. Extend it there.
+
+   *Historical note (fixed 2026-09-02):* this gate was inoperative from the day the blocklist
+   was added until that date. The script matched the blocklist words against `check_sample`'s
+   entire stdout, and `check_sample` never printed the OCR text — so the only thing those words
+   could match was its own trailing advisory, which says "novelty/fake-ID-vendor" and prints on
+   every run. Every candidate scored a vendor hit, and since acceptance requires the absence of
+   one, **the script accepted nothing at all**. The "bulk corpus growth is automated" claim
+   above was aspirational in that window; specimens were being placed by hand.
 
 This is a best-effort automated gate, not an infallible one — it cannot detect a real name + real
 photo + a non-placeholder document number with no specimen marking the way a human glancing at the

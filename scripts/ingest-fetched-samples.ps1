@@ -78,10 +78,9 @@ if (-not (Test-Path $StagingDir)) {
 # corpus -- see CONTRIBUTING.md "Adding a corpus specimen", point 1.
 $placeholderDocNumbers = @("E00000000", "000000000", "007007007")
 
-# CONTRIBUTING.md names novelty/fake-ID-document vendor sites as a specific
-# reject even when a "specimen"-shaped watermark is present. Best-effort,
-# not exhaustive -- extend as new vendors are seen.
-$vendorBlocklist = @("mrpassports", "novelty", "fakeid", "fake-id")
+# The vendor blocklist itself now lives in check_sample.rs's VENDOR_BLOCKLIST,
+# which is the only place the OCR text exists to match against; this script
+# reads its VENDOR verdict line. Extend the list there, not here.
 
 $extensions = @(".jpg", ".jpeg", ".png", ".webp", ".gif")
 
@@ -105,7 +104,13 @@ function Get-DocTypeDir([string]$FileName) {
     # which already embeds Passport/ID/Driving/Document into the filename.
     if ($FileName -match "(?i)passport") { return "passports" }
     if ($FileName -match "(?i)driving|licen[cs]e") { return "driving_licenses" }
-    if ($FileName -match "(?i)\bid\b|identity") { return "id_cards" }
+    # `(^|_)id(_|$|\.)`, not `\bid\b`: underscore is a word character, so there
+    # is no word boundary anywhere in `Sweden_ID_Specimen_2027_mrz.png` and
+    # `\bid\b` matched none of the corpus's `Country_ID_Specimen_...` names.
+    # Every ID card this script ingested therefore fell through to `misc/` --
+    # which `synthpass_bench::classify_specimen` reads as the document class,
+    # so a misrouted card was also benchmarked as the wrong kind of document.
+    if ($FileName -match "(?i)(^|_)id(_|\.|$)|identity") { return "id_cards" }
     return "misc"
 }
 
@@ -125,10 +130,30 @@ foreach ($file in $imageFiles) {
     foreach ($doc in $placeholderDocNumbers) {
         if ($output -match "MRZ HIT.*doc_number=$doc\b") { $hasPlaceholderDoc = $true }
     }
-    $hitsVendorBlocklist = $false
-    foreach ($vendor in $vendorBlocklist) {
-        if ($output -match "(?i)$vendor") { $hitsVendorBlocklist = $true }
+    # Read check_sample's VENDOR verdict line rather than pattern-matching the
+    # blocklist against its whole output. The old form was unfixable in
+    # principle: check_sample never prints the OCR text, so the blocklist words
+    # could only ever match its own trailing advisory -- which says
+    # "novelty/fake-ID-vendor" and prints on every run. Every candidate scored
+    # vendor_blocklist=True, and since acceptance requires NOT that, this gate
+    # rejected 100% of candidates for as long as that advisory has existed.
+    #
+    # Fail closed on a missing line: that means a check_sample too old to emit
+    # the verdict, and silently treating "no line" as "clear" would reintroduce
+    # an unscreened accept.
+    # An OCR failure is a legitimate per-file outcome, not a broken toolchain:
+    # check_sample prints OCR-ERROR and exits before any verdict line. Reject
+    # that candidate (nothing was read, so nothing can be vouched for) and keep
+    # going, rather than aborting the whole batch.
+    if ($output -match 'OCR-ERROR') {
+        $rejected++
+        Write-Host "REJECT  $($file.Name)  (OCR failed -- nothing to verify provenance against)" -ForegroundColor DarkYellow
+        continue
     }
+    if ($output -notmatch 'VENDOR\s+(CLEAR|BLOCKED)') {
+        throw "check_sample produced no VENDOR verdict line for $($file.Name) -- rebuild it (the ingest gate needs crates/synthpass-ocr/examples/check_sample.rs at or after the vendor-verdict change)."
+    }
+    $hitsVendorBlocklist = $output -match 'VENDOR\s+BLOCKED'
 
     $accept = ($hasSpecimenText -or $hasPlaceholderDoc) -and (-not $hitsVendorBlocklist)
 
