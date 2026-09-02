@@ -101,6 +101,30 @@ HEAD, since a report produced by an earlier/different run was not
 necessarily measured against what's checked out right now -- override with
 -GitSha if you do know it.
 
+.PARAMETER Cuda
+Build provider-bench with --features cuda (GPU offload for the Tier-2 LLM,
+ADR-0004) and record the row under provider_id "llm-cuda" instead of "llm",
+so a GPU run lands on the same track's history.jsonl as a third trend line
+alongside the CPU "mrz" and "llm" ones. Real-specimen tracks only -- the
+synthetic tracks run synthpass-bench, which has no LLM provider for the
+feature to affect.
+
+Only the "llm" provider's row is recorded on a -Cuda run. provider-bench has
+no --providers filter, so the deterministic "mrz" reader runs regardless, but
+it is pure CPU and unaffected by the feature; recording it would append a
+duplicate CPU row indistinguishable from a normal run's.
+
+GPU output is byte-identical to CPU (ADR-0004's amendment verified this on a
+GTX 970), so the accuracy panels will overlay the plain "llm" line exactly --
+the mean-latency panel is where the ~2.5x actually shows.
+
+Never run this in CI: no GitHub-hosted runner has a GPU, so a scheduled run
+would build the feature, execute on CPU anyway, and record a mislabelled
+"llm-cuda" row. It is deliberately absent from every track list in
+.github/workflows/bench-charts.yml. With -FromReport the bench run is skipped
+entirely, so -Cuda then only relabels the provider -- pass it when the report
+you are folding in was itself produced by a --features cuda run.
+
 .PARAMETER GitSha
 Override the row's recorded git_sha (only meaningful with -FromReport;
 otherwise it's always the current HEAD, which is always true for a fresh
@@ -121,6 +145,10 @@ Override the row's recorded invocation string (only meaningful with
 
 .EXAMPLE
 ./scripts/run-bench.ps1 -Track real-specimens -FromReport knowledge/benchmarks/qwen-real-50.json -InvocationNote "backfilled from knowledge/benchmarks/qwen-real-50.json"
+
+.EXAMPLE
+# GPU run on hardware that has one -- records an "llm-cuda" row on the same track.
+./scripts/run-bench.ps1 -Track real-specimens -Cuda -Limit 50
 #>
 
 param(
@@ -132,6 +160,7 @@ param(
     [int]$Seed = 0,
     [switch]$MeasureMemory,
     [switch]$SkipChart,
+    [switch]$Cuda,
     [string]$FromReport,
     [string]$GitSha,
     [string]$InvocationNote
@@ -141,6 +170,15 @@ param(
 # (provider-bench, --format-scoped samples/) track -- decides which binary
 # step 1 runs and which report shape step 1.5 flattens.
 $isSyntheticTrack = $Track -in @("td1", "td2", "td3", "mrva", "mrvb")
+
+# -Cuda only means something where an LLM provider actually runs. The
+# synthetic tracks run synthpass-bench, which measures the deterministic
+# Tier-1 gate and never loads a model, so the feature would build a GPU
+# backend nothing calls and then label the row a GPU result. Fail loudly
+# rather than record a lie.
+if ($Cuda -and $isSyntheticTrack) {
+    throw "-Cuda applies to real-specimen tracks only (passport, id_card, driving_license, real-specimens): the synthetic tracks run synthpass-bench, which has no LLM provider for --features cuda to affect."
+}
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
@@ -178,8 +216,12 @@ if ($FromReport) {
     if ($Limit -gt 0) { $benchArgs += @("--limit", "$Limit") }
     if ($MeasureMemory) { $benchArgs += "--measure-memory" }
 
-    Write-Host "Running: cargo run -p synthpass-bench --release --bin provider-bench -- $($benchArgs -join ' ')"
-    & cargo run -p synthpass-bench --release --bin provider-bench -- @benchArgs
+    # Splatted rather than inlined so the no-Cuda invocation stays byte-identical
+    # to what it has always been -- an empty array splats to nothing.
+    $cargoFeatures = if ($Cuda) { @("--features", "cuda") } else { @() }
+
+    Write-Host "Running: cargo run -p synthpass-bench --release $($cargoFeatures -join ' ') --bin provider-bench -- $($benchArgs -join ' ')"
+    & cargo run -p synthpass-bench --release @cargoFeatures --bin provider-bench -- @benchArgs
     if ($LASTEXITCODE -ne 0) {
         throw "provider-bench failed (exit $LASTEXITCODE)"
     }
@@ -260,13 +302,23 @@ if ($isSyntheticTrack) {
     # regardless of actual accuracy. `.rate` below is `$null` for the latter,
     # same as `$p.unsupported_assertion.overall.rate` already is for a
     # `NotApplicable` unsupported-assertion, not a false zero.
+    #
+    # -Cuda narrows this to the `llm` provider and relabels it `llm-cuda`.
+    # provider-bench has no --providers filter, so `mrz` still runs, but it is
+    # pure CPU and unaffected by the feature -- recording it would append a
+    # second CPU row indistinguishable from a normal run's, silently
+    # double-weighting `mrz` on the trend line. `bench-chart` groups by
+    # `provider_id` string equality, so the relabelled row simply becomes a
+    # third series next to `mrz` and `llm` with no chart-side change.
     $rows = foreach ($p in $report.providers) {
+        if ($Cuda -and $p.provider_id -ne "llm") { continue }
+        $providerId = if ($Cuda) { "$($p.provider_id)-cuda" } else { $p.provider_id }
         [ordered]@{
             run_timestamp_unix         = $runTimestamp
             git_sha                    = $sha
             invocation                 = $invocation
             documents                  = $p.documents
-            provider_id                = $p.provider_id
+            provider_id                = $providerId
             read_ok_rate               = $p.tier1_hit_rate.rate
             labelled_documents         = $p.accuracy.labelled_documents
             field_match_rate           = $p.accuracy.field_match_rate

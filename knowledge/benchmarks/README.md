@@ -178,6 +178,32 @@ least one row in the history carries a non-null value. Every historical row
 already has one, so no backfill was needed and existing charts gain the panel
 on their next regeneration.
 
+**GPU runs: the `llm-cuda` series (added 2026-09-02).**
+`./scripts/run-bench.ps1 -Track <real-specimen track> -Cuda` builds
+`provider-bench` with `--features cuda` (ADR-0004's GPU offload for Tier-2) and
+appends the result to that track's *existing* `history.jsonl` under
+`provider_id` `"llm-cuda"`. `bench-chart` groups by `provider_id` string
+equality, so it renders as a third trend line next to `mrz` and `llm` with no
+chart-side change and no second track directory.
+
+Two things to expect rather than report as bugs:
+
+- **Its accuracy lines overlay the plain `llm` line exactly.** GPU output is
+  byte-identical to CPU (ADR-0004 verified this on a GTX 970). The latency
+  panel is the only place the ~2.5x is visible — which is why the GPU feature
+  shipped in 2026-08 but could not be charted until that panel existed.
+- **A `-Cuda` run records no `mrz` row.** `provider-bench` has no
+  `--providers` filter so the deterministic reader still runs, but it is pure
+  CPU and unaffected by the feature; recording it would double-weight `mrz` on
+  the trend line with a duplicate CPU measurement.
+
+The numbers are hardware-specific (a GTX 970 today) and **local-only**: no
+GitHub-hosted runner has a GPU, so `-Cuda` is deliberately absent from every
+track list in `.github/workflows/bench-charts.yml`. A scheduled run would
+otherwise build the feature, execute on CPU anyway, and record a mislabelled
+row. It is also rejected outright on the synthetic tracks, which run
+`synthpass-bench` — that binary has no LLM provider for the feature to affect.
+
 Unlike the three rate panels — which share a fixed 0.0-1.0 axis so they stay
 honestly comparable — the latency panel auto-scales, because milliseconds have
 no natural ceiling. It is still anchored at zero and never cropped to the

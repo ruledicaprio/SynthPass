@@ -335,6 +335,34 @@ person doesn't re-derive it):
   name only, not `--features`, which `cargo clean` does not accept) is
   required after any toolkit change, not just a plain rebuild.
 
+**Where GPU numbers are recorded (added 2026-09-02).** The figures above lived
+only in this document, as prose. They now have a home in the normal benchmark
+pipeline: `./scripts/run-bench.ps1 -Track <real-specimen track> -Cuda` builds
+`provider-bench` with `--features cuda` and appends the result to that track's
+existing `results/<track>-bench/history.jsonl` under `provider_id` `"llm-cuda"`,
+so it renders as a third trend line beside the CPU `mrz` and `llm` ones with no
+chart-side change (`bench-chart` groups by `provider_id` string equality).
+
+Two consequences follow from what this amendment already established, and are
+worth stating so a future reader does not mistake either for a bug:
+
+- **The accuracy panels will overlay the plain `llm` line exactly.** Output is
+  byte-identical across the backend split, which is the determinism property
+  verified above. The whole visible value of a GPU row is the mean-latency
+  panel (added the same day, `bench-chart`'s fourth panel) — without it there
+  was nothing for a GPU row to show, which is why this was not wired up when
+  the feature landed.
+- **`-Cuda` records only the `llm` row.** `provider-bench` has no `--providers`
+  filter, so the deterministic `mrz` reader runs regardless; it is pure CPU and
+  unaffected by the feature, so recording it would append a duplicate CPU row
+  and silently double-weight `mrz` on the trend line.
+
+`-Cuda` is deliberately absent from every track list in
+`.github/workflows/bench-charts.yml`, per the CI limitation immediately below:
+a scheduled run would build the feature, execute on CPU anyway, and record a
+mislabelled `llm-cuda` row. GPU rows come only from a developer running the
+script on GPU hardware.
+
 **Still open:**
 - `vulkan` remains unimplemented and unverified.
 - No CI runner has this hardware — the GPU path is manually validated per this

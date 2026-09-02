@@ -201,6 +201,16 @@ set (the README quickstart convention), or at the repo root (the compiled defaul
 `-FromReport PATH` flattens an existing `provider-bench` report instead of running
 one — useful for folding in a slow run you already have, without redoing it.
 
+`-Cuda` (real-specimen tracks only, GPU hardware only) builds with `--features cuda`
+and records the row as `llm-cuda`, so a GPU run becomes a third trend line on the same
+chart as the CPU `mrz`/`llm` ones — see `knowledge/decisions/ADR-0004-gpu-acceleration.md`.
+Never used in CI: no GitHub-hosted runner has a GPU, so a scheduled `-Cuda` run would
+execute on CPU and record a mislabelled row.
+
+```powershell
+./scripts/run-bench.ps1 -Track real-specimens -Cuda -Limit 50
+```
+
 The regenerated SVG is never auto-committed — review it and commit it yourself on a
 normal branch/PR, same as any other README asset.
 
