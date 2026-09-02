@@ -126,17 +126,46 @@ stages Commons candidates in a gitignored directory, and `./scripts/ingest-fetch
 sifts them into `samples/` and pushes to `samples-data` — no human PR review gates a specimen
 entering the corpus anymore.
 
-That script enforces, automatically, the same provenance rule a human used to apply by eye —
-"never bypass validation" (`CLAUDE.md`) means the check moved, not that it went away. A candidate
-is accepted only if `check_sample` reports **both**:
+The script screens candidates on one **blocking** rule and reports two **advisory** signals.
 
-1. **Provenance.** Either a genuine `SPECIMEN` watermark printed on the document (OCR text contains
-   "specimen"), or an established synthetic-placeholder MRZ number already used in this corpus
-   (`E00000000`, `000000000`, `007007007`) — not a coincidence, an intentional marker that the
-   document is a template.
-2. **No known-vendor watermark.** Rejects a small blocklist of novelty/fake-ID-document vendor
+**Blocking — a known-vendor signature rejects outright.** See point 2 below.
+
+**Advisory — the specimen watermark and placeholder document number.** Reported per file and
+summarised at the end of the run, but they no longer veto (policy changed 2026-09-02, see
+"Why the watermark stopped being mandatory"). Every accepted file with neither marker is
+re-listed under a "nothing automated vouched for these" heading, because for those the
+provenance judgement is yours: open the image and confirm it is a specimen rather than a real
+person's document. `./scripts/watch-samples.ps1` pages through candidates one at a time.
+
+1. **Provenance (advisory).** Either a genuine `SPECIMEN` watermark printed on the document (OCR
+   text contains "specimen"), or an established synthetic-placeholder MRZ number already used in
+   this corpus (`E00000000`, `000000000`, `007007007`) — not a coincidence, an intentional marker
+   that the document is a template.
+2. **No known-vendor watermark (blocking).** Rejects a small blocklist of novelty/fake-ID-document vendor
    signatures (e.g. "mrpassports.com"-style sites) even when a specimen-shaped watermark is
-   present — different in kind from an official specimen even if the image looks clean.
+   present — different in kind from an official specimen even if the image looks clean. The
+   blocklist lives in `check_sample.rs`'s `VENDOR_BLOCKLIST`, which is where the OCR text is;
+   the script reads the `VENDOR CLEAR`/`VENDOR BLOCKED` verdict line it prints. Extend it there.
+
+   *Historical note (fixed 2026-09-02):* this gate was inoperative from the day the blocklist
+   was added until that date. The script matched the blocklist words against `check_sample`'s
+   entire stdout, and `check_sample` never printed the OCR text — so the only thing those words
+   could match was its own trailing advisory, which says "novelty/fake-ID-vendor" and prints on
+   every run. Every candidate scored a vendor hit, and since acceptance requires the absence of
+   one, **the script accepted nothing at all**. The "bulk corpus growth is automated" claim
+   above was aspirational in that window; specimens were being placed by hand.
+
+**Why the watermark stopped being mandatory (2026-09-02).** Requiring a printed `SPECIMEN`
+watermark assumed that a genuine specimen always carries one. It doesn't: many states publish
+authentic specimen pages — foreign-ministry and border-authority document galleries especially —
+with no watermark on the image at all. Against a real 30-file staging batch the old rule
+rejected 26 of 28 vendor-clean candidates, nearly all of them legitimate, which made bulk
+collection impossible. The bar is now "carries no known novelty/fake-document vendor signature",
+with the watermark and placeholder-number checks kept as reported signals.
+
+This is a deliberate trade: it moves the provenance decision for unmarked documents back to a
+human, which is why the run ends with an explicit review list rather than a silent pass. Read
+the paragraph below — it applied before this change and applies more sharply after it.
 
 This is a best-effort automated gate, not an infallible one — it cannot detect a real name + real
 photo + a non-placeholder document number with no specimen marking the way a human glancing at the
