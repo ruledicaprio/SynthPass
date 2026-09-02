@@ -8,11 +8,23 @@
 //!
 //! Two panels are always drawn (both computable with zero ground truth):
 //! read-success rate (fraction of documents where OCR + parse produced a
-//! result at all) and unsupported-assertion rate. A third panel for
-//! `field_match_rate` is drawn only when at least one row in the whole
-//! history has a non-null value — accuracy starts sparse (few
-//! `samples/ocr_fixtures/` labels exist for most tracks yet) and this panel
-//! would otherwise render an empty, confusing plot area.
+//! result at all) and unsupported-assertion rate. Two further panels are
+//! conditional, each drawn only when at least one row in the whole history has
+//! a non-null value for it — `field_match_rate` (accuracy starts sparse: few
+//! `samples/ocr_fixtures/` labels exist for most tracks yet) and `mean_ms`
+//! (mean latency per document). Either would otherwise render an empty,
+//! confusing plot area.
+//!
+//! The three rate panels share a fixed 0.0-1.0 y-axis so they are honestly
+//! comparable; the latency panel cannot (milliseconds have no natural ceiling)
+//! and auto-scales from zero to 110% of the largest value in the history.
+//! Still anchored at zero, never cropped to the data's own range — same
+//! "no series is exaggerated by a cropped axis" rule the bar mode follows.
+//! Providers differing by orders of magnitude (the deterministic reader runs
+//! in microseconds, the LLM in seconds) therefore render the fast one as a
+//! flat line near zero. That is the true shape of the difference, and the
+//! panel exists to compare *like* against like — most usefully the same LLM
+//! provider on CPU versus GPU.
 //!
 //! ```text
 //! bench-chart --history PATH --out PATH
@@ -60,6 +72,14 @@ struct HistoryRow {
     /// count renders as "n=?" rather than refusing to chart.
     #[serde(default)]
     documents: Option<u64>,
+    /// Mean wall-clock milliseconds per document for this provider on this
+    /// run. `scripts/run-bench.ps1` has always written this field for both
+    /// corpus sources; until the latency panel existed nothing here read it,
+    /// so every historical row already carries a value and no backfill is
+    /// needed. `#[serde(default)]` all the same, matching every other optional
+    /// field: a row without it simply contributes no point to that panel.
+    #[serde(default)]
+    mean_ms: Option<f64>,
 }
 
 #[derive(Debug)]
@@ -192,19 +212,23 @@ fn group_by_provider(rows: Vec<HistoryRow>) -> Vec<(String, Vec<HistoryRow>)> {
 
 const PALETTE: [RGBColor; 4] = [RED, BLUE, GREEN, MAGENTA];
 
+/// `y_range` is a parameter rather than the fixed `0.0..1.0` every rate panel
+/// wants because the latency panel plots milliseconds, which have no natural
+/// ceiling. Rate callers pass `(0.0, 1.0)` and are unchanged.
 fn draw_panel(
     area: &DrawingArea<SVGBackend, plotters::coord::Shift>,
     title: &str,
     groups: &[(String, Vec<HistoryRow>)],
     x_range: (i64, i64),
+    y_range: (f64, f64),
     value: impl Fn(&HistoryRow) -> Option<f64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut chart = ChartBuilder::on(area)
         .caption(title, ("sans-serif", 18))
         .margin(10)
         .x_label_area_size(28)
-        .y_label_area_size(45)
-        .build_cartesian_2d(x_range.0..x_range.1, 0.0f64..1.0f64)?;
+        .y_label_area_size(55)
+        .build_cartesian_2d(x_range.0..x_range.1, y_range.0..y_range.1)?;
 
     chart
         .configure_mesh()
@@ -267,28 +291,62 @@ fn run_trend(history: &str, out: &str) -> Result<(), Box<dyn std::error::Error>>
         .flat_map(|(_, rows)| rows.iter())
         .any(|r| r.field_match_rate.is_some());
 
-    let panel_count = if has_accuracy { 3 } else { 2 };
+    // Widest `mean_ms` across every provider — one shared ceiling, not a
+    // per-provider one, so the panel's whole point (comparing providers, and
+    // the same provider across backends) survives. `None` when no row in the
+    // history carries a latency at all, which is what gates the panel.
+    let max_latency_ms = groups
+        .iter()
+        .flat_map(|(_, rows)| rows.iter())
+        .filter_map(|r| r.mean_ms)
+        .fold(None::<f64>, |acc, v| Some(acc.map_or(v, |a: f64| a.max(v))));
+
+    let panel_count = 2 + usize::from(has_accuracy) + usize::from(max_latency_ms.is_some());
     let root = SVGBackend::new(out, (900, 320 * panel_count as u32)).into_drawing_area();
     root.fill(&WHITE)?;
     let panels = root.split_evenly((panel_count, 1));
 
-    draw_panel(&panels[0], "MRZ read-success rate", &groups, x_range, |r| {
-        r.read_ok_rate
-    })?;
+    draw_panel(
+        &panels[0],
+        "MRZ read-success rate",
+        &groups,
+        x_range,
+        (0.0, 1.0),
+        |r| r.read_ok_rate,
+    )?;
     draw_panel(
         &panels[1],
         "Unsupported-assertion rate",
         &groups,
         x_range,
+        (0.0, 1.0),
         |r| r.unsupported_assertion_rate,
     )?;
+    let mut next_panel = 2;
     if has_accuracy {
         draw_panel(
-            &panels[2],
+            &panels[next_panel],
             "Field match rate (labelled specimens only)",
             &groups,
             x_range,
+            (0.0, 1.0),
             |r| r.field_match_rate,
+        )?;
+        next_panel += 1;
+    }
+    if let Some(max_ms) = max_latency_ms {
+        // Headroom so the topmost point is not drawn on the axis line. A
+        // history whose only latencies are 0.0 would otherwise ask plotters
+        // for a degenerate 0.0..0.0 range, the same invalid-axis case
+        // `x_range` guards above.
+        let ceiling = if max_ms > 0.0 { max_ms * 1.1 } else { 1.0 };
+        draw_panel(
+            &panels[next_panel],
+            "Mean latency per document (ms)",
+            &groups,
+            x_range,
+            (0.0, ceiling),
+            |r| r.mean_ms,
         )?;
     }
 
@@ -471,6 +529,7 @@ mod tests {
                 field_match_rate: None,
                 unsupported_assertion_rate: None,
                 documents: None,
+                mean_ms: None,
             },
             HistoryRow {
                 run_timestamp_unix: 10,
@@ -479,6 +538,7 @@ mod tests {
                 field_match_rate: None,
                 unsupported_assertion_rate: None,
                 documents: None,
+                mean_ms: None,
             },
             HistoryRow {
                 run_timestamp_unix: 5,
@@ -487,6 +547,7 @@ mod tests {
                 field_match_rate: None,
                 unsupported_assertion_rate: None,
                 documents: None,
+                mean_ms: None,
             },
         ];
         let groups = group_by_provider(rows);
@@ -596,6 +657,105 @@ mod tests {
             !svg.contains("26.7%"),
             "the stale first TD1 row must not be the one plotted"
         );
+    }
+
+    /// The latency panel is gated on the data, not on a flag: a history with
+    /// no `mean_ms` anywhere renders the same height it always did, and one
+    /// with latencies grows by exactly one panel. Height is the observable
+    /// proxy for panel count (`320 * panel_count`), which is what the caller
+    /// of `run_trend` actually gets.
+    #[test]
+    fn latency_panel_appears_only_when_a_row_carries_mean_ms() {
+        let dir = std::env::temp_dir().join(format!(
+            "bench-chart-latency-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Two rate panels only: no field_match_rate, no mean_ms -> 640px.
+        let without = dir.join("without.jsonl");
+        std::fs::write(
+            &without,
+            "{\"run_timestamp_unix\": 1, \"provider_id\": \"mrz\", \"read_ok_rate\": 1.0}\n\
+             {\"run_timestamp_unix\": 2, \"provider_id\": \"mrz\", \"read_ok_rate\": 0.9}\n",
+        )
+        .unwrap();
+        let without_out = dir.join("without.svg");
+        run(&Args {
+            mode: Mode::Trend {
+                history: without.to_string_lossy().to_string(),
+            },
+            out: without_out.to_string_lossy().to_string(),
+        })
+        .expect("renders without latency");
+        let without_svg = std::fs::read_to_string(&without_out).unwrap();
+        assert!(
+            without_svg.contains("640"),
+            "two panels (2 * 320) when no row carries mean_ms"
+        );
+        assert!(!without_svg.contains("Mean latency per document"));
+
+        // Same history plus mean_ms -> a third panel, 960px.
+        let with = dir.join("with.jsonl");
+        std::fs::write(
+            &with,
+            "{\"run_timestamp_unix\": 1, \"provider_id\": \"mrz\", \"read_ok_rate\": 1.0, \"mean_ms\": 4.0}\n\
+             {\"run_timestamp_unix\": 2, \"provider_id\": \"llm\", \"read_ok_rate\": 0.9, \"mean_ms\": 18591.0}\n",
+        )
+        .unwrap();
+        let with_out = dir.join("with.svg");
+        run(&Args {
+            mode: Mode::Trend {
+                history: with.to_string_lossy().to_string(),
+            },
+            out: with_out.to_string_lossy().to_string(),
+        })
+        .expect("renders with latency");
+        let with_svg = std::fs::read_to_string(&with_out).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(
+            with_svg.contains("960"),
+            "three panels (3 * 320) once a row carries mean_ms"
+        );
+        assert!(with_svg.contains("Mean latency per document"));
+    }
+
+    /// A history whose only latencies are 0.0 must not ask plotters for a
+    /// degenerate 0.0..0.0 axis — the same invalid-range case `x_range`
+    /// already guards for a single-run history.
+    #[test]
+    fn an_all_zero_latency_history_still_renders() {
+        let dir = std::env::temp_dir().join(format!(
+            "bench-chart-zero-latency-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let history = dir.join("history.jsonl");
+        std::fs::write(
+            &history,
+            "{\"run_timestamp_unix\": 1, \"provider_id\": \"mrz\", \"read_ok_rate\": 1.0, \"mean_ms\": 0.0}\n\
+             {\"run_timestamp_unix\": 2, \"provider_id\": \"mrz\", \"read_ok_rate\": 1.0, \"mean_ms\": 0.0}\n",
+        )
+        .unwrap();
+        let out = dir.join("zero.svg");
+        run(&Args {
+            mode: Mode::Trend {
+                history: history.to_string_lossy().to_string(),
+            },
+            out: out.to_string_lossy().to_string(),
+        })
+        .expect("a zero-latency history still charts");
+        let svg = std::fs::read_to_string(&out).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(svg.contains("Mean latency per document"));
     }
 
     #[test]
