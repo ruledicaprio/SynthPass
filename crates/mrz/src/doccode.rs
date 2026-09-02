@@ -169,9 +169,13 @@ mod tests {
 
     #[test]
     fn the_table_matches_part_4_section_4_4_exactly() {
-        // Transcribed from knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and
-        // _TD3_MRTDs.md §4.4, plus Note 1's PU from Part 8. Pinned so a future
-        // edit to the enum has to be a deliberate change to the spec table.
+        // Transcribed from §4.4 of the Part 4 specification under
+        // `knowledge/docs9303/`, plus Note 1's PU from Part 8. Pinned so a
+        // future edit to the enum has to be a deliberate change to the spec
+        // table. (The full path is cited unbroken in this module's header —
+        // scripts/check-doc-links.sh matches these citations per line, so
+        // wrapping one across two comment lines makes it look like a dangling
+        // reference.)
         let expected = [
             ("PP", "National/ordinary passport"),
             ("PE", "Emergency passport"),
