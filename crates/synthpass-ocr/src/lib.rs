@@ -249,9 +249,7 @@ impl NativeOcr {
     /// to the retry loop's.
     pub fn recognize_detailed(&self, image_path: &Path) -> Result<OcrPage, String> {
         let verbose = verbose_enabled();
-        let image = image::open(image_path)
-            .map_err(|e| format!("failed to open image {}: {e}", image_path.display()))?
-            .into_rgb8();
+        let image = decode_image(image_path)?.into_rgb8();
 
         // A3: auto-rotate before the main pass (detection-only, cheap; see
         // `choose_rotation`'s doc comment, including its known 0°-vs-180°
@@ -462,6 +460,87 @@ impl NativeOcr {
             text_sanity,
         })
     }
+}
+
+/// Opens an image by **what its bytes are**, not by what its name claims.
+///
+/// `image::open` picks a decoder from the file extension. A file whose
+/// extension disagrees with its content therefore fails to decode even though
+/// the format is fully supported — and the error names the format the *name*
+/// implied, so it reads as a corrupt file rather than a mislabelled one.
+///
+/// This is not hypothetical. Three specimens in this repository's own corpus
+/// were JPEGs carrying `.png` and `.webp` names; all three failed with
+/// `Invalid PNG signature` and were silently skipped by every OCR walk in the
+/// tree — the corpus manifest generator, both surveys, `mrz_corpus` and
+/// `synthpass-bench` — until a magic-byte sweep found them. One of them,
+/// `Spain_Passport_Specimen_P0_2022_mrz`, is the specimen
+/// `crates/mrz/tests/line1_nonconformance.rs` pins as having no issuing state,
+/// and it had never once been read by the engine that pins it.
+///
+/// Cameras, scanners, phone exports and download managers all mislabel files,
+/// so a user handing this a `.png` that is really a JPEG is the ordinary case,
+/// not the pathological one. `with_guessed_format` reads the magic bytes and
+/// overrides the extension's guess, which is what the browser demo's
+/// `createImageBitmap` has always done.
+///
+/// When decoding genuinely fails, the leading bytes are consulted so the
+/// message names the real problem: a PDF or HEIC file renamed to `.jpg` gets
+/// the same actionable explanation `synthpass-pipeline` gives when the
+/// *extension* says so, instead of a decoder error about a format the file
+/// never was.
+///
+/// **Public because the mistake was repo-wide, not engine-local.** Four call
+/// sites reached for `image::open` independently — this engine,
+/// `synthpass_bench::load_specimen` (which drops an undecodable specimen from
+/// the benchmark *silently*, so a mislabelled file quietly shrinks the corpus),
+/// and two survey examples. One decoder they can all share is the only way that
+/// stays fixed.
+pub fn decode_image(path: &Path) -> Result<image::DynamicImage, String> {
+    let reader = image::ImageReader::open(path)
+        .map_err(|e| format!("failed to open image {}: {e}", path.display()))?
+        .with_guessed_format()
+        .map_err(|e| format!("failed to read image {}: {e}", path.display()))?;
+    reader.decode().map_err(|e| {
+        let hint = match sniff_unsupported(path) {
+            Some(f) => format!(
+                " — the file is {f}, whatever its extension says. \
+                 Convert it to JPEG or PNG first."
+            ),
+            None => String::new(),
+        };
+        format!("failed to decode image {}: {e}{hint}", path.display())
+    })
+}
+
+/// Names an unsupported-but-recognisable container from its leading bytes.
+///
+/// Deliberately tiny: this exists to turn a confusing decoder error into an
+/// actionable one, not to be a format registry. `image` handles every format
+/// this project supports, so anything reaching here is already a failure — the
+/// only question is whether the message can say something useful.
+fn sniff_unsupported(path: &Path) -> Option<&'static str> {
+    let mut head = [0u8; 12];
+    let read = {
+        use std::io::Read as _;
+        let mut f = std::fs::File::open(path).ok()?;
+        f.read(&mut head).ok()?
+    };
+    let head = &head[..read];
+    if head.starts_with(b"%PDF-") {
+        return Some("a PDF");
+    }
+    // ISO-BMFF: bytes 4..8 are `ftyp`, and the brand that follows says which
+    // flavour. HEIC/HEIF is the one worth naming — it is the iPhone default.
+    if head.len() >= 12 && &head[4..8] == b"ftyp" {
+        return match &head[8..12] {
+            b"heic" | b"heix" | b"hevc" | b"heim" | b"heis" | b"mif1" | b"msf1" => {
+                Some("HEIC/HEIF")
+            }
+            _ => None,
+        };
+    }
+    None
 }
 
 /// Whole-page [`geometry::text_sanity`], or `None` when nothing was
@@ -753,6 +832,124 @@ fn mrz_shaped_lines(text: &str) -> String {
         .filter(|l| l.chars().filter(|c| !c.is_whitespace()).count() >= 20)
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+    use image::{ImageFormat, RgbImage};
+
+    /// Writes `img` encoded as `format`, to a path whose extension deliberately
+    /// says something else.
+    fn write_mislabelled(dir: &Path, name: &str, format: ImageFormat) -> std::path::PathBuf {
+        let path = dir.join(name);
+        let img = RgbImage::from_pixel(8, 8, image::Rgb([200, 40, 90]));
+        image::DynamicImage::ImageRgb8(img)
+            .save_with_format(&path, format)
+            .expect("encodes");
+        path
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("synthpass-decode-{tag}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        dir
+    }
+
+    /// The regression this function exists for: a JPEG named `.png` must decode.
+    ///
+    /// `image::open` fails here with `Invalid PNG signature`, which is how three
+    /// corpus specimens stayed invisible to every OCR walk in the repo.
+    #[test]
+    fn decodes_a_jpeg_that_claims_to_be_a_png() {
+        let dir = scratch("jpeg-as-png");
+        let path = write_mislabelled(&dir, "actually_a_jpeg.png", ImageFormat::Jpeg);
+
+        assert!(
+            image::open(&path).is_err(),
+            "precondition: extension-based opening must fail, or this test proves nothing"
+        );
+        let decoded = decode_image(&path).expect("content sniffing decodes it anyway");
+        assert_eq!(decoded.width(), 8);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The mirror case, so the fix isn't accidentally JPEG-specific.
+    #[test]
+    fn decodes_a_png_that_claims_to_be_a_webp() {
+        let dir = scratch("png-as-webp");
+        let path = write_mislabelled(&dir, "actually_a_png.webp", ImageFormat::Png);
+
+        assert!(image::open(&path).is_err(), "precondition");
+        assert!(decode_image(&path).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A correctly-named file must behave exactly as before — sniffing is a
+    /// fallback for liars, not a change of behaviour for everyone else.
+    #[test]
+    fn an_honestly_named_file_still_decodes() {
+        let dir = scratch("honest");
+        let path = write_mislabelled(&dir, "honest.png", ImageFormat::Png);
+
+        assert!(image::open(&path).is_ok());
+        assert!(decode_image(&path).is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A PDF renamed to `.jpg` gets the PDF message, not a JPEG decoder error.
+    /// The pipeline's extension-based gate cannot catch this one.
+    #[test]
+    fn a_renamed_pdf_is_named_in_the_error() {
+        let dir = scratch("pdf");
+        let path = dir.join("not_really.jpg");
+        std::fs::write(&path, b"%PDF-1.7\n1 0 obj\n<<>>\n").expect("write");
+
+        let err = decode_image(&path).expect_err("a PDF is not a decodable image");
+        assert!(err.contains("PDF"), "message should name PDF: {err}");
+        assert!(
+            err.contains("Convert"),
+            "message should say what to do: {err}"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Likewise HEIC — the iPhone default, and the format users are most likely
+    /// to hand over with a wrong extension.
+    #[test]
+    fn a_renamed_heic_is_named_in_the_error() {
+        let dir = scratch("heic");
+        let path = dir.join("photo.jpg");
+        let mut bytes = vec![0u8, 0, 0, 0x18];
+        bytes.extend_from_slice(b"ftypheic");
+        bytes.extend_from_slice(b"\0\0\0\0mif1heic");
+        std::fs::write(&path, &bytes).expect("write");
+
+        let err = decode_image(&path).expect_err("HEIC is not decodable here");
+        assert!(err.contains("HEIC"), "message should name HEIC: {err}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Garbage stays a plain decode error — `sniff_unsupported` must not invent
+    /// a diagnosis it cannot support.
+    #[test]
+    fn unrecognized_bytes_get_no_invented_explanation() {
+        let dir = scratch("garbage");
+        let path = dir.join("junk.png");
+        std::fs::write(&path, b"not an image at all, just some bytes").expect("write");
+
+        let err = decode_image(&path).expect_err("garbage does not decode");
+        assert!(!err.contains("PDF"));
+        assert!(!err.contains("HEIC"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 #[cfg(test)]

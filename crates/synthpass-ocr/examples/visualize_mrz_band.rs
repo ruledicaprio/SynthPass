@@ -251,9 +251,11 @@ fn main() {
         println!("keyword scan: {}", keyword_hits.join(", "));
     }
 
-    let mut image = image::open(&args.path)
+    // The engine's decoder, so this visualisation cannot fail on a file the
+    // engine itself just read (`recognize_detailed` ran above).
+    let mut image = synthpass_ocr::decode_image(&args.path)
         .unwrap_or_else(|e| {
-            eprintln!("failed to open {}: {e}", args.path.display());
+            eprintln!("{e}");
             std::process::exit(1);
         })
         .into_rgb8();

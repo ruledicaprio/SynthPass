@@ -350,7 +350,11 @@ pub fn load_ground_truth(samples_root: &Path, stem: &str) -> Option<synthpass_co
 /// panic-free case to test.
 pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpecimenDoc> {
     let name = image_path.file_stem()?.to_str()?.to_string();
-    let image = image::open(image_path).ok()?;
+    // Content-sniffing, not extension-trusting: `image::open` picks its decoder
+    // from the file name, so a JPEG called `.png` returns `None` here and the
+    // specimen vanishes from the benchmark without a word. Three corpus files
+    // were in exactly that state.
+    let image = synthpass_ocr::decode_image(image_path).ok()?;
     let labels = load_ground_truth(samples_root, &name);
     let class = classify_specimen(image_path, labels.as_ref());
     Some(RealSpecimenDoc {
