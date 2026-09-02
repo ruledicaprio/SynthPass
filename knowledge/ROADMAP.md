@@ -341,15 +341,23 @@ flowchart LR
   0.652 originally reported for the private candidate. The proposed follow-up is unchanged:
   extend `preprocess.rs`'s deterministic treatment to the non-MRZ zone. Data:
   `knowledge/visual-zone-survey.jsonl`.
-- **Also 2026-09-02: a Tier-1 false positive, found by expanding the negative controls from 4 to 42.**
-  `mrz_corpus.rs`'s negative set is now derived from `samples/corpus.jsonl` (every row recording
-  `mrz.present == false`). On its first run it caught `Monaco_ID_Specimen_XXXX_front_no_mrz.png`
-  — the front of an ID card, carrying no machine-readable zone — returning a **checksum-valid**
-  Td1 record with document number `029067`, read out of visual-zone text. This is not confined to
-  the harness: `RoutingPolicy::decide` escalates only when
-  `!(mrz_found && mrz_checksums_valid)`, so a hallucinated valid MRZ is treated as authoritative
-  and never reaches Tier 2. Not yet diagnosed or fixed; recorded in the manifest's `notes` for
-  that specimen.
+- **2026-09-02: expanding the negative controls from 4 to 42 found a corpus labelling error —
+  first reported here, wrongly, as a Tier-1 false positive.** `mrz_corpus.rs`'s negative set is now
+  derived from `samples/corpus.jsonl` (every row recording `mrz.present == false`). Its first run
+  flagged `Monaco_ID_Specimen_XXXX_front_no_mrz.png` returning a checksum-valid Td1 record. That
+  was recorded as Tier 1 hallucinating an MRZ out of visual-zone text. **It was not.** The read was
+  correct: `IC`/`MCO` with every check digit passing is exactly what a genuine Monaco identity-card
+  MRZ looks like, and coherent values plus valid checksums are evidence *against* a hallucination,
+  not for one. The file was a **back** side filed under a front-side name, and has since been
+  renamed by its author.
+  The useful lesson is about the harness rather than the parser: a negative control is only as good
+  as the `no_mrz` tag it is derived from, so a `FALSE-POSITIVE` line has two explanations and the
+  mislabel is by far the likelier. `corpus_manifest.rs` now separates the two by strength — a
+  *checksum-valid* read off a `no_mrz` page is reported as `LABEL LIKELY WRONG`, while a read that
+  parses structurally but fails its check digits is left unreported, because 18 specimens do that
+  routinely when visual-zone text lands in an MRZ-shaped line.
+  `crates/synthpass-bench/tests/corpus_manifest.rs` now fails if any `no_mrz` row records a
+  checksum-valid observation.
 - **Issue #102 — feeding the checksum-partial MRZ read into the Tier-2 prompt as a hint measurably
   helps, at no measurable latency cost once measured on an uncontended machine.**
   `synthpass_llm::prompt::build_prompt` now accepts an optional `hint` (PROMPT_VERSION 1 → 2, new

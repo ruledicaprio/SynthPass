@@ -331,3 +331,29 @@ fn an_unrecognized_issuing_state_carries_a_note_explaining_why() {
         );
     }
 }
+
+#[test]
+fn a_no_mrz_specimen_never_records_a_checksum_valid_read() {
+    // Passing every check digit by chance is vanishingly unlikely, so a
+    // checksum-valid read off a page tagged `no_mrz` is near-proof the *tag* is
+    // wrong -- not that the parser hallucinated.
+    //
+    // `Monaco_ID_Specimen_XXXX_front_no_mrz.png` is why this test exists. It
+    // read `IC`/`MCO` with valid checksums, which is precisely what a correct
+    // read of a Monaco identity card looks like; the file was a back side filed
+    // under a front-side name. It was first reported as a Tier-1 false
+    // positive, and it was not one. A structurally-parseable read whose check
+    // digits *fail* is the opposite case and stays allowed -- 18 specimens do
+    // that, because visual-zone text lands in an MRZ-shaped line routinely.
+    for row in &manifest_rows() {
+        let name = row["filename"].as_str().unwrap_or_default();
+        if row["mrz"]["present"].as_bool() != Some(false) {
+            continue;
+        }
+        assert_ne!(
+            row["mrz"]["observed"]["checksums_valid"].as_bool(),
+            Some(true),
+            "{name}: tagged no_mrz but a checksum-valid MRZ was read from it — the file is              almost certainly the other side of the document, or otherwise mislabelled"
+        );
+    }
+}

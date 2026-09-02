@@ -171,13 +171,37 @@ fn main() {
                 ));
             }
         }
-        if let Some(tagged) = claims.mrz_present {
-            if tagged != observed.found {
+        // A `no_mrz` tag contradicted by the image is worth separating by
+        // strength, because the two readings mean opposite things.
+        //
+        // A *checksum-valid* read off a page tagged `no_mrz` is near-proof the
+        // tag is wrong: passing every check digit by chance is vanishingly
+        // unlikely, and the fields come back coherent. That is exactly what
+        // happened to `Monaco_ID_Specimen_XXXX_front_no_mrz.png`, which read
+        // `IC`/`MCO` with valid checksums — a correct read of a *back* side
+        // filed under a front-side name. It was first reported here as a Tier-1
+        // false positive, which it was not.
+        //
+        // A read that parses structurally but *fails* its check digits is the
+        // opposite and is routine: visual-zone text lands in an MRZ-shaped line
+        // often enough that 18 specimens do it. Reporting both at one volume
+        // buried the signal in the noise.
+        if claims.mrz_present == Some(false) {
+            if observed.checksums_valid {
                 disagreements.push(format!(
-                    "{filename}: filename tags mrz_present={tagged}, OCR found={}",
-                    observed.found
+                    "{filename}: LABEL LIKELY WRONG — tagged no_mrz, but OCR read a \
+                     CHECKSUM-VALID {} MRZ ({}{}). Check whether this is the other side \
+                     of the document.",
+                    observed.format.as_deref().unwrap_or("?"),
+                    observed.document_code.as_deref().unwrap_or("??"),
+                    observed.issuing_state.as_deref().unwrap_or("???"),
                 ));
             }
+        } else if claims.mrz_present == Some(true) && !observed.found {
+            // Benign on its own — OCR misses MRZs on redacted and low-contrast
+            // scans routinely — but worth listing so a genuinely absent MRZ can
+            // be spotted.
+            disagreements.push(format!("{filename}: tagged mrz, but OCR read none"));
         }
 
         rows.insert(
