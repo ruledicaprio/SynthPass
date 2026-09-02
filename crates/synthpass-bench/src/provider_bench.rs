@@ -24,7 +24,7 @@
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
 
-use crate::{CorpusDoc, MissReason, RealSpecimenDoc};
+use crate::{miss_kind, CorpusDoc, MissReason, RealSpecimenDoc};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -469,10 +469,15 @@ fn ocr_and_keep_path(
 /// only). `None` at an index means that document's OCR or ground-truth parse
 /// failed — carried as a hole rather than shrinking the `Vec`, so the
 /// original document count is still recoverable if a caller wants it.
-fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> {
+fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Option<BenchPage>> {
+    let total = corpus.len();
     corpus
         .iter()
-        .map(|doc| {
+        .enumerate()
+        .map(|(i, doc)| {
+            if progress {
+                eprintln!("[ocr {}/{total}] {}", i + 1, doc.seed);
+            }
             let (page, image_path) =
                 ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
             let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
@@ -498,10 +503,19 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc]) -> Vec<Option<BenchPage>> 
 /// ground truth (`None` when the specimen had no `samples/ocr_fixtures/
 /// <stem>.json` label). Unlike [`prep_corpus`], a missing label is not a
 /// reason to drop the document — only an OCR failure is.
-fn prep_specimens(ocr: &NativeOcr, specimens: &[RealSpecimenDoc]) -> Vec<Option<BenchPage>> {
+fn prep_specimens(
+    ocr: &NativeOcr,
+    specimens: &[RealSpecimenDoc],
+    progress: bool,
+) -> Vec<Option<BenchPage>> {
+    let total = specimens.len();
     specimens
         .iter()
-        .map(|doc| {
+        .enumerate()
+        .map(|(i, doc)| {
+            if progress {
+                eprintln!("[ocr {}/{total}] {}", i + 1, doc.name);
+            }
             let (page, image_path) = ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
@@ -539,9 +553,10 @@ pub async fn run_provider_bench(
     ocr: &NativeOcr,
     corpus: &[CorpusDoc],
     measure_memory: bool,
+    progress: bool,
 ) -> Vec<ProviderReport> {
-    let prepped = prep_corpus(ocr, corpus);
-    run_prepped(catalog, &prepped, measure_memory, false).await
+    let prepped = prep_corpus(ocr, corpus, progress);
+    run_prepped(catalog, &prepped, measure_memory, false, progress).await
 }
 
 /// Runs every reader in `catalog` against every real specimen in
@@ -555,9 +570,10 @@ pub async fn run_provider_bench_real(
     specimens: &[RealSpecimenDoc],
     measure_memory: bool,
     dump_ocr: bool,
+    progress: bool,
 ) -> Vec<ProviderReport> {
-    let prepped = prep_specimens(ocr, specimens);
-    run_prepped(catalog, &prepped, measure_memory, dump_ocr).await
+    let prepped = prep_specimens(ocr, specimens, progress);
+    run_prepped(catalog, &prepped, measure_memory, dump_ocr, progress).await
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
@@ -621,11 +637,18 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
 /// `synthpass_bench::CorpusDoc` runs (`run_provider_bench`) never pass
 /// `true` here — `synthpass-bench`'s own `--dump-ocr` already covers that
 /// path.
+///
+/// `progress`: print one stderr line per document as it completes, tagged with
+/// the provider and a `n/total` counter. A full real-specimen run takes over
+/// an hour and was otherwise completely silent until the final report; stderr
+/// keeps it clear of the stdout summary and the `--out` JSON that
+/// `scripts/run-bench.ps1` consumes.
 async fn run_prepped(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
     measure_memory: bool,
     dump_ocr: bool,
+    progress: bool,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
     let labelled_documents = prepped
@@ -672,7 +695,14 @@ async fn run_prepped(
         let mut unanchored_total = 0usize;
         let mut unanchored_unsupported = 0usize;
 
-        for bench_page in prepped.iter().flatten() {
+        if progress {
+            eprintln!(
+                "== provider {} ({ocr_documents} documents) ==",
+                reader.id().as_str()
+            );
+        }
+
+        for (doc_index, bench_page) in prepped.iter().flatten().enumerate() {
             // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
             // `mrz::find_and_parse(&markdown)` — a *read* of this provider's
             // OCR text, not any ground-truth labels: the hint must reflect
@@ -693,7 +723,8 @@ async fn run_prepped(
             }
             let started = Instant::now();
             let reading = reader.read(&ctx).await;
-            elapsed_per_doc.push(started.elapsed());
+            let elapsed = started.elapsed();
+            elapsed_per_doc.push(elapsed);
 
             // See `DocumentDetail::mrz_format`'s doc: synthetic documents
             // always resolve to the label's exact format, independent of
@@ -731,6 +762,14 @@ async fn run_prepped(
                         assertions_unsupported: 0,
                         unsupported_fields: Vec::new(),
                     });
+                    if progress {
+                        eprintln!(
+                            "[{} {}/{ocr_documents}] {} MISS ocr_error ({elapsed:.1?})",
+                            reader.id().as_str(),
+                            doc_index + 1,
+                            bench_page.name,
+                        );
+                    }
                     continue;
                 }
             };
@@ -857,6 +896,22 @@ async fn run_prepped(
                     // but printed rather than silently skipped if it ever does.
                     None => println!("  (no parsed MRZ data despite mrz_found)"),
                 }
+            }
+
+            if progress {
+                // `miss_reason` is `None` exactly when this document counted as
+                // a hit — the same predicate `miss_kind` reports on below, read
+                // here before the value is moved into `documents_detail`.
+                let verdict = match &miss_reason {
+                    None => "HIT".to_string(),
+                    Some(reason) => format!("MISS {}", miss_kind(reason)),
+                };
+                eprintln!(
+                    "[{} {}/{ocr_documents}] {} {verdict} ({elapsed:.1?})",
+                    reader.id().as_str(),
+                    doc_index + 1,
+                    bench_page.name,
+                );
             }
 
             documents_detail.push(DocumentDetail {
@@ -1194,7 +1249,7 @@ mod tests {
             }),
         ];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 1);
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
@@ -1226,7 +1281,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 0);
         assert_eq!(report.accuracy.field_match_rate, None);
@@ -1261,7 +1316,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1321,7 +1376,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::NotApplicable { reason } => {
                 assert!(!reason.is_empty());
@@ -1360,7 +1415,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         match reports[0].tier1_hit_rate {
             // `FixedReader::read` always returns `Evidence::default()` and
             // this fixture has no MRZ at all, so the one document is a
@@ -1405,7 +1460,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
         match &reports[0].tier1_hit_rate {
             Tier1HitRate::NotApplicable { reason } => assert!(!reason.is_empty()),
             Tier1HitRate::Computed(rate) => {
