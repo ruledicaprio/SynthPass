@@ -169,6 +169,26 @@ all) and `unsupported_assertion_rate` are always computable, no ground truth
 needed. `field_match_rate`/`mean_cer` are `null` until a run includes at
 least one labelled specimen — `labelled_documents` says how many did.
 
+**`mean_ms` is charted as of 2026-09-02.** `run-bench.ps1` has always written
+it, but `bench-chart` had no field for it and silently dropped it, so every
+trend chart showed only rates and the harness's own speed measurements were
+invisible. `bench-chart`'s trend mode now draws a fourth panel, **mean latency
+per document (ms)**, gated the same way the accuracy panel is: only when at
+least one row in the history carries a non-null value. Every historical row
+already has one, so no backfill was needed and existing charts gain the panel
+on their next regeneration.
+
+Unlike the three rate panels — which share a fixed 0.0-1.0 axis so they stay
+honestly comparable — the latency panel auto-scales, because milliseconds have
+no natural ceiling. It is still anchored at zero and never cropped to the
+data's own range, so the same "no series is exaggerated by a cropped axis"
+rule holds. One consequence worth expecting rather than reporting as a bug:
+the deterministic `mrz` provider runs in microseconds and the `llm` provider
+in tens of seconds, so on a shared axis `mrz` renders as a flat line on zero.
+That is the true shape of a five-orders-of-magnitude difference. The panel
+earns its place by comparing *like with like* — most usefully the same LLM
+provider across backends.
+
 **`unsupported_assertion_rate` and date fields (fixed 2026-08-01).** The
 predicate is "does the provider's asserted value appear verbatim in the OCR
 text it was given" — but `date_of_birth`/`date_of_expiry` are always
