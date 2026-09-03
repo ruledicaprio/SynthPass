@@ -8,7 +8,64 @@ Harness: [`tests/web/`](../tests/web/README.md). Re-run with
 
 ---
 
-## 2026-09-03 — first measurement
+## 2026-09-03 (b) — preprocessing moved from the JS port to WASM
+
+One variable: `web/scan.js`'s hand-written JavaScript preprocessing replaced by
+`synthpass-imageprep` compiled to WASM. Same corpus, same harness, same
+tesseract build, same machine.
+
+| | JS port | WASM | |
+| :-- | --: | --: | :-- |
+| checksum-valid | 122 (64.2 %) | **125 (65.8 %)** | **+3** |
+| near misses | 57 | 59 | +2 |
+| found no MRZ | 11 | **6** | **−5** |
+| reviewed-fixture fields | 147/153 | 143/153 | **−4** |
+| median latency | 1 516 ms | 2 285 ms | **+51 %** |
+| p90 latency | 10 271 ms | 13 590 ms | +32 % |
+
+Gained 4 — `Afghanistan P0_AFG_2016`, `Germany P0_D00_2018`,
+**`North_Macedonia P0_MKD_2020_mrz_rotated`**, `Sweden P0_SWE_2012_mrz_boxed`.
+The last two were previously native-only wins, and the rotated one arrived via
+the deskewed isolated-band variant, which the JS port never had.
+
+Lost 1 — `Egypt P0_EGY_2017`, which used to win on the binarized pass and now
+runs all seven and near-misses.
+
+### The regressions have one likely cause, and it is not the port being gone
+
+Two documents kept a checksum-valid read but lost **line-1** fields:
+`Canada P0_CAN_2013` (`issuing_country`, `given_names`) and
+`Cyprus P0_CYP_2010` (`issuing_country`, `surname`). Line 1 carries no check
+digits in any of TD1/TD2/TD3, so a fully checksum-valid MRZ can still hold
+misread characters there — which is exactly why those fields are scored only
+against *reviewed* fixtures.
+
+All three regressions point at resampling, the one thing that genuinely
+changed under the band crop:
+
+- **Filter.** The JS port upscaled with canvas `drawImage`
+  (`imageSmoothingEnabled`, bilinear-ish). `upscale_to_width` uses
+  **`Lanczos3`**, which is sharper and rings on high-contrast edges — exactly
+  what MRZ glyph strokes are.
+- **Cap.** The port capped upscale at **3×**, `preprocess::MAX_SCALE` at
+  **5×**. Identical in practice for anything wider than ~533 px after the
+  1600 px downscale, so this only bites on small source images.
+
+Both are now single-sourced in Rust and measurable. **Next candidate change:**
+A/B `Lanczos3` against `Triangle` for the band upscale. Do it as its own
+measured change — not folded into anything else.
+
+### Latency
+
++51 % on the median is the real cost. Two contributors: the variant list grew
+from 6 attempts to 7, and `mrz_variants` computes the row-density band search
+that the port did not have. Still well inside interactive range for the common
+case — the median document finishes in ~2.3 s and 110 of 125 hits come on the
+first pass, before any of the added work runs.
+
+---
+
+## 2026-09-03 (a) — first measurement
 
 Real headless Chromium (Playwright 1.62.1, Chromium 151), the assembled
 `_site/` build, tesseract.js 5.1.1 with the vendored OCR-B `mrz.traineddata`.

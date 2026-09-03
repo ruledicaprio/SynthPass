@@ -9,12 +9,30 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 mrz = { path = "../mrz", features = ["serde"] }
+# The same deterministic preprocessing the native pipeline runs. Replaces the
+# hand-written JavaScript port that used to live in web/scan.js.
+synthpass-imageprep = { path = "../synthpass-imageprep" }
+image = { version = "0.25", default-features = false }
 wasm-bindgen = "0.2"
 serde_json = "1"
 
-# Current Rust stable emits bulk-memory ops (memory.copy) and sign-extension
-# ops (i32.extend8_s, from inlining decisions that vary build to build);
-# enable both in wasm-pack's bundled wasm-opt so the release optimization
-# pass validates regardless of which ops a given build happens to emit.
+# wasm-opt validates against an explicit feature allowlist, so every wasm
+# extension rustc emits has to be named here or the release pass fails.
+#
+# - bulk-memory (memory.copy) and sign-ext (i32.extend8_s): emitted by current
+#   Rust stable, the latter from inlining decisions that vary build to build.
+# - nontrapping-float-to-int (i32.trunc_sat_f64_s and friends): what Rust
+#   lowers every `as` cast from a float to an integer into, since those are
+#   defined to saturate rather than trap. Arrived with the preprocessing code,
+#   which is float-heavy — every scale factor, threshold and rounded pixel
+#   coordinate is one of these casts.
+#
+# All three have been in every major browser engine for years; this is about
+# satisfying wasm-opt's allowlist, not about reaching for anything exotic.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ['-O', '--enable-bulk-memory', '--enable-sign-ext']
+wasm-opt = [
+    '-O',
+    '--enable-bulk-memory',
+    '--enable-sign-ext',
+    '--enable-nontrapping-float-to-int',
+]

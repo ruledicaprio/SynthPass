@@ -35,12 +35,7 @@
 
 use std::path::{Path, PathBuf};
 use synthpass_ocr::geometry::{self, OcrLine};
-use synthpass_ocr::NativeOcr;
-
-/// Mirrors `crate::MRZ_CHARSET` (not `pub` from `synthpass_ocr`'s root), so
-/// this survey's per-line MRZ scoring uses the exact same charset the
-/// production MRZ-band detector does.
-const MRZ_CHARSET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<";
+use synthpass_ocr::{NativeOcr, MRZ_CHARSET};
 
 /// A non-MRZ line this short (non-whitespace character count) is treated as
 /// noise regardless of content — too little text to be a genuine field
@@ -52,13 +47,11 @@ const NOISE_MAX_LEN: usize = 2;
 /// a garbled visual-zone read tends to produce.
 const NOISE_NON_ALNUM_FRACTION: f64 = 0.5;
 
-/// Mirrors `geometry::MRZ_BAND_MIN_AVG_SCORE` (not `pub` — it's an internal
-/// tuning constant for `detect_mrz_band_scored`'s group-average threshold),
-/// duplicated here as the per-line cutoff for "does this one line look
-/// MRZ-shaped at all". Kept in lockstep deliberately: drifting from the
-/// production value would make this survey's MRZ/non-MRZ split disagree
-/// with what `recognize_detailed` itself considers a plausible MRZ line.
-const MRZ_LINE_SCORE_THRESHOLD: f64 = 0.15;
+/// Per-line cutoff for "does this one line look MRZ-shaped at all", reusing
+/// `detect_mrz_band_scored`'s group-average threshold. This used to be a
+/// hand-maintained copy of the value, kept in lockstep by comment; the
+/// constant is public now, so lockstep is enforced by the compiler instead.
+const MRZ_LINE_SCORE_THRESHOLD: f64 = geometry::MRZ_BAND_MIN_AVG_SCORE;
 
 #[derive(Debug, Default, Clone)]
 struct SpecimenResult {

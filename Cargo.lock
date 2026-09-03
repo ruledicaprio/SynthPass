@@ -1619,8 +1619,10 @@ dependencies = [
 name = "mrz-wasm"
 version = "1.3.0"
 dependencies = [
+ "image",
  "mrz",
  "serde_json",
+ "synthpass-imageprep",
  "wasm-bindgen",
 ]
 
@@ -2957,6 +2959,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "synthpass-imageprep"
+version = "1.3.0"
+dependencies = [
+ "image",
+]
+
+[[package]]
 name = "synthpass-license"
 version = "1.3.0"
 dependencies = [
@@ -2991,6 +3000,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "synthpass-core",
+ "synthpass-imageprep",
 ]
 
 [[package]]

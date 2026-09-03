@@ -18,7 +18,7 @@
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset } from './pkg/mrz_wasm.js';
 import { scanDocument } from './scan.js';
 
 // Identical to index.html's tryParse — the WASM parser is the oracle.
@@ -26,6 +26,9 @@ function tryParse(text) {
   const r = JSON.parse(parse_mrz_text(text));
   return r.ok ? r : null;
 }
+
+// Same preprocessing namespace index.html passes in.
+const prep = { plain_band, mrz_variants, mrz_charset };
 
 /**
  * Scan one corpus image, served same-origin by the harness static server.
@@ -43,7 +46,7 @@ window.__scan = async function (url) {
   const t0 = performance.now();
   let out, error = null;
   try {
-    out = await scanDocument(blob, tryParse, setStatus);
+    out = await scanDocument(blob, tryParse, prep, setStatus);
   } catch (e) {
     error = String(e && e.message ? e.message : e);
     out = { result: null, raw: null, valid: false };

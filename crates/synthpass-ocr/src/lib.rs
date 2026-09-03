@@ -61,22 +61,30 @@
 pub mod download;
 #[cfg(feature = "embedded-models")]
 pub mod embedded;
-pub mod geometry;
-pub mod preprocess;
 pub mod verify;
 
-pub use geometry::{BBox, OcrLine, OcrPage};
+// Preprocessing and layout geometry now live in `synthpass-imageprep`, a
+// pure-Rust crate that also compiles to wasm32 so the browser demo can run
+// this exact code instead of a hand-written JavaScript port of it. They are
+// re-exported at their original paths, so `synthpass_ocr::preprocess::…`,
+// `synthpass_ocr::geometry::…` and `synthpass_ocr::BBox` are unchanged for
+// every caller — the move is an implementation detail of this crate.
+pub use synthpass_imageprep::{geometry, preprocess, sniff, BBox, OcrLine, OcrPage};
+
+/// The full ICAO 9303 MRZ character set. Constraining recognition to it makes
+/// the classic filler misreads (`<` read as `«`, `?`, or lowercase noise)
+/// unrepresentable at the decoder level instead of repaired after the fact.
+///
+/// Re-exported rather than redefined: the browser demo needs the identical
+/// string for its tesseract character whitelist, so it is single-sourced in
+/// [`synthpass_imageprep::MRZ_CHARSET`].
+pub use synthpass_imageprep::MRZ_CHARSET;
 
 use image::RgbImage;
 use ocrs::{DecodeMethod, ImageSource, OcrEngine as OcrsEngine, OcrEngineParams, TextItem};
 use rten::Model;
 use std::path::Path;
 use std::time::{Duration, Instant};
-
-/// The full ICAO 9303 MRZ character set. Constraining recognition to it makes
-/// the classic filler misreads (`<` read as `«`, `?`, or lowercase noise)
-/// unrepresentable at the decoder level instead of repaired after the fact.
-const MRZ_CHARSET: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<";
 
 /// Beam width for the constrained pass. Greedy decoding commits to one
 /// reading; a modest beam lets the decoder recover when the top character is
@@ -513,34 +521,20 @@ pub fn decode_image(path: &Path) -> Result<image::DynamicImage, String> {
     })
 }
 
-/// Names an unsupported-but-recognisable container from its leading bytes.
+/// Reads the leading bytes of `path` and names the container if
+/// [`sniff::unsupported_format`] recognises it.
 ///
-/// Deliberately tiny: this exists to turn a confusing decoder error into an
-/// actionable one, not to be a format registry. `image` handles every format
-/// this project supports, so anything reaching here is already a failure — the
-/// only question is whether the message can say something useful.
+/// The table itself lives in `synthpass-imageprep` so the browser demo — which
+/// has no filesystem, and reads the same bytes from a `Blob` — gives the same
+/// answer from the same source. This wrapper is only the file read.
 fn sniff_unsupported(path: &Path) -> Option<&'static str> {
-    let mut head = [0u8; 12];
+    let mut head = [0u8; sniff::SNIFF_BYTES];
     let read = {
         use std::io::Read as _;
         let mut f = std::fs::File::open(path).ok()?;
         f.read(&mut head).ok()?
     };
-    let head = &head[..read];
-    if head.starts_with(b"%PDF-") {
-        return Some("a PDF");
-    }
-    // ISO-BMFF: bytes 4..8 are `ftyp`, and the brand that follows says which
-    // flavour. HEIC/HEIF is the one worth naming — it is the iPhone default.
-    if head.len() >= 12 && &head[4..8] == b"ftyp" {
-        return match &head[8..12] {
-            b"heic" | b"heix" | b"hevc" | b"heim" | b"heis" | b"mif1" | b"msf1" => {
-                Some("HEIC/HEIF")
-            }
-            _ => None,
-        };
-    }
-    None
+    sniff::unsupported_format(&head[..read])
 }
 
 /// Whole-page [`geometry::text_sanity`], or `None` when nothing was

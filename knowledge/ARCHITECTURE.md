@@ -310,8 +310,9 @@ section records the cross-crate policies.
 | --- | --- |
 | `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer. The JSON key set is locked by `tests/schema_keys.rs`. |
 | `mrz` | Zero-dependency ICAO 9303 MRZ parser / emitter / check-digit validator (TD1/TD2/TD3, MRV-A/MRV-B). Published standalone and consumed outside this workspace, so it must stay dependency-free and `wasm32`-clean. |
-| `mrz-wasm` | `wasm-bindgen` wrapper around `mrz` for the GitHub Pages demo. |
-| `synthpass-ocr` | In-process pure-Rust OCR (`ocrs`/`rten`). Emits raw observations (text + confidence + position); does not interpret fields semantically. |
+| `mrz-wasm` | `wasm-bindgen` wrapper around `mrz` **and `synthpass-imageprep`** for the GitHub Pages demo — the parser and the preprocessing the browser runs. |
+| `synthpass-imageprep` | Deterministic MRZ preprocessing (band crop, contrast stretch, Otsu/local threshold, deskew, upscale) and layout geometry (`BBox`, MRZ-band and portrait scoring). One dependency (`image`, no default features), no OCR engine, and **must keep compiling for `wasm32-unknown-unknown`** — that constraint is what lets the browser demo run this exact code instead of a JavaScript port of it. |
+| `synthpass-ocr` | In-process pure-Rust OCR (`ocrs`/`rten`). Emits raw observations (text + confidence + position); does not interpret fields semantically. Re-exports `synthpass-imageprep`'s `preprocess`/`geometry` at their original paths. |
 | `synthpass-llm` | In-process `llama.cpp` (Qwen2.5-1.5B GGUF via `llama-cpp-2`). Tier 2 only — repairs / normalizes; never invents data absent from the input. |
 | `synthpass-die` | Document Intelligence Engine: provider contract, capability model, catalog, `RoutingPolicy`. See 13.2. |
 | `synthpass-pipeline` | Orchestrates OCR → Tier 1 MRZ validation → Tier 2 fallback → structured JSON. A checksum-valid MRZ skips Tier 2 entirely. |

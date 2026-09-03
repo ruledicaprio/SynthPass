@@ -32,7 +32,7 @@ const MAX_SCALE: f64 = 5.0;
 /// The MRZ sits in the bottom portion of every ICAO layout (TD1 rear, TD2,
 /// TD3 data page). 45% keeps all three MRZ lines with margin even on rear
 /// sides where the zone starts near mid-card. This is the blind fallback
-/// crop; [`mrz_band`] tries a tighter, row-density-isolated crop first.
+/// crop; `mrz_band` tries a tighter, row-density-isolated crop first.
 const BAND_FRACTION: f64 = 0.45;
 
 /// How far above the bottom to search for a row-density-isolated MRZ band.
@@ -87,9 +87,9 @@ const DESKEW_PROBE_MAX_DIM: u32 = 400;
 /// OCR over each until the checksum oracle validates.
 ///
 /// Band isolation is **additive and trailing**: the proven blind
-/// [`bottom_band`] variants — exactly the sequence that validated the entire
+/// `bottom_band` variants — exactly the sequence that validated the entire
 /// pre-isolation corpus — run *first*, in their original order; the
-/// row-density-isolated [`mrz_band`] variants are appended only as *extra*
+/// row-density-isolated `mrz_band` variants are appended only as *extra*
 /// attempts reached when the blind path fails. Ordering matters because the
 /// retry loop is bounded by a wall-clock/pass budget: running isolation first
 /// would let it starve the proven passes on a TD1 card (whose 3-line MRZ
@@ -136,7 +136,7 @@ pub fn mrz_variants(image: &RgbImage) -> Vec<RgbImage> {
 /// ([`crate::geometry::detect_mrz_band`]'s content-scored box), as a
 /// fraction of the band's own height, before [`geometry_band_variants`]
 /// crops to it. Much tighter than [`BAND_PAD_FRACTION`]'s 50%: that margin
-/// compensates for [`mrz_band`]'s coarse row-density search, while this band
+/// compensates for `mrz_band`'s coarse row-density search, while this band
 /// is already the union of individual OCR-detected line boxes — a few
 /// percent is enough safety margin for descenders/ascenders sitting just
 /// outside the recognized glyph boxes, without dragging in the extra
@@ -145,7 +145,7 @@ pub fn mrz_variants(image: &RgbImage) -> Vec<RgbImage> {
 const GEOMETRY_BAND_PAD_FRACTION: f64 = 0.08;
 
 /// A geometry-band crop within this many pixels (top offset and height,
-/// both) of [`bottom_band`]'s blind crop is treated as a duplicate and
+/// both) of `bottom_band`'s blind crop is treated as a duplicate and
 /// skipped. This is the overwhelmingly common case — most documents have no
 /// dense visual zone for the content-scored band to usefully avoid, so it
 /// lands close to where the blind crop already was — and it should cost
@@ -156,8 +156,8 @@ const GEOMETRY_BAND_DEDUP_PX: u32 = 4;
 /// [`crate::geometry`]) was missing until now: crop to the content-scored
 /// band the geometry pass already computed — precise enough on a
 /// dense/bilingual scan to exclude the non-Latin visual-zone text sitting
-/// directly above the MRZ, which both [`bottom_band`]'s blind crop and
-/// [`mrz_band`]'s row-density search can still drag in — then apply the two
+/// directly above the MRZ, which both `bottom_band`'s blind crop and
+/// `mrz_band`'s row-density search can still drag in — then apply the two
 /// treatments already proven strongest for a band crop: contrast stretch,
 /// then local threshold (glare/shadow-robust where a single Otsu cutoff
 /// would wash out).
@@ -166,8 +166,8 @@ const GEOMETRY_BAND_DEDUP_PX: u32 = 4;
 /// wouldn't add anything: a degenerate band (near-zero width or height —
 /// shouldn't happen given `detect_mrz_band`'s own confidence floor, but the
 /// geometry pass upstream is best-effort, so this guards against it
-/// regardless) or a crop within [`GEOMETRY_BAND_DEDUP_PX`] pixels of what
-/// [`bottom_band`] already produces — the common case, where the
+/// regardless) or a crop within `GEOMETRY_BAND_DEDUP_PX` pixels of what
+/// `bottom_band` already produces — the common case, where the
 /// content-scored band and the blind crop land in essentially the same
 /// place and a second pair of variants would only burn budget for nothing.
 pub fn geometry_band_variants(image: &RgbImage, band: BBox) -> Vec<RgbImage> {
@@ -208,8 +208,26 @@ pub fn geometry_band_variants(image: &RgbImage, band: BBox) -> Vec<RgbImage> {
     ]
 }
 
+/// The blind band crop, upscaled, with **no tonal treatment** — no contrast
+/// stretch, no threshold.
+///
+/// Deliberately absent from [`mrz_variants`], which is tuned for `ocrs`: that
+/// engine normalizes internally, so an untreated variant adds nothing there.
+/// A recognizer already trained on OCR-B is a different case. On the browser
+/// demo's tesseract build this single variant produced **112 of 122**
+/// checksum-valid reads across the specimen corpus, with all five treated
+/// variants recovering ten documents between them
+/// (`knowledge/WEB_OCR_BASELINE.md`, 2026-09-03).
+///
+/// So this is not a browser-specific hack, it is a recognizer-dependent
+/// ordering fact, and the caller that knows which recognizer it is running
+/// decides where this goes in the retry sequence.
+pub fn plain_band(image: &RgbImage) -> RgbImage {
+    upscale_to_width(&bottom_band(image), BAND_MIN_WIDTH)
+}
+
 /// Crop the bottom [`BAND_FRACTION`] of the image (full width). The blind
-/// fallback used when [`mrz_band`]'s row-density search finds nothing
+/// fallback used when `mrz_band`'s row-density search finds nothing
 /// confident.
 fn bottom_band(image: &RgbImage) -> RgbImage {
     let (w, h) = image.dimensions();
@@ -223,7 +241,7 @@ fn bottom_band(image: &RgbImage) -> RgbImage {
 /// page, which on dense bilingual/photographic scans (e.g. Hebrew
 /// visual-zone text sitting directly above the MRZ) pulls in non-Latin
 /// lines the MRZ-charset-constrained engine can only garble. Falls back to
-/// [`bottom_band`] when no confident band is found.
+/// `bottom_band` when no confident band is found.
 fn mrz_band(image: &RgbImage) -> RgbImage {
     let (w, h) = image.dimensions();
     let gray = to_gray(image);
