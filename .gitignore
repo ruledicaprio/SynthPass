@@ -80,6 +80,13 @@ web/pkg/
 web/vendor/
 web/tessdata/eng.traineddata.gz
 
+# Assembled demo site (scripts/build-site.sh) and the web OCR harness's
+# npm tree + generated reports. The harness's package-lock.json IS committed
+# so the measurement runs against a pinned toolchain.
+/_site/
+tests/web/node_modules/
+tests/web/*-report.json
+
 # Generated synthetic documents (synthpass generate --out-dir out/)
 /out/
 

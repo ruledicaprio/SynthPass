@@ -31,21 +31,10 @@ jobs:
       - name: Run mrz crate tests
         run: cargo test -p mrz
 
-      - name: Build WASM package
-        run: wasm-pack build crates/mrz-wasm --target web --release --no-typescript
-
-      # The demo's OCR runtime (tesseract.js + cores + eng traineddata) is
-      # fetched and SHA-256-verified at deploy time, never committed — the
-      # same pin-and-verify pattern the native pipeline uses for its .rten
-      # models. The deployed site then makes zero CDN requests.
-      - name: Fetch vendored OCR runtime
-        run: bash web/fetch-vendor.sh
-
+      # One definition of how the site is assembled, shared with tests/web so
+      # the harness measures exactly what deploys rather than its own build.
       - name: Assemble site
-        run: |
-          mkdir -p _site/pkg
-          cp -r web/* _site/
-          cp crates/mrz-wasm/pkg/mrz_wasm.js crates/mrz-wasm/pkg/mrz_wasm_bg.wasm _site/pkg/
+        run: bash scripts/build-site.sh _site
 
       - uses: actions/upload-pages-artifact@v5
         with:
