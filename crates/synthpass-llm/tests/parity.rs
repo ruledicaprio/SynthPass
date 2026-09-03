@@ -66,6 +66,7 @@
 //! which turns a Tier-1 success into an honest Tier-2 test case.
 
 use std::path::PathBuf;
+use std::time::Instant;
 use synthpass_core::v2::{CoreField, ExtractionV2, FieldConfidence};
 use synthpass_core::Extraction;
 use synthpass_llm::NativeLlm;
@@ -568,7 +569,17 @@ fn native_llm_field_accuracy_over_sample_set() {
     let mut derived = Tally::default();
     let mut legacy = Tally::default();
 
-    for fixture in &fixtures {
+    // Progress accounting. This run takes tens of minutes and is routinely
+    // interrupted; without a counter and an ETA the per-fixture output tells
+    // you *what* it was doing but not *how far in*, so a killed run can't be
+    // told apart from a stalled one, and there is no way to judge whether
+    // waiting is worthwhile. Cheap to print, and the difference between
+    // "died at fixture 3" and "died at 49 of 72".
+    let run_started = Instant::now();
+    let total_fixtures = fixtures.len();
+
+    for (index, fixture) in fixtures.iter().enumerate() {
+        let fixture_started = Instant::now();
         let markdown = std::fs::read_to_string(&fixture.markdown).expect("markdown reads");
         // Ground-truth fixtures predate `extraction_method` being required;
         // backfill it the same way `repair::parse_extraction` does for model
@@ -617,14 +628,28 @@ fn native_llm_field_accuracy_over_sample_set() {
             &mut derived
         };
         tally.documents += 1;
+
+        // ETA from the mean so far rather than the last document: per-fixture
+        // cost varies several-fold with OCR text length, so a trailing
+        // estimate would swing wildly and read as noise.
+        let done = index + 1;
+        let elapsed = run_started.elapsed();
+        let eta = if done > 0 && done < total_fixtures {
+            let mean = elapsed.as_secs_f64() / done as f64;
+            format!(", eta {:.0}m", mean * (total_fixtures - done) as f64 / 60.0)
+        } else {
+            String::new()
+        };
         println!(
-            "--- {} ({}) ---",
+            "--- [{done}/{total_fixtures}] {} ({}) {:.1?}, {:.0}m elapsed{eta} ---",
             fixture.stem,
             if fixture.reviewed {
                 "reviewed"
             } else {
                 "derived"
-            }
+            },
+            fixture_started.elapsed(),
+            elapsed.as_secs_f64() / 60.0,
         );
         for field in fixture.scored_fields() {
             let exp = expected.fields.get(field);
