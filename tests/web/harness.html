@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SynthPass web OCR harness</title>
+<!--
+  Measurement entry point for tests/web/run-corpus.mjs. It is served from the
+  assembled _site/ alongside index.html and imports the SAME modules the demo
+  imports — the same scan.js, the same mrz_wasm.js, the same vendored
+  tesseract.js build, in the same browser. The only thing it leaves out is the
+  DOM rendering, which is not what is being measured; index.html's result panel
+  is deliberately ephemeral (it clears itself after 10 s, a privacy feature),
+  so scraping it would race the measurement against a timer.
+
+  This file is NOT part of the deployed site: it lives outside web/, so
+  `cp -r web/*` never picks it up. The static server aliases it in at test time.
+-->
+<body>
+<p id="state">loading…</p>
+
+<script src="./vendor/tesseract.min.js"></script>
+<script type="module">
+import init, { parse_mrz_text } from './pkg/mrz_wasm.js';
+import { scanDocument } from './scan.js';
+
+// Identical to index.html's tryParse — the WASM parser is the oracle.
+function tryParse(text) {
+  const r = JSON.parse(parse_mrz_text(text));
+  return r.ok ? r : null;
+}
+
+/**
+ * Scan one corpus image, served same-origin by the harness static server.
+ * Resolves to a plain (structured-cloneable) record for the node runner.
+ */
+window.__scan = async function (url) {
+  const blob = await (await fetch(url)).blob();
+
+  // scan.js reports progress once per retry pass. Counting those calls tells
+  // us which attempt won without modifying scan.js — the module under
+  // measurement stays untouched.
+  const passes = [];
+  const setStatus = (msg) => { if (msg) passes.push(msg); };
+
+  const t0 = performance.now();
+  let out, error = null;
+  try {
+    out = await scanDocument(blob, tryParse, setStatus);
+  } catch (e) {
+    error = String(e && e.message ? e.message : e);
+    out = { result: null, raw: null, valid: false };
+  }
+  const ms = performance.now() - t0;
+
+  return {
+    valid: !!out.valid,
+    parsed: out.result ? JSON.parse(JSON.stringify(out.result)) : null,
+    raw: out.raw ?? null,
+    // Only meaningful on a checksum-valid read: scan.js returns at the first
+    // valid parse, so the last pass attempted is the one that won. When
+    // nothing validated, every pass ran and none of them "won".
+    winning_pass: out.valid && passes.length ? passes[passes.length - 1] : null,
+    passes: passes.length,
+    bytes: blob.size,
+    ms,
+    error,
+  };
+};
+
+await init();
+document.getElementById('state').textContent = 'ready';
+window.__ready = true;
+</script>
+</body>

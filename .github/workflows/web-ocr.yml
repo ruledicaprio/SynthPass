@@ -1,0 +1,79 @@
+name: Web OCR corpus measurement
+
+# Measures the browser MRZ validator's checksum-valid hit rate over the
+# specimen corpus, in real Chromium, against the native pipeline's recorded
+# result for the same documents. See tests/web/README.md.
+#
+# Deliberately NOT a pull-request gate: a full sweep takes 20-30 minutes and
+# needs the orphan samples-data branch, so it runs on demand and nightly —
+# the same posture crates/synthpass-llm/tests/parity.rs has as `#[ignore]`d.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Max specimens to scan (blank = all)'
+        required: false
+        type: string
+      floor:
+        description: 'Fail if the hit rate drops below this fraction (e.g. 0.30)'
+        required: false
+        type: string
+  schedule:
+    # 04:20 UTC daily — after the bench jobs, well clear of the Pages deploy.
+    - cron: '20 4 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      # The specimen images are not on main — they live on the orphan
+      # samples-data branch, which carries only samples/ content.
+      - name: Fetch the specimen corpus
+        run: |
+          git fetch --depth=1 origin samples-data
+          git checkout FETCH_HEAD -- samples
+          echo "specimen images: $(find samples -type f \( -name '*.jpg' -o -name '*.png' -o -name '*.webp' -o -name '*.jpeg' -o -name '*.bmp' \) | wc -l)"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/web/package-lock.json
+
+      - name: Assemble the site
+        run: bash scripts/build-site.sh _site
+
+      - name: Install harness
+        working-directory: tests/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Measure
+        run: |
+          ARGS="--out web-ocr-report.json"
+          [ -n "${{ inputs.limit }}" ] && ARGS="$ARGS --limit ${{ inputs.limit }}"
+          [ -n "${{ inputs.floor }}" ] && ARGS="$ARGS --floor ${{ inputs.floor }}"
+          node tests/web/run-corpus.mjs $ARGS
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: web-ocr-report
+          path: web-ocr-report.json
+          if-no-files-found: warn

@@ -187,6 +187,14 @@ list is a product feature, not housekeeping. Scope, in order — **all four item
    tesseract.js entirely and the JS port of the preprocessing with it. Gated on measured
    single-threaded WASM latency (GitHub Pages sends no COOP/COEP headers, so no wasm threads);
    the spike ships only if a worst-case scan stays interactive.
+
+   **Now also gated on accuracy, and the gap runs the wrong way.** The first measurement of the
+   browser path ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md), 2026-09-03) puts tesseract.js with
+   the OCR-B-trained `mrz.traineddata` at **122/190 (64.2 %)** checksum-valid against the native
+   `ocrs`/`rten` pipeline's **113/190 (59.5 %)** on the same specimens — so on this corpus,
+   "deleting tesseract.js entirely" would *cost* accuracy. The half of the end state that is
+   unambiguously right is the other half: deleting the **JS port of the preprocessing**, which is a
+   second implementation of pure, deterministic Rust that has no reason to exist twice.
 4. **Rust dependency audit — done.** `cargo tree` review of the remaining graph: trim `image` crate
    default features to the formats actually accepted (the decoder list in
    [`ocr.rs`](../crates/synthpass-pipeline/src/ocr.rs)), re-justify every default feature pulled in by
