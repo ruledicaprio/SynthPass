@@ -18,7 +18,7 @@
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset, rotate } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset, rotate, sniff_format, sniff_bytes } from './pkg/mrz_wasm.js';
 import { scanDocument } from './scan.js';
 
 // Identical to index.html's tryParse — the WASM parser is the oracle.
@@ -28,7 +28,7 @@ function tryParse(text) {
 }
 
 // Same preprocessing namespace index.html passes in.
-const prep = { plain_band, mrz_variants, mrz_charset, rotate };
+const prep = { plain_band, mrz_variants, mrz_charset, rotate, sniff_format, sniff_bytes };
 
 /**
  * Re-encode `blob` rotated clockwise by `deg` (90/180/270).
@@ -92,6 +92,21 @@ window.__scan = async function (url, rotate = 0) {
     ms,
     error,
   };
+};
+
+/**
+ * Feed raw bytes straight through the shipped scan path and report how it
+ * failed. Used by check-format-errors.mjs to verify the undecodable-format
+ * messages end to end, in the real browser, through the real `scanDocument`.
+ */
+window.__scanBytes = async function (bytes) {
+  const blob = new Blob([new Uint8Array(bytes)]);
+  try {
+    await scanDocument(blob, tryParse, prep, () => {});
+    return { error: null };
+  } catch (e) {
+    return { error: String(e && e.message ? e.message : e) };
+  }
 };
 
 await init();
