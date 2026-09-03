@@ -167,6 +167,20 @@ pub fn mrz_variants(rgba: &[u8], width: u32, height: u32) -> VariantSet {
     }
 }
 
+/// Turn the image clockwise by `degrees` (any multiple of 90).
+///
+/// Exact pixel transposition, never a resample: the one upscale a variant
+/// gets happens later, and a quarter turn must not spend image quality before
+/// it.
+#[wasm_bindgen]
+pub fn rotate(rgba: &[u8], width: u32, height: u32, degrees: u32) -> Option<ImageVariant> {
+    let image = rgba_to_rgb(rgba, width, height)?;
+    Some(to_variant(preprocess::rotate_quarter_turns(
+        &image,
+        degrees / 90,
+    )))
+}
+
 /// Canvas RGBA to the `RgbImage` the preprocessing works on, dropping alpha.
 ///
 /// `None` rather than a panic on a length mismatch: this is called with

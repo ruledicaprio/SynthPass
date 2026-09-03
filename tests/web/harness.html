@@ -18,7 +18,7 @@
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset, rotate } from './pkg/mrz_wasm.js';
 import { scanDocument } from './scan.js';
 
 // Identical to index.html's tryParse — the WASM parser is the oracle.
@@ -28,14 +28,40 @@ function tryParse(text) {
 }
 
 // Same preprocessing namespace index.html passes in.
-const prep = { plain_band, mrz_variants, mrz_charset };
+const prep = { plain_band, mrz_variants, mrz_charset, rotate };
+
+/**
+ * Re-encode `blob` rotated clockwise by `deg` (90/180/270).
+ *
+ * The corpus holds exactly one rotated specimen, so it cannot measure
+ * orientation handling on its own. Rotating every image turns all 190 into a
+ * rotation test. This runs before `scanDocument` sees anything and produces a
+ * real JPEG, so what the scanner receives is indistinguishable from a photo
+ * taken sideways — no privileged knowledge of the original orientation.
+ */
+async function rotatedBlob(blob, deg) {
+  const bitmap = await createImageBitmap(blob);
+  const swap = deg === 90 || deg === 270;
+  const c = document.createElement('canvas');
+  c.width = swap ? bitmap.height : bitmap.width;
+  c.height = swap ? bitmap.width : bitmap.height;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  bitmap.close?.();
+  return await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.95));
+}
 
 /**
  * Scan one corpus image, served same-origin by the harness static server.
- * Resolves to a plain (structured-cloneable) record for the node runner.
+ * `rotate` (0/90/180/270) turns the image before scanning — see
+ * [rotatedBlob]. Resolves to a plain (structured-cloneable) record for the
+ * node runner.
  */
-window.__scan = async function (url) {
-  const blob = await (await fetch(url)).blob();
+window.__scan = async function (url, rotate = 0) {
+  let blob = await (await fetch(url)).blob();
+  if (rotate) blob = await rotatedBlob(blob, rotate);
 
   // scan.js reports progress once per retry pass. Counting those calls tells
   // us which attempt won without modifying scan.js — the module under

@@ -44,6 +44,7 @@ function parseArgs(argv) {
     out: null,
     limit: Infinity,
     floor: null,
+    rotate: 0,
     headed: false,
     timeout: 120_000,
   };
@@ -55,6 +56,7 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = resolve(argv[++i]);
     else if (a === '--limit') args.limit = Number(argv[++i]);
     else if (a === '--floor') args.floor = Number(argv[++i]);
+    else if (a === '--rotate') args.rotate = Number(argv[++i]);
     else if (a === '--timeout') args.timeout = Number(argv[++i]);
     else {
       console.error(`unknown argument: ${a}`);
@@ -153,7 +155,7 @@ async function main() {
     let scan;
     try {
       scan = await Promise.race([
-        page.evaluate((u) => window.__scan(u), url),
+        page.evaluate(([u, r]) => window.__scan(u, r), [url, args.rotate]),
         new Promise((_, reject) =>
           setTimeout(() => reject(new Error(`timed out after ${args.timeout} ms`)), args.timeout),
         ),
@@ -241,6 +243,9 @@ async function main() {
 
   const report = {
     generated: new Date().toISOString(),
+    // Non-zero means every image was turned by this many degrees before
+    // scanning — an orientation test, not a like-for-like corpus run.
+    rotate: args.rotate,
     corpus: {
       manifest_rows: rows.length,
       mrz_bearing: rows.filter((r) => r.mrz?.present).length,
