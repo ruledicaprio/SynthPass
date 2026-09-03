@@ -118,7 +118,11 @@ Deterministic ICAO 9303 validation, not an AI guess.</p>
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset } from './pkg/mrz_wasm.js';
+
+// The deterministic preprocessing, compiled from the same Rust the native
+// pipeline runs (crates/synthpass-imageprep) rather than ported into JS.
+const prep = { plain_band, mrz_variants, mrz_charset };
 import { scanDocument } from './scan.js';
 
 const status = document.getElementById('status');
@@ -137,7 +141,7 @@ function tryParse(text) {
 
 async function scanImage(file) {
   await wasmReady;
-  const { result, valid } = await scanDocument(file, tryParse, setStatus);
+  const { result, valid } = await scanDocument(file, tryParse, prep, setStatus);
   if (result && valid) {
     setStatus('');
     fillForm(result);
