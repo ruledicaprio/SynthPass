@@ -69,7 +69,18 @@ pub mod verify;
 // re-exported at their original paths, so `synthpass_ocr::preprocess::…`,
 // `synthpass_ocr::geometry::…` and `synthpass_ocr::BBox` are unchanged for
 // every caller — the move is an implementation detail of this crate.
-pub use synthpass_imageprep::{geometry, preprocess, sniff, BBox, OcrLine, OcrPage};
+pub use synthpass_imageprep::{geometry, preprocess, sniff, BBox, OcrLine, OcrPage, UpscaleFilter};
+
+/// The resampling filter this engine's retry variants upscale with.
+///
+/// `ocrs` measurably prefers the sharper filter: over the `mrz_corpus`
+/// specimen set it reads 18/20 with [`UpscaleFilter::Lanczos3`] against 17/20
+/// with `Triangle`. The browser demo, running tesseract's OCR-B model,
+/// measurably prefers the opposite — see [`UpscaleFilter`] for the full table
+/// and the mechanism. Stated explicitly here rather than defaulted, because a
+/// silent default is exactly how the two engines' needs would get conflated
+/// again.
+const NATIVE_UPSCALE_FILTER: UpscaleFilter = UpscaleFilter::Lanczos3;
 
 /// The full ICAO 9303 MRZ character set. Constraining recognition to it makes
 /// the classic filler misreads (`<` read as `«`, `?`, or lowercase noise)
@@ -394,9 +405,9 @@ impl NativeOcr {
         // it found is close enough to the blind crop to be a duplicate (see
         // its doc comment), so this costs nothing on the common case.
         let geometry_variants = mrz_band
-            .map(|band| preprocess::geometry_band_variants(&image, band))
+            .map(|band| preprocess::geometry_band_variants(&image, band, NATIVE_UPSCALE_FILTER))
             .unwrap_or_default();
-        let variants = preprocess::mrz_variants(&image)
+        let variants = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER)
             .into_iter()
             .chain(geometry_variants)
             .enumerate();
@@ -1103,7 +1114,7 @@ mod tests {
                 }
             }
         }
-        let blind = preprocess::mrz_variants(&image);
+        let blind = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER);
         assert_eq!(
             blind.len(),
             6,
@@ -1118,7 +1129,7 @@ mod tests {
             w: 400.0,
             h: 20.0,
         };
-        let geometry = preprocess::geometry_band_variants(&image, band);
+        let geometry = preprocess::geometry_band_variants(&image, band, NATIVE_UPSCALE_FILTER);
         assert_eq!(
             geometry.len(),
             2,

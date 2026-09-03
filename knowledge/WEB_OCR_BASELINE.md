@@ -8,6 +8,77 @@ Harness: [`tests/web/`](../tests/web/README.md). Re-run with
 
 ---
 
+## 2026-09-03 (c) — the band upscale filter, measured on both engines
+
+(b) left one hypothesis outstanding: that its three regressions came from
+`upscale_to_width` resampling with `Lanczos3` where the deleted JavaScript port
+used the canvas's bilinear. Tested directly, one variable, on **both** OCR
+engines.
+
+**Determinism established first.** Two separate runs of the identical build
+agreed on all 60 documents checked — 0 differing verdicts. Without that, a
+rebuild-based A/B proves nothing.
+
+| | `Lanczos3` | `Triangle` |
+| :-- | --: | --: |
+| **browser** (tesseract, OCR-B), 190 docs — checksum-valid | 125 (65.8 %) | 125 (65.8 %) |
+| **browser** — reviewed line-1 fields | 143/153 | **150/153** |
+| **browser** — median latency | 2 285 ms | **2 088 ms** |
+| **native** (`ocrs`), `mrz_corpus` 20 docs | **18/20** | 17/20 |
+
+### The engines want opposite filters
+
+Not "one is better". The hit rate is identical in the browser and the two
+filters win *different documents*: `Triangle` gains `Belarus P0_BLR_2006` and
+`Egypt P0_EGY_2017`, and loses `Germany P0_D00_2018` and
+`North_Macedonia P0_MKD_2020_mrz_rotated`. Documents where nothing MRZ-shaped
+was found at all rose 6 → 12 under `Triangle`, while near misses fell 59 → 53.
+
+The mechanism that explains all of it: **`Lanczos3` sharpens, which helps the
+detector *find* MRZ-shaped text on a blurred or low-contrast scan, but it rings
+on high-contrast edges — and MRZ glyph strokes are nothing but high-contrast
+edges — which costs *character* accuracy.** `Triangle` is the reverse.
+
+The sharpest single piece of evidence that this is real rather than corpus
+noise: **`Cyprus_Passport_Specimen_P0_CYP_2010` is the one document native
+*loses* under `Triangle`, and simultaneously the one where the browser
+*recovers* line-1 fields under it.** Same image, same change, opposite
+directions in two engines.
+
+### Why the browser takes `Triangle` despite the tie
+
+Because the tie is only on the checksum-valid rate, and **line 1 carries no
+check digit in TD1, TD2 or TD3**. For `document_type`, `issuing_country`,
+`surname` and `given_names` the recognizer is the only protection there is —
+nothing downstream can catch a misread. `Triangle` is better exactly where the
+standard offers no safety net (+7 fields, including four on
+`United_Arab_Emirates_2011` that were wrong under `Lanczos3` *and* under the
+old JS port), at no cost to the checksum-valid rate and ~9 % faster.
+
+So `UpscaleFilter` is a parameter with **no `Default`**: `synthpass-ocr` passes
+`Lanczos3`, `mrz-wasm` passes `Triangle`, and both say so at the call site. A
+silent default is how the two engines' needs got conflated in the first place.
+
+This is the second finding of the same shape — the first was `plain_band`, the
+untreated pass tesseract needs and `ocrs` gains nothing from. The pattern is
+worth stating once: **preprocessing is shared; ordering and tuning are
+recognizer-dependent.**
+
+### Caveat
+
+The native arm is 20 documents, so one document is 5 %. It is a guardrail
+against a large native regression, not a precise comparison. The browser arm
+(190 documents) is the stronger evidence, and the two agree on direction.
+
+### Not tested yet
+
+The gains and losses are **disjoint documents**, and the retry chain is
+additive by contract — so running *both* filters as separate variants should
+capture all four rather than trading two for two. That needs its own
+measurement and its own latency budget; it is not assumed here.
+
+---
+
 ## 2026-09-03 (b) — preprocessing moved from the JS port to WASM
 
 One variable: `web/scan.js`'s hand-written JavaScript preprocessing replaced by

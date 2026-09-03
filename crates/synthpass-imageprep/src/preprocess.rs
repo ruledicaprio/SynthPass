@@ -97,16 +97,16 @@ const DESKEW_PROBE_MAX_DIM: u32 = 400;
 /// can only ever *add* a winning pass on a hard dense/bilingual scan, never
 /// displace or starve one that already worked — the same "retries are
 /// additive-only" contract the module upholds upstream.
-pub fn mrz_variants(image: &RgbImage) -> Vec<RgbImage> {
+pub fn mrz_variants(image: &RgbImage, filter: UpscaleFilter) -> Vec<RgbImage> {
     let blind = bottom_band(image);
 
     // Blind bottom-band crop first, in the original order: the two band
     // thresholds, then the full-page pass as the classic last resort. Every
     // specimen that hit before isolation existed still hits here, undisturbed.
     let mut variants = vec![
-        contrast_stretched(&upscale_to_width(&blind, BAND_MIN_WIDTH)),
-        binarized(&upscale_to_width(&blind, BAND_MIN_WIDTH)),
-        upscale_to_min_dim(image, FULL_PAGE_MIN_DIM),
+        contrast_stretched(&upscale_to_width(&blind, BAND_MIN_WIDTH, filter)),
+        binarized(&upscale_to_width(&blind, BAND_MIN_WIDTH, filter)),
+        upscale_to_min_dim(image, FULL_PAGE_MIN_DIM, filter),
     ];
 
     // Row-density-isolated band as trailing extras — only when it actually
@@ -119,14 +119,17 @@ pub fn mrz_variants(image: &RgbImage) -> Vec<RgbImage> {
         variants.push(contrast_stretched(&upscale_to_width(
             &isolated,
             BAND_MIN_WIDTH,
+            filter,
         )));
         variants.push(local_threshold(&upscale_to_width(
             &isolated,
             BAND_MIN_WIDTH,
+            filter,
         )));
         variants.push(contrast_stretched(&upscale_to_width(
             &deskew(&isolated),
             BAND_MIN_WIDTH,
+            filter,
         )));
     }
     variants
@@ -170,7 +173,11 @@ const GEOMETRY_BAND_DEDUP_PX: u32 = 4;
 /// `bottom_band` already produces — the common case, where the
 /// content-scored band and the blind crop land in essentially the same
 /// place and a second pair of variants would only burn budget for nothing.
-pub fn geometry_band_variants(image: &RgbImage, band: BBox) -> Vec<RgbImage> {
+pub fn geometry_band_variants(
+    image: &RgbImage,
+    band: BBox,
+    filter: UpscaleFilter,
+) -> Vec<RgbImage> {
     let (w, h) = image.dimensions();
     if w == 0 || h == 0 || band.w <= 0.0 || band.h <= 0.0 {
         return Vec::new();
@@ -203,8 +210,8 @@ pub fn geometry_band_variants(image: &RgbImage, band: BBox) -> Vec<RgbImage> {
 
     let crop = image::imageops::crop_imm(image, 0, top, w, crop_h).to_image();
     vec![
-        contrast_stretched(&upscale_to_width(&crop, BAND_MIN_WIDTH)),
-        local_threshold(&upscale_to_width(&crop, BAND_MIN_WIDTH)),
+        contrast_stretched(&upscale_to_width(&crop, BAND_MIN_WIDTH, filter)),
+        local_threshold(&upscale_to_width(&crop, BAND_MIN_WIDTH, filter)),
     ]
 }
 
@@ -222,8 +229,8 @@ pub fn geometry_band_variants(image: &RgbImage, band: BBox) -> Vec<RgbImage> {
 /// So this is not a browser-specific hack, it is a recognizer-dependent
 /// ordering fact, and the caller that knows which recognizer it is running
 /// decides where this goes in the retry sequence.
-pub fn plain_band(image: &RgbImage) -> RgbImage {
-    upscale_to_width(&bottom_band(image), BAND_MIN_WIDTH)
+pub fn plain_band(image: &RgbImage, filter: UpscaleFilter) -> RgbImage {
+    upscale_to_width(&bottom_band(image), BAND_MIN_WIDTH, filter)
 }
 
 /// Crop the bottom [`BAND_FRACTION`] of the image (full width). The blind
@@ -345,7 +352,54 @@ fn row_density(gray: &GrayImage, from: u32, to: u32) -> Vec<f64> {
         .collect()
 }
 
-fn scale_by(image: &RgbImage, scale: f64) -> RgbImage {
+/// Which resampling filter the band/page upscales use.
+///
+/// **This is a recognizer-dependent choice, and it is deliberately not a
+/// default.** Measured over the specimen corpus (see
+/// `knowledge/WEB_OCR_BASELINE.md`, 2026-09-03), the two engines this project
+/// runs want opposite answers, so every call site states which it is:
+///
+/// | | [`Lanczos3`](Self::Lanczos3) | [`Triangle`](Self::Triangle) |
+/// | :-- | --: | --: |
+/// | browser (tesseract, OCR-B model), 190 docs | 125 valid, 143/153 fields | 125 valid, **150/153 fields** |
+/// | native (`ocrs`), 20 docs | **18/20** | 17/20 |
+///
+/// The mechanism behind the split: Lanczos3 sharpens, which helps the
+/// *detector* find MRZ-shaped text on a blurred or low-contrast scan, but it
+/// rings on high-contrast edges — and an MRZ glyph stroke is nothing but
+/// high-contrast edges — which costs *character* accuracy. Triangle is the
+/// reverse.
+///
+/// The single clearest piece of evidence that this is a real effect rather
+/// than corpus noise: `Cyprus_Passport_Specimen_P0_CYP_2010` is the document
+/// native *loses* under Triangle, and simultaneously the one where the browser
+/// *recovers* line-1 fields under it. Same image, same change, opposite
+/// directions in two engines.
+///
+/// Character accuracy matters disproportionately on line 1, which carries no
+/// check digit in TD1, TD2 or TD3 — for `document_type`, `issuing_country`,
+/// `surname` and `given_names` the recognizer is the only protection there is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UpscaleFilter {
+    /// Sharper. Better MRZ *detection*; rings on glyph edges. What `ocrs`
+    /// wants.
+    Lanczos3,
+    /// Smoother. Better *character accuracy*, especially on the unchecksummed
+    /// line-1 fields. What tesseract's OCR-B model wants.
+    Triangle,
+}
+
+impl UpscaleFilter {
+    fn as_image_filter(self) -> FilterType {
+        match self {
+            Self::Lanczos3 => FilterType::Lanczos3,
+            Self::Triangle => FilterType::Triangle,
+        }
+    }
+}
+
+fn scale_by(image: &RgbImage, scale: f64, filter: UpscaleFilter) -> RgbImage {
     if scale <= 1.0 {
         return image.clone();
     }
@@ -355,18 +409,18 @@ fn scale_by(image: &RgbImage, scale: f64) -> RgbImage {
         image,
         (f64::from(w) * scale).round() as u32,
         (f64::from(h) * scale).round() as u32,
-        FilterType::Lanczos3,
+        filter.as_image_filter(),
     )
 }
 
-fn upscale_to_width(image: &RgbImage, min_width: u32) -> RgbImage {
+fn upscale_to_width(image: &RgbImage, min_width: u32, filter: UpscaleFilter) -> RgbImage {
     let w = image.width().max(1);
-    scale_by(image, f64::from(min_width) / f64::from(w))
+    scale_by(image, f64::from(min_width) / f64::from(w), filter)
 }
 
-fn upscale_to_min_dim(image: &RgbImage, min_dim: u32) -> RgbImage {
+fn upscale_to_min_dim(image: &RgbImage, min_dim: u32, filter: UpscaleFilter) -> RgbImage {
     let shorter = image.width().min(image.height()).max(1);
-    scale_by(image, f64::from(min_dim) / f64::from(shorter))
+    scale_by(image, f64::from(min_dim) / f64::from(shorter), filter)
 }
 
 /// Grayscale + linear contrast stretch mapping the 1st..99th intensity
@@ -722,7 +776,7 @@ mod tests {
     #[test]
     fn upscale_caps_at_max_scale() {
         let img = solid(100, 50, 128);
-        let out = upscale_to_width(&img, 1600);
+        let out = upscale_to_width(&img, 1600, UpscaleFilter::Lanczos3);
         // 16× requested, capped at MAX_SCALE (5×).
         assert_eq!(out.width(), 500);
         assert_eq!(out.height(), 250);
@@ -731,7 +785,8 @@ mod tests {
     #[test]
     fn upscale_never_downscales() {
         let img = solid(2000, 1500, 128);
-        assert_eq!(upscale_to_min_dim(&img, 1000).dimensions(), (2000, 1500));
+        let same = upscale_to_min_dim(&img, 1000, UpscaleFilter::Lanczos3);
+        assert_eq!(same.dimensions(), (2000, 1500));
     }
 
     #[test]
@@ -798,7 +853,7 @@ mod tests {
         // A blank image has no text bands, so `mrz_band` falls back to the
         // blind crop and the isolated block is skipped as a duplicate: just
         // the two blind-crop variants plus the full-page pass remain.
-        let v = mrz_variants(&solid(600, 400, 200));
+        let v = mrz_variants(&solid(600, 400, 200), UpscaleFilter::Lanczos3);
         assert_eq!(v.len(), 3);
         // The band crops come before the full-page pass, the last and most
         // expensive entry.
@@ -813,7 +868,7 @@ mod tests {
         // path (which must still lead — that's what keeps already-passing
         // specimens passing within budget): 2 blind + 1 full-page + 3 isolated.
         let img = image_with_bottom_stripes(400, 300, 2, 10, 4);
-        let v = mrz_variants(&img);
+        let v = mrz_variants(&img, UpscaleFilter::Lanczos3);
         assert_eq!(v.len(), 6);
         // The blind path leads: the full-page pass sits at index 2, ahead of
         // the trailing isolated variants, and is taller than the first band.
@@ -830,7 +885,7 @@ mod tests {
             w: 100.0,
             h: 0.0,
         };
-        assert!(geometry_band_variants(&img, band).is_empty());
+        assert!(geometry_band_variants(&img, band, UpscaleFilter::Lanczos3).is_empty());
     }
 
     #[test]
@@ -845,7 +900,7 @@ mod tests {
             h: blind.height() as f32,
         };
         assert!(
-            geometry_band_variants(&img, band).is_empty(),
+            geometry_band_variants(&img, band, UpscaleFilter::Lanczos3).is_empty(),
             "a band matching the blind crop should be skipped as a duplicate"
         );
     }
@@ -862,7 +917,7 @@ mod tests {
             w: 400.0,
             h: 20.0,
         };
-        let variants = geometry_band_variants(&img, band);
+        let variants = geometry_band_variants(&img, band, UpscaleFilter::Lanczos3);
         assert_eq!(variants.len(), 2, "contrast-stretched + local-threshold");
         for v in &variants {
             assert_eq!(
