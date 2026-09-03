@@ -167,6 +167,29 @@ pub fn mrz_variants(rgba: &[u8], width: u32, height: u32) -> VariantSet {
     }
 }
 
+/// Name the container `head` (the file's leading bytes) belongs to, when it is
+/// one this project recognises but cannot decode — currently a PDF or an
+/// HEIC/HEIF image. Returns `undefined` for anything else.
+///
+/// Same table the native decoder consults, so the browser and
+/// `synthpass_ocr::decode_image` give the same answer about the same bytes.
+/// Sniffing the content rather than trusting the file name is the point: an
+/// iPhone photo shared through a chat app routinely arrives with the wrong
+/// extension, and that is exactly the case a name-based check misses.
+///
+/// Deliberately narrow. Unrecognised bytes get no invented diagnosis, because
+/// a wrong explanation sends the reader after the wrong problem.
+#[wasm_bindgen]
+pub fn sniff_format(head: &[u8]) -> Option<String> {
+    synthpass_imageprep::sniff::unsupported_format(head).map(str::to_string)
+}
+
+/// How many leading bytes [`sniff_format`] needs.
+#[wasm_bindgen]
+pub fn sniff_bytes() -> usize {
+    synthpass_imageprep::sniff::SNIFF_BYTES
+}
+
 /// Turn the image clockwise by `degrees` (any multiple of 90).
 ///
 /// Exact pixel transposition, never a resample: the one upscale a variant

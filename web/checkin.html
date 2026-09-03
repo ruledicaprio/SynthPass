@@ -64,7 +64,7 @@ Deterministic ICAO 9303 validation, not an AI guess.</p>
 </div>
 
 <div class="drop">
-  <input type="file" id="file" accept=".jpg,.jpeg,.png,.webp,.bmp" capture="environment">
+  <input type="file" id="file" accept="image/*,.heic,.heif" capture="environment">
   <button id="go">📷 Scan document / Skeniraj</button>
   <span class="muted">passport (TD3) or ID card (TD1)</span>
 </div>
@@ -118,11 +118,11 @@ Deterministic ICAO 9303 validation, not an AI guess.</p>
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset, rotate } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset, rotate, sniff_format, sniff_bytes } from './pkg/mrz_wasm.js';
 
 // The deterministic preprocessing, compiled from the same Rust the native
 // pipeline runs (crates/synthpass-imageprep) rather than ported into JS.
-const prep = { plain_band, mrz_variants, mrz_charset, rotate };
+const prep = { plain_band, mrz_variants, mrz_charset, rotate, sniff_format, sniff_bytes };
 import { scanDocument } from './scan.js';
 
 const status = document.getElementById('status');
