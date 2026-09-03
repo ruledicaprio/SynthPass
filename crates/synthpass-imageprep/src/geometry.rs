@@ -92,7 +92,7 @@ pub struct OcrLine {
 }
 
 /// Structured OCR output for one page/image: the full text (identical to
-/// what [`crate::NativeOcr::recognize`] has always returned), per-line
+/// what `synthpass_ocr::NativeOcr::recognize` has always returned), per-line
 /// detail, and two layout-heuristic regions.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct OcrPage {
@@ -110,7 +110,7 @@ pub struct OcrPage {
     /// to spend money on a more expensive provider needs the former. A low
     /// score on a page that still produced a band is the signal that the band
     /// is probably noise — see the 0°/180° tie-break in
-    /// [`crate::NativeOcr::recognize_detailed`], which was written because
+    /// `synthpass_ocr::NativeOcr::recognize_detailed`, which was written because
     /// exactly that happens.
     ///
     /// `None` when no band was found at all. Compare against
@@ -124,7 +124,7 @@ pub struct OcrPage {
     /// crate must never cross.
     pub portrait: Option<BBox>,
     /// The rotation (degrees, clockwise) applied before the main OCR pass —
-    /// `0` if the page was used as-is. See [`crate::choose_rotation`].
+    /// `0` if the page was used as-is. See `synthpass_ocr`'s `choose_rotation`.
     pub rotation: u16,
     /// [`text_sanity`] over the whole page's recognized text.
     ///
@@ -146,8 +146,8 @@ pub struct OcrPage {
 ///
 /// `ocrs`'s public API exposes no native per-character or per-line
 /// probability/confidence score — confirmed by reading `ocrs-0.12.2`'s
-/// source: [`TextChar`](ocrs::TextChar) carries only `char` and `rect`,
-/// [`TextLine`](ocrs::TextLine) is a sequence of those, and
+/// source: `ocrs`'s `TextChar` carries only `char` and `rect`,
+/// `ocrs`'s `TextLine` is a sequence of those, and
 /// `OcrEngine::recognize_text`'s CTC decode probabilities
 /// (`recognition.rs`) are computed internally but never returned. This
 /// substitutes the fraction of non-whitespace characters that are
@@ -170,7 +170,7 @@ pub fn text_sanity(text: &str) -> f32 {
 
 /// TD1/TD2/TD3 MRZ line lengths (ICAO 9303), used by [`mrz_line_score`]'s
 /// length-match component.
-const MRZ_LINE_LENGTHS: [f64; 3] = [30.0, 36.0, 44.0];
+pub const MRZ_LINE_LENGTHS: [f64; 3] = [30.0, 36.0, 44.0];
 
 /// How many characters a line's length may differ from the nearest
 /// [`MRZ_LINE_LENGTHS`] target before [`mrz_line_score`]'s length component
@@ -178,13 +178,13 @@ const MRZ_LINE_LENGTHS: [f64; 3] = [30.0, 36.0, 44.0];
 /// prose — this needs to be tight enough that a short header/caption line
 /// (which, being all-uppercase, can otherwise score a deceptively high
 /// charset-density component) doesn't sneak past on length alone.
-const MRZ_LENGTH_TOLERANCE: f64 = 6.0;
+pub const MRZ_LENGTH_TOLERANCE: f64 = 6.0;
 
 /// Typical OCR-B glyph width:height ratio on ICAO documents — MRZ glyphs run
 /// close to a fixed per-character aspect once monospaced, used by
 /// [`mrz_line_score`]'s aspect-ratio component. Not exact (fonts/scans
 /// vary); [`mrz_line_score`] scores closeness rather than requiring a match.
-const MRZ_GLYPH_ASPECT: f64 = 0.62;
+pub const MRZ_GLYPH_ASPECT: f64 = 0.62;
 
 /// A group of MRZ lines must average at least this per-line score (each
 /// component is in `[0, 1]` and [`mrz_line_score`] multiplies them, so a
@@ -192,10 +192,10 @@ const MRZ_GLYPH_ASPECT: f64 = 0.62;
 /// comfortably clears it) for [`detect_mrz_band`] to report a band at all.
 /// Keeps a document with no MRZ (e.g. a photo-only front side) from getting
 /// a spurious `mrz_band` out of whatever text happens to score highest.
-const MRZ_BAND_MIN_AVG_SCORE: f64 = 0.15;
+pub const MRZ_BAND_MIN_AVG_SCORE: f64 = 0.15;
 
 /// A band score at or above this is strong enough that
-/// `crate::NativeOcr::recognize_detailed` skips its 180° probe entirely —
+/// `synthpass_ocr::NativeOcr::recognize_detailed` skips its 180° probe entirely —
 /// no observed upside-down page scores this well, so the flip could not win
 /// even if it were tried, and the extra geometry pass would be pure cost.
 ///
@@ -271,8 +271,8 @@ pub fn detect_mrz_band(lines: &[OcrLine], mrz_charset: &str) -> Option<BBox> {
 /// — the number that function computes and then discards.
 ///
 /// The score is what makes a **comparison between two candidate orientations**
-/// possible, which is how `crate::NativeOcr::recognize_detailed` resolves the
-/// 0°-vs-180° ambiguity `crate::choose_rotation` cannot: run the geometry pass
+/// possible, which is how `synthpass_ocr::NativeOcr::recognize_detailed` resolves the
+/// 0°-vs-180° ambiguity `synthpass_ocr`'s `choose_rotation` cannot: run the geometry pass
 /// on the page and on its 180° flip, and keep whichever produces the
 /// better-scoring band. Location alone is not enough to decide this — a
 /// genuinely upside-down page routinely produces a *spurious* band from

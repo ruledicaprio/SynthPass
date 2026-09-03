@@ -115,8 +115,12 @@ L898902C36UTO7408122F1204159ZE184226B&lt;&lt;&lt;&lt;&lt;10"></textarea>
 
 <script src="./vendor/tesseract.min.js"></script>
 <script type="module">
-import init, { parse_mrz_text } from './pkg/mrz_wasm.js';
+import init, { parse_mrz_text, plain_band, mrz_variants, mrz_charset } from './pkg/mrz_wasm.js';
 import { scanDocument } from './scan.js';
+
+// The deterministic preprocessing, compiled from the same Rust the native
+// pipeline runs (crates/synthpass-imageprep) rather than ported into JS.
+const prep = { plain_band, mrz_variants, mrz_charset };
 
 const status = document.getElementById('status');
 const goBtn = document.getElementById('go');
@@ -135,7 +139,7 @@ function tryParse(text) {
 
 async function scanImage(file) {
   await wasmReady;
-  const { result, raw, valid } = await scanDocument(file, tryParse, setStatus);
+  const { result, raw, valid } = await scanDocument(file, tryParse, prep, setStatus);
   if (result && valid) {
     setStatus('');
     render(result, raw);

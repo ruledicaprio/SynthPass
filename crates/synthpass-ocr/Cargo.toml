@@ -6,6 +6,9 @@ license.workspace = true
 
 [dependencies]
 synthpass-core = { path = "../synthpass-core", features = ["security"] }
+# Deterministic preprocessing + layout geometry, extracted so the browser demo
+# runs this exact code through mrz-wasm instead of a hand-written JS port.
+synthpass-imageprep = { path = "../synthpass-imageprep" }
 # The zero-dep ICAO 9303 engine, used here only as the checksum oracle that
 # decides whether the MRZ retry passes need to run (see src/lib.rs).
 mrz = { path = "../mrz" }

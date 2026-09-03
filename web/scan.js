@@ -1,15 +1,20 @@
 // Shared document-scanning module for the browser demos (index.html,
-// checkin.html) — the JS port of the native pipeline's v1.1.0 MRZ retry
-// strategy (crates/synthpass-ocr/src/preprocess.rs): try the OCR-B-trained model
-// over preprocessed variants of the MRZ band (plain, percentile contrast
-// stretch, Otsu binarization), then the full image, then the generic model,
-// and stop at the first checksum-VALID parse. The ICAO check digits are the
-// oracle: a retry can add a valid read but never break one.
+// checkin.html).
+//
+// This used to be a hand-written JavaScript port of the native pipeline's
+// preprocessing — the same band crop, percentile contrast stretch and Otsu
+// threshold, written a second time and drifting from the Rust constant by
+// constant. The port is gone. `crates/synthpass-imageprep` compiles to WASM,
+// so the browser now runs the *identical* preprocessing the native pipeline
+// runs, and there is one implementation to fix when it changes.
+//
+// What stays here is the part that is genuinely browser-specific: getting
+// pixels out of a file, blitting a variant to a canvas for tesseract, and the
+// retry ordering. The ICAO check digits are the oracle throughout — a retry
+// can add a valid read but never break one.
 //
 // Everything runs in-tab: canvases are in-memory, tesseract.js workers are
-// local, and the WASM parser is the same `mrz` crate the native pipeline uses.
-
-const MRZ_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<';
+// local, and the WASM module is the same `mrz` crate the native pipeline uses.
 
 /** Downscale an image to maxDim on the largest side — all in-memory. */
 async function toCanvas(bitmap, maxDim = 1600) {
@@ -21,109 +26,32 @@ async function toCanvas(bitmap, maxDim = 1600) {
   return c;
 }
 
-/** Crop the bottom band (where the MRZ lives on every ICAO layout) and
- *  upscale it toward targetWidth (capped — past ~3× there is no new signal,
- *  only interpolation blur and slower OCR). Mirrors the native
- *  `preprocess::bottom_band` + capped upscale. */
-function bottomBand(canvas, { fraction = 0.45, targetWidth = 1600, maxScale = 3 } = {}) {
-  const srcY = Math.round(canvas.height * (1 - fraction));
-  const upscale = Math.min(maxScale, Math.max(1, targetWidth / canvas.width));
+/** A canvas's pixels in the RGBA layout the WASM preprocessing takes. */
+function rgbaOf(canvas) {
+  return canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+}
+
+/** A preprocessed variant (from WASM) back onto a canvas for tesseract. */
+function variantToCanvas(variant) {
   const c = document.createElement('canvas');
-  c.width = Math.round(canvas.width * upscale);
-  c.height = Math.round((canvas.height - srcY) * upscale);
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(canvas, 0, srcY, canvas.width, canvas.height - srcY, 0, 0, c.width, c.height);
-  return c;
-}
-
-/** Grayscale luma histogram of a canvas + the pixel data to transform. */
-function grayData(canvas) {
-  const ctx = canvas.getContext('2d');
-  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const d = img.data;
-  const luma = new Uint8Array(d.length / 4);
-  const hist = new Uint32Array(256);
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    const y = Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]);
-    luma[p] = y;
-    hist[y]++;
-  }
-  return { ctx, img, d, luma, hist };
-}
-
-function applyLuma(g, map) {
-  const { ctx, img, d, luma } = g;
-  for (let i = 0, p = 0; i < d.length; i += 4, p++) {
-    d[i] = d[i + 1] = d[i + 2] = map[luma[p]];
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
-/** Copy of `canvas`, grayscaled with a linear contrast stretch mapping the
- *  1st..99th intensity percentiles to 0..255 — robust on washed-out
- *  guilloche backgrounds (native: `preprocess::contrast_stretched`). */
-function contrastStretched(canvas) {
-  const c = cloneCanvas(canvas);
-  const g = grayData(c);
-  const total = c.width * c.height;
-  let lo = 0, hi = 255, cum = 0, loSet = false;
-  for (let v = 0; v < 256; v++) {
-    cum += g.hist[v];
-    if (!loSet && cum > total * 0.01) { lo = v; loSet = true; }
-    if (cum >= total * 0.99) { hi = v; break; }
-  }
-  const range = Math.max(1, hi - lo);
-  const map = new Uint8Array(256);
-  for (let v = 0; v < 256; v++) {
-    map[v] = Math.max(0, Math.min(255, Math.round(((v - lo) / range) * 255)));
-  }
-  applyLuma(g, map);
-  return c;
-}
-
-/** Copy of `canvas`, grayscaled + Otsu global threshold to pure black/white —
- *  strongest on clean-but-tiny scans (native: `preprocess::binarized`). */
-function otsuBinarized(canvas) {
-  const c = cloneCanvas(canvas);
-  const g = grayData(c);
-  const total = c.width * c.height;
-  let sum = 0;
-  for (let v = 0; v < 256; v++) sum += v * g.hist[v];
-  let sumB = 0, wB = 0, maxVar = -1, thresh = 127;
-  for (let v = 0; v < 256; v++) {
-    wB += g.hist[v];
-    if (wB === 0) continue;
-    const wF = total - wB;
-    if (wF === 0) break;
-    sumB += v * g.hist[v];
-    const mB = sumB / wB;
-    const mF = (sum - sumB) / wF;
-    const variance = wB * wF * (mB - mF) * (mB - mF);
-    if (variance > maxVar) { maxVar = variance; thresh = v; }
-  }
-  const map = new Uint8Array(256);
-  for (let v = 0; v < 256; v++) map[v] = v > thresh ? 255 : 0;
-  applyLuma(g, map);
-  return c;
-}
-
-function cloneCanvas(canvas) {
-  const c = document.createElement('canvas');
-  c.width = canvas.width;
-  c.height = canvas.height;
-  c.getContext('2d').drawImage(canvas, 0, 0);
+  c.width = variant.width;
+  c.height = variant.height;
+  c.getContext('2d').putImageData(
+    new ImageData(new Uint8ClampedArray(variant.rgba), variant.width, variant.height),
+    0,
+    0,
+  );
   return c;
 }
 
 // Two OCR models: 'mrz' is fine-tuned on the OCR-B font MRZs are printed in
 // (vendored, BSD-3-Clause © DoubangoTelecom — see tessdata/LICENSE); 'eng'
-// is the generic fallback. Both are restricted to the MRZ charset — the JS
-// equivalent of the native engine's allowed_chars. Every runtime asset is
-// same-origin: fetched + SHA-256-verified at deploy time by fetch-vendor.sh,
-// so the page makes zero CDN requests.
+// is the generic fallback. Both are restricted to the MRZ charset, which now
+// comes from the Rust engine's own constant rather than a copy of it. Every
+// runtime asset is same-origin: fetched + SHA-256-verified at deploy time by
+// fetch-vendor.sh, so the page makes zero CDN requests.
 const workers = {};
-function getWorker(lang) {
+function getWorker(lang, charset) {
   workers[lang] ??= (async () => {
     const worker = await Tesseract.createWorker(lang, 1, {
       workerPath: './vendor/worker.min.js',
@@ -131,51 +59,95 @@ function getWorker(lang) {
       langPath: './tessdata',
       gzip: lang !== 'mrz', // mrz.traineddata is committed uncompressed
     });
-    await worker.setParameters({ tessedit_char_whitelist: MRZ_CHARS });
+    await worker.setParameters({ tessedit_char_whitelist: charset });
     return worker;
   })();
   return workers[lang];
 }
 
 /**
- * Scan `file` for an MRZ. `parse(text)` must return a parse result object
- * with a `.valid` boolean, or null (the caller wraps the WASM parser).
- * `setStatus(msg)` receives progress strings.
+ * Scan `file` for an MRZ.
+ *
+ * `parse(text)` must return a parse result object with a `.valid` boolean, or
+ * null (the caller wraps the WASM parser). `prep` is the WASM preprocessing
+ * namespace — `{ plain_band, mrz_variants, mrz_charset }`. `setStatus(msg)`
+ * receives progress strings.
  *
  * Resolves to `{ result, raw, valid }` — the first checksum-valid parse, or
  * the best parseable-but-invalid one, or `{ result: null }` if nothing
  * MRZ-shaped was found.
  */
-export async function scanDocument(file, parse, setStatus) {
+export async function scanDocument(file, parse, prep, setStatus) {
   setStatus('Loading image (downscaling locally)…');
   const bitmap = await createImageBitmap(file);
   const full = await toCanvas(bitmap);
   bitmap.close?.();
 
-  // Ordered like the native retry passes: OCR-B model over band variants
-  // (plain → contrast-stretched → binarized), then the full page, then the
-  // generic model as a last resort.
-  const band = () => bottomBand(full);
+  const charset = prep.mrz_charset();
+  const rgba = rgbaOf(full);
+  const { width, height } = full;
+
+  // Ordering is a property of the recognizer, not of the platform.
+  //
+  // The untreated band crop goes FIRST because this recognizer is already
+  // trained on OCR-B: measured over the specimen corpus it produced 112 of
+  // 122 checksum-valid reads on its own, with every treated variant together
+  // recovering ten more (knowledge/WEB_OCR_BASELINE.md). Native orders these
+  // differently because `ocrs` normalizes internally and gains nothing from
+  // an untreated pass.
+  //
+  // Then the engine's own ordered retry variants — contrast stretch,
+  // binarize, full page, and the row-density-isolated band passes that only
+  // materialize on a scan dense enough for the blind crop to have dragged in
+  // neighbouring text. Then the generic model, last, on the band and the
+  // full page.
+  //
+  // Variants are built lazily: each is megabytes of pixels, and the common
+  // case stops at the first attempt.
   const attempts = [
-    ['mrz', 'Reading MRZ band (OCR-B model)…', band],
-    ['mrz', 'Retrying with contrast stretch…', () => contrastStretched(band())],
-    ['mrz', 'Retrying binarized…', () => otsuBinarized(band())],
-    ['mrz', 'Scanning full image…', () => full],
-    ['eng', 'Retrying with the general model…', () => contrastStretched(band())],
-    ['eng', 'Scanning full image (general model)…', () => full],
+    ['mrz', 'Reading MRZ band (OCR-B model)…', () => prep.plain_band(rgba, width, height)],
   ];
+
+  const variants = prep.mrz_variants(rgba, width, height);
+  const VARIANT_LABELS = [
+    'Retrying with contrast stretch…',
+    'Retrying binarized…',
+    'Scanning full image…',
+    'Retrying with an isolated MRZ band…',
+    'Retrying the isolated band, locally thresholded…',
+    'Retrying the isolated band, deskewed…',
+  ];
+  for (let i = 0; i < variants.len; i++) {
+    attempts.push([
+      'mrz',
+      VARIANT_LABELS[i] ?? `Retrying (pass ${i + 2})…`,
+      () => variants.get(i),
+    ]);
+  }
+
+  attempts.push(
+    ['eng', 'Retrying with the general model…', () => prep.plain_band(rgba, width, height)],
+    ['eng', 'Scanning full image (general model)…', () => null],
+  );
 
   let best = null;
   let bestRaw = null;
-  for (const [lang, msg, makeCanvas] of attempts) {
+  for (const [lang, msg, makeVariant] of attempts) {
     setStatus(msg);
     let worker;
     try {
-      worker = await getWorker(lang);
+      worker = await getWorker(lang, charset);
     } catch {
       continue; // model failed to load — try the next attempt
     }
-    const { data } = await worker.recognize(makeCanvas());
+    const variant = makeVariant();
+    // `null` means "the original downscaled page, untouched"; a null variant
+    // from WASM means the buffer was rejected, which is not recoverable by
+    // retrying the same buffer.
+    const canvas = variant === null ? full : variant ? variantToCanvas(variant) : null;
+    if (!canvas) continue;
+
+    const { data } = await worker.recognize(canvas);
     const parsed = parse(data.text);
     if (parsed) {
       if (parsed.valid) {

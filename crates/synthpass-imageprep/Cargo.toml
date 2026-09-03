@@ -1,0 +1,19 @@
+[package]
+name = "synthpass-imageprep"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Deterministic MRZ image preprocessing and layout geometry — pure Rust, no OCR engine, compiles to wasm32 for the browser demo."
+
+[dependencies]
+# The ONLY dependency, and deliberately without default features: this crate
+# is compiled to wasm32-unknown-unknown for the browser demo, where the image
+# codecs are dead weight (the browser decodes; we receive raw RGBA). Trimmed,
+# `image` pulls 6 pure-Rust transitive crates and no C.
+#
+# Do not add a dependency here without checking it builds for
+# wasm32-unknown-unknown. That target is a hard constraint on this crate, not
+# a nice-to-have — see the module docs in src/lib.rs.
+image = { version = "0.25", default-features = false }
