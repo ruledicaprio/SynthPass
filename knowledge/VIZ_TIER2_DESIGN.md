@@ -211,9 +211,35 @@ produced:
 
 That is a direct measurement of *"can Tier 2 recover verified fields from the
 visual zone alone"* — the exact question §2.1 through §2.3 exist to improve, on
-ground truth no model was involved in producing. It is the natural next
-increment: one flag on the generator, one variant fixture set, no schema change,
-no prompt change.
+ground truth no model was involved in producing.
+
+**Implemented (2026-09-03) as a transform, not a variant fixture set.** This
+section originally scoped it as "one flag on the generator, one variant fixture
+set". The generator (`crates/synthpass-bench/examples/ground_truth_candidates.rs`)
+needs the source *images*, which live on the `samples-data` branch and are absent
+from a normal checkout — and a re-OCR pass is explicitly not byte-deterministic.
+Since `parity.rs` already reads each fixture's `.json` beside its `.md`, and that
+JSON carries `mrz_line` verbatim for all 72 fixtures, the strip can key on the
+known MRZ in memory. So: `SYNTHPASS_PARITY_HOLDOUT=1` on the existing parity
+test, no new files, no schema change, no prompt change.
+
+The predicate is a deliberate union of a shape test (≥25 chars, ≥85%
+MRZ-charset, *without* upper-casing — an MRZ is uppercase-only, so lowercase is
+evidence against) and similarity to the fixture's own `mrz_line`. Measured over
+all 72 fixtures: shape alone strips 400 lines but **misses 17** short corrupted
+fragments such as `KOVACEVIC<AZRA<MARINA<<<`, which leak surname and given names
+outright. The union strips 417 and leaves 2553 lines.
+
+The bias toward stripping is intentional and the two errors are not symmetric: a
+leaked fragment hands the model the answer and *inflates* the score, which is
+fatal to the number's meaning, while an over-stripped visual-zone line only
+removes context and makes the result conservative. `holdout_strips_every_fixture_on_disk`
+is a fast, model-free pre-flight asserting no fixture keeps its MRZ and none is
+stripped to nothing — it guards a ~31-minute run against exactly that failure.
+
+Holdout runs apply **no accuracy floor**: the floors are a regression gate for
+the standard corpus, and a holdout is a measurement of a harder task where a low
+number is the finding, not a failure.
 
 ### 5.3 What to record before touching anything
 
