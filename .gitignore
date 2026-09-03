@@ -85,7 +85,12 @@ web/tessdata/eng.traineddata.gz
 # so the measurement runs against a pinned toolchain.
 /_site/
 tests/web/node_modules/
-tests/web/*-report.json
+# Harness output. Every .json the harness writes is generated; only the npm
+# manifests are tracked, and they are named explicitly so a new report name
+# can never slip into a commit.
+tests/web/*.json
+!tests/web/package.json
+!tests/web/package-lock.json
 
 # Generated synthetic documents (synthpass generate --out-dir out/)
 /out/
