@@ -1,0 +1,13 @@
+{
+  "name": "synthpass-web-ocr-harness",
+  "private": true,
+  "type": "module",
+  "description": "Measures the browser MRZ validator's OCR hit rate over the specimen corpus, in real Chromium, against the native pipeline's recorded result for the same documents.",
+  "scripts": {
+    "corpus": "node run-corpus.mjs",
+    "smoke": "node run-corpus.mjs --limit 8"
+  },
+  "dependencies": {
+    "playwright": "1.62.1"
+  }
+}
