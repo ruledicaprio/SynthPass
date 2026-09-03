@@ -67,6 +67,22 @@ informative signal is a reviewed fixture's unproven fields.
 
 An empty candidate set reports **"not measured"**, never 0%.
 
+## Format-error check
+
+```bash
+node check-format-errors.mjs
+```
+
+Feeds bytes the browser cannot decode through the shipped `scanDocument` path
+in real Chromium and asserts the message names the actual format — HEIC/HEIF
+(the iPhone default, which `createImageBitmap` rejects in most engines) and
+PDF. Also asserts the two things that make those assertions mean something:
+unrecognised bytes get *no* invented diagnosis (an MP4 is ISO-BMFF too, and
+must not be reported as HEIC), and a real JPEG still decodes.
+
+Fast — no corpus, no OCR — so unlike the corpus sweep it is cheap to run on
+every change to the decode path.
+
 ## Recorded results
 
 [`knowledge/WEB_OCR_BASELINE.md`](../../knowledge/WEB_OCR_BASELINE.md).

@@ -66,20 +66,67 @@ function getWorker(lang, charset) {
 }
 
 /**
+ * Decode `file`, or fail with a message that names the actual problem.
+ *
+ * `createImageBitmap` rejects an HEIC/HEIF file in most browser engines — and
+ * HEIC is the iPhone default — with a bare "The source image could not be
+ * decoded", which reads as a corrupt file rather than an unsupported format.
+ * The leading bytes are consulted instead, so the message can say what the
+ * file actually is and what to do about it.
+ *
+ * Content, not file name: an iPhone photo shared through a chat app routinely
+ * arrives with the wrong extension, which is exactly what a name-based check
+ * misses. This is the same table `synthpass_ocr::decode_image` consults
+ * natively, shared through WASM rather than written twice.
+ *
+ * Unrecognised bytes get no invented diagnosis — a wrong explanation sends the
+ * reader after the wrong problem — but the message still says more than the
+ * browser's does.
+ */
+async function decodeOrExplain(file, prep) {
+  try {
+    return await createImageBitmap(file);
+  } catch (e) {
+    const head = new Uint8Array(await file.slice(0, prep.sniff_bytes()).arrayBuffer());
+    const format = prep.sniff_format(head);
+    if (format === 'HEIC/HEIF') {
+      throw new Error(
+        'This is an HEIC/HEIF photo, which this browser cannot decode — it is the ' +
+        'iPhone default, whatever the file is named. Re-save or export it as JPEG ' +
+        'and try again.',
+      );
+    }
+    if (format === 'a PDF') {
+      throw new Error(
+        'This is a PDF, whatever the file is named. Export the data page as an ' +
+        'image (JPEG or PNG) and try again.',
+      );
+    }
+    throw new Error(
+      `This file could not be decoded as an image (${e.message || e}). ` +
+      'JPEG, PNG, WebP and BMP all work.',
+    );
+  }
+}
+
+/**
  * Scan `file` for an MRZ.
  *
  * `parse(text)` must return a parse result object with a `.valid` boolean, or
  * null (the caller wraps the WASM parser). `prep` is the WASM preprocessing
- * namespace — `{ plain_band, mrz_variants, mrz_charset, rotate }`. `setStatus(msg)`
- * receives progress strings.
+ * namespace — `{ plain_band, mrz_variants, mrz_charset, rotate, sniff_format,
+ * sniff_bytes }`. `setStatus(msg)` receives progress strings.
  *
  * Resolves to `{ result, raw, valid }` — the first checksum-valid parse, or
  * the best parseable-but-invalid one, or `{ result: null }` if nothing
  * MRZ-shaped was found.
+ *
+ * Throws with an actionable message when the file is a format the browser
+ * cannot decode — see [decodeOrExplain].
  */
 export async function scanDocument(file, parse, prep, setStatus) {
   setStatus('Loading image (downscaling locally)…');
-  const bitmap = await createImageBitmap(file);
+  const bitmap = await decodeOrExplain(file, prep);
   const full = await toCanvas(bitmap);
   bitmap.close?.();
 
