@@ -105,11 +105,13 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// Default `SYNTHPASS_OCR_MAX_PASSES` ceiling on total OCR passes per document
 /// (the general pass plus retry variants) when the env var is unset or
 /// invalid. `preprocess::mrz_variants` yields at most 6 variants (two
-/// blind-crop, one full-page, three trailing isolated-band) and
+/// blind-crop, one full-page, three trailing isolated-band),
 /// `preprocess::geometry_band_variants` appends at most 2 more (trailing
 /// again, and only when the geometry-detected band differs from the blind
-/// crop), so the worst case is 6 + 2 = [`MAX_RETRY_VARIANTS`] retry variants
-/// plus the general pass: **9**. Note the retry loop seeds its counter at 1
+/// crop), and one texture-suppression pass trails all of those when
+/// `SYNTHPASS_OCR_TEXTURE` enables it, so the worst case is 6 + 2 + 1 =
+/// [`MAX_RETRY_VARIANTS`] retry variants plus the general pass: **10**.
+/// Note the retry loop seeds its counter at 1
 /// for the *first* variant and breaks on `passes_run >= max_passes`, so the
 /// number of variants that can actually run is `max_passes - 1` — an
 /// off-by-one here silently truncates the last variant on exactly the
@@ -122,11 +124,14 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// budget is what actually bounds a pathological document.
 const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 
-/// Worst-case number of retry variants: `preprocess::mrz_variants`'s 6 plus
-/// `preprocess::geometry_band_variants`'s 2. Single-sourced with
-/// [`DEFAULT_MAX_PASSES`] above so the budget and the variant count cannot
-/// drift apart silently — see that constant's doc comment.
-const MAX_RETRY_VARIANTS: usize = 8;
+/// Worst-case number of retry variants: `preprocess::mrz_variants`'s 6, plus
+/// `preprocess::geometry_band_variants`'s 2, plus the 1 trailing
+/// texture-suppression pass (`preprocess::texture_variants`, or its placebo —
+/// both produce exactly one, so the worst case is the same either way; see
+/// [`trailing_texture_mode`]). Single-sourced with [`DEFAULT_MAX_PASSES`]
+/// above so the budget and the variant count cannot drift apart silently —
+/// see that constant's doc comment.
+const MAX_RETRY_VARIANTS: usize = 9;
 
 /// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock ceiling on the whole
 /// `recognize` call when the env var is unset or invalid. Measured
@@ -407,9 +412,30 @@ impl NativeOcr {
         let geometry_variants = mrz_band
             .map(|band| preprocess::geometry_band_variants(&image, band, NATIVE_UPSCALE_FILTER))
             .unwrap_or_default();
+        // Texture suppression chains on *after* the geometry variants, making
+        // it the last pass of all — the same trailing contract, one step
+        // further out. It is built lazily so that a document which validates
+        // on any earlier variant never pays even its construction cost, and it
+        // is env-gated so the three measurement arms come out of one binary
+        // (see `trailing_texture_mode`).
+        let texture_mode = trailing_texture_mode();
+        let texture_variants = std::iter::once_with(|| match texture_mode {
+            TextureMode::Off => Vec::new(),
+            TextureMode::On => preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER),
+            // Placebo. `plain_band` is the untreated band crop, and its own
+            // doc comment records that it is deliberately kept out of
+            // `mrz_variants` because `ocrs` normalizes internally and an
+            // untreated variant "adds nothing there" — which is exactly the
+            // property a control needs. It costs a real pass and appends real
+            // text, while being the one band treatment already measured as
+            // inert on this engine.
+            TextureMode::Control => vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)],
+        })
+        .flatten();
         let variants = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER)
             .into_iter()
             .chain(geometry_variants)
+            .chain(texture_variants)
             .enumerate();
         for (passes_run, (i, variant)) in (1usize..).zip(variants) {
             if passes_run >= max_passes {
@@ -800,6 +826,55 @@ fn max_passes() -> usize {
         .unwrap_or(DEFAULT_MAX_PASSES)
 }
 
+/// Which trailing texture-suppression pass, if any, to append after every
+/// other retry variant. See [`trailing_texture_mode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextureMode {
+    /// No trailing pass at all — behaviour identical to before the stage
+    /// existed. The measurement baseline.
+    Off,
+    /// [`preprocess::texture_variants`], the real treatment.
+    On,
+    /// A **placebo**: one extra trailing pass carrying the same pass-budget
+    /// and text-accumulation pressure as [`On`](Self::On), with no new pixel
+    /// maths — `preprocess::plain_band`, the one band treatment already
+    /// measured as inert on `ocrs`.
+    Control,
+}
+
+/// `SYNTHPASS_OCR_TEXTURE` — `on`, `off` or `control`, defaulting to
+/// [`TextureMode::Off`].
+///
+/// This exists so the stage can be A/B-measured from **one binary**. A
+/// rebuild-based before/after has already hidden a real hit-rate regression on
+/// this project once; toggling in-process removes every difference between the
+/// arms except the one under test.
+///
+/// The `control` arm is the non-obvious half and is not optional. Appending
+/// *any* ninth pass changes two things besides the pixels: it consumes pass and
+/// wall-clock budget that a slow document might have been relying on, and it
+/// appends more text to the accumulated page that downstream parsing sees. The
+/// placebo arm exposes both, so a delta between `on` and `off` can be
+/// attributed to the median filter rather than to the mere existence of another
+/// pass. The decision rule is `on > control` **and** `control >= off`; if
+/// `control` sits below `off`, the budget was mis-sized and that must be fixed
+/// before the treatment can be judged at all.
+///
+/// Unrecognised values fall back to the default rather than erroring: this is a
+/// measurement knob, and a typo should not take down a production read.
+fn trailing_texture_mode() -> TextureMode {
+    match std::env::var("SYNTHPASS_OCR_TEXTURE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "on" => TextureMode::On,
+        "control" => TextureMode::Control,
+        _ => TextureMode::Off,
+    }
+}
+
 /// `SYNTHPASS_OCR_MAX_SECONDS`, or [`DEFAULT_MAX_SECONDS`] if unset/invalid/zero.
 fn max_duration() -> Duration {
     std::env::var("SYNTHPASS_OCR_MAX_SECONDS")
@@ -1136,11 +1211,32 @@ mod tests {
             "a geometry band distinct from the blind crop should add both treatments"
         );
 
-        let all_variants: Vec<_> = blind.into_iter().chain(geometry).collect();
+        // The trailing texture pass, which chains after everything above.
+        let texture = preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER);
+        assert_eq!(
+            texture.len(),
+            1,
+            "texture suppression contributes exactly one trailing variant"
+        );
+
+        let all_variants: Vec<_> = blind
+            .into_iter()
+            .chain(geometry)
+            .chain(texture.iter().cloned())
+            .collect();
         assert_eq!(
             all_variants.len(),
             MAX_RETRY_VARIANTS,
             "worst-case variant count this fixture was built to hit"
+        );
+        // Ordering is a correctness property here, not a style choice: the
+        // whole no-regression argument rests on the texture pass running
+        // *after* every variant that already validates specimens today.
+        // Nothing else in the codebase pins this.
+        assert_eq!(
+            all_variants.last(),
+            texture.last(),
+            "the texture pass must be the last variant of all"
         );
 
         let mut passes_that_ran = 0usize;
@@ -1196,5 +1292,31 @@ mod tests {
         unsafe { std::env::set_var("SYNTHPASS_OCR_VERBOSE", "1") };
         assert!(verbose_enabled());
         unsafe { std::env::remove_var("SYNTHPASS_OCR_VERBOSE") };
+    }
+
+    #[test]
+    fn texture_mode_defaults_off_and_parses_all_three_arms() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
+        assert_eq!(
+            trailing_texture_mode(),
+            TextureMode::Off,
+            "unset must be the untouched baseline"
+        );
+
+        for (raw, expected) in [
+            ("on", TextureMode::On),
+            ("ON", TextureMode::On),
+            ("  control  ", TextureMode::Control),
+            ("off", TextureMode::Off),
+            // A typo is a measurement mistake, not a production outage: it
+            // falls back rather than erroring.
+            ("onn", TextureMode::Off),
+            ("", TextureMode::Off),
+        ] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_TEXTURE", raw) };
+            assert_eq!(trailing_texture_mode(), expected, "parsing {raw:?}");
+        }
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
     }
 }

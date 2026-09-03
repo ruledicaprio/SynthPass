@@ -68,6 +68,35 @@ const MAX_MRZ_LINES: u32 = 3;
 /// as "dark" in [`local_threshold`] — a small margin against flat noise.
 const LOCAL_THRESHOLD_BIAS: f64 = 6.0;
 
+/// Divisor turning a measured MRZ text-row height into [`median_filter`]'s
+/// radius. An OCR-B stroke is roughly an eighth of the glyph row height, and
+/// the radius wants to sit at about half a stroke — wide enough to swallow
+/// the security-pattern strands printed under the glyphs, narrow enough that
+/// a stroke still occupies well over half the window and therefore survives
+/// the median untouched. Hence row height / 16.
+const TEXTURE_STROKE_DIVISOR: f64 = 16.0;
+
+/// Floor for [`median_radius_for_band`]. A 3x3 median is the smallest window
+/// that can delete a one-pixel strand at all, so there is no useful radius
+/// below this and a measurement that suggests one is telling us the band is
+/// too small to treat, not that a subtler kernel exists.
+const TEXTURE_MEDIAN_MIN_RADIUS: u32 = 1;
+
+/// Ceiling for [`median_radius_for_band`], and the load-bearing safety
+/// property of this whole stage.
+///
+/// The radius is derived from a *measurement* ([`text_bands`]' row heights),
+/// and a measurement can be wrong — a photo block or a dense visual zone that
+/// crosses the density threshold reads as one enormous "text row". Without a
+/// ceiling, that mismeasurement would produce a kernel wide enough to erase
+/// glyph strokes outright, turning `1` and `I` into blank space: precisely the
+/// character-confusion class this stage exists to *reduce*. Clamped to 3, the
+/// worst case a mismeasurement can produce is a 7x7 median on a band upscaled
+/// to [`BAND_MIN_WIDTH`], which still leaves an OCR-B stroke intact.
+///
+/// It also bounds [`median_filter`]'s stack buffer at `(2*3+1)^2 = 49`.
+const TEXTURE_MEDIAN_MAX_RADIUS: u32 = 3;
+
 /// Skew angles (degrees) probed by [`deskew`]. A handheld-photo tilt is a
 /// few degrees, not a right angle — `ocrs`'s own detector already tolerates
 /// larger rotations via its `RotatedRect` output; this variant targets the
@@ -213,6 +242,139 @@ pub fn geometry_band_variants(
         contrast_stretched(&upscale_to_width(&crop, BAND_MIN_WIDTH, filter)),
         local_threshold(&upscale_to_width(&crop, BAND_MIN_WIDTH, filter)),
     ]
+}
+
+/// Texture-suppressed MRZ band retry variant — the one treatment in this
+/// module that targets the *spatial* structure of a document's security
+/// printing rather than its tonal effect.
+///
+/// Identity documents print guilloche, rosette and microprint underneath the
+/// MRZ glyphs. Two helpers here already acknowledge that pattern —
+/// [`contrast_stretched`] calls itself "robust to the washed-out look of
+/// guilloche-patterned document backgrounds", and [`text_bands`] filters out
+/// "guilloche-pattern noise" — but both address only what the pattern does to
+/// the *histogram*. A percentile stretch is a point operation and cannot
+/// remove a spatially-varying pattern; [`local_threshold`] models the
+/// background with a box mean whose radius (`min_dim/16`) is tuned for
+/// illumination gradients, an order of magnitude coarser than a strand of
+/// microprint. So the strands survive into the binarized image and merge with
+/// the glyph strokes they sit under.
+///
+/// That is a candidate mechanism for the dominant real-specimen miss kind:
+/// `checksum_failed` outnumbers `no_mrz_found`, and the character confusions
+/// behind it were measured as diffuse — `0`/`O`, `1`/`I`/`L`, `5`/`S`, `8`/`B`
+/// scattered across many specimens with no single shared shape, which is what
+/// a textured background produces and what a geometric fault does not.
+///
+/// [`median_filter`] is the operator because it **fails safe**. It deletes any
+/// structure occupying less than half its window while leaving wider
+/// structures and straight edges alone, so a strand thinner than the kernel
+/// disappears and a glyph stroke does not. If the texture turns out to be
+/// wider than the kernel, the output is close to the input and this becomes a
+/// redundant pass — never a corrupting one. A morphological closing would be
+/// the sharper instrument and is the documented follow-up, but it is only
+/// selective while `strand < kernel < stroke`, and mis-sized by a single pixel
+/// it erases stroke terminals and thins `1` into nothing — manufacturing the
+/// exact confusion class this is meant to reduce.
+///
+/// It composes with rather than duplicates [`local_threshold`]: the median
+/// removes high-frequency structure *before* thresholding, adaptive
+/// thresholding removes low-frequency illumination. Disjoint parts of the
+/// spectrum.
+///
+/// Returns exactly one variant, or an empty vec on a degenerate image. Like
+/// every other producer here this is **additive**: the caller runs it after
+/// all existing variants, and the ICAO check digits decide whether it was
+/// right.
+pub fn texture_variants(image: &RgbImage, filter: UpscaleFilter) -> Vec<RgbImage> {
+    let (w, h) = image.dimensions();
+    if w == 0 || h == 0 {
+        return Vec::new();
+    }
+    let band = upscale_to_width(&mrz_band(image), BAND_MIN_WIDTH, filter);
+    let gray = to_gray(&band);
+    let cleaned = median_filter(&gray, median_radius_for_band(&gray));
+    vec![local_threshold(&gray_to_rgb_map(&cleaned, |v| v))]
+}
+
+/// Median radius for [`texture_variants`], derived from the band's own
+/// measured text-row height rather than hardcoded.
+///
+/// The band reaching this point has been upscaled to [`BAND_MIN_WIDTH`], but
+/// that fixes the *width*, not the glyph height — a TD1 card's three 30-column
+/// lines and a TD3 passport's two 44-column lines land at very different row
+/// heights for the same band width. So measure: [`text_bands`] already returns
+/// the runs of consecutive ink-dense rows, and on an MRZ band those runs *are*
+/// the glyph lines. The median of their heights is the row height, and
+/// [`TEXTURE_STROKE_DIVISOR`] turns that into half a stroke width.
+///
+/// Bounds are deliberately wide open (`1..=h`) where [`mrz_band`] uses
+/// page-relative fractions: those fractions describe where an MRZ sits on a
+/// *page*, and this input is already the cropped band, so reapplying them here
+/// would reject the very rows being measured.
+///
+/// Falls back to [`TEXTURE_MEDIAN_MIN_RADIUS`] when no band is found — a blank
+/// or degenerate crop yields no rows to measure, and the smallest kernel is
+/// the right thing to attempt when the measurement is absent.
+fn median_radius_for_band(gray: &GrayImage) -> u32 {
+    let h = gray.height();
+    let mut heights: Vec<u32> = text_bands(gray, 0, h, 1, h.max(1))
+        .into_iter()
+        .map(|(s, e)| e - s)
+        .collect();
+    if heights.is_empty() {
+        return TEXTURE_MEDIAN_MIN_RADIUS;
+    }
+    heights.sort_unstable();
+    let row_h = f64::from(heights[heights.len() / 2]);
+    ((row_h / TEXTURE_STROKE_DIVISOR).round() as u32)
+        .clamp(TEXTURE_MEDIAN_MIN_RADIUS, TEXTURE_MEDIAN_MAX_RADIUS)
+}
+
+/// Grayscale median filter over a `(2*radius+1)^2` window, edges clamped.
+///
+/// Deliberately the naive form rather than a sliding histogram (Huang): the
+/// radius is capped at [`TEXTURE_MEDIAN_MAX_RADIUS`], so the window holds at
+/// most 49 values and the whole pass costs tens of milliseconds on a band —
+/// on a retry path that only runs after eight other variants have already
+/// failed. A histogram version would be several times the code for a saving
+/// nothing here can perceive.
+///
+/// The `[u8; 49]` buffer is sized by that same cap. `radius` is re-clamped on
+/// entry rather than trusted: this is a private helper today, but a buffer
+/// whose bound lives in a *different* function's clamp is exactly the kind of
+/// coupling that breaks silently later, and the cost of not trusting it is one
+/// `min` call per image.
+fn median_filter(gray: &GrayImage, radius: u32) -> GrayImage {
+    let radius = radius.min(TEXTURE_MEDIAN_MAX_RADIUS);
+    let (w, h) = gray.dimensions();
+    if w == 0 || h == 0 || radius == 0 {
+        return gray.clone();
+    }
+    let side = (2 * radius + 1) as usize;
+    let capacity = side * side;
+    debug_assert!(capacity <= 49, "median window outgrew its buffer");
+
+    GrayImage::from_fn(w, h, |x, y| {
+        let mut window = [0u8; 49];
+        let mut n = 0usize;
+        let x0 = x.saturating_sub(radius);
+        let x1 = (x + radius).min(w - 1);
+        let y0 = y.saturating_sub(radius);
+        let y1 = (y + radius).min(h - 1);
+        for yy in y0..=y1 {
+            for xx in x0..=x1 {
+                if n < window.len() {
+                    window[n] = gray.get_pixel(xx, yy)[0];
+                    n += 1;
+                }
+            }
+        }
+        // `n` is always >= 1: the pixel's own position is inside the clamped
+        // rectangle, so the loops above run at least once.
+        window[..n].sort_unstable();
+        image::Luma([window[n / 2]])
+    })
 }
 
 /// The blind band crop, upscaled, with **no tonal treatment** — no contrast
@@ -1030,5 +1192,134 @@ mod tests {
             .map(|(x, y)| u64::from(gray.get_pixel(x, y)[0]))
             .sum();
         assert_eq!(integral.sum(x0, y0, x1, y1), expected);
+    }
+
+    /// A light field ruled with one-pixel dark lines every `period` rows —
+    /// the synthetic stand-in for the security-pattern strands printed under
+    /// an MRZ. Deliberately thinner than any glyph stroke.
+    fn hairline_texture(w: u32, h: u32, period: u32) -> GrayImage {
+        GrayImage::from_fn(w, h, |_, y| {
+            image::Luma(if y % period == 0 { [20] } else { [250] })
+        })
+    }
+
+    /// The first half of the claim: a strand thinner than the kernel is gone.
+    ///
+    /// Kept separate from the preservation test below so a regression says
+    /// *which* half broke — an over-aggressive kernel passes this one and
+    /// fails that one, an inert kernel does the reverse.
+    #[test]
+    fn median_filter_deletes_hairline_texture() {
+        let textured = hairline_texture(40, 40, 4);
+        let before = mean_intensity(&textured);
+        let after = mean_intensity(&median_filter(&textured, 1));
+        assert!(
+            before < 200.0,
+            "fixture should start visibly textured, got mean {before}"
+        );
+        assert!(
+            after > 245.0,
+            "3x3 median should erase 1px strands, mean only reached {after}"
+        );
+    }
+
+    /// The second half: a glyph-scale stroke is untouched. Same operator,
+    /// same radius, opposite expectation.
+    #[test]
+    fn median_filter_preserves_glyph_scale_strokes() {
+        // A 4px bar is roughly an OCR-B stroke at the width this stage runs at.
+        let mut img = GrayImage::from_pixel(40, 40, image::Luma([250]));
+        for y in 18..22 {
+            for x in 0..40 {
+                img.put_pixel(x, y, image::Luma([20]));
+            }
+        }
+        let out = median_filter(&img, 1);
+        for y in 19..21 {
+            assert_eq!(
+                out.get_pixel(5, y)[0],
+                20,
+                "stroke interior row {y} must survive the median"
+            );
+        }
+    }
+
+    #[test]
+    fn median_filter_radius_zero_is_the_identity() {
+        let img = hairline_texture(12, 12, 3);
+        assert_eq!(median_filter(&img, 0), img);
+    }
+
+    #[test]
+    fn median_filter_handles_degenerate_dimensions() {
+        for (w, h) in [(0, 0), (1, 1), (1, 9), (9, 1)] {
+            let img = GrayImage::from_pixel(w, h, image::Luma([128]));
+            let out = median_filter(&img, 3);
+            assert_eq!(out.dimensions(), (w, h));
+        }
+    }
+
+    /// The load-bearing safety property: a mismeasured band — here a photo
+    /// block read as one enormous "text row" — must not be able to produce a
+    /// stroke-destroying kernel.
+    #[test]
+    fn median_radius_clamps_a_mismeasured_band_to_the_ceiling() {
+        let mut img = GrayImage::from_pixel(200, 200, image::Luma([250]));
+        for y in 100..200 {
+            for x in 0..200 {
+                img.put_pixel(x, y, image::Luma([20]));
+            }
+        }
+        // A 100px "row" would ask for radius 6 unclamped.
+        assert_eq!(median_radius_for_band(&img), TEXTURE_MEDIAN_MAX_RADIUS);
+    }
+
+    #[test]
+    fn median_radius_always_within_bounds() {
+        let cases = [
+            hairline_texture(60, 60, 3),
+            GrayImage::from_pixel(40, 40, image::Luma([250])),
+            GrayImage::from_pixel(40, 40, image::Luma([10])),
+            to_gray(&image_with_bottom_stripes(120, 90, 3, 6, 3)),
+        ];
+        for (i, img) in cases.iter().enumerate() {
+            let r = median_radius_for_band(img);
+            assert!(
+                (TEXTURE_MEDIAN_MIN_RADIUS..=TEXTURE_MEDIAN_MAX_RADIUS).contains(&r),
+                "case {i} produced out-of-range radius {r}"
+            );
+        }
+    }
+
+    #[test]
+    fn texture_variants_is_empty_on_a_degenerate_image() {
+        assert!(texture_variants(&RgbImage::new(0, 0), UpscaleFilter::Lanczos3).is_empty());
+    }
+
+    #[test]
+    fn texture_variants_produces_exactly_one_treatment() {
+        let img = image_with_bottom_stripes(240, 180, 2, 8, 4);
+        assert_eq!(
+            texture_variants(&img, UpscaleFilter::Lanczos3).len(),
+            1,
+            "one trailing variant, so the pass budget moves by exactly one"
+        );
+    }
+
+    #[test]
+    fn texture_variants_is_deterministic() {
+        let img = image_with_bottom_stripes(240, 180, 2, 8, 4);
+        let a = texture_variants(&img, UpscaleFilter::Lanczos3);
+        let b = texture_variants(&img, UpscaleFilter::Lanczos3);
+        assert_eq!(a, b);
+    }
+
+    fn mean_intensity(gray: &GrayImage) -> f64 {
+        let n = u64::from(gray.width()) * u64::from(gray.height());
+        if n == 0 {
+            return 0.0;
+        }
+        let sum: u64 = gray.pixels().map(|p| u64::from(p[0])).sum();
+        sum as f64 / n as f64
     }
 }
