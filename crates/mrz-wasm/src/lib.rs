@@ -18,7 +18,17 @@
 //! Pixels cross the boundary as raw RGBA, the layout a canvas `ImageData`
 //! already has, so neither side pays for an encode/decode round trip.
 
-use synthpass_imageprep::preprocess;
+use synthpass_imageprep::{preprocess, UpscaleFilter};
+
+/// The resampling filter the browser upscales bands with.
+///
+/// tesseract's OCR-B model measurably prefers the smoother filter: same
+/// checksum-valid rate as `Lanczos3` over the 190-specimen corpus (125), but
+/// 150/153 correct line-1 fields against 143/153, and ~9% faster. Line 1
+/// carries no check digit in any ICAO format, so on those fields the
+/// recognizer is the only protection there is. `synthpass-ocr` runs `ocrs`
+/// and picks the opposite — see [`UpscaleFilter`].
+const BROWSER_UPSCALE_FILTER: UpscaleFilter = UpscaleFilter::Triangle;
 use wasm_bindgen::prelude::*;
 
 /// Scan free-form OCR text for an ICAO 9303 MRZ (TD3 passport or TD1 ID card),
@@ -126,7 +136,10 @@ impl VariantSet {
 #[wasm_bindgen]
 pub fn plain_band(rgba: &[u8], width: u32, height: u32) -> Option<ImageVariant> {
     let image = rgba_to_rgb(rgba, width, height)?;
-    Some(to_variant(preprocess::plain_band(&image)))
+    Some(to_variant(preprocess::plain_band(
+        &image,
+        BROWSER_UPSCALE_FILTER,
+    )))
 }
 
 /// The ordered MRZ retry variants — the identical sequence
@@ -147,7 +160,7 @@ pub fn mrz_variants(rgba: &[u8], width: u32, height: u32) -> VariantSet {
         return VariantSet { items: Vec::new() };
     };
     VariantSet {
-        items: preprocess::mrz_variants(&image)
+        items: preprocess::mrz_variants(&image, BROWSER_UPSCALE_FILTER)
             .into_iter()
             .map(to_variant)
             .collect(),
