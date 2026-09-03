@@ -42,6 +42,7 @@ pub mod preprocess;
 pub mod sniff;
 
 pub use geometry::{BBox, OcrLine, OcrPage};
+pub use preprocess::UpscaleFilter;
 
 /// The ICAO 9303 machine-readable-zone character set: A-Z, 0-9 and the filler
 /// `<`, and nothing else.
