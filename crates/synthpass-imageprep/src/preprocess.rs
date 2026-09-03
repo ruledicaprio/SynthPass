@@ -548,6 +548,21 @@ fn downscale_longest_side(gray: &GrayImage, max_dim: u32) -> GrayImage {
     )
 }
 
+/// Turn `image` clockwise by a whole number of quarter turns.
+///
+/// Exact pixel transposition via `image`'s right-angle rotations, never a
+/// resample — a quarter turn is lossless and must stay that way, because
+/// anything fed to a recognizer after this has already had its one upscale.
+/// `turns` is taken modulo 4, so any multiple of 90° works.
+pub fn rotate_quarter_turns(image: &RgbImage, turns: u32) -> RgbImage {
+    match turns % 4 {
+        1 => image::imageops::rotate90(image),
+        2 => image::imageops::rotate180(image),
+        3 => image::imageops::rotate270(image),
+        _ => image.clone(),
+    }
+}
+
 /// Variance of the row-density profile — higher means sharper line/gap
 /// contrast, i.e. better horizontal alignment.
 fn projection_contrast(gray: &GrayImage) -> f64 {
@@ -771,6 +786,32 @@ mod tests {
         assert_eq!(band.width(), 100);
         assert_eq!(band.height(), 45);
         assert_eq!(band.get_pixel(0, 44)[0], 0, "bottom row survives the crop");
+    }
+
+    /// A page of horizontal text rows: sharp density peaks along y.
+    fn ruled_page(w: u32, h: u32) -> RgbImage {
+        RgbImage::from_fn(w, h, |_, y| {
+            // 4px of "ink" every 12 rows, with margins left blank.
+            let ink = (y % 12) < 4 && y > 10 && y < h - 10;
+            image::Rgb(if ink { [20, 20, 20] } else { [235, 235, 235] })
+        })
+    }
+
+    #[test]
+    fn four_quarter_turns_are_the_identity() {
+        let img = ruled_page(37, 53); // deliberately non-square and odd-sized
+        assert_eq!(rotate_quarter_turns(&img, 4), img);
+        assert_eq!(rotate_quarter_turns(&img, 0), img);
+        // And a quarter turn swaps the dimensions rather than resampling.
+        assert_eq!(rotate_quarter_turns(&img, 1).dimensions(), (53, 37));
+        assert_eq!(rotate_quarter_turns(&img, 2).dimensions(), (37, 53));
+    }
+
+    #[test]
+    fn quarter_turns_are_lossless() {
+        let img = ruled_page(64, 48);
+        let round_tripped = rotate_quarter_turns(&rotate_quarter_turns(&img, 1), 3);
+        assert_eq!(round_tripped, img, "a quarter turn must not resample");
     }
 
     #[test]

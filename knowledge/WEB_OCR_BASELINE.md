@@ -8,6 +8,79 @@ Harness: [`tests/web/`](../tests/web/README.md). Re-run with
 
 ---
 
+## 2026-09-03 (d) — rotation
+
+The corpus holds exactly one rotated specimen, so it could not measure
+orientation handling at all. The harness gained `--rotate 90|180|270`, which
+re-encodes every image turned before the scanner sees it — a real JPEG, no
+privileged knowledge of the original orientation — turning all 190 documents
+into a rotation test.
+
+### Before: a sideways photo did not work
+
+| | reads |
+| :-- | --: |
+| upright, first 40 documents | 25/40 |
+| **same 40, turned 90°** | **1/40** |
+
+Not a degradation — a collapse. "Bottom 45 %" is the wrong edge of a turned
+page, so the band strategy has nothing to stand on.
+
+### After
+
+| | before | after | upright ceiling |
+| :-- | --: | --: | --: |
+| turned 90° | 1/40 | **24/40** | 26/40 |
+| turned 180° | — | **23/40** | 26/40 |
+| turned 270° | — | **22/40** | 26/40 |
+
+A turned document now reads at 85–92 % of the upright rate. Upright itself went
+**125 → 127** with **zero losses** — two corpus documents
+(`Australia P0_AUS_2015_redacted`, `Iran P0_IRN_2017_redacted`) turn out to
+have been misoriented all along and are now read.
+
+Cost: median latency unchanged (2 118 → 2 093 ms — a successful scan never
+reaches a rotated pass), p90 12.8 s → 22.1 s, paid only by documents that were
+already failing every upright attempt.
+
+### The cheap orientation probe does not work, and was removed
+
+The first attempt detected orientation *up front* and rotated before scanning,
+using `projection_contrast` — the row-density variance `deskew` already uses.
+**It cost 9 upright documents (125 → 116).** Instrumenting the failures showed
+8 of 10 upright passport pages probing as sideways, at both landscape (600×419)
+and portrait (687×914) aspect ratios.
+
+Two hypotheses, one right:
+
+1. *Sampling-noise asymmetry* — a non-square probe measures the quarter turn
+   over shorter, noisier rows. Real, and squaring the probe fixes it in a
+   synthetic test. **But it produced the identical 9 failures on the corpus, so
+   it was not the cause.**
+2. **The statistic is measuring the wrong thing.** `projection_contrast` is the
+   variance of the density profile, which captures *any* large-scale layout
+   structure — and a passport data page has a dark portrait photo on one side,
+   so **column** density varies far more than row density. It was built for
+   `deskew`, where the page is already near-upright and the comparison is
+   between small angles of the *same* image; that assumption does not survive
+   comparing an image against its transpose.
+
+`synthpass_ocr::choose_rotation` avoids this by scoring detected text-line
+width:height ratios — genuinely text-specific — which needs a word detector the
+browser does not have.
+
+**So rotation is strictly trailing instead.** The upright chain is untouched and
+runs first; rotations are appended and reached only once every upright attempt
+has failed. The additive contract then holds *by construction* rather than by
+measurement luck, and the ICAO check digits decide which orientation was right.
+Fixed order 90 → 270 → 180, two cheapest treatments each.
+
+**The lesson worth keeping: detection that can be wrong must not be allowed to
+rewrite the input.** A wrong guess that only reorders fallbacks costs nothing; a
+wrong guess that rotates the page costs 9 documents.
+
+---
+
 ## 2026-09-03 (c) — the band upscale filter, measured on both engines
 
 (b) left one hypothesis outstanding: that its three regressions came from

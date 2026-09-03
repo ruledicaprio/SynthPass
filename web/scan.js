@@ -70,7 +70,7 @@ function getWorker(lang, charset) {
  *
  * `parse(text)` must return a parse result object with a `.valid` boolean, or
  * null (the caller wraps the WASM parser). `prep` is the WASM preprocessing
- * namespace — `{ plain_band, mrz_variants, mrz_charset }`. `setStatus(msg)`
+ * namespace — `{ plain_band, mrz_variants, mrz_charset, rotate }`. `setStatus(msg)`
  * receives progress strings.
  *
  * Resolves to `{ result, raw, valid }` — the first checksum-valid parse, or
@@ -129,6 +129,48 @@ export async function scanDocument(file, parse, prep, setStatus) {
     ['eng', 'Retrying with the general model…', () => prep.plain_band(rgba, width, height)],
     ['eng', 'Scanning full image (general model)…', () => null],
   );
+
+  // Orientation, last and strictly additive.
+  //
+  // Measured: with no orientation handling at all, turning the corpus 90°
+  // took the browser from 25/40 reads to 1/40. A sideways phone photo simply
+  // did not work — "bottom 45%" is the wrong edge of a turned page, so the
+  // band strategy collapses rather than degrades.
+  //
+  // These run only after EVERY upright attempt has failed, so a document that
+  // reads today cannot be broken by them. That ordering is not a stylistic
+  // choice: an earlier version of this probed the page orientation up front
+  // and rotated before scanning, and the probe was wrong often enough to cost
+  // 9 upright documents (125 -> 116). Detection that can be wrong must not be
+  // allowed to rewrite the input; the ICAO check digits decide instead.
+  //
+  // Fixed order — 90, 270, 180 — rather than a guess: 90/270 cover a sideways
+  // photo, 180 an upside-down one. Only the two cheapest treatments run per
+  // orientation, since the untreated band alone wins ~88% of all reads.
+  const oriented = {};
+  const turn = (deg) => {
+    if (!oriented[deg]) {
+      const v = prep.rotate(rgba, width, height, deg);
+      if (!v) return null;
+      const c = variantToCanvas(v);
+      oriented[deg] = { rgba: rgbaOf(c), width: c.width, height: c.height };
+    }
+    return oriented[deg];
+  };
+  for (const deg of [90, 270, 180]) {
+    attempts.push(
+      ['mrz', `Retrying rotated ${deg}°…`, () => {
+        const t = turn(deg);
+        return t && prep.plain_band(t.rgba, t.width, t.height);
+      }],
+      ['mrz', `Retrying rotated ${deg}°, contrast stretched…`, () => {
+        const t = turn(deg);
+        if (!t) return null;
+        const set = prep.mrz_variants(t.rgba, t.width, t.height);
+        return set.len ? set.get(0) : null;
+      }],
+    );
+  }
 
   let best = null;
   let bestRaw = null;
