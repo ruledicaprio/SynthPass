@@ -301,6 +301,15 @@ struct OcrStage {
     /// "always falls through to Tier 2" behavior for the latter.
     escalation_budget: CostClass,
     ocr: OcrResult,
+    /// What the recognizer observed about the page, built once during the OCR
+    /// stage and handed to *both* tiers' `DocumentContext`.
+    ///
+    /// Carried on the stage rather than rebuilt at the Tier-2 call site so the
+    /// two tiers cannot be given subtly different accounts of the same page —
+    /// a second construction is a second thing to keep in step, and this
+    /// struct gains fields (`lines`, per `knowledge/VIZ_TIER2_DESIGN.md` §2.2)
+    /// as visual-zone work lands.
+    recognition: Recognition,
 }
 
 /// Progress/terminal events emitted by [`Pipeline::process_document_stream`].
@@ -667,6 +676,7 @@ impl Pipeline {
             escalation,
             escalation_budget,
             ocr: ocr_result,
+            recognition,
         })
     }
 
@@ -698,7 +708,20 @@ impl Pipeline {
                 // is only true if the pipeline actually populates the field. `input` is the
                 // original on-disk file, not the OCR engine's temp copy, so this also survives
                 // whatever the OCR stage does with its own scratch files.
-                let mut ctx = DocumentContext::from_text(&stage.markdown).with_image(input);
+                // `with_recognition`: the Tier-1 context above has always
+                // carried this and the Tier-2 context never did, so the
+                // *escalated* provider — the one asked the harder question, on
+                // the documents Tier 1 could not answer — was handed strictly
+                // less about the page than the provider that had already
+                // succeeded elsewhere. No reason for the asymmetry was
+                // recorded; it reads as an omission rather than a decision.
+                // Additive on its own: `LlmFieldReader` builds its prompt from
+                // `DocumentContext::text`, so nothing in today's output moves.
+                // It is a prerequisite for `knowledge/VIZ_TIER2_DESIGN.md`
+                // §2.3, which needs the geometry this struct will carry.
+                let mut ctx = DocumentContext::from_text(&stage.markdown)
+                    .with_recognition(&stage.recognition)
+                    .with_image(input);
                 if let Some(hint) = &hint {
                     ctx = ctx.with_mrz_hint(hint);
                 }
@@ -2810,6 +2833,10 @@ mod tests {
     struct ImageRecordingReader {
         capability: Capability,
         seen_image: std::sync::Mutex<Option<PathBuf>>,
+        /// Whether the context carried a [`Recognition`]. Recorded alongside
+        /// the image because the same class of omission produced both: a
+        /// field the pipeline already has in hand and simply never passes on.
+        seen_recognition: std::sync::Mutex<bool>,
     }
 
     impl ImageRecordingReader {
@@ -2817,6 +2844,18 @@ mod tests {
             Self {
                 capability: Capability::deterministic_reader().with_vision(true),
                 seen_image: std::sync::Mutex::new(None),
+                seen_recognition: std::sync::Mutex::new(false),
+            }
+        }
+
+        /// The same double, registered as a Tier-2 (model-backed,
+        /// non-deterministic) provider so `find_reader(_, |c| c.fields &&
+        /// !c.deterministic)` selects it.
+        fn tier2() -> Self {
+            Self {
+                capability: Capability::model_reader(CostClass::Free),
+                seen_image: std::sync::Mutex::new(None),
+                seen_recognition: std::sync::Mutex::new(false),
             }
         }
     }
@@ -2841,6 +2880,7 @@ mod tests {
             ctx: &DocumentContext<'_>,
         ) -> Result<synthpass_die::Reading, ProviderError> {
             *self.seen_image.lock().unwrap() = ctx.image.map(Path::to_path_buf);
+            *self.seen_recognition.lock().unwrap() = ctx.recognition.is_some();
             Ok(synthpass_die::Reading {
                 extraction: ExtractionV2::default(),
                 evidence: synthpass_die::Evidence::default(),
@@ -2878,6 +2918,34 @@ mod tests {
         }
     }
 
+    /// Like [`pipeline_with_reader`], but keeps the real `MrzReader` in the
+    /// Tier-1 slot and puts the double in the Tier-2 one — the arrangement
+    /// needed to observe what an *escalated* provider is handed.
+    fn pipeline_with_tier2_reader(
+        ocr: Box<dyn OcrEngine>,
+        infer: Box<dyn InferBackend>,
+        reader: Arc<ImageRecordingReader>,
+    ) -> Pipeline {
+        Pipeline {
+            ocr: Arc::from(ocr),
+            infer: Arc::from(infer),
+            audit_log: None,
+            encrypt_key: None,
+            llm_semaphore: Arc::new(Semaphore::new(1)),
+            ocr_semaphore: Arc::new(Semaphore::new(1)),
+            llm_queue_depth: Arc::new(AtomicUsize::new(0)),
+            metrics: Arc::new(PipelineMetrics::default()),
+            catalog: Arc::new(
+                ProviderCatalog::builder()
+                    .with_reader(Arc::new(MrzReader::new()))
+                    .with_reader(reader)
+                    .build()
+                    .expect("distinct ids"),
+            ),
+            jobs: Arc::new(jobs::JobRegistry::new(1)),
+        }
+    }
+
     #[tokio::test]
     async fn tier1_context_carries_the_image_path_for_a_vision_capable_provider() {
         let reader = Arc::new(ImageRecordingReader::new());
@@ -2909,6 +2977,43 @@ mod tests {
             Some(input.as_path()),
             "a vision-capable provider consulted at Tier 1 must receive the on-disk image path, \
              not None"
+        );
+        assert!(
+            *reader.seen_recognition.lock().unwrap(),
+            "the Tier-1 context has always carried the Recognition; this pins it so the \
+             Tier-2 assertion below is a comparison against a known-good tier, not a guess"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// `VIZ_TIER2_DESIGN.md` §2.2: the Tier-2 context was built
+    /// `.with_image(input)` but without `.with_recognition(...)`, so the
+    /// escalated provider — asked the harder question, on the documents Tier 1
+    /// could not answer — was handed strictly less about the page than the
+    /// tier that had already succeeded. Nothing recorded why.
+    ///
+    /// Uses prose with no MRZ so the real `MrzReader` finds nothing and the
+    /// router escalates, which is the only way to reach the Tier-2 context.
+    #[tokio::test]
+    async fn tier2_context_carries_the_recognition_like_tier1_does() {
+        let reader = Arc::new(ImageRecordingReader::tier2());
+        let pipeline = pipeline_with_tier2_reader(
+            Box::new(StaticOcr("just prose — no MRZ anywhere")),
+            Box::new(MockBackend),
+            reader.clone(),
+        );
+
+        let (input, dir) = temp_input("tier2-recognition-context").await;
+        pipeline
+            .process_document(&input)
+            .await
+            .expect("process_document with a mocked OCR must not fail");
+
+        assert!(
+            *reader.seen_recognition.lock().unwrap(),
+            "an escalated Tier-2 provider must receive the same Recognition the Tier-1 \
+             context carries — it is computed once per page either way"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
