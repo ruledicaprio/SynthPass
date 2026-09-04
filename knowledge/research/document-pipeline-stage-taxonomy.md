@@ -170,6 +170,27 @@ confirmed or refuted the idea. The test is the real-specimen `provider-bench` co
 
 The stage therefore ships **default-off** and costs nothing until that measurement runs.
 
+## Measured, 2026-09-04: the real-specimen run — small, real, mechanistically clean
+
+Full numbers in the same benchmarks file. 232 real specimens (229 scored), three arms from one
+CUDA binary: `off` 111/229 (48.5%), `control` 112/229, `on` **113/229 (49.3%)**. Decision rule
+satisfied, **zero regressions**, net **+2 documents**.
+
+What makes +2 believable rather than luck: both gained documents came from `checksum_failed`, and
+the miss-kind delta is exactly the predicted signature — `checksum_failed -2`, `no_mrz_found 0`. A
+coincidence would not land solely in the one bucket the mechanism names.
+
+So the idea in this note is **confirmed, and small**. The texture is really there, it really does
+corrupt binarization, and removing it really does recover documents — just not many, because the
+documents reaching variant 9 have already survived eight treatments.
+
+**The `control` arm found something better than the treatment did.** `plain_band` — the untreated
+crop used purely as a placebo — fixes a *different* miss class (`no_mrz_found`, i.e. detection)
+where the median fixes `checksum_failed` (recognition), and the two currently **compete for the
+same variant slot**. Running both, as variants 9 and 10, is the actual next step. A control arm
+added to isolate a confound turned out to be the most informative arm in the experiment, which is
+an argument for keeping placebo arms even when they feel like overhead.
+
 ## Why this might not work
 
 Kept per this directory's own rule — most ideas won't, and the dead end is worth recording.
