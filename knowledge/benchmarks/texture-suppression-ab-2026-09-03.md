@@ -95,4 +95,85 @@ Roughly 1h37m per arm. Compare `documents_detail[]` per-document, not the aggreg
 the `off`/`on` OCR dumps for documents that *still* fail — that distinguishes "right idea, wrong
 radius" from "wrong idea".
 
-Until that runs, the stage ships **default-off** (`TextureMode::Off`) and costs nothing.
+---
+
+# Real-specimen result, 2026-09-04 — the treatment is real, and small
+
+Run overnight on 232 real specimens (229 scored), three arms from one CUDA binary
+`sha256 a8a41d556c1a6f2cc26549fba94cae460cfce541e5e3fa4d63228916e0227f52`.
+81 / 85 / 82 minutes per arm.
+
+| arm | Tier-1 hits | rate | `checksum_failed` | `no_mrz_found` |
+| :-- | --: | --: | --: | --: |
+| `off` | 111/229 | 48.5% | 70 | 48 |
+| `control` | 112/229 | 48.9% | 71 | 46 |
+| `on` | 113/229 | **49.3%** | **68** | 48 |
+
+**Decision rule satisfied:** `on (113) > control (112) >= off (111)`, and **zero** hit→miss
+regressions against baseline. Net **+2 documents, +0.9pp**.
+
+## The mechanism checks out, which is what makes +2 believable
+
+Both documents gained by `on` came from `checksum_failed` — the exact miss class texture
+suppression targets — and the miss-kind delta is precisely the predicted signature:
+
+```
+on  vs off:  checksum_failed -2,  no_mrz_found  0
+```
+
+A coincidental gain would not land exclusively in the one bucket the mechanism predicts while
+leaving the other untouched. Gained: `Argentina_Passport_Specimen_P0_ARG_2026_mrz`,
+`Portugal_Passport_Specimen_PC_PRT_2012_mrz`, both `checksum_failed` → hit.
+
+**+2 of 229 is a small effect and should not be oversold.** Because the pipeline is deterministic
+these are real per-document facts rather than sampling noise, but "real" is not "large".
+
+## The unplanned finding, which is worth more than the +2
+
+The `control` arm was built only to isolate the cost of adding a pass. It found something else:
+
+```
+control vs off:  checksum_failed +1,  no_mrz_found -2
+```
+
+`plain_band` — the untreated band crop the placebo uses — fixes a **different miss class**. It
+recovers `no_mrz_found` documents (a *detection* failure), where the median filter recovers
+`checksum_failed` documents (a *recognition* failure). And they **compete for the same slot**:
+each arm has exactly one variant 9, so `on` does not include `plain_band`.
+
+The proof is `Switzerland_Passport_Specimen_PM_CHE_2022_mrz`: `off` = `checksum_failed`,
+`control` = **HIT**, `on` = `checksum_failed`. The placebo recovers a document the treatment
+cannot, and vice versa.
+
+**So the next step is not tuning the median — it is running both.** Variants 9 *and* 10
+(`plain_band` then `texture_variants`), which plausibly reaches 114/229 by taking all three
+documents. That needs `MAX_RETRY_VARIANTS` 9 → 10 and its own measured run; it is not a change to
+make unmeasured.
+
+Note the irony worth recording: `plain_band`'s own doc comment says it is deliberately excluded
+from `mrz_variants` because `ocrs` "normalizes internally, so an untreated variant adds nothing
+there". On this corpus, as a trailing variant, it adds one document. That claim was measured on
+the fixture corpus, not this one.
+
+## CUDA: much less speedup than expected, and the reason matters
+
+Predicted 40–50 min per arm from ADR-0004's ~2.5x. Actual: **81–85 min**, against a recorded
+~1h37m CPU baseline — roughly **16% faster, not 2.5x**.
+
+The prediction was wrong because it assumed the real-specimen run is dominated by Tier-2 LLM
+generation. It is not: it is dominated by **Tier-1 OCR**, which is pure CPU and untouched by the
+`cuda` feature. ADR-0004's 2.5x is a claim about *LLM generation*, and generalising it to
+*provider-bench wall-clock* was the error. Budget CPU time for real-specimen runs regardless of
+GPU.
+
+CUDA remains correct to use — GPU output is byte-identical, so it confounds nothing — but it is
+not the lever it looks like for this particular benchmark.
+
+## Recommendation
+
+Defaulting `TextureMode::On` is defensible on this evidence: a measured gain in the predicted
+direction, zero regressions, and a trailing/checksum-gated design that structurally cannot lower
+the hit rate. But the cleaner end state is **both variants**, so the sequencing is: land 9+10,
+measure, then flip the default once — rather than flipping twice.
+
+Until then the stage remains **default-off** and costs nothing.
