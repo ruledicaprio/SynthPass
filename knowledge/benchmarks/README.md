@@ -403,3 +403,15 @@ line-1-integrity work reached earlier this session).
 `knowledge/CORPUS_COVERAGE.md`'s per-country table was rewritten from this same pair of scans
 (pre- and post-fix) — most of its previous "specimen present, not yet wired" placeholders now
 carry a real, measured HIT/MISS status instead.
+
+### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
+
+Classifying the corrected parity run's per-field detail before starting
+`VIZ_TIER2_DESIGN.md` §2.3 found that **14 of 70 date mismatches were the model
+reading the printed date correctly while `normalize::date` discarded it** —
+48.1% → 52.5% overall, deterministically. The same classification found only
+**6 of 168 misses are `null`**, which undercuts §2.3's stated first lever
+(telling the model which fields are still missing), and that the `mrz_hint`
+built in issue #102 is unmeasurable on this corpus by construction. Full
+writeup, including the 56 date misses that are genuine model errors:
+[normalize-date-forms-2026-09-04.md](normalize-date-forms-2026-09-04.md).
