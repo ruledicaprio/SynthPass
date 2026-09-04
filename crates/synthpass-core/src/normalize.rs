@@ -14,10 +14,15 @@
 //! (`f(f(x)) == f(x)`). None of them invent data — input this module can't
 //! confidently resolve passes through unchanged rather than guessing.
 //!
-//! **Not wired into the pipeline.** `synthpass-pipeline` decides whether and
-//! where to call these; wiring them into the extraction flow is a
-//! `synthpass-pipeline` change, deliberately left for that integration step
-//! (see this module's originating task).
+//! **Wired into both pipeline paths.** `synthpass-pipeline` calls
+//! [`extraction`] on every Tier-2 result, in `process_document` and in
+//! `process_document_stream` alike, before anything downstream sees it. This
+//! doc previously said the opposite, left over from before that integration
+//! landed — and the stale claim cost real accuracy: `parity.rs` was written to
+//! match it, skipped normalization entirely, and under-reported Tier-2 field
+//! accuracy by roughly 20 percentage points until 2026-09-04. Anything
+//! measuring Tier-2 output must normalize it first, or it is measuring a value
+//! the product never emits.
 
 /// Normalize an `issuing_country`/`nationality` field: a full country name
 /// (any case) resolves to its 3-letter ICAO/ISO 3166-1 code via
@@ -94,7 +99,10 @@ const PLAUSIBLE_YEAR_RANGE: std::ops::RangeInclusive<u32> = 1900..=2999;
 /// - day-first `DD.MM.YYYY` / `DD/MM/YYYY` / `DD-MM-YYYY` — the common
 ///   non-US format a Tier-2 read of a visual zone tends to reproduce;
 /// - unseparated `YYYYMMDD` (8 digits, the raw shape once an MRZ `YYMMDD`
-///   has been century-expanded).
+///   has been century-expanded);
+/// - a **named month** as printed in a document's visual zone, including the
+///   bilingual renderings travel documents use (`"14 OCT /OUT 2000"` →
+///   `"2000-10-14"`) — see [`month_from_named_tokens`].
 ///
 /// Genuinely ambiguous input (e.g. `MM/DD/YYYY`-shaped, where neither
 /// outer component is a 4-digit year) passes through unchanged rather than
@@ -108,6 +116,12 @@ pub fn date(input: &str) -> String {
 }
 
 fn parse_date_parts(s: &str) -> Option<(u32, u32, u32)> {
+    // A named month is unambiguous where a numeric one is not, so it is tried
+    // first: "14 OCT /OUT 2000" has no separator layout the numeric branches
+    // below could read, and its month needs no day-vs-month judgement call.
+    if let Some(parts) = parse_named_month_date(s) {
+        return Some(parts);
+    }
     if s.len() == 8 && s.bytes().all(|b| b.is_ascii_digit()) {
         let (y, m, d) = (
             s[0..4].parse().ok()?,
@@ -130,6 +144,101 @@ fn parse_date_parts(s: &str) -> Option<(u32, u32, u32)> {
         return None; // ambiguous (neither end names a 4-digit year) — don't guess
     };
     valid_date(y, m, d).then_some((y, m, d))
+}
+
+/// Month names as printed on travel documents, in the languages this corpus
+/// actually contains. Both the three-letter abbreviation a document prints in
+/// its date line and the full word are listed, because a visual zone uses
+/// either.
+///
+/// Entries are matched **whole-token**, never as substrings — French `AOUT`
+/// (August) ends in the Portuguese `OUT` (October), and a substring match
+/// would silently read every French August as an October.
+///
+/// Laid out one month per line rather than one entry per line — the grouping
+/// is what makes a missing or misfiled language visible at a glance, which is
+/// the only review this table can realistically get.
+#[rustfmt::skip]
+const MONTH_NAMES: &[(&str, u32)] = &[
+    ("JAN", 1), ("JANUARY", 1), ("JANVIER", 1), ("JANUAR", 1), ("ENE", 1), ("ENERO", 1),
+    ("GEN", 1), ("GENNAIO", 1), ("JANEIRO", 1),
+    ("FEB", 2), ("FEBRUARY", 2), ("FEBRUAR", 2), ("FEV", 2), ("FEVRIER", 2), ("FEVEREIRO", 2),
+    ("FEBRERO", 2), ("FEBBRAIO", 2),
+    ("MAR", 3), ("MARCH", 3), ("MARS", 3), ("MARZ", 3), ("MARZO", 3), ("MARCO", 3),
+    ("APR", 4), ("APRIL", 4), ("AVR", 4), ("AVRIL", 4), ("ABR", 4), ("ABRIL", 4), ("APRILE", 4),
+    ("MAY", 5), ("MAI", 5), ("MAIO", 5), ("MAYO", 5), ("MAG", 5), ("MAGGIO", 5),
+    ("JUN", 6), ("JUNE", 6), ("JUIN", 6), ("JUNI", 6), ("JUNIO", 6), ("JUNHO", 6),
+    ("GIU", 6), ("GIUGNO", 6),
+    ("JUL", 7), ("JULY", 7), ("JUIL", 7), ("JUILLET", 7), ("JULI", 7), ("JULIO", 7),
+    ("JULHO", 7), ("LUG", 7), ("LUGLIO", 7),
+    ("AUG", 8), ("AUGUST", 8), ("AOUT", 8), ("AGO", 8), ("AGOSTO", 8),
+    ("SEP", 9), ("SEPT", 9), ("SEPTEMBER", 9), ("SEPTEMBRE", 9), ("SETEMBRO", 9),
+    ("SEPTIEMBRE", 9), ("SET", 9), ("SETTEMBRE", 9),
+    ("OCT", 10), ("OCTOBER", 10), ("OCTOBRE", 10), ("OCTUBRE", 10), ("OKT", 10),
+    ("OKTOBER", 10), ("OUT", 10), ("OUTUBRO", 10), ("OTT", 10), ("OTTOBRE", 10),
+    ("NOV", 11), ("NOVEMBER", 11), ("NOVEMBRE", 11), ("NOVIEMBRE", 11), ("NOVEMBRO", 11),
+    ("DEC", 12), ("DECEMBER", 12), ("DECEMBRE", 12), ("DEZ", 12), ("DEZEMBER", 12),
+    ("DEZEMBRO", 12), ("DIC", 12), ("DICIEMBRE", 12), ("DICEMBRE", 12),
+];
+
+/// The month named by `s`, or `None` when no token names one **or** two
+/// tokens disagree.
+///
+/// Travel documents routinely print a date bilingually — `"14 OCT /OUT 2000"`,
+/// `"27 DEC /DEZ 2032"` — so several tokens naming the *same* month is the
+/// normal case and is accepted. Tokens naming *different* months mean the
+/// string was misread or is not a single date, and that returns `None` rather
+/// than picking one: this module's existing contract is that ambiguous input
+/// passes through untouched instead of being guessed at.
+fn month_from_named_tokens(s: &str) -> Option<u32> {
+    let mut found: Option<u32> = None;
+    for token in s.split(|c: char| !c.is_ascii_alphabetic()) {
+        if token.is_empty() {
+            continue;
+        }
+        let upper = token.to_ascii_uppercase();
+        let Some((_, month)) = MONTH_NAMES.iter().find(|(name, _)| *name == upper) else {
+            continue;
+        };
+        match found {
+            Some(existing) if existing != *month => return None,
+            _ => found = Some(*month),
+        }
+    }
+    found
+}
+
+/// Parse a date whose month is written as a word, e.g. `"14 OCT /OUT 2000"`.
+///
+/// Requires exactly one 4-digit year token and exactly one distinct 1-2 digit
+/// day value; anything else is ambiguous and returns `None`. Note the day is
+/// compared by *value*, not by text, so the day printed twice in a bilingual
+/// line (`"01 JAN/JAN 01 2000"`) does not read as a conflict.
+fn parse_named_month_date(s: &str) -> Option<(u32, u32, u32)> {
+    let month = month_from_named_tokens(s)?;
+    let mut year: Option<u32> = None;
+    let mut day: Option<u32> = None;
+    for token in s.split(|c: char| !c.is_ascii_digit()) {
+        if token.is_empty() {
+            continue;
+        }
+        let value: u32 = token.parse().ok()?;
+        match token.len() {
+            4 => match year {
+                Some(existing) if existing != value => return None,
+                _ => year = Some(value),
+            },
+            1 | 2 => match day {
+                Some(existing) if existing != value => return None,
+                _ => day = Some(value),
+            },
+            // A 3-, 5- or longer digit run is not a day or a year on any date
+            // rendering; its presence means this is not the shape we think.
+            _ => return None,
+        }
+    }
+    let (y, d) = (year?, day?);
+    valid_date(y, month, d).then_some((y, month, d))
 }
 
 fn valid_date(y: u32, m: u32, d: u32) -> bool {
@@ -305,11 +414,102 @@ mod tests {
 
     #[test]
     fn date_is_idempotent() {
-        for input in ["2014-7-1", "12.08.1974", "19740812", "not a date", ""] {
+        for input in [
+            "2014-7-1",
+            "12.08.1974",
+            "19740812",
+            "not a date",
+            "",
+            "14 OCT /OUT 2000",
+            "01 AOUT 1990",
+        ] {
             let once = date(input);
             let twice = date(&once);
             assert_eq!(once, twice, "not idempotent for input: {input:?}");
         }
+    }
+
+    /// A name listed twice under *different* months would make lookups depend
+    /// on table order — the first entry would win and the second would be
+    /// dead, silently. `MARZO` was in fact listed twice while this table was
+    /// being written (harmlessly, same month, but it is the shape of the real
+    /// bug), which is why this test exists rather than a review comment.
+    #[test]
+    fn month_names_are_unique_and_unambiguous() {
+        let mut seen: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+        for (name, month) in MONTH_NAMES {
+            assert!(
+                (1..=12).contains(month),
+                "{name:?} maps to month {month}, which is not a month"
+            );
+            assert!(
+                name.chars().all(|c| c.is_ascii_uppercase()),
+                "{name:?} must be uppercase ASCII — lookups uppercase the token before comparing"
+            );
+            if let Some(existing) = seen.insert(name, *month) {
+                assert_eq!(
+                    existing, *month,
+                    "{name:?} is listed under two different months"
+                );
+                panic!("{name:?} is listed twice");
+            }
+        }
+    }
+
+    #[test]
+    fn date_reads_a_named_month_as_printed_in_a_visual_zone() {
+        // Every one of these is a real rendering from the parity corpus's
+        // baseline run, where the model read the date correctly and the
+        // comparison failed purely on format.
+        assert_eq!(date("14 OCT /OUT 2000"), "2000-10-14");
+        assert_eq!(date("27 DEC /DEZ 2032"), "2032-12-27");
+        assert_eq!(date("04 MAY 1991"), "1991-05-04");
+        assert_eq!(date("25 MAY 2024"), "2024-05-25");
+    }
+
+    #[test]
+    fn date_accepts_agreeing_bilingual_month_names_and_rejects_disagreeing_ones() {
+        // The same month in two languages is the normal case on a travel
+        // document and must be accepted.
+        assert_eq!(date("11 MAR/MAR 1985"), "1985-03-11");
+        assert_eq!(date("05 MAY/MAI 2001"), "2001-05-05");
+        // Two *different* months means the string was misread. Guessing one
+        // would be inventing data, so it passes through untouched.
+        assert_eq!(date("05 MAY/DEC 2001"), "05 MAY/DEC 2001");
+    }
+
+    /// French `AOUT` (August) ends with Portuguese `OUT` (October). A
+    /// substring search would silently turn every French August into an
+    /// October — a wrong date that still looks perfectly well-formed, which
+    /// is the worst failure shape this module can produce.
+    #[test]
+    fn date_does_not_read_a_month_name_inside_a_longer_word() {
+        assert_eq!(date("01 AOUT 1990"), "1990-08-01");
+        assert_eq!(date("15 SEPTEMBRE 2010"), "2010-09-15");
+    }
+
+    #[test]
+    fn date_leaves_an_incomplete_or_implausible_named_month_alone() {
+        // No day.
+        assert_eq!(date("OCT 2000"), "OCT 2000");
+        // No year.
+        assert_eq!(date("14 OCT"), "14 OCT");
+        // Day out of range — rejected by `valid_date`, not silently clamped.
+        assert_eq!(date("45 OCT 2000"), "45 OCT 2000");
+        // Two different days: ambiguous, so untouched.
+        assert_eq!(date("14 OCT 15 2000"), "14 OCT 15 2000");
+        // A digit run that is neither a day nor a year.
+        assert_eq!(date("14 OCT 20001"), "14 OCT 20001");
+    }
+
+    #[test]
+    fn date_named_month_does_not_disturb_the_numeric_forms() {
+        // The named-month branch runs first, so these prove it declines
+        // cleanly rather than capturing input the numeric branches own.
+        assert_eq!(date("2014-7-1"), "2014-07-01");
+        assert_eq!(date("12.08.1974"), "1974-08-12");
+        assert_eq!(date("19740812"), "1974-08-12");
+        assert_eq!(date("07/04/1976"), "1976-04-07");
     }
 
     // ── sex ──

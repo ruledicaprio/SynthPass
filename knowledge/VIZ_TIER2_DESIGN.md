@@ -59,6 +59,27 @@ non-MRZ zone is the mechanical part; knowing whether it worked is §5.
 **This is first for a reason.** Feeding noisier text into a narrower prompt
 makes the answer worse, not better, and does it while looking like progress.
 
+**Deferred 2026-09-04, measured before implementing.** Text-level line
+filtering — the most natural reading of "clean" — is refuted:
+
+- The 23.7% is over **geometry-detected lines**. The model receives
+  `NativeOcr`'s whole-page text, a *different artifact*. Applying the survey's
+  own predicate to that markdown, with the MRZ guard it requires, drops **61 of
+  2970 lines (2.1%)**, nearly all single characters like `?`, `$`, `(`.
+- **Every scored field is already present in that text**, 97-100% of fixtures.
+  Cleaning cannot help a model that already has the value in front of it.
+
+Two traps the naive implementation hits, recorded so nobody rediscovers them:
+the survey's `≤2 characters` rule deletes **31 lines that are exactly a
+ground-truth value** (`M`, `F`, `P`, `PP` — `sex` and `document_type` are scored
+fields), and its `≥50% non-alphanumeric` rule deletes **54 MRZ lines**, since
+`<` filler is not alphanumeric. The survey applies that rule only to non-MRZ
+lines, and that guard is the whole thing.
+
+**Image-level** cleaning ahead of the general OCR pass is untested and is a
+different proposition; it remains open. What is refuted is line-dropping. See
+[`benchmarks/parity-mrz-holdout-2026-09-04.md`](benchmarks/parity-mrz-holdout-2026-09-04.md).
+
 ### 2.2 Label — the geometry exists and is thrown away
 
 `synthpass_ocr::geometry::OcrPage` carries `lines: Vec<OcrLine>` — per-line text
@@ -251,17 +272,20 @@ roadmap should not accumulate measurement detail).
 
 | arm | reviewed | derived | legacy 7-field |
 | :-- | --: | --: | --: |
-| baseline | 43/162 (26.5%) | 47/162 (29.0%) | 38/126 (30.2%) |
-| holdout | 34/162 (21.0%) | 39/162 (24.1%) | 30/126 (23.8%) |
+| baseline | 78/162 (48.1%) | 78/162 (48.1%) | 54/126 (42.9%) |
+| holdout | 64/162 (39.5%) | 72/162 (44.4%) | 45/126 (35.7%) |
 
 417 lines stripped across all 72 fixtures, zero leaks, zero fixtures untouched.
 
-**The finding revises this document's premise.** Holding out the MRZ costs only
-~5pp, so Tier 2 was not MRZ-carried to begin with — the baseline itself is the
-problem. 26.5% of fields correct *with* a checksum-valid MRZ in the prompt is
-what §2.1–§2.3 exist to fix, and the goal is raising **both** arms, not closing
-the gap between them. A change that moves only the holdout number should be
-treated as suspect.
+The first run of this measurement reported 26.5% / 21.0%. **Those numbers were
+a harness defect** — `parity.rs` did not apply `normalize::extraction`, which
+both pipeline entry points run on every Tier-2 result, so it scored a value the
+product never emits. Corrected the same day; see the benchmark record.
+
+**The finding revises this document's premise.** Holding out the MRZ costs
+8.6pp, so Tier 2 is not MRZ-carried — the VIZ-only escalation case already
+stands at 39.5%. The goal is raising **both** arms; a change that moves only the
+holdout number should be treated as suspect.
 
 A before is not optional here — every change in §2 is a change to what the model
 is shown, and the only honest claim about such a change is a measured one.
