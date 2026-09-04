@@ -241,10 +241,29 @@ Holdout runs apply **no accuracy floor**: the floors are a regression gate for
 the standard corpus, and a holdout is a measurement of a harder task where a low
 number is the finding, not a failure.
 
-### 5.3 What to record before touching anything
+### 5.3 The before, measured 2026-09-04
 
-Run the harness and write the numbers into `knowledge/ROADMAP.md` first. A
-before is not optional here — every change in §2 is a change to what the model
+**Done.** Both arms ran from one binary; full writeup in
+[`benchmarks/parity-mrz-holdout-2026-09-04.md`](benchmarks/parity-mrz-holdout-2026-09-04.md)
+(recorded there rather than in `ROADMAP.md`, as this section originally scoped
+it — `benchmarks/README.md` is the mandated home for a dated result, and the
+roadmap should not accumulate measurement detail).
+
+| arm | reviewed | derived | legacy 7-field |
+| :-- | --: | --: | --: |
+| baseline | 43/162 (26.5%) | 47/162 (29.0%) | 38/126 (30.2%) |
+| holdout | 34/162 (21.0%) | 39/162 (24.1%) | 30/126 (23.8%) |
+
+417 lines stripped across all 72 fixtures, zero leaks, zero fixtures untouched.
+
+**The finding revises this document's premise.** Holding out the MRZ costs only
+~5pp, so Tier 2 was not MRZ-carried to begin with — the baseline itself is the
+problem. 26.5% of fields correct *with* a checksum-valid MRZ in the prompt is
+what §2.1–§2.3 exist to fix, and the goal is raising **both** arms, not closing
+the gap between them. A change that moves only the holdout number should be
+treated as suspect.
+
+A before is not optional here — every change in §2 is a change to what the model
 is shown, and the only honest claim about such a change is a measured one.
 
 ---
