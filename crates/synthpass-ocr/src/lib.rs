@@ -865,7 +865,11 @@ enum TextureMode {
 }
 
 /// `SYNTHPASS_OCR_TEXTURE` — `on`, `off` or `control`, defaulting to
-/// [`TextureMode::Off`].
+/// [`TextureMode::On`] since the 2026-09-04 two-variant measurement (114/229
+/// vs 111/229 with zero regressions; see
+/// `knowledge/benchmarks/texture-suppression-ab-2026-09-03.md`). It shipped
+/// default-`off` while it was unmeasured, and the default flipped once, after
+/// the final shape of the stage was decided — not twice.
 ///
 /// This exists so the stage can be A/B-measured from **one binary**. A
 /// rebuild-based before/after has already hidden a real hit-rate regression on
@@ -891,9 +895,9 @@ fn trailing_texture_mode() -> TextureMode {
         .to_ascii_lowercase()
         .as_str()
     {
-        "on" => TextureMode::On,
+        "off" => TextureMode::Off,
         "control" => TextureMode::Control,
-        _ => TextureMode::Off,
+        _ => TextureMode::On,
     }
 }
 
@@ -1320,12 +1324,12 @@ mod tests {
     }
 
     #[test]
-    fn texture_mode_defaults_off_and_parses_all_three_arms() {
+    fn texture_mode_defaults_on_and_parses_all_three_arms() {
         unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
         assert_eq!(
             trailing_texture_mode(),
-            TextureMode::Off,
-            "unset must be the untouched baseline"
+            TextureMode::On,
+            "unset must be the measured-best behaviour, not the baseline"
         );
 
         for (raw, expected) in [
@@ -1333,10 +1337,14 @@ mod tests {
             ("ON", TextureMode::On),
             ("  control  ", TextureMode::Control),
             ("off", TextureMode::Off),
+            ("OFF", TextureMode::Off),
             // A typo is a measurement mistake, not a production outage: it
-            // falls back rather than erroring.
-            ("onn", TextureMode::Off),
-            ("", TextureMode::Off),
+            // falls back to the default rather than erroring. Note the
+            // direction changed with the default — a mistyped arm name now
+            // measures `on`, so an A/B that reads "no difference" should
+            // suspect the spelling of its `off` arm first.
+            ("onn", TextureMode::On),
+            ("", TextureMode::On),
         ] {
             unsafe { std::env::set_var("SYNTHPASS_OCR_TEXTURE", raw) };
             assert_eq!(trailing_texture_mode(), expected, "parsing {raw:?}");
