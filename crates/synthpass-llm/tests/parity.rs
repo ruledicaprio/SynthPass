@@ -13,10 +13,19 @@
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
 //!
-//! Measured baseline, 2026-09-04, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
-//! **reviewed 78/162 (48.1%) over 18 documents, derived 78/162 (48.1%) over
+//! Measured baseline, 2026-09-04, `qwen2.5-1.5b-instruct-q4_k_m`, ~35 min:
+//! **reviewed 85/162 (52.5%) over 18 documents, derived 85/162 (52.5%) over
 //! 54.** Full record, including the MRZ-holdout arm, in
 //! `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`.
+//!
+//! That is up from 78/162 (48.1%) on the same corpus and model earlier the
+//! same day. Nothing about the model changed: `synthpass_core::normalize`
+//! learned two printed date forms it had been discarding — whitespace-separated
+//! numerics and a named month with a two-digit year — and the +14 landed as
+//! exactly +7 in each fixture set. See
+//! `knowledge/benchmarks/normalize-date-forms-2026-09-04.md`. Both numbers are
+//! quoted here because a baseline that silently tracks upward stops being a
+//! baseline.
 //!
 //! # Normalize before comparing, or this harness lies
 //!
@@ -737,7 +746,7 @@ fn native_llm_field_accuracy_over_sample_set() {
     // Two floors, because the two sets ask different questions and pooling them
     // would let a large easy set hide a regression in a small hard one.
     //
-    // Both sit far below the measured baseline (48.1% / 48.1%, recorded in
+    // Both sit far below the measured baseline (52.5% / 52.5%, recorded in
     // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`), and that
     // distance is deliberate. These catch a *broken* prompt or a repair-JSON
     // bug — failures that take the rate to near zero — not drift.
