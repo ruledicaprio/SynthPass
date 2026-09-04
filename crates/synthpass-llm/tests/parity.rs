@@ -174,26 +174,24 @@ fn fixtures() -> Vec<Fixture> {
     out
 }
 
+/// Case- and whitespace-insensitive comparison of two already-normalized
+/// values.
+///
+/// This used to carry a local `normalize_date` handling only `DD.MM.YYYY`,
+/// which made the harness score a *less* normalized value than production
+/// emits: `synthpass_core::normalize::extraction` runs on every Tier-2 result
+/// in both pipeline paths, and the harness did not run it at all. Measured
+/// over the 72-fixture corpus, 64% of date mismatches were the correct date in
+/// a format the local helper could not read — the harness was reporting model
+/// failures that the shipped product does not have. The fix is at the call
+/// site (normalize the extraction, exactly as the pipeline does); what remains
+/// here is only the trivial case/whitespace fold.
 fn normalize(s: &str) -> String {
     s.trim().to_uppercase()
 }
 
-/// `DD.MM.YYYY` -> `YYYY-MM-DD`, the model's favorite date rendering vs. the
-/// fixtures' ISO form. Falls back to the input unchanged if it isn't that shape.
-fn normalize_date(s: &str) -> String {
-    let parts: Vec<&str> = s.trim().split('.').collect();
-    if let [d, m, y] = parts[..] {
-        if d.len() <= 2 && m.len() <= 2 && y.len() == 4 {
-            return format!("{y}-{m:0>2}-{d:0>2}");
-        }
-    }
-    normalize(s)
-}
-
-fn fields_match(a: Option<&str>, b: Option<&str>, field: CoreField) -> bool {
-    let is_date = matches!(field, CoreField::DateOfBirth | CoreField::DateOfExpiry);
+fn fields_match(a: Option<&str>, b: Option<&str>, _field: CoreField) -> bool {
     match (a, b) {
-        (Some(a), Some(b)) if is_date => normalize_date(a) == normalize_date(b),
         (Some(a), Some(b)) => normalize(a) == normalize(b),
         (None, None) => true,
         _ => false,
@@ -592,8 +590,14 @@ fn native_llm_field_accuracy_over_sample_set() {
             .expect("fixture is a JSON object")
             .entry("extraction_method")
             .or_insert_with(|| "mrz-deterministic".into());
-        let expected: Extraction =
+        let mut expected: Extraction =
             serde_json::from_value(expected_value).expect("fixture parses as Extraction");
+        // Normalized on both sides, so a fixture written in a slightly
+        // different-but-equivalent form cannot score as a model error. The
+        // normalizer is idempotent (`normalize::date_is_idempotent` and
+        // friends), so this is a no-op on a fixture already in canonical form
+        // — which every generated one is.
+        synthpass_core::normalize::extraction(&mut expected);
 
         // Holdout: remove the MRZ the ground truth came from, so the model is
         // scored on what it can recover from the visual zone alone.
@@ -615,7 +619,13 @@ fn native_llm_field_accuracy_over_sample_set() {
             markdown
         };
 
-        let actual = llm.extract(&markdown, None).expect("extraction succeeds");
+        let mut actual = llm.extract(&markdown, None).expect("extraction succeeds");
+        // Both pipeline entry points call this on every Tier-2 result before
+        // anything downstream sees it (`synthpass-pipeline/src/lib.rs`), so a
+        // harness that skipped it would be scoring a value the product never
+        // emits. Measuring anything other than what ships is the one way this
+        // number can be confidently wrong.
+        synthpass_core::normalize::extraction(&mut actual);
 
         // Field lookup goes through the v2 lift so this file holds no third
         // copy of the `CoreField` -> struct-field mapping.
