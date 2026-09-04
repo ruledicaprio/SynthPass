@@ -151,7 +151,7 @@ row for the exact breakdown.
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
 | HKG | Hong Kong | -- | No specimen yet | -- |
-| IND | India | Passport | MISS (x2, no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IND | India | Passport | MISS (x2 no MRZ found; +1 checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2013 `boxed` specimen added 2026-09-04 parses as TD3 but fails checksums |
 | IDN | Indonesia | Passport | MISS (x2, checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | IRN | Iran | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | IRQ | Iraq | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
@@ -216,7 +216,7 @@ row for the exact breakdown.
 | LTU | Lithuania | -- | No specimen yet | -- |
 | LUX | Luxembourg | ID card | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MLT | Malta | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| MDA | Moldova | -- | No specimen yet | -- |
+| MDA | Moldova | Passport | HIT (x2 of 3) | Manifest regeneration, 2026-09-04. 2023 and the 2014 `wide` crop read checksum-valid; the tighter 2014 crop of the same document does not. |
 | MCO | Monaco | ID card, Passport | HIT (passport) + ID card no MRZ found | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | MNE | Montenegro | -- | No specimen yet | -- |
 | NLD | Netherlands | Driving license (no MRZ), Passport | HIT (passport) + driving license not wired | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
