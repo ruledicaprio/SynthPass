@@ -177,3 +177,78 @@ the hit rate. But the cleaner end state is **both variants**, so the sequencing 
 measure, then flip the default once — rather than flipping twice.
 
 Until then the stage remains **default-off** and costs nothing.
+
+---
+
+# Both variants, 2026-09-04 — 114/229, and a correction to the section above
+
+`TextureMode::On` now emits **two** trailing variants, `plain_band` then `texture_variants`
+(`MAX_RETRY_VARIANTS` 9 → 10). Three arms from one CUDA binary
+`sha256 8cf806b5be6dbc4a3c469f0ca3c14aa16d5ca3abad70c9d4802430623de58f7d`, 78 / 81 / 84 minutes.
+
+| arm | Tier-1 hits | rate | `checksum_failed` | `no_mrz_found` |
+| :-- | --: | --: | --: | --: |
+| `off` | 111/229 | 48.5% | 70 | 48 |
+| `control` (`plain_band` only) | 112/229 | 48.9% | 71 | 46 |
+| `on` (both) | **114/229** | **50.0%** | 69 | 46 |
+
+**Decision rule satisfied** — `on (114) > control (112) >= off (111)` — with **zero** hit→miss
+flips in any pairwise comparison. Net **+3 documents over baseline**, and the two treatments
+compose exactly as predicted rather than interfering:
+
+```
+off -> on:       GAIN Argentina_Passport_Specimen_P0_ARG_2026_mrz      (was checksum_failed)
+                 GAIN Portugal_Passport_Specimen_PC_PRT_2012_mrz       (was checksum_failed)
+                 GAIN Switzerland_Passport_Specimen_PM_CHE_2022_mrz    (was checksum_failed)
+off -> control:  GAIN Switzerland only
+control -> on:   GAIN Argentina, Portugal
+```
+
+The `on` arm takes the union of what each variant recovers alone, and loses nothing. `off` and
+`control` also reproduced the previous night's 111 and 112 exactly, on a different binary — the
+pipeline's determinism is doing real work for the credibility of a 3-document delta.
+
+## Correction: the "different miss classes" claim above is wrong
+
+The 2026-09-04 section above concluded that `plain_band` fixes *detection* failures
+(`no_mrz_found`) while the median fixes *recognition* failures (`checksum_failed`). **That was
+inferred from the aggregate miss-kind counts, and the per-document data does not support it.**
+
+`control`'s `no_mrz_found` count drops by 2, but not because two documents were recovered. Two
+documents *changed miss class while still missing*:
+
+```
+Bosnia_and_Herzegovina_ID_Specimen_front_no_mrz   no_mrz_found -> checksum_failed
+Peru_Passport_Specimen_P0_PER_XXXX_redacted_mrz   no_mrz_found -> checksum_failed
+```
+
+Switzerland — the document `plain_band` actually recovers — was `checksum_failed` in `off`, not
+`no_mrz_found`. **All three gained documents, from both variants, are `checksum_failed` → hit.**
+
+So the real mechanism is narrower and less tidy: both variants address the *same* miss class, and
+they are complementary because they fail on different documents, not because they target different
+failure modes. `plain_band` leaves the guilloche in place and happens to give `ocrs` a crop it
+reads correctly on Switzerland; the median removes the guilloche and wins on Argentina and
+Portugal. Which one works on a given document is not currently predictable — which is precisely
+why running both, checksum-arbitrated, is the right design rather than choosing between them.
+
+**The lesson worth keeping: an aggregate miss-kind delta is not a mechanism.** Two documents moving
+between miss buckets produced a count change indistinguishable from two recoveries, and the story
+built on it survived a PR review. Read the flip lists.
+
+## A second-order effect worth watching, not acting on
+
+The same two documents moving `no_mrz_found` → `checksum_failed` means the extra trailing pass
+produced **MRZ-shaped text on documents that have no valid MRZ** — one of them
+(`..._front_no_mrz`) a negative control by name. Both remain misses, which is the correct outcome,
+and the checksum still rejects them; no arm produced a false positive. But the direction is the one
+to watch: this stage makes it *easier* to find MRZ-shaped text, and the check digits are the only
+thing standing between that and a fabricated read. The 42-negative false-positive guard in
+`mrz_corpus.rs` remains the right place to catch it, and still reports zero.
+
+## Default flipped
+
+On this evidence `TextureMode::On` is now the default; `SYNTHPASS_OCR_TEXTURE=off` restores the
+baseline and `control` remains for future A/Bs. Cost is one or two extra `ocrs` passes on
+documents that have already failed nine variants — paid only on the failure path, since the retry
+loop breaks on the first checksum-valid read.

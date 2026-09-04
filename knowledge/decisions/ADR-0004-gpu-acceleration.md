@@ -335,6 +335,19 @@ person doesn't re-derive it):
   name only, not `--features`, which `cargo clean` does not accept) is
   required after any toolkit change, not just a plain rebuild.
 
+**The 2.5x is a claim about LLM generation, not about a benchmark run
+(clarified 2026-09-04).** Both figures in the table above measure work that is
+almost entirely token generation, which is what the GPU accelerates. Generalising
+them to *wall-clock on any run that happens to invoke the LLM* is wrong, and was
+gotten wrong in practice: a three-arm `provider-bench --real-specimens` A/B was
+predicted at 40-50 min/arm from the 2.5x and came in at **81-85 min, roughly 16%
+faster than its CPU baseline**. The reason is that `provider-bench` has no
+`--providers` filter, so every run also executes the full deterministic Tier-1
+OCR path over every document — pure CPU, untouched by this feature, and on that
+corpus the dominant cost. Budget CPU time for real-specimen runs regardless of
+GPU; expect the 2.5x only where generation dominates, as in `parity.rs`. See
+`knowledge/benchmarks/texture-suppression-ab-2026-09-03.md`.
+
 **Where GPU numbers are recorded (added 2026-09-02).** The figures above lived
 only in this document, as prose. They now have a home in the normal benchmark
 pipeline: `./scripts/run-bench.ps1 -Track <real-specimen track> -Cuda` builds

@@ -185,11 +185,22 @@ corrupt binarization, and removing it really does recover documents — just not
 documents reaching variant 9 have already survived eight treatments.
 
 **The `control` arm found something better than the treatment did.** `plain_band` — the untreated
-crop used purely as a placebo — fixes a *different* miss class (`no_mrz_found`, i.e. detection)
-where the median fixes `checksum_failed` (recognition), and the two currently **compete for the
-same variant slot**. Running both, as variants 9 and 10, is the actual next step. A control arm
-added to isolate a confound turned out to be the most informative arm in the experiment, which is
-an argument for keeping placebo arms even when they feel like overhead.
+crop used purely as a placebo — recovers a document the median does not, and the two were
+**competing for the same variant slot**. Running both, as variants 9 and 10, was the actual next
+step; it landed on 2026-09-04 and reached **114/229 (50.0%)**, taking the union of what each
+recovers alone with zero regressions. A control arm added to isolate a confound turned out to be
+the most informative arm in the experiment, which is an argument for keeping placebo arms even
+when they feel like overhead.
+
+**Correction, 2026-09-04.** This section originally said `plain_band` fixes a *different miss
+class* — `no_mrz_found`, i.e. detection — where the median fixes `checksum_failed`. That was
+inferred from the aggregate miss-kind counts and is **wrong**. The per-document data shows all
+three recovered documents were `checksum_failed` → hit; the apparent `no_mrz_found -2` was two
+*still-missing* documents changing miss class. Both variants address the same failure mode and are
+complementary only because they succeed on different documents — which is a weaker, less
+satisfying claim, and the one the data actually supports. An aggregate delta is not a mechanism;
+the flip list is. Full detail in
+[`../benchmarks/texture-suppression-ab-2026-09-03.md`](../benchmarks/texture-suppression-ab-2026-09-03.md).
 
 ## Why this might not work
 
