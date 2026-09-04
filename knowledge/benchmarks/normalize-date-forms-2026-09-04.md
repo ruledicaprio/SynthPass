@@ -6,6 +6,29 @@ Fixing the two parsing gaps moves overall Tier-2 field accuracy from **48.1% to
 52.5%** (156 → 170 of 324 scored comparisons) with no prompt change, no
 `PROMPT_VERSION` bump, and no model involved.
 
+## Confirmed by a full run
+
+Predicted offline by replaying the previous run's raw answers through the new
+normalizer, then **confirmed by a full parity run on the same corpus and model**
+(`qwen2.5-1.5b-instruct-q4_k_m`, greedy, ~35 min):
+
+| | baseline | with the fix | Δ |
+| :-- | --: | --: | --: |
+| reviewed (9 fields, 18 docs) | 78/162 — 48.1% | 85/162 — 52.5% | +7 |
+| derived (3 fields, 54 docs) | 78/162 — 48.1% | 85/162 — 52.5% | +7 |
+| legacy 7-field over reviewed | 54/126 — 42.9% | 61/126 — 48.4% | +7 |
+| **overall** | **156/324 — 48.1%** | **170/324 — 52.5%** | **+14** |
+
+The replay predicted 14 and the run produced 14, split evenly across two fixture
+sets that share only three scored fields. Both halves moving by the same amount
+is what a date-only change should look like — the derived set scores
+`document_number` and the two dates, so two of its three fields are exactly the
+ones touched.
+
+This is also the fourth time this harness has reproduced a number exactly across
+runs (the 2026-09-02 and 2026-09-04 baselines agreed at 43/162 before the
+normalization fix rebased them). Treat a small delta from it as real.
+
 ## How this was found — and what it says about the next piece of work
 
 This started as the first step of `VIZ_TIER2_DESIGN.md` §2.3 ("ask narrowly").

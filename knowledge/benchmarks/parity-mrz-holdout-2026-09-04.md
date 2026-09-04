@@ -123,6 +123,16 @@ than the model:
 | holdout, as first reported | 34/162 — 21.0% | 39/162 — 24.1% | 30/126 — 23.8% |
 | **holdout, corrected** | **64/162 — 39.5%** | **72/162 — 44.4%** | **45/126 — 35.7%** |
 
+**Superseded later the same day for the baseline arm.** Two printed date forms
+the normalizer had been discarding were added, and the baseline arm re-ran at
+**85/162 — 52.5%** on reviewed, **85/162 — 52.5%** on derived, **61/126 —
+48.4%** legacy. Nothing about the model changed; see
+[normalize-date-forms-2026-09-04.md](normalize-date-forms-2026-09-04.md). **The
+holdout arm has not been re-measured against that change**, so the ~8.6pp
+holdout gap above is computed from a baseline that has since moved and should
+not be quoted until both arms are re-run together — which is this file's own
+standing rule: a change that moves only one arm is suspect.
+
 Per field, baseline arm:
 
 | field | as first reported | corrected |
