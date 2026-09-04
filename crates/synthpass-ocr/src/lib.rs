@@ -108,9 +108,9 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// blind-crop, one full-page, three trailing isolated-band),
 /// `preprocess::geometry_band_variants` appends at most 2 more (trailing
 /// again, and only when the geometry-detected band differs from the blind
-/// crop), and one texture-suppression pass trails all of those when
-/// `SYNTHPASS_OCR_TEXTURE` enables it, so the worst case is 6 + 2 + 1 =
-/// [`MAX_RETRY_VARIANTS`] retry variants plus the general pass: **10**.
+/// crop), and two texture-suppression passes trail all of those when
+/// `SYNTHPASS_OCR_TEXTURE` enables them, so the worst case is 6 + 2 + 2 =
+/// [`MAX_RETRY_VARIANTS`] retry variants plus the general pass: **11**.
 /// Note the retry loop seeds its counter at 1
 /// for the *first* variant and breaks on `passes_run >= max_passes`, so the
 /// number of variants that can actually run is `max_passes - 1` — an
@@ -125,13 +125,14 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 
 /// Worst-case number of retry variants: `preprocess::mrz_variants`'s 6, plus
-/// `preprocess::geometry_band_variants`'s 2, plus the 1 trailing
-/// texture-suppression pass (`preprocess::texture_variants`, or its placebo —
-/// both produce exactly one, so the worst case is the same either way; see
-/// [`trailing_texture_mode`]). Single-sourced with [`DEFAULT_MAX_PASSES`]
-/// above so the budget and the variant count cannot drift apart silently —
-/// see that constant's doc comment.
-const MAX_RETRY_VARIANTS: usize = 9;
+/// `preprocess::geometry_band_variants`'s 2, plus the 2 trailing
+/// texture-suppression passes ([`TextureMode::On`] emits `plain_band` *and*
+/// `preprocess::texture_variants`, measured to recover different miss classes;
+/// the [`TextureMode::Control`] placebo emits only the first, so `On` is the
+/// worst case — see [`trailing_texture_mode`]). Single-sourced with
+/// [`DEFAULT_MAX_PASSES`] above so the budget and the variant count cannot
+/// drift apart silently — see that constant's doc comment.
+const MAX_RETRY_VARIANTS: usize = 10;
 
 /// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock ceiling on the whole
 /// `recognize` call when the env var is unset or invalid. Measured
@@ -421,7 +422,21 @@ impl NativeOcr {
         let texture_mode = trailing_texture_mode();
         let texture_variants = std::iter::once_with(|| match texture_mode {
             TextureMode::Off => Vec::new(),
-            TextureMode::On => preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER),
+            // Two variants, not one, and the order is deliberate. The
+            // 2026-09-04 real-specimen A/B found that these fix *different*
+            // miss classes — `plain_band` recovers `no_mrz_found` (a detection
+            // failure) while the median recovers `checksum_failed` (a
+            // recognition failure) — and that running only one of them made
+            // them compete for a single trailing slot, so each arm lost the
+            // documents the other would have caught. `plain_band` goes first
+            // because it is the cheaper of the two (a crop and an upscale, no
+            // per-pixel window sort), and on a document that validates from it
+            // the median is never built at all.
+            TextureMode::On => {
+                let mut variants = vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)];
+                variants.extend(preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER));
+                variants
+            }
             // Placebo. `plain_band` is the untreated band crop, and its own
             // doc comment records that it is deliberately kept out of
             // `mrz_variants` because `ocrs` normalizes internally and an
@@ -833,12 +848,19 @@ enum TextureMode {
     /// No trailing pass at all — behaviour identical to before the stage
     /// existed. The measurement baseline.
     Off,
-    /// [`preprocess::texture_variants`], the real treatment.
+    /// The real treatment: `preprocess::plain_band` followed by
+    /// [`preprocess::texture_variants`]. Two passes, because the 2026-09-04
+    /// real-specimen A/B measured them recovering disjoint miss classes.
     On,
-    /// A **placebo**: one extra trailing pass carrying the same pass-budget
-    /// and text-accumulation pressure as [`On`](Self::On), with no new pixel
-    /// maths — `preprocess::plain_band`, the one band treatment already
-    /// measured as inert on `ocrs`.
+    /// A **placebo**: one extra trailing pass carrying pass-budget and
+    /// text-accumulation pressure with no new pixel maths —
+    /// `preprocess::plain_band`, the one band treatment already measured as
+    /// inert on `ocrs`.
+    ///
+    /// Note this is no longer a *pass-count* match for [`On`](Self::On), which
+    /// now emits two. That is deliberate: `On`'s first variant is exactly this
+    /// one, so `control` is the arm that isolates what the median filter adds
+    /// on top of `plain_band` — the question the next measurement is asking.
     Control,
 }
 
@@ -1211,12 +1233,15 @@ mod tests {
             "a geometry band distinct from the blind crop should add both treatments"
         );
 
-        // The trailing texture pass, which chains after everything above.
-        let texture = preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER);
+        // The two trailing texture passes, which chain after everything above.
+        // This mirrors `TextureMode::On`'s construction in `recognize_detailed`
+        // exactly, including the order.
+        let mut texture = vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)];
+        texture.extend(preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER));
         assert_eq!(
             texture.len(),
-            1,
-            "texture suppression contributes exactly one trailing variant"
+            2,
+            "the enabled texture stage contributes exactly two trailing variants"
         );
 
         let all_variants: Vec<_> = blind
