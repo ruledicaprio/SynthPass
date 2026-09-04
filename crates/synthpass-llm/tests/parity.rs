@@ -13,22 +13,34 @@
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
 //!
-//! Measured baseline, 2026-09-02, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
-//! **reviewed 43/162 (26.5%) over 18 documents, derived 47/162 (29.0%) over
-//! 54.** The two sets agree closely on the one field they both score
-//! (`document_number`: 50% reviewed, 54% derived), which is the check that the
-//! generated half behaves like the hand-verified half rather than being easier.
-//! Per-field numbers and the full record are in `knowledge/ROADMAP.md`.
+//! Measured baseline, 2026-09-04, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
+//! **reviewed 78/162 (48.1%) over 18 documents, derived 78/162 (48.1%) over
+//! 54.** Full record, including the MRZ-holdout arm, in
+//! `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`.
 //!
-//! Two of the nine fields are weak for a reason worth reading before treating
-//! them as model failure: `document_type` scores 6% because the model answers
-//! `"PASSPORT"` where the MRZ says `"P"`, and `issuing_country` 22% because it
-//! answers `"CROATIA"` where the MRZ says `"HRV"`. Those are format
-//! disagreements, not wrong answers, and they are exactly what the narrow-ask
-//! work in `knowledge/VIZ_TIER2_DESIGN.md` §2.3 addresses — the prompt never
-//! says which form it wants. The harness deliberately does **not** normalise
-//! them away: doing so would raise the number without changing what the
-//! pipeline actually receives.
+//! # Normalize before comparing, or this harness lies
+//!
+//! This file previously scored the model's raw output and recorded 26.5% —
+//! about 20 points low. Its own doc comment argued for that, and the argument
+//! was wrong in one specific way worth preserving:
+//!
+//! > *The harness deliberately does not normalise them away: doing so would
+//! > raise the number without changing what the pipeline actually receives.*
+//!
+//! The pipeline **does** normalise. `synthpass_core::normalize::extraction`
+//! runs on every Tier-2 result in both `process_document` and
+//! `process_document_stream`, so `"PASSPORT"` reaches a caller as `"P"` and
+//! `"CROATIA"` as `"HRV"`. Declining to normalise here did not measure the
+//! shipped path more honestly — it measured a value the product never emits,
+//! and reported failures that do not exist. The false premise came from
+//! `normalize.rs`'s own module header, which still claimed it was "not wired
+//! into the pipeline" long after it was.
+//!
+//! So: normalise both sides, exactly as production does, and let the remaining
+//! disagreements be real ones. The four fields no normaliser touches
+//! (`document_number`, `surname`, `given_names`, `sex`) scored identically
+//! before and after the fix, which is the control that proves this changed the
+//! measurement rather than the answer.
 //!
 //! # Two fixture sets, because ground truth is not uniform
 //!
@@ -174,26 +186,24 @@ fn fixtures() -> Vec<Fixture> {
     out
 }
 
+/// Case- and whitespace-insensitive comparison of two already-normalized
+/// values.
+///
+/// This used to carry a local `normalize_date` handling only `DD.MM.YYYY`,
+/// which made the harness score a *less* normalized value than production
+/// emits: `synthpass_core::normalize::extraction` runs on every Tier-2 result
+/// in both pipeline paths, and the harness did not run it at all. Measured
+/// over the 72-fixture corpus, 64% of date mismatches were the correct date in
+/// a format the local helper could not read — the harness was reporting model
+/// failures that the shipped product does not have. The fix is at the call
+/// site (normalize the extraction, exactly as the pipeline does); what remains
+/// here is only the trivial case/whitespace fold.
 fn normalize(s: &str) -> String {
     s.trim().to_uppercase()
 }
 
-/// `DD.MM.YYYY` -> `YYYY-MM-DD`, the model's favorite date rendering vs. the
-/// fixtures' ISO form. Falls back to the input unchanged if it isn't that shape.
-fn normalize_date(s: &str) -> String {
-    let parts: Vec<&str> = s.trim().split('.').collect();
-    if let [d, m, y] = parts[..] {
-        if d.len() <= 2 && m.len() <= 2 && y.len() == 4 {
-            return format!("{y}-{m:0>2}-{d:0>2}");
-        }
-    }
-    normalize(s)
-}
-
-fn fields_match(a: Option<&str>, b: Option<&str>, field: CoreField) -> bool {
-    let is_date = matches!(field, CoreField::DateOfBirth | CoreField::DateOfExpiry);
+fn fields_match(a: Option<&str>, b: Option<&str>, _field: CoreField) -> bool {
     match (a, b) {
-        (Some(a), Some(b)) if is_date => normalize_date(a) == normalize_date(b),
         (Some(a), Some(b)) => normalize(a) == normalize(b),
         (None, None) => true,
         _ => false,
@@ -592,8 +602,14 @@ fn native_llm_field_accuracy_over_sample_set() {
             .expect("fixture is a JSON object")
             .entry("extraction_method")
             .or_insert_with(|| "mrz-deterministic".into());
-        let expected: Extraction =
+        let mut expected: Extraction =
             serde_json::from_value(expected_value).expect("fixture parses as Extraction");
+        // Normalized on both sides, so a fixture written in a slightly
+        // different-but-equivalent form cannot score as a model error. The
+        // normalizer is idempotent (`normalize::date_is_idempotent` and
+        // friends), so this is a no-op on a fixture already in canonical form
+        // — which every generated one is.
+        synthpass_core::normalize::extraction(&mut expected);
 
         // Holdout: remove the MRZ the ground truth came from, so the model is
         // scored on what it can recover from the visual zone alone.
@@ -615,7 +631,13 @@ fn native_llm_field_accuracy_over_sample_set() {
             markdown
         };
 
-        let actual = llm.extract(&markdown, None).expect("extraction succeeds");
+        let mut actual = llm.extract(&markdown, None).expect("extraction succeeds");
+        // Both pipeline entry points call this on every Tier-2 result before
+        // anything downstream sees it (`synthpass-pipeline/src/lib.rs`), so a
+        // harness that skipped it would be scoring a value the product never
+        // emits. Measuring anything other than what ships is the one way this
+        // number can be confidently wrong.
+        synthpass_core::normalize::extraction(&mut actual);
 
         // Field lookup goes through the v2 lift so this file holds no third
         // copy of the `CoreField` -> struct-field mapping.
@@ -696,18 +718,22 @@ fn native_llm_field_accuracy_over_sample_set() {
     // Two floors, because the two sets ask different questions and pooling them
     // would let a large easy set hide a regression in a small hard one.
     //
-    // Both sit far below the measured baseline (26.5% / 29.0%, recorded in
-    // `knowledge/ROADMAP.md`), and that distance is deliberate. These catch a
-    // *broken* prompt or a repair-JSON bug — failures that take the rate to
-    // near zero — not drift. `knowledge/technical_debt.md` reached the same
-    // conclusion from the other direction: "a single pass/fail at a 25% floor
-    // would not have caught anything here either. Recording the rate over time
-    // is the more valuable half."
+    // Both sit far below the measured baseline (48.1% / 48.1%, recorded in
+    // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`), and that
+    // distance is deliberate. These catch a *broken* prompt or a repair-JSON
+    // bug — failures that take the rate to near zero — not drift.
+    // `knowledge/technical_debt.md` reached the same conclusion from the other
+    // direction: "a single pass/fail at a 25% floor would not have caught
+    // anything here either. Recording the rate over time is the more valuable
+    // half."
     //
-    // The old floor was 0.25 against a then-measured 35.7% over seven fields.
-    // Keeping 0.25 while widening the scored set to nine would have *tightened*
-    // the gate by accident — 26.5% leaves it barely two fields of headroom on a
-    // 162-field denominator, which is a tripwire, not a floor.
+    // The floor was lowered 0.25 -> 0.15 when the scored set widened from seven
+    // fields to nine, against a then-measured 26.5%. That measurement was an
+    // artifact of this harness not normalizing (see the module docs); the real
+    // rate was 48.1% all along, so the headroom the lower floor was buying was
+    // never as thin as it looked. Left at 0.15 regardless: nothing here argues
+    // for a tighter gate, and a floor that tracks the current number upward
+    // stops being a floor and becomes a ratchet.
     if holdout {
         println!(
             "\nholdout: {holdout_removed} MRZ-derived line(s) stripped across \

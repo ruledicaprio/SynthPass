@@ -1,5 +1,12 @@
 # Tier-2 parity under MRZ holdout, 2026-09-04
 
+> **Superseded the same day — the numbers below were measured by a harness that
+> did not normalize the model's output, while both pipeline entry points do.
+> They understate the shipped product by roughly 20 percentage points.** The
+> corrected run is in the second half of this file; read it first. The original
+> is kept because its *relative* finding (holding out the MRZ costs ~5pp)
+> survived the correction, and because the defect is worth not repeating.
+
 The "before" required by [`../VIZ_TIER2_DESIGN.md`](../VIZ_TIER2_DESIGN.md) §5.3, and the first
 measurement of the escalation case described in §5.2.
 
@@ -94,3 +101,97 @@ What it does change is the expected size of the prize. The holdout gap is small,
 holdout gap* is not the goal worth chasing — **raising both arms together** is. A VIZ cleaning pass
 that helps the escalation case should show up in the baseline arm too, and if it only moves the
 holdout number, that is a signal to be suspicious of it.
+
+---
+
+# Corrected run, 2026-09-04 — the harness was scoring something we do not ship
+
+Same binary discipline, same 72 fixtures, same model. Two changes, both in the measurement rather
+than the model:
+
+1. **The harness now calls `synthpass_core::normalize::extraction` on the model's output**, which
+   both `synthpass-pipeline` entry points already do on every Tier-2 result. It previously called
+   nothing, relying on a local `normalize_date` that understood only `DD.MM.YYYY`.
+2. **`normalize::date` learned named months** — `"14 OCT /OUT 2000"` → `"2000-10-14"` — the
+   bilingual rendering travel documents actually print. This one is a production change, not a
+   harness change: it improves what ships.
+
+| arm | reviewed (9 fields) | derived (3 check-digited) | legacy 7-field |
+| :-- | --: | --: | --: |
+| baseline, as first reported | 43/162 — 26.5% | 47/162 — 29.0% | 38/126 — 30.2% |
+| **baseline, corrected** | **78/162 — 48.1%** | **78/162 — 48.1%** | **54/126 — 42.9%** |
+| holdout, as first reported | 34/162 — 21.0% | 39/162 — 24.1% | 30/126 — 23.8% |
+| **holdout, corrected** | **64/162 — 39.5%** | **72/162 — 44.4%** | **45/126 — 35.7%** |
+
+Per field, baseline arm:
+
+| field | as first reported | corrected |
+| :-- | --: | --: |
+| `document_number` | 38/72 (53%) | 38/72 (53%) |
+| `date_of_birth` | 11/72 (15%) | **36/72 (50%)** |
+| `date_of_expiry` | 15/72 (21%) | **34/72 (47%)** |
+| `document_type` | 1/18 (6%) | **12/18 (67%)** |
+| `issuing_country` | 4/18 (22%) | **12/18 (67%)** |
+| `nationality` | 4/18 (22%) | **7/18 (39%)** |
+| `surname` | 5/18 (28%) | 5/18 (28%) |
+| `given_names` | 7/18 (39%) | 7/18 (39%) |
+| `sex` | 5/18 (28%) | 5/18 (28%) |
+
+## What was actually wrong
+
+Nothing about the model changed. Every gain above is a value the model had already extracted
+correctly and the harness then marked wrong for its *format*:
+
+- **Dates** — the model reads `"14 OCT /OUT 2000"`; the fixture holds `"2000-10-14"`. 64% of date
+  mismatches in the original run were of exactly this shape.
+- **`document_type` and `issuing_country`** — the model answers `PASSPORT` and `CROATIA`;
+  `normalize::document_type` and `normalize::country_code` map those to `P` and `HRV` in
+  production, and the harness never ran them.
+
+The fields that did not move — `document_number`, `surname`, `given_names`, `sex` — are the ones
+where no normalizer applies, and their numbers were correct all along. That is the useful control
+built into this result: a normalization defect should leave exactly those untouched, and it did.
+
+## Why this was hard to see
+
+`knowledge/prompts/README.md` requires a measurement per `PROMPT_VERSION` bump. But
+`PROMPT_VERSION` and `prompt_digest` cover the compiled-in *template* only — the digest is computed
+with `{content}` empty, deliberately. **Anything that changes the content the model is given, or
+the post-processing applied to what it returns, is invisible to that mechanism.** The parity
+harness's own divergence from the pipeline was in precisely that blind spot, and sat there across
+several prompt versions.
+
+The general form: this project guards the prompt skeleton by digest and the deterministic path by
+checksum, and the Tier-2 *pre- and post-processing* by neither. The parity harness is the only
+instrument that would ever show it, which is an argument for keeping it faithful to the pipeline
+by construction rather than by resemblance.
+
+## What survived the correction
+
+The original run's *relative* finding holds and is, if anything, sharper: holding the MRZ out costs
+**8.6 percentage points** on reviewed fixtures (48.1% → 39.5%), against ~5pp measured wrongly.
+Tier 2 still is not MRZ-carried — but the VIZ-only escalation case now measures 39.5%, not 21.0%,
+which is a materially different starting point for the §2 work.
+
+## What this says about VIZ_TIER2_DESIGN §2.1
+
+§2.1 ("clean the visual zone") was the next planned piece of work, on the strength of a measured
+median 23.7% noise-line fraction. Two measurements taken before writing any of it argue against:
+
+- That fraction is over **geometry-detected lines** (`OcrPage.lines`). The model receives
+  `NativeOcr`'s whole-page text, a different artifact. Applying the survey's own noise predicate to
+  the markdown, with the MRZ guard it requires, drops **61 of 2970 lines (2.1%)** — nearly all of
+  them single characters like `?`, `$`, `(`.
+- **Every scored field is already present in the OCR text**, 97-100% of fixtures (dates 72/72 once
+  looked for as MRZ `YYMMDD` rather than ISO). Cleaning cannot help a model that already has the
+  value in front of it.
+
+Two traps found in the same pass, worth recording because the naive implementation hits both:
+the survey's `≤2 non-whitespace characters` rule deletes **31 lines that are exactly a ground-truth
+value** (`M`, `F`, `P`, `PP` — `sex` and `document_type` are scored fields), and its
+`≥50% non-alphanumeric` rule deletes **54 MRZ lines**, because `<` filler is not alphanumeric. The
+survey applies that rule only to lines that are not MRZ-shaped; that guard is the entire thing.
+
+§2.1 is therefore **deferred, not rejected** — image-level cleaning ahead of the general OCR pass
+is untested and is a different proposition from line filtering. What is refuted is text-level
+line-dropping, which is what "clean" would most naturally have been built as.
