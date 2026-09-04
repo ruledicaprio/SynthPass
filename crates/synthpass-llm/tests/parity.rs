@@ -13,22 +13,34 @@
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
 //!
-//! Measured baseline, 2026-09-02, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
-//! **reviewed 43/162 (26.5%) over 18 documents, derived 47/162 (29.0%) over
-//! 54.** The two sets agree closely on the one field they both score
-//! (`document_number`: 50% reviewed, 54% derived), which is the check that the
-//! generated half behaves like the hand-verified half rather than being easier.
-//! Per-field numbers and the full record are in `knowledge/ROADMAP.md`.
+//! Measured baseline, 2026-09-04, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
+//! **reviewed 78/162 (48.1%) over 18 documents, derived 78/162 (48.1%) over
+//! 54.** Full record, including the MRZ-holdout arm, in
+//! `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`.
 //!
-//! Two of the nine fields are weak for a reason worth reading before treating
-//! them as model failure: `document_type` scores 6% because the model answers
-//! `"PASSPORT"` where the MRZ says `"P"`, and `issuing_country` 22% because it
-//! answers `"CROATIA"` where the MRZ says `"HRV"`. Those are format
-//! disagreements, not wrong answers, and they are exactly what the narrow-ask
-//! work in `knowledge/VIZ_TIER2_DESIGN.md` §2.3 addresses — the prompt never
-//! says which form it wants. The harness deliberately does **not** normalise
-//! them away: doing so would raise the number without changing what the
-//! pipeline actually receives.
+//! # Normalize before comparing, or this harness lies
+//!
+//! This file previously scored the model's raw output and recorded 26.5% —
+//! about 20 points low. Its own doc comment argued for that, and the argument
+//! was wrong in one specific way worth preserving:
+//!
+//! > *The harness deliberately does not normalise them away: doing so would
+//! > raise the number without changing what the pipeline actually receives.*
+//!
+//! The pipeline **does** normalise. `synthpass_core::normalize::extraction`
+//! runs on every Tier-2 result in both `process_document` and
+//! `process_document_stream`, so `"PASSPORT"` reaches a caller as `"P"` and
+//! `"CROATIA"` as `"HRV"`. Declining to normalise here did not measure the
+//! shipped path more honestly — it measured a value the product never emits,
+//! and reported failures that do not exist. The false premise came from
+//! `normalize.rs`'s own module header, which still claimed it was "not wired
+//! into the pipeline" long after it was.
+//!
+//! So: normalise both sides, exactly as production does, and let the remaining
+//! disagreements be real ones. The four fields no normaliser touches
+//! (`document_number`, `surname`, `given_names`, `sex`) scored identically
+//! before and after the fix, which is the control that proves this changed the
+//! measurement rather than the answer.
 //!
 //! # Two fixture sets, because ground truth is not uniform
 //!
@@ -706,18 +718,22 @@ fn native_llm_field_accuracy_over_sample_set() {
     // Two floors, because the two sets ask different questions and pooling them
     // would let a large easy set hide a regression in a small hard one.
     //
-    // Both sit far below the measured baseline (26.5% / 29.0%, recorded in
-    // `knowledge/ROADMAP.md`), and that distance is deliberate. These catch a
-    // *broken* prompt or a repair-JSON bug — failures that take the rate to
-    // near zero — not drift. `knowledge/technical_debt.md` reached the same
-    // conclusion from the other direction: "a single pass/fail at a 25% floor
-    // would not have caught anything here either. Recording the rate over time
-    // is the more valuable half."
+    // Both sit far below the measured baseline (48.1% / 48.1%, recorded in
+    // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`), and that
+    // distance is deliberate. These catch a *broken* prompt or a repair-JSON
+    // bug — failures that take the rate to near zero — not drift.
+    // `knowledge/technical_debt.md` reached the same conclusion from the other
+    // direction: "a single pass/fail at a 25% floor would not have caught
+    // anything here either. Recording the rate over time is the more valuable
+    // half."
     //
-    // The old floor was 0.25 against a then-measured 35.7% over seven fields.
-    // Keeping 0.25 while widening the scored set to nine would have *tightened*
-    // the gate by accident — 26.5% leaves it barely two fields of headroom on a
-    // 162-field denominator, which is a tripwire, not a floor.
+    // The floor was lowered 0.25 -> 0.15 when the scored set widened from seven
+    // fields to nine, against a then-measured 26.5%. That measurement was an
+    // artifact of this harness not normalizing (see the module docs); the real
+    // rate was 48.1% all along, so the headroom the lower floor was buying was
+    // never as thin as it looked. Left at 0.15 regardless: nothing here argues
+    // for a tighter gate, and a floor that tracks the current number upward
+    // stops being a floor and becomes a ratchet.
     if holdout {
         println!(
             "\nholdout: {holdout_removed} MRZ-derived line(s) stripped across \
