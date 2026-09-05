@@ -123,6 +123,54 @@ than the model:
 | holdout, as first reported | 34/162 — 21.0% | 39/162 — 24.1% | 30/126 — 23.8% |
 | **holdout, corrected** | **64/162 — 39.5%** | **72/162 — 44.4%** | **45/126 — 35.7%** |
 
+**Superseded later the same day for the baseline arm.** Two printed date forms
+the normalizer had been discarding were added, and the baseline arm re-ran at
+**85/162 — 52.5%** on reviewed, **85/162 — 52.5%** on derived, **61/126 —
+48.4%** legacy. Nothing about the model changed; see
+[normalize-date-forms-2026-09-04.md](normalize-date-forms-2026-09-04.md).
+
+**Holdout re-measured 2026-09-05, and both arms moved together.** This file's
+standing rule — *a change that moves only one arm is suspect* — is satisfied:
+
+| arm | pre-#206 | post-#206 | Δ fields |
+| :-- | --: | --: | --: |
+| baseline reviewed | 78/162 (48.1%) | 85/162 (52.5%) | +7 |
+| holdout reviewed | 64/162 (39.5%) | **70/162 (43.2%)** | +6 |
+| holdout derived | 72/162 (44.4%) | **83/162 (51.2%)** | +11 |
+| holdout legacy 7-field | 45/126 (35.7%) | **51/126 (40.5%)** | +6 |
+
+The date normalizer is not a baseline-only artifact: it helps the escalation
+case as much as the easy one, which is what a *deterministic* fix should do and
+what a prompt-shaped one might not have.
+
+**Demonyms, 2026-09-05, both arms again** (vocabulary `74aee114001a9ed2`):
+
+| arm | post-#206 | with demonyms | Δ fields |
+| :-- | --: | --: | --: |
+| baseline reviewed | 85/162 (52.5%) | **95/162 (58.6%)** | +10 |
+| holdout reviewed | 70/162 (43.2%) | **78/162 (48.1%)** | +8 |
+| holdout legacy 7-field | 51/126 (40.5%) | **56/126 (44.4%)** | +5 |
+
+Holdout reviewed now equals what the *baseline* was on 2026-09-04. Both derived
+figures are unchanged in both arms, which is the control: derived fixtures score
+only the check-digited fields, so a change to `nationality`/`issuing_country`
+cannot move them — and did not.
+
+The holdout gap widened slightly (8.6pp → 9.3pp on reviewed) because the
+baseline gained marginally more — expected, since a fixture whose MRZ is
+stripped has fewer printed dates left to read.
+
+> **Provenance, recorded because it nearly went unrecorded.** These holdout
+> numbers came out of a run whose *baseline* arm was invalid: the runner's build
+> had failed and it silently re-used the previous binary. That made the run
+> useless for the change it was launched to measure (country demonyms) and
+> exactly right for this one, since the stale binary was post-#206/pre-demonym.
+> The incident is why `normalize::vocabulary_fingerprint()` and
+> `scripts/measure-parity.sh` now exist — see
+> [normalize-country-demonyms-2026-09-05.md](normalize-country-demonyms-2026-09-05.md).
+> Any run logged without a `normalizer vocabulary:` line predates that guard and
+> cannot prove which code produced it.
+
 Per field, baseline arm:
 
 | field | as first reported | corrected |

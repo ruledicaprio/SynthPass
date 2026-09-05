@@ -415,3 +415,19 @@ reading the printed date correctly while `normalize::date` discarded it** —
 built in issue #102 is unmeasurable on this corpus by construction. Full
 writeup, including the 56 date misses that are genuine model errors:
 [normalize-date-forms-2026-09-04.md](normalize-date-forms-2026-09-04.md).
+
+### 2026-09-05 — demonyms, and a replay harness for vocabulary changes
+
+The same per-field classification, applied to the non-date misses, **refuted two of three
+candidates before any code was written**: `sex` misses carry no foreign-language words at all
+(6 of 13 are the model answering `M` for `F` — a directional bias, not vocabulary), and
+`document_type` misses are a representation disagreement between the fixture's 2-char MRZ code
+and the normalizer's single letter. The one real gap was adjectival country forms —
+`mrz::code_for_name` holds `Canada`, never `CANADIAN`. Six entries recovered **10 fields,
+52.5% → 55.6%, zero regressions**:
+[normalize-country-demonyms-2026-09-05.md](normalize-country-demonyms-2026-09-05.md).
+
+That writeup also documents `vocab_replay`, which re-scores a finished parity log against the
+current normalizers in under a second — and the accept rule it enforces (**≥1 miss→hit and 0
+hit→miss**), whose useful side effect is that vocabulary no document exercises cannot enter the
+codebase, whatever proposed it.

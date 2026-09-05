@@ -13,10 +13,31 @@
 //! equality per file. A regression that tanks the match rate is the signal to
 //! watch for — not any single field on any single document.
 //!
-//! Measured baseline, 2026-09-04, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min:
-//! **reviewed 78/162 (48.1%) over 18 documents, derived 78/162 (48.1%) over
-//! 54.** Full record, including the MRZ-holdout arm, in
+//! Measured baseline, 2026-09-05, `qwen2.5-1.5b-instruct-q4_k_m`, ~31 min,
+//! vocabulary `74aee114001a9ed2`: **reviewed 95/162 (58.6%) over 18 documents,
+//! derived 85/162 (52.5%) over 54** — 180/324 overall. Full record, including
+//! the MRZ-holdout arm, in
 //! `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`.
+//!
+//! The climb, on one corpus and one model, with nothing about the model
+//! changing at any step:
+//!
+//! | date | baseline | what moved |
+//! | :-- | --: | :-- |
+//! | 2026-09-04 | 26.5% | *(artifact — this harness was not normalizing)* |
+//! | 2026-09-04 | 48.1% | the harness started normalizing, as production does |
+//! | 2026-09-04 | 52.5% | `normalize::date` learned two printed forms |
+//! | 2026-09-05 | 55.6% | `normalize::country_code` learned demonyms |
+//!
+//! Every number is quoted rather than replaced: a baseline that silently
+//! tracks the current figure upward stops being a baseline.
+//!
+//! **The `normalizer vocabulary:` line this test prints is load-bearing.** A
+//! run whose fingerprint matches an earlier run compiled the same vocabulary,
+//! whatever the working tree says — see
+//! `synthpass_core::normalize::vocabulary_fingerprint`, which exists because a
+//! runner once reported two complete arms against a stale binary and nothing in
+//! 55 minutes of output revealed it.
 //!
 //! # Normalize before comparing, or this harness lies
 //!
@@ -563,6 +584,25 @@ fn native_llm_field_accuracy_over_sample_set() {
          regenerates it"
     );
 
+    // Says which code produced the numbers below. On 2026-09-05 a runner whose
+    // build had failed fell back to the previous binary and reported two full
+    // arms against stale code — ~55 minutes of output that looked entirely
+    // normal, caught only by comparing two sha256 files by hand. A run whose
+    // fingerprint matches an older one used the same vocabulary, whatever the
+    // working tree says.
+    //
+    // `PROMPT_VERSION`/`prompt_digest` cannot cover this: that digest is taken
+    // over the template with `{content}` empty, so it fingerprints what the
+    // model is *asked* and nothing about the normalizers applied to what it
+    // answers — which is where this project's last two accuracy changes landed.
+    println!(
+        "normalizer vocabulary: {}   prompt: {} v{}   fixtures: {}",
+        synthpass_core::normalize::vocabulary_fingerprint(),
+        synthpass_llm::prompt::PROMPT_ID,
+        synthpass_llm::prompt::PROMPT_VERSION,
+        fixtures.len()
+    );
+
     let holdout = holdout_enabled();
     let mut holdout_removed = 0usize;
     let mut holdout_leaks = 0usize;
@@ -718,7 +758,7 @@ fn native_llm_field_accuracy_over_sample_set() {
     // Two floors, because the two sets ask different questions and pooling them
     // would let a large easy set hide a regression in a small hard one.
     //
-    // Both sit far below the measured baseline (48.1% / 48.1%, recorded in
+    // Both sit far below the measured baseline (58.6% / 52.5%, recorded in
     // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`), and that
     // distance is deliberate. These catch a *broken* prompt or a repair-JSON
     // bug — failures that take the rate to near zero — not drift.

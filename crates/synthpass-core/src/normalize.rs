@@ -30,8 +30,15 @@
 /// uses, so this can never drift from what the rest of the workspace
 /// considers a valid code. A string that already looks like a valid code (3
 /// ASCII letters, or the legacy single-letter `"D"`) passes through
-/// unchanged except for uppercasing. Anything unresolved passes through
-/// unchanged, verbatim.
+/// unchanged except for uppercasing.
+///
+/// Failing that, the string's individual tokens are checked against
+/// [`DEMONYMS`] — a document prints `CANADIAN/CANADIENNE` where its MRZ says
+/// `CAN`, and no country *name* table can resolve that. That fallback runs
+/// only after [`mrz::code_for_name`] has declined, so it can never override
+/// the shared table.
+///
+/// Anything still unresolved passes through unchanged, verbatim.
 pub fn country_code(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -40,7 +47,10 @@ pub fn country_code(input: &str) -> String {
     if looks_like_a_code(trimmed) {
         return trimmed.to_uppercase();
     }
-    match mrz::code_for_name(trimmed) {
+    if let Some(code) = mrz::code_for_name(trimmed) {
+        return code.to_string();
+    }
+    match code_from_demonym_tokens(trimmed) {
         Some(code) => code.to_string(),
         None => trimmed.to_string(),
     }
@@ -48,6 +58,73 @@ pub fn country_code(input: &str) -> String {
 
 fn looks_like_a_code(s: &str) -> bool {
     (s.len() == 3 && s.chars().all(|c| c.is_ascii_alphabetic())) || s.eq_ignore_ascii_case("D")
+}
+
+/// Adjectival and demonym forms of country names, as printed in a document's
+/// visual zone, mapped to the ICAO/ISO code its MRZ carries.
+///
+/// **Not a second country-name table.** [`mrz::code_for_name`] owns names and
+/// is consulted first; this covers only the forms a *name* table cannot hold —
+/// `CANADIAN` for Canada, `ESPANOLA` for Spain, `HRVATSKO` for Croatia. A
+/// passport prints the demonym far more often than the noun.
+///
+/// **Every entry here was observed in this corpus, and the table as a whole is
+/// proved by a measurement.** Each token appears verbatim in a real Tier-2
+/// answer, and together they flip 10 answers from miss to hit against
+/// `crates/synthpass-llm/tests/parity.rs` while flipping none the other way.
+/// See `knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md` for the
+/// accept rule.
+///
+/// The obvious sibling forms — `CROATIAN`, `SPANISH`, `SLOVAQUE`, `SRPSKO` —
+/// are deliberately **absent**. They are surely correct, and that is not the
+/// bar: no document here prints them, so nothing measures them, and a table
+/// that grows by guessing is one nobody can audit later. `country_code`'s
+/// caller loses nothing by passing an unresolved string through, and a
+/// plausible-looking wrong code is worse than an unresolved one. Add a form
+/// when a specimen prints it.
+///
+/// Diacritics are stored **stripped** because the recogniser drops them: a
+/// document printing `ESPAÑOLA` reaches this table as `ESPANOLA`. That is also
+/// why `SLOVENSKA` is absent — Slovakia's `SLOVENSKÁ` and Slovenia's
+/// `SLOVENSKA` differ by exactly the accent OCR discards, so the two collapse
+/// onto one token that would name the wrong country half the time.
+///
+/// Laid out one country per line, like [`MONTH_NAMES`] and for the same reason:
+/// grouping is what makes a missing or misfiled form visible in review.
+#[rustfmt::skip]
+const DEMONYMS: &[(&str, &str)] = &[
+    ("CANADIAN", "CAN"), ("CANADIENNE", "CAN"),
+    ("HRVATSKO", "HRV"),
+    ("SERBIAN", "SRB"),
+    ("SLOVAK", "SVK"),
+    ("ESPANOLA", "ESP"),
+];
+
+/// The single country named by `s`'s tokens, or `None` when none is named
+/// **or** two tokens name different countries.
+///
+/// Whole-token, never substring — the same rule and the same reasoning as
+/// [`month_from_named_tokens`], which this mirrors deliberately. A document
+/// prints its nationality bilingually (`CANADIAN/CANADIENNE`), so several
+/// tokens naming the *same* country is the normal case and is accepted; tokens
+/// naming *different* countries mean the string was misread or is not a single
+/// nationality, and that returns `None` rather than picking one.
+fn code_from_demonym_tokens(s: &str) -> Option<&'static str> {
+    let mut found: Option<&'static str> = None;
+    for token in s.split(|c: char| !c.is_ascii_alphabetic()) {
+        if token.is_empty() {
+            continue;
+        }
+        let upper = token.to_ascii_uppercase();
+        let Some((_, code)) = DEMONYMS.iter().find(|(name, _)| *name == upper) else {
+            continue;
+        };
+        match found {
+            Some(existing) if existing != *code => return None,
+            _ => found = Some(code),
+        }
+    }
+    found
 }
 
 /// Normalize `Extraction::issuing_country`. See [`country_code`].
@@ -392,12 +469,28 @@ fn valid_date(y: u32, m: u32, d: u32) -> bool {
 /// value to `X`).
 pub fn sex(input: &str) -> String {
     let upper = input.trim().to_uppercase();
-    match upper.as_str() {
-        "MALE" => "M".to_string(),
-        "FEMALE" => "F".to_string(),
-        "UNSPECIFIED" | "UNKNOWN" | "OTHER" => "X".to_string(),
-        _ => upper,
-    }
+    lookup(SEX_FORMS, &upper).unwrap_or(upper)
+}
+
+/// Long `sex` forms and their ICAO codes.
+///
+/// A table rather than `match` arms so [`vocabulary_fingerprint`] can hash the
+/// vocabulary this module dispatches on. Arms cannot be hashed, and a
+/// fingerprint that silently omitted half the vocabulary would be worse than
+/// none — it would certify runs it never covered.
+#[rustfmt::skip]
+const SEX_FORMS: &[(&str, &str)] = &[
+    ("MALE", "M"),
+    ("FEMALE", "F"),
+    ("UNSPECIFIED", "X"), ("UNKNOWN", "X"), ("OTHER", "X"),
+];
+
+/// Exact, already-uppercased lookup shared by [`sex`] and [`document_type`].
+fn lookup(table: &[(&str, &'static str)], upper: &str) -> Option<String> {
+    table
+        .iter()
+        .find(|(form, _)| *form == upper)
+        .map(|(_, code)| (*code).to_string())
 }
 
 /// Normalize `Extraction::document_type` to the ICAO 9303 single-letter
@@ -405,12 +498,96 @@ pub fn sex(input: &str) -> String {
 /// their code; anything else is uppercased and passed through unchanged.
 pub fn document_type(input: &str) -> String {
     let upper = input.trim().to_uppercase();
-    match upper.as_str() {
-        "PASSPORT" => "P".to_string(),
-        "IDENTITY CARD" | "ID CARD" | "NATIONAL IDENTITY CARD" | "NATIONAL ID" => "I".to_string(),
-        "VISA" => "V".to_string(),
-        _ => upper,
+    lookup(DOCUMENT_TYPE_FORMS, &upper).unwrap_or(upper)
+}
+
+/// Long `document_type` forms and their ICAO codes. A table for the same
+/// reason as [`SEX_FORMS`].
+#[rustfmt::skip]
+const DOCUMENT_TYPE_FORMS: &[(&str, &str)] = &[
+    ("PASSPORT", "P"),
+    ("IDENTITY CARD", "I"), ("ID CARD", "I"),
+    ("NATIONAL IDENTITY CARD", "I"), ("NATIONAL ID", "I"),
+    ("VISA", "V"),
+];
+
+/// Short digest of every vocabulary table this module dispatches on:
+/// [`MONTH_NAMES`], [`DEMONYMS`], [`SEX_FORMS`] and [`DOCUMENT_TYPE_FORMS`].
+///
+/// # Why this exists
+///
+/// A measurement has to be able to say which code produced it. On 2026-09-05 a
+/// parity run reported two full arms of numbers against a **stale binary**: the
+/// build had failed with `LNK1104`, the runner fell back to the previous
+/// executable, and ~55 minutes of output looked entirely normal. The numbers
+/// were real, reproducible, and answered a question nobody had asked. Comparing
+/// two `sha256` files by hand is what caught it.
+///
+/// `synthpass_llm::prompt::PROMPT_VERSION` and its `prompt_digest` cannot cover
+/// this and never could: that digest is computed over the prompt template with
+/// `{content}` empty, so it fingerprints what the model is *asked* and nothing
+/// about the normalizers that post-process what it *answers* — which is where
+/// the last two accuracy changes on this project actually landed. This is the
+/// other half of that guard.
+///
+/// # What it deliberately does not cover
+///
+/// Not a hash of this file: a comment edit would churn it and train everyone to
+/// ignore the line. It answers exactly one question — *which vocabulary was
+/// compiled into this binary* — so a run whose fingerprint matches an older run
+/// used the same vocabulary, whatever else changed. Parsing *logic* changes
+/// (the positional date reader, say) do not move it, and a change to those
+/// still needs its own measurement.
+///
+/// Stable across calls and across processes: it hashes compiled-in data in
+/// declaration order, with no clock, environment or allocation order involved.
+pub fn vocabulary_fingerprint() -> String {
+    use std::fmt::Write;
+
+    // Each table is labelled, so moving an entry between tables changes the
+    // digest even if the entry itself is untouched.
+    let mut buf = String::new();
+    buf.push_str("months\n");
+    for (name, month) in MONTH_NAMES {
+        let _ = writeln!(buf, "{name}={month}");
     }
+    buf.push_str("demonyms\n");
+    for (name, code) in DEMONYMS {
+        let _ = writeln!(buf, "{name}={code}");
+    }
+    buf.push_str("sex\n");
+    for (form, code) in SEX_FORMS {
+        let _ = writeln!(buf, "{form}={code}");
+    }
+    buf.push_str("doctype\n");
+    for (form, code) in DOCUMENT_TYPE_FORMS {
+        let _ = writeln!(buf, "{form}={code}");
+    }
+    format!("{:016x}", fnv1a64(buf.as_bytes()))
+}
+
+/// FNV-1a, 64-bit — the hash behind [`vocabulary_fingerprint`].
+///
+/// **Not [`crate::audit::sha256_hex`]**, deliberately, though that would
+/// otherwise be the obvious reuse. `audit` is gated behind this crate's
+/// `security` feature, and a fingerprint whose whole job is to make a stale
+/// build visible must not itself vanish in some build configuration — least of
+/// all the bare `cargo test -p synthpass-core` one, where no other guard is
+/// watching either.
+///
+/// The strength difference does not matter for this use. Nothing adversarial
+/// touches a compiled-in constant table; the property needed is "changes when
+/// the data changes, identical everywhere otherwise", which FNV-1a has and
+/// which needs no dependency to get.
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for b in bytes {
+        hash ^= u64::from(*b);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
 }
 
 /// Apply every per-field normalizer above to a full [`crate::Extraction`]
@@ -489,6 +666,198 @@ mod tests {
     #[test]
     fn issuing_country_and_nationality_are_the_same_normalizer() {
         assert_eq!(issuing_country("Croatia"), nationality("Croatia"));
+    }
+
+    // ── demonyms ──
+
+    /// Every case here is a real Tier-2 answer from the 2026-09-04 parity run
+    /// that the pipeline passed through unresolved. See
+    /// `knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md`.
+    #[test]
+    fn nationality_reads_a_demonym_as_printed_in_a_visual_zone() {
+        assert_eq!(nationality("CANADIAN/CANADIENNE"), "CAN");
+        assert_eq!(nationality("Serbian"), "SRB");
+        assert_eq!(nationality("SLOVAK"), "SVK");
+        assert_eq!(nationality("HRVATSKO"), "HRV");
+        assert_eq!(nationality("ESPANOLA"), "ESP");
+        // A whole phrase, where only one token names a country.
+        assert_eq!(
+            issuing_country("SLOVENSK? REPUBLIKA / SLOVAK REPUBLIC/"),
+            "SVK"
+        );
+    }
+
+    #[test]
+    fn nationality_leaves_a_string_naming_two_countries_alone() {
+        // Two different countries named means the string was misread or is not
+        // one nationality. Passing it through beats picking one — the same
+        // contract the named-month parser follows.
+        assert_eq!(nationality("ESPANOLA CANADIAN"), "ESPANOLA CANADIAN");
+    }
+
+    #[test]
+    fn country_code_still_prefers_the_shared_mrz_table() {
+        // The demonym fallback runs only after `mrz::code_for_name` declines,
+        // so a plain country name resolves through the shared table exactly as
+        // before this table existed.
+        assert_eq!(country_code("Canada"), "CAN");
+        assert_eq!(country_code("Croatia"), "HRV");
+        assert_eq!(country_code("Spain"), "ESP");
+        // And an already-valid code is still returned untouched.
+        assert_eq!(country_code("hrv"), "HRV");
+    }
+
+    #[test]
+    fn country_code_leaves_an_unknown_string_verbatim() {
+        // The OCR-corrupted misses this table deliberately does *not* chase:
+        // approximate country matching is a different, riskier mechanism.
+        for raw in ["CYPRIO", "ESPANOEA", "Meurowonuires pobenk"] {
+            assert_eq!(country_code(raw), raw, "{raw:?} must pass through");
+        }
+    }
+
+    #[test]
+    fn demonyms_are_unique_and_do_not_shadow_the_country_name_table() {
+        for (i, (name, code)) in DEMONYMS.iter().enumerate() {
+            assert!(
+                name.chars().all(|c| c.is_ascii_uppercase()),
+                "{name:?} must be stored uppercase and diacritic-free — the \
+                 recogniser drops accents, so an accented entry can never match"
+            );
+            assert!(
+                mrz::country_name(code).is_some(),
+                "{name:?} maps to {code:?}, which is not a code this workspace knows"
+            );
+            // A token naming two countries would resolve to whichever came
+            // first in the table — silently, and differently after a reorder.
+            if let Some((dupe, other)) = DEMONYMS
+                .iter()
+                .skip(i + 1)
+                .find(|(n, c)| n == name && c != code)
+            {
+                panic!("{dupe:?} maps to both {code:?} and {other:?}");
+            }
+            // Shadowing is harmless today (the name table is consulted first)
+            // but means the entry is dead weight, and a dead entry is one
+            // nobody re-checks when the shared table changes underneath it.
+            assert!(
+                mrz::code_for_name(name).is_none(),
+                "{name:?} is already resolved by mrz::code_for_name — drop it here"
+            );
+        }
+    }
+
+    #[test]
+    fn slovenska_is_deliberately_absent() {
+        // Slovakia's SLOVENSKÁ and Slovenia's SLOVENSKA differ by exactly the
+        // accent OCR discards, so one token would name the wrong country half
+        // the time. This asserts the omission is a decision, not an oversight.
+        for (name, _) in DEMONYMS {
+            assert_ne!(
+                *name, "SLOVENSKA",
+                "SLOVENSKA collapses Slovakia and Slovenia once accents are \
+                 dropped — see DEMONYMS' doc comment"
+            );
+        }
+    }
+
+    #[test]
+    fn country_code_is_idempotent_over_demonyms() {
+        for raw in ["CANADIAN/CANADIENNE", "SLOVAK", "CYPRIO", ""] {
+            let once = country_code(raw);
+            assert_eq!(country_code(&once), once, "country_code on {raw:?}");
+        }
+    }
+
+    // ── vocabulary fingerprint ──
+
+    #[test]
+    fn vocabulary_fingerprint_is_stable_across_calls() {
+        // It is quoted in benchmark writeups and compared between runs, so a
+        // value that varied within one process would be worse than useless.
+        let a = vocabulary_fingerprint();
+        assert_eq!(a, vocabulary_fingerprint());
+        assert_eq!(a.len(), 16, "quoted in prose — keep it short and fixed");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn vocabulary_fingerprint_covers_every_table_it_claims_to() {
+        // The digest is built from four labelled tables. This reproduces that
+        // construction and asserts a change to *each* one moves the result —
+        // a fingerprint that silently omitted a table would certify runs it
+        // never covered, which is the exact failure it exists to prevent.
+        fn digest(
+            months: &[(&str, u32)],
+            demonyms: &[(&str, &str)],
+            sex: &[(&str, &str)],
+            doctype: &[(&str, &str)],
+        ) -> String {
+            use std::fmt::Write;
+            let mut buf = String::new();
+            buf.push_str("months\n");
+            for (n, m) in months {
+                let _ = writeln!(buf, "{n}={m}");
+            }
+            buf.push_str("demonyms\n");
+            for (n, c) in demonyms {
+                let _ = writeln!(buf, "{n}={c}");
+            }
+            buf.push_str("sex\n");
+            for (n, c) in sex {
+                let _ = writeln!(buf, "{n}={c}");
+            }
+            buf.push_str("doctype\n");
+            for (n, c) in doctype {
+                let _ = writeln!(buf, "{n}={c}");
+            }
+            format!("{:016x}", fnv1a64(buf.as_bytes()))
+        }
+
+        let real = digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS);
+        assert_eq!(
+            real,
+            vocabulary_fingerprint(),
+            "this test's copy of the construction has drifted from the real one"
+        );
+
+        let mut months = MONTH_NAMES.to_vec();
+        months.push(("THERMIDOR", 11));
+        assert_ne!(
+            real,
+            digest(&months, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS)
+        );
+
+        let mut demonyms = DEMONYMS.to_vec();
+        demonyms.push(("RURITANIAN", "HRV"));
+        assert_ne!(
+            real,
+            digest(MONTH_NAMES, &demonyms, SEX_FORMS, DOCUMENT_TYPE_FORMS)
+        );
+
+        let mut sex = SEX_FORMS.to_vec();
+        sex.push(("INDETERMINATE", "X"));
+        assert_ne!(
+            real,
+            digest(MONTH_NAMES, DEMONYMS, &sex, DOCUMENT_TYPE_FORMS)
+        );
+
+        let mut doctype = DOCUMENT_TYPE_FORMS.to_vec();
+        doctype.push(("RESIDENCE PERMIT", "I"));
+        assert_ne!(real, digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, &doctype));
+    }
+
+    #[test]
+    fn sex_and_document_type_tables_are_what_the_functions_actually_use() {
+        // The tables exist so the fingerprint can hash them; if a function
+        // stopped reading its table the digest would keep certifying a
+        // vocabulary the code no longer applies.
+        for (form, code) in SEX_FORMS {
+            assert_eq!(&sex(form), code, "sex({form:?})");
+        }
+        for (form, code) in DOCUMENT_TYPE_FORMS {
+            assert_eq!(&document_type(form), code, "document_type({form:?})");
+        }
     }
 
     // ── given_names ──
