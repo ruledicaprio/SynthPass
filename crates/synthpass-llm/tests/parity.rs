@@ -595,8 +595,17 @@ fn native_llm_field_accuracy_over_sample_set() {
     // over the template with `{content}` empty, so it fingerprints what the
     // model is *asked* and nothing about the normalizers applied to what it
     // answers — which is where this project's last two accuracy changes landed.
+    //
+    // `log-format` is a separate number from all of the above: it versions the
+    // *shape* of the `field expected=… actual=… OK|MISMATCH` lines below, which
+    // `crates/synthpass-bench/examples/vocab_replay.rs` parses with hand-written
+    // string splitting and no shared struct with this file. Bump
+    // `PARITY_LOG_FORMAT_VERSION` (here) and `vocab_replay.rs`'s matching
+    // constant together whenever that line shape changes, so a replay against a
+    // log from before the change fails loudly instead of silently mis-parsing.
+    const PARITY_LOG_FORMAT_VERSION: u32 = 1;
     println!(
-        "normalizer vocabulary: {}   prompt: {} v{}   fixtures: {}",
+        "normalizer vocabulary: {}   log-format: {PARITY_LOG_FORMAT_VERSION}   prompt: {} v{}   fixtures: {}",
         synthpass_core::normalize::vocabulary_fingerprint(),
         synthpass_llm::prompt::PROMPT_ID,
         synthpass_llm::prompt::PROMPT_VERSION,
