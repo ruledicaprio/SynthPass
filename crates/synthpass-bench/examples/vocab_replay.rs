@@ -50,7 +50,12 @@
 //!
 //! Reads the log named on the command line (a run captured with `--nocapture`),
 //! re-scores every comparison it contains, and prints the flips in both
-//! directions. Exits 1 if any hit became a miss.
+//! directions. Exits 1 if any hit became a miss. Exits 2 (before parsing
+//! anything) if the log has no `log-format:` marker in its
+//! `normalizer vocabulary: …` header line, or one this parser doesn't
+//! understand — see [`check_log_format`] — since `comparison`/`optional`
+//! below have no shared struct with `parity.rs` and would otherwise
+//! mis-parse a log whose line shape had changed rather than failing loudly.
 
 use std::collections::BTreeMap;
 
@@ -78,6 +83,11 @@ fn main() {
             std::process::exit(2);
         }
     };
+
+    if let Err(e) = check_log_format(&text) {
+        eprintln!("{path}: {e}");
+        std::process::exit(2);
+    }
 
     let comparisons = parse(&text);
     if comparisons.is_empty() {
@@ -199,6 +209,43 @@ fn elide(s: &str, max: usize) -> String {
     s.chars().take(max.saturating_sub(1)).collect::<String>() + "…"
 }
 
+/// The `log-format` value this parser understands — must match
+/// `crates/synthpass-llm/tests/parity.rs`'s `PARITY_LOG_FORMAT_VERSION`. That
+/// constant's doc comment is the other half of this contract: bump both
+/// together whenever the `field expected=… actual=… OK|MISMATCH` line shape
+/// changes, since `comparison`/`optional` below parse that shape with
+/// hand-written string splitting and no shared struct with `parity.rs`.
+const EXPECTED_LOG_FORMAT_VERSION: u32 = 1;
+
+/// Find and validate the `log-format: N` marker in `parity.rs`'s run header
+/// (`"normalizer vocabulary: … log-format: … prompt: …"`), so a log from
+/// before that marker existed — or one printed by a version of `parity.rs`
+/// whose line shape this parser no longer matches — is refused up front
+/// rather than silently mis-parsed or silently dropped to zero comparisons.
+fn check_log_format(text: &str) -> Result<(), String> {
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("normalizer vocabulary:"))
+        .ok_or(
+            "no 'normalizer vocabulary:' header line found in this log — it predates the \
+             log-format guard and cannot be trusted to parse correctly",
+        )?;
+    let version: u32 = line
+        .split("log-format:")
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| format!("header line has no parseable 'log-format: N' marker: {line:?}"))?;
+    if version != EXPECTED_LOG_FORMAT_VERSION {
+        return Err(format!(
+            "log format {version} does not match the {EXPECTED_LOG_FORMAT_VERSION} this parser \
+             understands — the line shape this tool parses probably changed; update this file's \
+             `optional`/`comparison` alongside it"
+        ));
+    }
+    Ok(())
+}
+
 /// Pull every comparison line out of a `--nocapture` parity log, attributing
 /// each to the document header (`--- [n/m] <stem> (reviewed|derived) ... ---`)
 /// that most recently preceded it.
@@ -261,12 +308,45 @@ fn comparison(line: &str, document: &str) -> Option<Comparison> {
 /// and whatever sits between them is the value — including a `")` the document
 /// itself printed. `Option<Option<_>>` because "this is not a field" and "this
 /// field is absent" are different answers.
+///
+/// `parity.rs` prints these values with `{:?}` (Debug), which escapes an
+/// embedded `"` as `\"` — so the text between the stripped delimiters is not
+/// the raw value yet, and [`unescape_debug`] reverses exactly that.
 fn optional(s: &str) -> Option<Option<String>> {
     if s == "None" {
         return Some(None);
     }
     let inner = s.strip_prefix("Some(\"")?.strip_suffix("\")")?;
-    Some(Some(inner.to_string()))
+    Some(Some(unescape_debug(inner)))
+}
+
+/// Reverse Rust's `{:?}` Debug-string escaping: `\"` -> `"`, `\\` -> `\`.
+///
+/// [`optional`] isolates exactly the slice between a `Some("` / `")`
+/// wrapper's delimiters, so this is the only escaping that slice can contain
+/// — `parity.rs` prints single OCR/LLM field values, never a string with a
+/// newline or tab a Debug-escaped log would need `\n`/`\t` to represent.
+/// Without this, a genuine hit on a document whose value contains a quote
+/// (e.g. `O" NEIL`) replays with a stray backslash still in it, comparing
+/// unequal to the unescaped original and misreporting a hit as a new miss.
+fn unescape_debug(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some(escaped @ ('"' | '\\')) => out.push(escaped),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -293,12 +373,38 @@ mod tests {
     }
 
     #[test]
-    fn a_value_containing_a_quote_is_not_truncated() {
-        // Real OCR noise contains quotes. Splitting on the first `")` would cut
-        // the value short and quietly change what is being replayed.
-        let line = "  surname          expected=Some(\"A\") actual=Some(\"O\") NEIL\") MISMATCH";
+    fn a_value_containing_a_debug_escaped_quote_is_unescaped() {
+        // Real OCR/LLM output can contain a literal `"`. `parity.rs` prints
+        // with `{:?}` (Debug), which escapes it as `\"` — this is the shape a
+        // real log line actually has; a raw, unescaped embedded quote (what
+        // this test used before) is not something `{:?}` ever produces.
+        let line = r#"  surname          expected=Some("A") actual=Some("O\" NEIL") MISMATCH"#;
         let c = comparison(line, "doc").expect("parses");
-        assert_eq!(c.actual.as_deref(), Some("O\") NEIL"));
+        assert_eq!(c.actual.as_deref(), Some("O\" NEIL"));
+    }
+
+    #[test]
+    fn unescape_debug_reverses_quote_and_backslash_escaping() {
+        assert_eq!(unescape_debug(r#"O\" NEIL"#), "O\" NEIL");
+        assert_eq!(unescape_debug(r"back\\slash"), r"back\slash");
+        assert_eq!(unescape_debug("plain"), "plain");
+    }
+
+    #[test]
+    fn check_log_format_accepts_the_current_version() {
+        let text = "normalizer vocabulary: abc123   log-format: 1   prompt: x v1   fixtures: 72\n";
+        assert!(check_log_format(text).is_ok());
+    }
+
+    #[test]
+    fn check_log_format_rejects_a_log_that_predates_the_marker() {
+        assert!(check_log_format("no header here at all\n").is_err());
+    }
+
+    #[test]
+    fn check_log_format_rejects_a_mismatched_version() {
+        let text = "normalizer vocabulary: abc123   log-format: 99   prompt: x v1   fixtures: 72\n";
+        assert!(check_log_format(text).is_err());
     }
 
     #[test]
