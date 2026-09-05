@@ -212,3 +212,26 @@ are hand-writable in minutes, and a 1.5B instruct model is an unreliable multili
 lexicographer precisely on the uncommon countries where a human would also want to check. Its
 only real use is generalising beyond the corpus — and by the accept rule above, those are
 exactly the entries no measurement can support.
+
+## The scaling question a review raised, and where the answer already lives
+
+An ultra code review of this work (2026-09-05, after the demonym table shipped) flagged `DEMONYMS`
+as a hand-grown, one-entry-per-specimen list with no mechanism to grow it beyond linear human
+attention per new corpus country. That is a fair description of the *table*, but not of the
+tooling around it: `crates/synthpass-ocr/examples/mine_country_vocab.rs` already exists, was built
+alongside this work, and is exactly the missing mechanism — a deterministic, non-LLM candidate
+generator over the corpus itself, gated by the same `vocab_replay` accept rule this document
+describes above.
+
+It works by exclusivity, not similarity: a token proposed for code `C` must appear on at least two
+specimens of `C` and on **no** specimen of any other country, which is what separates `ESPANOLA`
+(Spanish documents only) from `PASSPORT` (everywhere) without any edit-distance heuristic that
+would also have to explain why `HRVATSKO` and `Croatia` are the same country despite sharing no
+characters. It proposes; a person still disposes — exclusivity alone also selects `MADRID → ESP`
+and `BUNDESDRUCKEREI → DEU`, which are real, exclusive, and not country names.
+
+**It has not been run against the full corpus yet.** The six entries in `DEMONYMS` today were
+found by hand, before this tool existed. The next concrete step is not "invent a scaling
+mechanism" — it is: run `mine_country_vocab.rs` over the full corpus, read its candidate list,
+and prove whatever looks like a real demonym through `vocab_replay` exactly as the six existing
+entries were proved. That is a data-collection task, not a design one.

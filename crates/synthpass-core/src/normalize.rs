@@ -451,10 +451,12 @@ fn parse_named_month_date_positional(s: &str, role: DateRole) -> Option<(u32, u3
 
 /// Whether `token` is one of [`MONTH_NAMES`], matched whole-token and
 /// case-insensitively — the same rule [`month_from_named_tokens`] applies,
-/// shared so the two cannot disagree about what counts as a month.
+/// shared so the two cannot disagree about what counts as a month. Built on
+/// [`lookup`], the same exact-uppercased-match idiom [`sex`]/[`document_type`]
+/// use over their own tables — a bare presence check, so no `String` gets
+/// allocated for the `u32` month number [`lookup`] finds and discards.
 fn is_a_month_name(token: &str) -> bool {
-    let upper = token.to_ascii_uppercase();
-    MONTH_NAMES.iter().any(|(name, _)| *name == upper)
+    lookup(MONTH_NAMES, &token.to_ascii_uppercase()).is_some()
 }
 
 fn valid_date(y: u32, m: u32, d: u32) -> bool {
@@ -469,7 +471,9 @@ fn valid_date(y: u32, m: u32, d: u32) -> bool {
 /// value to `X`).
 pub fn sex(input: &str) -> String {
     let upper = input.trim().to_uppercase();
-    lookup(SEX_FORMS, &upper).unwrap_or(upper)
+    lookup(SEX_FORMS, &upper)
+        .map(str::to_string)
+        .unwrap_or(upper)
 }
 
 /// Long `sex` forms and their ICAO codes.
@@ -485,12 +489,17 @@ const SEX_FORMS: &[(&str, &str)] = &[
     ("UNSPECIFIED", "X"), ("UNKNOWN", "X"), ("OTHER", "X"),
 ];
 
-/// Exact, already-uppercased lookup shared by [`sex`] and [`document_type`].
-fn lookup(table: &[(&str, &'static str)], upper: &str) -> Option<String> {
+/// Exact, already-uppercased lookup over a `(name, value)` table — shared by
+/// [`sex`]/[`document_type`] (`value: &'static str`, an ICAO code) and
+/// [`is_a_month_name`] (`value: u32`, the month number [`MONTH_NAMES`]
+/// carries). Generic so a bare presence check costs no allocation: `sex`
+/// still maps the `&'static str` result to an owned `String` at its call
+/// site, but [`is_a_month_name`] only needs `.is_some()`.
+fn lookup<T: Copy>(table: &[(&str, T)], upper: &str) -> Option<T> {
     table
         .iter()
         .find(|(form, _)| *form == upper)
-        .map(|(_, code)| (*code).to_string())
+        .map(|(_, value)| *value)
 }
 
 /// Normalize `Extraction::document_type` to the ICAO 9303 single-letter
@@ -498,7 +507,9 @@ fn lookup(table: &[(&str, &'static str)], upper: &str) -> Option<String> {
 /// their code; anything else is uppercased and passed through unchanged.
 pub fn document_type(input: &str) -> String {
     let upper = input.trim().to_uppercase();
-    lookup(DOCUMENT_TYPE_FORMS, &upper).unwrap_or(upper)
+    lookup(DOCUMENT_TYPE_FORMS, &upper)
+        .map(str::to_string)
+        .unwrap_or(upper)
 }
 
 /// Long `document_type` forms and their ICAO codes. A table for the same
