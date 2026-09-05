@@ -235,3 +235,61 @@ found by hand, before this tool existed. The next concrete step is not "invent a
 mechanism" — it is: run `mine_country_vocab.rs` over the full corpus, read its candidate list,
 and prove whatever looks like a real demonym through `vocab_replay` exactly as the six existing
 entries were proved. That is a data-collection task, not a design one.
+
+## Running it: 194 candidates, zero shippable
+
+Ran `mine_country_vocab.rs` over all 168 corpus specimens with a resolvable issuing state
+(release build, single pass) → `artifacts/country-vocab-candidates.tsv`, 194 proposals.
+
+**Most are exactly the false positives the tool's own doc comment warns about.** Exclusivity
+selects a city or a generic word just as readily as a demonym: `MADRID`, `ANKARA`, `BEOGRAD`,
+`BRATISLAVA`, `GATINEAU`, `BEIJING`/`SHANDONG`/`GUANGDONG`, `PYONGYANG`, `LEFKOSIA` are cities;
+`ORNEK` (Turkish "specimen"), `PASPOR`/`PASZPORT` (Indonesian/Polish "passport"), `IMZA` (Turkish
+"signature"), `NAAM`/`HOUDER`/`AFGIFTE` (Dutch "name"/"holder"/"issuance"), `TARIHI`/
+`GECERLILIK`/`KIMLIK` (Turkish "date"/"validity"/"identity"), `RESPUBLIKASI`/`NAZIRLIYI`
+(Azerbaijani "republic"/"ministry"), `VENCIMIENTO` (Spanish "expiry") are generic document
+vocabulary; `SARAH`, `HANNE`, `GEORGIOS`, `ORKHAN`/`ORXAN`, `VIRTANEN`, `ZINONAS`/`ZHNONAS` are
+personal names the corpus happens to concentrate in one country; a cluster of Serbia-only,
+`n=2` tokens (`BARSNON`, `BAXKN`, `CPBIJA`, and a dozen more) is single-template OCR corruption,
+plus `TEST`/`SRBTEST`/`STRNAME` — placeholder text burned into a synthetic specimen, not language
+at all.
+
+The linguistically defensible remainder — a genuine demonym or the country's own name in some
+language, not a city/org/generic noun — comes to 23 tokens across 16 countries: `RUSSIAN` (RUS),
+`CZECH` (CZE), `INDIAN` (IND), `BRITISH` (GBR), `DANSK`/`DANISH`/`DANMARK`/`DANEMARK`/`DANOISE`
+(DNK), `FINLANDE`/`SUOMI` (FIN), `MACEDONIA`/`MACEDOINE`/`MACEDONIAN` (MKD), `CYPRIOT` (CYP),
+`EGYPTIAN` (EGY), `ELLINAS`/`HELLAS`/`HELLENIC` (GRC), `FRANCAISE` (FRA), `BOSNA`/`HERZEGOVINA`
+(BIH), `ISLANDE` (ISL), `KOSOVAR` (RKS), `NEDERLANDEN`/`NEDERLANDSE` (NLD), `POLSKA`/
+`RZECZPOSPOLITA` (POL), and `SRPSKO` (SRB) — the exact sibling form this document's own "what
+was deliberately left out" section named as absent two days ago, because no specimen printed it
+at the time.
+
+**Staged all 23 in `DEMONYMS` and replayed both confirmed post-#208 logs (fingerprint
+`74aee114001a9ed2`): 0/324 change, both arms.** Not a near-miss — none of the 23 tokens appear
+anywhere in either log's text, because the *reviewed* fixture set behind these logs only carries
+ground truth for 11 countries/entities (Canada, Cetis, China, Croatia, Cyprus, Estonia, Serbia,
+Slovakia, Slovenia, Spain, UAE), and on the three where a candidate's country does overlap
+(`SRB`, `CYP`, `ARE`), the model's actual recorded miss is different text entirely: the Cyprus
+fixture's nationality miss is the OCR-corrupted `CYPRIO`, not `CYPRIOT`; the Serbia fixture's
+misses are unrelated garbage strings, not `SRPSKO`; the UAE fixture has no country-field miss to
+flip at all. This is the same "no document exercises it" case the six existing entries were
+already gated by — a candidate this pass found in the *mining* corpus (168 specimens, OCR only)
+is simply invisible to the *measurement* corpus (18 reviewed fixtures) most of the time, because
+the two pools barely overlap. **Nothing shipped from this pass.** The mining tool and the accept
+rule both did their job: they refused 23 plausible-looking entries for lack of evidence rather
+than admit them on vibes.
+
+**Byproduct: a real, unrelated `vocab_replay` bug, found only because this pass replayed the
+holdout log before touching `DEMONYMS`.** `parity.rs`'s `fields_match` folds every field through
+`.trim().to_uppercase()`, but `renormalized()` skipped that fold for `document_number`/`surname`
+(the two fields with no crate normalizer), so a case-only difference (`"Martin"` vs `"MARTIN"`)
+replayed as a false regression with zero vocabulary change involved. Fixed in
+`fix/parity-tooling-hardening`, independent of this document's own findings.
+
+**The actual next step to grow `DEMONYMS` further** is not another mining pass — it is
+broadening the *reviewed* fixture set (the 18 hand-labeled documents that score `nationality`/
+`issuing_country` at all) to carry ground truth for the countries this pass found real candidates
+for: Russia, Czechia, India, the UK, Denmark, Finland, North Macedonia, Egypt, Greece, France,
+Bosnia and Herzegovina, Iceland, Kosovo, the Netherlands, Poland. That is fixture-authoring work
+— finding and reviewing real ground truth for those specimens — not a tooling gap; the tooling
+already proved it can't do anything useful without that ground truth to check candidates against.
