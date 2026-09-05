@@ -46,8 +46,23 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-ARM="${2:-both}"
-[ "${1:-}" = "--arm" ] || ARM="both"
+
+# Every branch below either sets ARM explicitly or exits with the usage
+# message -- there is no path that silently falls back to "both". A prior
+# version assigned ARM from "${2:-both}" before checking that $1 was even
+# "--arm", so both a bare `--arm` (value omitted) and an unrecognized first
+# argument silently ran the full ~1hr two-arm measurement instead of erroring.
+ARM="both"
+if [ "${1:-}" = "--arm" ]; then
+  if [ -z "${2:-}" ]; then
+    echo "usage: $0 [--arm baseline|holdout|both]" >&2
+    exit 2
+  fi
+  ARM="$2"
+elif [ -n "${1:-}" ]; then
+  echo "usage: $0 [--arm baseline|holdout|both]" >&2
+  exit 2
+fi
 case "$ARM" in
   baseline|holdout|both) ;;
   *) echo "usage: $0 [--arm baseline|holdout|both]" >&2; exit 2 ;;
@@ -63,7 +78,19 @@ trap cleanup EXIT
 
 # A running parity binary holds its own .exe open on Windows, which is what
 # makes the next link fail. Refuse rather than produce an unlinkable build.
-if command -v tasklist >/dev/null 2>&1 && tasklist 2>/dev/null | grep -qi "parity-"; then
+#
+# `/FI "IMAGENAME eq parity-*"` asks tasklist itself to filter to that name
+# pattern, rather than grepping "parity-" as a bare substring over the whole
+# process list -- which would false-positive on any unrelated process whose
+# name happens to contain it, and would not distinguish this repo's stale
+# binary from a `parity-*` process elsewhere on the machine. Two quirks this
+# depends on, both confirmed against this project's own Git-Bash-on-Windows
+# environment: `MSYS_NO_PATHCONV=1` stops Git Bash rewriting `/FI` into a
+# filesystem path before tasklist ever sees it, and tasklist's own wildcard
+# support only matches a trailing `*` with nothing after it -- `parity-*.exe`
+# is rejected as an unrecognized filter, `parity-*` is not.
+if command -v tasklist >/dev/null 2>&1 &&
+   MSYS_NO_PATHCONV=1 tasklist /FI "IMAGENAME eq parity-*" 2>/dev/null | grep -qi '^parity-'; then
   echo "a parity binary is still running — wait for it, or the next link fails" >&2
   exit 2
 fi
@@ -77,7 +104,10 @@ cargo test -p synthpass-llm --test parity --release --no-run \
 
 # cargo names its own output. Never `ls -t`: after a failed build that glob
 # returns a *previous* binary and the run silently measures old code.
-BIN=$(python -c '
+#
+# python3, not python: this project's Linux dev container (Ubuntu, used for
+# llama-cpp-2/ocrs builds this script may also run under) ships only python3.
+BIN=$(python3 -c '
 import json,sys
 exe=None
 for line in open(sys.argv[1], encoding="utf-8"):
