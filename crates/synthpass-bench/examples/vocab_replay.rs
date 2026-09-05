@@ -164,7 +164,7 @@ fn main() {
 /// ones it passed through can move.
 fn renormalized(field: &str, value: Option<&str>) -> Option<String> {
     let v = value?;
-    Some(match field {
+    let normalized = match field {
         "issuing_country" => normalize::issuing_country(v),
         "nationality" => normalize::nationality(v),
         "date_of_birth" => normalize::date_of_birth(v),
@@ -175,7 +175,15 @@ fn renormalized(field: &str, value: Option<&str>) -> Option<String> {
         // `document_number` and `surname` have no normalizer, by design — see
         // `normalize::extraction`'s doc comment.
         _ => v.to_string(),
-    })
+    };
+    // `parity.rs`'s `fields_match` folds *every* field through
+    // `.trim().to_uppercase()` on top of whatever normalizer ran, including
+    // the two fields above with none. Skipping that fold here made a
+    // case-only difference (`"Martin"` vs `"MARTIN"`) replay as a false
+    // regression on a value the real harness scores as a hit — caught
+    // replaying `artifacts/parity-holdout-20260905-0919.log` on unmodified
+    // `main`, with no vocabulary change involved at all.
+    Some(normalized.trim().to_uppercase())
 }
 
 fn report(heading: &str, rows: &[&Comparison]) {
@@ -436,6 +444,22 @@ mod tests {
         assert_eq!(
             renormalized("document_number", Some("L898902C3")),
             Some("L898902C3".to_string())
+        );
+    }
+
+    #[test]
+    fn a_field_with_no_normalizer_still_gets_parity_rs_case_fold() {
+        // `parity.rs`'s `fields_match` compares every field through
+        // `.trim().to_uppercase()`, including `surname`/`document_number`,
+        // which have no crate normalizer. A value that is a real hit there
+        // (case-insensitively) must not replay as a miss here.
+        assert_eq!(
+            renormalized("surname", Some("Martin")),
+            renormalized("surname", Some(" MARTIN "))
+        );
+        assert_eq!(
+            renormalized("surname", Some("Martin")),
+            Some("MARTIN".to_string())
         );
     }
 }
