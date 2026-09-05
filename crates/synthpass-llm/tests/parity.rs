@@ -563,6 +563,25 @@ fn native_llm_field_accuracy_over_sample_set() {
          regenerates it"
     );
 
+    // Says which code produced the numbers below. On 2026-09-05 a runner whose
+    // build had failed fell back to the previous binary and reported two full
+    // arms against stale code — ~55 minutes of output that looked entirely
+    // normal, caught only by comparing two sha256 files by hand. A run whose
+    // fingerprint matches an older one used the same vocabulary, whatever the
+    // working tree says.
+    //
+    // `PROMPT_VERSION`/`prompt_digest` cannot cover this: that digest is taken
+    // over the template with `{content}` empty, so it fingerprints what the
+    // model is *asked* and nothing about the normalizers applied to what it
+    // answers — which is where this project's last two accuracy changes landed.
+    println!(
+        "normalizer vocabulary: {}   prompt: {} v{}   fixtures: {}",
+        synthpass_core::normalize::vocabulary_fingerprint(),
+        synthpass_llm::prompt::PROMPT_ID,
+        synthpass_llm::prompt::PROMPT_VERSION,
+        fixtures.len()
+    );
+
     let holdout = holdout_enabled();
     let mut holdout_removed = 0usize;
     let mut holdout_leaks = 0usize;
