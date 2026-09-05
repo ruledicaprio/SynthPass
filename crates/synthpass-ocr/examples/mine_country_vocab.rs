@@ -58,10 +58,14 @@
 //! contended run silently reads *less* text and mines less vocabulary.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use synthpass_ocr::geometry::{self, OcrLine};
 use synthpass_ocr::NativeOcr;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::{repo_root, walk_images};
 
 /// Per-line MRZ-likelihood cutoff, matching `visual_zone_survey.rs` so the two
 /// surveys agree on which lines are the machine-readable zone.
@@ -77,10 +81,14 @@ const MIN_TOKEN_LEN: usize = 4;
 /// is proposed — one appearance is indistinguishable from an OCR artifact.
 const MIN_SPECIMENS: usize = 2;
 
-const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
-
 fn main() {
-    let root = repo_root();
+    let root = match repo_root() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
     let only_dir = flag("--dir");
 
     let by_file = issuing_states(&root.join("samples").join("corpus.jsonl"));
@@ -90,7 +98,7 @@ fn main() {
     );
 
     let mut files = Vec::new();
-    walk(&root.join("samples"), &mut files);
+    walk_images(&root.join("samples"), &mut files);
     files.sort();
     if let Some(dir) = &only_dir {
         files.retain(|p| p.components().any(|c| c.as_os_str() == dir.as_str()));
@@ -98,11 +106,16 @@ fn main() {
     files.retain(|p| basename(p).is_some_and(|f| by_file.contains_key(f)));
     println!("specimens to scan: {}\n", files.len());
 
-    let ocr = NativeOcr::load(
+    let ocr = match NativeOcr::load(
         &root.join("text-detection.rten"),
         &root.join("text-recognition.rten"),
-    )
-    .expect("failed to load OCR models — run from the repo root");
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("failed to load OCR models — run from the repo root: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // token -> country code -> how many distinct specimens showed it.
     let mut seen: BTreeMap<String, BTreeMap<String, usize>> = BTreeMap::new();
@@ -139,8 +152,12 @@ fn main() {
 
     let mut proposals: Vec<(String, String, usize)> = Vec::new();
     for (token, per_country) in &seen {
-        // Exclusive to exactly one country, and seen often enough there.
-        let [(code, count)] = per_country.iter().collect::<Vec<_>>()[..] else {
+        // Exclusive to exactly one country, and seen often enough there. Two
+        // `.next()` calls rather than collecting into a `Vec` just to pattern
+        // -match a single-element slice: cheaper, and needs no unwrap/expect
+        // to prove there is exactly one entry.
+        let mut candidates = per_country.iter();
+        let (Some((code, count)), None) = (candidates.next(), candidates.next()) else {
             continue;
         };
         if *count < MIN_SPECIMENS {
@@ -247,31 +264,4 @@ fn flag(name: &str) -> Option<String> {
     args.iter()
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1).cloned())
-}
-
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk(&path, out);
-        } else if path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()))
-        {
-            out.push(path);
-        }
-    }
-}
-
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf()
 }
