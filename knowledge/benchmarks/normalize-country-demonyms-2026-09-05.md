@@ -114,8 +114,36 @@ riskier mechanism that belongs behind its own measurement.
   the test set. Vocabulary is the safest thing to fit — *"is ESPAÑOLA Spanish for Spanish"* is
   checkable by a person, unlike a tuned threshold — but the hazard is real, and the MRZ-holdout
   arm is the guard.
-- **Not confirmed by a full run yet** at the time of writing. The replay is a prediction until
-  a real parity run agrees with it; expected 180/324.
+## Confirmed by a full run, both arms, 2026-09-05
+
+`scripts/measure-parity.sh`, one binary (`26ee6171…`), vocabulary fingerprint
+**`74aee114001a9ed2`** printed in both logs.
+
+| arm | before | after | Δ |
+| :-- | --: | --: | --: |
+| baseline reviewed (9 fields, 18 docs) | 85/162 (52.5%) | **95/162 (58.6%)** | **+10** |
+| baseline derived (3 fields, 54 docs) | 85/162 (52.5%) | 85/162 (52.5%) | **0** |
+| **baseline overall** | **170/324 (52.5%)** | **180/324 (55.6%)** | **+10** |
+| holdout reviewed | 70/162 (43.2%) | **78/162 (48.1%)** | +8 |
+| holdout derived | 83/162 (51.2%) | 83/162 (51.2%) | **0** |
+| holdout legacy 7-field | 51/126 (40.5%) | **56/126 (44.4%)** | +5 |
+
+**The replay predicted 180/324 and the run produced 180/324** — the same
+technique that predicted 14 for PR #206 and got 14. For a change confined to the
+normalizers, a sub-second replay is now a trustworthy stand-in for a 35-minute
+run. That is the more valuable result here than the ten fields.
+
+**The derived set is the built-in control.** Derived fixtures score only the
+three check-digited fields, and neither `nationality` nor `issuing_country` is
+among them — so a demonym change *cannot* move that number. It did not, in
+either arm. Any movement there would have meant the table was reaching fields it
+has no business touching, exactly as #204's four untouched fields proved that
+change was a measurement fix rather than a flattering number.
+
+**Both arms moved.** Holdout reviewed is now 48.1% — what the *baseline* was two
+days ago. That a demonym helps the escalation case nearly as much as the easy one
+is the expected shape: the adjectival form is printed in the visual zone, which
+is precisely what survives when the MRZ is stripped.
 
 ## The stale-binary incident, and the guard it produced
 

@@ -6,8 +6,9 @@ declines, closes that: tokens are matched whole-word across the whole string, so
 `CANADIAN/CANADIENNE` resolves to `CAN` while a string naming two *different* countries is left
 alone rather than guessed at.
 
-Every entry was observed in a real specimen. Measured on the 2026-09-04 parity corpus: **10
-fields recovered, none lost — 52.5% to 55.6%.** Obvious sibling forms that no document here
+Every entry was observed in a real specimen. Measured on the parity corpus, both arms: **10
+fields recovered, none lost — 52.5% to 55.6% overall, and the MRZ-holdout arm moved with it
+(43.2% to 48.1% on reviewed fixtures).** Obvious sibling forms that no document here
 prints are deliberately absent, as is `SLOVENSKA`, which collapses Slovakia and Slovenia once
 OCR drops the accent that separates them. See
 `knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md`.

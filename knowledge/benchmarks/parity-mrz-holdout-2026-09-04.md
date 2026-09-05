@@ -143,6 +143,19 @@ The date normalizer is not a baseline-only artifact: it helps the escalation
 case as much as the easy one, which is what a *deterministic* fix should do and
 what a prompt-shaped one might not have.
 
+**Demonyms, 2026-09-05, both arms again** (vocabulary `74aee114001a9ed2`):
+
+| arm | post-#206 | with demonyms | Δ fields |
+| :-- | --: | --: | --: |
+| baseline reviewed | 85/162 (52.5%) | **95/162 (58.6%)** | +10 |
+| holdout reviewed | 70/162 (43.2%) | **78/162 (48.1%)** | +8 |
+| holdout legacy 7-field | 51/126 (40.5%) | **56/126 (44.4%)** | +5 |
+
+Holdout reviewed now equals what the *baseline* was on 2026-09-04. Both derived
+figures are unchanged in both arms, which is the control: derived fixtures score
+only the check-digited fields, so a change to `nationality`/`issuing_country`
+cannot move them — and did not.
+
 The holdout gap widened slightly (8.6pp → 9.3pp on reviewed) because the
 baseline gained marginally more — expected, since a fixture whose MRZ is
 stripped has fewer printed dates left to read.
