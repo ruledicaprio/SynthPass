@@ -117,6 +117,63 @@ riskier mechanism that belongs behind its own measurement.
 - **Not confirmed by a full run yet** at the time of writing. The replay is a prediction until
   a real parity run agrees with it; expected 180/324.
 
+## The stale-binary incident, and the guard it produced
+
+The first attempt to confirm the 180/324 **measured the wrong code and said nothing about it.**
+Recorded here in full, per this directory's "record the rejections" rule, because the failure is
+reusable and the fix is now load-bearing.
+
+An ad-hoc runner did this:
+
+```bash
+cargo test -p synthpass-llm --test parity --release --no-run   # exited 101
+BIN=$(ls -t target/release/deps/parity-*.exe | head -1)        # picked the OLD binary
+```
+
+The build had failed with `LNK1104: cannot open parity-9bc350efd6f4cd45.exe` — a previous parity
+process still held its own executable open — and the script carried on. Two complete arms ran, 55
+minutes, and produced numbers that were real, reproducible, internally consistent, and measured
+**pre-demonym code**.
+
+Three properties made it invisible:
+
+1. **The binary filename is identical across builds.** Only the content differs, so nothing in
+   any path or log distinguished the stale one. Caught only by diffing two `sha256` files by hand.
+2. **The baseline arm reproduced 52.5% exactly**, which read as reassuring determinism rather
+   than as the alarm it actually was.
+3. **No fingerprint covered it.** `PROMPT_VERSION`/`prompt_digest` is computed as
+   `fill_template("", HINT_PREFIX)` — the prompt template with the content empty — so it
+   fingerprints what the model is *asked* and nothing about the normalizers applied to what it
+   answers. Both accuracy changes this week landed in exactly that uncovered half.
+
+This is the third time on this project that a measurement has silently scored the wrong thing:
+the parity harness skipping `normalize::extraction` for ~20 points (PR #204), `MAX_RETRY_VARIANTS`
+truncating the variant under test, and now a stale binary.
+
+**The guard:** `normalize::vocabulary_fingerprint()` hashes every table the module dispatches on,
+and `parity.rs` prints it in its run header:
+
+```
+normalizer vocabulary: 74aee114001a9ed2   prompt: qwen2.5-fields v2   fixtures: 72
+```
+
+A run whose fingerprint matches an earlier run used the same vocabulary, whatever the working
+tree claims. **Any log without that line predates the guard and cannot prove which code produced
+it** — which includes every measurement in this directory written before 2026-09-05.
+
+**The runner:** `scripts/measure-parity.sh` takes the binary path from cargo's own
+`--message-format=json` `executable` field rather than a timestamp glob, aborts on a failed
+build, and holds a lock so two cargo invocations cannot overlap. That last point is its own
+lesson: concurrent cargo against one `target/` directory has produced both `LNK1103`
+("debugging information corrupt" in a cached rlib) and `STATUS_DLL_INIT_FAILED` on this project.
+Both looked like flakes. Both were contention.
+
+**What the bad run was still good for.** The stale binary was post-#206/pre-demonym — precisely
+the state needed to answer whether the date normalizer moved the MRZ-holdout arm. It did, and
+both arms moved together; see
+[parity-mrz-holdout-2026-09-04.md](parity-mrz-holdout-2026-09-04.md). A void measurement of one
+change was a valid measurement of another, which is luck, not method.
+
 ## On generating the table with the local LLM
 
 Considered and deferred. The harness is source-agnostic, so wiring a proposal file in later is
