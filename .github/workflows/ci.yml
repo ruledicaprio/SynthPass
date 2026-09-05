@@ -116,6 +116,60 @@ jobs:
           SYNTHPASS_OCR_MAX_PASSES: "1"
         run: cargo test -p synthpass-pipeline --release --test rust_ocr_smoke -- --ignored
 
+      - name: Check the OCR backend feature builds alone
+        run: cargo check -p synthpass-pipeline --no-default-features --features inferer-native,ocr-native-rust
+
+      # synthpass-license's default build (no `vendor`) must stay signing-free —
+      # it's what synthpass-cli/synthpass-serve actually ship; `vendor` (the issuer
+      # binary's signing/keygen code) is checked separately so a break in
+      # either doesn't hide behind the other.
+      - name: Check synthpass-license feature combinations (each must build alone)
+        run: |
+          cargo check -p synthpass-license
+          cargo check -p synthpass-license --features vendor
+
+  # Split out of the `rust` job (2026-09-05) so its ~3.5 min doesn't sit on
+  # that job's serial critical path behind fmt/clippy/test/OCR-e2e — it has
+  # no data dependency on any of those, only its own build + the OCR models.
+  # Same total CI compute (a second checkout/toolchain/model-download), but
+  # this now runs concurrently with `rust` instead of appending to it.
+  m4-hit-rate:
+    name: M4 Tier-1 hit-rate gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config clang libclang-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Small (~12 MB total) and the URLs/checksums are fixed, so this runs on
+      # every push rather than being workflow_dispatch-gated like native-llm's
+      # ~1 GB GGUF download.
+      - name: Cache OCR .rten models
+        uses: actions/cache@v6
+        with:
+          path: |
+            text-detection.rten
+            text-recognition.rten
+          key: ocrs-rten-models-v1
+
+      - name: Download + checksum-verify the OCR .rten models
+        run: |
+          for f in text-detection.rten text-recognition.rten; do
+            if [ ! -f "$f" ]; then
+              curl -fL --retry 3 -o "$f" "https://ocrs-models.s3-accelerate.amazonaws.com/$f"
+            fi
+          done
+          echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
+          echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
+
       # M4 regression gate: measures the Tier-1 (checksum-valid MRZ) hit rate
       # over a fixed, deterministic synthetic corpus and fails the build if it
       # drops meaningfully below the honestly-measured floor. 30% is set well
@@ -131,18 +185,6 @@ jobs:
         run: |
           cargo run -p synthpass-bench --release --bin synthpass-bench -- \
             --count 50 --seed 0 --profile clean --min-hit-rate 0.30 --out bench-report.json
-
-      - name: Check the OCR backend feature builds alone
-        run: cargo check -p synthpass-pipeline --no-default-features --features inferer-native,ocr-native-rust
-
-      # synthpass-license's default build (no `vendor`) must stay signing-free —
-      # it's what synthpass-cli/synthpass-serve actually ship; `vendor` (the issuer
-      # binary's signing/keygen code) is checked separately so a break in
-      # either doesn't hide behind the other.
-      - name: Check synthpass-license feature combinations (each must build alone)
-        run: |
-          cargo check -p synthpass-license
-          cargo check -p synthpass-license --features vendor
 
   cargo-deny:
     name: cargo-deny (advisories & licenses)
