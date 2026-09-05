@@ -327,6 +327,22 @@ pub fn code_for_name(name: &str) -> Option<&'static str> {
         .map(|&(c, _)| c)
 }
 
+/// Every `(code, name)` pair [`country_name`] and [`code_for_name`] are built
+/// on, in table order.
+///
+/// Exists for a caller that needs to detect when this table itself changes —
+/// e.g. a vocabulary fingerprint one layer up that hashes every table a
+/// normalizer dispatches on, so a run can prove which country data it was
+/// compiled against. Not needed for ordinary lookups: use [`country_name`] or
+/// [`code_for_name`] for those.
+///
+/// ```
+/// assert!(mrz::codes().contains(&("DEU", "Germany")));
+/// ```
+pub fn codes() -> &'static [(&'static str, &'static str)] {
+    CODES
+}
+
 /// Whether two ICAO/ISO 3166-1 codes name the same country or entity.
 ///
 /// Not the same question as `a == b`, because `CODES` deliberately carries

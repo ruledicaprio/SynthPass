@@ -77,7 +77,7 @@ mod translit;
 
 pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};
 pub use checksum::{check_digit, verify};
-pub use countries::{code_for_name, codes_equivalent, country_name};
+pub use countries::{code_for_name, codes, codes_equivalent, country_name};
 pub use dates::{
     date_completeness, expand_date, expand_date_with_pivot, Date, DateCompleteness, DateValidity,
     CURRENT_YY,
