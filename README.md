@@ -3,7 +3,7 @@
 [![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
 [![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-56%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-57%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 Stack: `llama.cpp` + Qwen 2.5 1.5B (q4\_k\_m) for Tier-2 repair · `ocrs`/`rten` OCR, in-process ·
@@ -116,7 +116,11 @@ Deterministic before probabilistic, air-gapped or it does not ship: argued in fu
 [knowledge/VISION.md](knowledge/VISION.md) §1. The CI accuracy gate that grades every OCR pass
 against the generated ground truth, and the license check that guards real-document extraction,
 are both covered in [knowledge/ARCHITECTURE.md](knowledge/ARCHITECTURE.md) and
-[knowledge/LICENSING.md](knowledge/LICENSING.md).
+[knowledge/LICENSING.md](knowledge/LICENSING.md). Every extracted field also passes through
+`synthpass-core`'s deterministic normalizers — dates, sex, document type, and country/demonym
+resolution for `nationality`/`issuing_country` — each entry added only once a real specimen
+proves it moves the measured parity rate; see
+[knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md](knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md).
 
 ## Accuracy
 
@@ -141,6 +145,8 @@ and [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4/M6 execution notes.
 ├── crates/
 │   ├── mrz/                Zero-dependency ICAO 9303 engine: TD1/TD2/TD3, checksum-verified OCR repair
 │   ├── mrz-wasm/           wasm-bindgen wrapper powering the browser demo
+│   ├── synthpass-imageprep/ MRZ preprocessing (crop, contrast, deskew, texture suppression)
+│   │                       + layout geometry; wasm32-clean, shared by synthpass-ocr/mrz-wasm
 │   ├── synthpass-gen/      Synthetic document factory: seeded identities, TD1/TD2/TD3, watermark
 │   ├── synthpass-bench/    Benchmark harness + corpus runner behind the CI accuracy gate
 │   ├── synthpass-core/     Canonical Extraction schema (v1 + v2) and audit/crypto helpers
