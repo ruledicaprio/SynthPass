@@ -880,6 +880,50 @@ mod tests {
         );
     }
 
+    // ── demonyms (normalize::DEMONYMS, added alongside country_code) ──
+    //
+    // This check runs `normalize::country_code` on the Tier-2 value before
+    // comparing to MRZ ground truth (see `check_tier2_against_mrz` above), so
+    // it silently started resolving demonyms the moment that table shipped —
+    // with no test here exercising the interaction until these two.
+
+    #[test]
+    fn a_demonym_matching_the_mrz_code_is_not_flagged() {
+        // Before `DEMONYMS` existed, "Canadian" resolved to nothing and
+        // compared unequal to "CAN" — a false positive on every Canadian
+        // document that reached Tier 2, the same shape as the Croatia/Germany
+        // cases above. This is the now-correct behavior, pinned.
+        let mut m = base();
+        "CAN".clone_into(&mut m.issuing_country);
+        "CAN".clone_into(&mut m.nationality);
+        for value in ["CANADIAN", "CANADIENNE", "Canadian"] {
+            let mut fields = agreeing_fields();
+            fields.issuing_country = Some(value.into());
+            fields.nationality = Some(value.into());
+            assert_eq!(
+                check_tier2_against_mrz(&fields, &m),
+                Vec::new(),
+                "value: {value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_demonym_naming_a_different_country_is_still_flagged() {
+        // Resolving a value through `country_code` must never quietly
+        // suppress a genuine contradiction — a demonym is just another form
+        // of the same field, not an exemption from this check.
+        let m = base(); // issuing_country/nationality: UTO
+        let mut fields = agreeing_fields();
+        fields.nationality = Some("Serbian".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "nationality".to_string()
+            }]
+        );
+    }
+
     // ── the four systematic false positives this check used to produce ──
 
     #[test]

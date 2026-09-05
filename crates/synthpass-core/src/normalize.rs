@@ -83,11 +83,17 @@ fn looks_like_a_code(s: &str) -> bool {
 /// plausible-looking wrong code is worse than an unresolved one. Add a form
 /// when a specimen prints it.
 ///
-/// Diacritics are stored **stripped** because the recogniser drops them: a
-/// document printing `ESPAÑOLA` reaches this table as `ESPANOLA`. That is also
-/// why `SLOVENSKA` is absent — Slovakia's `SLOVENSKÁ` and Slovenia's
-/// `SLOVENSKA` differ by exactly the accent OCR discards, so the two collapse
-/// onto one token that would name the wrong country half the time.
+/// Diacritics are stored **stripped**, matching the common case where OCR
+/// already dropped them before this table is ever consulted — a document
+/// printing `ESPAÑOLA` usually reaches this table as `ESPANOLA`. Lookups do
+/// not *rely* on that, though: [`code_from_demonym_tokens`] transliterates
+/// each token first (Doc 9303 Part 3 §6 A, [`mrz::TransliterationStyle::Simple`]),
+/// so a genuinely accented token — Tier-2's own "repair/normalize" pass can
+/// restore one the OCR hint never had — still matches this ASCII table rather
+/// than falling through unresolved. That is also why `SLOVENSKA` is absent —
+/// Slovakia's `SLOVENSKÁ` and Slovenia's `SLOVENSKA` differ by exactly the
+/// accent this transliteration also discards, so the two collapse onto one
+/// token that would name the wrong country half the time, accented or not.
 ///
 /// Laid out one country per line, like [`MONTH_NAMES`] and for the same reason:
 /// grouping is what makes a missing or misfiled form visible in review.
@@ -109,22 +115,46 @@ const DEMONYMS: &[(&str, &str)] = &[
 /// tokens naming the *same* country is the normal case and is accepted; tokens
 /// naming *different* countries mean the string was misread or is not a single
 /// nationality, and that returns `None` rather than picking one.
+///
+/// The conflict check considers **every** token that names a country, not
+/// only the ones [`DEMONYMS`] itself resolves: a token is also checked against
+/// [`mrz::code_for_name`], so `"CANADIAN FRANCE"` is refused (`CANADIAN` names
+/// Canada, `FRANCE` names France) rather than resolving to `CAN` with `FRANCE`
+/// silently ignored because it isn't a demonym. Only a [`DEMONYMS`] match can
+/// ever be *returned*, though — a lone `mrz::code_for_name` token with no
+/// demonym present resolves to `None` here, same as before this check existed,
+/// because [`country_code`] already tries the whole string against that table
+/// and this function's job is demonyms, not a second country-name table.
+///
+/// Splits on Unicode alphabetic boundaries (not ASCII-only), and
+/// transliterates each token (Doc 9303 Part 3 §6 A, `Simple` style) before
+/// matching — see [`DEMONYMS`]'s doc comment for why a genuinely accented
+/// token must not be treated as two tokens or fail to match.
 fn code_from_demonym_tokens(s: &str) -> Option<&'static str> {
-    let mut found: Option<&'static str> = None;
-    for token in s.split(|c: char| !c.is_ascii_alphabetic()) {
+    let mut demonym_code: Option<&'static str> = None;
+    let mut other_code: Option<&'static str> = None;
+    for token in s.split(|c: char| !c.is_alphabetic()) {
         if token.is_empty() {
             continue;
         }
-        let upper = token.to_ascii_uppercase();
-        let Some((_, code)) = DEMONYMS.iter().find(|(name, _)| *name == upper) else {
-            continue;
-        };
-        match found {
-            Some(existing) if existing != *code => return None,
-            _ => found = Some(code),
+        let upper = mrz::transliterate(token, mrz::TransliterationStyle::Simple);
+        if let Some((_, code)) = DEMONYMS.iter().find(|(name, _)| *name == upper.as_str()) {
+            match demonym_code {
+                Some(existing) if existing != *code => return None,
+                _ => demonym_code = Some(code),
+            }
+        } else if let Some(code) = mrz::code_for_name(&upper) {
+            match other_code {
+                Some(existing) if existing != code => return None,
+                _ => other_code = Some(code),
+            }
         }
     }
-    found
+    match (demonym_code, other_code) {
+        (Some(d), Some(o)) if d != o => None,
+        (Some(d), _) => Some(d),
+        (None, _) => None,
+    }
 }
 
 /// Normalize `Extraction::issuing_country`. See [`country_code`].
@@ -511,8 +541,11 @@ const DOCUMENT_TYPE_FORMS: &[(&str, &str)] = &[
     ("VISA", "V"),
 ];
 
-/// Short digest of every vocabulary table this module dispatches on:
-/// [`MONTH_NAMES`], [`DEMONYMS`], [`SEX_FORMS`] and [`DOCUMENT_TYPE_FORMS`].
+/// Short digest of every vocabulary table `country_code` and this module's
+/// other normalizers dispatch on: [`MONTH_NAMES`], [`DEMONYMS`], [`SEX_FORMS`],
+/// [`DOCUMENT_TYPE_FORMS`], and [`mrz::codes`] — the country-name table
+/// `country_code` consults *before* `DEMONYMS` (see [`country_code`]'s doc
+/// comment).
 ///
 /// # Why this exists
 ///
@@ -529,6 +562,12 @@ const DOCUMENT_TYPE_FORMS: &[(&str, &str)] = &[
 /// about the normalizers that post-process what it *answers* — which is where
 /// the last two accuracy changes on this project actually landed. This is the
 /// other half of that guard.
+///
+/// **[`mrz::codes`] is included for the same reason, not left out as "someone
+/// else's table".** `nationality`/`issuing_country` resolve through it before
+/// `DEMONYMS` is ever reached, so a change to *that* table is exactly as
+/// capable of silently moving parity numbers as a change to `DEMONYMS` — the
+/// two tables were an equally uncovered blind spot until this included both.
 ///
 /// # What it deliberately does not cover
 ///
@@ -562,6 +601,10 @@ pub fn vocabulary_fingerprint() -> String {
     buf.push_str("doctype\n");
     for (form, code) in DOCUMENT_TYPE_FORMS {
         let _ = writeln!(buf, "{form}={code}");
+    }
+    buf.push_str("countries\n");
+    for (code, name) in mrz::codes() {
+        let _ = writeln!(buf, "{code}={name}");
     }
     format!("{:016x}", fnv1a64(buf.as_bytes()))
 }
@@ -695,6 +738,35 @@ mod tests {
         assert_eq!(nationality("ESPANOLA CANADIAN"), "ESPANOLA CANADIAN");
     }
 
+    /// A genuinely accented token — not the pre-stripped ASCII form every
+    /// other demonym test uses — must still match. Tier-2's own repair pass
+    /// can plausibly restore a diacritic the OCR hint never had; a tokenizer
+    /// that treats the accent itself as a token boundary would silently
+    /// refuse this. See [`DEMONYMS`]'s doc comment.
+    #[test]
+    fn nationality_reads_a_genuinely_accented_demonym_token() {
+        assert_eq!(nationality("ESPAÑOLA"), "ESP");
+        assert_eq!(nationality("PASAPORTE ESPAÑOLA"), "ESP");
+    }
+
+    /// The two-country safety net must catch a conflict even when only one
+    /// side is a [`DEMONYMS`] entry and the other is a plain country name
+    /// [`mrz::code_for_name`] resolves — not just conflicts between two
+    /// `DEMONYMS` entries. Before this was checked, `FRANCE` here was silently
+    /// skipped (it is not itself a demonym) and `CANADIAN` resolved unopposed.
+    #[test]
+    fn nationality_refuses_a_demonym_conflicting_with_a_plain_country_name_token() {
+        assert_eq!(nationality("CANADIAN FRANCE"), "CANADIAN FRANCE");
+    }
+
+    /// The same cross-table check must not fire a false conflict when both
+    /// tokens name the *same* country — one via `DEMONYMS`, one via
+    /// `mrz::code_for_name`.
+    #[test]
+    fn nationality_accepts_a_demonym_agreeing_with_a_plain_country_name_token() {
+        assert_eq!(nationality("CANADIAN CANADA"), "CAN");
+    }
+
     #[test]
     fn country_code_still_prefers_the_shared_mrz_table() {
         // The demonym fallback runs only after `mrz::code_for_name` declines,
@@ -783,15 +855,19 @@ mod tests {
 
     #[test]
     fn vocabulary_fingerprint_covers_every_table_it_claims_to() {
-        // The digest is built from four labelled tables. This reproduces that
+        // The digest is built from five labelled tables. This reproduces that
         // construction and asserts a change to *each* one moves the result —
         // a fingerprint that silently omitted a table would certify runs it
         // never covered, which is the exact failure it exists to prevent.
+        // `mrz::codes` is included here on the same footing as the other four:
+        // `country_code` consults it before `DEMONYMS`, so it is exactly as
+        // capable of silently moving parity numbers.
         fn digest(
             months: &[(&str, u32)],
             demonyms: &[(&str, &str)],
             sex: &[(&str, &str)],
             doctype: &[(&str, &str)],
+            countries: &[(&str, &str)],
         ) -> String {
             use std::fmt::Write;
             let mut buf = String::new();
@@ -811,10 +887,21 @@ mod tests {
             for (n, c) in doctype {
                 let _ = writeln!(buf, "{n}={c}");
             }
+            buf.push_str("countries\n");
+            for (c, n) in countries {
+                let _ = writeln!(buf, "{c}={n}");
+            }
             format!("{:016x}", fnv1a64(buf.as_bytes()))
         }
 
-        let real = digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS);
+        let countries = mrz::codes();
+        let real = digest(
+            MONTH_NAMES,
+            DEMONYMS,
+            SEX_FORMS,
+            DOCUMENT_TYPE_FORMS,
+            countries,
+        );
         assert_eq!(
             real,
             vocabulary_fingerprint(),
@@ -825,26 +912,51 @@ mod tests {
         months.push(("THERMIDOR", 11));
         assert_ne!(
             real,
-            digest(&months, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS)
+            digest(&months, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS, countries)
         );
 
         let mut demonyms = DEMONYMS.to_vec();
         demonyms.push(("RURITANIAN", "HRV"));
         assert_ne!(
             real,
-            digest(MONTH_NAMES, &demonyms, SEX_FORMS, DOCUMENT_TYPE_FORMS)
+            digest(
+                MONTH_NAMES,
+                &demonyms,
+                SEX_FORMS,
+                DOCUMENT_TYPE_FORMS,
+                countries
+            )
         );
 
         let mut sex = SEX_FORMS.to_vec();
         sex.push(("INDETERMINATE", "X"));
         assert_ne!(
             real,
-            digest(MONTH_NAMES, DEMONYMS, &sex, DOCUMENT_TYPE_FORMS)
+            digest(MONTH_NAMES, DEMONYMS, &sex, DOCUMENT_TYPE_FORMS, countries)
         );
 
         let mut doctype = DOCUMENT_TYPE_FORMS.to_vec();
         doctype.push(("RESIDENCE PERMIT", "I"));
-        assert_ne!(real, digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, &doctype));
+        assert_ne!(
+            real,
+            digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, &doctype, countries)
+        );
+
+        // The regression this test exists for: a change to `mrz`'s own
+        // country table, wholly outside this module, must move the digest
+        // exactly like a change to any table declared in it.
+        let mut mutated_countries = countries.to_vec();
+        mutated_countries.push(("RUR", "Ruritania"));
+        assert_ne!(
+            real,
+            digest(
+                MONTH_NAMES,
+                DEMONYMS,
+                SEX_FORMS,
+                DOCUMENT_TYPE_FORMS,
+                &mutated_countries
+            )
+        );
     }
 
     #[test]
