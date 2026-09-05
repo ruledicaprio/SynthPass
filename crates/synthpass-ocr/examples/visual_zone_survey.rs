@@ -33,9 +33,13 @@
 //! cargo run -p synthpass-ocr --release --example visual_zone_survey -- --batch 5
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use synthpass_ocr::geometry::{self, OcrLine};
 use synthpass_ocr::{NativeOcr, MRZ_CHARSET};
+
+#[path = "common/mod.rs"]
+mod common;
+use common::{repo_root, walk_images};
 
 /// A non-MRZ line this short (non-whitespace character count) is treated as
 /// noise regardless of content — too little text to be a genuine field
@@ -115,41 +119,11 @@ fn evaluate(lines: &[OcrLine]) -> SpecimenResult {
     }
 }
 
-fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("workspace root")
-        .to_path_buf()
-}
-
-/// Image extensions this survey will decode.
-///
-/// The walk below used to take every file it found, which meant the 19 loose
-/// `samples/*.json` bench reports and `samples/README.md` were handed to the
-/// OCR engine -- several seconds each, to produce nothing.
-const SURVEY_IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
-
-fn walk_samples(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk_samples(&path, out);
-        } else if path.is_file() {
-            let is_image = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.to_ascii_lowercase())
-                .is_some_and(|e| SURVEY_IMAGE_EXTENSIONS.contains(&e.as_str()));
-            if is_image {
-                out.push(path);
-            }
-        }
-    }
-}
+// `repo_root`/`walk_images` moved to `common/mod.rs`, shared with
+// `mine_country_vocab.rs` — see that module's doc comment. The 19 loose
+// `samples/*.json` bench reports and `samples/README.md` this walk must skip
+// (several seconds each in the OCR engine, to produce nothing) is exactly
+// what its extension-based filter is for.
 
 fn median(sorted: &[f64]) -> f64 {
     percentile(sorted, 0.5)
@@ -174,12 +148,23 @@ fn main() {
         .position(|a| a == "--only")
         .and_then(|i| std::env::args().nth(i + 1));
 
-    let root = repo_root();
-    let ocr = NativeOcr::load(
+    let root = match repo_root() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let ocr = match NativeOcr::load(
         &root.join("text-detection.rten"),
         &root.join("text-recognition.rten"),
-    )
-    .expect("failed to load OCR models — run from the repo root");
+    ) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("failed to load OCR models — run from the repo root: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // `--file <path>` evaluates one arbitrary image (e.g. an untracked
     // candidate specimen outside `samples/`) and exits without touching the
@@ -208,7 +193,7 @@ fn main() {
     }
 
     let mut files = Vec::new();
-    walk_samples(&root.join("samples"), &mut files);
+    walk_images(&root.join("samples"), &mut files);
     files.sort();
     if let Some(substr) = &only {
         files.retain(|p| {
