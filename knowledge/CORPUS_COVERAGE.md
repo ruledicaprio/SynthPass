@@ -29,12 +29,11 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 56 |
-| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 19 |
-| Stale (was HIT, now reproducibly MISS against current OCR/parser — 2026-08-17) | 2 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 57 |
+| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 21 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 159 |
+| No specimen yet | 158 |
 | **Total tracked codes** | **238** |
 
 Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
