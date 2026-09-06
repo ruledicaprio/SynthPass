@@ -136,8 +136,9 @@ on the `bench-data` branch, nothing hand-drawn or hand-edited, unflattering numb
 **TD1 vs. TD2 vs. TD3**, each track's latest run:
 ![Tier-1 hit rate by MRZ format](knowledge/img/format-comparison.svg)
 
-Full methodology and per-format numbers: [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md)
-and [knowledge/ROADMAP.md](knowledge/ROADMAP.md)'s M4/M6 execution notes.
+Full methodology and per-format numbers: [knowledge/benchmarks/README.md](knowledge/benchmarks/README.md);
+milestone status in [knowledge/ROADMAP.md](knowledge/ROADMAP.md), with the historical detail in
+[knowledge/archive/roadmap-execution-log.md](knowledge/archive/roadmap-execution-log.md).
 
 ## Repository layout
 
