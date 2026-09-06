@@ -100,7 +100,7 @@ td1|td2|td3|mrva|mrvb`, the per-format Tier-1 hit-rate gate over the
 `provider-bench` — same ICAO format as `td3`, entirely different corpus and
 binary; `mrz::Format` vs. `DocumentType::document_code()`'s inability to
 tell TD1 from TD2 is exactly the collision M6 spent its time untangling
-(see `knowledge/ROADMAP.md`'s M6 execution note), so the naming stays
+(see `knowledge/archive/roadmap-execution-log.md`), so the naming stays
 deliberately distinct here too.
 
 `td3` is a *second*, independent way to measure TD3: the existing
@@ -288,7 +288,7 @@ changed SVG; a local `run-bench.ps1` run leaves the regenerated file for you to 
 Corpus is small (3 specimens as of 2026-08-16) and has **zero labelled ground
 truth** — no `samples/ocr_fixtures/` entries exist for this class, so
 `field_match_rate`/`mean_cer` are `null` on every row, not a bug. A known,
-deliberately deferred gap (see `knowledge/ROADMAP.md`'s M6 execution notes for
+deliberately deferred gap (see `knowledge/archive/roadmap-execution-log.md` for
 the parallel TD2 deferral pattern this follows): growing this corpus and
 labelling at least a few specimens is separate, open-ended work, not scoped
 into the Tier-1 diagnostics/metric work that added this track's chart.
