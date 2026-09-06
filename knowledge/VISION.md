@@ -91,8 +91,13 @@ Concretely, the long arc is:
    with per-field confidence and provenance, OCR that detects regions by geometry instead of
    guessing, bounded concurrency and batch capacity, structured observability, enforced
    licensing tiers, and grammar-constrained decoding for the LLM fallback.
-4. **Expand the surface.** TD1/TD2 and MRVA/MRVB formats, declarative document layouts,
-   dataset exports (COCO / YOLO / JSONL / Hugging Face), and a plugin architecture.
+4. **Harden the deterministic core.** All five MRZ formats (TD1/TD2/TD3, MRVA/MRVB) read
+   reliably on *real* specimens, not just synthetic ones — MRZ sequence completeness,
+   per-format render fidelity, and evidence-driven escalation. This is what the product is
+   sold on, and it leads M6 ([`decisions/ADR-0006-m6-accuracy-first.md`](decisions/ADR-0006-m6-accuracy-first.md)).
+5. **Expand the surface.** Declarative document layouts, dataset exports
+   (COCO / YOLO / JSONL / Hugging Face), an air-gapped deployment guide, and the commercial
+   tiers — sequenced after the core is hardened.
 
 > **Non-goals, permanently.** SynthPass crops a portrait region; it never *identifies* a
 > person — no face recognition, no biometric matching, no liveness. It proves a faithful

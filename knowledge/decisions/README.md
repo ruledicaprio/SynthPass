@@ -36,3 +36,4 @@ the record.
 | [0003](ADR-0003-docs9303-source-of-truth.md) | Adopt `knowledge/docs9303/` as the ICAO spec source of truth | Accepted |
 | [0004](ADR-0004-gpu-acceleration.md) | GPU acceleration as an optional, feature-gated path | Accepted (`cuda` only) |
 | [0005](ADR-0005-vision-provider-readiness.md) | Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF | Proposed |
+| [0006](ADR-0006-m6-accuracy-first.md) | Reframe M6 to lead with Tier-1 real-document accuracy | Accepted |
