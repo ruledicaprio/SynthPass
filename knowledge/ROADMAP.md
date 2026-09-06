@@ -180,8 +180,7 @@ taken against a catalog of providers that declare what they can do.
 contract rather than as new branches in a growing `if`/`else`; the barcode slot that driving
 licences need (see "Scoped separately" under M6 below) becomes a provider someone can write
 without touching the pipeline; and M6's "a third-party plugin builds against a stable interface"
-criterion
-is satisfied by an interface that exists.
+criterion is satisfied by an interface that exists.
 
 ## M6 — Expansion & Enterprise readiness
 
@@ -230,6 +229,83 @@ suggested order.
 contract → layout plugins → dataset exports → deployment guide + Pro beta. Each step after the
 first makes the next one's accuracy numbers meaningful instead of TD3-only.
 
+## Open backlog
+
+Committed but not yet done — the items that were scattered through the execution log, pulled
+into one place. Distinct from *Future Work* below, which is deliberately **not** committed.
+Detail and derivation for each is in
+[`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md) unless another pointer is
+given.
+
+**Tier-1 accuracy / MRZ completeness** — the deterministic-core track of M6, and where recent
+effort has actually gone.
+
+- MRZ sequence completeness — [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md),
+  live chunks: 1 (split `ChecksumFailed` into typed sub-reasons), 4 (`IncompleteSequence`
+  line-count signal), 5 (unified `SequenceCompleteness` vocabulary). Chunk 6 shipped, chunk 7
+  was measured and rejected.
+- Check-digit blind spot: `blind_positions` (`crates/synthpass-die/src/mrz_reader.rs`) counts
+  only per-*character* lookalike collisions; the real blind set is any substitution multiset
+  whose 7-3-1 weighted delta is 0 mod 10 — 46 of 66 observed `document_number` mismatches are
+  the compound kind it cannot see. No fix proposed; the counter's limit is a known quantity.
+- TD3 / MRV-B line-1 prefix-shift repair (`shift_or_unshift_line1`) is hit-rate-safe but not
+  complete — some corrupted line-1 readings still win over the unshifted candidate when both
+  parse and nothing on line 1 arbitrates.
+- TD1 line 3 and the fully-collapsed name separator (both fillers dropped) are structurally
+  unrecoverable — a checksum-valid TD1 record never proves the name. Pinned as tests, not
+  chased further.
+
+**Tier-2 / normalization.**
+
+- `SYNTHPASS_LLM_MRZ_HINT` (feed the checksum-partial MRZ read into the prompt, issue #102) is
+  implemented and **default-off** pending a larger clean-machine A/B (`--count 20+`); first
+  `n=10` run met all three ship criteria.
+- `VIZ_TIER2_DESIGN.md` §2.2 — add `lines` to `OcrResult`/`Recognition` and pass
+  `.with_recognition(...)` into the Tier-2 context (it currently is not); §2.4 — the new schema
+  fields (`place_of_birth`, `issuing_authority`, `date_of_issue`), the only irreversible change,
+  so last.
+- Reconcile the three divergent Tier-2 parity baselines (docling 9/42 vs `technical_debt.md`
+  16/42 vs `prompts/README.md` 19/42 for the same six fixtures) — recorded, never explained.
+
+**Orientation / preprocessing.**
+
+- Replace `choose_rotation`'s brute-force 0/90/180/270 detection pass with a single
+  width-weighted circular-mean angle estimate (`½·arg Σ w·e^{i2θ}` over detected words);
+  keep the MRZ-band tie-break for the intrinsic 0°-vs-180° ambiguity. Verify `ocrs`'s per-word
+  angle empirically against the corpus first; add alongside, don't replace, until measured.
+- Extend `preprocess.rs`'s deterministic upscale/contrast/threshold/deskew treatment to the
+  non-MRZ visual zone (issue #103) — visual-zone OCR noise is corpus-wide (median noise-line
+  fraction ~0.24 over 229 specimens), not specimen-specific.
+
+**Corpus.**
+
+- Two stale `CORPUS` entries (`Vietnam_Passport_Specimen_2023`, `Oman_Passport_Specimen_2004`)
+  now reproducibly return "no MRZ found" against the current OCR/parser — a real regression or
+  drift, un-root-caused.
+- Grow labelled ground truth: 13 passports today, 0 driving licences; 158 of 238 ISO/ICAO
+  country codes still have no specimen ([`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)). Each label
+  needs a one-by-one visual check, not a batch script.
+- The Slovakia 2005 specimen's MRZ `date_of_expiry` disagrees with its printed VIZ date (a
+  template defect, not OCR); recorded, not resolved. Several specimens carry the `11`-year
+  century-pivot trap (`scripts/check-century-pivot.sh`).
+- A 4-specimen ID-card cross-format-confusion weak spot (correctly-placed ID cards resolving to
+  TD2 / MRV-B), all checksum-invalid.
+
+**Tooling / CI.**
+
+- `provider-bench` feeds the weekly chart refresh but is not a PR gate — wiring it as one, and
+  a scheduled workflow that provisions the GGUF and records the parity rate
+  (`technical_debt.md`, MEDIUM), are both still open.
+- No per-format hit-rate floor exists (deliberately — "a floor over a corpus one day old is an
+  invented threshold"); add per-format floors once the numbers are earned.
+- `provider-bench` has no `--dump-ocr` equivalent scoped to real-specimen `checksum_failed`
+  misses — needed before those can be root-caused the way the synthetic ones were.
+
+**Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
+here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three
+parallel ICAO field-name lists; streaming bypasses the provider contract; nothing in CI
+exercises the real inference engine.
+
 ## Future Work
 
 Beyond M6 and M7, and deliberately not committed:
@@ -260,21 +336,14 @@ Beyond M6 and M7, and deliberately not committed:
   `llama-cpp-2/cuda` and measured ~2.5x on a GTX 970 with byte-identical output. Benchmark it with
   `./scripts/run-bench.ps1 -Track real-specimens -Cuda`, which records the run as an `llm-cuda`
   series on the track's normal trend chart.
-- **Deterministic field normalization before a bigger model.** The GBNF parity run (see the M5 note
-  above) shows part of the Tier-2 gap is *scoring*, not comprehension — the model read
-  `nationality` correctly and was marked wrong for format: `"CROATIA"` vs `HRV`,
-  `"JAAK-KRISTJAN"` vs `JAAK KRISTJAN`. `crates/mrz/src/countries.rs` already carries a
-  zero-dependency ICAO/ISO 3166-1 table, but only `code → name`; adding the reverse plus separator
-  and `sex`-vocabulary normalization would recover an estimated 2–3 of 42 fields (**+5–7 points**)
-  with no model, no dependencies, and full auditability — "deterministic before probabilistic"
-  applied to post-processing. Worth doing *before* any model comparison, so a bigger model is
-  measured on comprehension rather than formatting.
+- **Deterministic field normalization before a bigger model.** *(Largely shipped in the v1.4.0
+  cycle — date-form and country/demonym normalizers took the measured parity rate from an
+  under-measured 26.5% to ~56% with no model change; see [`benchmarks/README.md`](benchmarks/README.md).)*
+  The residual: `sex`-vocabulary and separator normalization not yet folded in, and the
+  principle — normalize deterministically before comparing a bigger model — still governs any
+  future model bake-off.
 - **Fine-tuning loop** — a `synthpass finetune` track that closes the improvement loop by
   training the local Tier-2 model on generated corpora (explicitly *out* of v2).
-- **Barcode/PDF417 decoding** — the extraction schema already reserves the slot; a decoder is
-  a later fill-in.
-- **Additional document classes** — visas, residence permits, and driving licences under the
-  same declarative-layout engine.
 - **Statistical dataset characterisation** — tooling to describe and diff generated corpora.
 - **Distributed generation** — parallel factory runs for very large dataset builds.
 
@@ -282,8 +351,9 @@ Beyond M6 and M7, and deliberately not committed:
 
 Everything above stays inside Doc 9303's scope (passports, visas, TD1/TD2 official travel
 documents — all covered by `knowledge/docs9303/`). Two document families sit genuinely outside
-it, named here so the M6 "driving licences are a different mechanism, not a lower priority" note
-above has somewhere to point once it's time to scope the work, rather than staying a bare mention:
+it, named here so the M6 "driving licences are a different mechanism, not a lower priority"
+scoping note (in [`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md)) has
+somewhere to point once it's time to scope the work, rather than staying a bare mention:
 
 - **AAMVA PDF417 barcode decoding (US/Canada driving licences).** AAMVA (the American Association
   of Motor Vehicle Administrators) publishes its own Card Design Standard, independent of ICAO —
