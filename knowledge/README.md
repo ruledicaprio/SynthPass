@@ -87,7 +87,9 @@ for provenance rather than as living docs: `KNOWLEDGE.md` (why this tree exists 
 originally proposed — adopted with variations, see `decisions/ADR-0001-knowledge-tree.md`),
 `FOUNDATIONAL_STRATEGY.md` and `synthpass_v2_0.md` (the source notes VISION/ROADMAP/BRANDING
 were distilled from), `V_1_3_PROPOSALS.md` (the v1.3.0 proposal set, superseded by ROADMAP's
-M7 section), and `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` (the duplicate DIE essay). (The
+M7 section), `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` (the duplicate DIE essay), and
+`roadmap-execution-log.md` (the append-only M1→v1.4.0 execution log, once ~70% of `ROADMAP.md`
+— now `ROADMAP.md`'s `## Current state` plus `benchmarks/README.md`). (The
 earlier `rebranding_identra_synthpass.md` and `mlis_v2_0_0_preliminary_design.md` scratch notes
 and the `REBRAND_MIGRATION.md` execution record have since been removed entirely, now
 that the rename is long complete and folded into `CHANGELOG.md`.) Where an archived document
