@@ -3,7 +3,7 @@ name = "synthpass-export"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Dataset exporter for synthpass-gen corpora — JSONL / Hugging Face, the DeepSeek-OCR 0–1000 convention (knowledge/decisions/ADR-0007)."
+description = "Dataset exporter for synthpass-gen corpora — JSONL / Hugging Face, the DeepSeek-OCR 0–1000 coordinate convention (SynthPass ADR-0007)."
 repository.workspace = true
 
 [dependencies]
