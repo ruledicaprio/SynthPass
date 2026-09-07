@@ -32,6 +32,11 @@ hit-rate). Timelines are targets, not commitments.
 > on. The reasoning, and the alternative of keeping strict order, are recorded in
 > [`ADR-0002`](decisions/ADR-0002-provider-model-before-layout-plugins.md). The milestones stay
 > numbered by dependency, not by build date.
+>
+> M6's *internal* priority order was later corrected — the deterministic-core work
+> (Tier-1 real-document accuracy, format/provider completeness) leads, and the
+> enterprise/packaging track is sequenced behind it. This is a reframe, not a split: M6 stays
+> one milestone. See [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md).
 
 ## Milestone overview
 
@@ -58,7 +63,7 @@ exception above. The numbering follows dependency, not schedule.)*
 | **M4 — Regression & Benchmarking** | ✅ Done | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented. Floor is `--min-hit-rate 0.30` on the synthetic clean TD3 corpus; measured ~55% synthetic clean / ~42% real corpus (the original 95% aspiration was dropped once measured — see [`benchmarks/README.md`](benchmarks/README.md)) |
 | **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
 | **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — all five MRZ formats generate, render and benchmark; layout plugins, dataset exports, air-gapped guide and Pro beta still open | TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract**; declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | Non-TD3 formats generate and validate; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — leads with Tier-1 real-document accuracy (`checksum_failed` is the top real-specimen miss); all five MRZ formats generate, render and benchmark; provider registration, layout plugins, dataset exports, air-gapped guide and Pro beta still open. Priority order corrected in [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md) | MRZ sequence completeness / Tier-1 real-document accuracy ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract** — *then* declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | `checksum_failed` sub-reasons diagnosed and the `MRZ_SEQUENCE_COMPLETENESS.md` chunks land; non-TD3 formats generate/validate and each reads through a registered provider; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 ## Architecture evolution
 
@@ -104,11 +109,11 @@ platform (Atlas), and the Document Intelligence Engine provider contract have al
 card geometry; Tier 1 and Tier 2 both run through the `synthpass-die` catalog rather than a
 hardcoded `if`/`else`; prompts are versioned with a CI-pinned digest.
 
-**M6: in progress.** The generator-format gap is closed. Remaining M6 work, per the M6
-section below: MRZ sequence completeness (Tier-1 real-document accuracy — see
-[`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)), TD1/TD2/MRVA/MRVB registered
-as `synthpass-die` providers, and the enterprise/packaging track (layout plugins, dataset
-exports, air-gapped guide, Pro beta).
+**M6: in progress.** The generator-format gap is closed. M6 leads with the deterministic-core
+work ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)): MRZ sequence completeness /
+Tier-1 real-document accuracy (see [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md))
+and TD1/TD2/MRVA/MRVB registered as `synthpass-die` providers. The enterprise/packaging track
+(layout plugins, dataset exports, air-gapped guide, Pro beta) is sequenced behind it.
 
 ### Measured accuracy
 
@@ -184,28 +189,30 @@ criterion is satisfied by an interface that exists.
 
 ## M6 — Expansion & Enterprise readiness
 
-M7's contract is what M6 was waiting on (see "What this buys M6" above) — this section gathers
-the scoping notes dropped into the execution log
-([`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md)) into one place, with a
-suggested order.
+M7's contract is what M6 was waiting on (see "What this buys M6" above). M6's priority order was
+corrected in [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md): the deterministic-core work
+leads, the enterprise/packaging track follows. The generator gap (once the stated bottleneck) is
+already cleared — `synthpass-gen` emits all five formats onto their own ICAO card geometry, and
+`--document-type td1|td2|td3|mrva|mrvb` reaches it from `synthpass generate` and both bench
+binaries; per-format hit rates and the defects the first measurements exposed are in the
+execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md)) and
+`benchmarks/README.md`.
 
-**What ships**
+**Ships first — the deterministic core:**
 
-- **~~The generator gap, not just the extraction gap.~~ DONE — this was the stated bottleneck and
-  it is cleared.** `synthpass-gen` emits all five formats onto their own ICAO card geometry, and
-  `--document-type td1|td2|td3|mrva|mrvb` reaches it from `synthpass generate` and both bench
-  binaries. Per-format Tier-1 hit rates and the defects the first measurements exposed are in the
-  execution log and `benchmarks/README.md`; they are no longer measured against synthetic
-  passports alone.
-- **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Once the generator produces them, extraction
-  is registration against the M7 contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the
-  same shape `MrzReader` already uses for TD3 — not a new branch in a growing `if`/`else`. See the
-  M7 section above for the contract itself.
-- **MRZ sequence completeness (Tier-1 accuracy).** Independent of the generator-format-expansion
-  track above — a diagnostic/completeness-typing/TD2-repair backlog for `crates/mrz` and the
-  `synthpass-die` pipeline layer around it, since `checksum_failed` is already the largest
-  real-specimen miss category. Full scoping, chunk-by-chunk, in
-  [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md).
+- **MRZ sequence completeness (Tier-1 real-document accuracy).** A diagnostic /
+  completeness-typing / TD2-repair backlog for `crates/mrz` and the `synthpass-die` pipeline
+  layer around it — `checksum_failed` (the MRZ is found but does not fully validate) is the
+  single largest real-specimen miss category. Full scoping, chunk-by-chunk, in
+  [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md). This is the track recent work
+  has actually been on.
+- **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Extraction is registration against the M7
+  contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the same shape `MrzReader`
+  already uses for TD3 — not a new branch in a growing `if`/`else`. See the M7 section above for
+  the contract itself.
+
+**Then — expansion and enterprise readiness:**
+
 - **Declarative document layout plugins.** A third-party layout definition drives generation
   without a code change — the M6 DoD criterion the milestone table already states.
 - **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
@@ -225,9 +232,11 @@ suggested order.
   an M6 deliverable — worth picking up opportunistically, but doesn't block or get blocked by
   anything above.
 
-**Suggested order:** generator (TD1/TD2/MRVA/MRVB emission) → extraction providers against the M7
-contract → layout plugins → dataset exports → deployment guide + Pro beta. Each step after the
-first makes the next one's accuracy numbers meaningful instead of TD3-only.
+**Suggested order:** MRZ sequence completeness / Tier-1 accuracy → TD1/TD2/MRVA/MRVB as providers
+against the M7 contract → layout plugins → dataset exports → deployment guide + Pro beta. The
+deterministic-core steps come first because they are what the product is sold on and where the
+real-specimen miss rate is; each expansion step after that makes the next one's accuracy numbers
+meaningful instead of TD3-only.
 
 ## Open backlog
 
@@ -237,8 +246,8 @@ Detail and derivation for each is in
 [`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md) unless another pointer is
 given.
 
-**Tier-1 accuracy / MRZ completeness** — the deterministic-core track of M6, and where recent
-effort has actually gone.
+**Tier-1 accuracy / MRZ completeness** — M6's lead track ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)),
+and where recent effort has actually gone.
 
 - MRZ sequence completeness — [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md),
   live chunks: 1 (split `ChecksumFailed` into typed sub-reasons), 4 (`IncompleteSequence`
