@@ -113,7 +113,10 @@ hardcoded `if`/`else`; prompts are versioned with a CI-pinned digest.
 work ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)): MRZ sequence completeness /
 Tier-1 real-document accuracy (see [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md))
 and TD1/TD2/MRVA/MRVB registered as `synthpass-die` providers. The enterprise/packaging track
-(layout plugins, dataset exports, air-gapped guide, Pro beta) is sequenced behind it.
+(layout plugins, dataset exports, air-gapped guide, Pro beta) is sequenced behind it — of which
+dataset exports has landed its first half: `synthpass export` writes JSONL / Hugging Face
+training datasets from a synthetic corpus ([`ADR-0007`](decisions/ADR-0007-dataset-export-format.md),
+[`EXPORTS.md`](EXPORTS.md)).
 
 ### Measured accuracy
 
@@ -216,9 +219,11 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
 - **Declarative document layout plugins.** A third-party layout definition drives generation
   without a code change — the M6 DoD criterion the milestone table already states.
 - **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
-  trainer end-to-end. Format decisions — the DeepSeek-OCR 0–1000 coordinate convention, JSONL
-  first — are fixed in [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md); the
-  build-from spec is [`EXPORTS.md`](EXPORTS.md).
+  trainer end-to-end. Conventions fixed in
+  [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md) (DeepSeek-OCR 0–1000 coordinates,
+  JSONL first); spec in [`EXPORTS.md`](EXPORTS.md). **JSONL and Hugging Face shipped**
+  (`crates/synthpass-export`, `synthpass export`); COCO / YOLO still open (they need geometry
+  `synthpass_gen::Labels` does not yet surface — see `EXPORTS.md`, "Deferred").
 - **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
 - **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
   the rest existing first.
