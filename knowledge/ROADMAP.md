@@ -216,7 +216,9 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
 - **Declarative document layout plugins.** A third-party layout definition drives generation
   without a code change — the M6 DoD criterion the milestone table already states.
 - **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
-  trainer end-to-end.
+  trainer end-to-end. Format decisions — the DeepSeek-OCR 0–1000 coordinate convention, JSONL
+  first — are fixed in [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md); the
+  build-from spec is [`EXPORTS.md`](EXPORTS.md).
 - **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
 - **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
   the rest existing first.
