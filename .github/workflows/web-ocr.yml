@@ -71,7 +71,7 @@ jobs:
           [ -n "${{ inputs.floor }}" ] && ARGS="$ARGS --floor ${{ inputs.floor }}"
           node tests/web/run-corpus.mjs $ARGS
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: web-ocr-report
