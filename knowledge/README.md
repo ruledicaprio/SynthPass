@@ -46,6 +46,9 @@ the constraints and the direction before you open a source file:
   and the checklist for adding a new specimen.
 - **[SYNTHPASS.md](SYNTHPASS.md)** — running the `synthpass-bench` corpus runner
   locally, its CLI flags, report format, and how the M4 CI accuracy gate works.
+- **[EXPORTS.md](EXPORTS.md)** — the `synthpass export` dataset formats
+  (JSONL / COCO / YOLO / Hugging Face), their coordinate convention, and the CLI —
+  spec, pending implementation ([decisions/ADR-0007](decisions/ADR-0007-dataset-export-format.md)).
 - **[ADVERSARIAL.md](ADVERSARIAL.md)** — the degraded capture profiles
   (mobile/scanner/worn/border-kiosk) as the adversarial corpus: what each
   simulates, and gate status.
