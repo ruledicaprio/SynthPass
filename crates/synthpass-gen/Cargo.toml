@@ -11,7 +11,7 @@ license.workspace = true
 mrz = { path = "../mrz" }
 image = { workspace = true }
 # Seeded, reproducible identity generation: same seed -> byte-identical output.
-rand = "0.9"
+rand = "0.10"
 rand_chacha = "0.9"
 # Glyph rasterization for VIZ/MRZ text, gated behind `embedded-fonts` (see
 # src/fonts.rs). Not the deprecated `rusttype`.
