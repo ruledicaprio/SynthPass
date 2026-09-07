@@ -187,17 +187,17 @@ MRVB
 
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="679,404 679,409 "/>
-<rect x="70" y="204" width="121" height="199" opacity="1" fill="#FF0000" stroke="none"/>
-<text x="70" y="193" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-56.0%
+<rect x="70" y="196" width="121" height="207" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="70" y="186" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+58.0%
 </text>
-<rect x="191" y="132" width="122" height="271" opacity="1" fill="#0000FF" stroke="none"/>
-<text x="191" y="121" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-76.0%
+<rect x="191" y="129" width="122" height="274" opacity="1" fill="#0000FF" stroke="none"/>
+<text x="191" y="118" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+77.0%
 </text>
-<rect x="313" y="139" width="122" height="264" opacity="1" fill="#00FF00" stroke="none"/>
-<text x="313" y="129" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-74.0%
+<rect x="313" y="136" width="122" height="267" opacity="1" fill="#00FF00" stroke="none"/>
+<text x="313" y="125" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+75.0%
 </text>
 <rect x="435" y="89" width="122" height="314" opacity="1" fill="#FF00FF" stroke="none"/>
 <text x="435" y="79" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
