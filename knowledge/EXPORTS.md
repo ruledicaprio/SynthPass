@@ -1,11 +1,11 @@
 # EXPORTS.md — `synthpass export` dataset formats
 
-**Status:** planned. The formats and coordinate convention are fixed by
+**Status:** JSONL and Hugging Face formats shipped (`crates/synthpass-export`, the
+`synthpass export` subcommand); COCO / YOLO deferred (see "Deferred" below). The formats and
+coordinate convention are fixed by
 [`decisions/ADR-0007-dataset-export-format.md`](decisions/ADR-0007-dataset-export-format.md);
-implementation is an M6 "Then — expansion and enterprise readiness" item
-([`ROADMAP.md`](ROADMAP.md#m6--expansion--enterprise-readiness)). This document is the spec the
-implementation is built against — it is precise enough to build from without another round of
-design questions.
+this is an M6 "Then — expansion and enterprise readiness" item
+([`ROADMAP.md`](ROADMAP.md#m6--expansion--enterprise-readiness)).
 
 `synthpass export` turns a deterministic `synthpass-gen` corpus into a training dataset in a
 standard on-disk shape. It is the sibling of [`SYNTHPASS.md`](SYNTHPASS.md)'s `synthpass-bench`
@@ -27,27 +27,27 @@ corpora most training recipes were built on (see
 ```text
 synthpass export --format FMT [--count N] [--seed N] [--document-type TYPE]
                  [--profile clean] [--pack-pages N] --out-dir DIR
-  --format FMT          jsonl | hf        (v1)
-                        coco | yolo       (later — see "Deferred: COCO / YOLO")
+  --format FMT          jsonl | hf        (coco / yolo error as "not implemented yet")
   --count N             number of documents to generate and export (default: 100)
   --seed N              base seed; document i uses seed N + i (default: 0)
   --document-type TYPE  td1 | td2 | td3 | mrva | mrvb | all   (default: td3)
                         "all" round-robins the five formats across the corpus by
                         document index, matching synthpass-bench's --profile all
   --profile clean       fixed at "clean" in v1 (see "Capture profiles" below)
-  --pack-pages N        JSONL only: concatenate N single-document samples per row
-                        with <page> separators (default: 1, i.e. one document per row)
-  --out-dir DIR         output directory (created if absent)
+  --pack-pages N        concatenate N documents per JSONL row with <page> separators
+                        (default: 1). Applies to hf too — its rows are the same JSONL rows.
+  --out-dir DIR         output directory, required (created if absent)
 ```
 
 Hand-rolled flag parsing, no clap — consistent with `crates/synthpass-cli/src/generate.rs`.
 The subcommand is **gated on `FEATURE_EXPORT`** (see "Licensing" below); it calls into the
-`crates/synthpass-export` library, which is where every consumer (`synthpass-cli`,
-`synthpass-bench`, tests) reaches it.
+`crates/synthpass-export` library (`synthpass_export::run(&ExportConfig)`), which is where
+every consumer (`synthpass-cli`, `synthpass-bench`, tests) reaches it.
 
 Per-document generation is exactly `generate.rs`'s loop:
-`synthpass_gen::generate_from_seed(base_seed + i, doc_type)` → `(image, labels, _passport)`,
-`include_personal_number` always `true`.
+`synthpass_gen::generate_from_seed` on `GeneratorConfig::with_document_type(base_seed + i,
+doc_type)` → `(image, labels, _passport)`, `include_personal_number` always `true`. v1 always
+writes the rendered PNGs alongside the JSONL (`images/<doctype>-<seed:06>.png`).
 
 ## The 0–1000 coordinate transform
 
@@ -74,13 +74,14 @@ One JSON object per line. One line per row; a row is one document when `--pack-p
 
 ```jsonc
 {
-  "id": "td3-000042",                 // "<doctype>-<seed padded to 6>"; for a packed
-                                       // row, "<doctype>-<firstSeed>+<n>"
+  "id": "td3-000042",                 // "<doctype>-<seed:06>"; for a packed row,
+                                       // "<doctype>-<firstSeed>+<n>" (doctype = the first doc's)
   "documents": [                       // one entry per packed document (length 1 by default)
     {
       "seed": 42,
       "document_type": "td3",          // td1 | td2 | td3 | mrva | mrvb
       "mrz_format": "TD3",             // synthpass_gen mrz_format.as_str()
+      "image": "images/td3-000042.png",// path relative to the JSONL file; always written in v1
       "width": 1200,                   // rendered image pixels (informational; boxes are 0–1000)
       "height": 840,
       "blocks": [                      // reading order: VIZ fields top-to-bottom, then MRZ

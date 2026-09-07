@@ -12,6 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use synthpass_pipeline::Pipeline;
 
+mod export;
 mod generate;
 
 /// Interior width of the banner box (character count between the two `│`
@@ -94,6 +95,8 @@ fn print_usage() {
     println!("  synthpass verify-license [path]    verify a license file (default: SYNTHPASS_LICENSE_PATH or ./license.mlis)");
     println!("  synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]");
     println!("                                     generate synthetic td1|td2|td3|mrva|mrvb document images + label JSON (no license required)");
+    println!("  synthpass export --format jsonl|hf [--count N] [--seed N] [--document-type TYPE] [--pack-pages N] --out-dir DIR");
+    println!("                                     export a synthetic corpus as a training dataset (needs the license 'export' feature; see knowledge/EXPORTS.md)");
     println!("  synthpass --help, -h               show this message");
     println!("  synthpass --version, -V            show the version");
     println!();
@@ -129,6 +132,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // No real PII is ever produced, so this bypasses `check_license` entirely,
         // same as `fingerprint`/`verify-license` below.
         "generate" => return generate::generate_command(&args[2..]),
+        // `synthpass export` — synthetic-corpus → training-dataset exporter
+        // (M6 expansion track, ADR-0007). Gated on the license `export`
+        // feature (bulk generation is a capacity surface, BRANDING §5) — the
+        // same shape as `batch` above; a single `generate` stays free.
+        "export" => {
+            let license_ok = match check_license_feature(synthpass_license::FEATURE_EXPORT) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("❌ {e}");
+                    eprintln!(
+                        "   run `synthpass fingerprint` and contact your vendor for a license with \
+                         the 'export' feature, or set SYNTHPASS_LICENSE_SKIP=1 for local development"
+                    );
+                    false
+                }
+            };
+            return export::export_command(&args[2..], license_ok);
+        }
         // `synthpass doctor` — preflight checks before running the pipeline for real.
         "doctor" => return doctor_command().await,
         // `synthpass fingerprint` / `synthpass verify-license` — diagnostic/recovery

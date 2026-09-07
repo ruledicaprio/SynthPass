@@ -2916,6 +2916,7 @@ dependencies = [
  "serde",
  "serde_json",
  "synthpass-core",
+ "synthpass-export",
  "synthpass-gen",
  "synthpass-license",
  "synthpass-ocr",
@@ -2945,6 +2946,18 @@ dependencies = [
  "serde",
  "serde_json",
  "synthpass-core",
+]
+
+[[package]]
+name = "synthpass-export"
+version = "1.4.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
+ "synthpass-core",
+ "synthpass-gen",
 ]
 
 [[package]]
