@@ -18,6 +18,9 @@ synthpass-ocr = { path = "../synthpass-ocr", optional = true }
 # `synthpass generate` — synthetic passport image + label-JSON factory (M3). No
 # real PII, so this command is explicitly exempt from the license gate.
 synthpass-gen = { path = "../synthpass-gen" }
+# `synthpass export` — synthetic-corpus → training-dataset exporter (M6, ADR-0007).
+# Gated on the license `export` feature.
+synthpass-export = { path = "../synthpass-export" }
 image = { workspace = true }
 tokio = { workspace = true }
 serde = { version = "1", features = ["derive"] }

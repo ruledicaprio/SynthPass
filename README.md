@@ -64,7 +64,7 @@ cargo run -p synthpass-cli -- batch "samples/ocr_fixtures/*.jpg"   # many at onc
 cargo run -p synthpass-serve                  # web app + JSON API on http://127.0.0.1:8080
 ```
 
-The subcommands (`generate`, `batch`, `doctor`, `fingerprint`, `verify-license`, `decrypt`), the
+The subcommands (`generate`, `export`, `batch`, `doctor`, `fingerprint`, `verify-license`, `decrypt`), the
 `POST /api/extract` API, and every environment variable are in
 [ARCHITECTURE.md §5](knowledge/ARCHITECTURE.md#5-pipeline-execution-flow) and
 [§12](knowledge/ARCHITECTURE.md#12-configuration-reference).
@@ -168,6 +168,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 │   ├── synthpass-bench/    Benchmark harness + corpus runner behind the CI accuracy gate
 │   ├── synthpass-core/     Canonical Extraction schema (v1 + v2), normalizers, audit/crypto helpers
 │   ├── synthpass-die/      Document Intelligence Engine: provider catalog, MRZ reader, routing
+│   ├── synthpass-export/   Synthetic corpus → training dataset (JSONL / Hugging Face), 0–1000 coords
 │   ├── synthpass-ocr/      In-process pure-Rust OCR: ocrs/rten, preprocessing, model integrity
 │   ├── synthpass-llm/      In-process Tier-2 inference: Qwen GGUF via llama-cpp-2
 │   ├── synthpass-license/  Offline Ed25519 licensing (`vendor` feature never ships to customers)

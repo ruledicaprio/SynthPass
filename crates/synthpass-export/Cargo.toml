@@ -1,0 +1,23 @@
+[package]
+name = "synthpass-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Dataset exporter for synthpass-gen corpora — JSONL / Hugging Face, the DeepSeek-OCR 0–1000 coordinate convention (SynthPass ADR-0007)."
+repository.workspace = true
+
+[dependencies]
+# The generator whose 100%-accurate-by-construction Labels this crate turns
+# into training rows. Built with real glyphs (like synthpass-bench): a dataset
+# of placeholder bars would train the wrong thing.
+synthpass-gen = { path = "../synthpass-gen", features = ["embedded-fonts"] }
+# The canonical ICAO field vocabulary — `CoreField`/`CoreField::ALL`. Reused
+# here rather than hard-coding a fourth parallel copy of the field names (see
+# ADR-0007 / knowledge/EXPORTS.md).
+synthpass-core = { path = "../synthpass-core" }
+image = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Per-file checksums in the export manifest — same crate/version every other
+# integrity check in the workspace uses (synthpass-ocr, synthpass-llm).
+sha2 = "0.11"

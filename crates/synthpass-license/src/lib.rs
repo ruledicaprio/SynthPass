@@ -43,6 +43,11 @@ pub const FEATURE_BATCH: &str = "batch";
 pub const FEATURE_MULTI_CONTEXT: &str = "multi-context";
 /// Prometheus `/metrics` — the "enhanced reporting" surface.
 pub const FEATURE_METRICS: &str = "metrics";
+/// `synthpass export` — bulk synthetic-dataset production. A
+/// "higher-capacity generation" surface per `knowledge/BRANDING.md` §5 and
+/// `knowledge/decisions/ADR-0007-dataset-export-format.md` decision 5:
+/// single-document `generate` stays free, a corpus builder is a capacity knob.
+pub const FEATURE_EXPORT: &str = "export";
 
 /// The commercial tiers of `knowledge/BRANDING.md` §5, ordered so that a higher
 /// tier is a superset of a lower one.
@@ -66,12 +71,18 @@ impl Tier {
     pub fn default_features(self) -> Vec<String> {
         let names: &[&str] = match self {
             Self::Trial => &[FEATURE_EXTRACT],
-            Self::Pro => &[FEATURE_EXTRACT, FEATURE_BATCH, FEATURE_MULTI_CONTEXT],
+            Self::Pro => &[
+                FEATURE_EXTRACT,
+                FEATURE_BATCH,
+                FEATURE_MULTI_CONTEXT,
+                FEATURE_EXPORT,
+            ],
             Self::Enterprise => &[
                 FEATURE_EXTRACT,
                 FEATURE_BATCH,
                 FEATURE_MULTI_CONTEXT,
                 FEATURE_METRICS,
+                FEATURE_EXPORT,
             ],
         };
         names.iter().map(|s| (*s).to_string()).collect()
@@ -583,6 +594,7 @@ mod tests {
             FEATURE_BATCH,
             FEATURE_MULTI_CONTEXT,
             FEATURE_METRICS,
+            FEATURE_EXPORT,
         ] {
             check_feature(&payload, feature).expect("a feature-less license unlocks everything");
         }
@@ -675,6 +687,11 @@ mod tests {
         // the bottom tier, or the gate would be decorative.
         assert!(!trial.contains(&FEATURE_BATCH.to_string()));
         assert!(!pro.contains(&FEATURE_METRICS.to_string()));
+        // Bulk dataset export is a paid capacity surface (ADR-0007): in Pro and
+        // Enterprise, never Trial.
+        assert!(!trial.contains(&FEATURE_EXPORT.to_string()));
+        assert!(pro.contains(&FEATURE_EXPORT.to_string()));
+        assert!(enterprise.contains(&FEATURE_EXPORT.to_string()));
     }
 
     #[test]
