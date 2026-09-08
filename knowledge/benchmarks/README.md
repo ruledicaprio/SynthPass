@@ -410,10 +410,16 @@ and got a character wrong" framing does not hold: **19** of the 71 are `*_no_mrz
 with no MRZ at all (`mrz::find_and_parse` accepts VIZ boilerplate as a TD2/MRV-B), **25** are
 `*_redacted_mrz` (unrecoverable by construction), and the remaining **27** have a real MRZ but
 zero verified ground truth — several carry deliberately non-conforming template MRZs, so an
-OCR misread cannot be told from a bad specimen. Ranked next steps in the writeup; the top one
-is a line-1 structural gate in `crates/mrz` (a hallucinated MRZ that *validated* would be a
-silent wrong extraction), which moves ~19 docs to `no_mrz_found` and needs a full-corpus
-re-run to prove zero HIT regression.
+OCR misread cannot be told from a bad specimen.
+
+**Step 1 shipped** (`mrz` 0.7.0, PR #238): `find_and_parse` returns `NotFound` when the
+best-scoring non-validating reading has an unrecognized issuing state *and* nationality *and*
+a non-numeric date of birth. Full-corpus re-run: `checksum_failed` **71 → 33**, `no_mrz_found`
+**47 → 85**, Tier-1 HIT **118 → 118** (zero regression). 38 documents moved — the hallucinated
+MRZ and most redacted specimens are now honestly not-found. Residual `checksum_failed` (33) is
+23 genuine unverified `*_mrz` + 8 partially-readable redacted + 2 stubborn no-MRZ; the
+writeup's steps 2–4 (redacted outcome, ground truth for the 23, then character-level fixes)
+stand.
 
 ### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
 

@@ -98,26 +98,45 @@ without labels:
   `personal_number` + `composite` and nothing else. One digit wrong in the 14-char
   optional field.
 
+## Result — step 1 shipped (`mrz` 0.7.0, PR #238)
+
+`find_and_parse` now returns `NotFound` when the best-scoring non-validating reading
+has an unrecognized issuing state **and** an unrecognized nationality **and** a
+non-numeric date of birth (`parser::looks_like_non_mrz_text`). Re-run of the full
+corpus with `mrz` 0.7.0, same 236 specimens:
+
+| outcome | before (0.6.6) | after (0.7.0) |
+|---|---:|---:|
+| Tier-1 HIT | 118 | **118** |
+| `checksum_failed` | 71 | **33** |
+| `no_mrz_found` | 47 | **85** |
+
+**Zero HIT regression** — the gate is `!valid()`-only and the 118 hits all carry a
+resolving issuing state or nationality. **38 documents** moved `checksum_failed →
+no_mrz_found`: 17 of the 19 population-A hallucinations (the two that stay,
+`Turkiye_ID` and `Portugal_ID`, have a real 3-letter code — `TUR`, a `PRT` fragment —
+sitting in the boilerplate), 17 population-B redacted specimens (a blackout bar
+reads as junk in all three fields too — correctly not-found), and 3 population-C
+documents whose OCR was total mush (`France_ID_..._back`, `Italy_ID_..._back`,
+`Moldova_Passport_2014` — `no_mrz_found` is the honest label; the OCR never
+produced a readable zone). Nothing entered `checksum_failed`.
+
+The `checksum_failed` bucket is now **33**: 23 genuine `*_mrz` (still unverified —
+step 3), 8 partially-readable redacted, 2 stubborn no-MRZ. Steps 2–4 below stand.
+
 ## Ranked next steps
 
-1. **Gate MRZ acceptance on line-1 structure** (`crates/mrz`, `find_and_parse` /
-   the per-format detectors + `damaged_pass`). Reject a candidate whose line 1 has
-   no valid document code, whose issuing-country field is not a code in the table,
-   or whose date fields are non-numeric. Measurable: ~19 documents move
-   `checksum_failed → no_mrz_found`, and the silent-wrong-extraction risk shrinks.
-   Must re-run the full real corpus to confirm zero HIT regression (the 118 HITs
-   have structurally valid MRZs, so a structural gate should not touch them) — this
-   is the gate to watch. Related open item: `UnrecognizedIssuingCountry`
-   (`ROADMAP.md`).
-2. **Sub-classify `checksum_failed` in the bench.** Split "line-1 structurally
-   invalid" (population A) from "MRZ structurally valid, check digits fail"
-   (populations B + C) in `MissReason::ChecksumFailed`. Cheap; makes the metric
-   honest going forward and lets the trend chart show the split. Also add a
-   `redacted` outcome (or filename-driven exclusion) so population B stops inflating
-   the miss count.
-3. **Grow ground truth for population C** (`samples/ocr_fixtures/*.json` or at least
-   `expected_document_number` in `corpus.jsonl` for the 27 `*_mrz` names in
-   `artifacts/checksum-dump/cf-names.txt`). Until these have labels, an OCR misread
+1. ~~**Gate MRZ acceptance on line-1 structure.**~~ **Done** — `mrz` 0.7.0 above.
+2. **Give redacted specimens their own outcome in the bench.** 8 `*_redacted_mrz`
+   still land in `checksum_failed` (the 17 whose redaction bar OCR'd as junk in all
+   three fields already moved to `no_mrz_found` via step 1). `samples/corpus.jsonl`
+   already carries `mrz.redacted: true`; the bench does not read it. Excluding them
+   from the miss denominator (or a `redacted` `MissReason`) removes the last of
+   population B. Optionally also split `MissReason::ChecksumFailed` structurally-
+   invalid vs check-digit-fail, though step 1 took most of that population out.
+3. **Grow ground truth for the 23 remaining `*_mrz`** (`samples/ocr_fixtures/*.json`
+   or `expected_document_number` in `corpus.jsonl` for the `*_mrz` names still in
+   `artifacts/checksum-dump/cf-names2.txt`). Until these have labels, an OCR misread
    and a non-conforming specimen are indistinguishable, and no `mrz` character-level
    fix can be measured. This is the `ROADMAP.md` "grow labelled ground truth" item
    with a concrete priority list.
