@@ -332,8 +332,8 @@ const TABLE_B: &[(char, &str)] = &[
 ];
 
 /// The §6 B transliteration of a single **upper-case** Cyrillic character, or
-/// `None` if `c` is not in [`TABLE_B`]. `lang` selects the twelve
-/// language-conditional rows; `is_first` (whether `c` is the first character
+/// `None` if `c` is not one of the 48 §6 B code points. `lang` selects the
+/// twelve language-conditional rows; `is_first` (whether `c` is the first character
 /// of the name) applies the five "Ukrainian first character" positional rows.
 ///
 /// Callers that have a whole string should use [`transliterate_cyrillic`],
