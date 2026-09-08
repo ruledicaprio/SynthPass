@@ -1,0 +1,15 @@
+{
+  "date_of_birth": null,
+  "date_of_expiry": "2016-09-06",
+  "document_number": "99006000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "VZOR",
+  "issuing_country": "CZE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<CZESPECIMEN<<VZOR<<<<<<<<<<<<<<<<<<<<<<<<<\n99006000<8CZE1102299F16090641152291111<<<<24",
+  "nationality": "CZE",
+  "personal_number": "1152291111",
+  "sex": "F",
+  "surname": "SPECIMEN"
+}

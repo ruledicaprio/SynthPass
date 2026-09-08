@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1998-06-28",
+  "date_of_expiry": "2028-12-01",
+  "document_number": "G28P5FV81",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "REYNALD",
+  "issuing_country": "D",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<D<<HEINKEL<<REYNALD<<<<<<<<<<<<<<<<<<<<<<<\nG28P5FV813D<<9806283M2812014987651<<<<<<<<<6",
+  "nationality": "D",
+  "personal_number": "987651",
+  "sex": "M",
+  "surname": "HEINKEL"
+}

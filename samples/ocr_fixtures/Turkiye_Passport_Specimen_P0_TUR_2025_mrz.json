@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1990-01-01",
+  "date_of_expiry": "2035-01-01",
+  "document_number": "U00000000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ORNEK",
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<TURORNEKOGLU<<ORNEK<<<<<<<<<<<<<<<<<<<<<<<\nU000000000TUR9001010F35010100<<<<<<<<<<<<<00",
+  "nationality": "TUR",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "ORNEKOGLU"
+}

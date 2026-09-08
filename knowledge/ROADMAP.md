@@ -142,8 +142,10 @@ none, ~25 deliberately-redacted MRZ, ~27 real-MRZ-but-unverified. Step 1 of its 
 shipped as **`mrz` 0.7.0** (`find_and_parse` rejects a non-validating reading whose issuing
 state, nationality and date of birth are all unrecognizable): full-corpus re-run moved
 `checksum_failed` **71 → 33** and `no_mrz_found` **47 → 85** with **zero** Tier-1 HIT
-regression (118 → 118). The residual 33 is 23 genuine unverified `*_mrz` + 8 redacted + 2
-no-MRZ; next is ground truth for the 23, then character-level `mrz` fixes — not a blind hunt.
+regression (118 → 118). The residual 33 is 23 genuine `*_mrz` + 8 redacted + 2 no-MRZ. The
+23 are now labelled (hand-transcribed `samples/ocr_fixtures/*.json`): 7 carry a checksum-valid
+printed MRZ (any `checksum_failed` on those is purely an OCR error), 16 are non-conforming by
+design. Next is character-level `mrz` fixes against the 7 — not a blind hunt.
 
 ## M7 — Document Intelligence Engine
 
@@ -306,9 +308,11 @@ and where recent effort has actually gone.
 - Two stale `CORPUS` entries (`Vietnam_Passport_Specimen_2023`, `Oman_Passport_Specimen_2004`)
   now reproducibly return "no MRZ found" against the current OCR/parser — a real regression or
   drift, un-root-caused.
-- Grow labelled ground truth: 13 passports today, 0 driving licences; 158 of 238 ISO/ICAO
-  country codes still have no specimen ([`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)). Each label
-  needs a one-by-one visual check, not a batch script.
+- Grow labelled ground truth: 41 hand-verified fixtures today (18 checksum-valid + the 23
+  hard `checksum_failed` specimens transcribed in the 2026-09-08 track, 7 of them
+  checksum-valid), 0 driving licences; 158 of 238 ISO/ICAO country codes still have no
+  specimen ([`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)). Each label needs a one-by-one visual
+  check, not a batch script.
 - The Slovakia 2005 specimen's MRZ `date_of_expiry` disagrees with its printed VIZ date (a
   template defect, not OCR); recorded, not resolved. Several specimens carry the `11`-year
   century-pivot trap (`scripts/check-century-pivot.sh`).
@@ -324,11 +328,13 @@ and where recent effort has actually gone.
   invented threshold"); add per-format floors once the numbers are earned.
 - `checksum_failed` root-cause track: `provider-bench --dump-ocr` (`#236`) → analysis
   ([2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md), `#237`) →
-  **step 1 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed` 71 → 33,
-  zero HIT regression. Remaining, ranked: (2) give `*_redacted_mrz` its own bench outcome
-  (8 still counted; `corpus.jsonl` already flags `mrz.redacted`); (3) ground truth for the 23
-  genuine `*_mrz` in `artifacts/checksum-dump/cf-names2.txt`; (4) then character-confusion /
-  candidate-selection `mrz` fixes, pinned by regressions from the now-labelled specimens.
+  **steps 1 & 3 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed` 71 → 33
+  zero HIT regression; then all 23 residual genuine `*_mrz` hand-transcribed into
+  `samples/ocr_fixtures/` (7 checksum-valid, 16 non-conforming by design). Remaining, ranked:
+  (2) give `*_redacted_mrz` its own bench outcome (8 still counted; `corpus.jsonl` already
+  flags `mrz.redacted`) — with a `provider-bench` split that sub-labels `checksum_failed` as
+  specimen-non-conforming vs OCR-misread using the new labels; (4) then character-confusion /
+  candidate-selection `mrz` fixes against the 7 checksum-valid anchors.
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three

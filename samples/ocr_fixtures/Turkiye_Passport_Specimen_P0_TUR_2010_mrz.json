@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-06-01",
+  "date_of_expiry": "2015-04-15",
+  "document_number": "U00005048",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ZEYNEP",
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<TURORNEK<<ZEYNEP<<<<<<<<<<<<<<<<<<<<<<<<<<\nU00005048<TUR840601<F150415<12345678901<<<<<",
+  "nationality": "TUR",
+  "personal_number": "12345678901",
+  "sex": "F",
+  "surname": "ORNEK"
+}

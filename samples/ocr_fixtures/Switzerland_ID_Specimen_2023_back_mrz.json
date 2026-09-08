@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1995-08-01",
+  "date_of_expiry": "2033-03-22",
+  "document_number": "S1A00A00",
+  "document_type": "ID",
+  "extraction_method": "hand-transcribed",
+  "given_names": "HELVETIA",
+  "issuing_country": "CHE",
+  "mrz_checksums_valid": false,
+  "mrz_line": "IDCHES1A00A00<9<<<<<<<<<<<<<<<\n9508015F3303228CHE<<<<<<<<<<<2\nSCHWEIZER<SAMPLE<<HELVETIA<<<<",
+  "nationality": "CHE",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "SCHWEIZER SAMPLE"
+}

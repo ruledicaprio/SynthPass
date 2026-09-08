@@ -44,6 +44,17 @@ status. `Passport`/`ID card`/etc. counts inside a single country's `Note` column
 "HIT (x2 specimens) (+ 1 checksum-failed)") are per-specimen, not per-country — see each
 row for the exact breakdown.
 
+**2026-09-08 — the 23 `checksum_failed` specimens are now labelled.** The
+[checksum_failed root-cause track](benchmarks/checksum-failed-real-specimens-2026-09-08.md)
+hand-transcribed the true printed MRZ for every real specimen whose zone lands in
+`checksum_failed`, into `samples/ocr_fixtures/<stem>.json` (hand-verified fixtures: 18 → 41).
+Of the 23: **7 carry a checksum-valid printed MRZ** (Afghanistan `P0_AFG_2016`, Belgium ID
+2021, Croatia ID 2021, Czechia `P0_CZE_2005`, Romania `PE_ROU_2024`, Russia `P0_RUS_2019`,
+Sweden ID 2022 — a `checksum_failed` on these is an OCR error, not a bad specimen, and each
+keeps its `expected_document_number`), **16 are non-conforming by design** and carry a
+`ground_truth_stem` but no `expected_document_number`. The per-country rows below still show
+the HIT/MISS status; this changes what a MISS on those rows *means*, not the count.
+
 ## Full table
 
 | Code | Country/Entity | Document type(s) | Status | Note |

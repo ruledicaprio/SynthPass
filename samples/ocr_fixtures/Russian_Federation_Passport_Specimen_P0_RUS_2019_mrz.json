@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1976-05-16",
+  "date_of_expiry": "2029-12-01",
+  "document_number": "512127995",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ALEKSANDR",
+  "issuing_country": "RUS",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<RUSLIEV<<ALEKSANDR<<<<<<<<<<<<<<<<<<<<<<<<\n5121279955RUS7605161M2912017<<<<<<<<<<<<<<08",
+  "nationality": "RUS",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "LIEV"
+}

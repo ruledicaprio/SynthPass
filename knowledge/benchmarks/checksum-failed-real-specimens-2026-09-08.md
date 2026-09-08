@@ -121,8 +121,50 @@ documents whose OCR was total mush (`France_ID_..._back`, `Italy_ID_..._back`,
 `Moldova_Passport_2014` — `no_mrz_found` is the honest label; the OCR never
 produced a readable zone). Nothing entered `checksum_failed`.
 
-The `checksum_failed` bucket is now **33**: 23 genuine `*_mrz` (still unverified —
-step 3), 8 partially-readable redacted, 2 stubborn no-MRZ. Steps 2–4 below stand.
+The `checksum_failed` bucket is now **33**: 23 genuine `*_mrz`, 8 partially-readable
+redacted, 2 stubborn no-MRZ.
+
+## Result — step 3 shipped: the 23 are labelled (PR 1)
+
+Every one of the 23 residual genuine `*_mrz` specimens now has a hand-transcribed
+`samples/ocr_fixtures/<stem>.json` recording the **true printed MRZ zone**, read from the
+specimen scan and checked against `mrz::find_and_parse`. `samples/corpus.jsonl` carries
+`ground_truth_stem` for all 23 and `expected_document_number` for the 7 whose printed zone
+is checksum-valid (`corpus_manifest` now withholds the expected number from a specimen
+labelled `mrz_checksums_valid: false` — a conformant Tier-1 read of it produces nothing to
+expect).
+
+The transcriptions settle the question the residual bucket left open — is a
+`checksum_failed` here an OCR misread, or a specimen whose printed check digits are wrong by
+design:
+
+| | count | what a `checksum_failed` on it means |
+|---|---:|---|
+| **Printed MRZ is checksum-valid** | 7 | The zone passes every ICAO check digit. Any `checksum_failed` is **100 % an OCR error** — a step-4 anchor. |
+| **Printed MRZ is non-conforming** | 16 | The zone itself fails ≥ 1 check digit, or is structurally malformed. Not an OCR-accuracy signal; belongs outside the denominator. |
+
+**The 7 checksum-valid** (step-4 targets): Afghanistan `P0_AFG_2016` (OCR reads the leading
+letter `O` of the document number as `0`), Belgium ID 2021 back, Croatia ID 2021 back,
+Czechia `P0_CZE_2005`, Romania `PE_ROU_2024`, Russia `P0_RUS_2019`, Sweden ID 2022 back.
+Croatia's zone is all-zeros and Czechia's date-of-birth field is `110229` (Feb 29 of a
+non-leap year) — the *check digits* are valid, the *dates* are placeholders; each fixture
+records that (`mrz_checksums_valid: true`, malformed date fields left null).
+
+**The 16 non-conforming**, by the field that fails: Germany `P0_D00_2018` (optional-data
+check only — a one-digit near-miss), Ghana `P0_GHA_2019` (composite only), Colombia
+`PP_COL_2026` (personal-number + composite), India `P0_IND_2013` (`L5733700`, check digit
+`0` where the rule wants `6`), India `P0_IND_2013` boxed (line 1 malformed; expiry field
+`230000`), Indonesia `P0_IDN_2011` (sex field printed as the letter `S`), Korea `PM_KOR_2020`
+/ `PM_KOR_2022` (birth + expiry check digits printed `0`), Mauritania `P0_MRT_2010` (line 2
+is 45 characters — an extra `<` at position 10), Poland `P0_POL_2023` (blank document-number
+check digit), Switzerland ID 2023 back, and the five `TEMPLATE` / `FAKE` / `ÖRNEK` / `TEST`
+passports (Türkiye `P0_TUR_2010` / `2024` / `2025`, Türkiye ID 2020 back, UK `P0_GBR_2021`).
+
+Method: the MRZ band was cropped and upscaled from each scan, read by eye, and every
+`mrz_line` fed back through `mrz::find_and_parse` — its `valid()` verdict is what sets each
+fixture's `mrz_checksums_valid`. `extraction_method` is `"hand-transcribed"`. The `.md`
+companion each fixture needs for parity is the live OCR text, which for these specimens is
+visibly garbled (`H0000014` → `HOODOD14`, sex `M` → `N`, …) — the step-4 material.
 
 ## Ranked next steps
 
@@ -134,12 +176,10 @@ step 3), 8 partially-readable redacted, 2 stubborn no-MRZ. Steps 2–4 below sta
    from the miss denominator (or a `redacted` `MissReason`) removes the last of
    population B. Optionally also split `MissReason::ChecksumFailed` structurally-
    invalid vs check-digit-fail, though step 1 took most of that population out.
-3. **Grow ground truth for the 23 remaining `*_mrz`** (`samples/ocr_fixtures/*.json`
-   or `expected_document_number` in `corpus.jsonl` for the `*_mrz` names still in
-   `artifacts/checksum-dump/cf-names2.txt`). Until these have labels, an OCR misread
-   and a non-conforming specimen are indistinguishable, and no `mrz` character-level
-   fix can be measured. This is the `ROADMAP.md` "grow labelled ground truth" item
-   with a concrete priority list.
+3. ~~**Grow ground truth for the 23 remaining `*_mrz`.**~~ **Done** — the "Result — step 3"
+   section above. All 23 have a `samples/ocr_fixtures/<stem>.json`; 7 carry a checksum-valid
+   printed zone, 16 are non-conforming by design. An OCR misread and a non-conforming
+   specimen can now be told apart.
 4. **Then** the character-confusion / line-selection `mrz` fixes (wider
    `CONFUSABLES` / wiring `solve_substitution` into the checksum-invalid path;
    line-2 left-anchor repair; candidate ranking that prefers a valid line-1+line-2

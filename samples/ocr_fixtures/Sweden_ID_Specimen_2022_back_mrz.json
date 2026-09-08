@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1982-08-21",
+  "date_of_expiry": "2025-01-01",
+  "document_number": "XA0000015",
+  "document_type": "AR",
+  "extraction_method": "hand-transcribed",
+  "given_names": "SVEA",
+  "issuing_country": "SWE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "ARSWEXA0000015919820821<<<<<<<\n8208215F2501017UTO<<<<<<<<<<<1\nSPECIMEN<<SVEA<<<<<<<<<<<<<<<<",
+  "nationality": "UTO",
+  "personal_number": "19820821",
+  "sex": "F",
+  "surname": "SPECIMEN"
+}

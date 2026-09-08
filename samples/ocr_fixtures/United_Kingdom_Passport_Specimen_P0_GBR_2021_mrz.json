@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1989-12-12",
+  "date_of_expiry": "2031-07-05",
+  "document_number": "824812264",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "FAKE",
+  "issuing_country": "GBR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<GBRTEMPLATE<<FAKE<<<<<<<<<<<<<<<<<<<<<<<<<\n8248122645GBR8912126M3107054<<<<<<<<<<<<<<00",
+  "nationality": "GBR",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "TEMPLATE"
+}

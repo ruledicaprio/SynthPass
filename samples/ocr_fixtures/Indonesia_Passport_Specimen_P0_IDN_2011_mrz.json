@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1945-08-17",
+  "date_of_expiry": "2016-01-26",
+  "document_number": "X000000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "NAMA",
+  "issuing_country": "IDN",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<IDNLENGKAP<<NAMA<<<<<<<<<<<<<<<<<<<<<<<<<<\nX000000<<9IDN4508179S1601269<<<<<<<<<<<<<<91",
+  "nationality": "IDN",
+  "personal_number": null,
+  "sex": null,
+  "surname": "LENGKAP"
+}

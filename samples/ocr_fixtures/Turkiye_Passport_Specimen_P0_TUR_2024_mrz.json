@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2000-01-01",
+  "date_of_expiry": "2034-12-30",
+  "document_number": "U12345678",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ALI",
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<TURKAYA<<ALI<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nU12345678<5TUR384732148<12345678910<<<<<<<<<",
+  "nationality": "TUR",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "KAYA"
+}

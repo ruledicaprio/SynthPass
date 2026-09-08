@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1992-12-23",
+  "date_of_expiry": "2023-07-14",
+  "document_number": "L5733700",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "KARAMJEET SINGH",
+  "issuing_country": "IND",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<INDSOHI<<KARAMJEET<SINGH<<<<<<<<<<<<<<<<<<\nL5733700<0IND9212233M2307149<<<<<<<<<<<<<<<2",
+  "nationality": "IND",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SOHI"
+}
