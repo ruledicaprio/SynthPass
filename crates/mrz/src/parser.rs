@@ -9,7 +9,7 @@ use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,
     is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
 };
-use crate::dates::{date_completeness, expand_date_with_pivot};
+use crate::dates::{date_completeness, expand_date_with_pivot, DateCompleteness};
 use crate::{country_name, Checks, Format, MrzData, MrzError, ParseOptions};
 
 /// A document number that overflowed its 9-character field.
@@ -767,6 +767,28 @@ fn country_resolves(slice: &str) -> bool {
     country_name(slice.trim_end_matches('<')).is_some()
 }
 
+/// Whether a best-scoring, non-validating reading is more likely OCR that found
+/// MRZ-shaped visual-inspection-zone text (card boilerplate, a printed legend)
+/// than a genuine MRZ read too badly to verify.
+///
+/// The signal is three independent line-1/line-2 fields — the issuing state,
+/// the nationality, and the date of birth — being *simultaneously*
+/// unrecognizable: neither three-letter code is in the table, and the date of
+/// birth field is not even six digits or fillers. None of the three carries a
+/// check digit that could arbitrate a misread, so a document that fails all
+/// three at once is one nothing downstream can trust. A genuinely degraded MRZ
+/// does not land here — a real non-conformant line 1 (Argentina's `<AR`,
+/// Spain's stateless `TAP`) still carries a resolving nationality and a real
+/// date of birth, and a mis-paired-lines parser bug still resolves at least the
+/// issuing state. Measured against the 2026-09-08 real-specimen dump
+/// (`knowledge/benchmarks/checksum-failed-real-specimens-2026-09-08.md`): it
+/// rejects 18 of the 19 no-MRZ specimens and none of the 118 hits.
+fn looks_like_non_mrz_text(data: &MrzData) -> bool {
+    !country_resolves(&data.issuing_country)
+        && !country_resolves(&data.nationality)
+        && data.date_of_birth_completeness == DateCompleteness::Malformed
+}
+
 fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String {
     if repaired.len() != target_width
         || target_width < 6
@@ -1124,7 +1146,11 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// candidate fully validates, the *best-scoring* one — the reading with the
 /// most passing check digits — is returned with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
-/// escalate. [`MrzError::NotFound`] means nothing MRZ-shaped was found at all.
+/// escalate. [`MrzError::NotFound`] means nothing MRZ-shaped was found at all —
+/// or that the best-scoring candidate fails every structural signal at once
+/// (unrecognized issuing state *and* nationality *and* a non-numeric date of
+/// birth), which is OCR that matched MRZ-shaped visual-zone text rather than a
+/// real MRZ read too badly to verify.
 ///
 /// ```
 /// let text = "## PASSPORT\n\nsome OCR noise\n\n\
@@ -1466,6 +1492,17 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     if fallback.is_some() {
         if let Some(data) = damaged_pass(&lines, opts) {
             return Ok(data);
+        }
+    }
+
+    // A best-scoring reading that never validated *and* fails every structural
+    // signal at once (see `looks_like_non_mrz_text`) is OCR that found
+    // MRZ-shaped VIZ text, not a genuine MRZ — reporting it as a checksum-failed
+    // record invites a silent wrong extraction downstream. Report it as
+    // not-found instead.
+    if let Some(data) = &fallback {
+        if !data.valid() && looks_like_non_mrz_text(data) {
+            return Err(MrzError::NotFound);
         }
     }
 

@@ -72,7 +72,11 @@ formats, each with a `*_with` variant taking `ParseOptions`.
 locates an MRZ inside noisy OCR output — it tolerates HTML-escaped fillers and
 lines merged onto one physical line — and drives a check-digit-guided repair
 pass. A candidate reading is accepted only when its composite check digit
-proves it.
+proves it. When no candidate validates, the best-scoring partial read is
+returned with its honest `Checks` — *unless* it fails every structural signal at
+once (unrecognized issuing state and nationality and a non-numeric date of
+birth), which is OCR that matched MRZ-shaped visual-zone text rather than a real
+MRZ, and reads as `NotFound`.
 
 ```rust
 let text = "## REPUBLIC OF UTOPIA\n\
