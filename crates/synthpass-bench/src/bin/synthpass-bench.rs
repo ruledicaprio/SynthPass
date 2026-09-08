@@ -303,7 +303,9 @@ fn main() {
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
             );
             let failing_checks = match &result.reason {
-                Some(synthpass_bench::MissReason::ChecksumFailed { failing }) => failing.clone(),
+                Some(synthpass_bench::MissReason::ChecksumFailed { failing, .. }) => {
+                    failing.clone()
+                }
                 _ => Vec::new(),
             };
             SeedResult {

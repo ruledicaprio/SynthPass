@@ -46,6 +46,29 @@ fn mrz_format_str(format: MrzFormat) -> &'static str {
     }
 }
 
+/// Characters where the run's recovered MRZ zone differs from the
+/// hand-transcribed true zone, compared line by line over the longer of the
+/// two (a missing character counts as a mismatch). `0` means the OCR/parse
+/// pipeline recovered the printed zone faithfully — a checksum failure on such
+/// a zone is the *specimen's* printed check digits, not an OCR error. See the
+/// 2026-09-08 checksum_failed writeup.
+fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
+    let rec: Vec<&str> = recovered.lines().collect();
+    let tru: Vec<&str> = truth.lines().collect();
+    (0..rec.len().max(tru.len()))
+        .map(|i| {
+            let mut a = rec.get(i).copied().unwrap_or("").chars();
+            let mut b = tru.get(i).copied().unwrap_or("").chars();
+            std::iter::from_fn(|| match (a.next(), b.next()) {
+                (None, None) => None,
+                (x, y) => Some(x != y),
+            })
+            .filter(|&differs| differs)
+            .count()
+        })
+        .sum()
+}
+
 /// One `checksum_failed` real-specimen miss, as written to
 /// `provider-bench-checksum-failed-dump.jsonl` when `run_prepped` is given a
 /// `dump_ocr_dir`. Owned strings throughout — the per-document `read_mrz` it
@@ -69,6 +92,16 @@ struct ChecksumFailedDump {
     recovered_mrz_lines: Vec<String>,
     /// The check digit field name(s) that did not validate.
     failing_checks: Vec<String>,
+    /// The hand-transcribed true printed MRZ zone, when this specimen carries
+    /// a `samples/ocr_fixtures/<stem>.json` label; `None` for the unlabelled
+    /// majority.
+    ground_truth_mrz: Option<String>,
+    /// Characters where `recovered_mrz_lines` differs from `ground_truth_mrz`
+    /// ([`mrz_zone_mismatch`]). `Some(0)` → the printed zone was recovered
+    /// faithfully and its own check digits are what failed
+    /// (`checksum_failed_specimen`); `Some(n > 0)` → OCR introduced the error
+    /// and this is the Phase-3d character-fix material; `None` → no label.
+    zone_mismatch: Option<usize>,
 }
 
 /// Everything measured for one provider over one corpus run.
@@ -432,6 +465,11 @@ struct BenchPage {
     name: String,
     page: OcrPage,
     ground_truth: Option<HashMap<CoreField, String>>,
+    /// The hand-transcribed true printed MRZ zone (`Extraction::mrz_line` from
+    /// `samples/ocr_fixtures/<stem>.json`), newline-joined, when this specimen
+    /// is labelled. Only real specimens carry one; synthetic documents leave
+    /// this `None`. Used solely to sub-classify a `checksum_failed` miss.
+    ground_truth_mrz: Option<String>,
     image_path: PathBuf,
     /// Whether `mrz::find_and_parse` recovered *any* MRZ from this document's
     /// OCR text — parsed, not necessarily checksum-valid.
@@ -515,6 +553,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 name: doc.seed.to_string(),
                 page,
                 ground_truth: Some(mrz_ground_truth(&truth)),
+                ground_truth_mrz: None,
                 image_path,
                 mrz_found,
                 synthetic: true,
@@ -543,6 +582,12 @@ fn prep_specimens(
             }
             let (page, image_path) = ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
+            // The hand-transcribed true printed MRZ zone, when this specimen
+            // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
+            // compares the run's recovered zone against it to tell a genuine
+            // OCR misread apart from a specimen whose *printed* check digits
+            // are wrong by design.
+            let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             // Best-effort fallback only — used in `run_prepped` when no
             // provider's own Tier-1 read resolves a format for this
@@ -559,6 +604,7 @@ fn prep_specimens(
                 name: doc.name.clone(),
                 page,
                 ground_truth,
+                ground_truth_mrz,
                 image_path,
                 mrz_found,
                 synthetic: false,
@@ -885,11 +931,21 @@ async fn run_prepped(
                 // text, computed once per document above) is the same source
                 // `--dump-ocr` already uses a few lines below to print which
                 // check digit(s) failed — reused here for the same reason.
+                //
+                // When this specimen has a hand-transcribed `mrz_line` label
+                // and the run recovered that exact zone, the check digits fail
+                // because the *printed* document is non-conforming, not because
+                // OCR misread it — report that as `checksum_failed_specimen`.
+                let specimen_nonconforming = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                    (Some(data), Some(truth)) => mrz_zone_mismatch(&data.mrz_lines, truth) == 0,
+                    _ => false,
+                };
                 Some(MissReason::ChecksumFailed {
                     failing: read_mrz
                         .as_ref()
                         .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
                         .unwrap_or_default(),
+                    specimen_nonconforming,
                 })
             } else {
                 bench_page
@@ -957,6 +1013,30 @@ async fn run_prepped(
                     }
                 };
 
+                let zone_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                    (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
+                    _ => None,
+                };
+                // Printed alongside the zone above so a run stopped before the
+                // final JSONL flush (the usual `llm`-pass kill) still carries the
+                // ground-truth comparison for every labelled specimen.
+                if let Some(truth) = &bench_page.ground_truth_mrz {
+                    println!("  ground-truth MRZ zone (hand-transcribed):");
+                    for (i, line) in truth.lines().enumerate() {
+                        println!("    [{i}] {line:?}");
+                    }
+                    match zone_mismatch {
+                        Some(0) => println!(
+                            "  zone mismatch vs ground truth: 0 \
+                             (printed zone recovered faithfully — specimen is non-conforming)"
+                        ),
+                        Some(n) => println!(
+                            "  zone mismatch vs ground truth: {n} character(s) \
+                             (OCR introduced the error)"
+                        ),
+                        None => {}
+                    }
+                }
                 dump_rows.push(ChecksumFailedDump {
                     name: bench_page.name.clone(),
                     provider: provider.to_string(),
@@ -965,6 +1045,8 @@ async fn run_prepped(
                     raw_ocr_text: bench_page.page.text.clone(),
                     recovered_mrz_lines: recovered,
                     failing_checks: failing,
+                    ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
+                    zone_mismatch,
                 });
             }
 
@@ -1101,11 +1183,23 @@ async fn run_prepped(
                 body.push('\n');
             }
             match std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, &body)) {
-                Ok(()) => println!(
-                    "checksum_failed OCR dump written to {} ({} rows)",
-                    path.display(),
-                    dump_rows.len()
-                ),
+                Ok(()) => {
+                    let specimen = dump_rows
+                        .iter()
+                        .filter(|r| r.zone_mismatch == Some(0))
+                        .count();
+                    let ocr_misread = dump_rows
+                        .iter()
+                        .filter(|r| r.zone_mismatch.is_some_and(|n| n > 0))
+                        .count();
+                    println!(
+                        "checksum_failed OCR dump written to {} ({} rows; \
+                         {specimen} labelled specimen-non-conforming, \
+                         {ocr_misread} labelled OCR-misread)",
+                        path.display(),
+                        dump_rows.len(),
+                    );
+                }
                 Err(e) => eprintln!("warning: could not write {}: {e}", path.display()),
             }
         }
@@ -1321,6 +1415,7 @@ mod tests {
                     ..OcrPage::default()
                 },
                 ground_truth: Some(labelled_truth),
+                ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
                 mrz_found: false,
                 synthetic: false,
@@ -1333,6 +1428,7 @@ mod tests {
                     ..OcrPage::default()
                 },
                 ground_truth: None,
+                ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: false,
                 synthetic: false,
@@ -1366,6 +1462,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None,
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             synthetic: false,
@@ -1401,6 +1498,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None, // deliberately unlabelled — must not block this metric
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             synthetic: false,
@@ -1471,6 +1569,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None,
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: true,
             synthetic: false,
@@ -1506,6 +1605,126 @@ mod tests {
             !row["failing_checks"].as_array().unwrap().is_empty(),
             "at least one check digit field is named"
         );
+        assert!(
+            row["ground_truth_mrz"].is_null() && row["zone_mismatch"].is_null(),
+            "an unlabelled specimen carries no ground-truth MRZ"
+        );
+        assert_eq!(
+            row["miss_reason"].as_str().or(Some("checksum_failed")),
+            Some("checksum_failed"),
+            "no label -> plain checksum_failed"
+        );
+    }
+
+    /// A `checksum_failed` specimen that carries a hand-transcribed `mrz_line`
+    /// label the run recovered faithfully is reported as
+    /// `checksum_failed_specimen` — the printed zone's own check digits are
+    /// what failed, not OCR.
+    #[tokio::test]
+    async fn a_labelled_specimen_whose_printed_zone_was_read_faithfully_is_specimen_nonconforming()
+    {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "ERIKSSON",
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        // A non-conforming TD3 (month 13 in the DOB field). The OCR text *is*
+        // this exact zone, so `find_and_parse` recovers it unchanged.
+        let zone = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<\n\
+                    L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+        let recovered = mrz::find_and_parse(zone).expect("parses");
+        assert!(!recovered.valid());
+
+        let prepped = vec![Some(BenchPage {
+            name: "labelled-nonconforming-specimen".to_string(),
+            page: OcrPage {
+                text: zone.to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: Some(recovered.mrz_lines.clone()),
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: true,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert!(matches!(
+            detail.miss_reason,
+            Some(MissReason::ChecksumFailed {
+                specimen_nonconforming: true,
+                ..
+            })
+        ));
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("checksum_failed_specimen")
+        );
+    }
+
+    /// The same label, but the run's OCR text drops one character of the zone:
+    /// the recovered zone no longer matches the transcription, so the miss
+    /// stays `checksum_failed` (an OCR error — Phase-3d material), not
+    /// `checksum_failed_specimen`.
+    #[tokio::test]
+    async fn a_labelled_specimen_read_with_an_ocr_error_stays_checksum_failed() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "ERIKSSON",
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let true_zone = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<\n\
+                         L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+        // OCR misreads the document number's leading `L` as `1`.
+        let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
+
+        let prepped = vec![Some(BenchPage {
+            name: "labelled-ocr-misread".to_string(),
+            page: OcrPage {
+                text: ocr_zone,
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: Some(true_zone.to_string()),
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: true,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert!(matches!(
+            detail.miss_reason,
+            Some(MissReason::ChecksumFailed {
+                specimen_nonconforming: false,
+                ..
+            })
+        ));
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("checksum_failed")
+        );
+    }
+
+    #[test]
+    fn mrz_zone_mismatch_counts_differing_characters_line_by_line() {
+        assert_eq!(mrz_zone_mismatch("ABC\nDEF", "ABC\nDEF"), 0);
+        assert_eq!(mrz_zone_mismatch("ABC\nDXF", "ABC\nDEF"), 1);
+        // a missing trailing character still counts
+        assert_eq!(mrz_zone_mismatch("ABC\nDE", "ABC\nDEF"), 1);
+        // a whole extra line counts every character
+        assert_eq!(mrz_zone_mismatch("ABC", "ABC\nDEF"), 3);
     }
 
     /// The other half of 1.3: a `vision` provider gets `NotApplicable`
@@ -1530,6 +1749,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None,
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             synthetic: false,
@@ -1569,6 +1789,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None,
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             synthetic: false,
@@ -1614,6 +1835,7 @@ mod tests {
                 ..OcrPage::default()
             },
             ground_truth: None,
+            ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             synthetic: false,
