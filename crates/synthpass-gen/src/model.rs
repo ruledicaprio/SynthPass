@@ -35,8 +35,22 @@ pub struct Passport {
     pub document_type: String,
     /// 3-letter ICAO/ISO 3166-1 issuing-state code.
     pub issuing_country: String,
+    /// Primary identifier as it goes into the MRZ and the printed romanized
+    /// line — always Latin `[A-Z]`. For a Cyrillic-script issuing state this is
+    /// the ICAO 9303 Part 3 §6 B transliteration of [`surname_native`]
+    /// (`Passport::surname_native`), computed with that state's language; for a
+    /// Latin-script state it is the name itself.
     pub surname: String,
+    /// Secondary identifier, Latin — see [`surname`](Self::surname).
     pub given_names: String,
+    /// The primary identifier in its native Cyrillic script, when the issuing
+    /// state uses one (`RUS`/`SRB`/`BGR`/`MKD`/`UKR`/`BLR`). `None` for
+    /// Latin-script identities. This is what a real passport prints in the VIZ;
+    /// [`surname`](Self::surname) is its transliteration.
+    pub surname_native: Option<String>,
+    /// The secondary identifier in its native Cyrillic script — see
+    /// [`surname_native`](Self::surname_native).
+    pub given_names_native: Option<String>,
     /// Document number, already trimmed of MRZ filler padding.
     pub document_number: String,
     /// 3-letter ICAO/ISO 3166-1 nationality code.

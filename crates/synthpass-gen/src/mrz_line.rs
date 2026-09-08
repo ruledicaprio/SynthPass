@@ -217,6 +217,8 @@ mod tests {
             issuing_country: "UTO".to_string(),
             surname: "ERIKSSON".to_string(),
             given_names: "ANNA MARIA".to_string(),
+            surname_native: None,
+            given_names_native: None,
             document_number: "L898902C3".to_string(),
             nationality: "UTO".to_string(),
             date_of_birth: Date::new(1974, 8, 12),

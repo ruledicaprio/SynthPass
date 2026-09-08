@@ -56,9 +56,67 @@ const SURNAMES: &[&str] = &[
 /// 3-letter ICAO/ISO 3166-1 codes used for issuing state / nationality. Real
 /// country codes are not PII on their own; the ICAO specimen code `UTO` is
 /// included deliberately as the most "obviously synthetic" option.
+///
+/// Six of these ([`cyrillic_language_for`]) are Cyrillic-script states — for
+/// those, [`generate_passport`] draws a native-script name and stores its
+/// ICAO 9303 Part 3 §6 B transliteration as the Latin `surname`/`given_names`.
 const COUNTRY_CODES: &[&str] = &[
-    "UTO", "UTO", "USA", "GBR", "DEU", "FRA", "CAN", "AUS", "JPN", "BRA", "ZAF", "SWE",
+    "UTO", "UTO", "USA", "GBR", "DEU", "FRA", "CAN", "AUS", "JPN", "BRA", "ZAF", "SWE", "RUS",
+    "SRB", "BGR", "MKD", "UKR", "BLR",
 ];
+
+/// Fictional Cyrillic-script given names (male), single-token, clearly not real
+/// public figures — several begin with `Ю`/`Я`/`Є` to exercise §6 B's
+/// word-initial Ukrainian rules.
+const GIVEN_NAMES_CYR_M: &[&str] = &[
+    "АНДРІЙ",
+    "ДМИТРО",
+    "ІВАН",
+    "МИХАЙЛО",
+    "ЮРІЙ",
+    "ЯРОСЛАВ",
+    "ПЕТРО",
+    "ОЛЕКСІЙ",
+];
+/// Fictional Cyrillic-script given names (female).
+const GIVEN_NAMES_CYR_F: &[&str] = &[
+    "АННА",
+    "МАРІЯ",
+    "ОЛЕНА",
+    "ЄВГЕНІЯ",
+    "ЮЛІЯ",
+    "НАДІЯ",
+    "СОФІЯ",
+    "ІРИНА",
+];
+/// Fictional Cyrillic-script surnames, single-token.
+const SURNAMES_CYR: &[&str] = &[
+    "ІВАНЕНКО",
+    "ПЕТРОВ",
+    "КОВАЛЕНКО",
+    "ШЕВЧЕНКО",
+    "ЖУКОВ",
+    "БОНДАР",
+    "ТКАЧЕНКО",
+    "МЕЛНИК",
+    "ГРИГОРЕНКО",
+    "ЦВЄТКОВ",
+];
+
+/// The ICAO 9303 Part 3 §6 B transliteration column for a Cyrillic-script
+/// issuing state, or `None` for a Latin-script one.
+fn cyrillic_language_for(code: &str) -> Option<mrz::CyrillicLanguage> {
+    use mrz::CyrillicLanguage::*;
+    Some(match code {
+        "RUS" => Russian,
+        "BLR" => Belarusian,
+        "BGR" => Bulgarian,
+        "SRB" => Serbian,
+        "UKR" => Ukrainian,
+        "MKD" => Macedonian,
+        _ => return None,
+    })
+}
 
 /// Alphabet for document numbers: digits + letters, excluding the MRZ filler.
 const ALNUM: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -114,12 +172,7 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
     let mut rng = ChaCha8Rng::seed_from_u64(config.seed);
 
     let is_male = rng.random_bool(0.5);
-    let (sex, given_names) = if is_male {
-        (Sex::M, pick(&mut rng, GIVEN_NAMES_M).to_string())
-    } else {
-        (Sex::F, pick(&mut rng, GIVEN_NAMES_F).to_string())
-    };
-    let surname = pick(&mut rng, SURNAMES).to_string();
+    let sex = if is_male { Sex::M } else { Sex::F };
 
     // Issuing state and nationality are drawn together, not independently: on
     // the overwhelming majority of real passports they're the same 3-letter
@@ -128,6 +181,41 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
     // AUS on a USA-issued document, which is confusing ground truth for a
     // benchmark to grade against.
     let country = pick(&mut rng, COUNTRY_CODES).to_string();
+
+    // A Cyrillic-script state draws a native-script name and stores its §6 B
+    // transliteration (computed with that state's language) as the Latin
+    // surname/given_names the MRZ and the romanized VIZ line carry. A
+    // Latin-script state draws a Latin name and leaves the `*_native` fields
+    // `None`.
+    let (given_names, given_names_native, surname, surname_native) =
+        match cyrillic_language_for(&country) {
+            Some(lang) => {
+                let gn_pool = if is_male {
+                    GIVEN_NAMES_CYR_M
+                } else {
+                    GIVEN_NAMES_CYR_F
+                };
+                let gn_native = pick(&mut rng, gn_pool).to_string();
+                let sn_native = pick(&mut rng, SURNAMES_CYR).to_string();
+                let gn = mrz::transliterate_cyrillic(&gn_native, lang);
+                let sn = mrz::transliterate_cyrillic(&sn_native, lang);
+                (gn, Some(gn_native), sn, Some(sn_native))
+            }
+            None => {
+                let gn_pool = if is_male {
+                    GIVEN_NAMES_M
+                } else {
+                    GIVEN_NAMES_F
+                };
+                (
+                    pick(&mut rng, gn_pool).to_string(),
+                    None,
+                    pick(&mut rng, SURNAMES).to_string(),
+                    None,
+                )
+            }
+        };
+
     let issuing_country = country.clone();
     let nationality = country;
 
@@ -147,6 +235,8 @@ pub fn generate_passport(config: &GeneratorConfig) -> Passport {
         issuing_country,
         surname,
         given_names,
+        surname_native,
+        given_names_native,
         document_number,
         nationality,
         date_of_birth,

@@ -35,6 +35,16 @@ pub struct Labels {
     pub sex: FieldLabel,
     pub date_of_expiry: FieldLabel,
     pub personal_number: Option<FieldLabel>,
+    /// The primary identifier in its native Cyrillic script, when the issuing
+    /// state uses one — the string a real passport prints in the VIZ. `None`
+    /// for a Latin-script identity, where [`surname`](Self::surname) already
+    /// *is* the printed form. Its `rect` is the same VIZ surname slot; the
+    /// value is the Cyrillic string, and [`surname`](Self::surname) carries its
+    /// ICAO 9303 Part 3 §6 B transliteration.
+    pub surname_native: Option<FieldLabel>,
+    /// The secondary identifier in its native Cyrillic script — see
+    /// [`surname_native`](Self::surname_native).
+    pub given_names_native: Option<FieldLabel>,
     /// MRZ lines for the document (2 for TD2/TD3, 3 for TD1).
     pub mrz_lines: Vec<String>,
     /// Bounding box of the full MRZ band.
@@ -88,6 +98,14 @@ pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
             .personal_number
             .as_ref()
             .map(|v| FieldLabel::new(v.clone(), page.personal_number)),
+        surname_native: passport
+            .surname_native
+            .as_ref()
+            .map(|v| FieldLabel::new(v.clone(), page.surname)),
+        given_names_native: passport
+            .given_names_native
+            .as_ref()
+            .map(|v| FieldLabel::new(v.clone(), page.given_names)),
         mrz_lines: mrz_line_strings,
         mrz_rect,
         mrz_format: doc_type,

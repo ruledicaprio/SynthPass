@@ -118,6 +118,15 @@ synthetic name `mrz_line` with a 0-based `line` index. `synthpass-export` re-exp
 `CoreField` list rather than hard-coding a fourth parallel copy of the ICAO field names (the
 repo already has three — `ROADMAP.md` "Open backlog", `knowledge/technical_debt.md`).
 
+**Cyrillic-script documents** (issuing state `RUS`/`SRB`/`BGR`/`MKD`/`UKR`/`BLR`) additionally
+carry `surname_native` and `given_names_native` blocks — the name in its native Cyrillic
+script, which is what the VIZ actually paints, on the *same* box as `surname`/`given_names`.
+The `surname`/`given_names` blocks and the MRZ carry the ICAO 9303 Part 3 §6 B transliteration
+(`mrz::transliterate_cyrillic` with the issuing state's language). So a Cyrillic row has two
+blocks sharing the surname box: `{field:"surname", value:"IVANOV"}` and
+`{field:"surname_native", value:"ИВАНОВ"}`. Latin-script documents have neither `*_native`
+block.
+
 **Value forms.** `date_of_birth` / `date_of_expiry` are ISO `YYYY-MM-DD` (as in `Labels`); the
 MRZ strings carry the `YYMMDD` forms. `sex` is one character. Values are the generator's ground
 truth verbatim — never re-derived from the image.

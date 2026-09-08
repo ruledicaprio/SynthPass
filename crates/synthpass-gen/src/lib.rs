@@ -19,6 +19,10 @@
 //! - **No real PII, ever.** Identities are drawn deterministically from a
 //!   seed out of small, hand-authored pools of clearly fictional names (see
 //!   [`data`]) — never real people, never sourced from real documents.
+//!   Cyrillic-script issuing states (`RUS`/`SRB`/`BGR`/`MKD`/`UKR`/`BLR`) draw
+//!   a native-script name and store its ICAO 9303 Part 3 §6 B transliteration
+//!   (`mrz::transliterate_cyrillic`) as the Latin `surname`/`given_names` the
+//!   MRZ carries; the native strings are on [`Labels`](labels::Labels) too.
 //!
 //! ## MRZ correctness
 //!
