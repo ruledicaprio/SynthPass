@@ -108,10 +108,17 @@ for you, so output always round-trips back through the matching parser as
 `optional_data_1` + `optional_data_2` and `optional_data` respectively.
 
 National characters are **transliterated, not dropped**: Doc 9303 Part 3 §6 A
-is applied automatically, so `MÜLLER` emits as `MUELLER` rather than `MLLER`.
-Five of the table's 95 characters have more than one ICAO-recommended
-transliteration and the issuing State chooses among them, so the crate can
-*produce* a conformant transliteration but cannot *validate* one — see
+(Latin) and §6 B (Cyrillic) are applied automatically, so `MÜLLER` emits as
+`MUELLER` rather than `MLLER` and `ИВАНОВ` as `IVANOV` rather than fillers.
+Five §6 A characters have more than one ICAO-recommended transliteration and
+twelve §6 B rows (plus five positional ones) depend on the name's language —
+Serbian `Ж` is `Z`, Russian `Ж` is `ZH` — so the crate can *produce* a
+conformant transliteration but cannot *validate* one. The emit path applies
+§6 B's base (≈ Russian) column; a caller that knows the language should run
+[`transliterate_cyrillic`](https://docs.rs/mrz/latest/mrz/fn.transliterate_cyrillic.html)
+with the right
+[`CyrillicLanguage`](https://docs.rs/mrz/latest/mrz/enum.CyrillicLanguage.html)
+first. §6 C (Arabic) is not implemented. See
 [`transliterate`](https://docs.rs/mrz/latest/mrz/fn.transliterate.html).
 
 ## What a check digit cannot prove
@@ -183,7 +190,10 @@ documents where the standard is **silent** rather than inventing conformance:
   is this crate's policy and is documented as such.
 - Name truncation is issuer-discretionary; Doc 9303 defines several strategies
   and states that truncation is not reliably detectable.
-- Transliteration is deliberately multi-valued for five characters.
+- §6 A transliteration is deliberately multi-valued for five characters; §6 B
+  (Cyrillic) is language-dependent and carries no worked example in the
+  standard, so its 48 rows are pinned by table-integrity checks only. §6 C
+  (Arabic) is not implemented.
 
 The corroboration record — which passages are relied on, how each was verified,
 and which remain unverified — is kept alongside the source corpus in

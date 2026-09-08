@@ -929,3 +929,73 @@ fn emit_transliterates_table_a_characters_expanded() {
         );
     }
 }
+
+// ---- Part 3 §6 B Cyrillic transliteration ----
+//
+// Doc 9303 §6 B carries NO worked example (unlike §6 A's `Térèsa CAÑON`), so
+// the table-level vectors live in `translit.rs`'s unit tests, constructed from
+// the table's own rows. What this file adds is the *emit path*: a Cyrillic
+// name reaching an MRZ name field through `format_td3`. The CONFORMANCE_BASIS
+// entry for §6 B is "Unverified" accordingly.
+
+/// Emit-path regression: a Cyrillic name reaches the MRZ name field
+/// transliterated (§6 B base column), not silently deleted to fillers the way
+/// it was before this landed.
+#[test]
+fn emit_transliterates_cyrillic_base_column() {
+    let cases: &[(&str, &str)] = &[
+        ("ИВАНОВ", "IVANOV"),
+        ("Смирнова", "SMIRNOVA"),
+        ("ЖУКОВ", "ZHUKOV"),     // Ж → ZH
+        ("ЩЕДРИН", "SHCHEDRIN"), // Щ → SHCH
+    ];
+    for (surname, expected) in cases {
+        let mrz = format_td3(&Td3Fields {
+            surname: (*surname).into(),
+            ..Default::default()
+        });
+        let line1 = mrz.split_once('\n').unwrap().0;
+        // Name field starts at offset 5 (doc code 2 + issuing country 3).
+        let name_field = &line1[5..];
+        let expected_field: String = {
+            let mut s = expected.to_string();
+            while s.len() < 39 {
+                s.push('<');
+            }
+            s
+        };
+        assert_eq!(
+            name_field, expected_field,
+            "surname {surname:?} should transliterate to {expected:?}"
+        );
+    }
+}
+
+/// A language-aware caller pre-transliterates with the right
+/// `CyrillicLanguage`, then emits: the Serbian form (`Ж`→`Z`) survives into the
+/// MRZ rather than being flattened to the base (Russian, `Ж`→`ZH`) column, and
+/// the document round-trips checksum-valid.
+#[test]
+fn cyrillic_language_aware_emit_round_trip() {
+    use mrz::{parse_td3, transliterate_cyrillic, CyrillicLanguage};
+
+    let surname_sr = transliterate_cyrillic("ЖИВКОВ", CyrillicLanguage::Serbian);
+    assert_eq!(surname_sr, "ZIVKOV");
+
+    let mrz = format_td3(&Td3Fields {
+        surname: surname_sr,
+        given_names: "ANA".into(),
+        issuing_country: "SRB".into(),
+        nationality: "SRB".into(),
+        document_number: "123456789".into(),
+        date_of_birth: "900101".into(),
+        sex: "F".into(),
+        date_of_expiry: "300101".into(),
+        ..Default::default()
+    });
+    let (l1, l2) = mrz.split_once('\n').unwrap();
+    let decoded = parse_td3(l1, l2).expect("valid TD3");
+    assert_eq!(decoded.surname, "ZIVKOV");
+    assert_eq!(decoded.given_names, "ANA");
+    assert!(decoded.valid());
+}

@@ -34,7 +34,8 @@
 //! - [`find_and_parse`] — scan free-form OCR text for an MRZ
 //! - [`format_td3`] and its siblings — emit an MRZ, national characters and all
 //! - [`MrzData::full_document_number`] — numbers too long for the printed field
-//! - [`transliterate`] — Doc 9303 Part 3 §6 A, including its multi-valued cells
+//! - [`transliterate`] — Doc 9303 Part 3 §6 A (Latin), including its multi-valued cells
+//! - [`transliterate_cyrillic`] — Doc 9303 Part 3 §6 B (Cyrillic), per [`CyrillicLanguage`]
 //! - [`MrzData::validity`] — why a proven *read* is not a valid *document*
 //! - [`Blindspot`] — the substitutions no check digit can ever catch
 //!
@@ -96,7 +97,10 @@ pub use repair::{
     solve_field, solve_substitution, substitution_candidates, width_candidates, FieldKind,
     Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
 };
-pub use translit::{transliterate, transliterate_char, transliterations, TransliterationStyle};
+pub use translit::{
+    transliterate, transliterate_char, transliterate_cyrillic, transliterate_cyrillic_char,
+    transliterations, CyrillicLanguage, TransliterationStyle,
+};
 
 /// Tunables for the parsing entry points.
 ///

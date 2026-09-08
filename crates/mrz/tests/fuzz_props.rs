@@ -15,8 +15,8 @@
 use mrz::{
     find_and_parse, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
     parse_mrv_b, parse_td1, parse_td2, parse_td3, substitution_candidates, transliterate,
-    transliterations, MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
-    TransliterationStyle,
+    transliterate_cyrillic, transliterate_cyrillic_char, transliterations, CyrillicLanguage,
+    MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields, TransliterationStyle,
 };
 use proptest::prelude::*;
 
@@ -429,20 +429,37 @@ fn translit_ish_char() -> impl Strategy<Value = char> {
         2 => prop::char::range('a', 'z'),
         2 => prop::char::range('0', '9'),
         3 => (0usize..95).prop_map(|i| {
-            // Sample a Table A code point via `transliterations`'s own inverse:
-            // walk the known Latin-1/Latin-Extended-A ranges the table covers
-            // and pick one that has entries. Falls back to a fixed one on any
-            // miss so the closure is total.
+            // Sample a Table A / Table B code point: a hand-picked spread
+            // across the Latin-Extended ranges §6 A covers and the Cyrillic
+            // block §6 B covers, including the conditional and positional
+            // rows. Falls back to a fixed one on any miss so the closure is
+            // total.
             const CANDIDATES: &[char] = &[
+                // §6 A (Latin)
                 '\u{00C0}', '\u{00C4}', '\u{00C5}', '\u{00D1}', '\u{00D6}', '\u{00DC}',
                 '\u{00DF}', '\u{0110}', '\u{0131}', '\u{0132}', '\u{013F}', '\u{1E9E}',
                 '\u{017D}',
+                // §6 B (Cyrillic): base rows + every conditional/positional row
+                '\u{0410}', '\u{0416}', '\u{0429}', '\u{042F}', '\u{0401}', '\u{0404}',
+                '\u{0407}', '\u{040C}', '\u{040F}', '\u{0413}', '\u{0418}', '\u{0419}',
+                '\u{0425}', '\u{0426}', '\u{0427}', '\u{0428}', '\u{042E}', '\u{0492}',
+                '\u{0430}', // lowercase а — exercises the uppercase-first path
             ];
             CANDIDATES[i % CANDIDATES.len()]
         }),
         1 => any::<char>(),
     ]
 }
+
+/// The six Cyrillic languages, for property tests that must cover every column.
+const CYRILLIC_LANGS: &[CyrillicLanguage] = &[
+    CyrillicLanguage::Russian,
+    CyrillicLanguage::Belarusian,
+    CyrillicLanguage::Bulgarian,
+    CyrillicLanguage::Serbian,
+    CyrillicLanguage::Ukrainian,
+    CyrillicLanguage::Macedonian,
+];
 
 fn translit_ish_string() -> impl Strategy<Value = String> {
     prop::collection::vec(translit_ish_char(), 0..40).prop_map(|chars| chars.into_iter().collect())
@@ -527,6 +544,39 @@ proptest! {
                         out.chars().all(|o| o.is_ascii_uppercase()),
                         "transliterate({u:?}) = {out:?} contains non-[A-Z]"
                     );
+                }
+            }
+        }
+    }
+
+    /// §6 B: `transliterate_cyrillic` never panics on arbitrary input, for
+    /// every language.
+    #[test]
+    fn transliterate_cyrillic_never_panics(
+        s in translit_ish_string(),
+        lang_idx in 0usize..6,
+    ) {
+        let _ = transliterate_cyrillic(&s, CYRILLIC_LANGS[lang_idx]);
+    }
+
+    /// §6 B: every Table B character's transliteration output — under every
+    /// language, in every position — is `[A-Z]+`. Same MRZ-alphabet invariant
+    /// as the §6 A property above.
+    #[test]
+    fn transliterate_cyrillic_output_is_upper_ascii(
+        s in translit_ish_string(),
+    ) {
+        for c in s.chars() {
+            for u in c.to_uppercase() {
+                for &lang in CYRILLIC_LANGS {
+                    for is_first in [false, true] {
+                        if let Some(out) = transliterate_cyrillic_char(u, lang, is_first) {
+                            prop_assert!(
+                                !out.is_empty() && out.chars().all(|o| o.is_ascii_uppercase()),
+                                "transliterate_cyrillic_char({u:?}, {lang:?}, {is_first}) = {out:?}"
+                            );
+                        }
+                    }
                 }
             }
         }

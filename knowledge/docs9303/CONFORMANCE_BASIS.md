@@ -279,6 +279,70 @@ entry below).
 checks — there is no further worked example in this corpus to check them
 against.
 
+### Part 3 §6 B — transliteration of Cyrillic characters
+
+[`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:809-863`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#b-transliteration-of-cyrillic-characters) (Table B, 48 rows,
+U+0401…U+04BA, one unified table with a mid-table repeated header,
+3 columns: `Unicode` | `National character` | `Recommended transliteration`)
+
+Added `crates/mrz/src/translit.rs`'s `TABLE_B` (the base ≈ Russian column,
+keyed on the Unicode column) plus `transliterate_cyrillic` /
+`CyrillicLanguage`, and gave `emit.rs`'s `clean_name_half` a §6 B base-column
+pass so a Cyrillic name no longer emits as an all-filler field (the same
+silent-data-loss fix §6 A got for Latin, still non-conformant against `:493`
+until now).
+
+**§6 B is structurally different from §6 A.** Where §6 A leaves five rows to
+the issuer's free choice, §6 B makes 17 rows *deterministic given the name's
+language*:
+
+- **12 language-conditional** — the base form applies except in a named
+  language: `Ё`→`E`/Belorussian `IO`; `Г`→`G`/Belorussian, Serbian, Ukrainian
+  `H`; `Ж`→`ZH`/Serbian `Z`; `И`→`I`/Ukrainian `Y`; `Х`→`KH`/Serbian,
+  Macedonian `H`; `Ц`→`TS`/Serbian, Macedonian `C`; `Ч`→`CH`/Serbian `C`;
+  `Ш`→`SH`/Serbian `S`; `Щ`→`SHCH`/Bulgarian `SHT`; `Ќ`→`K`/Macedonian `KJ`;
+  `Џ`→`DZ`/Macedonian `DJ`; `Ғ`→`G`/Macedonian `GJ`.
+- **5 position-conditional** — `Є Ї Й Ю Я` take a `Y`- form only "if Ukrainian
+  first character"; `transliterate_cyrillic` treats "first character" as the
+  first character of the string it is given.
+
+The `CyrillicLanguage` enum uses the modern short names; §6 B itself spells
+Belarusian "Belorussian" and never names Macedonian directly ("the language
+spoken in the former Yugoslav Republic of Macedonia").
+
+**No worked example exists.** §6 A had Appendix B's "Térèsa CAÑON"; §6 B has
+nothing in this corpus — not a name, not a reverse table (Appendix B's reverse
+transliteration is Arabic-only). So the 48 rows and 17 conditionals are pinned
+by **table-integrity checks only**: 48 rows, strictly ascending, all keys in
+U+0400…U+04FF, every base and every conditional output `[A-Z]+`, the
+conditional set is *exactly* the 17 rows above, and a lowercase-round-trip
+over all 48 rows × 6 languages (`crates/mrz/src/translit.rs` unit tests). The
+emit path is covered end-to-end in `crates/mrz/tests/icao_vectors.rs`.
+
+**Known corpus defect — three `National character` glyph cells.** Like Table
+A's four (below), the display column is transcription-damaged and the Unicode
+column is authoritative, so `TABLE_B` is unaffected:
+
+- **U+0402** prints as `Ћ` (Tshe) but U+0402 is `Ђ` (Dje); `Ђ`→`D` is the
+  coherent reading and is what `TABLE_B` uses. A consequence either way:
+  Serbian `Ћ` (U+040B) has no row in §6 B at all, so a name containing it
+  (common in Serbian, e.g. `-ић` endings) passes an un-transliterated Cyrillic
+  character straight through. This is a gap in the standard's table as
+  transcribed, not a crate bug — flagged here for a future source-PDF check.
+- **U+040E** prints lowercase (`ў`); U+040E is the capital `Ў`.
+- **U+0474** prints as Latin `V`; U+0474 is `Ѵ` (Izhitsa), and its
+  transliteration `Y` is consistent with Izhitsa.
+
+Additionally, the U+0492 row is labelled "Macedonian = GJ", but U+0492 is `Ғ`
+(Ghe with stroke, a Turkic letter), not Macedonian `Ѓ` (U+0403). `TABLE_B`
+transcribes U+0492 as written; Macedonian `Ѓ` names are consequently not
+covered. Also flagged for a source-PDF check.
+
+**Status: Unverified.** No worked example; table-integrity and
+conditional-set checks only. Four suspected source-table defects recorded
+above for a future rendered-image verification against `9303_p3_cons_en.pdf`
+(same method as the Table A glyph-cell entry below).
+
 ### Part 3 §5 — issuing-state/nationality code registry, full cross-check
 
 [`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:618-696`](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#5-codes-for-nationality-place-of-birth-location-of-issuing-stateauthority-and-other-purposes) (Parts A-H)

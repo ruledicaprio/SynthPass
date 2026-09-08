@@ -185,6 +185,14 @@ fn field(s: &str, width: usize) -> String {
 /// transliterated, apostrophes dropped with no filler, hyphens/commas/spaces
 /// folded to a single `<`.
 ///
+/// Transliteration covers Doc 9303 Part 3 §6 A (Latin national characters,
+/// `Expanded` style) *and* §6 B (Cyrillic) — but §6 B is applied with its base
+/// (≈ Russian) column, because this function has no language context. A name in
+/// a language whose §6 B column differs (Serbian, Ukrainian, Bulgarian,
+/// Macedonian, Belarusian) should be run through
+/// [`transliterate_cyrillic`](crate::transliterate_cyrillic) with the right
+/// [`CyrillicLanguage`](crate::CyrillicLanguage) first.
+///
 /// Public so a consumer can ask "could this visual-zone reading have produced
 /// that MRZ name field?" using the same encoder that writes them, rather than
 /// re-deriving the rules. `mrz::transliterate` alone is not a substitute — its
@@ -203,6 +211,19 @@ fn clean_name_half(s: &str) -> String {
             if let Some(t) = crate::translit::transliterate_char(
                 u,
                 crate::translit::TransliterationStyle::Expanded,
+            ) {
+                out.push_str(t);
+                last_was_sep = false;
+            } else if let Some(t) = crate::translit::transliterate_cyrillic_char(
+                u,
+                // This path has no language context, so it applies §6 B's
+                // base (≈ Russian) column. That is "better than deleting the
+                // character" (which is what happened before), not "correct for
+                // every language": a Serbian or Ukrainian name should be
+                // pre-transliterated with `mrz::transliterate_cyrillic` and the
+                // right `CyrillicLanguage` *before* it reaches an emitter.
+                crate::translit::CyrillicLanguage::Russian,
+                false,
             ) {
                 out.push_str(t);
                 last_was_sep = false;
