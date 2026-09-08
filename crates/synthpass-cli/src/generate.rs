@@ -190,6 +190,14 @@ struct LabelsJson {
     date_of_expiry: FieldLabelJson,
     #[serde(skip_serializing_if = "Option::is_none")]
     personal_number: Option<FieldLabelJson>,
+    /// The primary/secondary identifier in native Cyrillic script — present
+    /// only for a Cyrillic-script issuing state, where `surname`/`given_names`
+    /// above carry the ICAO 9303 Part 3 §6 B transliteration. Same rect as
+    /// their Latin counterparts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    surname_native: Option<FieldLabelJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    given_names_native: Option<FieldLabelJson>,
     /// The ICAO 9303 MRZ format ("TD1"/"TD2"/"TD3") — the join key for the
     /// bench corpus and Tier-1 gate to separate formats by, since
     /// `document_type.value` (the MRZ document code) cannot: TD1 and TD2
@@ -237,6 +245,8 @@ fn labels_to_json(
         sex: (&labels.sex).into(),
         date_of_expiry: (&labels.date_of_expiry).into(),
         personal_number: labels.personal_number.as_ref().map(Into::into),
+        surname_native: labels.surname_native.as_ref().map(Into::into),
+        given_names_native: labels.given_names_native.as_ref().map(Into::into),
         mrz_format: labels.mrz_format.as_str().to_string(),
         mrz_lines: labels.mrz_lines.clone(),
         mrz_line1: labels.mrz_lines[0].clone(),

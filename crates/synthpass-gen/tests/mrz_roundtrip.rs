@@ -180,3 +180,96 @@ fn generated_mrz_round_trips_without_personal_number() {
     assert!(parsed.valid(), "checks: {:?}", parsed.checks);
     assert_eq!(parsed.personal_number, None);
 }
+
+/// Cyrillic-script identities: the generator draws a native-script name, stores
+/// its ICAO 9303 Part 3 §6 B transliteration (computed with the issuing
+/// state's language) as the Latin `surname`/`given_names`, and the MRZ carries
+/// that Latin form checksum-valid. This is the round-trip that makes §6 B
+/// measurable — before it, nothing exercised `transliterate_cyrillic` end to
+/// end.
+#[test]
+fn cyrillic_identities_transliterate_and_round_trip() {
+    let lang_for = |code: &str| -> Option<mrz::CyrillicLanguage> {
+        use mrz::CyrillicLanguage::*;
+        Some(match code {
+            "RUS" => Russian,
+            "BLR" => Belarusian,
+            "BGR" => Bulgarian,
+            "SRB" => Serbian,
+            "UKR" => Ukrainian,
+            "MKD" => Macedonian,
+            _ => return None,
+        })
+    };
+
+    let mut seen_cyrillic = 0;
+    let mut seen_languages = std::collections::BTreeSet::new();
+
+    for seed in 0..400u64 {
+        let cfg = GeneratorConfig::new(seed);
+        let passport = generate_passport(&cfg);
+        let (_image, labels) = generate(&passport, &cfg);
+
+        let Some(lang) = lang_for(&passport.issuing_country) else {
+            // Latin-script identity: no native name, `surname` is the printed form.
+            assert!(passport.surname_native.is_none(), "seed {seed}");
+            assert!(passport.given_names_native.is_none(), "seed {seed}");
+            continue;
+        };
+        seen_cyrillic += 1;
+        seen_languages.insert(passport.issuing_country.clone());
+
+        let sn_native = passport.surname_native.as_ref().expect("native surname");
+        let gn_native = passport
+            .given_names_native
+            .as_ref()
+            .expect("native given names");
+
+        // The Latin fields are exactly the §6 B transliteration of the native
+        // ones, and pure [A-Z].
+        assert_eq!(
+            passport.surname,
+            mrz::transliterate_cyrillic(sn_native, lang),
+            "seed {seed} ({})",
+            passport.issuing_country
+        );
+        assert_eq!(
+            passport.given_names,
+            mrz::transliterate_cyrillic(gn_native, lang),
+            "seed {seed}"
+        );
+        assert!(
+            passport.surname.chars().all(|c| c.is_ascii_uppercase())
+                && passport.given_names.chars().all(|c| c.is_ascii_uppercase()),
+            "seed {seed}: romanized name is not [A-Z]: {:?} / {:?}",
+            passport.surname,
+            passport.given_names
+        );
+
+        // Labels carry the native strings on the same VIZ rects.
+        assert_eq!(labels.surname_native.as_ref().unwrap().value, *sn_native);
+        assert_eq!(
+            labels.surname_native.as_ref().unwrap().rect,
+            labels.surname.rect
+        );
+
+        // The MRZ round-trips checksum-valid and reads back the Latin surname.
+        let mrz_string = labels.mrz_string();
+        let mut ls = mrz_string.lines();
+        let parsed = mrz::parse_td3(ls.next().unwrap(), ls.next().unwrap())
+            .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        assert!(parsed.valid(), "seed {seed}: checks {:?}", parsed.checks);
+        assert_eq!(parsed.surname, passport.surname, "seed {seed}");
+        assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+    }
+
+    assert!(
+        seen_cyrillic >= 20,
+        "expected a meaningful share of Cyrillic identities in 400 seeds, got {seen_cyrillic}"
+    );
+    assert_eq!(
+        seen_languages.len(),
+        6,
+        "all six Cyrillic issuing states should appear in 400 seeds: {seen_languages:?}"
+    );
+}

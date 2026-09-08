@@ -417,13 +417,20 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
         &labels.issuing_country.value,
         fonts_ref,
     );
-    draw_text_field(&mut img, page.surname, &labels.surname.value, fonts_ref);
-    draw_text_field(
-        &mut img,
-        page.given_names,
-        &labels.given_names.value,
-        fonts_ref,
-    );
+    // A real passport prints the name in its native script; the MRZ band
+    // (drawn below from `labels.mrz_lines`) carries the Latin transliteration.
+    // For a Latin-script identity `*_native` is `None` and `surname`/
+    // `given_names` are already the printed form.
+    let surname_viz = labels
+        .surname_native
+        .as_ref()
+        .map_or(labels.surname.value.as_str(), |fl| fl.value.as_str());
+    let given_names_viz = labels
+        .given_names_native
+        .as_ref()
+        .map_or(labels.given_names.value.as_str(), |fl| fl.value.as_str());
+    draw_text_field(&mut img, page.surname, surname_viz, fonts_ref);
+    draw_text_field(&mut img, page.given_names, given_names_viz, fonts_ref);
     draw_text_field(
         &mut img,
         page.document_number,

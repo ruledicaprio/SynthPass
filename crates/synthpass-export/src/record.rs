@@ -179,6 +179,27 @@ fn build_record(
         ));
     }
 
+    // Cyrillic-script documents paint the name in its native script in the VIZ;
+    // the `surname`/`given_names` blocks above and the MRZ carry the ICAO 9303
+    // §6 B transliteration. Emit the native strings as their own blocks, on the
+    // same VIZ rect, so an exported row carries both scripts (EXPORTS.md).
+    for (name, fl) in [
+        ("surname_native", labels.surname_native.as_ref()),
+        ("given_names_native", labels.given_names_native.as_ref()),
+    ] {
+        if let Some(fl) = fl {
+            staged.push((
+                fl.rect,
+                Block {
+                    field: name.to_string(),
+                    value: fl.value.clone(),
+                    bbox: normalize_box(fl.rect, width, height),
+                    line: None,
+                },
+            ));
+        }
+    }
+
     for (i, line) in labels.mrz_lines.iter().enumerate() {
         let rect = page.mrz_lines[i];
         staged.push((
