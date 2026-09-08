@@ -1,5 +1,11 @@
 # MRZ_SEQUENCE_COMPLETENESS.md — Tier-1 completeness backlog (M6 sub-track)
 
+> **Status (2026-09-08): complete — no open work.** Chunks 1–5 shipped (PRs #162–#166),
+> chunk 6 shipped, chunk 7 was measured and **rejected** (reverted in #178). `crates/mrz`
+> now carries typed `ChecksumFailed` sub-reasons, `MrzError::IncompleteSequence`, and the
+> unified `SequenceCompleteness` type. This document is kept as the design record and the
+> reasoning trail; there is nothing left to implement in it.
+
 Scope: `crates/mrz` **structural completeness** — ensuring an OCR-read MRZ sequence
 is detected/repaired/validated as complete and internally consistent (right line
 count, right line length, all fields present, checksums valid, cross-field
@@ -58,7 +64,8 @@ start implementation without the checkpoint described in its own section. Chunk 
 was also gated; see its section for why the originally-proposed design was
 dropped at design time and what shipped instead, cleared by measurement.
 
-Suggested order and parallelism:
+Suggested order and parallelism (**historical** — everything below shipped; kept for the
+dependency reasoning):
 
 ```
 Parallel, first (cheap, foundational, no interdependency):
@@ -79,7 +86,7 @@ Last, independent of each other:
 
 ---
 
-## Chunk 1 — Diagnostic: split `ChecksumFailed` into sub-reasons
+## Chunk 1 — [DONE, #163] Diagnostic: split `ChecksumFailed` into sub-reasons
 
 **Goal.** Turn the single `checksum_failed` bucket into an actionable breakdown of
 *which* check digit(s) failed.
@@ -123,7 +130,7 @@ PR description (e.g. "28 composite-only, 5 document_number, 3 multi-field").
 
 ---
 
-## Chunk 2 — Verify `personal_number_check_digit` `'0'`-or-`'<'` issuer option
+## Chunk 2 — [DONE, #162] Verify `personal_number_check_digit` `'0'`-or-`'<'` issuer option
 
 **Goal.** Close a normative-spec conformance question with a definitive answer.
 
@@ -173,7 +180,7 @@ this becomes a one-line fix instead, and should be re-scoped accordingly).
 
 ---
 
-## Chunk 3 — `changelog.d/` housekeeping
+## Chunk 3 — [DONE, #164] `changelog.d/` housekeeping
 
 **Goal.** Close two fragment-trail gaps before more M6 fragments land on top of a
 trail with known holes.
@@ -215,7 +222,7 @@ else.
 
 ---
 
-## Chunk 4 — `IncompleteSequence` / line-count signal
+## Chunk 4 — [DONE, #165] `IncompleteSequence` / line-count signal
 
 **Goal.** Give "found N of M expected lines" a typed signal — the literal gap this
 whole doc is named for.
@@ -277,7 +284,7 @@ land before chunk 5, whose type shape depends on this signal's real shape.
 
 ---
 
-## Chunk 5 — `SequenceCompleteness` unified type
+## Chunk 5 — [DONE, #166] `SequenceCompleteness` unified type
 
 **Goal.** Give `crates/mrz` one coordinated completeness vocabulary instead of
 four uncoordinated ones, without breaking any existing consumer.

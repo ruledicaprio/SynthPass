@@ -154,6 +154,13 @@ pub enum TransliterationStyle {
 
 /// Every ICAO-recommended transliteration for `c`, in the order Doc 9303
 /// lists them. Empty if `c` is not in Table A.
+///
+/// ```
+/// // Ñ is one of Table A's five multi-valued rows.
+/// assert_eq!(mrz::transliterations('Ñ'), ["N", "NXX"]);
+/// // 'A' is a plain MRZ character, not a Table A entry.
+/// assert_eq!(mrz::transliterations('A'), &[] as &[&str]);
+/// ```
 pub fn transliterations(c: char) -> &'static [&'static str] {
     match TABLE_A.binary_search_by_key(&c, |&(cp, _)| cp) {
         Ok(idx) => TABLE_A[idx].1,
@@ -163,6 +170,15 @@ pub fn transliterations(c: char) -> &'static [&'static str] {
 
 /// The single transliteration for `c` under `style`, or `None` if `c` is not
 /// in Table A.
+///
+/// ```
+/// use mrz::{transliterate_char, TransliterationStyle};
+///
+/// assert_eq!(transliterate_char('Ü', TransliterationStyle::Expanded), Some("UE"));
+/// assert_eq!(transliterate_char('Ü', TransliterationStyle::Simple), Some("U"));
+/// // Not a Table A character:
+/// assert_eq!(transliterate_char('A', TransliterationStyle::Expanded), None);
+/// ```
 pub fn transliterate_char(c: char, style: TransliterationStyle) -> Option<&'static str> {
     let variants = transliterations(c);
     if variants.is_empty() {
@@ -245,6 +261,13 @@ pub fn transliterate(s: &str, style: TransliterationStyle) -> String {
 /// the former Yugoslav Republic of Macedonia"); this enum uses the modern
 /// short names. The default, [`Russian`](Self::Russian), is the table's
 /// unnamed base column.
+///
+/// ```
+/// use mrz::{transliterate_cyrillic, CyrillicLanguage};
+///
+/// assert_eq!(transliterate_cyrillic("Иванов", CyrillicLanguage::default()), "IVANOV");
+/// assert_eq!(transliterate_cyrillic("Живков", CyrillicLanguage::Serbian), "ZIVKOV");
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum CyrillicLanguage {
@@ -338,6 +361,17 @@ const TABLE_B: &[(char, &str)] = &[
 ///
 /// Callers that have a whole string should use [`transliterate_cyrillic`],
 /// which upper-cases and tracks `is_first` for you.
+///
+/// ```
+/// use mrz::{transliterate_cyrillic_char, CyrillicLanguage};
+///
+/// // Ж is one of the twelve language-conditional rows.
+/// assert_eq!(transliterate_cyrillic_char('Ж', CyrillicLanguage::Russian, false), Some("ZH"));
+/// assert_eq!(transliterate_cyrillic_char('Ж', CyrillicLanguage::Serbian, false), Some("Z"));
+/// // Є takes a Y- form only as the first character of a Ukrainian name.
+/// assert_eq!(transliterate_cyrillic_char('Є', CyrillicLanguage::Ukrainian, true), Some("YE"));
+/// assert_eq!(transliterate_cyrillic_char('Є', CyrillicLanguage::Ukrainian, false), Some("IE"));
+/// ```
 pub fn transliterate_cyrillic_char(
     c: char,
     lang: CyrillicLanguage,

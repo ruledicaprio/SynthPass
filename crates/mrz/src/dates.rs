@@ -55,6 +55,17 @@ pub fn expand_date(yymmdd: &str, is_birth: bool) -> String {
 pub const CURRENT_YY: u32 = 26;
 
 /// Like [`expand_date`] but with a caller-supplied two-digit-year pivot.
+///
+/// ```
+/// use mrz::expand_date_with_pivot;
+///
+/// // yy = 74. With the default pivot (26) a birth year of 74 is last century;
+/// // raise the pivot past 74 and the same digits read as 2074.
+/// assert_eq!(expand_date_with_pivot("740812", true, 26), "1974-08-12");
+/// assert_eq!(expand_date_with_pivot("740812", true, 80), "2074-08-12");
+/// // Expiry dates are always 20xx regardless of the pivot.
+/// assert_eq!(expand_date_with_pivot("740812", false, 80), "2074-08-12");
+/// ```
 pub fn expand_date_with_pivot(yymmdd: &str, is_birth: bool, pivot_yy: u32) -> String {
     if yymmdd.len() != 6 || !yymmdd.chars().all(|c| c.is_ascii_digit()) {
         return yymmdd.to_string(); // leave unparseable input untouched
