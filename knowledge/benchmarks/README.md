@@ -352,13 +352,18 @@ already exists to separate) and an actual band-detection failure on a
 document that does carry one. `checksum_failed` carries no such ambiguity: it
 means OCR found MRZ-*shaped* text and got at least one character wrong inside
 it — a clean, unambiguous OCR weak spot, and now the larger of the two miss
-kinds on the real corpus. Follow-up (not done in this pass): pull the
-`checksum_failed` documents' raw OCR text the way the M6 TD1 root-cause
-investigation did — `synthpass-bench --dump-ocr` has no real-specimen
-equivalent today (`provider-bench` has no `--dump-ocr` flag at all) — and
-look for a systematic character confusion the way the name-separator and
-line-1-prefix bugs were found this session, rather than guessing from the
-aggregate alone. `knowledge/technical_debt.md`'s separate finding that OCR
+kinds on the real corpus. Follow-up: pull the `checksum_failed` documents' raw
+OCR text the way the M6 TD1 root-cause investigation did and look for a
+systematic character confusion the way the name-separator and line-1-prefix
+bugs were found, rather than guessing from the aggregate alone. The tooling
+for this now exists: `provider-bench --real-specimens --dump-ocr` (added
+2026-08-31, extended 2026-09-08) prints, for every `checksum_failed` miss, the
+full pre-parse OCR text + MRZ band score + recovered MRZ zone + failing check
+digit(s), and writes one row per miss to
+`artifacts/provider-bench-checksum-failed-dump.jsonl` for offline analysis —
+the real-specimen equivalent of `synthpass-bench --dump-ocr`. The analysis
+pass over that dump is the open work. `knowledge/technical_debt.md`'s separate
+finding that OCR
 confidence is a character-plausibility proxy, not a real per-character model
 score, is the reason a confidence-based shortcut to the same answer isn't
 available either — the aggregate `checksum_failed` count is genuinely the
