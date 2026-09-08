@@ -316,8 +316,11 @@ and where recent effort has actually gone.
   (`technical_debt.md`, MEDIUM), are both still open.
 - No per-format hit-rate floor exists (deliberately — "a floor over a corpus one day old is an
   invented threshold"); add per-format floors once the numbers are earned.
-- `provider-bench` has no `--dump-ocr` equivalent scoped to real-specimen `checksum_failed`
-  misses — needed before those can be root-caused the way the synthetic ones were.
+- `provider-bench --real-specimens --dump-ocr` dumps the raw OCR text + recovered MRZ zone +
+  failing check digit(s) for every real-specimen `checksum_failed` miss, and writes
+  `artifacts/provider-bench-checksum-failed-dump.jsonl` for offline analysis. The tooling is
+  in place; the analysis pass over that dump — categorising the ~66 misses the way the
+  synthetic name-separator / line-1-prefix bugs were root-caused — is the open work.
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three

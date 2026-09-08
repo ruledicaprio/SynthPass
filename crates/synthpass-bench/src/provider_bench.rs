@@ -26,7 +26,7 @@
 
 use crate::{miss_kind, CorpusDoc, MissReason, RealSpecimenDoc};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use synthpass_core::v2::{CoreField, MrzFormat};
 use synthpass_die::{Capability, CostClass, DocumentContext, Evidence, ProviderCatalog};
@@ -44,6 +44,31 @@ fn mrz_format_str(format: MrzFormat) -> &'static str {
         MrzFormat::MrvA => "MRVA",
         MrzFormat::MrvB => "MRVB",
     }
+}
+
+/// One `checksum_failed` real-specimen miss, as written to
+/// `provider-bench-checksum-failed-dump.jsonl` when `run_prepped` is given a
+/// `dump_ocr_dir`. Owned strings throughout — the per-document `read_mrz` it
+/// draws `recovered_mrz_lines` from is a loop local that does not outlive the
+/// iteration. This is a diagnostic artifact, not a hot path.
+#[derive(serde::Serialize)]
+struct ChecksumFailedDump {
+    /// Real specimen file stem.
+    name: String,
+    /// Which reader produced the miss (`"mrz"`, `"llm"`, …).
+    provider: String,
+    /// Resolved ICAO format for the row, when one is known.
+    mrz_format: Option<String>,
+    /// `OcrPage::mrz_band_score` — a low value reframes the miss as band
+    /// detection rather than character OCR.
+    mrz_band_score: Option<f64>,
+    /// The full pre-parse OCR text the provider was handed.
+    raw_ocr_text: String,
+    /// The MRZ zone `mrz::find_and_parse` recovered (post width/substitution
+    /// repair), one entry per line; empty if nothing parsed.
+    recovered_mrz_lines: Vec<String>,
+    /// The check digit field name(s) that did not validate.
+    failing_checks: Vec<String>,
 }
 
 /// Everything measured for one provider over one corpus run.
@@ -556,7 +581,7 @@ pub async fn run_provider_bench(
     progress: bool,
 ) -> Vec<ProviderReport> {
     let prepped = prep_corpus(ocr, corpus, progress);
-    run_prepped(catalog, &prepped, measure_memory, false, progress).await
+    run_prepped(catalog, &prepped, measure_memory, None, progress).await
 }
 
 /// Runs every reader in `catalog` against every real specimen in
@@ -569,11 +594,11 @@ pub async fn run_provider_bench_real(
     ocr: &NativeOcr,
     specimens: &[RealSpecimenDoc],
     measure_memory: bool,
-    dump_ocr: bool,
+    dump_ocr_dir: Option<&Path>,
     progress: bool,
 ) -> Vec<ProviderReport> {
     let prepped = prep_specimens(ocr, specimens, progress);
-    run_prepped(catalog, &prepped, measure_memory, dump_ocr, progress).await
+    run_prepped(catalog, &prepped, measure_memory, dump_ocr_dir, progress).await
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
@@ -625,18 +650,24 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
 /// unsupported-assertion are computed, so the two corpus sources cannot
 /// silently diverge in what "correct" or "unsupported" means.
 ///
-/// `dump_ocr`: when a document's `miss_reason` resolves to
-/// `MissReason::ChecksumFailed`, print its raw MRZ zone text (debug-quoted,
-/// so a misread or invisible character is visible) and which check digit(s)
-/// failed. Mirrors `synthpass-bench`'s own `--dump-ocr`, but scoped to this
-/// one miss kind rather than every document: `checksum_failed` is the
-/// unambiguous signal (OCR found MRZ-shaped text and misread a character in
-/// it — unlike `no_mrz_found`, which also catches genuinely MRZ-less
-/// documents), and a real-specimen run is large enough that dumping every
-/// hit would be noise a synthetic diagnostic run never has to contend with.
-/// `synthpass_bench::CorpusDoc` runs (`run_provider_bench`) never pass
-/// `true` here — `synthpass-bench`'s own `--dump-ocr` already covers that
-/// path.
+/// `dump_ocr_dir`: when `Some`, for every document whose `miss_reason`
+/// resolves to `MissReason::ChecksumFailed`, print — debug-quoted, so a
+/// misread or invisible character shows — the full pre-parse OCR text, the
+/// MRZ band score, and the recovered/repaired MRZ zone with the check
+/// digit(s) that failed; and append one row per such miss to
+/// `<dir>/provider-bench-checksum-failed-dump.jsonl` so the population can be
+/// analysed from a file rather than terminal scrollback. Mirrors
+/// `synthpass-bench`'s own `--dump-ocr` (which prints the full OCR text for
+/// *every* synthetic document), but scoped to this one miss kind:
+/// `checksum_failed` is the unambiguous signal (OCR found MRZ-shaped text and
+/// misread a character in it — unlike `no_mrz_found`, which also catches
+/// genuinely MRZ-less documents), and a real-specimen run is large enough
+/// that dumping every hit would be noise a synthetic diagnostic run never has
+/// to contend with. `synthpass_bench::CorpusDoc` runs (`run_provider_bench`)
+/// always pass `None` here — `synthpass-bench`'s own `--dump-ocr` already
+/// covers that path. The JSONL carries specimen OCR content and is written
+/// only under `/artifacts/` (`.gitignore`d); it never enters the `--out`
+/// trend report, which stays shape-only.
 ///
 /// `progress`: print one stderr line per document as it completes, tagged with
 /// the provider and a `n/total` counter. A full real-specimen run takes over
@@ -647,7 +678,7 @@ async fn run_prepped(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
     measure_memory: bool,
-    dump_ocr: bool,
+    dump_ocr_dir: Option<&Path>,
     progress: bool,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
@@ -669,6 +700,9 @@ async fn run_prepped(
         .count();
 
     let mut reports = Vec::with_capacity(catalog.readers().len());
+    // Accumulated across every provider (each tagged in the row) and written
+    // once after the loop — see `dump_ocr_dir` in this fn's doc.
+    let mut dump_rows: Vec<ChecksumFailedDump> = Vec::new();
     for reader in catalog.readers() {
         let capability = reader.capability();
         let rss_before = measure_memory.then(sample_rss).flatten();
@@ -875,27 +909,63 @@ async fn run_prepped(
                     })
             };
 
-            if dump_ocr && matches!(miss_reason, Some(MissReason::ChecksumFailed { .. })) {
+            if dump_ocr_dir.is_some()
+                && matches!(miss_reason, Some(MissReason::ChecksumFailed { .. }))
+            {
+                let provider = reader.id().as_str();
+
+                // The full OCR text the provider actually consumed — this is
+                // what `synthpass-bench --dump-ocr` prints for synthetic
+                // misses, and what makes a systematic shift or dropped filler
+                // visible next to the recovered zone below.
+                println!("--- {} ({provider}) raw OCR text ---", bench_page.name);
+                if bench_page.page.text.is_empty() {
+                    println!("  (OCR returned no text)");
+                } else {
+                    for (i, line) in bench_page.page.text.lines().enumerate() {
+                        println!("  [{i}] {line:?}");
+                    }
+                }
+                match bench_page.page.mrz_band_score {
+                    Some(s) => println!("  mrz band score: {s:.3}"),
+                    None => println!("  mrz band score: (none)"),
+                }
+
                 println!(
-                    "--- {} ({}) raw MRZ zone ---",
-                    bench_page.name,
-                    reader.id().as_str()
+                    "--- {} ({provider}) recovered MRZ zone ---",
+                    bench_page.name
                 );
-                match &read_mrz {
+                let (recovered, failing): (Vec<String>, Vec<String>) = match &read_mrz {
                     Some(data) => {
-                        for (i, line) in data.mrz_lines.lines().enumerate() {
+                        let recovered: Vec<String> =
+                            data.mrz_lines.lines().map(str::to_string).collect();
+                        for (i, line) in recovered.iter().enumerate() {
                             println!("  [{i}] {line:?}");
                         }
-                        let failed: Vec<String> =
+                        let failing: Vec<String> =
                             data.checks.failed().iter().map(|f| f.to_string()).collect();
-                        println!("  failed check digit(s): {}", failed.join(", "));
+                        println!("  failed check digit(s): {}", failing.join(", "));
+                        (recovered, failing)
                     }
                     // read_mrz is None here only if mrz::find_and_parse found no
                     // candidate at all despite bench_page.mrz_found being true —
                     // shouldn't happen (both are the same call on the same text),
                     // but printed rather than silently skipped if it ever does.
-                    None => println!("  (no parsed MRZ data despite mrz_found)"),
-                }
+                    None => {
+                        println!("  (no parsed MRZ data despite mrz_found)");
+                        (Vec::new(), Vec::new())
+                    }
+                };
+
+                dump_rows.push(ChecksumFailedDump {
+                    name: bench_page.name.clone(),
+                    provider: provider.to_string(),
+                    mrz_format: mrz_format.map(str::to_string),
+                    mrz_band_score: bench_page.page.mrz_band_score,
+                    raw_ocr_text: bench_page.page.text.clone(),
+                    recovered_mrz_lines: recovered,
+                    failing_checks: failing,
+                });
             }
 
             if progress {
@@ -1018,6 +1088,27 @@ async fn run_prepped(
     // `DocumentContext::with_image`.
     for bench_page in prepped.iter().flatten() {
         let _ = std::fs::remove_file(&bench_page.image_path);
+    }
+
+    if let Some(dir) = dump_ocr_dir {
+        if dump_rows.is_empty() {
+            println!("no checksum_failed misses to dump");
+        } else {
+            let path = dir.join("provider-bench-checksum-failed-dump.jsonl");
+            let mut body = String::new();
+            for row in &dump_rows {
+                body.push_str(&serde_json::to_string(row).expect("serialize dump row"));
+                body.push('\n');
+            }
+            match std::fs::create_dir_all(dir).and_then(|_| std::fs::write(&path, &body)) {
+                Ok(()) => println!(
+                    "checksum_failed OCR dump written to {} ({} rows)",
+                    path.display(),
+                    dump_rows.len()
+                ),
+                Err(e) => eprintln!("warning: could not write {}: {e}", path.display()),
+            }
+        }
     }
 
     reports
@@ -1249,7 +1340,7 @@ mod tests {
             }),
         ];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 1);
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
@@ -1281,7 +1372,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 0);
         assert_eq!(report.accuracy.field_match_rate, None);
@@ -1316,7 +1407,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1348,6 +1439,75 @@ mod tests {
         }
     }
 
+    /// `--dump-ocr` (a `Some(dir)` handed to `run_prepped`) writes one JSONL
+    /// row per `checksum_failed` miss, carrying the full pre-parse OCR text,
+    /// the recovered MRZ zone, and the failing check field(s) — the file
+    /// Phase 2's real-specimen root-cause pass reads.
+    #[tokio::test]
+    async fn dump_ocr_writes_one_jsonl_row_per_checksum_failed_miss() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "ERIKSSON",
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        // A TD3 that parses but does not validate: the DOB digits carry a
+        // malformed month (13), which both fails the check digit and blocks
+        // `damaged_pass` repair (it accepts a damaged read only when both
+        // dates are well-formed), so the miss stays `checksum_failed` rather
+        // than being silently recovered.
+        let mrz = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<<<\n\
+                   L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+        let parsed = mrz::find_and_parse(mrz).expect("the corrupted TD3 still parses");
+        assert!(!parsed.valid(), "but it must not validate");
+
+        let prepped = vec![Some(BenchPage {
+            name: "corrupted-td3-fixture".to_string(),
+            page: OcrPage {
+                text: mrz.to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: true,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let dir = std::env::temp_dir().join(format!(
+            "provider-bench-dump-ocr-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _reports = run_prepped(&catalog, &prepped, false, Some(&dir), false).await;
+
+        let path = dir.join("provider-bench-checksum-failed-dump.jsonl");
+        let dump = std::fs::read_to_string(&path).expect("dump file written");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let lines: Vec<&str> = dump.lines().collect();
+        assert_eq!(lines.len(), 1, "one row for the one checksum_failed miss");
+        let row: serde_json::Value = serde_json::from_str(lines[0]).expect("valid JSON row");
+        assert_eq!(row["name"], "corrupted-td3-fixture");
+        assert_eq!(row["provider"], "fixed-test-reader");
+        assert!(
+            row["raw_ocr_text"]
+                .as_str()
+                .is_some_and(|t| t.contains("ERIKSSON")),
+            "full pre-parse OCR text is carried verbatim"
+        );
+        assert!(
+            !row["failing_checks"].as_array().unwrap().is_empty(),
+            "at least one check digit field is named"
+        );
+    }
+
     /// The other half of 1.3: a `vision` provider gets `NotApplicable`
     /// rather than a number, even when its answer is absent from the OCR
     /// text — that absence is exactly what a working vision provider looks
@@ -1376,7 +1536,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         match &reports[0].unsupported_assertion {
             UnsupportedAssertion::NotApplicable { reason } => {
                 assert!(!reason.is_empty());
@@ -1415,7 +1575,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         match reports[0].tier1_hit_rate {
             // `FixedReader::read` always returns `Evidence::default()` and
             // this fixture has no MRZ at all, so the one document is a
@@ -1460,7 +1620,7 @@ mod tests {
             known_or_guessed_format: None,
         })];
 
-        let reports = run_prepped(&catalog, &prepped, false, false, false).await;
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         match &reports[0].tier1_hit_rate {
             Tier1HitRate::NotApplicable { reason } => assert!(!reason.is_empty()),
             Tier1HitRate::Computed(rate) => {
