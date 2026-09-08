@@ -166,6 +166,49 @@ fixture's `mrz_checksums_valid`. `extraction_method` is `"hand-transcribed"`. Th
 companion each fixture needs for parity is the live OCR text, which for these specimens is
 visibly garbled (`H0000014` → `HOODOD14`, sex `M` → `N`, …) — the step-4 material.
 
+## Result — step 4 tooling shipped: the bench splits the bucket (PR 2)
+
+`provider-bench --real-specimens` now sub-classifies a `checksum_failed` miss. When the
+specimen carries a hand-transcribed `mrz_line` **and** the run's `find_and_parse` recovered
+that exact zone character-for-character (`mrz_zone_mismatch == 0`), the miss is reported as
+`checksum_failed_specimen` — the printed document's own check digits are non-conforming, not
+an OCR error. `--dump-ocr` rows (and, since this PR, the stdout dump block) carry
+`ground_truth_mrz` and `zone_mismatch` — the per-line character distance between the parser's
+recovered zone and the transcription. Unlabelled specimens and the entire synthetic corpus
+are unaffected (`specimen_nonconforming: false` always).
+
+Full-corpus re-run, `mrz` provider, repo `b3965f7`, 238 specimens (the corpus grew by 2
+after step 1's run):
+
+| outcome | step 1 (0.7.0, 236 docs) | with the split (238 docs) |
+|---|---:|---:|
+| Tier-1 HIT | 118 | 120 |
+| `checksum_failed` | 33 | **32** |
+| `checksum_failed_specimen` | — | **1** |
+| `no_mrz_found` | 85 | 85 |
+
+PR 2 relabels only — it changes no verdict. Exactly **1** document moves
+`checksum_failed → checksum_failed_specimen`: **Colombia `PP_COL_2026`**, whose non-conforming
+printed zone (personal-number + composite check digits wrong) native OCR happens to recover
+exactly. The HIT `+2` / bucket `−1` against step 1 is the two new specimens, not this change.
+
+The other **22** of the 23 labelled specimens stay in `checksum_failed`: native OCR does not
+reproduce their printed zone, so the classifier cannot yet attribute the failure to the
+document. That gap *is* the step-4 signal — `zone_mismatch` now quantifies it per specimen:
+
+- **7 checksum-valid anchors**, native-OCR zone error (characters): Afghanistan `1`,
+  Czechia `3`, Belgium ID `17`, Romania `23`, Sweden ID `27`, Croatia ID `30`, Russia `112`
+  (parser latched a wrong 29-char candidate). Afghanistan is **one character** (`O`→`0` in
+  the document number) from a clean Tier-1 HIT — the tightest step-4 target.
+- **16 non-conforming**, zone error: Colombia `0` (→ `checksum_failed_specimen`), India boxed
+  `1`, Türkiye `P0_TUR_2010` `8`, India `17`, Germany `18`, Switzerland `22`, Ghana `32`,
+  Türkiye `2024` `34` / `2025` `35`, UK `36`, Mauritania `40`, Korea `2022` `43` / `2020`
+  `44`, Poland `55`, Türkiye ID 2020 `56`, Indonesia `109`.
+
+The split mechanism is proven (unit tests + the Colombia live case); native OCR accuracy on
+these low-resolution guilloché scans is now the sole thing between the bucket and a full
+attribution, which is precisely what step 4 works on.
+
 ## Ranked next steps
 
 1. ~~**Gate MRZ acceptance on line-1 structure.**~~ **Done** — `mrz` 0.7.0 above.
@@ -174,8 +217,8 @@ visibly garbled (`H0000014` → `HOODOD14`, sex `M` → `N`, …) — the step-4
    three fields already moved to `no_mrz_found` via step 1). `samples/corpus.jsonl`
    already carries `mrz.redacted: true`; the bench does not read it. Excluding them
    from the miss denominator (or a `redacted` `MissReason`) removes the last of
-   population B. Optionally also split `MissReason::ChecksumFailed` structurally-
-   invalid vs check-digit-fail, though step 1 took most of that population out.
+   population B. (`MissReason::ChecksumFailed` now also carries
+   `specimen_nonconforming` — see the step-4-tooling result above.)
 3. ~~**Grow ground truth for the 23 remaining `*_mrz`.**~~ **Done** — the "Result — step 3"
    section above. All 23 have a `samples/ocr_fixtures/<stem>.json`; 7 carry a checksum-valid
    printed zone, 16 are non-conforming by design. An OCR misread and a non-conforming
@@ -184,7 +227,10 @@ visibly garbled (`H0000014` → `HOODOD14`, sex `M` → `N`, …) — the step-4
    `CONFUSABLES` / wiring `solve_substitution` into the checksum-invalid path;
    line-2 left-anchor repair; candidate ranking that prefers a valid line-1+line-2
    pair over two line-1s). Each pinned by a regression test built from the specimen
-   that motivated it — once (3) makes "motivated" mean something.
+   that motivated it — (3) and the step-4 tooling above now make "motivated"
+   mean something: start with Afghanistan `P0_AFG_2016` (`zone_mismatch` 1,
+   `O`→`0`) and Czechia `P0_CZE_2005` (`zone_mismatch` 3), the two checksum-valid
+   anchors closest to a HIT.
 
 `blindspot_seq` (sequence-level check-digit blind spot,
 [2026-08-05 note](checksum-blindspots-measured-2026-08-05.md)) is unrelated and

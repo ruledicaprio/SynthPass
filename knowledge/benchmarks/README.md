@@ -424,7 +424,17 @@ MRZ and most redacted specimens are now honestly not-found. Residual `checksum_f
 zone** (any `checksum_failed` on them is 100 % an OCR error — the step-4 target list), **16
 are non-conforming by design** (`TEMPLATE` / `ÖRNEK` / all-zeros zones with wrong or blank
 check digits). `corpus.jsonl` gains `ground_truth_stem` ×23 and `expected_document_number`
-×7. Steps 2 (redacted bench outcome) and 4 (character-level `mrz` fixes) stand.
+×7.
+
+**Step 4 tooling shipped** (PR 2, repo `b3965f7`): `provider-bench --real-specimens` splits a
+`checksum_failed` miss into `checksum_failed_specimen` (labelled specimen whose printed zone
+native OCR recovered exactly — the check digits are non-conforming, not misread) vs plain
+`checksum_failed`; `--dump-ocr` rows gain `ground_truth_mrz` + `zone_mismatch`. Full-corpus
+re-run (`mrz`, 238 docs): HIT **120**, `checksum_failed` **32**, `checksum_failed_specimen`
+**1** (Colombia `PP_COL_2026`), `no_mrz_found` **85** — a pure relabel. The other 22 labelled
+specimens stay `checksum_failed` because native OCR does not reproduce their printed zone
+(`zone_mismatch` 1–112); Afghanistan `P0_AFG_2016` is one character off. Step 2 (redacted
+bench outcome) and step 4 proper (character-level `mrz` fixes) stand.
 
 ### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
 
