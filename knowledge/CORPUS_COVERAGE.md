@@ -29,11 +29,11 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 57 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 58 |
 | MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 21 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 158 |
+| No specimen yet | 157 |
 | **Total tracked codes** | **238** |
 
 Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
@@ -54,6 +54,10 @@ Sweden ID 2022 — a `checksum_failed` on these is an OCR error, not a bad speci
 keeps its `expected_document_number`), **16 are non-conforming by design** and carry a
 `ground_truth_stem` but no `expected_document_number`. The per-country rows below still show
 the HIT/MISS status; this changes what a MISS on those rows *means*, not the count.
+
+**2026-09-08 — Nicaragua added.** Two passport specimens (`P0_NIC_2001`, `P0_NIC_2015`)
+ingested via manifest regeneration; both read checksum-valid. NIC moves from "No specimen
+yet" to HIT (157 codes still uncovered).
 
 ## Full table
 
@@ -137,7 +141,7 @@ the HIT/MISS status; this changes what a MISS on those rows *means*, not the cou
 | HND | Honduras | -- | No specimen yet | -- |
 | JAM | Jamaica | -- | No specimen yet | -- |
 | MEX | Mexico | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| NIC | Nicaragua | -- | No specimen yet | -- |
+| NIC | Nicaragua | Passport | HIT (x2 specimens) | Manifest regeneration, 2026-09-08. Both specimens (2001 and 2015 issues) read checksum-valid (`P<NIC` Td3). |
 | PAN | Panama | -- | No specimen yet | -- |
 | PRY | Paraguay | -- | No specimen yet | -- |
 | PER | Peru | -- | No specimen yet | -- |
