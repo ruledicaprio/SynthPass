@@ -401,7 +401,19 @@ pub enum MissReason {
     /// `checksum_failed` (the largest real-specimen miss bucket measured so
     /// far, see `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1) stops being
     /// one undifferentiated count.
-    ChecksumFailed { failing: Vec<&'static str> },
+    ///
+    /// `specimen_nonconforming` is set only for a real specimen that carries a
+    /// hand-transcribed `mrz_line` label whose printed zone the run's OCR
+    /// recovered faithfully: the check digits fail because the *printed*
+    /// document is non-conforming (a `TEMPLATE` / `ÖRNEK` / all-zeros zone),
+    /// not because OCR misread it. It stays `false` for every unlabelled
+    /// document and for a labelled one whose recovered zone differs from the
+    /// transcription — see the 2026-09-08 checksum_failed writeup. `miss_kind`
+    /// reports the two as `checksum_failed_specimen` vs `checksum_failed`.
+    ChecksumFailed {
+        failing: Vec<&'static str>,
+        specimen_nonconforming: bool,
+    },
     /// A checksum-valid MRZ that disagrees with the ground truth. Rare and
     /// interesting: the check digits can validate over a misread that
     /// happens to stay self-consistent.
@@ -413,8 +425,15 @@ impl std::fmt::Display for MissReason {
         match self {
             Self::OcrError(e) => write!(f, "OCR error: {e}"),
             Self::NoMrzFound(e) => write!(f, "no MRZ found: {e}"),
-            Self::ChecksumFailed { failing } => {
-                write!(f, "checksum invalid: {}", failing.join(", "))
+            Self::ChecksumFailed {
+                failing,
+                specimen_nonconforming,
+            } => {
+                write!(f, "checksum invalid: {}", failing.join(", "))?;
+                if *specimen_nonconforming {
+                    write!(f, " (printed zone is non-conforming, read faithfully)")?;
+                }
+                Ok(())
             }
             Self::DocumentNumberMismatch { got, expected } => {
                 write!(
@@ -434,6 +453,10 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
     match reason {
         MissReason::OcrError(_) => "ocr_error",
         MissReason::NoMrzFound(_) => "no_mrz_found",
+        MissReason::ChecksumFailed {
+            specimen_nonconforming: true,
+            ..
+        } => "checksum_failed_specimen",
         MissReason::ChecksumFailed { .. } => "checksum_failed",
         MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
     }
@@ -624,6 +647,10 @@ fn run_check(
         return (
             Some(MissReason::ChecksumFailed {
                 failing: decoded.checks.failed().iter().map(|f| f.as_str()).collect(),
+                // Synthetic corpus: every document is generated from a
+                // conformant zone, so a checksum failure here is always the
+                // OCR/parse pipeline, never a non-conforming source.
+                specimen_nonconforming: false,
             }),
             fields,
             line1_integrity,
@@ -850,12 +877,19 @@ mod tests {
 
         let reason = MissReason::ChecksumFailed {
             failing: failing.clone(),
+            specimen_nonconforming: false,
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
         assert_eq!(
             reason.to_string(),
             "checksum invalid: date_of_birth, composite"
         );
+
+        let specimen = MissReason::ChecksumFailed {
+            failing,
+            specimen_nonconforming: true,
+        };
+        assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
     }
 
     /// A document whose MRZ never parsed must count as a total loss in every

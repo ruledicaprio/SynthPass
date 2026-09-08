@@ -89,7 +89,11 @@ struct Args {
     /// With `real_specimens`: for every `checksum_failed` miss, dump the full
     /// pre-parse OCR text, the MRZ band score, and the recovered MRZ zone +
     /// failing check digit(s) to stdout, and a row per miss to
-    /// `<out-dir>/provider-bench-checksum-failed-dump.jsonl`. See
+    /// `<out-dir>/provider-bench-checksum-failed-dump.jsonl`. A row for a
+    /// labelled specimen also carries the hand-transcribed true zone and the
+    /// character-mismatch count against it (`zone_mismatch`: `0` → the printed
+    /// zone was read faithfully and its own check digits failed; `> 0` → OCR
+    /// introduced the error). See
     /// `synthpass_bench::provider_bench::run_prepped`'s doc for why this is
     /// scoped to that one miss kind rather than every document the way
     /// `synthpass-bench --dump-ocr` is.
@@ -399,7 +403,8 @@ struct DocumentDetailReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     miss_reason: Option<&'static str>,
     /// Which check digit(s) failed, only present when `miss_reason` is
-    /// `"checksum_failed"` — `mrz::Field::as_str()` names. Field names only,
+    /// `"checksum_failed"` or `"checksum_failed_specimen"` — `mrz::Field::as_str()`
+    /// names. Field names only,
     /// same discipline as `unsupported_fields` above — see this struct's
     /// module doc. See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -547,7 +552,7 @@ impl From<ProviderReport> for ProviderRow {
                     mrz_checksums_valid: d.mrz_checksums_valid,
                     miss_reason: d.miss_reason.as_ref().map(miss_kind),
                     failing_checks: match &d.miss_reason {
-                        Some(MissReason::ChecksumFailed { failing }) => failing.clone(),
+                        Some(MissReason::ChecksumFailed { failing, .. }) => failing.clone(),
                         _ => Vec::new(),
                     },
                     assertions_total: d.assertions_total,
@@ -829,7 +834,7 @@ async fn main() {
             let mut by_failing_field: std::collections::BTreeMap<&str, usize> =
                 std::collections::BTreeMap::new();
             for d in &r.documents_detail {
-                if let Some(MissReason::ChecksumFailed { failing }) = &d.miss_reason {
+                if let Some(MissReason::ChecksumFailed { failing, .. }) = &d.miss_reason {
                     for field in failing {
                         *by_failing_field.entry(field).or_default() += 1;
                     }
