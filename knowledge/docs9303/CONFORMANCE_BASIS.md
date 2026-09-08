@@ -409,6 +409,22 @@ this corpus, but the rule (`:547`, `:563`) and the general 7-3-1 check-digit
 definition (already corroborated above) are both literal corpus text, so the
 combination is a direct application rather than an inference.
 
+### `find_and_parse` structural gate — not spec text, a real-corpus guard
+
+`find_and_parse` returns `NotFound` for a best-scoring, non-validating reading
+whose issuing state, nationality and date of birth are *all* unrecognizable at
+once (2026-09-08). This is not derived from Doc 9303 — the standard defines the
+MRZ layout, not what a scanner should do with visual-inspection-zone text that
+happens to be MRZ-shaped. It extends the structural guarding
+`crates/mrz/src/countries.rs` already frames ("one of the structural guards the
+crate layers on top of the arithmetic"): none of the three fields carries a
+check digit, so a reading that fails all three is one nothing downstream can
+trust. Basis is empirical, not textual — the 2026-09-08 real-specimen dump
+([`knowledge/benchmarks/checksum-failed-real-specimens-2026-09-08.md`](../benchmarks/checksum-failed-real-specimens-2026-09-08.md)):
+19 corpus documents with no MRZ had VIZ boilerplate forced through a format; the
+gate rejects 18 of them and none of the 118 hits or the two pinned real
+non-conformant line-1 specimens.
+
 ## Known corpus defects
 
 ### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies

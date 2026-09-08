@@ -14,7 +14,7 @@
 //! as literal strings rather than read from the corpus so this file runs in a
 //! clone with no images synced.
 
-use mrz::{find_and_parse, Format};
+use mrz::{find_and_parse, Format, MrzError};
 
 /// Argentina's emergency passport puts a filler at position 3 and `ARG` at
 /// 4-6, shifting the name field one character right of where Part 4 §4.2.2
@@ -126,5 +126,26 @@ fn kosovos_non_iso_code_resolves() {
     assert!(
         mrz::country_name("RKS").is_some(),
         "RKS is legitimately printed on Kosovar passports"
+    );
+}
+
+/// A document with no machine-readable zone whose visual-inspection-zone text
+/// OCR read as two MRZ-shaped lines — here the Czech Republic specimen's
+/// printed legend. `find_and_parse` used to force it through TD2 and return a
+/// checksum-failed record; a `document_number` of `CESKAREPUB` is not a near
+/// miss, it is not an MRZ. The issuing state, the nationality, and the date of
+/// birth are all unrecognisable at once — none of them check-digit-arbitrated —
+/// so the honest answer is `NotFound`, not a believable-looking parse.
+///
+/// Transcribed from the recovered zone in
+/// `knowledge/benchmarks/checksum-failed-real-specimens-2026-09-08.md`
+/// (`Czechia_Passport_Specimen_P0_CZE_2005_no_mrz`).
+#[test]
+fn viz_boilerplate_that_ocr_shaped_like_an_mrz_is_not_found() {
+    let text = "CESKAREPUBLIKACZECHREPUBLIC<<<\n\
+                CE5KAREPU811KACZECHREPUBLIC<<<";
+    assert!(
+        matches!(find_and_parse(text), Err(MrzError::NotFound)),
+        "card boilerplate must not surface as a checksum-failed MRZ record"
     );
 }
