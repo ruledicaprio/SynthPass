@@ -147,6 +147,12 @@ pub const CLASSES: [&[char]; 10] = [
 
 /// The residue class `c` belongs to, as a borrowed row of [`CLASSES`], or
 /// `None` when `c` is outside the MRZ alphabet. Allocation-free.
+///
+/// ```
+/// // 'K' has ICAO value 20 ≡ 0 (mod 10) — the class `<`/`0` also live in.
+/// assert_eq!(mrz::class_of('K'), Some(&['0', 'A', 'K', 'U', '<'][..]));
+/// assert_eq!(mrz::class_of('@'), None);
+/// ```
 pub fn class_of(c: char) -> Option<&'static [char]> {
     char_value(c).ok().map(|v| CLASSES[(v % 10) as usize])
 }

@@ -147,6 +147,17 @@ impl Resolution {
 /// Bounded and deterministic: at most `target + 4` candidates, each exactly
 /// `target` characters, in a stable order. Returns empty for non-ASCII input
 /// or a deficit wider than the module's insertion bound.
+///
+/// ```
+/// use mrz::{width_candidates, UNKNOWN};
+///
+/// let cands = width_candidates("ABCDE", 6);
+/// // Every candidate is exactly the target width.
+/// assert!(cands.iter().all(|c| c.chars().count() == 6));
+/// // The `?` is tried at every insertion position, including both ends.
+/// assert!(cands.contains(&format!("{UNKNOWN}ABCDE")));
+/// assert!(cands.contains(&format!("ABCDE{UNKNOWN}")));
+/// ```
 pub fn width_candidates(line: &str, target: usize) -> Vec<String> {
     let n: String = line.chars().filter(|c| !c.is_whitespace()).collect();
     if !n.is_ascii() || target == 0 {
@@ -336,6 +347,15 @@ fn confusable_alternatives(c: char) -> Vec<char> {
 /// — this function only proposes *different* readings for [`solve_substitution`]
 /// to test. Bounded by an internal `MAX_SUBSTITUTION_CANDIDATES` cap, in a
 /// stable order.
+///
+/// ```
+/// // `CONFUSABLES` pairs `0` with the round letters O, D, Q.
+/// assert_eq!(mrz::substitution_candidates("0"), ["O", "D", "Q"]);
+/// // The identity reading is never proposed.
+/// assert!(!mrz::substitution_candidates("0").contains(&"0".to_string()));
+/// // A field still carrying an unknown position is not this function's job.
+/// assert!(mrz::substitution_candidates("A?C").is_empty());
+/// ```
 pub fn substitution_candidates(field: &str) -> Vec<String> {
     if !field.is_ascii() || field.contains(UNKNOWN) {
         return Vec::new();
@@ -375,6 +395,22 @@ pub fn substitution_candidates(field: &str) -> Vec<String> {
 /// check digit, for the same reason [`solve_field`] does: a check digit that
 /// was not itself read faithfully cannot prove anything about the field next
 /// to it.
+///
+/// ```
+/// use mrz::{solve_substitution, FieldKind, Resolution};
+///
+/// // The ICAO specimen DOB (740812, check digit 2) misread `2` → `Z`.
+/// // The only confusable swap that verifies restores the digit.
+/// assert_eq!(
+///     solve_substitution("74081Z", '2', FieldKind::Date),
+///     Resolution::Unique("740812".to_string()),
+/// );
+/// // A field whose check digit already verifies is returned unchanged.
+/// assert_eq!(
+///     solve_substitution("740812", '2', FieldKind::Date),
+///     Resolution::Unique("740812".to_string()),
+/// );
+/// ```
 pub fn solve_substitution(field: &str, check: char, kind: FieldKind) -> Resolution {
     if !field.is_ascii() || check == UNKNOWN {
         return Resolution::Unresolvable;

@@ -187,11 +187,41 @@ fn ensure_charset(line: &str) -> Result<(), MrzError> {
 /// (ICAO 9303 part 4 §4.2.2). Long-document-number overflow is decoded here
 /// too, though Part 4 defines no such rule for TD3 — it is applied by analogy
 /// to part 5 note j / part 6 note j, because issuers do it in practice.
+///
+/// ```
+/// // ICAO 9303 Part 4's Utopia specimen.
+/// let doc = mrz::parse_td3(
+///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+/// ).unwrap();
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert_eq!(doc.given_names, "ANNA MARIA");
+/// assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
+/// assert!(doc.valid());                        // every check digit verified
+/// ```
 pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_td3_with(line1, line2, &ParseOptions::default())
 }
 
-/// [`parse_td3`] with an explicit [`ParseOptions`].
+/// [`parse_td3`] with an explicit [`ParseOptions`] — pin the two-digit-year
+/// pivot instead of inheriting [`CURRENT_YY`](crate::CURRENT_YY).
+///
+/// ```
+/// use mrz::{parse_td3_with, ParseOptions};
+///
+/// let l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+/// let l2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+///
+/// // The default pivot dates a `74` birth year to last century.
+/// let d = parse_td3_with(l1, l2, &ParseOptions::default()).unwrap();
+/// assert_eq!(d.date_of_birth, "1974-08-12");
+///
+/// // Raise the pivot past 74 and the same digits read as this century —
+/// // the check digits are unaffected, so the document still validates.
+/// let d = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// assert_eq!(d.date_of_birth, "2074-08-12");
+/// assert!(d.valid());
+/// ```
 pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
     for line in [line1, line2] {
         if line.len() != 44 {
@@ -266,7 +296,24 @@ pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_td2_with(line1, line2, &ParseOptions::default())
 }
 
-/// [`parse_td2`] with an explicit [`ParseOptions`].
+/// [`parse_td2`] with an explicit [`ParseOptions`] — pin the two-digit-year
+/// pivot instead of inheriting [`CURRENT_YY`](crate::CURRENT_YY).
+///
+/// ```
+/// use mrz::{parse_td2_with, ParseOptions};
+///
+/// let l1 = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
+/// let l2 = "D231458907UTO7408122F1204159<<<<<<<6";
+///
+/// assert_eq!(
+///     parse_td2_with(l1, l2, &ParseOptions::default()).unwrap().date_of_birth,
+///     "1974-08-12",
+/// );
+/// assert_eq!(
+///     parse_td2_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap().date_of_birth,
+///     "2074-08-12",
+/// );
+/// ```
 pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
     for line in [line1, line2] {
         if line.len() != 36 {
@@ -342,7 +389,25 @@ pub fn parse_td1(line1: &str, line2: &str, line3: &str) -> Result<MrzData, MrzEr
     parse_td1_with(line1, line2, line3, &ParseOptions::default())
 }
 
-/// [`parse_td1`] with an explicit [`ParseOptions`].
+/// [`parse_td1`] with an explicit [`ParseOptions`] — pin the two-digit-year
+/// pivot instead of inheriting [`CURRENT_YY`](crate::CURRENT_YY).
+///
+/// ```
+/// use mrz::{parse_td1_with, ParseOptions};
+///
+/// let l1 = "I<UTOD231458907<<<<<<<<<<<<<<<";
+/// let l2 = "7408122F1204159UTO<<<<<<<<<<<6";
+/// let l3 = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+///
+/// assert_eq!(
+///     parse_td1_with(l1, l2, l3, &ParseOptions::default()).unwrap().date_of_birth,
+///     "1974-08-12",
+/// );
+/// assert_eq!(
+///     parse_td1_with(l1, l2, l3, &ParseOptions { pivot_yy: 80 }).unwrap().date_of_birth,
+///     "2074-08-12",
+/// );
+/// ```
 pub fn parse_td1_with(
     line1: &str,
     line2: &str,
@@ -434,7 +499,19 @@ pub fn parse_mrv_a(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_mrv_a_with(line1, line2, &ParseOptions::default())
 }
 
-/// [`parse_mrv_a`] with an explicit [`ParseOptions`].
+/// [`parse_mrv_a`] with an explicit [`ParseOptions`] — pin the two-digit-year
+/// pivot instead of inheriting [`CURRENT_YY`](crate::CURRENT_YY).
+///
+/// ```
+/// use mrz::{parse_mrv_a_with, ParseOptions};
+///
+/// let l1 = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+/// let l2 = "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<";
+///
+/// let d = parse_mrv_a_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// assert_eq!(d.date_of_birth, "2069-08-06"); // `69` reads as this century past the pivot
+/// assert!(d.valid());
+/// ```
 pub fn parse_mrv_a_with(
     line1: &str,
     line2: &str,
@@ -505,7 +582,19 @@ pub fn parse_mrv_b(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
     parse_mrv_b_with(line1, line2, &ParseOptions::default())
 }
 
-/// [`parse_mrv_b`] with an explicit [`ParseOptions`].
+/// [`parse_mrv_b`] with an explicit [`ParseOptions`] — pin the two-digit-year
+/// pivot instead of inheriting [`CURRENT_YY`](crate::CURRENT_YY).
+///
+/// ```
+/// use mrz::{parse_mrv_b_with, ParseOptions};
+///
+/// let l1 = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
+/// let l2 = "L898902C<3UTO6908061F9406236ZE184226";
+///
+/// let d = parse_mrv_b_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// assert_eq!(d.date_of_birth, "2069-08-06");
+/// assert!(d.valid());
+/// ```
 pub fn parse_mrv_b_with(
     line1: &str,
     line2: &str,

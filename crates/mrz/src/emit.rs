@@ -199,6 +199,15 @@ fn field(s: &str, width: usize) -> String {
 /// own doc comment notes it performs no filler handling and no truncation, so
 /// a name containing an apostrophe or a separator round-trips through it
 /// unchanged and then compares unequal to the MRZ form.
+///
+/// ```
+/// use mrz::encode_name_component;
+///
+/// assert_eq!(encode_name_component("O'Connor"), "OCONNOR");      // apostrophe: dropped, no filler
+/// assert_eq!(encode_name_component("Anna Maria"), "ANNA<MARIA"); // space: folded to one `<`
+/// assert_eq!(encode_name_component("Müller"), "MUELLER");        // §6 A transliteration
+/// assert_eq!(encode_name_component("Иванов"), "IVANOV");         // §6 B (base column)
+/// ```
 pub fn encode_name_component(s: &str) -> String {
     clean_name_half(s)
 }

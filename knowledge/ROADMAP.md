@@ -256,10 +256,12 @@ given.
 **Tier-1 accuracy / MRZ completeness** — M6's lead track ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)),
 and where recent effort has actually gone.
 
-- MRZ sequence completeness — [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md),
-  live chunks: 1 (split `ChecksumFailed` into typed sub-reasons), 4 (`IncompleteSequence`
-  line-count signal), 5 (unified `SequenceCompleteness` vocabulary). Chunk 6 shipped, chunk 7
-  was measured and rejected.
+- MRZ sequence completeness — **done** ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
+  All of its chunks shipped: typed `ChecksumFailed` sub-reasons (#163), the personal-number
+  filler test (#162), the `changelog.d` backfill (#164), `MrzError::IncompleteSequence` (#165),
+  the unified `SequenceCompleteness` type (#166), and TD2 line-1 filler repair (#171); chunk 7
+  (`MrzReader` partial-read surfacing) was measured and rejected (#178). The doc is kept as the
+  design record.
 - Check-digit blind spot: `blind_positions` (`crates/synthpass-die/src/mrz_reader.rs`) counts
   only per-*character* lookalike collisions; the real blind set is any substitution multiset
   whose 7-3-1 weighted delta is 0 mod 10 — 46 of 66 observed `document_number` mismatches are
