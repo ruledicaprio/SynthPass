@@ -826,6 +826,13 @@ async fn main() {
                 .collect();
             println!("    misses by kind: {}", counts.join(", "));
 
+            if let Some(n) = by_miss_kind.get("redacted_mrz") {
+                println!(
+                    "    (redacted_mrz: {n} specimen(s) with a physically redacted zone — \
+                     excluded from the Tier-1 hit-rate denominator, not scored as a miss)"
+                );
+            }
+
             // Sub-breakdown of checksum_failed specifically — see
             // `synthpass-bench.rs`'s identical summary and
             // `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1. Tallies

@@ -328,13 +328,14 @@ and where recent effort has actually gone.
   invented threshold"); add per-format floors once the numbers are earned.
 - `checksum_failed` root-cause track: `provider-bench --dump-ocr` (`#236`) → analysis
   ([2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md), `#237`) →
-  **steps 1 & 3 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed` 71 → 33
-  zero HIT regression; then all 23 residual genuine `*_mrz` hand-transcribed into
-  `samples/ocr_fixtures/` (7 checksum-valid, 16 non-conforming by design). Remaining, ranked:
-  (2) give `*_redacted_mrz` its own bench outcome (8 still counted; `corpus.jsonl` already
-  flags `mrz.redacted`) — with a `provider-bench` split that sub-labels `checksum_failed` as
-  specimen-non-conforming vs OCR-misread using the new labels; (4) then character-confusion /
-  candidate-selection `mrz` fixes against the 7 checksum-valid anchors.
+  **steps 1, 2 & 3 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed`
+  71 → 33 zero HIT regression; all 23 residual genuine `*_mrz` hand-transcribed into
+  `samples/ocr_fixtures/` (7 checksum-valid, 16 non-conforming by design), with a
+  `provider-bench` split sub-labelling `checksum_failed` as specimen-non-conforming vs
+  OCR-misread; and `*_redacted_mrz` specimens now report as `redacted_mrz` and are dropped
+  from the Tier-1 hit-rate denominator (they carry no recoverable zone). Remaining, ranked:
+  (4) character-confusion / candidate-selection `mrz` fixes against the 7 checksum-valid
+  anchors — start with Afghanistan `P0_AFG_2016` (one `O`→`0` from a HIT).
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three
