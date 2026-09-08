@@ -349,25 +349,17 @@ very different populations — a genuinely MRZ-less document (many real ID
 cards and driving licenses have no machine-readable zone at all, a fact the
 `unsupported_assertion`'s `with_mrz_anchor`/`without_mrz_anchor` split
 already exists to separate) and an actual band-detection failure on a
-document that does carry one. `checksum_failed` carries no such ambiguity: it
-means OCR found MRZ-*shaped* text and got at least one character wrong inside
-it — a clean, unambiguous OCR weak spot, and now the larger of the two miss
-kinds on the real corpus. Follow-up: pull the `checksum_failed` documents' raw
-OCR text the way the M6 TD1 root-cause investigation did and look for a
-systematic character confusion the way the name-separator and line-1-prefix
-bugs were found, rather than guessing from the aggregate alone. The tooling
-for this now exists: `provider-bench --real-specimens --dump-ocr` (added
+document that does carry one. `checksum_failed` was assumed to carry no such
+ambiguity — "OCR found MRZ-shaped text and got a character wrong" — but the
+2026-09-08 dump analysis below shows it is also conflated: ~19 of it is
+hallucinated MRZ on `*_no_mrz` documents, ~25 is redacted MRZ, and the rest is
+unverifiable. The tooling: `provider-bench --real-specimens --dump-ocr` (added
 2026-08-31, extended 2026-09-08) prints, for every `checksum_failed` miss, the
 full pre-parse OCR text + MRZ band score + recovered MRZ zone + failing check
 digit(s), and writes one row per miss to
-`artifacts/provider-bench-checksum-failed-dump.jsonl` for offline analysis —
-the real-specimen equivalent of `synthpass-bench --dump-ocr`. The analysis
-pass over that dump is the open work. `knowledge/technical_debt.md`'s separate
-finding that OCR
-confidence is a character-plausibility proxy, not a real per-character model
-score, is the reason a confidence-based shortcut to the same answer isn't
-available either — the aggregate `checksum_failed` count is genuinely the
-best signal there is right now.
+`artifacts/provider-bench-checksum-failed-dump.jsonl` — the real-specimen
+equivalent of `synthpass-bench --dump-ocr`. Analysis in the 2026-09-08 entry
+below.
 
 Two more specific findings from the same run, detailed above under "The local
 bench loop (tracks)": a **corpus placement defect** (13 passport pages
@@ -408,6 +400,20 @@ line-1-integrity work reached earlier this session).
 `knowledge/CORPUS_COVERAGE.md`'s per-country table was rewritten from this same pair of scans
 (pre- and post-fix) — most of its previous "specimen present, not yet wired" placeholders now
 carry a real, measured HIT/MISS status instead.
+
+### 2026-09-08 — `checksum_failed` is not a clean OCR-accuracy signal
+
+Full writeup: [`checksum-failed-real-specimens-2026-09-08.md`](checksum-failed-real-specimens-2026-09-08.md).
+Pulled the raw OCR text for all 71 `checksum_failed` misses (the follow-up the 2026-08-16
+entry asked for, now that `provider-bench --dump-ocr` exists). The "OCR found MRZ-shaped text
+and got a character wrong" framing does not hold: **19** of the 71 are `*_no_mrz` specimens
+with no MRZ at all (`mrz::find_and_parse` accepts VIZ boilerplate as a TD2/MRV-B), **25** are
+`*_redacted_mrz` (unrecoverable by construction), and the remaining **27** have a real MRZ but
+zero verified ground truth — several carry deliberately non-conforming template MRZs, so an
+OCR misread cannot be told from a bad specimen. Ranked next steps in the writeup; the top one
+is a line-1 structural gate in `crates/mrz` (a hallucinated MRZ that *validated* would be a
+silent wrong extraction), which moves ~19 docs to `no_mrz_found` and needs a full-corpus
+re-run to prove zero HIT regression.
 
 ### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
 
