@@ -135,14 +135,15 @@ cycle; the model did not change). The CI regression floor for Tier 2 is 15%. Tie
 enterprise add-on for the residual cases; **the deterministic Tier-1 core is the product**
 (see [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
 
-On the real corpus, `checksum_failed` (71 on the 2026-09-08 re-run, vs `no_mrz_found` 47) is
-the single largest miss category — but the
-[2026-09-08 dump analysis](benchmarks/checksum-failed-real-specimens-2026-09-08.md) shows it
-is not a clean OCR-accuracy signal: ~19 are hallucinated MRZ on documents that have none
-(`mrz::find_and_parse` accepts VIZ boilerplate), ~25 are deliberately-redacted MRZ, and the
-remaining ~27 have a real MRZ but no verified ground truth. The M6 accuracy track's next
-concrete step is a line-1 structural gate in `crates/mrz` (rejecting the hallucinations) plus
-ground truth for the 27, not a blind character-confusion hunt.
+On the real corpus the
+[2026-09-08 dump analysis](benchmarks/checksum-failed-real-specimens-2026-09-08.md) showed
+`checksum_failed` was not a clean OCR-accuracy signal — ~19 hallucinated MRZ on documents with
+none, ~25 deliberately-redacted MRZ, ~27 real-MRZ-but-unverified. Step 1 of its ranked fixes
+shipped as **`mrz` 0.7.0** (`find_and_parse` rejects a non-validating reading whose issuing
+state, nationality and date of birth are all unrecognizable): full-corpus re-run moved
+`checksum_failed` **71 → 33** and `no_mrz_found` **47 → 85** with **zero** Tier-1 HIT
+regression (118 → 118). The residual 33 is 23 genuine unverified `*_mrz` + 8 redacted + 2
+no-MRZ; next is ground truth for the 23, then character-level `mrz` fixes — not a blind hunt.
 
 ## M7 — Document Intelligence Engine
 
@@ -321,16 +322,13 @@ and where recent effort has actually gone.
   (`technical_debt.md`, MEDIUM), are both still open.
 - No per-format hit-rate floor exists (deliberately — "a floor over a corpus one day old is an
   invented threshold"); add per-format floors once the numbers are earned.
-- `provider-bench --real-specimens --dump-ocr` dumps the raw OCR text + recovered MRZ zone +
-  failing check digit(s) for every real-specimen `checksum_failed` miss (`#236`). Analysis
-  done — [2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md). Open
-  work it identified, ranked: (1) a **line-1 structural gate** in `crates/mrz` so
-  `find_and_parse` stops accepting VIZ boilerplate as a TD2/MRV-B (~19 `*_no_mrz` docs move to
-  `no_mrz_found`; guards against a silent wrong extraction; needs a full-corpus re-run for
-  zero-HIT-regression proof); (2) sub-classify `MissReason::ChecksumFailed` into
-  structurally-invalid vs check-digit-fail, and add a `redacted` outcome; (3) ground truth for
-  the 27 `*_mrz` names in `artifacts/checksum-dump/cf-names.txt`; (4) then the
-  character-confusion / candidate-selection `mrz` fixes.
+- `checksum_failed` root-cause track: `provider-bench --dump-ocr` (`#236`) → analysis
+  ([2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md), `#237`) →
+  **step 1 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed` 71 → 33,
+  zero HIT regression. Remaining, ranked: (2) give `*_redacted_mrz` its own bench outcome
+  (8 still counted; `corpus.jsonl` already flags `mrz.redacted`); (3) ground truth for the 23
+  genuine `*_mrz` in `artifacts/checksum-dump/cf-names2.txt`; (4) then character-confusion /
+  candidate-selection `mrz` fixes, pinned by regressions from the now-labelled specimens.
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three
