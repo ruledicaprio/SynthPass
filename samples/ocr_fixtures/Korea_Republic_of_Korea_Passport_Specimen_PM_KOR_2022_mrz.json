@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1990-07-04",
+  "date_of_expiry": "2032-05-07",
+  "document_number": "M723A7155",
+  "document_type": "PM",
+  "extraction_method": "hand-transcribed",
+  "given_names": "JUNSU",
+  "issuing_country": "KOR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "PMKORPARK<<JUNSU<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nM723A71552KOR9007044M3205070V324789065436789",
+  "nationality": "KOR",
+  "personal_number": "V32478906543",
+  "sex": "M",
+  "surname": "PARK"
+}

@@ -621,8 +621,24 @@ impl GroundTruth {
             let label = self.dir.join(format!("{stem}.json"));
             if let Ok(bytes) = std::fs::read(&label) {
                 if let Ok(gt) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    // `expected_document_number` is what a correct Tier-1 read
+                    // should yield, so `mrz_corpus` can score against it. A
+                    // specimen whose *printed* MRZ fails its own check digits
+                    // (`mrz_checksums_valid: false` in the label — the 16
+                    // non-conforming `TEMPLATE`/`ORNEK`/... zones from the
+                    // 2026-09-08 checksum_failed track) has no such number:
+                    // a conformant Tier-1 read of it produces nothing. It
+                    // still carries a `ground_truth_stem` for parity, just not
+                    // an expected number.
+                    let checksums_valid = gt
+                        .get("mrz_checksums_valid")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
                     if let Some(doc) = gt.get("document_number").and_then(|v| v.as_str()) {
-                        return serde_json::Value::String(doc.to_string());
+                        if checksums_valid {
+                            return serde_json::Value::String(doc.to_string());
+                        }
+                        return serde_json::Value::Null;
                     }
                 }
             }

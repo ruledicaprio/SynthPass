@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-01-01",
+  "date_of_expiry": "2034-09-02",
+  "document_number": "040021039",
+  "document_type": "PE",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MIHAELA STEFANIA",
+  "issuing_country": "ROU",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PEROUPOPESCU<<MIHAELA<STEFANIA<<<<<<<<<<<<<<\n0400210397ROU8001014F34090284800101017005<70",
+  "nationality": "ROU",
+  "personal_number": "4800101017005",
+  "sex": "F",
+  "surname": "POPESCU"
+}

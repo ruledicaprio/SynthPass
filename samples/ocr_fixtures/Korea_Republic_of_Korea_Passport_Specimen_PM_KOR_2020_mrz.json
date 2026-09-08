@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1987-02-01",
+  "date_of_expiry": "2030-08-15",
+  "document_number": "M123A4567",
+  "document_type": "PM",
+  "extraction_method": "hand-transcribed",
+  "given_names": "GILSOON",
+  "issuing_country": "KOR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "PMKORHONG<<GILSOON<<<<<<<<<<<<<<<<<<<<<<<<<<\nM123A45670KOR8702010F3008150V200000000000000",
+  "nationality": "KOR",
+  "personal_number": "V200000000000",
+  "sex": "F",
+  "surname": "HONG"
+}

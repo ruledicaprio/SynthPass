@@ -417,9 +417,14 @@ best-scoring non-validating reading has an unrecognized issuing state *and* nati
 a non-numeric date of birth. Full-corpus re-run: `checksum_failed` **71 → 33**, `no_mrz_found`
 **47 → 85**, Tier-1 HIT **118 → 118** (zero regression). 38 documents moved — the hallucinated
 MRZ and most redacted specimens are now honestly not-found. Residual `checksum_failed` (33) is
-23 genuine unverified `*_mrz` + 8 partially-readable redacted + 2 stubborn no-MRZ; the
-writeup's steps 2–4 (redacted outcome, ground truth for the 23, then character-level fixes)
-stand.
+23 genuine `*_mrz` + 8 partially-readable redacted + 2 stubborn no-MRZ.
+
+**Step 3 shipped** (PR 1): all 23 genuine `*_mrz` now have a hand-transcribed
+`samples/ocr_fixtures/<stem>.json` recording the true printed MRZ. **7 carry a checksum-valid
+zone** (any `checksum_failed` on them is 100 % an OCR error — the step-4 target list), **16
+are non-conforming by design** (`TEMPLATE` / `ÖRNEK` / all-zeros zones with wrong or blank
+check digits). `corpus.jsonl` gains `ground_truth_stem` ×23 and `expected_document_number`
+×7. Steps 2 (redacted bench outcome) and 4 (character-level `mrz` fixes) stand.
 
 ### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
 

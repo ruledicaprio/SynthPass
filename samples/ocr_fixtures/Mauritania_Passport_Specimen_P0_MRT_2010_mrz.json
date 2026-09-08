@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1975-11-28",
+  "date_of_expiry": "2015-11-14",
+  "document_number": "AB1234567",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MOHAMMED",
+  "issuing_country": "MRT",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<MRTABDELLAHI<MAHFOUDH<<MOHAMMED<<<<<<<<<<<\nAB1234567<5MRT7511287M1511143123456789<<<<<14",
+  "nationality": "MRT",
+  "personal_number": "123456789",
+  "sex": "M",
+  "surname": "ABDELLAHI MAHFOUDH"
+}

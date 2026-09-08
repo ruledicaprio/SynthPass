@@ -1,0 +1,15 @@
+{
+  "date_of_birth": null,
+  "date_of_expiry": null,
+  "document_number": "A01T123456",
+  "document_type": "I",
+  "extraction_method": "hand-transcribed",
+  "given_names": "TEST",
+  "issuing_country": "TUR",
+  "mrz_checksums_valid": false,
+  "mrz_line": "I<TURA01T123456<12345678901<<<\n1234567M1234567TUR<<<<<<<<<<<0\nTEST<<TEST<<<<<<<<<<<<<<<<<<<<",
+  "nationality": "TUR",
+  "personal_number": "12345678901",
+  "sex": "M",
+  "surname": "TEST"
+}

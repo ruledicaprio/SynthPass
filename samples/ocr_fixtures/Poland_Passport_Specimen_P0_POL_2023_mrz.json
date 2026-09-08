@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1984-04-23",
+  "date_of_expiry": "2033-01-25",
+  "document_number": "EM9638245",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "BORYS ANDRZEJ",
+  "issuing_country": "POL",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<POLMUSIELAK<<<BORYS<ANDRZEJ<<<<<<<<<<<<<<<\nEM9638245<POL8404238M33012567544<<<<<<<<<<02",
+  "nationality": "POL",
+  "personal_number": "7544",
+  "sex": "M",
+  "surname": "MUSIELAK"
+}

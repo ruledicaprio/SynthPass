@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1988-01-01",
+  "date_of_expiry": "2014-08-14",
+  "document_number": "H0000014",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MALE",
+  "issuing_country": "GHA",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<GHASPECIMEN<<MALE<<<<<<<<<<<<<<<<<<<<<<<<<\nH0000014<8GHA8801018M1408142<<<<<<<<<<<<<<<3",
+  "nationality": "GHA",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SPECIMEN"
+}

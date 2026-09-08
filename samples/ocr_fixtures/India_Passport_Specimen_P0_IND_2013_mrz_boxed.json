@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1985-05-24",
+  "date_of_expiry": null,
+  "document_number": "Z9999999",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "KUMAR G",
+  "issuing_country": "IND",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<<SPECIMEN<<KUMAR<G<<<<<<<<<<<<<<<<<<<<<<<<\nZ9999999<0IND8505246M2300000<<<<<<<<<<<<<<<4",
+  "nationality": "IND",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "SPECIMEN"
+}

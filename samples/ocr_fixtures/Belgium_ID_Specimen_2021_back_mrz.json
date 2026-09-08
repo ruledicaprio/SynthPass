@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1995-02-28",
+  "date_of_expiry": "2030-01-06",
+  "document_number": "000001115",
+  "document_type": "ID",
+  "extraction_method": "hand-transcribed",
+  "given_names": "SPECIMEN",
+  "issuing_country": "BEL",
+  "mrz_checksums_valid": true,
+  "mrz_line": "IDBEL000001115<7027<<<<<<<<<<<\n9502286F3001064UTO952028998747\nSPECIMEN<<SPECIMEN<<<<<<<<<<<<",
+  "nationality": "UTO",
+  "personal_number": "95202899874",
+  "sex": "F",
+  "surname": "SPECIMEN"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1970-05-05",
+  "date_of_expiry": "2021-07-03",
+  "document_number": "O1415403",
+  "document_type": "PO",
+  "extraction_method": "hand-transcribed",
+  "given_names": "SAYED ESHAQ",
+  "issuing_country": "AFG",
+  "mrz_checksums_valid": true,
+  "mrz_line": "POAFGHASHIMI<<SAYED<ESHAQ<<<<<<<<<<<<<<<<<<<\nO1415403<0AFG7005059M2107039<<<<<<<<<<<<<<<2",
+  "nationality": "AFG",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "HASHIMI"
+}
