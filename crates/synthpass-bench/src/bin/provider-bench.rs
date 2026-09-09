@@ -1309,6 +1309,36 @@ async fn main() {
                     );
                 }
             }
+            // The mirror of `false_positive_mrz`, and it costs us a hit rather
+            // than inventing one: a specimen tagged `*_redacted_mrz` whose zone
+            // reads checksum-valid is evidence the *zone* is not what was
+            // redacted. Passing every ICAO check digit by chance is vanishingly
+            // unlikely — the same argument `corpus_manifest.rs`'s
+            // `a_no_mrz_specimen_never_records_a_checksum_valid_read` makes for
+            // the `no_mrz` tag, and the same shape as the Monaco file that was
+            // reported as a Tier-1 false positive and turned out to be a label
+            // error. Scoring it out is right if the tag is right, and silently
+            // costs a genuine hit if it is not, so the harness says so either
+            // way instead of leaving it to whoever next reads the JSON.
+            let mislabelled_redactions: Vec<&str> = r
+                .documents_detail
+                .iter()
+                .filter(|d| {
+                    d.mrz_checksums_valid
+                        && d.miss_reason.as_ref().map(miss_kind) == Some("redacted_mrz")
+                })
+                .map(|d| d.name.as_str())
+                .collect();
+            if !mislabelled_redactions.is_empty() {
+                println!(
+                    "    ⚠ {} specimen(s) tagged redacted read a checksum-VALID MRZ, so the zone \
+                     is probably not what was redacted — they are scored out and may be costing \
+                     a genuine hit: {}",
+                    mislabelled_redactions.len(),
+                    mislabelled_redactions.join(", ")
+                );
+            }
+
             // Loud on purpose, and phrased as a defect rather than a count: a
             // checksum-valid MRZ off a document that has none is either a
             // hallucinated record or a mislabelled corpus file, and both need
