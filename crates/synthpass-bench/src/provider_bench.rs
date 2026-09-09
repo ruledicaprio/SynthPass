@@ -496,6 +496,24 @@ struct BenchPage {
     /// documents — `synthpass-gen` draws the zone itself, so there is always
     /// one to find.
     mrz_expected: bool,
+    /// The specimen's own **printed** MRZ fails its ICAO check digits — a
+    /// `TEMPLATE`/`ÖRNEK`/`VZOR`/all-zeros zone, or one that is structurally
+    /// malformed. Computed from the hand-transcribed `mrz_line` ground truth,
+    /// so it is a property of the document rather than of the run: no OCR
+    /// pipeline, however good, can return a checksum-valid record for one of
+    /// these, and the 2026-09-08 `checksum_failed` writeup concluded that all
+    /// 16 of them "belong outside the denominator".
+    ///
+    /// Deliberately **not** "OCR recovered the printed zone exactly", which is
+    /// what this used to be. That conflated a fact about the specimen with an
+    /// achievement of the run, and it recognised 1 of the 16 — the other 15
+    /// were non-conforming *and* imperfectly read, so they were scored as
+    /// ordinary OCR failures against a target they could never hit.
+    ///
+    /// `false` for an unlabelled specimen: with no transcription there is no
+    /// evidence the printed zone is bad, and assuming it would quietly excuse
+    /// real misreads.
+    printed_zone_nonconforming: bool,
     /// `true` for a synthetic-corpus document (from [`prep_corpus`]), `false`
     /// for a real specimen (from [`prep_specimens`]) — which of
     /// [`DocumentDetail::mrz_format`]'s two resolution rules applies.
@@ -570,6 +588,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 redacted: false,
                 // `synthpass-gen` drew the MRZ, so there is always one to find.
                 mrz_expected: true,
+                printed_zone_nonconforming: false,
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
             })
@@ -602,6 +621,14 @@ fn prep_specimens(
             // OCR misread apart from a specimen whose *printed* check digits
             // are wrong by design.
             let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
+            // Does the *printed* zone pass its own check digits? Parsed from
+            // the hand transcription, not from OCR, so the answer describes the
+            // document and stays the same whatever the run reads off it.
+            // `None` (unlabelled) is not evidence of non-conformance — see
+            // `BenchPage::printed_zone_nonconforming`.
+            let printed_zone_nonconforming = ground_truth_mrz
+                .as_deref()
+                .is_some_and(|zone| !mrz::find_and_parse(zone).is_ok_and(|d| d.valid()));
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             // Derived from the filename, the same way the corpus manifest
             // generator records `mrz.redacted` (`corpus_manifest.rs`). The
@@ -632,6 +659,7 @@ fn prep_specimens(
                 // The manifest is the signal here because two driving-license
                 // fronts predate the `_no_mrz` naming convention entirely.
                 mrz_expected: doc.mrz_expected,
+                printed_zone_nonconforming,
                 synthetic: false,
                 known_or_guessed_format,
             })
@@ -952,26 +980,33 @@ async fn run_prepped(
             // specimen with no label that clears those gets no further check;
             // that is a hit, not an unknown.
             //
-            // The one rung with no synthetic analogue is `Redacted`: a
-            // specimen whose printed zone is blacked/scrambled out. It sits
-            // after the `mrz_found` gate on purpose — a redaction bar that OCR
-            // could not shape into a parseable zone is honestly `no_mrz_found`
-            // (most already are, via `mrz` 0.7.0's structural gate); this only
-            // intercepts the few that still parse into a checksum-failed
-            // reading, so they stop inflating `checksum_failed`.
-            // A document that carries no MRZ is judged on the opposite
-            // question from every other rung: not "was the zone recovered" but
-            // "was nothing invented". Reading none is correct
-            // (`no_mrz_expected`, scored off the denominator like `redacted_mrz`);
-            // returning a checksum-valid record is a false positive, and the
-            // most serious thing this harness can report.
+            // The rungs are ordered by **what the document makes possible**,
+            // before anything about what the run achieved. Three populations
+            // cannot produce a Tier-1 hit no matter how good the pipeline gets,
+            // and each is scored off the denominator rather than counted as a
+            // failure to do the impossible:
             //
-            // This gate has to come first. Downstream, an MRZ-less front has no
-            // `ocr_fixtures/` label to contradict — that population is precisely
-            // the unlabelled one — so a hallucinated zone reached the final
-            // `else`, found no ground truth to check against, and was counted as
-            // a Tier-1 **hit**. 42 correct refusals were simultaneously counted
-            // as `no_mrz_found` failures. Both errors are fixed here.
+            //   * `no_mrz_expected` — the document carries no zone at all.
+            //   * `redacted_mrz`    — the zone is physically blacked out.
+            //   * `checksum_failed_specimen` — the *printed* zone fails its own
+            //     ICAO check digits, so even a byte-perfect read fails.
+            //
+            // Getting that order wrong is what this whole classification was
+            // rebuilt for. Every one of the three used to be decided by what OCR
+            // happened to return:
+            //
+            //   * An MRZ-less front has no `ocr_fixtures/` label to contradict,
+            //     so a hallucinated checksum-valid zone reached the final `else`,
+            //     found no ground truth, and was counted as a Tier-1 **hit** —
+            //     while the 42 correct refusals were counted as `no_mrz_found`.
+            //   * `Redacted` sat *after* the `mrz_found` gate, so 9 of the 36
+            //     redacted specimens were scored out and 27 were scored in as
+            //     detection failures, split by nothing but whether the blackout
+            //     bar happened to OCR into parseable noise. The cleaner the
+            //     redaction, the worse the document scored.
+            //   * A non-conforming printed zone was only recognised when OCR
+            //     recovered it *exactly*, which caught 1 of the 16 the
+            //     2026-09-08 writeup identified.
             let miss_reason = if !bench_page.mrz_expected {
                 if bench_page.mrz_found && reading.evidence.mrz_checksums_valid {
                     Some(MissReason::FalsePositiveMrz)
@@ -980,30 +1015,40 @@ async fn run_prepped(
                     // check digits rejected it, which is the system working.
                     Some(MissReason::NoMrzExpected)
                 }
-            } else if !bench_page.mrz_found {
-                Some(MissReason::NoMrzFound(String::new()))
             } else if bench_page.redacted {
+                // Before the `mrz_found` gate, not after. Whether a blackout bar
+                // resolves into something parseable is a property of the bar's
+                // texture, not of the pipeline, and it is not stable run to run.
                 Some(MissReason::Redacted)
-            } else if !reading.evidence.mrz_checksums_valid {
-                // `read_mrz` (this harness's own independent parse of the OCR
-                // text, computed once per document above) is the same source
-                // `--dump-ocr` already uses a few lines below to print which
-                // check digit(s) failed — reused here for the same reason.
-                //
-                // When this specimen has a hand-transcribed `mrz_line` label
-                // and the run recovered that exact zone, the check digits fail
-                // because the *printed* document is non-conforming, not because
-                // OCR misread it — report that as `checksum_failed_specimen`.
-                let specimen_nonconforming = match (&read_mrz, &bench_page.ground_truth_mrz) {
-                    (Some(data), Some(truth)) => mrz_zone_mismatch(&data.mrz_lines, truth) == 0,
-                    _ => false,
-                };
+            } else if bench_page.printed_zone_nonconforming {
+                // The printed zone fails its own check digits, so this document
+                // has no reachable hit. Reported whatever OCR returned, for the
+                // same reason as `redacted`: the document decides this, not the
+                // run.
                 Some(MissReason::ChecksumFailed {
                     failing: read_mrz
                         .as_ref()
                         .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
                         .unwrap_or_default(),
-                    specimen_nonconforming,
+                    specimen_nonconforming: true,
+                })
+            } else if !bench_page.mrz_found {
+                Some(MissReason::NoMrzFound(String::new()))
+            } else if !reading.evidence.mrz_checksums_valid {
+                // A genuine OCR misread: the printed zone is conforming (the
+                // rung above already took the specimens where it is not), so
+                // every failing check digit here is the pipeline's own.
+                //
+                // `read_mrz` (this harness's own independent parse of the OCR
+                // text, computed once per document above) is the same source
+                // `--dump-ocr` already uses a few lines below to print which
+                // check digit(s) failed — reused here for the same reason.
+                Some(MissReason::ChecksumFailed {
+                    failing: read_mrz
+                        .as_ref()
+                        .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
+                        .unwrap_or_default(),
+                    specimen_nonconforming: false,
                 })
             } else {
                 bench_page
@@ -1183,15 +1228,19 @@ async fn run_prepped(
                 reason: NOT_DETERMINISTIC_REASON,
             }
         } else {
-            // Two populations are neither a hit nor a fair miss, and both are
+            // Three populations are neither a hit nor a fair miss, and each is
             // excluded from the denominator the same way an unlabelled document
-            // is excluded from field accuracy. A `*_redacted_mrz` specimen
-            // physically carries no readable zone; a `no_mrz_expected` one
-            // never had a zone at all (an ID-card front, a border pass, a
-            // driving-license face) and reading none off it is the correct
-            // answer, not a failure to detect. Both still appear in
-            // `documents_detail` and in the "misses by kind" table; they just
-            // do not cap the achievable rate.
+            // is excluded from field accuracy — because no pipeline, however
+            // good, can turn one into a Tier-1 hit:
+            //
+            //   * `no_mrz_expected`          — no zone on the document at all.
+            //   * `redacted_mrz`             — the zone is blacked out.
+            //   * `checksum_failed_specimen` — the printed zone fails its own
+            //                                  ICAO check digits.
+            //
+            // They still appear in `documents_detail` and in the "misses by
+            // kind" table; they just do not cap the achievable rate. What is
+            // left is the population where a miss is genuinely ours.
             //
             // This list must stay identical to `RealSpecimenSnapshot`'s
             // off-denominator set in `bin/provider-bench.rs` — they are two
@@ -1202,7 +1251,12 @@ async fn run_prepped(
                 .filter(|d| {
                     !matches!(
                         d.miss_reason,
-                        Some(MissReason::Redacted) | Some(MissReason::NoMrzExpected)
+                        Some(MissReason::Redacted)
+                            | Some(MissReason::NoMrzExpected)
+                            | Some(MissReason::ChecksumFailed {
+                                specimen_nonconforming: true,
+                                ..
+                            })
                     )
                 })
                 .count();
@@ -1509,6 +1563,7 @@ mod tests {
                 mrz_found: false,
                 redacted: false,
                 mrz_expected: true,
+                printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1524,6 +1579,7 @@ mod tests {
                 mrz_found: false,
                 redacted: false,
                 mrz_expected: true,
+                printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1561,6 +1617,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1600,6 +1657,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1674,6 +1732,7 @@ mod tests {
             mrz_found: true,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1718,13 +1777,18 @@ mod tests {
         );
     }
 
-    /// A `checksum_failed` specimen that carries a hand-transcribed `mrz_line`
-    /// label the run recovered faithfully is reported as
-    /// `checksum_failed_specimen` — the printed zone's own check digits are
-    /// what failed, not OCR.
+    /// A specimen whose **printed** zone fails its own check digits is
+    /// `checksum_failed_specimen` — and, since 2026-09-09, that verdict no
+    /// longer depends on OCR having recovered the zone exactly.
+    ///
+    /// The old rule was "the run recovered the transcription byte for byte",
+    /// which conflated a fact about the document with an achievement of the
+    /// run. It recognised 1 of the 16 non-conforming specimens the 2026-09-08
+    /// writeup identified; the other 15 were non-conforming *and* imperfectly
+    /// read, so they were scored as ordinary OCR failures against a target no
+    /// pipeline could ever hit. See the second case below.
     #[tokio::test]
-    async fn a_labelled_specimen_whose_printed_zone_was_read_faithfully_is_specimen_nonconforming()
-    {
+    async fn a_specimen_with_a_nonconforming_printed_zone_is_scored_out() {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
@@ -1754,6 +1818,7 @@ mod tests {
             mrz_found: true,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1773,12 +1838,18 @@ mod tests {
         );
     }
 
-    /// The same label, but the run's OCR text drops one character of the zone:
-    /// the recovered zone no longer matches the transcription, so the miss
-    /// stays `checksum_failed` (an OCR error — Phase-3d material), not
-    /// `checksum_failed_specimen`.
+    /// A **conforming** printed zone that the run misreads stays
+    /// `checksum_failed` — a genuine OCR error, inside the denominator, and the
+    /// population accuracy work is actually aimed at.
+    ///
+    /// This is the other half of the rule above, and the reason it is keyed on
+    /// the printed zone rather than on how faithfully OCR did: the two cases
+    /// differ in the *document*, not in the quality of the read. Note the true
+    /// zone here is ICAO 9303's own canonical example, asserted valid below —
+    /// the fixture used to use a month-13 zone, which was non-conforming, so it
+    /// claimed to test a conforming-document misread while doing the opposite.
     #[tokio::test]
-    async fn a_labelled_specimen_read_with_an_ocr_error_stays_checksum_failed() {
+    async fn a_conforming_zone_read_with_an_ocr_error_stays_checksum_failed() {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
@@ -1789,8 +1860,14 @@ mod tests {
             .build()
             .expect("no duplicate ids");
 
+        // ICAO 9303's canonical TD3 example: every check digit verifies.
         let true_zone = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<\n\
-                         L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+                         L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+        assert!(
+            mrz::find_and_parse(true_zone).is_ok_and(|d| d.valid()),
+            "the fixture's printed zone must be conforming, or this test is measuring the \
+             other case"
+        );
         // OCR misreads the document number's leading `L` as `1`.
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
@@ -1806,6 +1883,7 @@ mod tests {
             mrz_found: true,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1822,6 +1900,44 @@ mod tests {
         assert_eq!(
             detail.miss_reason.as_ref().map(miss_kind),
             Some("checksum_failed")
+        );
+    }
+
+    /// `printed_zone_nonconforming` is a property of the transcription, not of
+    /// the read: a non-conforming zone stays non-conforming even when OCR
+    /// mangles it.
+    ///
+    /// This is the 15 documents the old rule missed. They were non-conforming
+    /// *and* imperfectly read, so "did OCR recover the zone exactly?" answered
+    /// no and they were filed as ordinary `checksum_failed` — scored inside the
+    /// denominator, against a hit they could never reach. Asserted on the
+    /// derivation directly, because `prep_specimens` (where it is computed) needs
+    /// real images and does not run in a unit test.
+    #[test]
+    fn a_nonconforming_printed_zone_is_recognised_however_badly_it_was_read() {
+        // Month 13 in the date of birth — the zone is malformed as printed.
+        let printed = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<<\n\
+                       L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+        let nonconforming =
+            |zone: &str| !mrz::find_and_parse(zone).is_ok_and(|d: mrz::MrzData| d.valid());
+
+        assert!(
+            nonconforming(printed),
+            "the printed zone fails its own check digits"
+        );
+
+        // The old rule compared the recovered zone against the transcription and
+        // needed an exact match. Under it, this document — mangled by OCR on top
+        // of being non-conforming — was scored as an ordinary OCR failure.
+        let mangled = printed.replacen("L898902C36", "1898902C36", 1);
+        assert_ne!(
+            mrz_zone_mismatch(&mangled, printed),
+            0,
+            "the read differs from the transcription, which is what used to disqualify it"
+        );
+        assert!(
+            nonconforming(printed),
+            "and yet the document is still one no pipeline can turn into a hit"
         );
     }
 
@@ -1857,6 +1973,7 @@ mod tests {
             mrz_found: true,
             redacted: true,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1870,11 +1987,20 @@ mod tests {
         );
     }
 
-    /// The redacted rung sits *after* the `mrz_found` gate: a redaction bar
-    /// that OCR could not shape into a parseable zone is honestly
-    /// `no_mrz_found`, not `redacted_mrz`.
+    /// The redacted rung sits *before* the `mrz_found` gate: a specimen whose
+    /// zone is blacked out is `redacted_mrz` whether or not the bar happened to
+    /// OCR into something parseable.
+    ///
+    /// This test asserted the opposite until 2026-09-09, and the behaviour it
+    /// pinned was the bug. Ordering redaction after `mrz_found` split the 36
+    /// redacted specimens into 9 scored out and 27 scored in as detection
+    /// failures — decided entirely by the texture of the blackout bar, which is
+    /// not a property of the pipeline and is not stable run to run. It also ran
+    /// the wrong way round: the *cleaner* the redaction, the worse the document
+    /// scored, because a bar that produced no parseable noise looked exactly
+    /// like a passport whose MRZ we had failed to find.
     #[tokio::test]
-    async fn a_redacted_specimen_with_no_parseable_mrz_stays_no_mrz_found() {
+    async fn a_redacted_specimen_is_redacted_whether_or_not_its_bar_parsed() {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
@@ -1897,6 +2023,7 @@ mod tests {
             mrz_found: false,
             redacted: true,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1905,7 +2032,8 @@ mod tests {
         let detail = &reports[0].documents_detail[0];
         assert_eq!(
             detail.miss_reason.as_ref().map(miss_kind),
-            Some("no_mrz_found")
+            Some("redacted_mrz"),
+            "a blacked-out zone is not a detection failure, however cleanly it was blacked out"
         );
     }
 
@@ -1939,6 +2067,7 @@ mod tests {
                 mrz_found: true,
                 redacted,
                 mrz_expected: true,
+                printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             })
@@ -1997,6 +2126,7 @@ mod tests {
                 mrz_found,
                 redacted: false,
                 mrz_expected,
+                printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             })
@@ -2057,6 +2187,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: false,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -2105,6 +2236,7 @@ mod tests {
             mrz_found: true,
             redacted: false,
             mrz_expected: false,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -2162,6 +2294,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -2205,6 +2338,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -2254,6 +2388,7 @@ mod tests {
             mrz_found: false,
             redacted: false,
             mrz_expected: true,
+            printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];

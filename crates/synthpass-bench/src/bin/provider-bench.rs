@@ -692,18 +692,33 @@ fn mrz_only_catalog() -> ProviderCatalog {
         .expect("a single reader cannot collide on id")
 }
 
-/// The miss buckets whose growth is a Tier-1 regression. `redacted_mrz` and
-/// `no_mrz_expected` are excluded on purpose — both sit outside the hit-rate
-/// denominator (a redaction bar carries no readable zone; an ID-card front
-/// carries no zone at all), so their counts moving is a corpus change, not a
-/// parser regression. `checksum_failed_specimen` *is* included: a labelled
-/// specimen whose printed zone the run no longer recovers exactly has regressed,
-/// even though its printed check digits were always non-conforming.
+/// The miss kinds that sit outside the Tier-1 hit-rate denominator: documents
+/// that cannot yield a hit however good the pipeline gets, so counting them as
+/// failures measures the corpus rather than the reader.
+///
+/// Must stay identical to the filter in `provider_bench::run_prepped`, which
+/// computes the same number for `ProviderReport::tier1_hit_rate`.
+const OFF_DENOMINATOR_KINDS: &[&str] = &[
+    // The zone is physically blacked out by whoever published the specimen.
+    "redacted_mrz",
+    // The document has no machine-readable zone at all — an ID-card front, a
+    // border pass, a driving-license face.
+    "no_mrz_expected",
+    // The *printed* zone fails its own ICAO check digits (TEMPLATE / ÖRNEK /
+    // VZOR / all-zeros), so a byte-perfect read still fails. The 2026-09-08
+    // `checksum_failed` writeup identified 16 of these and concluded they
+    // "belong outside the denominator"; this is that conclusion, implemented.
+    "checksum_failed_specimen",
+];
+
+/// The miss buckets whose growth is a Tier-1 regression — i.e. every kind that
+/// is *inside* the denominator, where a miss is genuinely the pipeline's.
+/// Everything in [`OFF_DENOMINATOR_KINDS`] is excluded on purpose: those counts
+/// moving is a corpus change, not a parser regression, and each warns instead.
 /// `false_positive_mrz` is included and is the most serious of them: it means a
 /// checksum-valid MRZ was returned for a document that has none.
 const REGRESSION_BUCKETS: &[&str] = &[
     "checksum_failed",
-    "checksum_failed_specimen",
     "no_mrz_found",
     "ocr_error",
     "document_number_mismatch",
@@ -760,7 +775,7 @@ impl RealSpecimenSnapshot {
             }
         }
         let documents = mrz.documents_detail.len();
-        let off_denominator = ["redacted_mrz", "no_mrz_expected"]
+        let off_denominator = OFF_DENOMINATOR_KINDS
             .iter()
             .filter_map(|k| by_miss_kind.get(*k))
             .sum::<usize>();
@@ -772,16 +787,13 @@ impl RealSpecimenSnapshot {
         })
     }
 
-    fn redacted(&self) -> usize {
-        self.by_miss_kind.get("redacted_mrz").copied().unwrap_or(0)
-    }
-
-    /// Documents scored out because they carry no MRZ to find.
-    fn no_mrz_expected(&self) -> usize {
-        self.by_miss_kind
-            .get("no_mrz_expected")
-            .copied()
-            .unwrap_or(0)
+    /// Documents scored out because no pipeline could have produced a hit —
+    /// the total across [`OFF_DENOMINATOR_KINDS`].
+    fn off_denominator(&self) -> usize {
+        OFF_DENOMINATOR_KINDS
+            .iter()
+            .filter_map(|k| self.by_miss_kind.get(*k))
+            .sum()
     }
 }
 
@@ -872,15 +884,13 @@ fn check_baseline(
             baseline.scored, actual.scored
         ));
     }
-    // Both off-denominator populations drift the same way and warn the same
+    // Every off-denominator population drifts the same way and warns the same
     // way: a count that moved means the corpus changed, not that anything
     // regressed. Reported per bucket rather than as one total so the message
     // names which population moved.
-    for (bucket, now) in [
-        ("redacted_mrz", actual.redacted()),
-        ("no_mrz_expected", actual.no_mrz_expected()),
-    ] {
+    for &bucket in OFF_DENOMINATOR_KINDS {
         let was = baseline.by_miss_kind.get(bucket).copied().unwrap_or(0);
+        let now = actual.by_miss_kind.get(bucket).copied().unwrap_or(0);
         if now != was {
             warnings.push(format!(
                 "{bucket} count changed: {was} -> {now} (off-denominator) — regenerate the \
@@ -973,6 +983,13 @@ fn print_baseline_table(baseline: &RealSpecimenBaseline, actual: &RealSpecimenSn
     row("tier1_hits", baseline.tier1_hits, actual.tier1_hits);
     row("scored (denominator)", baseline.scored, actual.scored);
     row("documents", baseline.documents, actual.documents);
+    // Stated explicitly so `documents - scored` is not left as arithmetic for
+    // the reader: it is the count of specimens that cannot yield a hit at all.
+    row(
+        "  of which unattackable",
+        baseline.documents - baseline.scored,
+        actual.off_denominator(),
+    );
     let mut kinds: Vec<&str> = baseline
         .by_miss_kind
         .keys()
@@ -1271,17 +1288,26 @@ async fn main() {
                 .collect();
             println!("    misses by kind: {}", counts.join(", "));
 
-            if let Some(n) = by_miss_kind.get("redacted_mrz") {
-                println!(
-                    "    (redacted_mrz: {n} specimen(s) with a physically redacted zone — \
-                     excluded from the Tier-1 hit-rate denominator, not scored as a miss)"
-                );
-            }
-            if let Some(n) = by_miss_kind.get("no_mrz_expected") {
-                println!(
-                    "    (no_mrz_expected: {n} specimen(s) that carry no MRZ at all and correctly \
-                     yielded none — a correct refusal, excluded from the denominator)"
-                );
+            // The three populations that cannot yield a hit, named individually
+            // so the reader can see what the denominator actually excludes
+            // rather than having to reconstruct it from the table above.
+            for (kind, why) in [
+                (
+                    "no_mrz_expected",
+                    "carry no MRZ at all and correctly yielded none — a correct refusal",
+                ),
+                ("redacted_mrz", "have a physically redacted zone"),
+                (
+                    "checksum_failed_specimen",
+                    "have a printed zone that fails its own ICAO check digits",
+                ),
+            ] {
+                if let Some(n) = by_miss_kind.get(kind) {
+                    println!(
+                        "    ({kind}: {n} specimen(s) that {why} — excluded from the Tier-1 \
+                         hit-rate denominator, not scored as a miss)"
+                    );
+                }
             }
             // Loud on purpose, and phrased as a defect rather than a count: a
             // checksum-valid MRZ off a document that has none is either a
@@ -1602,10 +1628,10 @@ mod tests {
             kinds.iter().map(|(k, n)| ((*k).to_string(), *n)).collect();
         let misses: usize = kinds.iter().map(|(_, n)| n).sum();
         let documents = hits + misses;
-        // Mirrors `RealSpecimenSnapshot::from_reports` — both off-denominator
-        // populations, not just the redacted one, or these tests would exercise
-        // a denominator the production path does not use.
-        let off: usize = ["redacted_mrz", "no_mrz_expected"]
+        // Via the same constant `RealSpecimenSnapshot::from_reports` uses, not a
+        // second hand-written list — a copy here would let these tests exercise
+        // a denominator the production path does not have.
+        let off: usize = OFF_DENOMINATOR_KINDS
             .iter()
             .filter_map(|k| by_miss_kind.get(*k))
             .sum();
@@ -1710,11 +1736,15 @@ mod tests {
         assert!(warnings.iter().any(|w| w.contains("redacted_mrz")));
     }
 
-    /// The exact shape of the 2026-09-09 reclassification: 42 documents move
-    /// from `no_mrz_found` to `no_mrz_expected`, HITs are untouched, and no
-    /// bucket grows — so every regression check stays silent while the
-    /// published hit rate goes 52.0% -> 63.6%. Only the denominator warning
-    /// notices, which is why it exists.
+    /// The exact shape of the 2026-09-09 reclassification, and the reason the
+    /// denominator warning exists: documents move between buckets, HITs are
+    /// untouched, and no regression bucket grows — so every failure check stays
+    /// silent while the published hit rate goes 52.0% -> 82.6%.
+    ///
+    /// The three populations that move: 42 with no MRZ at all, 27 redacted
+    /// specimens that used to be filed as detection failures because their
+    /// blackout bar produced no parseable noise, and 15 whose printed zone was
+    /// non-conforming but imperfectly read.
     #[test]
     fn baseline_warns_when_only_the_denominator_moved() {
         let base = snap(
@@ -1726,20 +1756,24 @@ mod tests {
                 ("redacted_mrz", 9),
             ],
         );
+        // `snap` applies today's rules, so this is 228 rather than the 229 the
+        // baseline was actually published with — the single
+        // `checksum_failed_specimen` is off-denominator now and was not then.
+        // The published figure is prose here on purpose; asserting a historical
+        // number through a helper that no longer models it would pin nothing.
         let b = baseline_with_tolerance(&base, 0);
-        assert_eq!(b.scored, 229, "the published denominator before the fix");
 
         let reclassified = snap(
             119,
             &[
-                ("checksum_failed", 24),
-                ("checksum_failed_specimen", 1),
-                ("no_mrz_found", 43),
+                ("checksum_failed", 7),
+                ("checksum_failed_specimen", 16),
+                ("no_mrz_found", 18),
                 ("no_mrz_expected", 42),
-                ("redacted_mrz", 9),
+                ("redacted_mrz", 36),
             ],
         );
-        assert_eq!(reclassified.scored, 187, "the corrected denominator");
+        assert_eq!(reclassified.scored, 144, "the corrected denominator");
 
         let warnings =
             check_baseline(&reclassified, &b).expect("a reclassification is not a regression");
@@ -1747,7 +1781,45 @@ mod tests {
             warnings.iter().any(|w| w.contains("denominator changed")),
             "the denominator moving must be reported: {warnings:?}"
         );
-        assert!(warnings.iter().any(|w| w.contains("no_mrz_expected")));
+        for bucket in [
+            "no_mrz_expected",
+            "redacted_mrz",
+            "checksum_failed_specimen",
+        ] {
+            assert!(
+                warnings.iter().any(|w| w.contains(bucket)),
+                "{bucket} drifted and must be named: {warnings:?}"
+            );
+        }
+    }
+
+    /// `checksum_failed_specimen` growing is no longer a regression — it is an
+    /// off-denominator population, so a document moving into it is a corpus
+    /// fact, not a parser fault. Its *conforming* sibling still is.
+    #[test]
+    fn nonconforming_specimens_warn_while_real_checksum_failures_fail() {
+        let base = snap(
+            119,
+            &[("checksum_failed", 7), ("checksum_failed_specimen", 16)],
+        );
+        let b = baseline_with_tolerance(&base, 0);
+
+        let more_nonconforming = snap(
+            119,
+            &[("checksum_failed", 7), ("checksum_failed_specimen", 18)],
+        );
+        let warnings = check_baseline(&more_nonconforming, &b)
+            .expect("a non-conforming specimen appearing is not a regression");
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("checksum_failed_specimen")));
+
+        let more_real = snap(
+            119,
+            &[("checksum_failed", 9), ("checksum_failed_specimen", 16)],
+        );
+        let err = check_baseline(&more_real, &b).expect_err("real OCR failures growing is");
+        assert!(err.iter().any(|m| m.contains("`checksum_failed` grew")));
     }
 
     /// A false positive is inside the denominator and inside the regression
