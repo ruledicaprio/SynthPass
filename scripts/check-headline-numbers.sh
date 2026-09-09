@@ -48,6 +48,7 @@ json_int() {
 }
 
 scored="$(json_int scored)"
+documents="$(json_int documents)"
 hits="$(json_int tier1_hits)"
 no_mrz="$(json_int no_mrz_found)"
 checksum="$(json_int checksum_failed)"
@@ -63,15 +64,24 @@ false_positives="$(json_int_or_zero false_positive_mrz)"
 
 # One decimal place, rounded half-up, matching how the README states it.
 rate="$(awk -v h="$hits" -v s="$scored" 'BEGIN { printf "%.1f", (h * 100.0) / s }')"
+# The corpus-level rate: the same hits over every document in the corpus,
+# including the ones no pipeline could read. Published alongside the first so
+# neither can be accused of flattering by exclusion.
+corpus_rate="$(awk -v h="$hits" -v d="$documents" 'BEGIN { printf "%.1f", (h * 100.0) / d }')"
 
-echo "baseline: ${hits}/${scored} = ${rate}%  (no_mrz_found ${no_mrz}, checksum_failed ${checksum})"
+echo "baseline: ${hits}/${scored} = ${rate}% scored, ${hits}/${documents} = ${corpus_rate}% of corpus"
+echo "          (no_mrz_found ${no_mrz}, checksum_failed ${checksum}, unattackable $((documents - scored)))"
 
-# 1. The README must state the hit rate as "<hits> / <scored> = <rate>%".
+# 1. The README must state BOTH rates, each as "<hits> / <denominator> = <rate>%".
 #    Tolerate any run of spaces around the slash so a reflow does not fail the build.
-if ! grep -qE "${hits}[[:space:]]*/[[:space:]]*${scored}[[:space:]]*=[[:space:]]*${rate}%" "$readme"; then
-    fail "README.md does not state the current hit rate '${hits} / ${scored} = ${rate}%'."
-    fail "Found instead: $(grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+[[:space:]]*=[[:space:]]*[0-9.]+%' "$readme" | head -3 | tr '\n' ' ')"
-fi
+check_rate() { # <denominator> <rate> <what>
+    if ! grep -qE "${hits}[[:space:]]*/[[:space:]]*$1[[:space:]]*=[[:space:]]*$2%" "$readme"; then
+        fail "README.md does not state the $3 rate '${hits} / $1 = $2%'."
+        fail "Found instead: $(grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+[[:space:]]*=[[:space:]]*[0-9.]+%' "$readme" | head -3 | tr '\n' ' ')"
+    fi
+}
+check_rate "$scored" "$rate" "scored"
+check_rate "$documents" "$corpus_rate" "corpus-level"
 
 # 2. The README must name the dominant miss kind with its current count. Which kind
 #    dominates is derived here, not assumed -- if the ordering flips back, this

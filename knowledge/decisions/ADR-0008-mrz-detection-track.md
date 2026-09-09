@@ -1,6 +1,6 @@
 # ADR-0008 — MRZ detection succeeds sequence completeness as M6's accuracy track
 
-**Status:** Accepted
+**Status:** Accepted (target metric corrected 2026-09-09 — see amendment below)
 **Date:** 2026-09-09
 
 ## Context
@@ -116,3 +116,47 @@ separate problems and conflating them would make both unmeasurable.
 **Explicitly not licensed by this decision:** replacing the OCR engine, adding a vision
 provider, or any new dependency. This ADR names a target and mandates a measurement. What the
 measurement justifies is a later decision, argued on its own evidence.
+
+## Amendment 2026-09-09 — the target metric was contaminated; the decision stands
+
+The first chunk this ADR mandates is a measurement. Reconnaissance for it, before any OCR was
+run, found that **the number this ADR picked as its target was measuring something else**.
+
+`no_mrz_found = 85 of 229` counted 94 specimens that cannot produce a Tier-1 hit under any
+pipeline: 42 carry no machine-readable zone at all, 36 have the zone blacked out by the publisher,
+and 16 have a printed zone whose own ICAO check digits fail. Two of those three were classified by
+what OCR happened to return rather than by what the document is — a redacted specimen was scored
+out only if its blackout bar OCR'd into parseable noise, so the *cleaner* the redaction the worse
+it scored. Full analysis and evidence:
+[`denominator-correction-2026-09-09.md`](../benchmarks/denominator-correction-2026-09-09.md).
+
+Corrected, with no extraction code changed and the HIT count identical:
+
+| | as written above | corrected |
+| :-- | --: | --: |
+| Tier-1 hit rate | 119 / 229 = 52.0% | **119 / 144 = 82.6%** |
+| `no_mrz_found` (the target) | 85 | **18** |
+| `checksum_failed` | 24 | **7** |
+| ratio | 3.5 : 1 | **2.6 : 1** |
+
+**The decision is unchanged.** Detection is still the dominant miss and still outnumbers character
+accuracy, so MRZ detection remains M6's accuracy track and the constraint (Tier-1 HIT must not
+regress) is untouched. Three things about it change:
+
+1. **The target is 18 documents, not 85.** Four fifths of the original number could never have
+   moved. A detector that fixed every genuine detection failure would have taken the old metric
+   from 52.0% to 60.3% and read as a failure.
+2. **The 18 are named**, and most of them are documents the browser demo already reads — six are
+   three-line TD1 ID-card backs, against a native band search built around the two-line TD3 case.
+   The mandated measurement now has a specific population to explain rather than an aggregate.
+3. **The framing "37% of real specimens yield no MRZ" was never true** and should not be repeated;
+   the honest figure is 12.5% of documents that have a zone to find.
+
+What this does not change: the measurement still comes before any construction, the same-binary
+A/B discipline still holds, and replacing the OCR engine or adding a dependency is still not
+licensed by this ADR.
+
+**Also corrected, and unrelated to the metric:** a checksum-valid MRZ returned for a document that
+carries none was being counted as a **Tier-1 hit**, because such documents are unlabelled by
+construction and so reached the ground-truth rung with nothing to be compared against. It is now
+`false_positive_mrz` and fails the gate. The current corpus has zero.
