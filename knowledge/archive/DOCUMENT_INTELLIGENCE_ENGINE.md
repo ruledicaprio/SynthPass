@@ -1,10 +1,12 @@
-> **Editor's note (M6).** This and `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` were two
-> author's-voice essays making the same case (a provider interface, not a single VLM). The
-> other has been archived to [`archive/SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`](archive/SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md)
-> to keep one copy of the argument, kept under this file's name since it doesn't carry the
-> redundant `SYNTHPASS_` prefix every doc in this tree implicitly has. **`ROADMAP.md`'s M7
-> section is the shipped, authoritative account of what was actually built** — this file is
-> the design conversation that led there, kept for provenance, not a living spec.
+> **Archived 2026-09-09.** This and [`SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`](SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md)
+> were two author's-voice essays making the same case (a provider interface, not a single VLM).
+> The other was archived first, to keep one copy of the argument; this one has now followed it,
+> because M7 shipped and [`../ROADMAP.md`](../ROADMAP.md)'s M7 section is the authoritative
+> account of what was actually built. Kept for provenance, not as a living spec — where it
+> disagrees with anything outside `archive/`, the current document wins.
+>
+> Its lasting contribution is structural: the `knowledge/` subject-folder layout this essay
+> proposed is the one that was built. See [`ADR-0001`](../decisions/ADR-0001-knowledge-tree.md).
 
 # SynthPass has a clear engineering philosophy behind it. 
 

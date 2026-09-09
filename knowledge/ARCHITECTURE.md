@@ -1,4 +1,9 @@
-# 🏛️ Architectural Manifest: SynthPass — Air-Gapped Document Processing (v1.2.0)
+# 🏛️ Architectural Manifest: SynthPass — Air-Gapped Document Processing
+
+> **Scope:** this manifest describes the architecture as cut at **v1.2.0**, which is still the
+> shape of the system. Work past v1.2.0 moved to the M1–M7 platform roadmap —
+> [`ROADMAP.md`](ROADMAP.md), not this file, is the current source for milestone state, and
+> [`benchmarks/README.md`](benchmarks/README.md) for every measured number.
 
 ## 1. Executive Summary
 This repository houses the design and implementation of a localized, air-gapped machine learning architecture dedicated to processing identity documents (passports, ID cards). Engineered for high-stakes rental and compliance applications, the system automates data extraction while enforcing strict data privacy, zero recurring cloud API costs, and optimal local hardware utilization. By decoupling high-concurrency file orchestration from heavy machine learning workloads, the pipeline achieves a robust, production-ready foundation for sensitive Personally Identifiable Information (PII) processing.

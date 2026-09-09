@@ -23,6 +23,6 @@ ship.
 
 A hardware-recommendation *feature*. The design notes float a
 `synthpass benchmark` command that detects your GPU and star-rates models for it.
-That is not implemented and is not in the v1.3.0 scope. If it is ever built, the
+That is not implemented and is still out of scope as of v1.4.0. If it is ever built, the
 numbers behind it come from this folder and from `../benchmarks/`, measured — not
 from a table someone typed.

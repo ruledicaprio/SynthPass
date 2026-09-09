@@ -10,6 +10,11 @@
 > those existing citations, not to imply sections `§1`, `§2`, `§5`–`§8`,
 > `§10` were ever written or planned — they weren't; don't add them
 > speculatively.
+>
+> **"v2.0.0" in this file always means the `ExtractionV2` *schema* generation, never a
+> workspace or crate release.** The schema shipped inside the 1.x line (under M5); the
+> workspace is at 1.4.0 and there is no planned 2.0.0 release of it. Where the text says a
+> shim is "scoped to one major release", read that as one schema generation.
 
 ## §3 — Why a versioned schema, and what's in it
 

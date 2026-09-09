@@ -1,7 +1,11 @@
 # Visual inspection zone → Tier 2
 
-**Status: design only. No code in this document has been written, no
-`PROMPT_VERSION` has moved, and no schema field has been added.**
+**Status: mostly design, partly shipped.** No `PROMPT_VERSION` has moved and no schema field
+has been added. Two pieces did land: §2.1's candidate signal was measured and **refuted**, and
+§5.3's holdout measurement shipped as the `SYNTHPASS_PARITY_HOLDOUT` mode in
+`crates/synthpass-llm/tests/parity.rs`. Everything else here — §2.2, §2.3, §2.4 and the rest of
+§5 — remains unbuilt design. Live numbers for anything measured here are in
+[`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers).
 
 The visual inspection zone (VIZ) is everything on a travel document that is not
 the MRZ — Doc 9303 Part 1's own definition: *"those portions of the MRTD

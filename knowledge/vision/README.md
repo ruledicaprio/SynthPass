@@ -4,7 +4,7 @@ Vision-language models and the multimodal track.
 
 ## Status: not implemented
 
-As of v1.3.0 there is **no vision provider**. `Capability.vision` is `false` for
+As of v1.4.0 there is **no vision provider**. `Capability.vision` is `false` for
 every registered provider, and that is stated as the deliverable rather than
 hidden: the interface exists and has zero vision implementations.
 

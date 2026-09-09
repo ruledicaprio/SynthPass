@@ -46,12 +46,25 @@ the constraints and the direction before you open a source file:
   and the checklist for adding a new specimen.
 - **[SYNTHPASS.md](SYNTHPASS.md)** — running the `synthpass-bench` corpus runner
   locally, its CLI flags, report format, and how the M4 CI accuracy gate works.
-- **[EXPORTS.md](EXPORTS.md)** — the `synthpass export` dataset formats
-  (JSONL / COCO / YOLO / Hugging Face), their coordinate convention, and the CLI —
-  spec, pending implementation ([decisions/ADR-0007](decisions/ADR-0007-dataset-export-format.md)).
+- **[EXPORTS.md](EXPORTS.md)** — the `synthpass export` dataset formats, their
+  coordinate convention, and the CLI. **JSONL and Hugging Face are shipped**
+  (`crates/synthpass-export`); COCO / YOLO remain deferred on geometry
+  `synthpass_gen::Labels` does not yet surface
+  ([decisions/ADR-0007](decisions/ADR-0007-dataset-export-format.md)).
 - **[ADVERSARIAL.md](ADVERSARIAL.md)** — the degraded capture profiles
   (mobile/scanner/worn/border-kiosk) as the adversarial corpus: what each
   simulates, and gate status.
+- **[V2-DESIGN.md](V2-DESIGN.md)** — why the `ExtractionV2` schema has the slots it
+  has. "v2.0.0" throughout that file names the *schema* generation, not the
+  workspace release line.
+- **[WEB_OCR_BASELINE.md](WEB_OCR_BASELINE.md)** — the browser OCR stack
+  (tesseract.js + an OCR-B model) and its dated measurement log. It is a separate
+  stack from the native `ocrs`/`rten` pipeline, and currently out-reads it.
+- **[VIZ_TIER2_DESIGN.md](VIZ_TIER2_DESIGN.md)** — the VIZ → Tier-2 design and its
+  ordered plan; §2.1 measured and refuted, §5.3's holdout mode shipped, the rest open.
+- **[MRZ_SEQUENCE_COMPLETENESS.md](MRZ_SEQUENCE_COMPLETENESS.md)** — **closed record.**
+  The Tier-1 completeness track, complete with no open work, kept in place (not archived)
+  because seventeen source files cite it as the rationale of record.
 
 ## Subject folders
 
@@ -73,15 +86,13 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 | **[papers/](papers/)** | Source academic material, kept as reference. |
 | **[docs9303/](docs9303/)** | ICAO Doc 9303, Parts 1–13 — the spec behind `crates/mrz` and `synthpass-die`, kept as reference. |
 
-## Design notes (informal)
+## Where the numbers live
 
-Working notes and creator's remarks that shaped the current direction.
-Opinionated and unedited; where they disagree with `ROADMAP.md` or an ADR, those
-win.
-
-- **[DOCUMENT_INTELLIGENCE_ENGINE.md](DOCUMENT_INTELLIGENCE_ENGINE.md)** — the
-  case for a provider interface rather than a single VLM (its one-time duplicate,
-  `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`, is archived — see below).
+**[benchmarks/README.md](benchmarks/README.md) is the only document that carries live accuracy
+numbers.** Everything else — this file, the root `README.md`, `ROADMAP.md`, an ADR — states at
+most one figure and links there. `scripts/check-headline-numbers.sh` enforces the root README's
+against the CI-written baseline. If you are about to paste a hit rate into a second document,
+paste a link instead.
 
 ## Archive (historical record)
 
@@ -90,7 +101,9 @@ for provenance rather than as living docs: `KNOWLEDGE.md` (why this tree exists 
 originally proposed — adopted with variations, see `decisions/ADR-0001-knowledge-tree.md`),
 `FOUNDATIONAL_STRATEGY.md` and `synthpass_v2_0.md` (the source notes VISION/ROADMAP/BRANDING
 were distilled from), `V_1_3_PROPOSALS.md` (the v1.3.0 proposal set, superseded by ROADMAP's
-M7 section), `SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` (the duplicate DIE essay), and
+M7 section), `DOCUMENT_INTELLIGENCE_ENGINE.md` and its duplicate
+`SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md` (the two author's-voice essays arguing for a
+provider interface, archived once M7 shipped the contract they argued for), and
 `roadmap-execution-log.md` (the append-only M1→v1.4.0 execution log, once ~70% of `ROADMAP.md`
 — now `ROADMAP.md`'s `## Current state` plus `benchmarks/README.md`). (The
 earlier `rebranding_identra_synthpass.md` and `mlis_v2_0_0_preliminary_design.md` scratch notes

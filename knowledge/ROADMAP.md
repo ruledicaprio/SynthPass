@@ -63,7 +63,7 @@ exception above. The numbering follows dependency, not schedule.)*
 | **M4 — Regression & Benchmarking** | ✅ Done | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented. Floor is `--min-hit-rate 0.30` on the synthetic clean TD3 corpus; measured ~55% synthetic clean / ~42% real corpus (the original 95% aspiration was dropped once measured — see [`benchmarks/README.md`](benchmarks/README.md)) |
 | **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
 | **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — leads with Tier-1 real-document accuracy (`checksum_failed` is the top real-specimen miss); all five MRZ formats generate, render and benchmark; provider registration, layout plugins, dataset exports, air-gapped guide and Pro beta still open. Priority order corrected in [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md) | MRZ sequence completeness / Tier-1 real-document accuracy ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract** — *then* declarative document *layout* plugins; dataset exports (COCO / YOLO / JSONL / Hugging Face); air-gapped deployment guide; commercial "Pro" closed beta | `checksum_failed` sub-reasons diagnosed and the `MRZ_SEQUENCE_COMPLETENESS.md` chunks land; non-TD3 formats generate/validate and each reads through a registered provider; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — leads with Tier-1 real-document accuracy. Sequence completeness is **done**; the track is now **MRZ detection** (`no_mrz_found`, 85 of 229, is the top real-specimen miss) per [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md). All five MRZ formats generate, render and benchmark; JSONL/HF exports shipped. Provider registration, layout plugins, COCO/YOLO, air-gapped guide and Pro beta still open. Priority order set by [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md) | MRZ **detection** / Tier-1 real-document accuracy ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md); sequence completeness closed in [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract** — *then* declarative document *layout* plugins; remaining dataset exports (COCO / YOLO); air-gapped deployment guide; commercial "Pro" closed beta | `no_mrz_found` is measurably reduced with no Tier-1 HIT regression against the committed baseline; non-TD3 formats generate/validate and each reads through a registered provider; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 ## Architecture evolution
 
@@ -120,20 +120,18 @@ training datasets from a synthetic corpus ([`ADR-0007`](decisions/ADR-0007-datas
 
 ### Measured accuracy
 
-See [`benchmarks/README.md`](benchmarks/README.md) for method, per-track trend charts, and
-the dated weak-spot findings. In brief, as of v1.4.0:
+**[`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers) is the single source
+for every measured number** — method, per-track trend charts, per-format breakdowns, and the
+dated weak-spot findings. This section states one figure and the shape of the misses; anything
+more specific belongs there, because restating numbers in a second document is precisely how
+`README.md` came to advertise a hit rate ten points stale.
 
-| Corpus | Tier-1 hit rate (checksum-valid MRZ, document number matches) |
-|---|---|
-| Synthetic, clean profile (100-seed) | ~55% overall — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% |
-| Real specimens (union, ~210 docs) | ~42–46% — passport ~52%, id_card ~26%, driving_license 0% (no labelled ground truth yet) |
-| CI floor (`m4-hit-rate` job: synthetic clean TD3, 50-seed) | 0.30 |
-
-Tier-2 per-field exact-match on the 72-fixture parity corpus is ~56% overall as of v1.4.0
-(it read as 26.5% before the normalization/measurement fixes that landed in the v1.4.0
-cycle; the model did not change). The CI regression floor for Tier 2 is 15%. Tier 2 is the
-enterprise add-on for the residual cases; **the deterministic Tier-1 core is the product**
-(see [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
+**Tier-1 on real specimens: 119 / 229 = 52.0%**, from the CI-written baseline
+([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-09)
+that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every
+PR. The misses are dominated by `no_mrz_found` (85) over `checksum_failed` (24) — detection,
+not parsing. Tier 2 is the enterprise add-on for the residual cases; **the deterministic Tier-1
+core is the product.**
 
 On the real corpus the
 [2026-09-08 dump analysis](benchmarks/checksum-failed-real-specimens-2026-09-08.md) showed
@@ -181,7 +179,7 @@ taken against a catalog of providers that declare what they can do.
 
 **Non-goals — stated so they do not get re-litigated**
 
-- **No vision-language model in v1.3.0.** `Capability.vision` is `false` for every registered
+- **No vision-language model.** Still true as of v1.4.0. `Capability.vision` is `false` for every registered
   provider, and that is the honest claim: *the interface exists and has zero vision
   implementations.* `synthpass-llm` is text-only — it consumes OCR Markdown, not pixels — and
   `llama-cpp-2` stays pinned at `0.1.151` with only the `sampler` feature, so no mmproj/mtmd
@@ -216,12 +214,18 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
 
 **Ships first — the deterministic core:**
 
-- **MRZ sequence completeness (Tier-1 real-document accuracy).** A diagnostic /
+- **MRZ detection (Tier-1 real-document accuracy).** `no_mrz_found` — no MRZ located at all —
+  is the single largest real-specimen miss category at 85 of 229 scored documents, 3.5× the
+  24 that are found but fail a check digit. Scoped in
+  [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md), whose first chunk is a measurement:
+  explain why the browser demo's tesseract.js stack out-reads the native `ocrs`/`rten` pipeline
+  on the same corpus before changing a detector.
+- **MRZ sequence completeness — closed.** The predecessor track: a diagnostic /
   completeness-typing / TD2-repair backlog for `crates/mrz` and the `synthpass-die` pipeline
-  layer around it — `checksum_failed` (the MRZ is found but does not fully validate) is the
-  single largest real-specimen miss category. Full scoping, chunk-by-chunk, in
-  [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md). This is the track recent work
-  has actually been on.
+  layer around it. Complete, with the chunk-by-chunk record kept in
+  [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md). Closing it is what revealed
+  the detection gap: `mrz` 0.7.0 stopped accepting implausible readings, and ~38 phantom
+  `checksum_failed` were reclassified to the `no_mrz_found` they had always been.
 - **TD1/TD2/MRVA/MRVB as `synthpass-die` providers.** Extraction is registration against the M7
   contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the same shape `MrzReader`
   already uses for TD3 — not a new branch in a growing `if`/`else`. See the M7 section above for
@@ -252,7 +256,8 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   an M6 deliverable — worth picking up opportunistically, but doesn't block or get blocked by
   anything above.
 
-**Suggested order:** MRZ sequence completeness / Tier-1 accuracy → TD1/TD2/MRVA/MRVB as providers
+**Suggested order:** MRZ detection / Tier-1 accuracy ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md))
+→ TD1/TD2/MRVA/MRVB as providers
 against the M7 contract → layout plugins → dataset exports → deployment guide + Pro beta. The
 deterministic-core steps come first because they are what the product is sold on and where the
 real-specimen miss rate is; each expansion step after that makes the next one's accuracy numbers
@@ -266,8 +271,12 @@ Detail and derivation for each is in
 [`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md) unless another pointer is
 given.
 
-**Tier-1 accuracy / MRZ completeness** — M6's lead track ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)),
-and where recent effort has actually gone.
+**Tier-1 accuracy** — M6's lead track ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)),
+and where recent effort has actually gone. The *sequence-completeness* half of it is closed;
+[`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md) succeeds it with **MRZ detection**, on
+the evidence that `no_mrz_found` (85 of 229) now outnumbers `checksum_failed` (24) by 3.5:1.
+Its first chunk is a measurement: explain why the browser demo's OCR out-reads the native
+pipeline ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) before changing any detector.
 
 - MRZ sequence completeness — **done** ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
   All of its chunks shipped: typed `ChecksumFailed` sub-reasons (#163), the personal-number

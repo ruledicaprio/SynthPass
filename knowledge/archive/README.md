@@ -16,7 +16,8 @@ was proposed or believed at the time it was written, banner-noted with what supe
 | [`V_1_3_PROPOSALS.md`](V_1_3_PROPOSALS.md) | `../ROADMAP.md`'s M7 section — the v1.3.0 proposal set |
 | [`synthpass_v2_0.md`](synthpass_v2_0.md) | `../ROADMAP.md` — the v2.0 synthetic-generation design record |
 | [`KNOWLEDGE.md`](KNOWLEDGE.md) | `../decisions/ADR-0001-knowledge-tree.md` and `../README.md` — the original `knowledge/` tree proposal, adopted with variations |
-| [`SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`](SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md) | `../DOCUMENT_INTELLIGENCE_ENGINE.md` and `../ROADMAP.md`'s M7 section — a duplicate essay making the same provider-interface case |
+| [`DOCUMENT_INTELLIGENCE_ENGINE.md`](DOCUMENT_INTELLIGENCE_ENGINE.md) | `../ROADMAP.md`'s M7 section — the author's-voice essay arguing for a provider interface rather than a single VLM. Archived 2026-09-09, once M7 shipped and the contract it argued for existed in code |
+| [`SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md`](SYNTHPASS_DOCUMENT_INTELLIGENCE_ENGINE.md) | `DOCUMENT_INTELLIGENCE_ENGINE.md` (above) and `../ROADMAP.md`'s M7 section — a duplicate essay making the same provider-interface case |
 | [`roadmap-execution-log.md`](roadmap-execution-log.md) | `../ROADMAP.md`'s `## Current state` + `../benchmarks/README.md` — the append-only M1→v1.4.0 execution log, once ~70% of `ROADMAP.md` by length |
 
 Never delete an entry once archived — the same "never delete an ADR, supersede and link both

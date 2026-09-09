@@ -46,8 +46,9 @@ keeps a distinct purpose. This convention is codified: new products in the ecosy
 
 ## 3. Naming & repository strategy
 
-- **Primary repository:** `synthpass` (currently `multi-level-id-strip`). The rename is an
-  intent recorded here; the executed crate mapping is recorded in `CHANGELOG.md`.
+- **Primary repository:** `SynthPass` — **done.** The repository rename from
+  `multi-level-id-strip` and the `mlis-*` → `synthpass-*` crate mapping both executed in the
+  v1.2.0 cycle; the mapping is recorded in `CHANGELOG.md`.
 - **GitHub organisation:** target a dedicated `identra-org` (or similar) to house all
   ecosystem projects, for discoverability and a professional structure. **Declared intent
   only** — no organisation or remote migration is performed as part of adopting these docs.
@@ -55,8 +56,8 @@ keeps a distinct purpose. This convention is codified: new products in the ecosy
   namespace. It has the potential to become the de-facto Rust MRZ library and should remain
   independent, dependency-light, and separately publishable. Its companion `mrz-wasm` (the
   browser demo) travels with it.
-- **Workspace crates** are renamed `mlis-*` → `synthpass-*` (with the new `synthpass-gen` and,
-  later, `synthpass-bench`). The full mapping and sequencing is recorded in `CHANGELOG.md`.
+- **Workspace crates** were renamed `mlis-*` → `synthpass-*` (adding `synthpass-gen` and
+  `synthpass-bench`). The full mapping and sequencing is recorded in `CHANGELOG.md`.
 
 A formal brand book (logo, colour palette, typography) is deferred; stating the intent to
 create one signals commitment to a consistent public identity without over-investing before it
