@@ -86,19 +86,49 @@ Persona framing:
 
 ## 5. Commercial strategy
 
-A tiered model keeps the core free while funding long-term sustainability:
+**The software is MIT, all of it, permanently. Revenue comes from what cannot be copied by
+recompiling.**
 
-| Tier | Audience | What it adds |
+| What is sold | To whom | Why they can't just build it |
 |---|---|---|
-| **Community (OSS, MIT)** | Everyone | The full generate → benchmark → extract core. Drives adoption and contribution. |
-| **Professional SDK** | Teams integrating SynthPass | Higher-capacity generation/extraction knobs, priority support, packaged SDK surfaces. |
-| **Enterprise** | Regulated / air-gapped orgs | SSO and advanced security integrations, enhanced reporting, managed/air-gapped deployment support. |
-| **Certification · Consulting · Custom models** | Strategic customers | Validation/certification programs, integration consulting, and custom-trained document models. |
+| **Labelled corpora** — generated to a customer's document mix, volume, degradation profile and edge cases, delivered with ground truth | AI/ML teams training or evaluating document models | The generator is free; a corpus that matches *their* distribution, with per-field labels and checksum-valid MRZs, is a service. No PII, so no data-sharing agreement to negotiate. |
+| **Benchmarking & certification** | Vendors and buyers of identity-verification systems | An independent, reproducible accuracy number against a corpus the vendor did not choose. The value is the *independence*, which is not a software feature. |
+| **Integration & air-gapped deployment** | Regulated, on-premises, border-control integrators | Getting it running inside an environment with no network, and being answerable for it. |
+| **Custom-trained document models** | Strategic customers | Trained on generated data for layouts the public corpus does not cover. |
+| **Support & priority roadmap** | Anyone depending on it in production | Someone to call, and influence over what ships next. |
 
-The boundary between Community and paid tiers is drawn at *capacity, support, and
-enterprise-integration surfaces* — enforced through the existing offline Ed25519 licensing
-mechanism (feature-gated, metered, never phoning home) — **not** by withholding the core
-capability. Community stays genuinely useful on its own.
+### Why not a paid tier gated on features
+
+The obvious model — Community free, Professional and Enterprise unlocked by the offline
+Ed25519 licensing mechanism — was written down here first, and does not survive contact with
+this repository:
+
+- **The licence gate is bypassable by recompiling.** `ARCHITECTURE.md` §6 says so in its own
+  threat model: this is metering, not DRM. Under MIT, removing the check is not even a licence
+  violation.
+- **The bypass is documented.** `SYNTHPASS_LICENSE_SKIP=1` appears in the README quickstart,
+  because local development genuinely needs it.
+- **No licence has ever been issuable.** `crates/synthpass-license/pubkey.b64` is still the
+  placeholder its own comment says to replace before issuing anything real
+  ([`technical_debt.md`](technical_debt.md)), and the machine fingerprint binds nothing on
+  Windows.
+
+Gating a feature people can un-gate in an afternoon buys no revenue and costs the project its
+central claim — that you can read every line that touches your documents. Given the choice
+between the two, **auditability is worth more than the gate**: it is the actual reason an
+air-gapped buyer picks this over a cloud API.
+
+`synthpass-license` is not deleted. It stays as honest **capacity metering and entitlement
+records** for official builds and hosted arrangements — a way to know what a customer is
+entitled to, not a wall. That is the job it is actually good at.
+
+### What this means for sequencing
+
+The revenue surfaces above need a corpus and a benchmark harness, both of which exist today.
+None of them requires the Tier-1 extraction accuracy number to improve first. That matters,
+because the extraction product is not yet sellable on accuracy — see
+[`benchmarks/README.md`](benchmarks/README.md) — while the generation and benchmarking side is
+sellable now. Sell the provable thing first.
 
 ## 6. Trademark & IP (intent)
 

@@ -38,8 +38,9 @@ the constraints and the direction before you open a source file:
   deleted and when).
 - **[technical_debt.md](technical_debt.md)** — deferred decisions with honest
   severity and effort. Add an entry when you *choose* not to fix something.
-- **[BRANDING.md](BRANDING.md)** — the naming model, messaging guardrails,
-  commercial tiers.
+- **[BRANDING.md](BRANDING.md)** — the naming model, messaging guardrails, and the
+  commercial model: MIT software throughout, revenue from corpora, benchmarking,
+  certification and integration rather than a feature gate.
 - **[LICENSING.md](LICENSING.md)** — the offline customer (`fingerprint` →
   `verify-license`) and vendor (`keygen` → `issue-license`) CLI walkthrough.
 - **[CORPUS_COVERAGE.md](CORPUS_COVERAGE.md)** — per-country OCR corpus status
