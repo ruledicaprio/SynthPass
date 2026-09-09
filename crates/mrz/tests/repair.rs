@@ -258,3 +258,76 @@ fn an_interior_filler_is_never_a_document_number() {
         }
     }
 }
+
+/// Emit a TD3 whose document number is `document_number`, returning its two
+/// lines. The caller pokes one glyph in `l2[0..9]` (the document-number
+/// field) and checks `find_and_parse` recovers it.
+fn td3_with_document_number(document_number: &str) -> (String, String) {
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "UTO".to_string(),
+        document_number: document_number.to_string(),
+        surname: "SPECIMEN".to_string(),
+        given_names: "TEST".to_string(),
+        nationality: "UTO".to_string(),
+        date_of_birth: "800101".to_string(),
+        sex: "F".to_string(),
+        date_of_expiry: "301230".to_string(),
+        personal_number: None,
+    });
+    let lines: Vec<&str> = mrz.lines().collect();
+    let (l1, l2) = (lines[0].to_string(), lines[1].to_string());
+    assert!(
+        mrz::parse_td3(&l1, &l2)
+            .expect("fixture parses before damage")
+            .valid(),
+        "the emitted fixture must validate before it is damaged"
+    );
+    (l1, l2)
+}
+
+/// Poke `l2[idx]` to `glyph`, confirm the damage broke the checksum, then
+/// confirm `find_and_parse` recovers `expect` as the document number.
+fn assert_confusable_recovers(document_number: &str, idx: usize, glyph: u8) {
+    let (l1, l2) = td3_with_document_number(document_number);
+    let mut damaged = l2.clone().into_bytes();
+    assert_ne!(damaged[idx], glyph, "the poke must actually change a byte");
+    damaged[idx] = glyph;
+    let damaged_l2 = String::from_utf8(damaged).expect("ascii in, ascii out");
+    assert!(
+        mrz::parse_td3(&l1, &damaged_l2).is_ok_and(|d| !d.valid()),
+        "the misread must not verify as-is"
+    );
+
+    let recovered = find_and_parse(&format!("{l1}\n{damaged_l2}"))
+        .expect("a single misread glyph must still parse");
+    assert!(
+        recovered.valid(),
+        "the recovered reading must checksum-verify"
+    );
+    assert_eq!(recovered.document_number, document_number);
+}
+
+/// `2`/`7` is a stroke-shape confusion that *crosses* residue classes, so the
+/// field check digit itself rejects the misread. Measured on
+/// `India_..._P0_IND_2013`, whose printed `2` OCRs as `7`.
+///
+/// The fixture carries exactly one `2`: every MRZ weight (7, 3, 1) is odd, so
+/// two `2`↔`7` swaps at different positions always net to zero mod 10 and
+/// would make the reading ambiguous — `find_and_parse` then correctly refuses
+/// to guess. One occurrence of the pair keeps the recovery unique.
+#[test]
+fn a_two_misread_as_seven_in_the_document_number_resolves_through_find_and_parse() {
+    // "AB234561" -> l2[0..9] "AB234561<", the '2' at index 2.
+    assert_confusable_recovers("AB234561", 2, b'7');
+}
+
+/// `M`/`N` likewise crosses residues (values 22 and 23). Measured on
+/// `Ghana_..._P0_GHA_2019`, whose printed sex `M` OCRs as `N`; the sex field
+/// carries no check digit, so this exercises the pair through the document
+/// number, which does.
+#[test]
+fn an_m_misread_as_n_in_the_document_number_resolves_through_find_and_parse() {
+    // "MB135790" -> l2[0..9] "MB135790<", the 'M' at index 0.
+    assert_confusable_recovers("MB135790", 0, b'N');
+}
