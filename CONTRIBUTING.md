@@ -358,14 +358,26 @@ cat > changelog.d/<pr-number-or-branch-slug>.added.md <<'EOF'
 EOF
 ```
 
-Category suffix is one of `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`.
+Category suffix is one of `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`,
+optionally followed by `!` for a breaking change (`api-rename.changed!.md`).
 `CHANGELOG.md` has one append point per section, so two branches open at once conflict on it
 every single time — a file per change has no shared append point, and merge day stops being a
 rebase queue. See [`changelog.d/README.md`](changelog.d/README.md) for the full convention.
 
+**`crates/mrz` fragments go in [`changelog.d/mrz/`](changelog.d/mrz/README.md)**, because the
+crate publishes on its own version line and its entries assemble into its own
+`crates/mrz/CHANGELOG.md`.
+
+**The category determines the next version number.** `scripts/next-version.sh --explain` derives
+it from the pending fragments, and CI (`scripts/check-changelog.sh`) fails a PR whose version
+bump disagrees with them — as well as one that touches `crates/` with no fragment at all, or
+whose fragment is malformed. Purely internal changes that a user would never notice need no
+fragment: label the PR `skip-changelog`.
+
 At release time, `scripts/assemble-changelog.sh --write` splices the fragments into the topmost
-section of `CHANGELOG.md` and deletes them (run it with no arguments to preview). Purely internal
-changes that a user would never notice need no fragment at all.
+section of `CHANGELOG.md` and deletes them (run it with no arguments to preview). Merging the
+release commit is what cuts the release — the tag and the GitHub Release are created by
+`.github/workflows/release.yml`, never by hand. Full procedure: [`RELEASING.md`](RELEASING.md).
 
 ## Commit sign-off
 

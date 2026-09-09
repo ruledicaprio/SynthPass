@@ -36,6 +36,12 @@ on:
       - "scripts/sync-samples.ps1"
       - "Cargo.lock"
       - ".github/workflows/real-specimen-gate.yml"
+      # Markdown under crates/ cannot change an extraction result, but it does
+      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a full
+      # ~1-minute corpus run on a docs-only PR. Exclusions are evaluated after
+      # the includes, so this restores the "never on a docs-only PR" property
+      # this workflow's header claims.
+      - "!crates/**/*.md"
   push:
     branches: [main]
     paths:
@@ -51,6 +57,12 @@ on:
       - "scripts/sync-samples.ps1"
       - "Cargo.lock"
       - ".github/workflows/real-specimen-gate.yml"
+      # Markdown under crates/ cannot change an extraction result, but it does
+      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a full
+      # ~1-minute corpus run on a docs-only PR. Exclusions are evaluated after
+      # the includes, so this restores the "never on a docs-only PR" property
+      # this workflow's header claims.
+      - "!crates/**/*.md"
   workflow_dispatch:
     inputs:
       mode:

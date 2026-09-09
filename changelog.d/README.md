@@ -12,15 +12,40 @@ so parallel branches never touch the same bytes.
 ## Naming
 
 ```
-changelog.d/<id>.<category>.md
+changelog.d/<id>.<category>[!].md          the workspace release line
+changelog.d/mrz/<id>.<category>[!].md      the mrz crate's own line
 ```
 
 - `<id>` — the PR number if you know it (`47`), otherwise the branch slug (`ocr-geometry`).
   A PR that lands two unrelated changes writes two files.
 - `<category>` — one of `added`, `changed`, `deprecated`, `removed`, `fixed`, `security`.
   These are the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) sections, lowercased.
+- `!` — **breaking.** Optional, and the one piece of the name that changes a version number.
 
-Examples: `47.added.md`, `ocr-geometry.changed.md`, `52.fixed.md`.
+Examples: `47.added.md`, `ocr-geometry.changed.md`, `52.fixed.md`, `api-rename.changed!.md`.
+
+`crates/mrz` is published separately and versions independently, so its entries go in
+[`mrz/`](mrz/) — see that directory's README for why the `!` matters more there.
+
+## The name is the version discriminator
+
+A version number should follow from what changed, not from what someone typed at the moment
+they were least likely to remember the rules. So the release process derives it:
+
+| Pending fragments | workspace (1.x) | `mrz` (0.x) |
+| --- | --- | --- |
+| any `!` | major — `2.0.0` | **minor** — `0.8.0` (pre-1.0 breaking slot) |
+| any `.added` | minor — `1.5.0` | patch — `0.7.2` |
+| otherwise | patch — `1.4.1` | patch — `0.7.2` |
+
+```bash
+scripts/next-version.sh                        # 1.5.0
+scripts/next-version.sh --scope mrz --explain  # and which fragments said so
+```
+
+CI enforces both halves: `scripts/check-changelog.sh` fails a PR that touches `crates/` without
+a fragment, one whose fragment is malformed, and one whose version bump disagrees with what its
+fragments imply. Full procedure in [`RELEASING.md`](../RELEASING.md).
 
 ## Contents
 

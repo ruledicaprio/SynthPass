@@ -1,0 +1,170 @@
+name: Release
+
+# Tag and publish from a version change on main.
+#
+# The problem this exists to solve: every release tag v0.4.0..v1.4.0 was created
+# by hand on a local branch, and every one of them ended up on a history that
+# shares no common ancestor with main. `git merge-base v1.4.0 HEAD` exits 1 and
+# `git describe` fails outright, so `git log v1.3.0..v1.4.0` and GitHub's tag
+# compare are both meaningless. Fifteen of sixteen tags also have no GitHub
+# Release, and crates/mrz shipped nine versions with no tags at all.
+#
+# The fix is structural rather than procedural: nobody creates a tag by hand
+# again. This workflow watches the version fields on main and tags the commit
+# that actually changed them — which is by construction a commit on main.
+#
+# Trigger: a push to main whose Cargo.toml or crates/mrz/Cargo.toml version
+# differs from its parent. That makes the release commit itself the trigger, so
+# a release cannot be "forgotten" and a tag cannot drift from what it names.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - crates/mrz/Cargo.toml
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report what would be tagged, change nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    outputs:
+      mrz_version: ${{ steps.detect.outputs.mrz_version }}
+      mrz_changed: ${{ steps.detect.outputs.mrz_changed }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect version changes
+        id: detect
+        run: |
+          set -euo pipefail
+
+          version_of() {  # <ref> <manifest> <section>
+            git show "$1:$2" 2>/dev/null | awk -v sect="$3" '
+              $0 == sect { f = 1; next }
+              f && /^\[/ { exit }
+              f && /^version[[:space:]]*=/ { gsub(/[^0-9.]/, "", $0); print; exit }'
+          }
+
+          # A merge commit's first parent is the previous state of main, which is
+          # the comparison a squash-merged repo wants.
+          prev="$(git rev-parse HEAD^ 2>/dev/null || echo '')"
+
+          for scope in workspace mrz; do
+            if [ "$scope" = workspace ]; then
+              manifest=Cargo.toml; section='[workspace.package]'; prefix=v
+            else
+              manifest=crates/mrz/Cargo.toml; section='[package]'; prefix=mrz-v
+            fi
+
+            now="$(version_of HEAD "$manifest" "$section")"
+            was=""
+            [ -n "$prev" ] && was="$(version_of "$prev" "$manifest" "$section" || true)"
+
+            if [ -z "$now" ]; then
+              echo "::error::could not read a version from $manifest"; exit 1
+            fi
+
+            if [ "$now" = "$was" ]; then
+              echo "$scope: unchanged at $now"
+              echo "${scope}_changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "$scope: $was -> $now  (tag ${prefix}${now})"
+              echo "${scope}_changed=true" >> "$GITHUB_OUTPUT"
+            fi
+            echo "${scope}_version=$now" >> "$GITHUB_OUTPUT"
+            echo "${scope}_tag=${prefix}${now}" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        if: steps.detect.outputs.workspace_changed == 'true'
+        run: |
+          set -euo pipefail
+          v="${{ steps.detect.outputs.workspace_version }}"
+          # The section for this version, up to the next '## ' heading.
+          awk -v ver="$v" '
+            $0 ~ "^## \\[" ver "\\]" { f = 1; print; next }
+            f && /^## / { exit }
+            f { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::no '## [$v]' section found in CHANGELOG.md"; exit 1
+          fi
+          echo "--- notes preview ---"; head -20 release-notes.md
+
+      - name: Create tag and GitHub Release
+        if: >-
+          steps.detect.outputs.workspace_changed == 'true' &&
+          github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.detect.outputs.workspace_tag }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::notice::$tag already exists; nothing to do"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Annotated, on this commit — which is on main, which is the whole point.
+          git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+          git push origin "$tag"
+          gh release create "$tag" --title "$tag" --notes-file release-notes.md --verify-tag
+
+      - name: Tag the mrz release line
+        if: >-
+          steps.detect.outputs.mrz_changed == 'true' &&
+          github.event.inputs.dry_run != 'true'
+        run: |
+          set -euo pipefail
+          tag="${{ steps.detect.outputs.mrz_tag }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::notice::$tag already exists; nothing to do"; exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
+          git push origin "$tag"
+
+  # Publishing to crates.io is irreversible — a version can be yanked but never
+  # replaced or deleted. So it does not run automatically: the `crates-io`
+  # environment gates it on a human approval, and the job only becomes available
+  # once the tag above exists.
+  publish-mrz:
+    name: Publish mrz to crates.io
+    needs: tag
+    if: needs.tag.outputs.mrz_changed == 'true' && github.event.inputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      # The pre-publish gate: the same checks the `msrv`, `docs` and `semver` CI
+      # jobs run, re-run here because a publish is the one action that cannot be
+      # taken back.
+      - name: Verify before publishing
+        run: |
+          cargo test -p mrz --all-features
+          RUSTDOCFLAGS="-D warnings" cargo doc -p mrz --all-features --no-deps
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p mrz
