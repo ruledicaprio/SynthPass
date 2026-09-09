@@ -491,6 +491,11 @@ struct BenchPage {
     /// Tier-1 hit-rate denominator, never scored as a `checksum_failed` miss.
     /// Always `false` for synthetic-corpus documents.
     redacted: bool,
+    /// Whether this document carries an MRZ at all
+    /// ([`crate::RealSpecimenDoc::mrz_expected`]). Always `true` for synthetic
+    /// documents — `synthpass-gen` draws the zone itself, so there is always
+    /// one to find.
+    mrz_expected: bool,
     /// `true` for a synthetic-corpus document (from [`prep_corpus`]), `false`
     /// for a real specimen (from [`prep_specimens`]) — which of
     /// [`DocumentDetail::mrz_format`]'s two resolution rules applies.
@@ -563,6 +568,8 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 image_path,
                 mrz_found,
                 redacted: false,
+                // `synthpass-gen` drew the MRZ, so there is always one to find.
+                mrz_expected: true,
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
             })
@@ -620,6 +627,11 @@ fn prep_specimens(
                 image_path,
                 mrz_found,
                 redacted,
+                // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
+                // time — unlike `redacted`, which the stem can carry on its own.
+                // The manifest is the signal here because two driving-license
+                // fronts predate the `_no_mrz` naming convention entirely.
+                mrz_expected: doc.mrz_expected,
                 synthetic: false,
                 known_or_guessed_format,
             })
@@ -947,7 +959,28 @@ async fn run_prepped(
             // (most already are, via `mrz` 0.7.0's structural gate); this only
             // intercepts the few that still parse into a checksum-failed
             // reading, so they stop inflating `checksum_failed`.
-            let miss_reason = if !bench_page.mrz_found {
+            // A document that carries no MRZ is judged on the opposite
+            // question from every other rung: not "was the zone recovered" but
+            // "was nothing invented". Reading none is correct
+            // (`no_mrz_expected`, scored off the denominator like `redacted_mrz`);
+            // returning a checksum-valid record is a false positive, and the
+            // most serious thing this harness can report.
+            //
+            // This gate has to come first. Downstream, an MRZ-less front has no
+            // `ocr_fixtures/` label to contradict — that population is precisely
+            // the unlabelled one — so a hallucinated zone reached the final
+            // `else`, found no ground truth to check against, and was counted as
+            // a Tier-1 **hit**. 42 correct refusals were simultaneously counted
+            // as `no_mrz_found` failures. Both errors are fixed here.
+            let miss_reason = if !bench_page.mrz_expected {
+                if bench_page.mrz_found && reading.evidence.mrz_checksums_valid {
+                    Some(MissReason::FalsePositiveMrz)
+                } else {
+                    // Includes the parseable-but-checksum-failing case: the
+                    // check digits rejected it, which is the system working.
+                    Some(MissReason::NoMrzExpected)
+                }
+            } else if !bench_page.mrz_found {
                 Some(MissReason::NoMrzFound(String::new()))
             } else if bench_page.redacted {
                 Some(MissReason::Redacted)
@@ -1150,15 +1183,28 @@ async fn run_prepped(
                 reason: NOT_DETERMINISTIC_REASON,
             }
         } else {
-            // A `*_redacted_mrz` specimen physically carries no readable zone,
-            // so it is neither a hit nor a fair miss — excluded from the
-            // denominator the same way an unlabelled document is excluded from
-            // field accuracy. It still appears in `documents_detail` and in the
-            // "misses by kind" table as `redacted_mrz`; it just does not cap
-            // the achievable rate.
+            // Two populations are neither a hit nor a fair miss, and both are
+            // excluded from the denominator the same way an unlabelled document
+            // is excluded from field accuracy. A `*_redacted_mrz` specimen
+            // physically carries no readable zone; a `no_mrz_expected` one
+            // never had a zone at all (an ID-card front, a border pass, a
+            // driving-license face) and reading none off it is the correct
+            // answer, not a failure to detect. Both still appear in
+            // `documents_detail` and in the "misses by kind" table; they just
+            // do not cap the achievable rate.
+            //
+            // This list must stay identical to `RealSpecimenSnapshot`'s
+            // off-denominator set in `bin/provider-bench.rs` — they are two
+            // computations of the same number, and a divergence would put the
+            // reported hit rate and the committed baseline quietly at odds.
             let scored = documents_detail
                 .iter()
-                .filter(|d| !matches!(d.miss_reason, Some(MissReason::Redacted)))
+                .filter(|d| {
+                    !matches!(
+                        d.miss_reason,
+                        Some(MissReason::Redacted) | Some(MissReason::NoMrzExpected)
+                    )
+                })
                 .count();
             let tier1_hits = documents_detail
                 .iter()
@@ -1462,6 +1508,7 @@ mod tests {
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
                 mrz_found: false,
                 redacted: false,
+                mrz_expected: true,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1476,6 +1523,7 @@ mod tests {
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: false,
                 redacted: false,
+                mrz_expected: true,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1512,6 +1560,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1550,6 +1599,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1623,6 +1673,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: true,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1702,6 +1753,7 @@ mod tests {
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1753,6 +1805,7 @@ mod tests {
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1803,6 +1856,7 @@ mod tests {
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
             redacted: true,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1842,6 +1896,7 @@ mod tests {
             image_path: PathBuf::from("unused.png"),
             mrz_found: false,
             redacted: true,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1883,6 +1938,7 @@ mod tests {
                 image_path: PathBuf::from("unused.png"),
                 mrz_found: true,
                 redacted,
+                mrz_expected: true,
                 synthetic: false,
                 known_or_guessed_format: None,
             })
@@ -1899,6 +1955,173 @@ mod tests {
                 panic!("a deterministic provider must get a computed tier1_hit_rate")
             }
         }
+    }
+
+    /// ...and, like a redacted one, it is dropped from the Tier-1 denominator:
+    /// one correct refusal alongside one genuine hit reports `1.0`, not `0.5`.
+    ///
+    /// The rate and the committed baseline compute `scored` in two different
+    /// places (`Tier1HitRate::Computed` here, `RealSpecimenSnapshot` in
+    /// `bin/provider-bench.rs`). This pins the half that would otherwise be
+    /// caught only by a CI run against the real corpus.
+    #[tokio::test]
+    async fn mrz_less_specimens_are_excluded_from_the_tier1_denominator() {
+        let mut hit_evidence = Evidence::default();
+        hit_evidence.mrz_found = true;
+        hit_evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence: hit_evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        // Both documents read a checksum-valid MRZ from this reader. The
+        // MRZ-less one is therefore a false positive — but the point here is
+        // the denominator, and `false_positive_mrz` stays *in* it, so use a
+        // reader-agnostic pairing instead: mark the second `mrz_found: false`
+        // so it lands in `no_mrz_expected`.
+        let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
+            Some(BenchPage {
+                name: name.to_string(),
+                page: OcrPage {
+                    text: "surname DOE".to_string(),
+                    ..OcrPage::default()
+                },
+                ground_truth: None,
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("unused.png"),
+                mrz_found,
+                redacted: false,
+                mrz_expected,
+                synthetic: false,
+                known_or_guessed_format: None,
+            })
+        };
+        let prepped = vec![
+            page("Clean_Passport_Specimen_P0_UTO_2020_mrz", true, true),
+            page("Wonderland_ID_Specimen_2021_front_no_mrz", false, false),
+        ];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        assert_eq!(
+            reports[0].documents_detail[1]
+                .miss_reason
+                .as_ref()
+                .map(miss_kind),
+            Some("no_mrz_expected")
+        );
+        match reports[0].tier1_hit_rate {
+            Tier1HitRate::Computed(rate) => assert_eq!(
+                rate, 1.0,
+                "a document with no MRZ to find must not cap the achievable rate"
+            ),
+            Tier1HitRate::NotApplicable { .. } => {
+                panic!("a deterministic provider must get a computed tier1_hit_rate")
+            }
+        }
+    }
+
+    /// A document that carries no MRZ, read correctly as carrying none, is a
+    /// **correct refusal** — `no_mrz_expected`, not `no_mrz_found`.
+    ///
+    /// 42 of the real corpus are exactly this: ID-card fronts, border passes
+    /// and driving-license faces. Every one used to be scored as a detection
+    /// failure inside the hit-rate denominator, which put the headline rate
+    /// 11.6 points low and roughly doubled the apparent size of the
+    /// `no_mrz_found` bucket that `ADR-0008` picked as its target metric.
+    #[tokio::test]
+    async fn a_document_with_no_mrz_reading_none_is_a_correct_refusal() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence: Evidence::default(),
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let prepped = vec![Some(BenchPage {
+            name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
+            page: OcrPage {
+                text: "IDENTITY CARD  DOE  JANE".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: false,
+            redacted: false,
+            mrz_expected: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("no_mrz_expected"),
+            "an ID-card front with no MRZ must not be scored as a detection failure"
+        );
+    }
+
+    /// The other direction, and the serious one: a checksum-**valid** MRZ read
+    /// off a document that carries none is a hallucinated record.
+    ///
+    /// This had no representation before. Such a document is unlabelled by
+    /// construction (`ocr_fixtures/` covers the MRZ-bearing specimens), so it
+    /// passed the `mrz_found` gate, passed the checksum gate, found no ground
+    /// truth to be compared against, and was counted as a **Tier-1 hit**.
+    /// `Monaco_ID_Specimen_XXXX_front_no_mrz.png` really did produce one.
+    #[tokio::test]
+    async fn a_checksum_valid_read_off_an_mrz_less_document_is_a_false_positive() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_found = true;
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let prepped = vec![Some(BenchPage {
+            name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
+            page: OcrPage {
+                text: "I<UTODOE<<JANE<<<<<<<<<<<<<<<<".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: true,
+            redacted: false,
+            mrz_expected: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("false_positive_mrz"),
+            "a hallucinated MRZ must never be counted as a Tier-1 hit"
+        );
+        // The regression this pins: it used to reach the ground-truth rung,
+        // find `None`, and fall out of the `if` chain as a hit.
+        assert!(
+            detail.miss_reason.is_some(),
+            "a false positive must be a miss, not an unchecked hit"
+        );
     }
 
     #[test]
@@ -1938,6 +2161,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1980,6 +2204,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -2028,6 +2253,7 @@ mod tests {
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
             redacted: false,
+            mrz_expected: true,
             synthetic: false,
             known_or_guessed_format: None,
         })];

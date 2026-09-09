@@ -52,6 +52,15 @@ hits="$(json_int tier1_hits)"
 no_mrz="$(json_int no_mrz_found)"
 checksum="$(json_int checksum_failed)"
 
+# Optional buckets: absent from an older baseline, so default to 0 rather than
+# aborting the way `json_int` does for the required ones.
+json_int_or_zero() {
+    local v
+    v="$(grep -oE "\"$1\"[[:space:]]*:[[:space:]]*[0-9]+" "$baseline" | grep -oE '[0-9]+$' | head -1)"
+    printf '%s' "${v:-0}"
+}
+false_positives="$(json_int_or_zero false_positive_mrz)"
+
 # One decimal place, rounded half-up, matching how the README states it.
 rate="$(awk -v h="$hits" -v s="$scored" 'BEGIN { printf "%.1f", (h * 100.0) / s }')"
 
@@ -83,6 +92,34 @@ if [ "$dominant" = "no_mrz_found" ]; then
     if grep -qiE 'largest.{0,40}checksum_failed|checksum_failed.{0,40}ahead of' "$readme"; then
         fail "README.md still claims checksum_failed is the largest miss; no_mrz_found (${no_mrz}) overtook it."
     fi
+fi
+
+# 4. The README states how far ahead the dominant miss is, as a "N.N×"
+#    multiplier. That sentence is prose around two numbers this script already
+#    knows, so it can go stale on its own -- it did: the ratio was 3.5x while
+#    the counts said 1.8x, because 42 documents that carry no MRZ at all were
+#    being counted as detection failures. Checked only when the README actually
+#    states a multiplier, so removing the sentence is allowed; stating a wrong
+#    one is not.
+#    Scoped to the two lines around the dominant-miss sentence, not the whole
+#    file: README.md also states a "~2.5×" GPU speedup, and a file-wide search
+#    for a multiplier finds that one first.
+if [ "$checksum" -gt 0 ]; then
+    ratio="$(awk -v a="$dominant_n" -v b="$checksum" 'BEGIN { printf "%.1f", a / b }')"
+    stated="$(grep -A2 -E "\`${dominant}\`" "$readme" | grep -oE '[0-9]+\.[0-9]+×' | head -1 || true)"
+    if [ -n "$stated" ] && [ "$stated" != "${ratio}×" ]; then
+        fail "README.md states the dominant miss is ${stated} the other; the baseline says ${ratio}× (${dominant_n} vs ${checksum})."
+    fi
+fi
+
+# 5. A committed baseline must never bless a false positive. `false_positive_mrz`
+#    is a checksum-valid MRZ returned for a document that carries none -- a
+#    hallucinated record, or a mislabelled corpus file. Either way, freezing one
+#    into the baseline makes it the accepted state and the gate stops objecting.
+if [ "$false_positives" -gt 0 ]; then
+    fail "the committed baseline records ${false_positives} false positive(s) (\`false_positive_mrz\`)."
+    fail "a checksum-valid MRZ was returned for a document tagged as carrying none — find out which"
+    fail "(\`provider-bench --real-specimens --mrz-only --verbose\`) before this is baselined as normal."
 fi
 
 if [ "$status" -eq 0 ]; then

@@ -173,6 +173,21 @@ pub struct RealSpecimenDoc {
     /// `provider-bench --format`. See [`classify_specimen`] for how this is
     /// decided.
     pub class: SpecimenClass,
+    /// Whether this specimen carries an MRZ at all, from
+    /// [`MrzExpectations`] (`samples/corpus.jsonl`'s `mrz.present`, falling
+    /// back to the `_no_mrz` filename tag).
+    ///
+    /// 42 of the corpus's specimens are ID-card fronts, border passes and
+    /// driving-license faces that have no machine-readable zone anywhere on
+    /// them. Reading no MRZ off one of those is the *correct* Tier-1 answer —
+    /// this whole product refuses rather than guesses — but the bench walks
+    /// the image directory and used to score every one of them as
+    /// `no_mrz_found`, so 42 correct refusals were counted as failures and
+    /// sat inside the headline hit rate's denominator. They are now scored
+    /// out as [`MissReason::NoMrzExpected`], and a checksum-valid read off one
+    /// of them is the genuine failure it always was
+    /// ([`MissReason::FalsePositiveMrz`]).
+    pub mrz_expected: bool,
 }
 
 /// Which `samples/` document format a specimen represents, for
@@ -339,8 +354,82 @@ pub fn load_ground_truth(samples_root: &Path, stem: &str) -> Option<synthpass_co
     }
 }
 
+/// Whether each specimen stem is expected to carry an MRZ at all, read once
+/// from `samples/corpus.jsonl` so a whole corpus load costs one file read.
+///
+/// Keyed by file stem rather than `(dir, filename)`: [`RealSpecimenDoc::name`]
+/// is the stem, and it is the only identity a walked image and a manifest row
+/// reliably share. Three stems appear twice in the manifest (the same document
+/// stored in two formats — `…AZE_2013_mrz` as both `.jpg` and `.webp`, and two
+/// more like it), and in every case both rows agree on `mrz.present`, so the
+/// stem resolves unambiguously. [`MrzExpectations::load`] rejects the corpus
+/// rather than guessing if that ever stops being true.
+#[derive(Debug, Default, Clone)]
+pub struct MrzExpectations {
+    present: std::collections::HashMap<String, bool>,
+}
+
+impl MrzExpectations {
+    /// Reads `samples_root/corpus.jsonl`. An absent or unreadable manifest
+    /// yields an empty map rather than an error — every lookup then falls back
+    /// to the filename tag, which is what [`Self::get`] does for an unlisted
+    /// specimen anyway.
+    pub fn load(samples_root: &Path) -> Self {
+        let Ok(text) = std::fs::read_to_string(samples_root.join("corpus.jsonl")) else {
+            return Self::default();
+        };
+        let mut present: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            let Ok(row) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            let Some(filename) = row.get("filename").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(flag) = row
+                .get("mrz")
+                .and_then(|m| m.get("present"))
+                .and_then(|v| v.as_bool())
+            else {
+                continue;
+            };
+            let stem = filename.rsplit_once('.').map_or(filename, |(s, _)| s);
+            if let Some(prev) = present.insert(stem.to_string(), flag) {
+                // Two rows sharing a stem must agree, or the stem is not a
+                // usable key and a specimen would silently take whichever row
+                // happened to be read last.
+                assert_eq!(
+                    prev, flag,
+                    "corpus.jsonl: stem {stem:?} appears twice with disagreeing mrz.present"
+                );
+            }
+        }
+        Self { present }
+    }
+
+    /// Whether `stem` is expected to carry an MRZ.
+    ///
+    /// Manifest first, filename tag as the fallback. The tag alone is not
+    /// enough: two driving-license fronts
+    /// (`Bosnia_Herzegovina_Driving_License_Specimen_face`/`_front`) predate the
+    /// `_mrz`/`_no_mrz` naming convention and carry no tag, while the manifest
+    /// records them correctly. The fallback still matters in the other
+    /// direction — an image can be on disk with no manifest row at all
+    /// (`Kenya_Passport_Specimen_P0_KEN_XXXX_no_mrz.jpg` is, as this is
+    /// written), and defaulting such a specimen to "expected" would score a
+    /// correct refusal as a detection failure, which is the whole bug this type
+    /// exists to fix.
+    pub fn get(&self, stem: &str) -> bool {
+        self.present
+            .get(stem)
+            .copied()
+            .unwrap_or_else(|| !stem.to_ascii_lowercase().contains("no_mrz"))
+    }
+}
+
 /// Loads one real specimen from `image_path`, attaching ground truth from
-/// `samples_root/ocr_fixtures/<stem>.json` when one exists.
+/// `samples_root/ocr_fixtures/<stem>.json` when one exists and its MRZ
+/// expectation from `expectations`.
 ///
 /// Returns `None` when `image_path` doesn't exist, isn't readable, or isn't
 /// a format the `image` crate can decode — the same "skip, don't abort"
@@ -348,7 +437,11 @@ pub fn load_ground_truth(samples_root: &Path, stem: &str) -> Option<synthpass_co
 /// (rather than one this crate's own walk produced) gets the same graceful
 /// handling, which is what makes "loader given a nonexistent file" a safe,
 /// panic-free case to test.
-pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpecimenDoc> {
+pub fn load_specimen(
+    samples_root: &Path,
+    image_path: &Path,
+    expectations: &MrzExpectations,
+) -> Option<RealSpecimenDoc> {
     let name = image_path.file_stem()?.to_str()?.to_string();
     // Content-sniffing, not extension-trusting: `image::open` picks its decoder
     // from the file name, so a JPEG called `.png` returns `None` here and the
@@ -357,11 +450,13 @@ pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpeci
     let image = synthpass_ocr::decode_image(image_path).ok()?;
     let labels = load_ground_truth(samples_root, &name);
     let class = classify_specimen(image_path, labels.as_ref());
+    let mrz_expected = expectations.get(&name);
     Some(RealSpecimenDoc {
         name,
         image,
         labels,
         class,
+        mrz_expected,
     })
 }
 
@@ -378,9 +473,10 @@ pub fn load_specimen(samples_root: &Path, image_path: &Path) -> Option<RealSpeci
 /// specimen appears twice (`samples/ocr_fixtures/`'s images are not
 /// duplicated anywhere else in the tree).
 pub fn load_real_specimens(samples_root: &Path) -> Vec<RealSpecimenDoc> {
+    let expectations = MrzExpectations::load(samples_root);
     find_image_files(samples_root)
         .into_iter()
-        .filter_map(|path| load_specimen(samples_root, &path))
+        .filter_map(|path| load_specimen(samples_root, &path, &expectations))
         .collect()
 }
 
@@ -428,6 +524,33 @@ pub enum MissReason {
     /// the Tier-1 hit-rate denominator — see the 2026-09-08 `checksum_failed`
     /// writeup, population B.
     Redacted,
+    /// The specimen carries no MRZ at all — an ID-card front, a border pass, a
+    /// driving-license face ([`RealSpecimenDoc::mrz_expected`] is false) — and
+    /// the run correctly read none. **This is a success, not a miss.** It is a
+    /// `MissReason` only because that is how this harness spells "produced no
+    /// Tier-1 record", and it is scored off the hit-rate denominator exactly
+    /// like [`Self::Redacted`]: a document with nothing to find can neither
+    /// prove nor disprove detection accuracy.
+    ///
+    /// Reported as `no_mrz_expected`. Its count moving means the corpus
+    /// changed, not that anything regressed, so it stays out of
+    /// `provider-bench`'s regression buckets.
+    NoMrzExpected,
+    /// The specimen carries no MRZ, and the run returned a **checksum-valid
+    /// one anyway**. A hallucinated document.
+    ///
+    /// This is the most serious outcome the bench can report and it had no
+    /// representation at all until now: such a document has no
+    /// `ocr_fixtures/` label to contradict (MRZ-less fronts are exactly the
+    /// population that goes unlabelled), so it fell through every gate and was
+    /// counted as a **Tier-1 hit**. `Monaco_ID_Specimen_XXXX_front_no_mrz.png`
+    /// really did produce one; it turned out to be a mislabelled file rather
+    /// than a hallucination, and the fix then was to correct the label —
+    /// which only works if the harness says something when it happens.
+    ///
+    /// Reported as `false_positive_mrz`, inside the denominator, and a
+    /// regression bucket: growth here must fail the gate.
+    FalsePositiveMrz,
 }
 
 impl std::fmt::Display for MissReason {
@@ -452,6 +575,13 @@ impl std::fmt::Display for MissReason {
                 )
             }
             Self::Redacted => write!(f, "MRZ redacted in the specimen"),
+            Self::NoMrzExpected => {
+                write!(f, "no MRZ on this document, and none was read (correct)")
+            }
+            Self::FalsePositiveMrz => write!(
+                f,
+                "FALSE POSITIVE: checksum-valid MRZ read off a document that carries none"
+            ),
         }
     }
 }
@@ -471,6 +601,8 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
         MissReason::ChecksumFailed { .. } => "checksum_failed",
         MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
         MissReason::Redacted => "redacted_mrz",
+        MissReason::NoMrzExpected => "no_mrz_expected",
+        MissReason::FalsePositiveMrz => "false_positive_mrz",
     }
 }
 
@@ -1109,7 +1241,7 @@ mod tests {
             "no samples/ocr_fixtures/unlabelled.json should exist"
         );
 
-        let specimen = load_specimen(&samples, &image_path)
+        let specimen = load_specimen(&samples, &image_path, &MrzExpectations::default())
             .expect("the image itself exists and should decode");
         std::fs::remove_dir_all(&root).ok();
 
@@ -1129,7 +1261,7 @@ mod tests {
         let root = repo_root();
         let samples = root.join("samples");
         let bogus = samples.join("id_cards").join("does_not_exist_1234.png");
-        assert!(load_specimen(&samples, &bogus).is_none());
+        assert!(load_specimen(&samples, &bogus, &MrzExpectations::default()).is_none());
     }
 
     /// The recursive walk finds specimens in more than one subdirectory,
