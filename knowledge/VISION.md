@@ -122,13 +122,14 @@ Target markets are those for whom data sovereignty is not optional:
 - **AI/ML teams** building or evaluating document-understanding models who need large volumes
   of perfectly labelled training and evaluation data.
 
-The business model is tiered and detailed in [`BRANDING.md`](BRANDING.md): an open-source
-Community edition drives adoption and contribution; a commercial Professional SDK and
-Enterprise edition add capacity, support, certification, and custom-model services. The core
-technology stays freely available; sustainability comes from the surfaces enterprises actually
-pay for. The value proposition is not "a passport generator" — it is **testing, validation,
-benchmarking, and AI infrastructure for identity documents**, and messaging is held to that
-line deliberately.
+The business model is detailed in [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy): **the software is MIT, all of
+it, permanently**, and revenue comes from what recompiling cannot copy — labelled corpora
+generated to a customer's document mix, independent benchmarking and certification, air-gapped
+integration, custom-trained models, and support. A feature-gated paid tier was considered and
+rejected: the licence check is bypassable by rebuilding, which makes it worth less than the
+auditability it would cost. The value proposition is not "a passport generator" — it is
+**testing, validation, benchmarking, and AI infrastructure for identity documents**, and
+messaging is held to that line deliberately.
 
 ## 4. Compliance Framework
 

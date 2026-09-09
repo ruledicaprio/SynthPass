@@ -238,8 +238,11 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   (`crates/synthpass-export`, `synthpass export`); COCO / YOLO still open (they need geometry
   `synthpass_gen::Labels` does not yet surface — see `EXPORTS.md`, "Deferred").
 - **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
-- **Commercial "Pro" closed beta**, with feedback collected — the last item, since it depends on
-  the rest existing first.
+- **First commercial engagement**, with feedback collected — the last item, since it depends on
+  the rest existing first. Per [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) this is no
+  longer a feature-gated "Pro" tier: the software stays MIT and the offering is a labelled
+  corpus, an independent benchmark, or an air-gapped integration. None of those wait on the
+  Tier-1 accuracy number.
 
 **Scoped separately — not folded into this milestone**
 
