@@ -19,24 +19,42 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **119 / 229 = 52.0%** | `real-specimen-mrz-baseline.json` (CI, 2026-09-09) |
+| **Tier-1 hit rate, real specimens** | **119 / 144 = 82.6%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-09) |
+| Tier-1 hit rate, whole specimen corpus | 119 / 238 = 50.0% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
-| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | 64.2% vs 59.5% on the same 190-doc corpus | [`WEB_OCR_BASELINE.md`](../WEB_OCR_BASELINE.md) |
+| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | 64.2% vs 59.5% on the same 190-doc corpus — **both figures are stale**, see note below | [`WEB_OCR_BASELINE.md`](../WEB_OCR_BASELINE.md) |
 
-**Real-specimen misses, by kind** (denominator 229; `redacted_mrz` is scored out):
+**Why two rates.** 94 of the 238 specimens cannot produce a Tier-1 hit under any pipeline, so
+counting them as failures measures the corpus rather than the reader. They are scored out, and both
+numbers are published so neither can be accused of flattering by exclusion: the first says how often
+extraction succeeds when success is possible, the second what a pile of real documents yields. Only
+the first moves when accuracy work lands. Full analysis:
+[`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md).
 
-| Miss kind | Count | Meaning |
-| --- | --- | --- |
-| `no_mrz_found` | **85** | No MRZ located at all — **the dominant miss, and the current accuracy bottleneck** |
-| `checksum_failed` | 24 | MRZ read, check digits do not validate |
-| `checksum_failed_specimen` | 1 | Non-conforming by design in the printed specimen |
-| `redacted_mrz` | 9 | MRZ deliberately blanked on the specimen; off the denominator |
+**Real-specimen outcomes** (238 documents):
+
+| Outcome | Count | In the denominator? | Meaning |
+| --- | --- | --- | --- |
+| **Tier-1 HIT** | **119** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| `no_mrz_found` | **18** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
+| `checksum_failed` | 7 | yes | Conforming printed zone, read wrong — a genuine OCR error |
+| `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
+| `no_mrz_expected` | 42 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `redacted_mrz` | 36 | no | Zone blacked out by whoever published the specimen |
+| `checksum_failed_specimen` | 16 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
-readings — roughly 38 phantom `checksum_failed` were reclassified to what they always were. The
-bottleneck moved from MRZ *parsing* to MRZ *detection*; see
-[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md).
+readings, and stayed ahead after the denominator correction (2.6:1). The bottleneck is MRZ
+*detection*, not *parsing*; see [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose
+target metric this correction reduced from 85 documents to 18.
+
+**The browser-vs-native row is not current**, and is left in place because ADR-0008's first chunk
+is the measurement that replaces it. The browser figure is the first of four measurements in
+`WEB_OCR_BASELINE.md` and was superseded twice (122 → 125 → 127); the native figure is a
+`samples/corpus.jsonl` field last recomputed on 2026-09-03, unchanged through `mrz` 0.7.0, 0.7.1,
+`geometry_band_variants` and the `Lanczos3`/`Triangle` decision. Neither side of the "4.7-point gap"
+is a current number.
 
 ## What belongs here
 
@@ -575,3 +593,25 @@ That writeup also documents `vocab_replay`, which re-scores a finished parity lo
 current normalizers in under a second — and the accept rule it enforces (**≥1 miss→hit and 0
 hit→miss**), whose useful side effect is that vocabulary no document exercises cannot enter the
 codebase, whatever proposed it.
+
+### 2026-09-09 — the denominator counted 94 documents that could never be read
+
+Full writeup: [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md).
+Reconnaissance for [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s measurement, before
+any OCR ran, found that the metric it targets was measuring something else. Of the 229 scored
+specimens, **94 cannot produce a Tier-1 hit under any pipeline** — 42 carry no machine-readable
+zone, 36 have it blacked out, 16 print a zone whose own check digits fail — and every one was
+counted as a failure to produce one. Hit rate **52.0% → 82.6%** with the HIT count unchanged at
+119 and no extraction code touched; the `no_mrz_found` target **85 → 18**.
+
+Two of the three populations were classified by what OCR happened to return rather than by what the
+document is. A redacted specimen was scored out only if its blackout bar OCR'd into parseable
+noise, so **the cleaner the redaction, the worse it scored**; a non-conforming printed zone was
+recognised only when OCR recovered it byte-for-byte, catching 1 of the 16 that the
+[2026-09-08 entry above](#2026-09-08--checksum_failed-is-not-a-clean-ocr-accuracy-signal) had
+already concluded "belong outside the denominator". The durable lesson: **ask what the document
+makes possible before asking what the run achieved.**
+
+Also found: a checksum-valid MRZ returned for a document carrying none was counted as a **Tier-1
+HIT**, because such documents are unlabelled by construction and reached the ground-truth rung with
+nothing to contradict them. Now `false_positive_mrz`, and a build failure. The corpus has zero.

@@ -374,3 +374,66 @@ fn a_no_mrz_specimen_never_records_a_checksum_valid_read() {
         );
     }
 }
+
+/// Every manifest stem resolves to exactly one `mrz.present` value.
+///
+/// `synthpass_bench::MrzExpectations` keys on the file stem, because that is
+/// the only identity a walked image and a manifest row reliably share
+/// (`RealSpecimenDoc::name` is the stem). Three stems appear twice — the same
+/// document stored in two formats, e.g. `…AZE_2013_mrz` as both `.jpg` and
+/// `.webp` — and the key is only sound while both rows agree. If a future
+/// specimen ever breaks that, this fails here rather than silently giving one
+/// of the two images the other's MRZ expectation.
+#[test]
+fn a_stem_never_carries_two_different_mrz_present_values() {
+    let mut seen: std::collections::HashMap<String, (bool, String)> =
+        std::collections::HashMap::new();
+    for row in &manifest_rows() {
+        let name = row["filename"].as_str().unwrap_or_default();
+        let Some(present) = row["mrz"]["present"].as_bool() else {
+            panic!("{name}: manifest row has no mrz.present boolean");
+        };
+        if let Some((prev, prev_name)) =
+            seen.insert(stem_of(name).to_string(), (present, name.to_string()))
+        {
+            assert_eq!(
+                prev,
+                present,
+                "stem {:?} is shared by {prev_name} and {name}, which disagree on mrz.present — \
+                 MrzExpectations keys on the stem and would give one of them the other's value",
+                stem_of(name)
+            );
+        }
+    }
+}
+
+/// The manifest, not the filename, is what makes the MRZ expectation correct.
+///
+/// The `_mrz`/`_no_mrz` naming convention postdates parts of the corpus:
+/// `driving_licenses/` names carry no tag at all. Resolving expectations from
+/// the filename alone would call those documents MRZ-bearing, and every one of
+/// them would then be scored as a detection failure for correctly finding
+/// nothing. This pins the population that only the manifest gets right.
+#[test]
+fn some_mrz_less_specimens_are_untagged_and_only_the_manifest_knows() {
+    let untagged: Vec<String> = manifest_rows()
+        .iter()
+        .filter(|row| row["mrz"]["present"].as_bool() == Some(false))
+        .map(|row| row["filename"].as_str().unwrap_or_default().to_string())
+        .filter(|name| !stem_of(name).to_ascii_lowercase().contains("no_mrz"))
+        .collect();
+
+    assert!(
+        !untagged.is_empty(),
+        "expected at least one untagged MRZ-less specimen (the driving-license fronts) — if the \
+         corpus was renamed so every one now carries the tag, this test has served its purpose \
+         and the filename fallback in MrzExpectations::get is no longer load-bearing"
+    );
+    for name in &untagged {
+        assert!(
+            name.starts_with("Bosnia_Herzegovina_Driving_License_Specimen"),
+            "{name}: a new untagged MRZ-less specimen appeared. That is allowed — the manifest \
+             resolves it correctly — but add it here deliberately so the population stays known."
+        );
+    }
+}

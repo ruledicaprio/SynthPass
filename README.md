@@ -119,11 +119,19 @@ pull request. Nothing is hand-edited and unflattering numbers stay in.
 [benchmarks/README.md](knowledge/benchmarks/README.md) is the single source for all of them; the
 one headline below is checked against the committed baseline by CI.
 
-- **Tier-1 hit rate on real specimens: 119 / 229 = 52.0%** — a checksum-valid MRZ whose document
-  number matches hand-verified ground truth. Any PR that drops it is blocked by
-  [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
+Two rates, because one number cannot answer both questions honestly. A hit means a checksum-valid
+MRZ whose document number matches hand-verified ground truth.
+
+- **119 / 144 = 82.6% on documents that can yield a hit** — how often extraction succeeds when
+  success is possible. This is the number accuracy work moves, and any PR that drops it is blocked
+  by [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
   [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json).
-- **The dominant miss is `no_mrz_found` (85 of 229)** — no MRZ is located at all, 3.5× the 24
+- **119 / 238 = 50.0% across the whole specimen corpus** — what happens if you point it at a pile
+  of real documents. The 94-specimen gap is not failure: those carry no machine-readable zone at
+  all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
+  whose own check digits are wrong by design. Returning nothing for them is the correct answer, and
+  [until 2026-09-09 they were counted as failures](knowledge/benchmarks/denominator-correction-2026-09-09.md).
+- **The dominant miss is `no_mrz_found` (18 of 144)** — no MRZ is located at all, 2.6× the 7
   that are found but fail a check digit. Detection, not parsing, is the current bottleneck, and
   it is what the in-progress M6 accuracy track targets
   ([ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md)).
