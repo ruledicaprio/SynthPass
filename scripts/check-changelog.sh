@@ -86,12 +86,23 @@ changed_files="$(git diff --name-only "$base"...HEAD)"
 added_files="$(git diff --name-only --diff-filter=A "$base"...HEAD)"
 
 has() { printf '%s\n' "$changed_files" | grep -qE "$1"; }
-added_matching() { printf '%s\n' "$added_files" | grep -E "$1" || true; }
+# The README.md files documenting changelog.d/ and changelog.d/mrz/ match the
+# same globs the fragments do. Counting one as a fragment let a PR that added
+# only a directory README satisfy the "you owe a fragment" rule — observed in
+# CI on this very PR, which reported "ok: mrz fragment present" for a README.
+added_matching() {
+    printf '%s\n' "$added_files" | grep -E "$1" | grep -v '/README\.md$' || true
+}
 
 # ------------------------------------------------------------------ check 2
 echo "==> a code change carries a fragment"
 if printf '%s' "$labels" | grep -q 'skip-changelog'; then
     echo "    skipped: 'skip-changelog' label present"
+elif ! printf '%s\n' "$changed_files" | grep -E '^crates/' | grep -qvE '\.md$'; then
+    # Only Markdown under crates/ changed — a crate README or CHANGELOG. That
+    # cannot alter behaviour, so it owes no entry. Mirrors the same exclusion in
+    # real-specimen-gate.yml's path filter.
+    echo "    skipped: crates/ changes are documentation only"
 elif has '^crates/'; then
     if [ -z "$(added_matching '^changelog\.d/.*\.md$')" ]; then
         fail "this PR touches crates/ but adds no changelog.d/ fragment."
@@ -110,8 +121,9 @@ if printf '%s' "$labels" | grep -q 'skip-changelog'; then
 elif has '^crates/mrz/'; then
     # Test-only and CI-only mrz changes ship no release, per CONTRIBUTING.md's
     # semver policy, so they do not owe a fragment either.
-    if ! printf '%s\n' "$changed_files" | grep -E '^crates/mrz/' | grep -qvE '^crates/mrz/(tests|fuzz)/'; then
-        echo "    skipped: mrz changes are test-only"
+    if ! printf '%s\n' "$changed_files" | grep -E '^crates/mrz/' \
+         | grep -qvE '^crates/mrz/(tests|fuzz)/|\.md$'; then
+        echo "    skipped: mrz changes are test-only or documentation"
     elif [ -z "$(added_matching '^changelog\.d/mrz/.*\.md$')" ]; then
         fail "this PR touches crates/mrz/ but adds no changelog.d/mrz/ fragment."
         fail "mrz has its own published version line -- its entries do not go in the workspace set"
