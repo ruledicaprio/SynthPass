@@ -61,18 +61,11 @@ self="scripts/check-doc-links.sh"
 #     `decisions/`, and `benchmarking/` shipped as `benchmarks/`. The doc is
 #     kept in the author's voice with an editor's note pointing at ADR-0001;
 #     rewriting the paths would misrepresent what was proposed.
-#
-#   knowledge/benchmarks/real-specimen-mrz-baseline.json
-#     The committed baseline for the real-specimen-gate.yml CI gate. Its counts
-#     are only ever produced on CI (local rten inference differs from CI's), so
-#     the file does not exist until the first `mode=write-baseline` run of that
-#     workflow lands it. Remove this entry in the PR that commits the baseline.
 allow_missing=(
   "docs/"
   "knowledge/architecture/vision-provider-interface.md"
   "knowledge/architecture/document-fusion.md"
   "knowledge/benchmarking/methodology.md"
-  "knowledge/benchmarks/real-specimen-mrz-baseline.json"
   "docs/V2-DESIGN.md"
   "docs/mlis_v2_0_0_preliminary_design.md"
   "docs/REBRAND_MIGRATION.md"
