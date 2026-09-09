@@ -272,6 +272,28 @@ execute on CPU and record a mislabelled row.
 The regenerated SVG is never auto-committed — review it and commit it yourself on a
 normal branch/PR, same as any other README asset.
 
+### The real-specimen regression gate
+
+`.github/workflows/real-specimen-gate.yml` runs `provider-bench --real-specimens
+--mrz-only` (deterministic reader only, no LLM) over the whole `samples/` corpus on
+every PR that touches the extraction path, and **fails the build** if the Tier-1 HIT
+count drops or any miss bucket grows past the committed baseline in
+`knowledge/benchmarks/real-specimen-mrz-baseline.json`. It is the real-corpus
+counterpart to `ci.yml`'s synthetic `m4-hit-rate` gate.
+
+If your PR legitimately changes the real-specimen numbers — a parser improvement, or
+adding/removing a specimen — regenerate the baseline **in the same PR**:
+
+```
+gh workflow run real-specimen-gate.yml -r <your-branch> -f mode=write-baseline
+# download the `real-specimen-mrz-baseline` artifact from that run, commit the file
+```
+
+Never hand-edit the counts: local `rten` inference differs from CI's by a few
+characters of float rounding, so the baseline is only ever measured on CI. The
+design, the `tolerance` knob, and the rollout to a required check are in
+`knowledge/benchmarks/README.md`.
+
 ## Semver policy (the `mrz` crate)
 
 `crates/mrz` is [published to crates.io](https://crates.io/crates/mrz) on its own version line,

@@ -326,9 +326,14 @@ and where recent effort has actually gone.
 
 **Tooling / CI.**
 
-- `provider-bench` feeds the weekly chart refresh but is not a PR gate — wiring it as one, and
-  a scheduled workflow that provisions the GGUF and records the parity rate
-  (`technical_debt.md`, MEDIUM), are both still open.
+- `provider-bench` as a per-PR gate — **done** (`.github/workflows/real-specimen-gate.yml`).
+  `--real-specimens --mrz-only` (deterministic reader, no LLM) over the whole `samples/`
+  corpus, checked against a committed CI-measured baseline
+  (`knowledge/benchmarks/real-specimen-mrz-baseline.json`): the build fails if the Tier-1 HIT
+  count drops or any miss bucket grows. Advisory first, promoted to a required check after a
+  runner-variance check. Still open: the `per-release` gate that runs the *full* harness (both
+  providers, GGUF provisioned) and records the parity rate (`technical_debt.md`, MEDIUM), and
+  README accuracy graphs fed from the baseline JSON(s).
 - No per-format hit-rate floor exists (deliberately — "a floor over a corpus one day old is an
   invented threshold"); add per-format floors once the numbers are earned.
 - `checksum_failed` root-cause track — **closed**

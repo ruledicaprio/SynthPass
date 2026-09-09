@@ -15,8 +15,9 @@
 //!
 //! ```text
 //! provider-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out PATH]
-//!                [--measure-memory] [--real-specimens] [--limit N]
+//!                [--measure-memory] [--real-specimens] [--limit N] [--mrz-only]
 //!                [--format NAME] [--verbose] [--dump-ocr]
+//!                [--write-baseline PATH] [--assert-baseline PATH]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
@@ -52,9 +53,29 @@
 //!                      when stderr is redirected. It is already on by
 //!                      default whenever stderr is a terminal, so this flag
 //!                      is only needed to keep it when piping to a file
+//!   --mrz-only         register only the deterministic `mrz` reader, skipping
+//!                      the Tier-2 LLM provider (and its ~1 GB GGUF, never
+//!                      loaded). Turns a full real-specimen run from hours into
+//!                      the ~1-minute deterministic pass — what the per-PR
+//!                      `real-specimen-gate.yml` CI job runs. Valid over either
+//!                      corpus source.
+//!   --write-baseline PATH
+//!                      after the run, write the `mrz` provider's Tier-1
+//!                      snapshot (HIT count + miss-kind histogram + denominator)
+//!                      as JSON to PATH and exit 0. How
+//!                      `knowledge/benchmarks/real-specimen-mrz-baseline.json`
+//!                      is (re)generated — always on CI, never hand-edited.
+//!   --assert-baseline PATH
+//!                      compare the `mrz` provider's Tier-1 snapshot against the
+//!                      committed baseline at PATH and exit non-zero on a
+//!                      regression: HIT count dropped, or any miss bucket
+//!                      (`checksum_failed`, `no_mrz_found`, …) grew. A missing
+//!                      PATH is written and passes (first-run bootstrap). The
+//!                      per-PR no-regression gate.
 //! ```
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -65,6 +86,7 @@ use synthpass_bench::provider_bench::{
 use synthpass_bench::{
     generate_corpus, load_real_specimens, miss_kind, MissReason, ProfileChoice, SpecimenClass,
 };
+use synthpass_die::{MrzReader, ProviderCatalog};
 use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
@@ -120,6 +142,23 @@ struct Args {
     /// above already means `SpecimenClass` (which real `samples/` directory
     /// to read).
     document_type: Option<DocumentType>,
+    /// Register only the deterministic `mrz` reader — skip the Tier-2 LLM
+    /// provider entirely. The LLM pass dominates a real-specimen run (~19-37s
+    /// per document, hours for the whole corpus) while the deterministic
+    /// reader is µs-ms per document, and the LLM's GGUF (never loaded here) is
+    /// a ~1 GB download. The per-PR `real-specimen-gate.yml` CI job runs with
+    /// this on; it is also useful for any quick local Tier-1 measurement.
+    mrz_only: bool,
+    /// Write the `mrz` provider's Tier-1 snapshot to this path as JSON and
+    /// exit 0 — the regeneration path for the committed real-specimen
+    /// baseline. CI-only by convention (`--assert-baseline`'s doc explains
+    /// why local and CI numbers differ).
+    write_baseline: Option<String>,
+    /// Compare the `mrz` provider's Tier-1 snapshot against the committed
+    /// baseline at this path; exit non-zero on a regression (HIT count down,
+    /// or a miss bucket up, beyond the baseline's `tolerance`). A path that
+    /// does not exist yet is written and passes — the first-run bootstrap.
+    assert_baseline: Option<String>,
 }
 
 impl Default for Args {
@@ -137,6 +176,9 @@ impl Default for Args {
             progress: false,
             format: None,
             document_type: None,
+            mrz_only: false,
+            write_baseline: None,
+            assert_baseline: None,
         }
     }
 }
@@ -181,6 +223,19 @@ fn usage() {
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \
          redirected (already on by default when stderr is a terminal)"
+    );
+    eprintln!(
+        "  --mrz-only         register only the deterministic mrz reader, skipping the Tier-2 \
+         LLM provider and its GGUF (the per-PR real-specimen CI gate runs this way)"
+    );
+    eprintln!(
+        "  --write-baseline PATH  write the mrz provider's Tier-1 snapshot (HIT count + \
+         miss-kind histogram) to PATH as JSON and exit"
+    );
+    eprintln!(
+        "  --assert-baseline PATH  compare the mrz provider's Tier-1 snapshot against the \
+         committed baseline at PATH; exit non-zero on a regression (missing PATH is written \
+         and passes)"
     );
 }
 
@@ -274,6 +329,24 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.document_type = Some(DocumentType::parse(v)?);
                 i += 2;
             }
+            "--mrz-only" => {
+                parsed.mrz_only = true;
+                i += 1;
+            }
+            "--write-baseline" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--write-baseline requires a path".to_string())?;
+                parsed.write_baseline = Some(v.clone());
+                i += 2;
+            }
+            "--assert-baseline" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--assert-baseline requires a path".to_string())?;
+                parsed.assert_baseline = Some(v.clone());
+                i += 2;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
     }
@@ -287,6 +360,13 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         return Err(
             "--document-type generates the synthetic corpus and is not valid together with \
              --real-specimens (use --format to scope which real samples/ directory is read)"
+                .to_string(),
+        );
+    }
+    if parsed.write_baseline.is_some() && parsed.assert_baseline.is_some() {
+        return Err(
+            "--write-baseline and --assert-baseline are mutually exclusive: one regenerates the \
+             baseline, the other checks against it"
                 .to_string(),
         );
     }
@@ -601,6 +681,325 @@ fn n_ctx() -> u32 {
         .unwrap_or(2048)
 }
 
+/// A one-reader catalog holding just the deterministic `mrz` provider — the
+/// `--mrz-only` path. [`MrzReader::new`] takes no arguments and pulls in no
+/// OCR/LLM dependency (it lives in `synthpass-die`), so this needs neither a
+/// [`Pipeline`] nor a model file.
+fn mrz_only_catalog() -> ProviderCatalog {
+    ProviderCatalog::builder()
+        .with_reader(std::sync::Arc::new(MrzReader::new()))
+        .build()
+        .expect("a single reader cannot collide on id")
+}
+
+/// The miss buckets whose growth is a Tier-1 regression. `redacted_mrz` is
+/// excluded on purpose — it sits outside the hit-rate denominator (a redaction
+/// bar carries no readable zone), so its count moving is a corpus change, not a
+/// parser regression. `checksum_failed_specimen` *is* included: a labelled
+/// specimen whose printed zone the run no longer recovers exactly has regressed,
+/// even though its printed check digits were always non-conforming.
+const REGRESSION_BUCKETS: &[&str] = &[
+    "checksum_failed",
+    "checksum_failed_specimen",
+    "no_mrz_found",
+    "ocr_error",
+    "document_number_mismatch",
+];
+
+const BASELINE_NOTE: &str = "Real-specimen Tier-1 no-regression baseline for the deterministic \
+    `mrz` provider. Regenerate ONLY via CI: `gh workflow run real-specimen-gate.yml -f \
+    mode=write-baseline`, download the artifact, commit it. Local numbers differ from CI \
+    (OCR-inference float variance), so never hand-edit the counts. See \
+    knowledge/benchmarks/README.md.";
+
+/// The measured Tier-1 facts for the deterministic `mrz` provider over one run —
+/// what [`--write-baseline`](Args::write_baseline) records (via
+/// [`RealSpecimenBaseline`]) and [`--assert-baseline`](Args::assert_baseline)
+/// checks against.
+#[derive(Debug)]
+struct RealSpecimenSnapshot {
+    /// Documents that OCR'd successfully and reached the reader loop.
+    documents: usize,
+    /// Denominator of the Tier-1 hit rate: `documents` minus `redacted_mrz`.
+    scored: usize,
+    /// Documents that were a genuine Tier-1 hit (MRZ found, checksums valid,
+    /// document number matches when labelled).
+    tier1_hits: usize,
+    /// Every miss kind that occurred, with its document count.
+    by_miss_kind: BTreeMap<String, usize>,
+}
+
+impl RealSpecimenSnapshot {
+    /// Build from the `"mrz"` provider's report. `None` when that provider is
+    /// absent (a run that registered only the LLM — never the case under
+    /// `--mrz-only`, and normally the full catalog has both).
+    fn from_reports(reports: &[ProviderReport]) -> Option<Self> {
+        let mrz = reports.iter().find(|r| r.provider_id == "mrz")?;
+        let mut by_miss_kind: BTreeMap<String, usize> = BTreeMap::new();
+        let mut tier1_hits = 0usize;
+        for d in &mrz.documents_detail {
+            match &d.miss_reason {
+                None => tier1_hits += 1,
+                Some(reason) => {
+                    *by_miss_kind
+                        .entry(miss_kind(reason).to_string())
+                        .or_default() += 1
+                }
+            }
+        }
+        let documents = mrz.documents_detail.len();
+        Some(Self {
+            documents,
+            scored: documents - by_miss_kind.get("redacted_mrz").copied().unwrap_or(0),
+            tier1_hits,
+            by_miss_kind,
+        })
+    }
+
+    fn redacted(&self) -> usize {
+        self.by_miss_kind.get("redacted_mrz").copied().unwrap_or(0)
+    }
+}
+
+/// The committed baseline file
+/// (`knowledge/benchmarks/real-specimen-mrz-baseline.json`): a
+/// [`RealSpecimenSnapshot`]'s counts plus provenance and a `tolerance`.
+#[derive(Debug, Serialize, Deserialize)]
+struct RealSpecimenBaseline {
+    /// What this file is and how to regenerate it. Ignored by the comparison.
+    note: String,
+    /// The commit the baseline run measured against (`GITHUB_SHA` on CI).
+    measured_on_ci_sha: String,
+    measured_date: String,
+    /// `samples-data` branch HEAD at measurement time. The corpus is not
+    /// pinned, so this is provenance only.
+    samples_data_sha: String,
+    documents: usize,
+    scored: usize,
+    tier1_hits: usize,
+    /// Slack for run-to-run OCR-inference variance across CI runner hardware:
+    /// subtracted from the HIT-count floor and added to every "may not grow"
+    /// bucket bound. `0` today; raise it (a one-line reviewed change) only if
+    /// runs prove flaky.
+    tolerance: usize,
+    by_miss_kind: BTreeMap<String, usize>,
+}
+
+fn baseline_from_snapshot(snap: &RealSpecimenSnapshot, ts_unix: u64) -> RealSpecimenBaseline {
+    RealSpecimenBaseline {
+        note: BASELINE_NOTE.to_string(),
+        measured_on_ci_sha: env_or("GITHUB_SHA", git_head),
+        measured_date: iso_date(ts_unix),
+        samples_data_sha: env_or("SAMPLES_DATA_SHA", || "unknown".to_string()),
+        documents: snap.documents,
+        scored: snap.scored,
+        tier1_hits: snap.tier1_hits,
+        tolerance: 0,
+        by_miss_kind: snap.by_miss_kind.clone(),
+    }
+}
+
+/// Compare a fresh run against the committed baseline.
+///
+/// `Err` lists every regression — a HIT-count drop, or a [`REGRESSION_BUCKETS`]
+/// bucket growing — beyond `baseline.tolerance`. `Ok(warnings)` is a clean run:
+/// the `Vec` carries corpus-shape drift (`documents` or `redacted_mrz` moved),
+/// which means the numbers legitimately changed and the author should
+/// regenerate the baseline, but is not a parser regression to block a merge on.
+fn check_baseline(
+    actual: &RealSpecimenSnapshot,
+    baseline: &RealSpecimenBaseline,
+) -> Result<Vec<String>, Vec<String>> {
+    let tol = baseline.tolerance;
+    let mut failures = Vec::new();
+    let mut warnings = Vec::new();
+
+    if actual.tier1_hits + tol < baseline.tier1_hits {
+        failures.push(format!(
+            "Tier-1 HIT count regressed: {} -> {} (tolerance {tol})",
+            baseline.tier1_hits, actual.tier1_hits
+        ));
+    }
+    for &bucket in REGRESSION_BUCKETS {
+        let was = baseline.by_miss_kind.get(bucket).copied().unwrap_or(0);
+        let now = actual.by_miss_kind.get(bucket).copied().unwrap_or(0);
+        if now > was + tol {
+            failures.push(format!(
+                "miss bucket `{bucket}` grew: {was} -> {now} (tolerance {tol})"
+            ));
+        }
+    }
+
+    if actual.documents != baseline.documents {
+        warnings.push(format!(
+            "corpus size changed: {} -> {} documents — regenerate the baseline in this PR",
+            baseline.documents, actual.documents
+        ));
+    }
+    let redacted_was = baseline
+        .by_miss_kind
+        .get("redacted_mrz")
+        .copied()
+        .unwrap_or(0);
+    if actual.redacted() != redacted_was {
+        warnings.push(format!(
+            "redacted_mrz count changed: {} -> {} (off-denominator) — regenerate the baseline \
+             if the corpus changed",
+            redacted_was,
+            actual.redacted()
+        ));
+    }
+
+    if failures.is_empty() {
+        Ok(warnings)
+    } else {
+        failures.extend(warnings);
+        Err(failures)
+    }
+}
+
+/// `--write-baseline` / `--assert-baseline`, run after the report JSON is on
+/// disk. May [`std::process::exit`] non-zero on a regression.
+fn run_baseline_step(parsed: &Args, snapshot: Option<RealSpecimenSnapshot>, ts_unix: u64) {
+    let Some(snapshot) = snapshot else {
+        eprintln!(
+            "❌ --write-baseline/--assert-baseline need the `mrz` provider in the run — it was \
+             not registered (check the catalog wiring)"
+        );
+        std::process::exit(1);
+    };
+
+    if let Some(path) = parsed.write_baseline.as_deref() {
+        let baseline = baseline_from_snapshot(&snapshot, ts_unix);
+        write_json_pretty(path, &baseline);
+        println!(
+            "baseline written to {path} (tier1_hits={}, scored={}, {} miss kind(s))",
+            baseline.tier1_hits,
+            baseline.scored,
+            baseline.by_miss_kind.len(),
+        );
+        return;
+    }
+
+    let path = parsed
+        .assert_baseline
+        .as_deref()
+        .expect("run_baseline_step is only reached with one of the two flags set");
+
+    if !std::path::Path::new(path).exists() {
+        let baseline = baseline_from_snapshot(&snapshot, ts_unix);
+        write_json_pretty(path, &baseline);
+        println!(
+            "ℹ no baseline at {path} yet — wrote the current snapshot and passing. Review and \
+             commit it (CI owns the committed value)."
+        );
+        return;
+    }
+
+    let text =
+        std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read baseline {path}: {e}"));
+    let baseline: RealSpecimenBaseline =
+        serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse baseline {path}: {e}"));
+
+    print_baseline_table(&baseline, &snapshot);
+
+    match check_baseline(&snapshot, &baseline) {
+        Ok(warnings) => {
+            for w in &warnings {
+                eprintln!("⚠ {w}");
+            }
+            println!("✅ real-specimen Tier-1 (mrz): no regression vs baseline");
+        }
+        Err(problems) => {
+            for p in &problems {
+                eprintln!("❌ {p}");
+            }
+            eprintln!(
+                "\nIf this change is intentional (parser improvement, corpus edit), regenerate \
+                 the baseline in this PR — see knowledge/benchmarks/README.md."
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_baseline_table(baseline: &RealSpecimenBaseline, actual: &RealSpecimenSnapshot) {
+    println!("\nreal-specimen Tier-1 baseline check (mrz provider):");
+    let row = |label: &str, was: usize, now: usize| {
+        println!(
+            "  {label:<26} {was:>5} -> {now:<5} ({:+})",
+            now as i64 - was as i64
+        );
+    };
+    row("tier1_hits", baseline.tier1_hits, actual.tier1_hits);
+    row("scored (denominator)", baseline.scored, actual.scored);
+    row("documents", baseline.documents, actual.documents);
+    let mut kinds: Vec<&str> = baseline
+        .by_miss_kind
+        .keys()
+        .chain(actual.by_miss_kind.keys())
+        .map(String::as_str)
+        .collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    for k in kinds {
+        row(
+            k,
+            baseline.by_miss_kind.get(k).copied().unwrap_or(0),
+            actual.by_miss_kind.get(k).copied().unwrap_or(0),
+        );
+    }
+    println!(
+        "  (baseline measured {} on {})",
+        baseline.measured_date, baseline.measured_on_ci_sha
+    );
+}
+
+fn write_json_pretty<T: Serialize>(path: &str, value: &T) {
+    let json = serde_json::to_string_pretty(value).expect("serialize");
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).expect("create baseline directory");
+        }
+    }
+    std::fs::write(path, format!("{json}\n")).unwrap_or_else(|e| panic!("write {path}: {e}"));
+}
+
+fn env_or(var: &str, fallback: impl FnOnce() -> String) -> String {
+    std::env::var(var)
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(fallback)
+}
+
+fn git_head() -> String {
+    std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// `YYYY-MM-DD` (UTC) from a Unix timestamp — a trimmed civil-from-days
+/// (Howard Hinnant's algorithm). One date string in a report does not justify a
+/// `chrono`/`time` dependency.
+fn iso_date(unix_secs: u64) -> String {
+    let days = (unix_secs / 86_400) as i64;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -635,14 +1034,27 @@ async fn main() {
     )
     .expect("failed to load OCR models — run from the repo root");
 
-    // A second OCR engine handle purely to satisfy `Pipeline::new`'s
-    // constructor — never actually invoked. Every document in this harness
-    // is OCR'd once via `ocr` above and shared across every reader; the
-    // pipeline itself is only a vehicle for reaching its registered
-    // `ProviderCatalog` (`LlmFieldReader` is `pub(crate)` there).
-    let pipeline_ocr: Box<dyn OcrEngine> = Box::new(RustOcrEngine::new(&root, false));
-    let infer: Box<dyn InferBackend> = Box::new(NativeInferer::new(model_path(), n_ctx()));
-    let pipeline = Pipeline::new(pipeline_ocr, infer);
+    // The full M7 catalog is `mrz` + the Tier-2 `LlmFieldReader`, and the only
+    // way to reach the latter's registered instance is through a `Pipeline`
+    // (`LlmFieldReader` is `pub(crate)` there). `--mrz-only` skips all of it —
+    // no second OCR engine, no `NativeInferer`, no GGUF ever touched — and
+    // builds a one-reader catalog directly instead, turning a real-specimen
+    // run from hours into the ~1-minute deterministic pass the per-PR
+    // `real-specimen-gate.yml` CI job needs.
+    let pipeline;
+    let deterministic_only;
+    let catalog: &ProviderCatalog = if parsed.mrz_only {
+        deterministic_only = mrz_only_catalog();
+        &deterministic_only
+    } else {
+        // A second OCR engine handle purely to satisfy `Pipeline::new`'s
+        // constructor — never actually invoked. Every document in this harness
+        // is OCR'd once via `ocr` above and shared across every reader.
+        let pipeline_ocr: Box<dyn OcrEngine> = Box::new(RustOcrEngine::new(&root, false));
+        let infer: Box<dyn InferBackend> = Box::new(NativeInferer::new(model_path(), n_ctx()));
+        pipeline = Pipeline::new(pipeline_ocr, infer);
+        pipeline.catalog()
+    };
 
     // Real specimens (ground truth optional, MRZ-less fronts included) vs.
     // the synthetic corpus (ground truth always present) — see
@@ -686,7 +1098,7 @@ async fn main() {
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
         });
         let reports = run_provider_bench_real(
-            pipeline.catalog(),
+            catalog,
             &ocr,
             &specimens,
             parsed.measure_memory,
@@ -708,14 +1120,8 @@ async fn main() {
             parsed.count,
             parsed.document_type.unwrap_or(DocumentType::TD3),
         );
-        let reports = run_provider_bench(
-            pipeline.catalog(),
-            &ocr,
-            &corpus,
-            parsed.measure_memory,
-            show_progress,
-        )
-        .await;
+        let reports =
+            run_provider_bench(catalog, &ocr, &corpus, parsed.measure_memory, show_progress).await;
         (
             reports,
             "synthetic-corpus",
@@ -897,11 +1303,18 @@ async fn main() {
         }
     }
 
+    // Captured before `reports` is consumed into the report below. `None` when
+    // no baseline flag was passed, or `Some(None)` when one was but the `mrz`
+    // provider is somehow absent from the run (handled in `run_baseline_step`).
+    let baseline_snapshot = (parsed.write_baseline.is_some() || parsed.assert_baseline.is_some())
+        .then(|| RealSpecimenSnapshot::from_reports(&reports));
+
+    let timestamp_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     let report = Report {
-        timestamp_unix: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0),
+        timestamp_unix,
         source,
         profile,
         format: parsed.format.map(SpecimenClass::as_str),
@@ -917,6 +1330,13 @@ async fn main() {
     }
     std::fs::write(&parsed.out, json).expect("write report");
     println!("report written to {}", parsed.out);
+
+    // Baseline write / assert — the per-PR real-specimen no-regression gate.
+    // Runs last, after the report JSON is safely on disk, and may
+    // `std::process::exit(1)` on a regression.
+    if let Some(snapshot) = baseline_snapshot {
+        run_baseline_step(&parsed, snapshot, timestamp_unix);
+    }
 }
 
 fn repo_root() -> std::path::PathBuf {
@@ -1080,5 +1500,167 @@ mod tests {
             .map(|s| s.to_string())
             .collect();
         assert!(parse_args(&args).is_err());
+    }
+
+    // --- --mrz-only + the real-specimen no-regression gate ----------------
+
+    fn argv(args: &[&str]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn mrz_only_parses_alone_and_with_real_specimens() {
+        assert!(parse_args(&argv(&["--mrz-only"])).expect("parses").mrz_only);
+        let p = parse_args(&argv(&["--real-specimens", "--mrz-only"])).expect("parses");
+        assert!(p.mrz_only && p.real_specimens);
+    }
+
+    #[test]
+    fn mrz_only_catalog_holds_exactly_the_deterministic_reader() {
+        let catalog = mrz_only_catalog();
+        assert_eq!(catalog.readers().len(), 1);
+        assert_eq!(catalog.readers()[0].id().as_str(), "mrz");
+    }
+
+    #[test]
+    fn baseline_flags_parse_and_conflict() {
+        let p = parse_args(&argv(&[
+            "--real-specimens",
+            "--mrz-only",
+            "--assert-baseline",
+            "x.json",
+        ]))
+        .expect("parses");
+        assert_eq!(p.assert_baseline.as_deref(), Some("x.json"));
+        assert!(parse_args(&argv(&[
+            "--write-baseline",
+            "a.json",
+            "--assert-baseline",
+            "b.json"
+        ]))
+        .is_err());
+    }
+
+    fn snap(hits: usize, kinds: &[(&str, usize)]) -> RealSpecimenSnapshot {
+        let by_miss_kind: BTreeMap<String, usize> =
+            kinds.iter().map(|(k, n)| ((*k).to_string(), *n)).collect();
+        let misses: usize = kinds.iter().map(|(_, n)| n).sum();
+        let documents = hits + misses;
+        RealSpecimenSnapshot {
+            documents,
+            scored: documents - by_miss_kind.get("redacted_mrz").copied().unwrap_or(0),
+            tier1_hits: hits,
+            by_miss_kind,
+        }
+    }
+
+    fn baseline_with_tolerance(
+        base: &RealSpecimenSnapshot,
+        tolerance: usize,
+    ) -> RealSpecimenBaseline {
+        let mut b = baseline_from_snapshot(base, 1_757_030_400);
+        b.tolerance = tolerance;
+        b
+    }
+
+    #[test]
+    fn baseline_identical_run_passes_clean() {
+        let s = snap(
+            120,
+            &[
+                ("checksum_failed", 24),
+                ("no_mrz_found", 85),
+                ("redacted_mrz", 9),
+            ],
+        );
+        let b = baseline_with_tolerance(&s, 0);
+        assert_eq!(check_baseline(&s, &b), Ok(vec![]));
+    }
+
+    #[test]
+    fn baseline_fails_on_a_hit_count_drop() {
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 0);
+        let regressed = snap(119, &[("checksum_failed", 25), ("no_mrz_found", 85)]);
+        let err = check_baseline(&regressed, &b).expect_err("hits dropped");
+        assert!(err.iter().any(|m| m.contains("HIT count regressed")));
+    }
+
+    #[test]
+    fn baseline_fails_on_bucket_churn_that_nets_zero_on_hits() {
+        // HITs flat at 120, but 3 documents moved checksum_failed -> no_mrz_found.
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 0);
+        let churned = snap(120, &[("checksum_failed", 21), ("no_mrz_found", 88)]);
+        let err = check_baseline(&churned, &b).expect_err("no_mrz_found grew");
+        assert!(err.iter().any(|m| m.contains("`no_mrz_found` grew")));
+    }
+
+    #[test]
+    fn baseline_passes_a_genuine_improvement() {
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 0);
+        let better = snap(123, &[("checksum_failed", 21), ("no_mrz_found", 85)]);
+        assert_eq!(check_baseline(&better, &b), Ok(vec![]));
+    }
+
+    #[test]
+    fn baseline_tolerance_absorbs_small_drift_but_not_more() {
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 2);
+        assert_eq!(
+            check_baseline(
+                &snap(118, &[("checksum_failed", 26), ("no_mrz_found", 85)]),
+                &b
+            ),
+            Ok(vec![])
+        );
+        assert!(check_baseline(
+            &snap(117, &[("checksum_failed", 27), ("no_mrz_found", 85)]),
+            &b
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn baseline_corpus_growth_warns_but_does_not_fail() {
+        let base = snap(
+            120,
+            &[
+                ("checksum_failed", 24),
+                ("no_mrz_found", 85),
+                ("redacted_mrz", 9),
+            ],
+        );
+        let b = baseline_with_tolerance(&base, 0);
+        // two specimens added: one HIT, one redacted.
+        let grown = snap(
+            121,
+            &[
+                ("checksum_failed", 24),
+                ("no_mrz_found", 85),
+                ("redacted_mrz", 10),
+            ],
+        );
+        let warnings = check_baseline(&grown, &b).expect("growth is not a regression");
+        assert!(warnings.iter().any(|w| w.contains("corpus size")));
+        assert!(warnings.iter().any(|w| w.contains("redacted_mrz")));
+    }
+
+    #[test]
+    fn baseline_json_round_trips() {
+        let s = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&s, 1);
+        let text = serde_json::to_string_pretty(&b).expect("serialize");
+        let back: RealSpecimenBaseline = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back.tier1_hits, b.tier1_hits);
+        assert_eq!(back.by_miss_kind, b.by_miss_kind);
+        assert_eq!(back.tolerance, 1);
+    }
+
+    #[test]
+    fn iso_date_is_utc_civil_from_days() {
+        assert_eq!(iso_date(0), "1970-01-01");
+        assert_eq!(iso_date(1_757_030_400), "2025-09-05");
     }
 }

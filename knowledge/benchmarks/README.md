@@ -233,6 +233,73 @@ name-reconstruction check hit (see "Record the rejections" above), caught
 here instead of thrown away because the fix (compare against the
 pre-formatting representation) is cheap and doesn't weaken the check.
 
+## The per-PR real-specimen regression gate
+
+`.github/workflows/real-specimen-gate.yml` runs `provider-bench --real-specimens
+--mrz-only` on every PR that touches the extraction path (`crates/mrz`,
+`crates/synthpass-ocr`, `crates/synthpass-imageprep`, `crates/synthpass-die`,
+`crates/synthpass-core`, `crates/synthpass-pipeline`, `crates/synthpass-bench`,
+`samples/ocr_fixtures/`, `Cargo.lock`) and fails the build on a Tier-1
+regression. It is the `m4-hit-rate` gate (`.github/workflows/ci.yml`, synthetic
+clean TD3) extended to the real `samples/` corpus — the population every
+`checksum_failed` / `mrz` 0.7.x change actually moved, and which `bench-charts.yml`
+only touched weekly and only as an advisory chart PR.
+
+**`--mrz-only`.** The gate scores the deterministic `mrz` provider alone. The
+Tier-2 LLM pass is ~19-37 s per document (hours for the whole corpus) against the
+deterministic reader's µs-ms, and its GGUF is a ~1 GB download; the deterministic
+core is also what the product is sold on (`knowledge/project_principles.md`,
+`knowledge/MRZ_SEQUENCE_COMPLETENESS.md`). `provider-bench --mrz-only` builds a
+one-reader `ProviderCatalog` directly from `synthpass_die::MrzReader` — no
+`Pipeline`, no model — so the job needs only the ~12 MB OCR models.
+
+**The baseline.** `real-specimen-mrz-baseline.json` in this directory holds the
+`mrz` provider's HIT count, the miss-kind histogram, the denominator, and a
+`tolerance`. Its **counts are produced only by CI** and never hand-edited — local
+`rten` inference and CI `rten` inference differ by a few characters of float
+rounding, so a locally-measured number would fail the gate on the first CI run.
+Regenerate it with:
+
+```
+gh workflow run real-specimen-gate.yml -f mode=write-baseline
+# then: download the `real-specimen-mrz-baseline` artifact, commit the file
+```
+
+**What counts as a regression.** The gate fails if `tier1_hits` drops below
+`baseline.tier1_hits - tolerance`, **or** if any of `checksum_failed`,
+`checksum_failed_specimen`, `no_mrz_found`, `ocr_error`, or
+`document_number_mismatch` exceeds its baseline value plus `tolerance`. Checking
+the whole histogram, not just the headline HIT count, catches a change that
+moves documents `checksum_failed → no_mrz_found` (or the reverse) while the net
+HIT count stays flat — a real behaviour change worth a human looking at.
+`redacted_mrz` is excluded (it sits outside the denominator); a change in its
+count, or in `documents`, is reported as a **warning, not a failure** — the
+corpus grew or shrank and the baseline needs regenerating, which is not a parser
+regression.
+
+**`tolerance` is data, not code.** It lives in the JSON, starts at `0` (exact
+ratchet), and is raised by a one-line reviewed change only if CI runs prove
+flaky across runner hardware. Same reasoning as `m4-hit-rate`'s wide margin, but
+tuned from measurement rather than guessed up front.
+
+**Re-blessing (for PR authors).** A PR that legitimately moves the numbers —
+a parser improvement, or adding/removing specimens — must regenerate the
+baseline in the same PR (`gh workflow run real-specimen-gate.yml -r <branch> -f
+mode=write-baseline`, download the artifact, commit it). The `assert` run on that
+PR then compares against the updated file and goes green. This is the forcing
+function that keeps the committed number honest.
+
+**Rollout.** The gate lands **advisory** (visible, red on a regression, but not a
+required check). Once a handful of `assert` runs confirm the HIT count and
+histogram are identical run-to-run across CI runner SKUs, it is promoted to a
+required check — which needs a trailing always-running `result` job so a
+path-filtered skip on a docs-only PR does not leave the required check pending
+forever.
+
+**Envisioned next.** A second, `per-release` gate that runs the *full*
+`provider-bench` (both providers) and gates a release, plus accuracy graphs in
+the top-level `README.md` — both read the same baseline JSON(s) this gate writes.
+
 ## Per-format comparison chart (`bench-chart --bars`)
 
 `bench-chart`'s original mode plots one track's `history.jsonl` as a trend line over
