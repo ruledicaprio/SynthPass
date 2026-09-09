@@ -242,6 +242,48 @@ The other 27 redacted specimens were already `no_mrz_found` (their bar OCR'd as 
 three structural fields, caught by `mrz` 0.7.0's gate) and stay there — the new rung sits
 after the `mrz_found` gate on purpose.
 
+## Result — step 4: `CONFUSABLES` widened; guard investigated; the 7 anchors are OCR-bound
+
+**Shipped (`mrz` 0.7.1).** The damaged-read repair table (`find_and_parse` only, after
+nothing validated) gained `M`↔`N` and `2`↔`7` — both stroke-shape confusions named in the
+step-3 findings (`Ghana_..._P0_GHA_2019` reads the sex `M` as `N`; `India_..._P0_IND_2013`
+reads a printed `2` as `7`) that the existing round-letter / vertical-stroke rows did not
+cover. Both cross residue classes, so the field check digit rejects the misread and a repair
+is only taken when the digit proves it and nothing else also verifies. Two end-to-end
+regression tests through `find_and_parse` (`crates/mrz/tests/repair.rs`); `cargo-semver-checks`
+reports no API change.
+
+**No measured corpus effect.** Replaying all 25 real-specimen `checksum_failed` OCR texts
+(the step-2 run's `--dump-ocr` output) through the patched parser: every one of the 7
+checksum-valid anchors is unchanged (`zone_mismatch` delta 0), and the non-conforming
+specimens too. The two pairs are real, but on this corpus the blocker is never one `M`/`N`
+or `2`/`7` in isolation.
+
+**Investigated, not shipped — candidate-selection guard.** A predicate that skips a line-2
+candidate which is structurally a *line 1* (`P`/`V` prefix + issuing-state shape, no line-2
+birth date) was prototyped against the split-line search and replayed on the same 25 texts:
+zero anchor movement; all effect confined to the 16 non-conforming template specimens, which
+miss regardless — Mauritania `40→4`, Türkiye-2025 `35→5`, Korea-2020 `44→27`, Poland `55→48`
+(cleaner recovered zone, still a miss), Korea-2022 `43→47` (small regression), UK-2021 and
+Türkiye-2024 `checksum_failed → no_mrz_found` (on noisy multi-pass OCR the parser was already
+mis-pairing; the guard trades one wrong bucket for another). No accuracy change, unpredictable
+on noisy OCR — not shipped. The case it targets (a repeated name line sliced into a garbage
+record) yields `checksum_failed`, never a silent valid read.
+
+**The 7 checksum-valid anchors are OCR-quality-bound — track closed.** Each residual miss is
+now attributable to native OCR on a low-resolution guilloché scan, not to `mrz`:
+
+| anchor | `zone_mismatch` | why it stays a miss |
+|---|---:|---|
+| Afghanistan `P0_AFG_2016` | 1 | Line 2's `O`→`0` is already covered by `substituted()`; the blocker is line 1, whose `<<`/`<` filler runs OCR collapses. TD3 line 1 has no check digit — nothing can place the name separators. |
+| Czechia `P0_CZE_2005` | 3 | Needs `9`→`2` in `personal_number` (a weak same-parity pair) **and** a second fix on the same line; `damaged_pass` applies one repair kind per line, `MAX_SUBSTITUTIONS = 1`. |
+| Belgium `2021_back` 17 · Romania `PE_ROU_2024` 23 · Sweden `2022_back` 27 · Croatia `2021_back` 30 | 17–30 | Broad, diffuse multi-character degradation; no single confusion or line-selection fix applies. Croatia's printed zone is all-zeros with placeholder dates. |
+| Russia `P0_RUS_2019` | 112 | Line 2 is physically unreadable in this scan (longest MRZ-shaped candidate ~24 chars vs 44). |
+
+Out of scope unless a future measurement shows an anchor one clean confusion from valid:
+over-width-by-one repair, per-field `solve_substitution` wired into `damaged_pass`,
+`MAX_SUBSTITUTIONS > 1`, weak same-parity pairs (`9`↔`2`).
+
 ## Ranked next steps
 
 1. ~~**Gate MRZ acceptance on line-1 structure.**~~ **Done** — `mrz` 0.7.0 above.
@@ -254,14 +296,11 @@ after the `mrz_found` gate on purpose.
    section above. All 23 have a `samples/ocr_fixtures/<stem>.json`; 7 carry a checksum-valid
    printed zone, 16 are non-conforming by design. An OCR misread and a non-conforming
    specimen can now be told apart.
-4. **Then** the character-confusion / line-selection `mrz` fixes (wider
-   `CONFUSABLES` / wiring `solve_substitution` into the checksum-invalid path;
-   line-2 left-anchor repair; candidate ranking that prefers a valid line-1+line-2
-   pair over two line-1s). Each pinned by a regression test built from the specimen
-   that motivated it — (3) and the step-4 tooling above now make "motivated"
-   mean something: **start with Afghanistan `P0_AFG_2016`** (`zone_mismatch` 1, the
-   line-2 document number's leading letter `O` misread as `0` — one character off a
-   Tier-1 HIT), then Czechia `P0_CZE_2005` (`zone_mismatch` 3).
+4. ~~**Then** the character-confusion / line-selection `mrz` fixes.~~ **Done** — the
+   "Result — step 4" section above. `CONFUSABLES` widened (`mrz` 0.7.1, no measured corpus
+   effect); the candidate-selection guard was measured and rejected; the 7 checksum-valid
+   anchors are each now attributable to native OCR, not `mrz`. **This closes the
+   `checksum_failed` root-cause track** — any further gain is an OCR-quality problem.
 
 `blindspot_seq` (sequence-level check-digit blind spot,
 [2026-08-05 note](checksum-blindspots-measured-2026-08-05.md)) is unrelated and

@@ -145,7 +145,12 @@ state, nationality and date of birth are all unrecognizable): full-corpus re-run
 regression (118 → 118). The residual 33 is 23 genuine `*_mrz` + 8 redacted + 2 no-MRZ. The
 23 are now labelled (hand-transcribed `samples/ocr_fixtures/*.json`): 7 carry a checksum-valid
 printed MRZ (any `checksum_failed` on those is purely an OCR error), 16 are non-conforming by
-design. Next is character-level `mrz` fixes against the 7 — not a blind hunt.
+design. Steps 2 and 4 then closed the track: `*_redacted_mrz` specimens report as
+`redacted_mrz` and leave the denominator, and **`mrz` 0.7.1** widened the damaged-read
+`CONFUSABLES` table (`M`↔`N`, `2`↔`7`; no measured corpus effect on its own). A
+candidate-selection guard was measured and rejected. The 7 checksum-valid anchors are each
+now attributable to native OCR on a low-resolution scan (line-1 filler collapse with no
+checksum oracle, unreadable line 2, diffuse noise), not to `mrz`.
 
 ## M7 — Document Intelligence Engine
 
@@ -326,16 +331,17 @@ and where recent effort has actually gone.
   (`technical_debt.md`, MEDIUM), are both still open.
 - No per-format hit-rate floor exists (deliberately — "a floor over a corpus one day old is an
   invented threshold"); add per-format floors once the numbers are earned.
-- `checksum_failed` root-cause track: `provider-bench --dump-ocr` (`#236`) → analysis
-  ([2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md), `#237`) →
-  **steps 1, 2 & 3 done**: `mrz` 0.7.0 line-1 structural gate (`#238`), `checksum_failed`
-  71 → 33 zero HIT regression; all 23 residual genuine `*_mrz` hand-transcribed into
-  `samples/ocr_fixtures/` (7 checksum-valid, 16 non-conforming by design), with a
-  `provider-bench` split sub-labelling `checksum_failed` as specimen-non-conforming vs
-  OCR-misread; and `*_redacted_mrz` specimens now report as `redacted_mrz` and are dropped
-  from the Tier-1 hit-rate denominator (they carry no recoverable zone). Remaining, ranked:
-  (4) character-confusion / candidate-selection `mrz` fixes against the 7 checksum-valid
-  anchors — start with Afghanistan `P0_AFG_2016` (one `O`→`0` from a HIT).
+- `checksum_failed` root-cause track — **closed**
+  ([2026-09-08 writeup](benchmarks/checksum-failed-real-specimens-2026-09-08.md)).
+  `--dump-ocr` (`#236`) → analysis (`#237`) → step 1: `mrz` 0.7.0 line-1 structural gate
+  (`#238`), `checksum_failed` 71 → 33 zero HIT regression → step 3: 23 residual `*_mrz`
+  hand-transcribed into `samples/ocr_fixtures/` (`#240`/`#242`, 7 checksum-valid, 16
+  non-conforming) plus the `checksum_failed` specimen-non-conforming split → step 2:
+  `*_redacted_mrz` specimens report as `redacted_mrz` off the denominator (`#244`) → step 4:
+  `mrz` 0.7.1 widened `CONFUSABLES` (`M`↔`N`, `2`↔`7`; no measured corpus effect), the
+  candidate-selection guard was rejected, and the 7 checksum-valid anchors are each
+  attributable to native OCR on a low-resolution guilloché scan rather than to `mrz`. Any
+  further gain here is an OCR-quality problem, not a parser one.
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three
