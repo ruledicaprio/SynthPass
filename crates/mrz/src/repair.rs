@@ -305,16 +305,27 @@ const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
 /// `U` are not plausible misreads of `0` — restricting this table to glyphs
 /// that actually look alike is what keeps [`solve_substitution`]'s answers
 /// meaningfully unique instead of reproducing the whole residue class.
+///
+/// Most rows pair a digit with letters in its own residue class, so a swap
+/// leaves the check digit unchanged and the *structural* constraint
+/// ([`FieldKind`]) is what separates the readings. `2`/`7` and `M`/`N` are the
+/// exceptions — they are genuine stroke-shape confusions (an `ocrs` measurement
+/// on real specimens: `India_..._P0_IND_2013` reads a printed `2` as `7`;
+/// `Ghana_..._P0_GHA_2019` reads the sex `M` as `N`) that *cross* residues, so
+/// there the check digit itself rejects the wrong reading. Both directions are
+/// still worth carrying: the point of the table is which glyph OCR plausibly
+/// emitted, and the arithmetic is a separate gate downstream.
 pub const CONFUSABLES: &[(char, &str)] = &[
     ('0', "ODQ"),
     ('1', "ILTU"),
-    ('2', "Z"),
+    ('2', "Z7"),
     ('4', "A"),
     ('5', "S"),
     ('6', "G"),
-    ('7', "T"),
+    ('7', "T2"),
     ('8', "B"),
     ('9', "G"),
+    ('M', "N"),
 ];
 
 /// Every character [`CONFUSABLES`] lists as a plausible misread of `c`, in
