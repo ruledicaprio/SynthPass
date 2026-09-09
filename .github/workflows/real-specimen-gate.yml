@@ -1,0 +1,148 @@
+name: Real-specimen Tier-1 gate
+
+# Per-PR no-regression gate for the deterministic `mrz` provider over the real
+# `samples/` corpus — the population every checksum_failed / mrz-0.7.x PR
+# actually moved, and which nothing in `ci.yml` covers (`m4-hit-rate` there runs
+# the *synthetic* clean-TD3 corpus only; `bench-charts.yml` runs the real corpus
+# but weekly, and only opens an advisory chart PR).
+#
+# Runs `provider-bench --real-specimens --mrz-only`: the ~1-minute deterministic
+# pass, not the ~3 h Tier-2 LLM pass, so no GGUF is downloaded. The result is
+# compared against a committed, CI-measured baseline
+# (`knowledge/benchmarks/real-specimen-mrz-baseline.json`) and the job fails on a
+# regression — HIT count down, or a miss bucket up, beyond the baseline's
+# `tolerance`. See `knowledge/benchmarks/README.md` for the design and the
+# re-bless flow.
+#
+# Path-filtered so it never runs on a docs-only or unrelated PR. Advisory at
+# first (not a required check) — see the README section for the rollout to
+# required once run-to-run variance across CI runner hardware is measured.
+#
+# The pull_request and push path lists are kept identical by hand (GitHub does
+# not share them across triggers).
+
+on:
+  pull_request:
+    paths:
+      - "crates/mrz/**"
+      - "crates/synthpass-ocr/**"
+      - "crates/synthpass-imageprep/**"
+      - "crates/synthpass-die/**"
+      - "crates/synthpass-core/**"
+      - "crates/synthpass-pipeline/**"
+      - "crates/synthpass-bench/**"
+      - "samples/ocr_fixtures/**"
+      - "knowledge/benchmarks/real-specimen-mrz-baseline.json"
+      - "scripts/sync-samples.ps1"
+      - "Cargo.lock"
+      - ".github/workflows/real-specimen-gate.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/mrz/**"
+      - "crates/synthpass-ocr/**"
+      - "crates/synthpass-imageprep/**"
+      - "crates/synthpass-die/**"
+      - "crates/synthpass-core/**"
+      - "crates/synthpass-pipeline/**"
+      - "crates/synthpass-bench/**"
+      - "samples/ocr_fixtures/**"
+      - "knowledge/benchmarks/real-specimen-mrz-baseline.json"
+      - "scripts/sync-samples.ps1"
+      - "Cargo.lock"
+      - ".github/workflows/real-specimen-gate.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "assert against the committed baseline, or regenerate it"
+        type: choice
+        options: [assert, write-baseline]
+        default: assert
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-specimen-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Real-specimen Tier-1 no-regression gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config clang libclang-dev
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache OCR .rten models
+        uses: actions/cache@v6
+        with:
+          path: |
+            text-detection.rten
+            text-recognition.rten
+          key: ocrs-rten-models-v1
+
+      - name: Download + checksum-verify the OCR .rten models
+        run: |
+          for f in text-detection.rten text-recognition.rten; do
+            if [ ! -f "$f" ]; then
+              curl -fL --retry 3 -o "$f" "https://ocrs-models.s3-accelerate.amazonaws.com/$f"
+            fi
+          done
+          echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
+          echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
+
+      # scripts/sync-samples.ps1 does `git worktree add` on a fresh runner that
+      # has no identity configured — same reason bench-charts.yml sets one.
+      - name: Configure git identity for the sync script
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Specimen images are not on `main` (CONTRIBUTING.md) — pulled from the
+      # orphan `samples-data` branch, additively, exactly as bench-charts.yml
+      # does. The hand-verified ground truth under samples/ocr_fixtures/ is
+      # already in the checkout.
+      - name: Pull the samples corpus from samples-data
+        shell: pwsh
+        run: ./scripts/sync-samples.ps1
+
+      - name: Record the samples-data sha (baseline provenance)
+        run: |
+          sha=$(git rev-parse refs/remotes/origin/samples-data 2>/dev/null || echo unknown)
+          echo "SAMPLES_DATA_SHA=$sha" >> "$GITHUB_ENV"
+
+      - name: Real-specimen mrz pass + no-regression gate
+        env:
+          MODE: ${{ github.event.inputs.mode || 'assert' }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = write-baseline ]; then flag=--write-baseline; else flag=--assert-baseline; fi
+          cargo run -p synthpass-bench --release --bin provider-bench -- \
+            --real-specimens --mrz-only --progress \
+            "$flag" knowledge/benchmarks/real-specimen-mrz-baseline.json \
+            --out artifacts/real-specimen-gate-report.json
+
+      - name: Upload the regenerated baseline
+        if: ${{ github.event.inputs.mode == 'write-baseline' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-specimen-mrz-baseline
+          path: knowledge/benchmarks/real-specimen-mrz-baseline.json
+
+      - name: Preserve the run report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-specimen-gate-report
+          path: artifacts/real-specimen-gate-report.json
+          if-no-files-found: ignore
