@@ -175,7 +175,13 @@ if command -v gh >/dev/null 2>&1; then
             echo "  $tag: no CHANGELOG section — skipped"
             continue
         fi
-        printf '%s\n' "$notes" | gh release create "$tag" --title "$tag" --notes-file - --verify-tag
+        # --latest=false matters: gh marks the most recently *created* release as
+        # "Latest" by default, so backfilling history in chronological order ends
+        # with an old release badged Latest on the repo front page. Observed on
+        # the real run — v1.3.0 took the badge from v1.4.0 and had to be undone
+        # with `gh release edit v1.4.0 --latest`.
+        printf '%s\n' "$notes" \
+            | gh release create "$tag" --title "$tag" --notes-file - --verify-tag --latest=false
         echo "  $tag: release created"
     done
 fi
