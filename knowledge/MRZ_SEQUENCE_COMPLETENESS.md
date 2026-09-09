@@ -1,10 +1,20 @@
-# MRZ_SEQUENCE_COMPLETENESS.md — Tier-1 completeness backlog (M6 sub-track)
+# MRZ_SEQUENCE_COMPLETENESS.md — Tier-1 completeness, closed record (M6 sub-track)
 
-> **Status (2026-09-08): complete — no open work.** Chunks 1–5 shipped (PRs #162–#166),
+> **Status (2026-09-09): CLOSED — complete, no open work.** Chunks 1–5 shipped (PRs #162–#166),
 > chunk 6 shipped, chunk 7 was measured and **rejected** (reverted in #178). `crates/mrz`
 > now carries typed `ChecksumFailed` sub-reasons, `MrzError::IncompleteSequence`, and the
-> unified `SequenceCompleteness` type. This document is kept as the design record and the
-> reasoning trail; there is nothing left to implement in it.
+> unified `SequenceCompleteness` type. There is nothing left to implement here.
+>
+> **It stays in `knowledge/` rather than moving to `archive/` deliberately.** It is not
+> *superseded* — it is *finished*, and seventeen source files across `crates/mrz`,
+> `crates/synthpass-bench` and `crates/synthpass-die` cite it by path as the rationale of
+> record for decisions still encoded in the parser. `archive/` is for documents a later
+> document replaced; this one is still the only account of why the code reads the way it does.
+>
+> **The numbers below are historical.** The section that follows quotes the 2026-08-16
+> measurement that motivated the track. That ordering has since inverted — see
+> [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers) for live numbers and
+> [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md) for the track that succeeded this one.
 
 Scope: `crates/mrz` **structural completeness** — ensuring an OCR-read MRZ sequence
 is detected/repaired/validated as complete and internally consistent (right line
@@ -16,10 +26,13 @@ consistency), not merely that individual characters parsed. See
 
 SynthPass's product is the deterministic Tier-1 MRZ core; Tier-2 LLM inference is
 the enterprise add-on for the residual ~1%, not the thing being sold. Real-specimen
-benchmarking (`knowledge/benchmarks/README.md`, 2026-08-16 run) already shows
-`checksum_failed` (66) as the **largest** miss category — ahead of `no_mrz_found`
-(51). In other words: the MRZ is *found* but doesn't fully validate more often than
-it isn't found at all. `crates/mrz` already carries serious OCR-repair machinery —
+benchmarking (`knowledge/benchmarks/README.md`, 2026-08-16 run) showed, *at the time this
+track opened*, `checksum_failed` (66) as the **largest** miss category — ahead of
+`no_mrz_found` (51). In other words: the MRZ was *found* but didn't fully validate more often
+than it wasn't found at all. (That premise held for the duration of this track and no longer
+does: closing it out with `mrz` 0.7.0 reclassified ~38 phantom `checksum_failed` into
+`no_mrz_found`, which is now the dominant miss. That is a result of this work, not a
+contradiction of it.) `crates/mrz` already carries serious OCR-repair machinery —
 `repair.rs`'s bounded unknown-character solver, `checksum.rs`'s lookalike/defiller
 repair, `blindspot.rs`'s mod-10 residue-class analysis — that goes well beyond three
 external Python MRZ projects surveyed while scoping this doc

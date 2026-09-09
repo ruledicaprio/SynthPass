@@ -91,7 +91,10 @@ spatially-varying pattern. `local_threshold` models the background with a box me
 `min_dim/16`, tuned for illumination gradients and an order of magnitude coarser than a strand of
 microprint. So the strands survive into the binarized image and merge with the strokes above them.
 
-**The evidence it targets.** Among real-specimen misses, `checksum_failed` (66) outnumbers
+**The evidence it targets** *(as measured 2026-08-16; the miss ordering has since inverted —
+see [`benchmarks/README.md`](../benchmarks/README.md#current-headline-numbers). The diffuse-
+confusion signature this argument rests on is unaffected.)*. Among real-specimen misses,
+`checksum_failed` (66) outnumbers
 `no_mrz_found` (51), and root-causing recorded the confusions as diffuse — `0`/`O`, `1`/`I`/`L`,
 `5`/`S`, `8`/`B` scattered across many specimens with no single shared shape — with no follow-up
 fix identified. That is the signature a textured background produces and a geometric fault does

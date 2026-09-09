@@ -5,6 +5,39 @@ that were rejected.**
 
 Principle 6: a constant with no measurement behind it does not ship.
 
+## Current headline numbers
+
+**This section is the only place in the repo that carries live accuracy numbers.** Every other
+document — `README.md`, `ROADMAP.md`, an ADR — states at most one figure and links here. That rule
+exists because it was broken: the same numbers were restated in four documents, and `README.md`
+spent a release cycle advertising a hit rate ten points low while naming the wrong dominant miss.
+
+The machine-readable source is [`real-specimen-mrz-baseline.json`](real-specimen-mrz-baseline.json),
+written only by CI (`gh workflow run real-specimen-gate.yml -f mode=write-baseline`) and enforced
+on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-gate.yml).
+`scripts/check-headline-numbers.sh` fails the build if `README.md` disagrees with it.
+
+| Metric | Value | Source |
+| --- | --- | --- |
+| **Tier-1 hit rate, real specimens** | **119 / 229 = 52.0%** | `real-specimen-mrz-baseline.json` (CI, 2026-09-09) |
+| Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
+| Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
+| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | 64.2% vs 59.5% on the same 190-doc corpus | [`WEB_OCR_BASELINE.md`](../WEB_OCR_BASELINE.md) |
+
+**Real-specimen misses, by kind** (denominator 229; `redacted_mrz` is scored out):
+
+| Miss kind | Count | Meaning |
+| --- | --- | --- |
+| `no_mrz_found` | **85** | No MRZ located at all — **the dominant miss, and the current accuracy bottleneck** |
+| `checksum_failed` | 24 | MRZ read, check digits do not validate |
+| `checksum_failed_specimen` | 1 | Non-conforming by design in the printed specimen |
+| `redacted_mrz` | 9 | MRZ deliberately blanked on the specimen; off the denominator |
+
+`no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
+readings — roughly 38 phantom `checksum_failed` were reclassified to what they always were. The
+bottleneck moved from MRZ *parsing* to MRZ *detection*; see
+[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md).
+
 ## What belongs here
 
 - **Methodology** — how a run is configured so two runs are comparable. The
@@ -411,7 +444,11 @@ over the full local corpus, deterministic `mrz` provider, no `-Limit`:
 | `real-specimens` (union) | 203 | 42.4% | 51 | 66 |
 
 Over `real-specimens`, `checksum_failed` (66) outnumbers `no_mrz_found` (51)
-as the dominant miss kind. That split matters: `no_mrz_found` conflates two
+as the dominant miss kind. **(Superseded — this ordering inverted on 2026-09-08 when
+`mrz` 0.7.0 reclassified ~38 phantom `checksum_failed`; see
+[Current headline numbers](#current-headline-numbers). The rest of this entry's
+reasoning stands, and is why the reclassification was worth making.)**
+That split matters: `no_mrz_found` conflates two
 very different populations — a genuinely MRZ-less document (many real ID
 cards and driving licenses have no machine-readable zone at all, a fact the
 `unsupported_assertion`'s `with_mrz_anchor`/`without_mrz_anchor` split

@@ -11,6 +11,41 @@ known imperfections.
 
 ## High
 
+### The licensing public key is still a placeholder
+
+`crates/synthpass-license/pubkey.b64` is the Ed25519 verifying key compiled into every shipped
+binary. `keys.rs`'s own comment says: *"Placeholder — generate a real keypair … and replace this
+file before issuing any real licenses."* It has not been touched since the v2 rebrand commit
+(2026-07-21).
+
+**Consequence:** no real customer license can be issued against a shipped binary today. The
+licensing crate itself is sound — Ed25519 `verify_strict`, fail-closed feature gating, expiry,
+32 unit tests — but it is verifying against a key nobody holds the private half of in anger.
+This is a hard blocker on the "official binary" distribution path, not a code-quality nit.
+
+**Fix:** generate the real keypair out-of-band, store the private half where it is never in the
+repo, replace `pubkey.b64`, and delete the placeholder comment in the same commit so the file
+cannot be misread as still-fake. Cheap to do, easy to forget, expensive to discover late.
+
+**Related:** the machine fingerprint is real only on Linux (`/etc/machine-id` with a
+persisted-random fallback). On Windows it degrades to `windows-dev-{COMPUTERNAME}` /
+`unbound-dev-windows`, which binds nothing. Any Windows distribution needs a real fingerprint
+source first.
+
+### `synthpass-ocr`'s 18 `unsafe` blocks sit on the untrusted-image path
+
+`crates/synthpass-ocr` carries 18 `unsafe` blocks — the workspace's largest concentration by
+far (`synthpass-die`, `synthpass-llm` and `synthpass-pipeline` have 2 each; everything else has
+zero). That crate is also the first thing an attacker-supplied image reaches.
+
+**Consequence:** the ingest path the `fuzz/` targets exist to defend is the same path carrying
+the most unreviewed `unsafe`. That combination is worth a deliberate audit rather than an
+assumption; nobody has read all 18 in one sitting with memory-safety as the question.
+
+**Fix:** one focused pass — for each block, the invariant it relies on and whether a caller can
+violate it, written down next to the block. Then decide per-site whether it can be made safe.
+Not urgent, but it should not stay implicit.
+
 ### OCR confidence is a character-plausibility proxy, not a model score
 
 `geometry::text_sanity` computes "fraction of plausible characters" because

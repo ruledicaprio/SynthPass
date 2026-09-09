@@ -38,3 +38,4 @@ the record.
 | [0005](ADR-0005-vision-provider-readiness.md) | Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF | Proposed |
 | [0006](ADR-0006-m6-accuracy-first.md) | Reframe M6 to lead with Tier-1 real-document accuracy | Accepted |
 | [0007](ADR-0007-dataset-export-format.md) | Dataset export format: adopt the DeepSeek-OCR 0–1000 convention, JSONL first | Accepted |
+| [0008](ADR-0008-mrz-detection-track.md) | MRZ detection succeeds sequence completeness as M6's accuracy track | Accepted |

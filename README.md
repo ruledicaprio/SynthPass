@@ -8,7 +8,7 @@ documents. **Zero cloud calls, ever.**
 [![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
 [![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-57%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-58%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 Pure Rust, one binary. `ocrs`/`rten` OCR and ICAO 9303 MRZ check digits run in-process;
@@ -114,18 +114,21 @@ resolution), each added only once a real specimen proved it moved the measured p
 
 ## Accuracy
 
-Every number here is measured — rendered by `bench-chart` from run history on the `bench-data`
-branch, nothing hand-edited, unflattering numbers included. As of v1.4.0
-([full method and per-format numbers](knowledge/benchmarks/README.md)):
+Every number here is measured — written by CI, committed as a baseline, and enforced on every
+pull request. Nothing is hand-edited and unflattering numbers stay in.
+[benchmarks/README.md](knowledge/benchmarks/README.md) is the single source for all of them; the
+one headline below is checked against the committed baseline by CI.
 
-- **Tier-1 hit rate** (checksum-valid MRZ whose document number matches ground truth): **~55%**
-  on the synthetic clean corpus, **~42–46%** on real specimens. CI blocks any merge that drops
-  the synthetic-TD3 floor below **0.30**.
-- **Tier-2 per-field exact match**: **~56%** on the 72-fixture real-specimen parity corpus —
-  scored every CI run since v1.4.0 (floor 15%), where before it went unguarded between releases.
-- Largest real-corpus miss: `checksum_failed` (66) ahead of `no_mrz_found` (51) — the MRZ is
-  found but does not fully validate more often than it is missing. That is what the in-progress
-  [M6 accuracy track](knowledge/ROADMAP.md#measured-accuracy) targets.
+- **Tier-1 hit rate on real specimens: 119 / 229 = 52.0%** — a checksum-valid MRZ whose document
+  number matches hand-verified ground truth. Any PR that drops it is blocked by
+  [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
+  [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json).
+- **The dominant miss is `no_mrz_found` (85 of 229)** — no MRZ is located at all, 3.5× the 24
+  that are found but fail a check digit. Detection, not parsing, is the current bottleneck, and
+  it is what the in-progress M6 accuracy track targets
+  ([ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md)).
+- Synthetic-corpus and Tier-2 parity numbers, per-format breakdowns, and the rejected candidates
+  are all in [benchmarks/README.md](knowledge/benchmarks/README.md#current-headline-numbers).
 
 **Tier-1 on synthetic passports, over time:**
 ![Tier-1 hit rate on the synthetic passport corpus](knowledge/img/passport-bench-trend.svg)

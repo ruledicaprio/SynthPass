@@ -58,6 +58,13 @@ jobs:
       - name: Documentation links resolve
         run: bash scripts/check-doc-links.sh
 
+      # README.md's one headline accuracy figure must match the CI-written
+      # baseline. The README spent the v1.4.0 cycle quoting ~42-46% against a
+      # measured 52.0%, and naming the wrong dominant miss — a reader was given
+      # both a wrong number and a wrong bottleneck. Nothing but this notices.
+      - name: README headline numbers match the baseline
+        run: bash scripts/check-headline-numbers.sh
+
       # crates/mrz is deliberately clock-free (wasm32-unknown-unknown target,
       # reproducible builds), so nothing in the crate itself can notice its
       # two-digit-year century pivot (`dates.rs::CURRENT_YY`) going stale. CI
