@@ -209,16 +209,47 @@ The split mechanism is proven (unit tests + the Colombia live case); native OCR 
 these low-resolution guilloché scans is now the sole thing between the bucket and a full
 attribution, which is precisely what step 4 works on.
 
+## Result — step 2 shipped: redacted specimens leave the bucket (PR 3)
+
+`provider-bench --real-specimens` classifies a `*_redacted_mrz` specimen as its own miss
+kind, **`redacted_mrz`**, ahead of the checksum gate, and drops it from the Tier-1 hit-rate
+denominator — the redaction bar carries no recoverable zone, so scoring it as a `checksum_failed`
+OCR miss (or letting it cap the achievable rate) was never right. The signal is the filename
+token: `provider-bench` walks the image directory, never `samples/corpus.jsonl`, so it derives
+`redacted` the same way `corpus_manifest` records `mrz.redacted`. A `corpus_manifest` test
+locks the two derivations together.
+
+Deterministic relabel off the step-4 run's per-specimen verdicts (repo `b3965f7`, `mrz`
+provider, 238 docs) — the classification is filename-only, so no re-measurement is needed:
+
+| outcome | step-4 tooling | with redacted split |
+|---|---:|---:|
+| Tier-1 HIT | 120 | **119** |
+| `checksum_failed` | 32 | **24** |
+| `checksum_failed_specimen` | 1 | 1 |
+| `redacted_mrz` | — | **9** |
+| `no_mrz_found` | 85 | 85 |
+| **denominator** | 238 | **229** |
+| **Tier-1 hit rate** | 50.4 % | **52.0 %** |
+
+The 9: the **8** redacted specimens that were in `checksum_failed` (Australia `P0_AUS_2015`,
+Colombia `P0_COL_2021`, France, Iran `P0_IRN_2017`, Japan `P0_JPN_2009`, Nepal `P0_NPL_2011`
+×2, Russia `P0_RUS_2016`) plus **Malaysia `P0_MYS_2019_redacted_mrz_blur`, which was scoring a
+Tier-1 HIT** — `find_and_parse` validated over whatever survived the redaction. Moving a
+checksum-"valid" read of a redacted zone out of the HIT column is the honest call, not a
+regression; the rate still rises because the denominator loses 9 and the numerator only 1.
+The other 27 redacted specimens were already `no_mrz_found` (their bar OCR'd as junk in all
+three structural fields, caught by `mrz` 0.7.0's gate) and stay there — the new rung sits
+after the `mrz_found` gate on purpose.
+
 ## Ranked next steps
 
 1. ~~**Gate MRZ acceptance on line-1 structure.**~~ **Done** — `mrz` 0.7.0 above.
-2. **Give redacted specimens their own outcome in the bench.** 8 `*_redacted_mrz`
-   still land in `checksum_failed` (the 17 whose redaction bar OCR'd as junk in all
-   three fields already moved to `no_mrz_found` via step 1). `samples/corpus.jsonl`
-   already carries `mrz.redacted: true`; the bench does not read it. Excluding them
-   from the miss denominator (or a `redacted` `MissReason`) removes the last of
-   population B. (`MissReason::ChecksumFailed` now also carries
-   `specimen_nonconforming` — see the step-4-tooling result above.)
+2. ~~**Give redacted specimens their own outcome in the bench.**~~ **Done** — the
+   "Result — step 2" section above. `MissReason::Redacted` → `redacted_mrz`, ahead of the
+   checksum gate and off the denominator; `checksum_failed` 32 → 24, rate 50.4 % → 52.0 %.
+   The `MissReason::ChecksumFailed { specimen_nonconforming }` sub-split from the step-4
+   tooling is unaffected.
 3. ~~**Grow ground truth for the 23 remaining `*_mrz`.**~~ **Done** — the "Result — step 3"
    section above. All 23 have a `samples/ocr_fixtures/<stem>.json`; 7 carry a checksum-valid
    printed zone, 16 are non-conforming by design. An OCR misread and a non-conforming
@@ -228,9 +259,9 @@ attribution, which is precisely what step 4 works on.
    line-2 left-anchor repair; candidate ranking that prefers a valid line-1+line-2
    pair over two line-1s). Each pinned by a regression test built from the specimen
    that motivated it — (3) and the step-4 tooling above now make "motivated"
-   mean something: start with Afghanistan `P0_AFG_2016` (`zone_mismatch` 1,
-   `O`→`0`) and Czechia `P0_CZE_2005` (`zone_mismatch` 3), the two checksum-valid
-   anchors closest to a HIT.
+   mean something: **start with Afghanistan `P0_AFG_2016`** (`zone_mismatch` 1, the
+   line-2 document number's leading letter `O` misread as `0` — one character off a
+   Tier-1 HIT), then Czechia `P0_CZE_2005` (`zone_mismatch` 3).
 
 `blindspot_seq` (sequence-level check-digit blind spot,
 [2026-08-05 note](checksum-blindspots-measured-2026-08-05.md)) is unrelated and

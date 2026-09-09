@@ -433,8 +433,16 @@ native OCR recovered exactly — the check digits are non-conforming, not misrea
 re-run (`mrz`, 238 docs): HIT **120**, `checksum_failed` **32**, `checksum_failed_specimen`
 **1** (Colombia `PP_COL_2026`), `no_mrz_found` **85** — a pure relabel. The other 22 labelled
 specimens stay `checksum_failed` because native OCR does not reproduce their printed zone
-(`zone_mismatch` 1–112); Afghanistan `P0_AFG_2016` is one character off. Step 2 (redacted
-bench outcome) and step 4 proper (character-level `mrz` fixes) stand.
+(`zone_mismatch` 1–112); Afghanistan `P0_AFG_2016` is one character off.
+
+**Step 2 shipped** (PR 3): `provider-bench` classifies a `*_redacted_mrz` specimen as
+`redacted_mrz` ahead of the checksum gate and drops it from the Tier-1 hit-rate denominator —
+a redaction bar carries no recoverable zone. Deterministic relabel off the step-4 run (repo
+`b3965f7`): **9** move to `redacted_mrz` (8 from `checksum_failed`, plus Malaysia
+`P0_MYS_2019_redacted_mrz_blur` which was scoring a HIT over its redacted zone),
+`checksum_failed` **32 → 24**, HIT **120 → 119**, denominator **238 → 229**, Tier-1 hit rate
+**50.4 % → 52.0 %**. The other 27 redacted specimens were already `no_mrz_found` and stay
+there. Step 4 proper (character-level `mrz` fixes — start with Afghanistan) stands.
 
 ### 2026-09-04 — Tier-2 date misses were mostly the normalizer, not the model
 

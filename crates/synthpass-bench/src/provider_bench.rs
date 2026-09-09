@@ -485,6 +485,12 @@ struct BenchPage {
     /// nothing to be right about — which is what
     /// [`UnsupportedAssertion`]'s split exists to measure separately.
     mrz_found: bool,
+    /// The specimen's MRZ zone is redacted in the image (the `*_redacted_mrz`
+    /// filename tag). Whatever OCR read there comes from the redaction bar, not
+    /// a real zone — classified `MissReason::Redacted` and excluded from the
+    /// Tier-1 hit-rate denominator, never scored as a `checksum_failed` miss.
+    /// Always `false` for synthetic-corpus documents.
+    redacted: bool,
     /// `true` for a synthetic-corpus document (from [`prep_corpus`]), `false`
     /// for a real specimen (from [`prep_specimens`]) — which of
     /// [`DocumentDetail::mrz_format`]'s two resolution rules applies.
@@ -556,6 +562,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 ground_truth_mrz: None,
                 image_path,
                 mrz_found,
+                redacted: false,
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
             })
@@ -589,6 +596,11 @@ fn prep_specimens(
             // are wrong by design.
             let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
+            // Derived from the filename, the same way the corpus manifest
+            // generator records `mrz.redacted` (`corpus_manifest.rs`). The
+            // bench never reads `samples/corpus.jsonl` — it walks the image
+            // directory — so the stem is the signal it has.
+            let redacted = doc.name.to_ascii_lowercase().contains("redacted");
             // Best-effort fallback only — used in `run_prepped` when no
             // provider's own Tier-1 read resolves a format for this
             // document. Reuses `MrzFormat::guess_from_lines` rather than a
@@ -607,6 +619,7 @@ fn prep_specimens(
                 ground_truth_mrz,
                 image_path,
                 mrz_found,
+                redacted,
                 synthetic: false,
                 known_or_guessed_format,
             })
@@ -709,7 +722,10 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
 /// misread a character in it — unlike `no_mrz_found`, which also catches
 /// genuinely MRZ-less documents), and a real-specimen run is large enough
 /// that dumping every hit would be noise a synthetic diagnostic run never has
-/// to contend with. `synthpass_bench::CorpusDoc` runs (`run_provider_bench`)
+/// to contend with. A `*_redacted_mrz` specimen is classified
+/// `MissReason::Redacted` before the checksum gate, so it never reaches this
+/// dump — its zone is a redaction bar, not recoverable OCR material.
+/// `synthpass_bench::CorpusDoc` runs (`run_provider_bench`)
 /// always pass `None` here — `synthpass-bench`'s own `--dump-ocr` already
 /// covers that path. The JSONL carries specimen OCR content and is written
 /// only under `/artifacts/` (`.gitignore`d); it never enters the `--out`
@@ -918,14 +934,23 @@ async fn run_prepped(
                 }
             }
 
-            // Mirrors `run_check`'s miss classification in `lib.rs` exactly:
-            // no MRZ found, then checksum validity, then — only when this
-            // document is labelled — a document-number check against ground
-            // truth. A specimen with no label that clears the first two gets
-            // no third check at all, since there is no truth to compare
-            // against; that is a hit, not an unknown.
+            // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
+            // found, then checksum validity, then — only when this document is
+            // labelled — a document-number check against ground truth. A
+            // specimen with no label that clears those gets no further check;
+            // that is a hit, not an unknown.
+            //
+            // The one rung with no synthetic analogue is `Redacted`: a
+            // specimen whose printed zone is blacked/scrambled out. It sits
+            // after the `mrz_found` gate on purpose — a redaction bar that OCR
+            // could not shape into a parseable zone is honestly `no_mrz_found`
+            // (most already are, via `mrz` 0.7.0's structural gate); this only
+            // intercepts the few that still parse into a checksum-failed
+            // reading, so they stop inflating `checksum_failed`.
             let miss_reason = if !bench_page.mrz_found {
                 Some(MissReason::NoMrzFound(String::new()))
+            } else if bench_page.redacted {
+                Some(MissReason::Redacted)
             } else if !reading.evidence.mrz_checksums_valid {
                 // `read_mrz` (this harness's own independent parse of the OCR
                 // text, computed once per document above) is the same source
@@ -1125,14 +1150,24 @@ async fn run_prepped(
                 reason: NOT_DETERMINISTIC_REASON,
             }
         } else {
+            // A `*_redacted_mrz` specimen physically carries no readable zone,
+            // so it is neither a hit nor a fair miss — excluded from the
+            // denominator the same way an unlabelled document is excluded from
+            // field accuracy. It still appears in `documents_detail` and in the
+            // "misses by kind" table as `redacted_mrz`; it just does not cap
+            // the achievable rate.
+            let scored = documents_detail
+                .iter()
+                .filter(|d| !matches!(d.miss_reason, Some(MissReason::Redacted)))
+                .count();
             let tier1_hits = documents_detail
                 .iter()
                 .filter(|d| d.miss_reason.is_none())
                 .count();
-            Tier1HitRate::Computed(if documents_detail.is_empty() {
+            Tier1HitRate::Computed(if scored == 0 {
                 0.0
             } else {
-                tier1_hits as f64 / documents_detail.len() as f64
+                tier1_hits as f64 / scored as f64
             })
         };
 
@@ -1253,6 +1288,11 @@ mod tests {
     struct FixedReader {
         capability: Capability,
         surname: &'static str,
+        /// The `Evidence` every `read` returns. `Evidence::default()` for most
+        /// tests (nothing proven); a test that needs the provider to look like
+        /// a successful deterministic read sets `mrz_found` /
+        /// `mrz_checksums_valid` here.
+        evidence: Evidence,
     }
 
     #[async_trait::async_trait]
@@ -1280,7 +1320,7 @@ mod tests {
             extraction.fields.surname = Some(self.surname.to_string());
             Ok(Reading {
                 extraction,
-                evidence: Evidence::default(),
+                evidence: self.evidence.clone(),
                 by: self.id(),
             })
         }
@@ -1352,6 +1392,7 @@ mod tests {
         let reader = FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            evidence: Evidence::default(),
         };
         let ctx = DocumentContext::from_text("surname DOE date of birth 1990");
         let reading = reader.read(&ctx).await.expect("reader never fails");
@@ -1364,6 +1405,7 @@ mod tests {
         let reader = FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH",
+            evidence: Evidence::default(),
         };
         let ctx = DocumentContext::from_text("surname DOE date of birth 1990");
         let reading = reader.read(&ctx).await.expect("reader never fails");
@@ -1399,6 +1441,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1418,6 +1461,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
                 mrz_found: false,
+                redacted: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1431,6 +1475,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: false,
+                redacted: false,
                 synthetic: false,
                 known_or_guessed_format: None,
             }),
@@ -1449,6 +1494,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1465,6 +1511,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1485,6 +1532,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH", // absent from the OCR text below
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1501,6 +1549,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1546,6 +1595,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1572,6 +1622,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: true,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1626,6 +1677,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1649,6 +1701,7 @@ mod tests {
             ground_truth_mrz: Some(recovered.mrz_lines.clone()),
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1677,6 +1730,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1698,6 +1752,7 @@ mod tests {
             ground_truth_mrz: Some(true_zone.to_string()),
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1715,6 +1770,135 @@ mod tests {
             detail.miss_reason.as_ref().map(miss_kind),
             Some("checksum_failed")
         );
+    }
+
+    /// A `*_redacted_mrz` specimen whose redaction bar still OCR'd into a
+    /// parseable (checksum-failing) zone is reported as `redacted_mrz`, not
+    /// `checksum_failed` — the zone is an artefact of the blackout, not a
+    /// misread of a real MRZ.
+    #[tokio::test]
+    async fn a_redacted_specimen_is_reported_as_redacted_not_checksum_failed() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence: Evidence::default(),
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        // A structurally valid TD3 whose check digits do not verify — exactly
+        // what `find_and_parse` yields for many redaction bars.
+        let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
+                    XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
+        let prepped = vec![Some(BenchPage {
+            name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
+            page: OcrPage {
+                text: zone.to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: true,
+            redacted: true,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert!(matches!(detail.miss_reason, Some(MissReason::Redacted)));
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("redacted_mrz")
+        );
+    }
+
+    /// The redacted rung sits *after* the `mrz_found` gate: a redaction bar
+    /// that OCR could not shape into a parseable zone is honestly
+    /// `no_mrz_found`, not `redacted_mrz`.
+    #[tokio::test]
+    async fn a_redacted_specimen_with_no_parseable_mrz_stays_no_mrz_found() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence: Evidence::default(),
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let prepped = vec![Some(BenchPage {
+            name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
+            page: OcrPage {
+                text: "just some redaction smudge, nothing MRZ-shaped".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("unused.png"),
+            mrz_found: false,
+            redacted: true,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail[0];
+        assert_eq!(
+            detail.miss_reason.as_ref().map(miss_kind),
+            Some("no_mrz_found")
+        );
+    }
+
+    /// A redacted specimen is dropped from the Tier-1 hit-rate denominator —
+    /// one redacted miss alongside one genuine hit reports `1.0`, not `0.5`.
+    #[tokio::test]
+    async fn redacted_specimens_are_excluded_from_the_tier1_denominator() {
+        let mut hit_evidence = Evidence::default();
+        hit_evidence.mrz_found = true;
+        hit_evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            evidence: hit_evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let page = |name: &str, redacted: bool| {
+            Some(BenchPage {
+                name: name.to_string(),
+                page: OcrPage {
+                    text: "surname DOE".to_string(),
+                    ..OcrPage::default()
+                },
+                ground_truth: None,
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("unused.png"),
+                mrz_found: true,
+                redacted,
+                synthetic: false,
+                known_or_guessed_format: None,
+            })
+        };
+        let prepped = vec![
+            page("Clean_Passport_Specimen_P0_UTO_2020_mrz", false),
+            page("Blacked_Passport_Specimen_P0_UTO_2019_redacted_mrz", true),
+        ];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        match reports[0].tier1_hit_rate {
+            Tier1HitRate::Computed(rate) => assert_eq!(rate, 1.0),
+            Tier1HitRate::NotApplicable { .. } => {
+                panic!("a deterministic provider must get a computed tier1_hit_rate")
+            }
+        }
     }
 
     #[test]
@@ -1736,6 +1920,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader().with_vision(true),
             surname: "SMITH", // absent from the OCR text — must not be penalized
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1752,6 +1937,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1776,6 +1962,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1792,6 +1979,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];
@@ -1822,6 +2010,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::model_reader(CostClass::Expensive),
             surname: "SMITH",
+            evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
             .with_reader(reader)
@@ -1838,6 +2027,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            redacted: false,
             synthetic: false,
             known_or_guessed_format: None,
         })];

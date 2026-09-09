@@ -418,6 +418,16 @@ pub enum MissReason {
     /// interesting: the check digits can validate over a misread that
     /// happens to stay self-consistent.
     DocumentNumberMismatch { got: String, expected: String },
+    /// The specimen's own MRZ zone is redacted in the image — blacked out,
+    /// X-ed over, or scrambled by whoever published the specimen. Whatever
+    /// OCR read there is an artefact of the redaction bar, not a misread of a
+    /// real zone, so this is neither an OCR-accuracy signal nor something a
+    /// better parser could recover. Real specimens only (derived from the
+    /// `*_redacted_mrz` filename tag); the synthetic corpus never produces it.
+    /// `provider-bench` reports these as `redacted_mrz` and excludes them from
+    /// the Tier-1 hit-rate denominator — see the 2026-09-08 `checksum_failed`
+    /// writeup, population B.
+    Redacted,
 }
 
 impl std::fmt::Display for MissReason {
@@ -441,6 +451,7 @@ impl std::fmt::Display for MissReason {
                     "document number mismatch: got {got:?}, expected {expected:?}"
                 )
             }
+            Self::Redacted => write!(f, "MRZ redacted in the specimen"),
         }
     }
 }
@@ -459,6 +470,7 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
         } => "checksum_failed_specimen",
         MissReason::ChecksumFailed { .. } => "checksum_failed",
         MissReason::DocumentNumberMismatch { .. } => "document_number_mismatch",
+        MissReason::Redacted => "redacted_mrz",
     }
 }
 

@@ -228,6 +228,23 @@ fn recorded_mrz_presence_matches_the_filename_tag() {
 }
 
 #[test]
+fn recorded_redaction_matches_the_filename_tag() {
+    // `provider-bench` walks the image directory, not this manifest, and
+    // derives `MissReason::Redacted` from the same `redacted` token in the
+    // stem. This locks the token → `mrz.redacted` correspondence the manifest
+    // records, so the two derivations cannot drift.
+    for row in &manifest_rows() {
+        let name = row["filename"].as_str().unwrap_or_default();
+        let tagged = name.to_ascii_lowercase().contains("redacted");
+        assert_eq!(
+            row["mrz"]["redacted"].as_bool(),
+            Some(tagged),
+            "{name}: filename redaction tag is {tagged}, manifest mrz.redacted disagrees"
+        );
+    }
+}
+
+#[test]
 fn the_year_recorded_matches_the_year_in_the_filename() {
     for row in &manifest_rows() {
         let name = row["filename"].as_str().unwrap_or_default();
