@@ -1,26 +1,41 @@
 #!/usr/bin/env bash
-# Assemble changelog.d/ fragments into CHANGELOG.md's topmost release section.
+# Assemble changelog.d/ fragments into a CHANGELOG's topmost release section.
 #
-#   scripts/assemble-changelog.sh           print the assembled sections to stdout
-#   scripts/assemble-changelog.sh --write   splice them in and delete the fragments
+#   scripts/assemble-changelog.sh                     print the assembled sections to stdout
+#   scripts/assemble-changelog.sh --write             splice them in and delete the fragments
+#   scripts/assemble-changelog.sh --scope mrz [--write]
+#                                                     ...for the mrz crate's own release line
+#
+# Two scopes because there are two release lines. `crates/mrz` publishes to crates.io on its
+# own version, so its entries belong in its own CHANGELOG — a consumer reading docs.rs should
+# not have to filter application changes out of a library changelog. See RELEASING.md.
 #
 # See changelog.d/README.md for the fragment naming convention. Pure bash — no towncrier,
 # no Python, nothing to install.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-frag_dir="$repo_root/changelog.d"
-changelog="$repo_root/CHANGELOG.md"
 
 # Keep a Changelog's canonical section order.
 categories=(added changed deprecated removed fixed security)
 
 write=0
-case "${1:-}" in
-  --write) write=1 ;;
-  "")      ;;
-  *)       echo "usage: $(basename "$0") [--write]" >&2; exit 2 ;;
+scope=workspace
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --write) write=1; shift ;;
+    --scope) scope="${2:?--scope needs a value}"; shift 2 ;;
+    *)       echo "usage: $(basename "$0") [--scope workspace|mrz] [--write]" >&2; exit 2 ;;
+  esac
+done
+
+case "$scope" in
+  workspace) frag_dir="$repo_root/changelog.d";     changelog="$repo_root/CHANGELOG.md" ;;
+  mrz)       frag_dir="$repo_root/changelog.d/mrz"; changelog="$repo_root/crates/mrz/CHANGELOG.md" ;;
+  *)         echo "unknown scope '$scope' (expected: workspace, mrz)" >&2; exit 2 ;;
 esac
+
+[ -f "$changelog" ] || { echo "$changelog does not exist" >&2; exit 1; }
 
 title_of() {
   case "$1" in
@@ -53,7 +68,7 @@ if [ "$write" -eq 0 ]; then
     for f in "${files[@]}"; do read_fragment "$f"; printf '%s\n' "${body[@]}"; done
     printf '\n'
   done
-  [ "$found" -eq 0 ] && echo "no fragments in changelog.d/" >&2
+  [ "$found" -eq 0 ] && echo "no fragments in ${frag_dir#$repo_root/}/" >&2
   exit 0
 fi
 
@@ -64,7 +79,7 @@ for cat in "${categories[@]}"; do
   [ ${#files[@]} -gt 0 ] && pending+=( "${files[@]}" )
 done
 if [ ${#pending[@]} -eq 0 ]; then
-  echo "no fragments in changelog.d/ — nothing to do" >&2
+  echo "no fragments in ${frag_dir#$repo_root/}/ — nothing to do" >&2
   exit 0
 fi
 

@@ -186,6 +186,39 @@ jobs:
           cargo run -p synthpass-bench --release --bin synthpass-bench -- \
             --count 50 --seed 0 --profile clean --min-hit-rate 0.30 --out bench-report.json
 
+  # The changelog contract, enforced rather than trusted. Until now a PR could
+  # merge with no fragment at all, a malformed one, or a version bump that did
+  # not follow from what changed — and four of the fragments pending at the time
+  # this job was added were in fact malformed, which nothing had noticed.
+  #
+  # Check 4 is the discriminator the release process leans on: the version number
+  # and the diff have to agree. See RELEASING.md.
+  changelog:
+    name: Changelog fragments & version bump
+    runs-on: ubuntu-latest
+    steps:
+      # The version check diffs against the merge base, so it needs real history,
+      # not the default single-commit fetch.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fragment contract
+        env:
+          # The `skip-changelog` escape hatch, for changes a user would never see.
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # fetch-depth: 0 above already brought every branch down, so
+            # origin/<base> resolves. A second shallow fetch here would make the
+            # clone shallow again and break the `base...HEAD` merge-base diff.
+            bash scripts/check-changelog.sh --base "origin/${{ github.base_ref }}"
+          else
+            # On a push to main there is no PR to scope against; validate the
+            # fragments themselves and leave the diff-scoped rules to the PR run.
+            bash scripts/check-changelog.sh
+          fi
+
   cargo-deny:
     name: cargo-deny (advisories & licenses)
     runs-on: ubuntu-latest

@@ -128,7 +128,12 @@ for f in "${md_files[@]}"; do
   # `changelog.d/` fragments are spliced verbatim into CHANGELOG.md at the repo
   # root by scripts/assemble-changelog.sh, so their links are written
   # root-relative and must be resolved from there, not from changelog.d/.
-  case "$f" in changelog.d/*) dir="." ;; esac
+  # The README.md files documenting those directories are NOT fragments -- they
+  # are read in place, so their links resolve relative to themselves as usual.
+  case "$f" in
+    */README.md) ;;
+    changelog.d/*) dir="." ;;
+  esac
   while IFS= read -r target; do
     [ -z "$target" ] && continue
     case "$target" in http://*|https://*|mailto:*|\#*) continue ;; esac
@@ -173,7 +178,10 @@ echo "==> markdown anchor fragments"
 declare -A slug_cache=()
 for f in "${md_files[@]}"; do
   dir="$(dirname "$f")"
-  case "$f" in changelog.d/*) dir="." ;; esac
+  case "$f" in
+    */README.md) ;;
+    changelog.d/*) dir="." ;;
+  esac
   while IFS= read -r target; do
     [ -z "$target" ] && continue
     case "$target" in http://*|https://*|mailto:*) continue ;; esac
