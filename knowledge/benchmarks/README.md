@@ -671,4 +671,20 @@ recognition misses (band found, one wrong character — mostly O/0 confusables �
 in page text). ~6 are specimen artifacts (X-redacted, novelty, all-zeros) that belong off the
 denominator. So the research note's *localization vs recognizer* framing misses the point: the
 dominant factor is upstream of both — `ocrs` is not detecting text on these images at all. §8's
-"scale and binarization" is the likely lever, with a pure-Rust fix.
+"scale and binarization" is the likely lever, with a pure-Rust fix. *(Cell c, below, found the
+lever is more specific still: native rotates all 11 of these documents 90° before OCR.)*
+
+### 2026-09-10 — the detection failures are a wrong-orientation failure (ADR-0008 chunk 1C, cell c)
+
+Full writeup: [`ocr-crop-recognizer-2026-09-10.md`](ocr-crop-recognizer-2026-09-10.md). New
+`SYNTHPASS_OCR_DUMP_VARIANTS` dumps the exact preprocessed crops `ocrs` is fed;
+`tests/web/recognize-crops.mjs` runs the browser's OCR-B model over them. **All 11 detection-failure
+documents were auto-rotated 90°/270° by native's `choose_rotation`** (the 3 recognition controls
+were not) — on these low-signal scans `ocrs` detects too little text for the rotation score to mean
+anything, and a wrong 90° turn clears the 1.2× margin by chance. OCR-B fails on native's sideways
+crop exactly as `ocrs` does; it reads the MRZ straight off 4 of 6 sampled *originals* at 0°, and the
+browser reads Canada/Oman/Monaco on its first pass (`plain_band` + OCR-B, no rotation). `web/scan.js`
+removed this same upfront-orientation-probe once (cost it 9 documents, 125→116). The recognizer is
+not the variable — native's orientation handling is. Levers, all pure-Rust: gate `choose_rotation`
+below a text-confidence floor; move 90°/270° into the retry chain as late band-crop variants; a
+modest pre-detection upscale for the sub-300px documents.
