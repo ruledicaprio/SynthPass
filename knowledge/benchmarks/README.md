@@ -642,6 +642,33 @@ two China), so their union reads 137 of 160 = 85.6%, well above either.
 Not yet attributed. Two of ADR-0008's four confounders turn out to be controlled already —
 `synthpass-imageprep` compiles to wasm so both stacks run the same Rust preprocessing, and
 `MRZ_CHARSET` constrains both recognizers. The cheapest untested cell: the browser's *first*
-attempt is an untreated band crop that wins ~88% of its reads, and **native has no untreated band
-pass at all**, on an assertion in two call sites that `ocrs` "gains nothing" from one that appears
-never to have been measured.
+attempt is an untreated band crop that wins ~88% of its reads, while native runs the same
+`plain_band` function as its second-to-last pass, on an assertion in two call sites that `ocrs`
+"gains nothing" from an untreated pass that had never been measured.
+
+### 2026-09-10 — pass ordering (ADR-0008 chunk 1C, cell a)
+
+Full writeup: [`ocr-order-band-first-2026-09-10.md`](ocr-order-band-first-2026-09-10.md).
+`SYNTHPASS_OCR_ORDER=band-first` moves `plain_band` to the first retry pass and measures.
+**The assertion holds:** `plain_band` tried first recovers **zero** documents for `ocrs` on its own
+merit (the 3 that validate on it under `band-first` all validated on the general pass under
+`default` — run-to-run inference noise, not `plain_band` wins). The one real change is +1 hit
+(`Belgium_ID_2021_back`, an O/0-confusable recognition miss), against 13 documents that pay ~2–3 s
+for a wasted pass and a `control` arm that does not track `default`. So the browser's
+untreated-band-first advantage is a property of the **OCR-B recognizer**, not of the ordering —
+which rules variant ordering out as an explanation for the gap and points at the recognizer
+(cell c). `SYNTHPASS_OCR_ORDER` ships default `default`; production behaviour is unchanged.
+
+### 2026-09-10 — the gap is a text-*detection* gap (ADR-0008 chunk 1C, cell b)
+
+Full writeup: [`ocr-gap-is-detection-2026-09-10.md`](ocr-gap-is-detection-2026-09-10.md).
+`--dump-ocr` (widened to `no_mrz_found` in [#257](https://github.com/ruledicaprio/SynthPass/pull/257))
+records `mrz_band_score` and the full OCR text per in-denominator miss. The 25 split: **~11 are OCR
+*detection* failures** — `ocrs`/`rten` returns a few dozen stray characters for the *entire page*
+(`Canada_PP_CAN_2023`'s complete output is 17 characters of noise) on clean passport images the
+user hand-read without difficulty, and these are exactly the ones tesseract.js recovers. ~8 are
+recognition misses (band found, one wrong character — mostly O/0 confusables — or the zone drowned
+in page text). ~6 are specimen artifacts (X-redacted, novelty, all-zeros) that belong off the
+denominator. So the research note's *localization vs recognizer* framing misses the point: the
+dominant factor is upstream of both — `ocrs` is not detecting text on these images at all. §8's
+"scale and binarization" is the likely lever, with a pure-Rust fix.

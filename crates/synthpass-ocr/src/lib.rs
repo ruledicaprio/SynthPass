@@ -420,6 +420,17 @@ impl NativeOcr {
         // is env-gated so the three measurement arms come out of one binary
         // (see `trailing_texture_mode`).
         let texture_mode = trailing_texture_mode();
+        // `SYNTHPASS_OCR_ORDER` moves (never duplicates) the untreated
+        // `plain_band` pass to the front of the chain under `band-first` —
+        // see `OcrOrder`. `band_first_pass` and the texture stage below both
+        // check `order`, so the pass appears exactly once regardless of
+        // which arm is selected.
+        let order = ocr_order();
+        let band_first_pass = if order == OcrOrder::BandFirst && texture_mode != TextureMode::Off {
+            vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
+        } else {
+            Vec::new()
+        };
         let texture_variants = std::iter::once_with(|| match texture_mode {
             TextureMode::Off => Vec::new(),
             // Two variants, not one, and the order is deliberate. The
@@ -431,9 +442,15 @@ impl NativeOcr {
             // documents the other would have caught. `plain_band` goes first
             // because it is the cheaper of the two (a crop and an upscale, no
             // per-pixel window sort), and on a document that validates from it
-            // the median is never built at all.
+            // the median is never built at all. Under `OcrOrder::BandFirst`
+            // that first entry has already run, at the front of the whole
+            // chain, so it is left out here rather than duplicated.
             TextureMode::On => {
-                let mut variants = vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)];
+                let mut variants = if order == OcrOrder::BandFirst {
+                    Vec::new()
+                } else {
+                    vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
+                };
                 variants.extend(preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER));
                 variants
             }
@@ -443,12 +460,27 @@ impl NativeOcr {
             // untreated variant "adds nothing there" — which is exactly the
             // property a control needs. It costs a real pass and appends real
             // text, while being the one band treatment already measured as
-            // inert on this engine.
-            TextureMode::Control => vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)],
+            // inert on this engine. Same `BandFirst` de-duplication as `On`.
+            TextureMode::Control => {
+                if order == OcrOrder::BandFirst {
+                    Vec::new()
+                } else {
+                    vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
+                }
+            }
         })
         .flatten();
-        let variants = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER)
+        let mut mrz_variants_list = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER);
+        // `OcrOrder::Control`'s reorder: swap the two blind-crop variants
+        // (contrast-stretched, binarized) that neither `BandFirst` nor any
+        // other hypothesis here expects to matter individually — see
+        // `OcrOrder::Control`'s doc comment for why this arm exists.
+        if order == OcrOrder::Control && mrz_variants_list.len() >= 2 {
+            mrz_variants_list.swap(0, 1);
+        }
+        let variants = band_first_pass
             .into_iter()
+            .chain(mrz_variants_list)
             .chain(geometry_variants)
             .chain(texture_variants)
             .enumerate();
@@ -898,6 +930,59 @@ fn trailing_texture_mode() -> TextureMode {
         "off" => TextureMode::Off,
         "control" => TextureMode::Control,
         _ => TextureMode::On,
+    }
+}
+
+/// Where the untreated `preprocess::plain_band` pass sits in the retry
+/// chain. See [`ocr_order`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OcrOrder {
+    /// Today's order, unchanged: `mrz_variants` first, then
+    /// `geometry_band_variants`, then the texture stage — `plain_band` sits
+    /// wherever [`TextureMode`] already puts it (last, or absent under
+    /// `TextureMode::Off`). The measurement baseline.
+    Default,
+    /// `plain_band` is *moved*, not duplicated, to the very first retry
+    /// pass — ahead of `mrz_variants` — mirroring `web/scan.js`'s own first
+    /// attempt (untreated band crop, wins ~88% of the browser's reads on
+    /// its own). It is removed from its default trailing position so the
+    /// total pass count is unchanged; `DEFAULT_MAX_PASSES` is proven (see
+    /// its doc comment) to reach every variant regardless of order, so this
+    /// is a pure reordering with no budget confound. Under
+    /// `TextureMode::Off` there is no `plain_band` pass to move, so this
+    /// arm is equivalent to [`Default`](Self::Default) in that
+    /// configuration.
+    BandFirst,
+    /// A **control** for [`BandFirst`](Self::BandFirst): swaps the first
+    /// two `mrz_variants` entries (contrast-stretched and binarized blind
+    /// band), neither of which any hypothesis here expects to matter more
+    /// than the other. A `BandFirst` delta is only trusted if `Control`
+    /// tracks [`Default`](Self::Default) document-for-document — otherwise
+    /// the delta is explained by "the harness is sensitive to reordering
+    /// passes at all," not by the untreated band crop specifically.
+    Control,
+}
+
+/// `SYNTHPASS_OCR_ORDER` — `default`, `band-first` or `control`, defaulting
+/// to [`OcrOrder::Default`] since this axis is unmeasured as of its
+/// introduction. See [`OcrOrder`] for what each arm does and
+/// `knowledge/benchmarks/ocr-stack-gap-2026-09-09.md` for why it exists:
+/// native already runs `plain_band` (see `TextureMode::On`), just as the
+/// second-to-last pass rather than the browser's first.
+///
+/// Unrecognised values fall back to the default, matching
+/// [`trailing_texture_mode`]'s reasoning: this is a measurement knob, and a
+/// typo should not take down a production read.
+fn ocr_order() -> OcrOrder {
+    match std::env::var("SYNTHPASS_OCR_ORDER")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "band-first" => OcrOrder::BandFirst,
+        "control" => OcrOrder::Control,
+        _ => OcrOrder::Default,
     }
 }
 
@@ -1351,5 +1436,33 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
+    }
+
+    #[test]
+    fn ocr_order_defaults_to_default_and_parses_all_three_arms() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
+        assert_eq!(
+            ocr_order(),
+            OcrOrder::Default,
+            "unset must be today's chain, unchanged, not an unmeasured reorder"
+        );
+
+        for (raw, expected) in [
+            ("default", OcrOrder::Default),
+            ("DEFAULT", OcrOrder::Default),
+            ("band-first", OcrOrder::BandFirst),
+            ("BAND-FIRST", OcrOrder::BandFirst),
+            ("  control  ", OcrOrder::Control),
+            // A typo is a measurement mistake, not a production outage: it
+            // falls back to the default rather than erroring, same as
+            // `trailing_texture_mode`.
+            ("bandfirst", OcrOrder::Default),
+            ("", OcrOrder::Default),
+        ] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_ORDER", raw) };
+            assert_eq!(ocr_order(), expected, "parsing {raw:?}");
+        }
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
     }
 }
