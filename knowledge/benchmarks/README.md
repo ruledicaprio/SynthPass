@@ -688,3 +688,13 @@ removed this same upfront-orientation-probe once (cost it 9 documents, 125→116
 not the variable — native's orientation handling is. Levers, all pure-Rust: gate `choose_rotation`
 below a text-confidence floor; move 90°/270° into the retry chain as late band-crop variants; a
 modest pre-detection upscale for the sub-300px documents.
+
+### 2026-09-10 — the OCR-stack gap, attributed (ADR-0008 chunk 1, close-out)
+
+Full writeup: [`ocr-stack-gap-attribution-2026-09-10.md`](ocr-stack-gap-attribution-2026-09-10.md).
+The synthesis of 1A–1C, answering `Tesseract_OCR_studies.md`'s nine deliverables point by point:
+the gap is **native page-orientation handling**, not the OCR-B recognizer, not the band search,
+not retry ordering, and only secondarily scale. OCR-B provenance (deliverable 9) is **CONFIRMED**,
+not UNKNOWN (`mrz.traineddata`, BSD-3 © DoubangoTelecom, OEM 1, `MRZ_CHARSET` whitelist, no PSM on
+either side). [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s second amendment records
+the three pure-Rust changes this licenses; building them is the next chunk.

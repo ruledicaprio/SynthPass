@@ -1,6 +1,7 @@
 # ADR-0008 — MRZ detection succeeds sequence completeness as M6's accuracy track
 
-**Status:** Accepted (target metric corrected 2026-09-09 — see amendment below)
+**Status:** Accepted. Target metric corrected 2026-09-09; the mandated measurement completed
+2026-09-10 (the gap is native page orientation) — see the two amendments below.
 **Date:** 2026-09-09
 
 ## Context
@@ -160,3 +161,36 @@ licensed by this ADR.
 carries none was being counted as a **Tier-1 hit**, because such documents are unlabelled by
 construction and so reached the ground-truth rung with nothing to be compared against. It is now
 `false_positive_mrz` and fails the gate. The current corpus has zero.
+
+## Amendment 2026-09-10 — the measurement is in: the gap is native page orientation
+
+The chunk this ADR mandates is complete. Full attribution:
+[`ocr-stack-gap-attribution-2026-09-10.md`](../benchmarks/ocr-stack-gap-attribution-2026-09-10.md),
+built from four same-binary measurements (1A denominator, 1B both arms, 1C(a) ordering, 1C(b)
+detection vs recognition, 1C(c) recognizer held constant).
+
+**The browser/native gap is native page-orientation handling.** On the 11 documents that drive it,
+`synthpass-ocr`'s `choose_rotation` turns the page 90°/270° before OCR — on low-signal scans it
+detects too little text for its rotation score to mean anything, and a wrong turn clears the 1.2×
+margin by chance. Every downstream crop then presents the MRZ vertically, so neither `ocrs` nor
+tesseract's OCR-B model can read it (cell c ran OCR-B over `ocrs`'s exact crops and it failed
+identically). The browser reads these documents because `web/scan.js` applies rotation only as
+*late retry passes* and never lets an orientation guess rewrite its input — a design it reached by
+deleting the same upfront probe native still runs.
+
+**Ruled out** as the primary cause: the OCR-B recognizer (cell a + cell c), retry-pass ordering
+(cell a), the band search, and — as a first-order effect — scale and binarisation. Scale is a
+**secondary** lever: `plain_band` upscales the band and the native *general* pass does not, which
+is why the browser also recovers sub-300px scans that stay lost even once oriented correctly.
+
+**Licensed by this measurement** (the construction is the next chunk, not this one), all pure-Rust
+changes to `recognize_detailed`'s existing structure, no new dependency, each measurable
+same-binary A/B against the 11 named documents:
+
+1. Gate `choose_rotation` behind a detected-text confidence floor — do not rotate on low signal.
+2. Move 90°/270° into the retry chain as late band-crop variants (native already rotates for the
+   0°/180° tie-break), mirroring `web/scan.js`.
+3. Upscale before the general detection pass.
+
+**Still not licensed:** replacing `ocrs`/`rten`, adding tesseract or any dependency, or writing a
+new detector — until the three changes above are built and measured and shown insufficient.

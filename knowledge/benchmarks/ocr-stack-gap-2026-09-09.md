@@ -118,3 +118,22 @@ Native takes ~53 min locally (~1 min on CI, which caches the `.rten` models); th
 alongside anything else, and see
 [`verify-benchmark-numbers-for-contention`](README.md#the-local-bench-loop-tracks). Corpus pinned at
 `samples_data_sha c31d048a`.
+
+## Correction (2026-09-10)
+
+Two claims above were overturned by chunk 1C. They do not change this writeup's numbers or its
+"the gap is concentrated in 17 documents" conclusion, but they redirect the attribution:
+
+- **"`plain_band` is never called natively" / "Native has no untreated band pass at all"** (the
+  "sharpest untested hypothesis" section) is **wrong**. `plain_band` *is* invoked natively, from
+  the trailing texture stage (`TextureMode::On`, the default). It runs as the second-to-last of up
+  to 11 passes rather than the browser's first. Cell (a)
+  ([`ocr-order-band-first-2026-09-10.md`](ocr-order-band-first-2026-09-10.md)) measured moving it
+  to the front: it recovers nothing for `ocrs` on its own merit.
+- The framing that a **PSM** difference might explain a localisation edge is closed: grep confirms
+  **neither side sets a page-segmentation mode**. The browser runs default PSM 3 even on a cropped
+  band.
+
+The attributed cause is in
+[`ocr-stack-gap-attribution-2026-09-10.md`](ocr-stack-gap-attribution-2026-09-10.md): native's
+`choose_rotation` turns the page 90° before OCR on the 11 detection-failure documents.
