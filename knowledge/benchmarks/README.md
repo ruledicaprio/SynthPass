@@ -658,3 +658,17 @@ for a wasted pass and a `control` arm that does not track `default`. So the brow
 untreated-band-first advantage is a property of the **OCR-B recognizer**, not of the ordering —
 which rules variant ordering out as an explanation for the gap and points at the recognizer
 (cell c). `SYNTHPASS_OCR_ORDER` ships default `default`; production behaviour is unchanged.
+
+### 2026-09-10 — the gap is a text-*detection* gap (ADR-0008 chunk 1C, cell b)
+
+Full writeup: [`ocr-gap-is-detection-2026-09-10.md`](ocr-gap-is-detection-2026-09-10.md).
+`--dump-ocr` (widened to `no_mrz_found` in [#257](https://github.com/ruledicaprio/SynthPass/pull/257))
+records `mrz_band_score` and the full OCR text per in-denominator miss. The 25 split: **~11 are OCR
+*detection* failures** — `ocrs`/`rten` returns a few dozen stray characters for the *entire page*
+(`Canada_PP_CAN_2023`'s complete output is 17 characters of noise) on clean passport images the
+user hand-read without difficulty, and these are exactly the ones tesseract.js recovers. ~8 are
+recognition misses (band found, one wrong character — mostly O/0 confusables — or the zone drowned
+in page text). ~6 are specimen artifacts (X-redacted, novelty, all-zeros) that belong off the
+denominator. So the research note's *localization vs recognizer* framing misses the point: the
+dominant factor is upstream of both — `ocrs` is not detecting text on these images at all. §8's
+"scale and binarization" is the likely lever, with a pure-Rust fix.
