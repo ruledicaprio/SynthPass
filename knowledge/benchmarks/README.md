@@ -19,43 +19,45 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **119 / 144 = 82.6%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-09) |
-| Tier-1 hit rate, whole specimen corpus | 119 / 238 = 50.0% | same baseline; the gap is explained below |
+| **Tier-1 hit rate, real specimens** | **118 / 142 = 83.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-10) |
+| Tier-1 hit rate, whole specimen corpus | 118 / 238 = 49.6% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 94 of the 238 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 96 of the 238 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
 the first moves when accuracy work lands. Full analysis:
-[`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md).
+[`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md) (the original 94),
+[`denominator-bucket-a-2026-09-10.md`](denominator-bucket-a-2026-09-10.md) (the Argentina 2026 pair).
 
 **Real-specimen outcomes** (238 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **119** | numerator | Checksum-valid MRZ, document number matches ground truth |
-| `no_mrz_found` | **18** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
+| **Tier-1 HIT** | **118** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| `no_mrz_found` | **17** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
 | `checksum_failed` | 7 | yes | Conforming printed zone, read wrong — a genuine OCR error |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 42 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 36 | no | Zone blacked out by whoever published the specimen |
-| `checksum_failed_specimen` | 16 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
+| `checksum_failed_specimen` | 18 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
-readings, and stayed ahead after the denominator correction (2.6:1). The bottleneck is MRZ
+readings, and stayed ahead after the denominator corrections (2.4:1). The bottleneck is MRZ
 *detection*, not *parsing*; see [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose
-target metric this correction reduced from 85 documents to 18.
+target metric these corrections reduced from 85 documents to 17.
 
 **The browser-vs-native row replaces ADR-0008's "64.2% vs 59.5%"**, neither side of which was
 current: the browser figure was the first of four measurements in `WEB_OCR_BASELINE.md` and had
 been superseded three times, and the native figure was a `samples/corpus.jsonl` field last
 recomputed on 2026-09-03 — unchanged through `mrz` 0.7.0, 0.7.1, `geometry_band_variants` and the
 `Lanczos3`/`Triangle` decision. Both arms are now measured the same day. The gap survives at
-+5.6 pp and, more usefully, **is concentrated in 17 named documents**: the browser reads 11 of
-native's 18 detection failures and 6 of its 7 `checksum_failed`.
++5.6 pp and, more usefully, **is concentrated in a named handful**: as first measured on 2026-09-09
+the browser read 11 of native's 18 detection failures and 6 of its 7 `checksum_failed` (the
+detection count is 17 after the Argentina 2026 pair was scored out; see the outcomes table above).
 
 ## What belongs here
 
