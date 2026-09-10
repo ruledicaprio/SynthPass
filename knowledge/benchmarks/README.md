@@ -23,7 +23,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | Tier-1 hit rate, whole specimen corpus | 119 / 238 = 50.0% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
-| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | 64.2% vs 59.5% on the same 190-doc corpus — **both figures are stale**, see note below | [`WEB_OCR_BASELINE.md`](../WEB_OCR_BASELINE.md) |
+| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
 **Why two rates.** 94 of the 238 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
@@ -49,12 +49,13 @@ readings, and stayed ahead after the denominator correction (2.6:1). The bottlen
 *detection*, not *parsing*; see [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose
 target metric this correction reduced from 85 documents to 18.
 
-**The browser-vs-native row is not current**, and is left in place because ADR-0008's first chunk
-is the measurement that replaces it. The browser figure is the first of four measurements in
-`WEB_OCR_BASELINE.md` and was superseded twice (122 → 125 → 127); the native figure is a
-`samples/corpus.jsonl` field last recomputed on 2026-09-03, unchanged through `mrz` 0.7.0, 0.7.1,
-`geometry_band_variants` and the `Lanczos3`/`Triangle` decision. Neither side of the "4.7-point gap"
-is a current number.
+**The browser-vs-native row replaces ADR-0008's "64.2% vs 59.5%"**, neither side of which was
+current: the browser figure was the first of four measurements in `WEB_OCR_BASELINE.md` and had
+been superseded three times, and the native figure was a `samples/corpus.jsonl` field last
+recomputed on 2026-09-03 — unchanged through `mrz` 0.7.0, 0.7.1, `geometry_band_variants` and the
+`Lanczos3`/`Triangle` decision. Both arms are now measured the same day. The gap survives at
++5.6 pp and, more usefully, **is concentrated in 17 named documents**: the browser reads 11 of
+native's 18 detection failures and 6 of its 7 `checksum_failed`.
 
 ## What belongs here
 
@@ -615,3 +616,32 @@ makes possible before asking what the run achieved.**
 Also found: a checksum-valid MRZ returned for a document carrying none was counted as a **Tier-1
 HIT**, because such documents are unlabelled by construction and reached the ground-truth rung with
 nothing to contradict them. Now `false_positive_mrz`, and a build failure. The corpus has zero.
+
+### 2026-09-09 — the browser/native OCR gap, both arms measured the same day
+
+Full writeup: [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md).
+[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md) chunk 1, part 1. Its "64.2% vs 59.5%"
+was stale on both sides — the browser figure had been superseded three times, and the native
+figure was never a measurement in that run at all but a `samples/corpus.jsonl` field frozen on
+2026-09-03 (**0 of 232 pre-existing rows changed** since). Re-measured today on 160 non-redacted
+MRZ-bearing specimens: **browser 128 = 80.0%, native 119 = 74.4%**, gap +9 documents / +5.6 pp.
+Both 110, browser-only 18, native-only 9.
+
+**The gap is concentrated, not diffuse — and that is the finding.** Native has 25 in-denominator
+misses; **the browser reads 17 of them.** Eleven are detection failures, the metric ADR-0008
+targets. The other six are exactly the anchors the
+[2026-09-08 entry](#2026-09-08--checksum_failed-is-not-a-clean-ocr-accuracy-signal) named as
+carrying a checksum-valid printed zone — *"any `checksum_failed` is 100% an OCR error"* — and on
+which it closed the `checksum_failed` track as OCR-quality-bound. Six of those seven are read
+correctly by a different recognizer today, so **they are bound by *this* recognizer, not by OCR
+quality in general.** Only Russia `P0_RUS_2019` is missed by both.
+
+The two stacks also fail on *different* documents (native wins 9 — two `_blur`, one `_rotated`,
+two China), so their union reads 137 of 160 = 85.6%, well above either.
+
+Not yet attributed. Two of ADR-0008's four confounders turn out to be controlled already —
+`synthpass-imageprep` compiles to wasm so both stacks run the same Rust preprocessing, and
+`MRZ_CHARSET` constrains both recognizers. The cheapest untested cell: the browser's *first*
+attempt is an untreated band crop that wins ~88% of its reads, and **native has no untreated band
+pass at all**, on an assertion in two call sites that `ocrs` "gains nothing" from one that appears
+never to have been measured.
