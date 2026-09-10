@@ -149,6 +149,12 @@ struct Args {
     /// a ~1 GB download. The per-PR `real-specimen-gate.yml` CI job runs with
     /// this on; it is also useful for any quick local Tier-1 measurement.
     mrz_only: bool,
+    /// Add the gitignored, real-PII `samples/private/` specimens back into
+    /// the `--real-specimens` walk, which excludes them by default (see
+    /// `synthpass_bench::load_real_specimens`). Local, opt-in, and never set
+    /// by any CI workflow: a private-track run's report names real identity
+    /// documents and must not become a CI artifact. `--real-specimens` only.
+    include_private: bool,
     /// Write the `mrz` provider's Tier-1 snapshot to this path as JSON and
     /// exit 0 — the regeneration path for the committed real-specimen
     /// baseline. CI-only by convention (`--assert-baseline`'s doc explains
@@ -177,6 +183,7 @@ impl Default for Args {
             format: None,
             document_type: None,
             mrz_only: false,
+            include_private: false,
             write_baseline: None,
             assert_baseline: None,
         }
@@ -227,6 +234,11 @@ fn usage() {
     eprintln!(
         "  --mrz-only         register only the deterministic mrz reader, skipping the Tier-2 \
          LLM provider and its GGUF (the per-PR real-specimen CI gate runs this way)"
+    );
+    eprintln!(
+        "  --include-private  with --real-specimens: add the gitignored samples/private/ \
+         real-PII specimens back into the walk (excluded by default; local opt-in only — a \
+         private-track report must never become a CI artifact)"
     );
     eprintln!(
         "  --write-baseline PATH  write the mrz provider's Tier-1 snapshot (HIT count + \
@@ -333,6 +345,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.mrz_only = true;
                 i += 1;
             }
+            "--include-private" => {
+                parsed.include_private = true;
+                i += 1;
+            }
             "--write-baseline" => {
                 let v = args
                     .get(i + 1)
@@ -355,6 +371,9 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     }
     if parsed.dump_ocr && !parsed.real_specimens {
         return Err("--dump-ocr is only valid together with --real-specimens".to_string());
+    }
+    if parsed.include_private && !parsed.real_specimens {
+        return Err("--include-private is only valid together with --real-specimens".to_string());
     }
     if parsed.document_type.is_some() && parsed.real_specimens {
         return Err(
@@ -1117,7 +1136,7 @@ async fn main() {
     // `synthpass_bench::provider_bench`'s top doc comment for why both
     // sources feed the exact same reader loop and reporting shape.
     let (reports, source, profile, count, seed_start) = if parsed.real_specimens {
-        let mut specimens = load_real_specimens(&root.join("samples"));
+        let mut specimens = load_real_specimens(&root.join("samples"), parsed.include_private);
         if specimens.is_empty() {
             eprintln!(
                 "❌ no image files found under samples/ — is this being run from the repo root?"
@@ -1544,6 +1563,24 @@ mod tests {
         assert!(
             parse_args(&args).is_err(),
             "--dump-ocr only makes sense scoping --real-specimens"
+        );
+    }
+
+    #[test]
+    fn include_private_parses_alongside_real_specimens_and_is_rejected_without_it() {
+        let ok: Vec<String> = ["--real-specimens", "--include-private"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&ok).expect("valid combination").include_private);
+
+        let bad: Vec<String> = ["--include-private"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(
+            parse_args(&bad).is_err(),
+            "--include-private only makes sense scoping --real-specimens"
         );
     }
 

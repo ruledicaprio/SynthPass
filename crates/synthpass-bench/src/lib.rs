@@ -300,25 +300,26 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", 
 /// silently grow to include them (it did, once: 238 → 251 documents, with
 /// no warning). Case-insensitive rather than matching the `.gitignore`
 /// pattern's exact casing, because the directory itself is lowercase and a
-/// single consistent rule is less to get wrong than two. A caller that
-/// actually wants them back has to ask for it explicitly; see
-/// [`load_real_specimens`].
-fn find_image_files(dir: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+/// single consistent rule is less to get wrong than two. `include_private`
+/// is that explicit opt-in — `provider-bench --include-private` sets it, and
+/// nothing else does; see [`load_real_specimens`].
+fn find_image_files(dir: &Path, include_private: bool) -> Vec<PathBuf> {
+    fn walk(dir: &Path, include_private: bool, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.to_ascii_lowercase().contains("private"))
+            if !include_private
+                && path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.to_ascii_lowercase().contains("private"))
             {
                 continue;
             }
             if path.is_dir() {
-                walk(&path, out);
+                walk(&path, include_private, out);
             } else if path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -329,7 +330,7 @@ fn find_image_files(dir: &Path) -> Vec<PathBuf> {
         }
     }
     let mut out = Vec::new();
-    walk(dir, &mut out);
+    walk(dir, include_private, &mut out);
     out.sort();
     out
 }
@@ -345,11 +346,137 @@ fn find_image_files(dir: &Path) -> Vec<PathBuf> {
 /// and deliberately so — one broken file must not abort a corpus load — but
 /// only one of them is normal, and a silent malformed label would shrink the
 /// labelled population without anyone noticing.
+/// The nested, versioned ground-truth schema `samples/private/<stem>.json`
+/// uses (schema_version 1): per-field confidence, an MRZ check-digit
+/// breakdown and a portrait box on top of the field values. The flat
+/// `synthpass_core::Extraction` that `samples/ocr_fixtures/` files
+/// deserialize into is a strict subset — [`PrivateSidecar::into_extraction`]
+/// projects it. Only the fields the bench's accuracy loop actually reads are
+/// modelled; `confidence`, `provenance` and `portrait` are deserialized past.
+#[derive(serde::Deserialize)]
+struct PrivateSidecar {
+    #[serde(default)]
+    fields: PrivateSidecarFields,
+    #[serde(default)]
+    mrz: Option<PrivateSidecarMrz>,
+    #[serde(default)]
+    extraction_method: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct PrivateSidecarFields {
+    #[serde(default)]
+    document_type: Option<String>,
+    #[serde(default)]
+    issuing_country: Option<String>,
+    #[serde(default)]
+    document_number: Option<String>,
+    #[serde(default)]
+    surname: Option<String>,
+    #[serde(default)]
+    given_names: Option<String>,
+    #[serde(default)]
+    nationality: Option<String>,
+    #[serde(default)]
+    date_of_birth: Option<String>,
+    #[serde(default)]
+    sex: Option<String>,
+    #[serde(default)]
+    date_of_expiry: Option<String>,
+    #[serde(default)]
+    personal_number: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct PrivateSidecarMrz {
+    #[serde(default)]
+    lines: Option<String>,
+    #[serde(default)]
+    checks: Option<PrivateSidecarChecks>,
+}
+
+#[derive(serde::Deserialize)]
+struct PrivateSidecarChecks {
+    #[serde(default)]
+    document_number: bool,
+    #[serde(default)]
+    date_of_birth: bool,
+    #[serde(default)]
+    date_of_expiry: bool,
+    #[serde(default)]
+    personal_number: bool,
+    #[serde(default)]
+    composite: bool,
+}
+
+impl PrivateSidecar {
+    fn into_extraction(self) -> synthpass_core::Extraction {
+        let mut e = synthpass_core::Extraction::default();
+        let f = self.fields;
+        e.document_type = f.document_type;
+        e.issuing_country = f.issuing_country;
+        e.document_number = f.document_number;
+        e.surname = f.surname;
+        e.given_names = f.given_names;
+        e.nationality = f.nationality;
+        e.date_of_birth = f.date_of_birth;
+        e.sex = f.sex;
+        e.date_of_expiry = f.date_of_expiry;
+        e.personal_number = f.personal_number;
+        if let Some(mrz) = self.mrz {
+            e.mrz_line = mrz.lines;
+            // Checksums are "valid" only if every ICAO check digit the
+            // sidecar recorded passed — the same all-or-nothing predicate
+            // `mrz::MrzData::valid()` applies, so a private specimen and a
+            // generated one reach `provider_bench`'s classifier identically.
+            e.mrz_checksums_valid = mrz.checks.map(|c| {
+                c.document_number
+                    && c.date_of_birth
+                    && c.date_of_expiry
+                    && c.personal_number
+                    && c.composite
+            });
+        }
+        e.extraction_method = self.extraction_method;
+        e
+    }
+}
+
+/// `samples/private/<stem>.json` -> [`synthpass_core::Extraction`], or `None`
+/// when absent/malformed — same "one bad file costs one specimen, never the
+/// run, but never silent on malformed" contract as [`load_ground_truth`],
+/// which is this function's only caller.
+fn load_private_ground_truth(
+    samples_root: &Path,
+    stem: &str,
+) -> Option<synthpass_core::Extraction> {
+    let path = samples_root.join("private").join(format!("{stem}.json"));
+    let bytes = std::fs::read(&path).ok()?;
+    match serde_json::from_slice::<PrivateSidecar>(&bytes) {
+        Ok(sidecar) => Some(sidecar.into_extraction()),
+        Err(e) => {
+            eprintln!(
+                "warning: {} exists but did not parse as a v1 PrivateSidecar ({e}) — \
+                 treating this specimen as unlabelled",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
 pub fn load_ground_truth(samples_root: &Path, stem: &str) -> Option<synthpass_core::Extraction> {
     let path = samples_root
         .join("ocr_fixtures")
         .join(format!("{stem}.json"));
-    let bytes = std::fs::read(&path).ok()?;
+    let Ok(bytes) = std::fs::read(&path) else {
+        // No flat `ocr_fixtures/` label. A `--include-private` specimen
+        // carries its ground truth beside the image as `private/<stem>.json`
+        // instead, in the richer nested schema `PrivateSidecar` models —
+        // try that before giving up. Absent there too is the normal
+        // unlabelled case and returns `None` silently.
+        return load_private_ground_truth(samples_root, stem);
+    };
     match serde_json::from_slice(&bytes) {
         Ok(extraction) => Some(extraction),
         Err(e) => {
@@ -494,9 +621,9 @@ pub fn load_specimen(
 /// `samples_root` — there is no separate code path for them, and no
 /// specimen appears twice (`samples/ocr_fixtures/`'s images are not
 /// duplicated anywhere else in the tree).
-pub fn load_real_specimens(samples_root: &Path) -> Vec<RealSpecimenDoc> {
+pub fn load_real_specimens(samples_root: &Path, include_private: bool) -> Vec<RealSpecimenDoc> {
     let expectations = MrzExpectations::load(samples_root);
-    find_image_files(samples_root)
+    find_image_files(samples_root, include_private)
         .into_iter()
         .filter_map(|path| load_specimen(samples_root, &path, &expectations))
         .collect()
@@ -1240,6 +1367,64 @@ mod tests {
         );
     }
 
+    /// `load_ground_truth` falls through to `samples/private/<stem>.json` and
+    /// projects the nested `PrivateSidecar` schema onto the flat
+    /// `Extraction` the accuracy loop reads — field values map 1:1, and
+    /// `mrz_checksums_valid` is `true` only when every recorded check passed.
+    /// Uses a fabricated all-`X` document so no real PII enters the test.
+    #[test]
+    fn a_private_sidecar_projects_onto_extraction_via_load_ground_truth() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-private-sidecar-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let private = root.join("private");
+        std::fs::create_dir_all(&private).expect("temp dir is creatable");
+        std::fs::write(
+            private.join("Country_ID_Private_Specimen_XX_XXX_2020_mrz.json"),
+            br#"{
+              "schema_version": 1,
+              "document": { "kind": "id_card" },
+              "fields": {
+                "document_type": "ID", "issuing_country": "XXX",
+                "document_number": "XX0000000", "surname": "XXXXX",
+                "given_names": "XXXXX", "nationality": "XXX",
+                "date_of_birth": "2000-01-01", "sex": "X",
+                "date_of_expiry": "2030-01-01", "personal_number": null
+              },
+              "confidence": { "document_number": 0.9 },
+              "provenance": { "kind": "human", "model": "n/a" },
+              "mrz": {
+                "lines": "IDXXX...\nLINE2...\nLINE3...",
+                "format": "TD1",
+                "checks": {
+                  "document_number": true, "date_of_birth": true,
+                  "date_of_expiry": true, "personal_number": true,
+                  "composite": false
+                }
+              },
+              "portrait": { "x": 0, "y": 0, "width": 1, "height": 1 },
+              "extraction_method": "human"
+            }"#,
+        )
+        .expect("temp file is writable");
+
+        let e = load_ground_truth(&root, "Country_ID_Private_Specimen_XX_XXX_2020_mrz")
+            .expect("private sidecar resolves through load_ground_truth");
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(e.document_number.as_deref(), Some("XX0000000"));
+        assert_eq!(e.date_of_birth.as_deref(), Some("2000-01-01"));
+        assert_eq!(e.mrz_line.as_deref(), Some("IDXXX...\nLINE2...\nLINE3..."));
+        assert_eq!(
+            e.mrz_checksums_valid,
+            Some(false),
+            "one failing check (composite) must make the whole record checksum-invalid"
+        );
+        assert_eq!(e.extraction_method, "human");
+    }
+
     /// Written to a temp tree rather than `samples/`, so this doesn't depend
     /// on any specific file surviving in the real (gitignored, local-mirror-
     /// only) bulk corpus — only `samples/ocr_fixtures/` is tracked, and nothing
@@ -1326,13 +1511,13 @@ mod tests {
         )
         .expect("temp fixture writes");
 
-        let paths = find_image_files(&root);
+        let paths = find_image_files(&root, false);
         assert!(
             !paths.is_empty(),
             "the walk should find the images written to the temp tree"
         );
 
-        let paths_again = find_image_files(&root);
+        let paths_again = find_image_files(&root, false);
         assert_eq!(
             paths, paths_again,
             "repeated walks of the same directory must yield the same order"
@@ -1386,20 +1571,26 @@ mod tests {
             .save(private_dir.join("unrelated_image_007.png"))
             .expect("temp fixture writes");
 
-        let paths = find_image_files(&root);
+        let default_paths = find_image_files(&root, false);
+        let with_private = find_image_files(&root, true);
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(
-            paths.len(),
+            default_paths.len(),
             1,
-            "only the one non-Private file should survive the walk: {paths:?}"
+            "default walk: only the one non-private file survives: {default_paths:?}"
         );
         assert!(
-            paths[0]
+            default_paths[0]
                 .file_name()
                 .and_then(|n| n.to_str())
                 .is_some_and(|n| n.starts_with("Public_")),
-            "the surviving file must be the public specimen, not a Private one: {paths:?}"
+            "the survivor must be the public specimen, not a private one: {default_paths:?}"
+        );
+        assert_eq!(
+            with_private.len(),
+            3,
+            "include_private walk: every file is returned, private or not: {with_private:?}"
         );
     }
 
@@ -1413,8 +1604,8 @@ mod tests {
     #[ignore]
     fn load_real_specimens_decodes_every_image_under_samples() {
         let root = repo_root();
-        let specimens = load_real_specimens(&root.join("samples"));
-        let expected = find_image_files(&root.join("samples")).len();
+        let specimens = load_real_specimens(&root.join("samples"), false);
+        let expected = find_image_files(&root.join("samples"), false).len();
         assert_eq!(
             specimens.len(),
             expected,
