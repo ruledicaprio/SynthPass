@@ -288,6 +288,21 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", 
 /// symlink) is skipped rather than aborting the whole walk, for the same
 /// "one bad entry costs one entry, not the run" reason `find_sample` returns
 /// `Option` instead of panicking.
+///
+/// **Any path component containing `private` (case-insensitive) is skipped
+/// unconditionally** — both a directory named `private` (the real local
+/// convention: `samples/private/`) and a filename carrying the corpus
+/// naming convention's `_Private_` token. These are real identity documents
+/// a user has placed under `samples/` for their own local benchmarking,
+/// gitignored (`.gitignore:63`: `samples/**/*Private*`) so they never reach
+/// the repo — but this walk has no other signal to tell them apart from the
+/// public specimen corpus, and the default real-specimen run must never
+/// silently grow to include them (it did, once: 238 → 251 documents, with
+/// no warning). Case-insensitive rather than matching the `.gitignore`
+/// pattern's exact casing, because the directory itself is lowercase and a
+/// single consistent rule is less to get wrong than two. A caller that
+/// actually wants them back has to ask for it explicitly; see
+/// [`load_real_specimens`].
 fn find_image_files(dir: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -295,6 +310,13 @@ fn find_image_files(dir: &Path) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
+            if path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_ascii_lowercase().contains("private"))
+            {
+                continue;
+            }
             if path.is_dir() {
                 walk(&path, out);
             } else if path
@@ -1332,6 +1354,52 @@ mod tests {
         assert!(
             has_unlabelled,
             "an MRZ-less front like a bare ID-card face should have no label file"
+        );
+    }
+
+    /// A `private`-tagged image must never enter the default walk, however
+    /// deep it sits — this is the fix for the corpus silently growing
+    /// 238 → 251 when real-PII specimens landed under `samples/private/`
+    /// with no exclusion in place. Covers both signals independently: a file
+    /// under a directory literally named `private` (the real local
+    /// convention) with no token of its own, and a file carrying the corpus
+    /// naming convention's `_Private_` token directly in its name.
+    #[test]
+    fn find_image_files_excludes_anything_tagged_private() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-exclude-private-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let passports = root.join("passports");
+        let private_dir = root.join("private");
+        std::fs::create_dir_all(&passports).expect("temp dir is creatable");
+        std::fs::create_dir_all(&private_dir).expect("temp dir is creatable");
+
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(passports.join("Public_Passport_Specimen_P0_XXX_2020_mrz.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(passports.join("Country_Passport_Private_Specimen_P0_XXX_2020_mrz.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(private_dir.join("unrelated_image_007.png"))
+            .expect("temp fixture writes");
+
+        let paths = find_image_files(&root);
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(
+            paths.len(),
+            1,
+            "only the one non-Private file should survive the walk: {paths:?}"
+        );
+        assert!(
+            paths[0]
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("Public_")),
+            "the surviving file must be the public specimen, not a Private one: {paths:?}"
         );
     }
 
