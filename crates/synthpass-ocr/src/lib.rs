@@ -94,7 +94,7 @@ pub use synthpass_imageprep::MRZ_CHARSET;
 use image::RgbImage;
 use ocrs::{DecodeMethod, ImageSource, OcrEngine as OcrsEngine, OcrEngineParams, TextItem};
 use rten::Model;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Beam width for the constrained pass. Greedy decoding commits to one
@@ -274,6 +274,9 @@ impl NativeOcr {
     /// to the retry loop's.
     pub fn recognize_detailed(&self, image_path: &Path) -> Result<OcrPage, String> {
         let verbose = verbose_enabled();
+        // `None` on every normal run; `Some` only under the
+        // `SYNTHPASS_OCR_DUMP_VARIANTS` cell-(c) diagnostic (see its doc).
+        let dump_dir = dump_variants_dir();
         let image = decode_image(image_path)?.into_rgb8();
 
         // A3: auto-rotate before the main pass (detection-only, cheap; see
@@ -365,6 +368,9 @@ impl NativeOcr {
 
         let overall_started = Instant::now();
         let general_started = Instant::now();
+        if let Some(dir) = &dump_dir {
+            dump_pass_image(dir, image_path, "general", &image, verbose);
+        }
         let mut text = run_pass(&self.engine, &image)?;
         if verbose {
             let regions = region_count(&self.engine, &image).unwrap_or(0);
@@ -503,6 +509,18 @@ impl NativeOcr {
             }
 
             let variant_started = Instant::now();
+            if let Some(dir) = &dump_dir {
+                dump_pass_image(
+                    dir,
+                    image_path,
+                    // Matches the `variant {i}` index the verbose pass log
+                    // prints, so a dumped crop and its stderr timing line
+                    // line up.
+                    &format!("variant{i:02}"),
+                    &variant,
+                    verbose,
+                );
+            }
             // A failed retry pass must never fail the whole OCR — the general
             // pass's text is already in hand and Tier 2 can still run on it.
             let Ok(pass_text) = run_pass(&self.mrz_engine, &variant) else {
@@ -986,6 +1004,54 @@ fn ocr_order() -> OcrOrder {
     }
 }
 
+/// `SYNTHPASS_OCR_DUMP_VARIANTS` — when set to a non-empty path, every
+/// preprocessed image [`NativeOcr::recognize_detailed`] hands the recognizer
+/// (the general full-page pass and each retry variant that actually runs) is
+/// written there as a PNG, named `<source-stem>__<label>.png`.
+///
+/// A diagnostic hook for ADR-0008 chunk 1C cell (c): cell (b) established that
+/// on the ~11 documents driving the browser/native gap, `ocrs` returns near-
+/// empty text for the whole page. This dump lets a *different* recognizer be
+/// run offline over the exact bytes `ocrs` saw, to tell "native's crop is
+/// unusable" apart from "native's recognizer is the weak link". See
+/// `knowledge/benchmarks/ocr-crop-recognizer-2026-09-10.md`.
+///
+/// Unset — the default, and every normal run — it is a no-op: the OCR path is
+/// byte-identical, since the only new work is behind `Option::is_some`. Writes
+/// are best-effort; a failure logs under `SYNTHPASS_OCR_VERBOSE` and never
+/// fails the OCR call.
+fn dump_variants_dir() -> Option<PathBuf> {
+    std::env::var("SYNTHPASS_OCR_DUMP_VARIANTS")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
+/// Write one preprocessed pass image for the [`dump_variants_dir`] diagnostic.
+/// Best-effort: any error is logged (verbose only) and swallowed, so a full
+/// disk or a bad path can never turn a dump run into a failed OCR run.
+fn dump_pass_image(dir: &Path, source: &Path, label: &str, image: &RgbImage, verbose: bool) {
+    let stem = source
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image");
+    let path = dir.join(format!("{stem}__{label}.png"));
+    let result = std::fs::create_dir_all(dir)
+        .map_err(|e| e.to_string())
+        .and_then(|()| image.save(&path).map_err(|e| e.to_string()));
+    match result {
+        Ok(()) if verbose => eprintln!("[synthpass-ocr] dump-variants: wrote {}", path.display()),
+        Err(e) if verbose => {
+            eprintln!(
+                "[synthpass-ocr] dump-variants: {} failed: {e}",
+                path.display()
+            )
+        }
+        _ => {}
+    }
+}
+
 /// `SYNTHPASS_OCR_MAX_SECONDS`, or [`DEFAULT_MAX_SECONDS`] if unset/invalid/zero.
 fn max_duration() -> Duration {
     std::env::var("SYNTHPASS_OCR_MAX_SECONDS")
@@ -1464,5 +1530,33 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
+    }
+
+    #[test]
+    fn dump_variants_dir_is_none_unless_set_to_a_non_empty_path() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_DUMP_VARIANTS") };
+        assert_eq!(
+            dump_variants_dir(),
+            None,
+            "unset must be a no-op — the diagnostic never fires on a normal run"
+        );
+
+        for blank in ["", "   ", "\t"] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_DUMP_VARIANTS", blank) };
+            assert_eq!(
+                dump_variants_dir(),
+                None,
+                "a blank value is treated as unset, not as a dump to the cwd: {blank:?}"
+            );
+        }
+
+        unsafe { std::env::set_var("SYNTHPASS_OCR_DUMP_VARIANTS", "  artifacts/cell-c/crops  ") };
+        assert_eq!(
+            dump_variants_dir(),
+            Some(PathBuf::from("artifacts/cell-c/crops")),
+            "surrounding whitespace is trimmed"
+        );
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_DUMP_VARIANTS") };
     }
 }

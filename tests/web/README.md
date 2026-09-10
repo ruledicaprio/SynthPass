@@ -83,6 +83,23 @@ must not be reported as HEIC), and a real JPEG still decodes.
 Fast — no corpus, no OCR — so unlike the corpus sweep it is cheap to run on
 every change to the decode path.
 
+## Crop-recognizer check (`recognize-crops.mjs`)
+
+```bash
+node recognize-crops.mjs --crops <dir> --out result.jsonl
+node recognize-crops.mjs --crops <dir> --only __variant00 --best --out best.jsonl
+```
+
+Runs the exact `web/scan.js` OCR-B worker config over a directory of images —
+no `scan.js` pipeline, no preprocessing, no `eng` fallback, just the recognizer.
+Built for ADR-0008 chunk 1C cell (c): pointed at the crops
+`SYNTHPASS_OCR_DUMP_VARIANTS` writes, it answers whether a *different* recognizer
+can read an MRZ off native's own preprocessed crops. `--best` OCRs each image at
+all four orientations and keeps the best, the way `scan.js`'s rotation retries
+do. Serves `web/` (vendored runtime + `tessdata/`) directly, so no `_site/`
+build is needed. Writeup:
+[`knowledge/benchmarks/ocr-crop-recognizer-2026-09-10.md`](../../knowledge/benchmarks/ocr-crop-recognizer-2026-09-10.md).
+
 ## Recorded results
 
 [`knowledge/WEB_OCR_BASELINE.md`](../../knowledge/WEB_OCR_BASELINE.md).

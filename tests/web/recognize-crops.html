@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SynthPass — tesseract OCR-B over native's crops (ADR-0008 1C cell c)</title>
+<!--
+  Cell (c) recognizer harness. Runs the SAME vendored tesseract.js OCR-B model
+  the browser demo uses (web/scan.js's `getWorker('mrz', …)` config, copied
+  verbatim below) over the preprocessed crop PNGs `crates/synthpass-ocr` dumped
+  under SYNTHPASS_OCR_DUMP_VARIANTS. Driven by recognize-crops.mjs.
+
+  Not part of the deployed site — it lives in tests/web/, so `cp -r web/*` never
+  picks it up. The static server aliases it in at /harness.html at test time and
+  serves web/ (vendor/, tessdata/) as the site root, so the relative paths below
+  resolve exactly as they do in the real demo.
+
+  Why a separate page and not scan.js: scan.js runs the full retry pipeline
+  (its own WASM preprocessing, orientation, `eng` fallback). Cell (c) needs the
+  recognizer ALONE, over bytes that are already native's finished crop — no
+  second preprocessing pass, no fallback model, nothing but OCR-B on the pixels.
+-->
+<body>
+<p id="state">loading…</p>
+
+<script src="./vendor/tesseract.min.js"></script>
+<script type="module">
+// synthpass_imageprep::MRZ_CHARSET — single-sourced in the Rust engine; copied
+// here because this page deliberately does not load the WASM module.
+const MRZ_CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<';
+
+// Verbatim from web/scan.js:54-66 — same model, same OEM (1 = LSTM only), same
+// same-origin asset paths, same whitelist, no PSM set (default PSM 3). If that
+// function changes, change this to match and note it in the cell (c) writeup.
+let workerPromise = null;
+function getMrzWorker() {
+  workerPromise ??= (async () => {
+    const worker = await Tesseract.createWorker('mrz', 1, {
+      workerPath: './vendor/worker.min.js',
+      corePath: './vendor',
+      langPath: './tessdata',
+      gzip: false, // mrz.traineddata is committed uncompressed
+    });
+    await worker.setParameters({ tessedit_char_whitelist: MRZ_CHARSET });
+    return worker;
+  })();
+  return workerPromise;
+}
+
+/**
+ * OCR one crop by URL (served same-origin by recognize-crops.mjs's static
+ * server). Returns the raw recognized text and Tesseract's mean word
+ * confidence — no parsing, no retry. The Node runner does the MRZ parse so the
+ * exact same `mrz` crate scores both stacks.
+ */
+window.__recognize = async function (url) {
+  const worker = await getMrzWorker();
+  const { data } = await worker.recognize(url);
+  return {
+    text: data.text ?? '',
+    confidence: typeof data.confidence === 'number' ? data.confidence : null,
+  };
+};
+
+/** `blob` re-encoded rotated clockwise by `deg` (0/90/180/270), via a canvas. */
+async function rotatedBlob(blob, deg) {
+  if (!deg) return blob;
+  const bitmap = await createImageBitmap(blob);
+  const swap = deg === 90 || deg === 270;
+  const c = document.createElement('canvas');
+  c.width = swap ? bitmap.height : bitmap.width;
+  c.height = swap ? bitmap.width : bitmap.height;
+  const ctx = c.getContext('2d');
+  ctx.translate(c.width / 2, c.height / 2);
+  ctx.rotate((deg * Math.PI) / 180);
+  ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+  bitmap.close?.();
+  return await new Promise((ok) => c.toBlob(ok, 'image/png'));
+}
+
+/**
+ * OCR one crop at all four orientations and return the best by MRZ-shaped-line
+ * length. This is what `web/scan.js` does with its orientation-retry passes —
+ * the point of the confirmation arm is: if tesseract reads an MRZ off one of
+ * the four rotations of native's own crop, the crop's *pixels* are fine and it
+ * is native's single upfront orientation choice that lost the document.
+ */
+window.__recognizeBest = async function (url) {
+  const worker = await getMrzWorker();
+  const src = await (await fetch(url)).blob();
+  let best = { deg: 0, text: '', confidence: null, score: -1 };
+  for (const deg of [0, 90, 180, 270]) {
+    const blob = await rotatedBlob(src, deg);
+    const { data } = await worker.recognize(blob);
+    const text = data.text ?? '';
+    const score = (text.match(/[A-Z0-9<]{20,}/g) || []).join('').length;
+    if (score > best.score) {
+      best = { deg, text, confidence: typeof data.confidence === 'number' ? data.confidence : null, score };
+    }
+  }
+  return best;
+};
+
+document.getElementById('state').textContent = 'ready';
+window.__ready = true;
+</script>
+</body>
