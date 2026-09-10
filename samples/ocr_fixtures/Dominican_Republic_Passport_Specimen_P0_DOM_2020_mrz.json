@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2000-05-10",
+  "date_of_expiry": "2026-02-28",
+  "document_number": "RD5893175",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "JANIBEL",
+  "issuing_country": "DOM",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<DOMMATOS<VALENZUELA<<JANIBEL<<<<<<<<<<<<<<<\nRD58931752DOM0005108F260228040210114548<<<48",
+  "nationality": "DOM",
+  "personal_number": "40210114548",
+  "sex": "F",
+  "surname": "MATOS VALENZUELA"
+}

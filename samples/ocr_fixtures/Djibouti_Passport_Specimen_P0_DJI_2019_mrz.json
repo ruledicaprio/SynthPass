@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1991-07-26",
+  "date_of_expiry": "2024-08-04",
+  "document_number": "18RF15320",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "FARID RAGUE",
+  "issuing_country": "DJI",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<DJIHASSAN<FARID<RAGUE<<<<<<<<<<<<<<<<<<<<<<\n18RF153208DJI9107267M2408046<<<<<<<<<<<<<<04",
+  "nationality": "DJI",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "HASSAN"
+}

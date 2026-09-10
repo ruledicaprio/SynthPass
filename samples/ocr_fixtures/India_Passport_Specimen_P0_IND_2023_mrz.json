@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1986-04-21",
+  "date_of_expiry": "2033-09-25",
+  "document_number": "Y6409808",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "BINTA",
+  "issuing_country": "IND",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<INDMATHEW<<BINTA<<<<<<<<<<<<<<<<<<<<<<<<<<<\nY6409808<9IND8604219F33092540075050358923<70",
+  "nationality": "IND",
+  "personal_number": "0075050358923",
+  "sex": "F",
+  "surname": "MATHEW"
+}

@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1991-03-12",
+  "date_of_expiry": "2032-12-07",
+  "document_number": "Z6922170",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MOHAMMAD ANZARUL",
+  "issuing_country": "IND",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<INDHASSAN<<MOHAMMAD<ANZARUL<<<<<<<<<<<<<<<<\nZ6922170<2IND9103122M32120791077112473422<94",
+  "nationality": "IND",
+  "personal_number": "1077112473422",
+  "sex": "M",
+  "surname": "HASSAN"
+}

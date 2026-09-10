@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2005-07-10",
+  "date_of_expiry": "2027-08-23",
+  "document_number": "C03202220",
+  "document_type": "PC",
+  "extraction_method": "hand-transcribed",
+  "given_names": "FARHAD",
+  "issuing_country": "AZE",
+  "mrz_checksums_valid": true,
+  "mrz_line": "PCAZEABIYEV<<FARHAD<<<<<<<<<<<<<<<<<<<<<<<<<<\nC032022203AZE0507107M27082307VA3P3Q<<<<<<<30",
+  "nationality": "AZE",
+  "personal_number": "7VA3P3Q",
+  "sex": "M",
+  "surname": "ABIYEV"
+}

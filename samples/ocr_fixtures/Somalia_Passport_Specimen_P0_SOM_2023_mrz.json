@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1995-02-02",
+  "date_of_expiry": "2028-12-15",
+  "document_number": "P01447848",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ABDIAZIZ MOHAMUD",
+  "issuing_country": "SOM",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<SOMIBRAHIM<<ABDIAZIZ<MOHAMUD<<<<<<<<<<<<<<<\nP014478489SOM9502024M28121512950202198557888",
+  "nationality": "SOM",
+  "personal_number": "29502021985578",
+  "sex": "M",
+  "surname": "IBRAHIM"
+}

@@ -1,0 +1,28 @@
+REPUBLIC OF INDIA
+PASSPORT
+Type
+P
+Code
+IND
+Nationality
+INDIAN
+Passport No.
+Z6922170
+Surname
+HASSAN
+Given Name(s)
+MOHAMMAD ANZARUL
+Date of Birth
+12/03/1991
+Sex
+M
+Place of Birth
+JAMSHEDPUR, JHARKHAND
+Place of Issue
+RANCHI
+Date of Issue
+08/12/2022
+Date of Expiry
+07/12/2032
+P<INDHASSAN<<MOHAMMAD<ANZARUL<<<<<<<<<<<<<<<<
+Z6922170<2IND9103122M32120791077112473422<94

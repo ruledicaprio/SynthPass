@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2002-02-27",
+  "date_of_expiry": "2033-08-26",
+  "document_number": "A11933503",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MD ABDUS",
+  "issuing_country": "BGD",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<BGDSALAM<<MD<ABDUS<<<<<<<<<<<<<<<<<<<<<<<<<\nA119335037BGD0202273M33082686908672915<<<<70",
+  "nationality": "BGD",
+  "personal_number": "6908672915",
+  "sex": "M",
+  "surname": "SALAM"
+}
