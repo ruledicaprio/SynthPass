@@ -29,11 +29,11 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 58 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 64 |
 | MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 21 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 157 |
+| No specimen yet | 151 |
 | **Total tracked codes** | **238** |
 
 Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
@@ -59,6 +59,14 @@ the HIT/MISS status; this changes what a MISS on those rows *means*, not the cou
 ingested via manifest regeneration; both read checksum-valid. NIC moves from "No specimen
 yet" to HIT (157 codes still uncovered).
 
+**2026-09-10 — 15 specimens ingested for the ADR-0008 orientation track.** Real-specimen
+CI baseline `documents` 238 → 254, `tier1_hits` 118 → 128. Six new codes: **DJI, NGA, SOM,
+UZB → HIT**; **DOM, PAK → MISS (`no_mrz_found`** — DOM is a low-signal scan, PAK is
+photographed sideways; both are chunk-2 targets). **IND and IDN flip MISS → HIT** on the new
+2023 / 2024-rotated books. AGO, AZE, BGD already HIT (new specimens don't change the row).
+KEN's front page is in the corpus but carries no MRZ — a bio-page book specimen is still
+needed. 151 codes still uncovered.
+
 ## Full table
 
 | Code | Country/Entity | Document type(s) | Status | Note |
@@ -77,7 +85,7 @@ yet" to HIT (157 codes still uncovered).
 | COG | Congo | -- | No specimen yet | -- |
 | COD | Congo (Democratic Republic of the) | -- | No specimen yet | -- |
 | CIV | Côte d'Ivoire | -- | No specimen yet | -- |
-| DJI | Djibouti | -- | No specimen yet | -- |
+| DJI | Djibouti | Passport | HIT (x2) | Ingested 2026-09-10; both books read checksum-valid |
 | EGY | Egypt | Passport | HIT (+ 2 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GNQ | Equatorial Guinea | -- | No specimen yet | -- |
 | ERI | Eritrea | -- | No specimen yet | -- |
@@ -88,7 +96,7 @@ yet" to HIT (157 codes still uncovered).
 | GHA | Ghana | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GIN | Guinea | -- | No specimen yet | -- |
 | GNB | Guinea-Bissau | -- | No specimen yet | -- |
-| KEN | Kenya | -- | No specimen yet | -- |
+| KEN | Kenya | Passport (front) | No specimen yet | Front page in corpus 2026-09-10, no MRZ; bio-page book specimen still needed |
 | LSO | Lesotho | -- | No specimen yet | -- |
 | LBR | Liberia | -- | No specimen yet | -- |
 | LBY | Libya | -- | No specimen yet | -- |
@@ -101,13 +109,13 @@ yet" to HIT (157 codes still uncovered).
 | MOZ | Mozambique | -- | No specimen yet | -- |
 | NAM | Namibia | -- | No specimen yet | -- |
 | NER | Niger | -- | No specimen yet | -- |
-| NGA | Nigeria | -- | No specimen yet | -- |
+| NGA | Nigeria | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
 | RWA | Rwanda | -- | No specimen yet | -- |
 | STP | Sao Tome and Principe | -- | No specimen yet | -- |
 | SEN | Senegal | -- | No specimen yet | -- |
 | SYC | Seychelles | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SLE | Sierra Leone | -- | No specimen yet | -- |
-| SOM | Somalia | -- | No specimen yet | -- |
+| SOM | Somalia | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
 | ZAF | South Africa | -- | No specimen yet | -- |
 | SSD | South Sudan | -- | No specimen yet | -- |
 | SDN | Sudan | Passport | Candidate rejected | No SPECIMEN watermark, read as real personal data -- excluded per vetting checklist |
@@ -131,7 +139,7 @@ yet" to HIT (157 codes still uncovered).
 | CRI | Costa Rica | -- | No specimen yet | -- |
 | CUB | Cuba | -- | No specimen yet | -- |
 | DMA | Dominica | -- | No specimen yet | -- |
-| DOM | Dominican Republic | -- | No specimen yet | -- |
+| DOM | Dominican Republic | Passport | MISS (no MRZ found) | Ingested 2026-09-10; low-signal scan, ADR-0008 chunk-2 target |
 | ECU | Ecuador | -- | No specimen yet | -- |
 | SLV | El Salvador | -- | No specimen yet | -- |
 | GRD | Grenada | -- | No specimen yet | -- |
@@ -165,8 +173,8 @@ yet" to HIT (157 codes still uncovered).
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
 | HKG | Hong Kong | -- | No specimen yet | -- |
-| IND | India | Passport | MISS (x2 no MRZ found; +1 checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2013 `boxed` specimen added 2026-09-04 parses as TD3 but fails checksums |
-| IDN | Indonesia | Passport | MISS (x2, checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| IND | India | Passport | HIT (1 of 7 specimens; rest non-conforming / redacted / missed) | The 2023 specimen added 2026-09-10 reads checksum-valid; the other six are 2 checksum-failed specimens, 2 redacted, 1 checksum-failed, 1 no-MRZ (CI baseline 2026-09-10) |
+| IDN | Indonesia | Passport | HIT (1 of 3 specimens) | The 2024 specimen added 2026-09-10 (photographed sideways) reads checksum-valid; the 2011 specimen is non-conforming, the 2023 one redacted |
 | IRN | Iran | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | IRQ | Iraq | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | ISR | Israel | Passport | Known MISS (documented) + HIT (+ 1 checksum-failed) | Public specimen, physically redacted MRZ -- kept local-only, not committed; 2 more (unrelated, unredacted) specimens found in the real-OCR scan, 2026-08-17, one a clean HIT |
@@ -186,7 +194,7 @@ yet" to HIT (157 codes still uncovered).
 | MMR | Myanmar | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | NPL | Nepal | Passport | MISS (x2, checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | OMN | Oman | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
-| PAK | Pakistan | -- | No specimen yet | -- |
+| PAK | Pakistan | Passport | MISS (no MRZ found) | Ingested 2026-09-10; photographed sideways, ADR-0008 chunk-2 target |
 | PSE | Palestine | -- | No specimen yet | -- |
 | PHL | Philippines | -- | No specimen yet | -- |
 | QAT | Qatar | -- | No specimen yet | -- |
@@ -201,7 +209,7 @@ yet" to HIT (157 codes still uncovered).
 | TUR | Türkiye | Passport, ID card | HIT (x5 specimens) (+ 5 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | TKM | Turkmenistan | -- | No specimen yet | -- |
 | ARE | United Arab Emirates | Passport | HIT | Contributor-supplied specimen (watermarked reference) |
-| UZB | Uzbekistan | -- | No specimen yet | -- |
+| UZB | Uzbekistan | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
 | VNM | Viet Nam | Passport | MISS (stale, 2026-08-17) | Specimen present in `samples/`; reproducibly returns "no MRZ found" against the current OCR/parser despite the recorded doc number — regression or flaky original hit, not yet root-caused |
 | YEM | Yemen | -- | No specimen yet | -- |
 | ALB | Albania | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
