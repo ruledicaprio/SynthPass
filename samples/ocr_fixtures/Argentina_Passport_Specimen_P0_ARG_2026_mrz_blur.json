@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1957-02-10",
+  "date_of_expiry": "2036-03-03",
+  "document_number": "AAM000000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MARIANA FLORENCIA",
+  "issuing_country": "ARG",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<ARGGONZALES<RODRIGUEZ<MARIANA<FLORENCIA<<<<\nAAM0000000ARG5702147M33030230000000000<<<<<06",
+  "nationality": "ARG",
+  "personal_number": "99999999",
+  "sex": "F",
+  "surname": "GONZALES RODRIGUEZ"
+}
