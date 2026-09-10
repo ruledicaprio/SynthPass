@@ -94,11 +94,12 @@ of 6 sampled documents, with no band crop at all:
 | `Monaco_ID_XXXX_back` | — | noise — the original is 254×162; this one also needs the upscale |
 | `Oman_P0_OMN_2004` | — | noise at full page — needs the band crop to isolate the MRZ from the VIZ |
 
-And the browser's own sweep ([`tests/web/baseline-report.json`](../../tests/web/baseline-report.json))
-reads **Canada, Oman and Monaco** — `web_checksum_valid: true`, `winning_pass: "Reading MRZ band
-(OCR-B model)"`, **`passes: 2`**: its first OCR attempt, `plain_band` + OCR-B, at the original
-orientation. No rotation. Monaco and Oman come in because `plain_band` crops *and upscales* the
-band — so scale is a secondary lever behind orientation, not a primary one.
+And the browser's own corpus sweep (`node tests/web/run-corpus.mjs`, the harness behind
+[`WEB_OCR_BASELINE.md`](../WEB_OCR_BASELINE.md)) reads **Canada, Oman and Monaco** —
+`web_checksum_valid: true`, `winning_pass: "Reading MRZ band (OCR-B model)"`, **`passes: 2`**: its
+first OCR attempt, `plain_band` + OCR-B, at the original orientation. No rotation. Monaco and Oman
+come in because `plain_band` crops *and upscales* the band — so scale is a secondary lever behind
+orientation, not a primary one.
 
 ## What this answers for 1D
 
