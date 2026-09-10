@@ -97,10 +97,10 @@ $ for arm in default band-first control; do
       ./target/release/provider-bench --real-specimens --mrz-only \
       --out artifacts/ocr-order-ab/$arm.json
   done
-$ python artifacts/ocr-order-ab/analyze.py \
+$ python knowledge/benchmarks/ocr-order-ab/analyze.py \
     artifacts/ocr-order-ab/{default,band-first,control}.json
 # pass-distribution / latency: re-run default + band-first with
-# SYNTHPASS_OCR_VERBOSE=1, then artifacts/ocr-order-ab/passes2.py
+# SYNTHPASS_OCR_VERBOSE=1, then knowledge/benchmarks/ocr-order-ab/passes2.py
 ```
 
 Corpus: local `samples/` at 239 specimens (the committed CI baseline pins 238; the local tree
