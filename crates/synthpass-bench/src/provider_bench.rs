@@ -69,15 +69,26 @@ fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
         .sum()
 }
 
-/// One `checksum_failed` real-specimen miss, as written to
-/// `provider-bench-checksum-failed-dump.jsonl` when `run_prepped` is given a
-/// `dump_ocr_dir`. Owned strings throughout — the per-document `read_mrz` it
-/// draws `recovered_mrz_lines` from is a loop local that does not outlive the
-/// iteration. This is a diagnostic artifact, not a hot path.
+/// One in-denominator real-specimen miss (`checksum_failed` or
+/// `no_mrz_found`), as written to `provider-bench-miss-ocr-dump.jsonl` when
+/// `run_prepped` is given a `dump_ocr_dir`. Owned strings throughout — the
+/// per-document `read_mrz` it draws `recovered_mrz_lines` from is a loop
+/// local that does not outlive the iteration. This is a diagnostic artifact,
+/// not a hot path.
+///
+/// For a `no_mrz_found` row `recovered_mrz_lines` and `failing_checks` are
+/// empty and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
+/// matters there is `mrz_band_score` (was a band even found?) and
+/// `raw_ocr_text` (what did the recognizer see?) — the localization-vs-
+/// recognition question `ADR-0008` chunk 1C cell (b) asks.
 #[derive(serde::Serialize)]
-struct ChecksumFailedDump {
+struct MissOcrDump {
     /// Real specimen file stem.
     name: String,
+    /// `"checksum_failed"` or `"no_mrz_found"` — which gate this row is
+    /// under, so a consumer can filter without re-deriving it from the
+    /// other fields.
+    miss_reason: &'static str,
     /// Which reader produced the miss (`"mrz"`, `"llm"`, …).
     provider: String,
     /// Resolved ICAO format for the row, when one is known.
@@ -750,21 +761,23 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
 /// silently diverge in what "correct" or "unsupported" means.
 ///
 /// `dump_ocr_dir`: when `Some`, for every document whose `miss_reason`
-/// resolves to `MissReason::ChecksumFailed`, print — debug-quoted, so a
-/// misread or invisible character shows — the full pre-parse OCR text, the
-/// MRZ band score, and the recovered/repaired MRZ zone with the check
-/// digit(s) that failed; and append one row per such miss to
-/// `<dir>/provider-bench-checksum-failed-dump.jsonl` so the population can be
+/// resolves to `MissReason::ChecksumFailed` or `MissReason::NoMrzFound`,
+/// print — debug-quoted, so a misread or invisible character shows — the
+/// full pre-parse OCR text, the MRZ band score, and (for `checksum_failed`)
+/// the recovered/repaired MRZ zone with the check digit(s) that failed; and
+/// append one row per such miss to
+/// `<dir>/provider-bench-miss-ocr-dump.jsonl` so the population can be
 /// analysed from a file rather than terminal scrollback. Mirrors
 /// `synthpass-bench`'s own `--dump-ocr` (which prints the full OCR text for
-/// *every* synthetic document), but scoped to this one miss kind:
-/// `checksum_failed` is the unambiguous signal (OCR found MRZ-shaped text and
-/// misread a character in it — unlike `no_mrz_found`, which also catches
-/// genuinely MRZ-less documents), and a real-specimen run is large enough
-/// that dumping every hit would be noise a synthetic diagnostic run never has
-/// to contend with. A `*_redacted_mrz` specimen is classified
-/// `MissReason::Redacted` before the checksum gate, so it never reaches this
-/// dump — its zone is a redaction bar, not recoverable OCR material.
+/// *every* synthetic document), but scoped to the two in-denominator miss
+/// kinds. Both are now clean signals: since the 2026-09-09 denominator
+/// correction, `no_mrz_found` means "MRZ expected, none found" — a genuine
+/// detection failure — because the MRZ-less documents that used to pollute
+/// it are scored out as `no_mrz_expected` first. A real-specimen run is
+/// large enough that dumping every *hit* would still be noise a synthetic
+/// diagnostic run never has to contend with. A `*_redacted_mrz` specimen is
+/// classified `MissReason::Redacted` before either gate, so it never reaches
+/// this dump — its zone is a redaction bar, not recoverable OCR material.
 /// `synthpass_bench::CorpusDoc` runs (`run_provider_bench`)
 /// always pass `None` here — `synthpass-bench`'s own `--dump-ocr` already
 /// covers that path. The JSONL carries specimen OCR content and is written
@@ -804,7 +817,7 @@ async fn run_prepped(
     let mut reports = Vec::with_capacity(catalog.readers().len());
     // Accumulated across every provider (each tagged in the row) and written
     // once after the loop — see `dump_ocr_dir` in this fn's doc.
-    let mut dump_rows: Vec<ChecksumFailedDump> = Vec::new();
+    let mut dump_rows: Vec<MissOcrDump> = Vec::new();
     for reader in catalog.readers() {
         let capability = reader.capability();
         let rss_before = measure_memory.then(sample_rss).flatten();
@@ -1068,9 +1081,13 @@ async fn run_prepped(
                     })
             };
 
-            if dump_ocr_dir.is_some()
-                && matches!(miss_reason, Some(MissReason::ChecksumFailed { .. }))
-            {
+            let dump_miss_kind = match &miss_reason {
+                Some(r @ (MissReason::ChecksumFailed { .. } | MissReason::NoMrzFound(_))) => {
+                    Some(miss_kind(r))
+                }
+                _ => None,
+            };
+            if let (Some(_), Some(dump_miss_kind)) = (dump_ocr_dir, dump_miss_kind) {
                 let provider = reader.id().as_str();
 
                 // The full OCR text the provider actually consumed — this is
@@ -1106,12 +1123,13 @@ async fn run_prepped(
                         println!("  failed check digit(s): {}", failing.join(", "));
                         (recovered, failing)
                     }
-                    // read_mrz is None here only if mrz::find_and_parse found no
-                    // candidate at all despite bench_page.mrz_found being true —
-                    // shouldn't happen (both are the same call on the same text),
-                    // but printed rather than silently skipped if it ever does.
+                    // `no_mrz_found`: nothing MRZ-shaped parsed, so there is
+                    // no zone to show — the band score and raw text above are
+                    // the whole story. (Also the "shouldn't happen" case where
+                    // `mrz_found` is true but `find_and_parse` recovered
+                    // nothing — same output, and just as informative.)
                     None => {
-                        println!("  (no parsed MRZ data despite mrz_found)");
+                        println!("  (nothing MRZ-shaped parsed)");
                         (Vec::new(), Vec::new())
                     }
                 };
@@ -1140,8 +1158,9 @@ async fn run_prepped(
                         None => {}
                     }
                 }
-                dump_rows.push(ChecksumFailedDump {
+                dump_rows.push(MissOcrDump {
                     name: bench_page.name.clone(),
+                    miss_reason: dump_miss_kind,
                     provider: provider.to_string(),
                     mrz_format: mrz_format.map(str::to_string),
                     mrz_band_score: bench_page.page.mrz_band_score,
@@ -1309,9 +1328,9 @@ async fn run_prepped(
 
     if let Some(dir) = dump_ocr_dir {
         if dump_rows.is_empty() {
-            println!("no checksum_failed misses to dump");
+            println!("no checksum_failed or no_mrz_found misses to dump");
         } else {
-            let path = dir.join("provider-bench-checksum-failed-dump.jsonl");
+            let path = dir.join("provider-bench-miss-ocr-dump.jsonl");
             let mut body = String::new();
             for row in &dump_rows {
                 body.push_str(&serde_json::to_string(row).expect("serialize dump row"));
@@ -1747,7 +1766,7 @@ mod tests {
         ));
         let _reports = run_prepped(&catalog, &prepped, false, Some(&dir), false).await;
 
-        let path = dir.join("provider-bench-checksum-failed-dump.jsonl");
+        let path = dir.join("provider-bench-miss-ocr-dump.jsonl");
         let dump = std::fs::read_to_string(&path).expect("dump file written");
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -1771,9 +1790,76 @@ mod tests {
             "an unlabelled specimen carries no ground-truth MRZ"
         );
         assert_eq!(
-            row["miss_reason"].as_str().or(Some("checksum_failed")),
-            Some("checksum_failed"),
-            "no label -> plain checksum_failed"
+            row["miss_reason"], "checksum_failed",
+            "the row records which gate it is under"
+        );
+    }
+
+    /// The dump also covers `no_mrz_found` — a genuine detection failure
+    /// since the 2026-09-09 denominator correction (MRZ-less documents are
+    /// scored out as `no_mrz_expected` first). Those rows carry the band
+    /// score and raw OCR text but no recovered zone: nothing MRZ-shaped
+    /// parsed. This is the localization-vs-recognition material for
+    /// `ADR-0008` chunk 1C cell (b).
+    #[tokio::test]
+    async fn dump_ocr_also_writes_a_row_for_a_no_mrz_found_miss() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "UNUSED",
+            evidence: Evidence::default(),
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        // OCR text with nothing MRZ-shaped in it: an MRZ is expected
+        // (`mrz_expected: true`) but none was found.
+        let prepped = vec![Some(BenchPage {
+            name: "no-mrz-found-fixture".to_string(),
+            page: OcrPage {
+                text: "REPUBLIC OF EXAMPLE\nNAME  JANE DOE\n".to_string(),
+                ..OcrPage::default()
+            },
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
+            redacted: false,
+            mrz_expected: true,
+            printed_zone_nonconforming: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+        })];
+
+        let dir = std::env::temp_dir().join(format!(
+            "provider-bench-dump-nomrz-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _reports = run_prepped(&catalog, &prepped, false, Some(&dir), false).await;
+
+        let path = dir.join("provider-bench-miss-ocr-dump.jsonl");
+        let dump = std::fs::read_to_string(&path).expect("dump file written");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let row: serde_json::Value =
+            serde_json::from_str(dump.lines().next().expect("one row")).expect("valid JSON");
+        assert_eq!(row["name"], "no-mrz-found-fixture");
+        assert_eq!(row["miss_reason"], "no_mrz_found");
+        assert!(
+            row["raw_ocr_text"]
+                .as_str()
+                .is_some_and(|t| t.contains("JANE DOE")),
+            "the raw OCR text the recognizer produced is carried"
+        );
+        assert!(
+            row["recovered_mrz_lines"].as_array().unwrap().is_empty()
+                && row["failing_checks"].as_array().unwrap().is_empty(),
+            "nothing MRZ-shaped parsed, so no recovered zone or failing checks"
         );
     }
 

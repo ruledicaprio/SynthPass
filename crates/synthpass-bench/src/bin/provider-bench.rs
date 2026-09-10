@@ -44,7 +44,7 @@
 //!                      miss, print the full pre-parse OCR text, the MRZ band
 //!                      score, and the recovered MRZ zone + failing check
 //!                      digit(s), and append a row per miss to
-//!                      <out-dir>/provider-bench-checksum-failed-dump.jsonl.
+//!                      <out-dir>/provider-bench-miss-ocr-dump.jsonl.
 //!                      The real-specimen equivalent of synthpass-bench's own
 //!                      --dump-ocr, scoped to this one miss kind since a
 //!                      real-specimen run is much larger than a synthetic
@@ -108,17 +108,18 @@ struct Args {
     limit: Option<usize>,
     /// Print the per-document breakdown behind each provider's aggregates.
     verbose: bool,
-    /// With `real_specimens`: for every `checksum_failed` miss, dump the full
-    /// pre-parse OCR text, the MRZ band score, and the recovered MRZ zone +
-    /// failing check digit(s) to stdout, and a row per miss to
-    /// `<out-dir>/provider-bench-checksum-failed-dump.jsonl`. A row for a
-    /// labelled specimen also carries the hand-transcribed true zone and the
-    /// character-mismatch count against it (`zone_mismatch`: `0` → the printed
-    /// zone was read faithfully and its own check digits failed; `> 0` → OCR
-    /// introduced the error). See
+    /// With `real_specimens`: for every `checksum_failed` or `no_mrz_found`
+    /// miss, dump the full pre-parse OCR text and the MRZ band score (and,
+    /// for `checksum_failed`, the recovered MRZ zone + failing check
+    /// digit(s)) to stdout, and a row per miss to
+    /// `<out-dir>/provider-bench-miss-ocr-dump.jsonl`. A `checksum_failed`
+    /// row for a labelled specimen also carries the hand-transcribed true
+    /// zone and the character-mismatch count against it (`zone_mismatch`:
+    /// `0` → the printed zone was read faithfully and its own check digits
+    /// failed; `> 0` → OCR introduced the error). See
     /// `synthpass_bench::provider_bench::run_prepped`'s doc for why this is
-    /// scoped to that one miss kind rather than every document the way
-    /// `synthpass-bench --dump-ocr` is.
+    /// scoped to those two in-denominator miss kinds rather than every
+    /// document the way `synthpass-bench --dump-ocr` is.
     dump_ocr: bool,
     /// Force the per-document progress log on even when stderr is not a
     /// terminal. Progress is *already* on by default for an interactive run
@@ -223,9 +224,10 @@ fn usage() {
          --real-specimens the same way --format is rejected without it."
     );
     eprintln!(
-        "  --dump-ocr         with --real-specimens: for every checksum_failed miss, print the \
-         full pre-parse OCR text + MRZ band score + recovered MRZ zone + failing check digit(s), \
-         and append a row per miss to <out-dir>/provider-bench-checksum-failed-dump.jsonl"
+        "  --dump-ocr         with --real-specimens: for every checksum_failed or no_mrz_found \
+         miss, print the full pre-parse OCR text + MRZ band score (+ recovered MRZ zone + failing \
+         check digit(s) for checksum_failed), and append a row per miss to \
+         <out-dir>/provider-bench-miss-ocr-dump.jsonl"
     );
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \
