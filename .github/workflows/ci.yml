@@ -330,6 +330,27 @@ jobs:
   # Cross-platform proof: `synthpass-ocr` (ocrs/rten) builds and tests here with
   # no system OCR libraries at all — the "zero Docker/Python, genuinely pure
   # Rust" claim, exercised on macOS on every push.
+  #
+  # Scoped to the packages that claim actually covers. A bare `cargo test` here
+  # also built `synthpass-llm` -> `llama-cpp-2` -> a vendored llama.cpp, whose
+  # `cpp-httplib` wants an `OpenSSL::SSL` CMake target. On `macos-latest` that
+  # find_package resolves libcrypto but never creates the SSL imported target,
+  # so the generate step fails:
+  #
+  #   -- Found OpenSSL: /opt/homebrew/Cellar/openssl@3/3.6.3/lib/libcrypto.dylib
+  #   CMake Error at vendor/cpp-httplib/CMakeLists.txt:149 (target_link_libraries):
+  #     Target "cpp-httplib" links to: OpenSSL::SSL but the target was not found.
+  #
+  # It surfaced only intermittently because a warm `rust-cache` skips the build
+  # entirely — so the job passed on PRs that touched Rust and failed on one that
+  # touched nothing but Markdown, which is the wrong way round and cost real
+  # review time to interpret.
+  #
+  # Pinning OpenSSL (OPENSSL_ROOT_DIR) would work too, and is the wrong fix: a
+  # job whose entire point is "no system libraries are needed" should not be
+  # linking a C++ HTTP client against system TLS to prove it. Nothing is lost by
+  # scoping — the `rust` job above runs `cargo test --workspace` on Linux, so
+  # `synthpass-llm` and the full graph stay covered on every push.
   rust-portable:
     name: Rust (${{ matrix.os }}, default members)
     strategy:
@@ -340,11 +361,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Still required, and not by anything to do with OCR: `synthpass-ocr`
+      # pulls `reqwest` (model download) -> `rustls` -> `aws-lc-rs` ->
+      # `aws-lc-sys`, which has a build-dependency on `cmake`. Verified with
+      # `cargo tree -p synthpass-ocr -i cmake` rather than assumed — the first
+      # draft of this comment claimed the scoped set no longer needed cmake,
+      # which was wrong. `aws-lc-sys` vendors its own crypto, so it needs a C
+      # compiler and cmake but no system OpenSSL, which is why it builds here
+      # and the llama.cpp path did not.
       - name: Install cmake
         run: brew install cmake
       - uses: Swatinem/rust-cache@v2
-      - name: Test default members (includes synthpass-ocr)
-        run: cargo test
+      - name: Test the pure-Rust OCR path
+        run: >
+          cargo test
+          -p synthpass-ocr
+          -p synthpass-imageprep
+          -p synthpass-core
+          -p mrz
 
   # Real-model native LLM checks: downloads the ~1 GB GGUF, so this is opt-in
   # (workflow_dispatch) rather than on every push/PR: the e2e smoke test plus
