@@ -412,6 +412,88 @@ Beyond M6 and M7, and deliberately not committed:
 - **Statistical dataset characterisation** — tooling to describe and diff generated corpora.
 - **Distributed generation** — parallel factory runs for very large dataset builds.
 
+### Generator variety — the axes, and what each one is for
+
+The generator is the moat ([`VISION.md`](VISION.md) §1–2): the loop is generate → label →
+benchmark → recognise → repeat, and a turn of that loop is only worth taking if the new images
+arrive with ground truth something in the pipeline can be scored against. So the ordering rule
+below is not *how much variety does this add* but **which currently-unmeasured stage does this
+create a deterministic oracle for**. An axis that produces more pixels without a label that can
+fail a test belongs at the bottom of the list.
+
+Nothing here is committed, and nothing here is licensed by
+[`ADR-0009`](decisions/ADR-0009-generator-as-a-service.md) — read it first, because it already
+priced the expensive half of this list.
+
+**1. Degradation and damage profiles — first, because the handlers exist and the coverage does
+not.** Page-orientation handling shipped in the ADR-0008 detection track, and a skew estimator
+follows it; their entire evidence base is a 155-document A/B over real specimens, and the
+synthetic corpus exercises neither. A generator that applies a *known* transform is strictly
+better evidence than a corpus we happened to collect, because the ground truth then includes the
+transform itself:
+
+- **Rotation at a known quarter-turn, and tilt at a known angle.** The angle is the oracle: a
+  skew estimate can be scored as a regression against truth instead of pass/fail on whether the
+  MRZ happened to read.
+- **MRZ damage that is still partially recoverable** — missing characters, a line cut in half, a
+  scissor cut across a corner, a torn or trimmed edge. Each has an exact expected outcome: which
+  check digits survive and which fields degrade, rather than a guess about whether OCR copes.
+- **Redaction and censoring bars.** This closes a loop the benchmark currently only *observes*:
+  `redacted_mrz` is an off-denominator bucket of 36 real specimens, and nothing generates that
+  population, so correct-refusal behaviour is tested only by what we happened to collect.
+- **Wear, fading, stains, glare, shadow, perspective and compression artifacts** — capture
+  realism, and the likeliest home of the browser-vs-native divergence
+  ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) that is currently unexplained.
+
+These are also cheap to score, so they belong in the synthetic corpus the fast Tier-1 hit-rate
+job already runs — not in the real-specimen gate, whose cost problem is a separate track.
+
+**2. Name, locality and transliteration realism — second, because MRZ name encoding is a
+documented source of real defects.** Fictional identities are infinite; the interesting part is
+not the names but the **encoding rules they stress** — Doc 9303 truncation of long composite
+names, the `<` filler, apostrophes and hyphens, and transliteration of non-Latin scripts (the
+Cyrillic work in M6 is the precedent). Region-weighted forename and surname distributions make
+those cases arise naturally instead of being hand-picked, which is the difference between a
+fixture and a population.
+
+One constraint, before anyone scrapes: **name-frequency data needs a source whose licence permits
+redistribution.** A site's displayed statistics usually are not redistributable, and a corpus this
+repo ships has to be as licence-clean as its code — the constraint that decided ADR-0009, applied
+to data instead of templates.
+
+**3. Machine-readable carriers beyond the MRZ — third, and generation should lead decoding.**
+AAMVA PDF417 and ISO 18013 mDL are scoped in "Beyond ICAO 9303" below; QR sits alongside them.
+Worth stating the order explicitly: generating a carrier is far cheaper than decoding one, and a
+generator hands the future decoder a labelled corpus on its first day. RFID/chip content is a
+different kind of thing again — a signed data structure rather than ink (Part 11), closer to mDL
+than to anything printed.
+
+**4. Country-accurate templates and security marks — gated, and the gate is already written.**
+ADR-0009's finding stands: **MIT, publicly distributed, and country-accurate are mutually
+incompatible — pick two.** Security features (guilloche, microprint, OVI, UV) add a second
+constraint that licensing does not address: a generic, overtly synthetic specimen that exercises
+texture suppression is a test fixture, whereas a convincing reproduction of a specific country's
+actual security design is something else regardless of how it is licensed. The usable form of
+this axis is therefore **generic** security-like texture — enough to stress the preprocessing
+path that already exists behind `SYNTHPASS_OCR_TEXTURE`, on specimens that stay overtly marked
+as synthetic.
+
+**5. Portrait regions — last, and deliberately narrow.** What the pipeline needs from a portrait
+is **geometry**: a region with a known bounding box, so layout detection and the COCO/YOLO export
+blocked on geometry labels ([`ADR-0007`](decisions/ADR-0007-dataset-export-format.md)) finally
+have something to be scored against. A stylised, non-photoreal sketch delivers exactly that, and
+varying pose, framing and tone delivers robustness. Going further — photoreal faces with
+demographic attribute controls — stops being a labelling tool and becomes a synthetic-face
+dataset: a different product, with different obligations, sitting close enough to
+[`VISION.md`](VISION.md)'s biometrics non-goal that it needs its own decision record rather than a
+roadmap bullet. Generation is not recognition, and nothing here reopens that non-goal: no face
+recognition, matching or liveness, at any point.
+
+**The ordering, stated once:** damage first (the handlers exist, the coverage does not), names
+second (the encoding rules bite), carriers third (generation precedes decoding), templates and
+security marks fourth (gated by ADR-0009), portraits last and narrow. Every axis ships with the
+oracle that scores it, or it does not ship.
+
 ### Beyond ICAO 9303
 
 Everything above stays inside Doc 9303's scope (passports, visas, TD1/TD2 official travel
