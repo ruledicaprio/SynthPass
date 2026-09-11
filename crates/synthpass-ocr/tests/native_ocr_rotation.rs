@@ -144,6 +144,84 @@ fn native_ocr_reads_the_genuinely_sideways_specimens() {
     }
 }
 
+/// The upright documents ADR-0008 chunk 2 recovered must keep reading — and
+/// keep reading **at 0°**.
+///
+/// Each of these was a real-specimen miss on the CI gate report before chunk 2
+/// and a hit after it (per-document diff, 2026-09-10 → 2026-09-12: fifteen
+/// flips, every one toward HIT). Ten are the documents `choose_rotation` used to
+/// turn 90° on too little detected text, after which every crop presented the
+/// MRZ sideways; India 2022 is the band the second deskew angle recovers.
+///
+/// Why name them when the real-specimen gate already asserts the hit count: that
+/// gate compares **totals**, so a change that loses one of these and gains any
+/// other document passes it at tolerance 0. This test does not.
+///
+/// `rotation == 0` is asserted alongside validity because the regression this
+/// guards against is specifically a page being turned before it is read. A
+/// quarter-turn tier that happened to recover one of these sideways would pass
+/// a validity-only check while reintroducing exactly the behaviour chunk 2
+/// removed. Failures are collected rather than stopping at the first, since a
+/// change to orientation handling rarely costs just one document.
+#[test]
+#[ignore]
+fn native_ocr_keeps_reading_the_upright_specimens_chunk_2_recovered() {
+    if !has_the_retry_budget_these_tests_need() {
+        return;
+    }
+    let (detection_path, recognition_path) = require_models();
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
+
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for name in [
+        "Canada_Passport_Specimen_PP_CAN_2023_mrz.jpeg",
+        "Dominican_Republic_Passport_Specimen_P0_DOM_2020_mrz.png",
+        "Finland_Passport_Specimen_P0_FIN_2007_mrz.jpg",
+        "Finland_Passport_Specimen_P0_FIN_2023_mrz.png",
+        "India_Passport_Specimen_P0_IND_2022_mrz.png",
+        "India_Passport_Specimen_P0_IND_2024_mrz.jpg",
+        "Kuwait_Passport_Specimen_P0_KWT_2023_mrz.png",
+        "Monaco_ID_Specimen_XXXX_back_mrz.png",
+        "Nepal_Passport_Specimen_P0_NPL_2019_mrz.png",
+        "Oman_Passport_Specimen_P0_OMN_2004_mrz.jpg",
+        "Portugal_Passport_Specimen_PX_PRT_2017_mrz.png",
+        "Russian_Federation_Passport_Specimen_P0_RUS_2014_mrz.jpg",
+        "Vietnam_Passport_Specimen_P0_VNM_2023_mrz.webp",
+    ] {
+        let Some(path) = find_sample(name) else {
+            eprintln!("SKIPPED {name}: not present — run scripts/sync-samples.ps1 for the corpus");
+            continue;
+        };
+        let page = ocr
+            .recognize_detailed(&path)
+            .unwrap_or_else(|e| panic!("{name}: recognition failed: {e}"));
+
+        let valid = mrz::find_and_parse(&page.text).is_ok_and(|d| d.valid());
+        if !valid || page.rotation != 0 {
+            failures.push(format!(
+                "{name}: checksum-valid MRZ = {valid}, reported rotation = {}°",
+                page.rotation
+            ));
+        }
+        checked += 1;
+    }
+
+    assert!(
+        failures.is_empty(),
+        "{} of {checked} upright specimens recovered by ADR-0008 chunk 2 no longer read upright:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+    if checked == 0 {
+        eprintln!(
+            "SKIPPED: none of the upright chunk-2 specimens are present locally. This test asserts \
+             nothing without the corpus — that is deliberate, but it means a green run here is \
+             not evidence."
+        );
+    }
+}
+
 /// A page handed to the engine a quarter-turn off must come back with the same
 /// MRZ fragment as the upright original, and must say how far it turned it.
 ///

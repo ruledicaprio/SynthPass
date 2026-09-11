@@ -1037,9 +1037,9 @@ fn orientation_signal(engine: &OcrsEngine, image: &RgbImage) -> Result<Orientati
 
 /// Rotate `image` clockwise by `angle` degrees (must be 0/90/180/270 — any
 /// other value is treated as a no-op copy). Lossless pixel rotation via the
-/// `image` crate (no new dependency): exact for right angles, unlike
-/// `preprocess::deskew`'s bilinear arbitrary-angle rotation for small-tilt
-/// correction.
+/// `image` crate (no new dependency): exact for right angles, unlike the MRZ
+/// band deskew inside `preprocess::mrz_variants_with`, which is a bilinear
+/// arbitrary-angle rotation for small-tilt correction.
 fn rotate_image(image: &RgbImage, angle: u16) -> RgbImage {
     match angle {
         90 => image::imageops::rotate90(image),
