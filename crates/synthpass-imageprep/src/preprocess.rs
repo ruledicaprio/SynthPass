@@ -97,7 +97,8 @@ const TEXTURE_MEDIAN_MIN_RADIUS: u32 = 1;
 /// It also bounds [`median_filter`]'s stack buffer at `(2*3+1)^2 = 49`.
 const TEXTURE_MEDIAN_MAX_RADIUS: u32 = 3;
 
-/// Skew angles (degrees) probed by [`deskew`]. A handheld-photo tilt is a
+/// Skew angles (degrees) probed by [`skew_angle`] under [`SkewMode::Legacy`].
+/// A handheld-photo tilt is a
 /// few degrees, not a right angle — `ocrs`'s own detector already tolerates
 /// larger rotations via its `RotatedRect` output; this variant targets the
 /// smaller tilt that smears row projections just enough to fragment MRZ
@@ -106,11 +107,26 @@ const DESKEW_CANDIDATES_DEG: [f64; 17] = [
     -8.0, -7.0, -6.0, -5.0, -4.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
 ];
 
-/// Longest side (px) a probe image is downscaled to before testing
-/// [`DESKEW_CANDIDATES_DEG`] — the angle search only needs the row-density
-/// profile's shape, not full resolution, and this keeps 17 rotate-and-score
-/// passes cheap.
+/// Longest side (px) a probe image is downscaled to before the skew search —
+/// the angle search only needs the row-density profile's shape, not full
+/// resolution. It kept the legacy 17 rotate-and-score passes cheap; it now
+/// bounds how many dark pixels [`estimate_skew_deg`] sweeps per angle.
 const DESKEW_PROBE_MAX_DIM: u32 = 400;
+
+/// Half-width of [`estimate_skew_deg`]'s search, in degrees.
+///
+/// Wider than the legacy ±8° because the estimator no longer pays a resample
+/// per angle: the cost of an extra candidate is one multiply-add per dark
+/// pixel, so the range is set by what a handheld photo plausibly does rather
+/// than by what the search could afford. Beyond ~10° the tilt stops being skew
+/// and becomes orientation, which is `synthpass-ocr`'s quarter-turn problem
+/// (ADR-0008 chunk 2, layer 1), not this function's.
+const SKEW_SEARCH_LIMIT_DEG: f64 = 10.0;
+
+/// Angular resolution of [`estimate_skew_deg`]'s search, in degrees. Finer
+/// than the legacy 1° for the same reason the range is wider — see
+/// [`SKEW_SEARCH_LIMIT_DEG`].
+const SKEW_SEARCH_STEP_DEG: f64 = 0.5;
 
 /// The ordered preprocessing variants for the MRZ retry passes. Callers run
 /// OCR over each until the checksum oracle validates.
@@ -127,6 +143,17 @@ const DESKEW_PROBE_MAX_DIM: u32 = 400;
 /// displace or starve one that already worked — the same "retries are
 /// additive-only" contract the module upholds upstream.
 pub fn mrz_variants(image: &RgbImage, filter: UpscaleFilter) -> Vec<RgbImage> {
+    mrz_variants_with(image, filter, SkewMode::default())
+}
+
+/// [`mrz_variants`], with the skew estimator selectable.
+///
+/// Additive rather than a signature change: `mrz_variants`' three call sites
+/// include `mrz-wasm`, and widening the shared entry point would drag a
+/// measurement seam into the browser demo's public API for the benefit of one
+/// native A/B. Callers that have no opinion keep calling `mrz_variants` and get
+/// [`SkewMode::Default`].
+pub fn mrz_variants_with(image: &RgbImage, filter: UpscaleFilter, skew: SkewMode) -> Vec<RgbImage> {
     let blind = bottom_band(image);
 
     // Blind bottom-band crop first, in the original order: the two band
@@ -155,11 +182,40 @@ pub fn mrz_variants(image: &RgbImage, filter: UpscaleFilter) -> Vec<RgbImage> {
             BAND_MIN_WIDTH,
             filter,
         )));
+
+        // The deskewed band, trailing. Under `SkewMode::Default` this emits
+        // **both** estimators' angles rather than choosing between them, because
+        // measurement said choosing loses documents either way: over the
+        // 254-specimen corpus the estimator alone scores +1/-1 against the
+        // legacy search — it recovers an India passport whose band is tilted
+        // ~1.5° with a strong signal, and loses a 232x146 Swiss ID card back
+        // whose 232x57 band is so nearly information-free that the variance
+        // objective is flat and correctly declines to rotate, where the legacy
+        // contrast score does rotate and does read. Neither estimator is wrong;
+        // they optimise different objectives on an input that barely has one.
+        //
+        // Running both is cheap where it matters: the retry chain breaks on the
+        // first checksum-valid MRZ, so the second angle costs an extra OCR pass
+        // only on a document that was going to run the whole chain anyway, and
+        // the angles are compared *before* the second rotation, so a clean
+        // upright band — where both answer 0.0 — builds no duplicate at all.
+        let gray = to_gray(&isolated);
+        let primary = skew_angle(&gray, skew);
         variants.push(contrast_stretched(&upscale_to_width(
-            &deskew(&isolated),
+            &deskew_by(&isolated, primary),
             BAND_MIN_WIDTH,
             filter,
         )));
+        if skew == SkewMode::Default {
+            let fallback = skew_angle(&gray, SkewMode::Legacy);
+            if fallback != primary {
+                variants.push(contrast_stretched(&upscale_to_width(
+                    &deskew_by(&isolated, fallback),
+                    BAND_MIN_WIDTH,
+                    filter,
+                )));
+            }
+        }
     }
     variants
 }
@@ -671,27 +727,158 @@ impl Integral {
     }
 }
 
-/// Deskew by the rotation angle (from [`DESKEW_CANDIDATES_DEG`]) that
-/// maximizes horizontal row-density variance: text rows align into sharp
-/// density peaks when level, and skew smears them into a flatter profile.
-/// Pure-Rust bilinear rotation around the image center — no `imageproc`
-/// dependency.
-fn deskew(image: &RgbImage) -> RgbImage {
-    let gray = to_gray(image);
-    let probe = downscale_longest_side(&gray, DESKEW_PROBE_MAX_DIM);
-    let best = DESKEW_CANDIDATES_DEG
-        .iter()
-        .copied()
-        .max_by(|&a, &b| {
-            let ca = projection_contrast(&rotate_gray(&probe, a));
-            let cb = projection_contrast(&rotate_gray(&probe, b));
-            ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .unwrap_or(0.0);
-    if best == 0.0 {
+/// How the skew angle is estimated. Passed in rather than read from an
+/// environment variable, because this crate has **no** `std::env` reads and
+/// that is load-bearing: it is what keeps the crate deterministic and
+/// `wasm32`-clean so the browser demo runs this exact code. An env toggle here
+/// would silently always take the default under `wasm32` and let the browser
+/// and native paths diverge invisibly.
+///
+/// Same reasoning as [`UpscaleFilter`], stated at its definition: a caller's
+/// choice belongs at the call site, not in a default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SkewMode {
+    /// [`estimate_skew_deg`] — one estimation pass, no per-angle resampling —
+    /// **and**, when the two estimators disagree about the band, the legacy
+    /// angle appended as one further trailing variant.
+    ///
+    /// It emits both because measurement said choosing loses documents in both
+    /// directions; [`mrz_variants_with`] carries the evidence and the reason the
+    /// extra pass is nearly free. This is the shipped path, so its worst case is
+    /// what the caller's retry budget has to cover — one variant more than the
+    /// arms below.
+    #[default]
+    Default,
+    /// The pre-ADR-0008 search on its own: rotate the probe once per candidate
+    /// angle in [`DESKEW_CANDIDATES_DEG`] and keep the best-scoring. Retained as
+    /// the A/B baseline — it is what [`SkewMode::Default`] is measured against,
+    /// and it never appends a second angle.
+    Legacy,
+}
+
+/// Estimate the skew of `gray` in degrees, **without rotating it once**.
+///
+/// The legacy search resampled the probe 17 times — once per candidate angle —
+/// to ask a question that never needed a rotated image. Rotating a point by θ
+/// and projecting onto the vertical axis is the same arithmetic as projecting
+/// the *original* point onto an axis tilted by θ, and the second form is one
+/// multiply-add per dark pixel with no interpolation, no allocation, and no
+/// resampling loss. The estimate is therefore both cheaper and finer: 0.5°
+/// steps across ±10°, against the old 1° steps across ±8°.
+///
+/// **Why the maximum is the answer.** For text tilted by `t`, points on one
+/// line satisfy `y ≈ y0 + x·tan t`. Their projection at angle θ is
+/// `y0·cos θ + x·(sin θ + tan t·cos θ)`, so every point on the line lands in
+/// one bin exactly when `tan θ = -tan t`, i.e. `θ = -t`. At that angle the
+/// histogram collapses into sharp line/gap peaks and its variance peaks with
+/// it; at any other angle the line smears across bins. So the arg-max is
+/// already the *correction* angle, directly usable as [`rotate_rgb`]'s
+/// argument — no sign flip at the call site, which is exactly the kind of
+/// detail that is wrong half the time when it is left implicit.
+///
+/// Ties and flat profiles resolve to `0.0`: the search is seeded with 0°'s own
+/// score and only a **strict** improvement displaces it, so a page with no
+/// usable line structure is left alone rather than nudged by noise. Same bias
+/// as every other orientation decision in this project.
+pub fn estimate_skew_deg(gray: &GrayImage) -> f64 {
+    let probe = downscale_longest_side(gray, DESKEW_PROBE_MAX_DIM);
+    let (w, h) = probe.dimensions();
+    if w == 0 || h == 0 {
+        return 0.0;
+    }
+    let threshold = otsu_threshold(&probe);
+    let dark: Vec<(f64, f64)> = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| probe.get_pixel(x, y)[0] <= threshold)
+        .map(|(x, y)| (f64::from(x), f64::from(y)))
+        .collect();
+    if dark.is_empty() {
+        return 0.0;
+    }
+
+    // One fixed bin array for every angle, so the variances are comparable:
+    // a bin count that changed with θ would make the score depend on the
+    // grid as well as on the alignment.
+    let max_shift = (f64::from(w) * SKEW_SEARCH_LIMIT_DEG.to_radians().sin()).ceil();
+    let offset = max_shift.max(0.0);
+    let bins = (f64::from(h) + 2.0 * offset).ceil() as usize + 1;
+    let mut histogram = vec![0f64; bins];
+
+    let score_at = |theta: f64, histogram: &mut Vec<f64>| -> f64 {
+        histogram.iter_mut().for_each(|b| *b = 0.0);
+        let (sin_t, cos_t) = theta.to_radians().sin_cos();
+        for &(x, y) in &dark {
+            let bin = (x * sin_t + y * cos_t + offset).round();
+            if bin >= 0.0 {
+                let bin = bin as usize;
+                if bin < histogram.len() {
+                    histogram[bin] += 1.0;
+                }
+            }
+        }
+        let n = histogram.len() as f64;
+        let mean = histogram.iter().sum::<f64>() / n;
+        histogram.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / n
+    };
+
+    let mut best_theta = 0.0;
+    let mut best_score = score_at(0.0, &mut histogram);
+    let steps = (2.0 * SKEW_SEARCH_LIMIT_DEG / SKEW_SEARCH_STEP_DEG).round() as i32;
+    for step in 0..=steps {
+        let theta = -SKEW_SEARCH_LIMIT_DEG + f64::from(step) * SKEW_SEARCH_STEP_DEG;
+        if theta == 0.0 {
+            continue;
+        }
+        let score = score_at(theta, &mut histogram);
+        if score > best_score {
+            best_score = score;
+            best_theta = theta;
+        }
+    }
+    best_theta
+}
+
+/// Deskew by the angle that maximizes horizontal row-density variance: text
+/// rows align into sharp density peaks when level, and skew smears them into a
+/// flatter profile. Pure-Rust bilinear rotation around the image center — no
+/// `imageproc` dependency.
+///
+/// Under [`SkewMode::Default`] the angle comes from [`estimate_skew_deg`] and
+/// the image is resampled **once**, at the end, or not at all. Under
+/// [`SkewMode::Legacy`] the pre-ADR-0008 search runs, resampling the probe once
+/// per candidate angle.
+/// The angle, in degrees, that `mode` would correct `gray` by.
+///
+/// Kept separate from [`deskew_by`] so a caller can ask whether two modes
+/// *agree* before
+/// paying for a second rotation and a second OCR pass. That question is the
+/// whole reason [`mrz_variants_with`] can afford to run both estimators: on a
+/// clean upright scan they both answer `0.0`, and the duplicate variant is never
+/// built.
+fn skew_angle(gray: &GrayImage, mode: SkewMode) -> f64 {
+    match mode {
+        SkewMode::Default => estimate_skew_deg(gray),
+        SkewMode::Legacy => {
+            let probe = downscale_longest_side(gray, DESKEW_PROBE_MAX_DIM);
+            DESKEW_CANDIDATES_DEG
+                .iter()
+                .copied()
+                .max_by(|&a, &b| {
+                    let ca = projection_contrast(&rotate_gray(&probe, a));
+                    let cb = projection_contrast(&rotate_gray(&probe, b));
+                    ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or(0.0)
+        }
+    }
+}
+
+/// Rotate by a known angle, skipping the resample entirely at `0.0`.
+fn deskew_by(image: &RgbImage, angle: f64) -> RgbImage {
+    if angle == 0.0 {
         image.clone()
     } else {
-        rotate_rgb(image, best)
+        rotate_rgb(image, angle)
     }
 }
 
@@ -1167,8 +1354,65 @@ mod tests {
     #[test]
     fn deskew_is_a_noop_within_tolerance_for_already_level_text() {
         let img = image_with_bottom_stripes(300, 150, 2, 10, 5);
-        let out = deskew(&img);
-        assert_eq!(out.dimensions(), img.dimensions());
+        let gray = to_gray(&img);
+        for mode in [SkewMode::Default, SkewMode::Legacy] {
+            // Level text must estimate *exactly* 0.0. That is a stronger claim
+            // than the dimensions coming back unchanged, and it is the one the
+            // name makes: `deskew_by` skips the resample entirely at 0.0, so a
+            // zero estimate is what makes this a no-op rather than a
+            // round-trip. It is also the property both callers rely on —
+            // `mrz_variants_with` compares the two modes' angles to decide
+            // whether a second variant is worth building, and on level text
+            // they must agree here or every clean scan pays a duplicate pass.
+            let angle = skew_angle(&gray, mode);
+            assert_eq!(angle, 0.0, "{mode:?}");
+            assert_eq!(
+                deskew_by(&img, angle).dimensions(),
+                img.dimensions(),
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// The estimator must return the angle that **undoes** the tilt, so it can
+    /// be handed straight to `rotate_rgb` with no sign flip at the call site.
+    ///
+    /// Asserted against a known-tilted fixture rather than against the
+    /// derivation in `estimate_skew_deg`'s doc comment, because a sign error is
+    /// exactly the kind of mistake that survives a convincing paragraph. Rotate
+    /// level text by `t` and the estimate must come back at `-t`.
+    #[test]
+    fn estimate_skew_recovers_a_known_tilt_with_the_sign_that_undoes_it() {
+        let level = image_with_bottom_stripes(360, 260, 6, 9, 11);
+        for tilt in [-7.0, -3.0, -1.0, 1.0, 3.0, 7.0] {
+            let tilted = rotate_rgb(&level, tilt);
+            let estimate = estimate_skew_deg(&to_gray(&tilted));
+            assert!(
+                (estimate - (-tilt)).abs() <= 0.75,
+                "a {tilt}° tilt should estimate as {:.1}° (the correction), got {estimate:.1}°",
+                -tilt
+            );
+        }
+    }
+
+    /// Already-level text must estimate as flat, or `deskew` would resample a
+    /// page that needed nothing — the resample this whole layer exists to avoid.
+    #[test]
+    fn estimate_skew_is_zero_for_level_text() {
+        let level = image_with_bottom_stripes(360, 260, 6, 9, 11);
+        let estimate = estimate_skew_deg(&to_gray(&level));
+        assert!(
+            estimate.abs() <= 0.5,
+            "level text should estimate at ~0°, got {estimate:.2}°"
+        );
+    }
+
+    /// A page with nothing on it carries no line structure, so the only honest
+    /// answer is "no rotation" — not whichever angle noise happened to win.
+    #[test]
+    fn estimate_skew_is_zero_on_a_blank_page() {
+        assert_eq!(estimate_skew_deg(&to_gray(&solid(120, 90, 255))), 0.0);
+        assert_eq!(estimate_skew_deg(&to_gray(&solid(120, 90, 0))), 0.0);
     }
 
     #[test]

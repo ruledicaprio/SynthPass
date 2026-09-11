@@ -105,15 +105,17 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 
 /// Default `SYNTHPASS_OCR_MAX_PASSES` ceiling on total OCR passes per document
 /// (the general pass plus retry variants) when the env var is unset or
-/// invalid. `preprocess::mrz_variants` yields at most 6 variants (two
-/// blind-crop, one full-page, three trailing isolated-band),
+/// invalid. `preprocess::mrz_variants` yields at most 7 variants (two
+/// blind-crop, one full-page, four trailing isolated-band — the fourth being
+/// the second deskew angle `preprocess::SkewMode::Default` appends when the two
+/// estimators disagree about the band),
 /// `preprocess::geometry_band_variants` appends at most 2 more (trailing
 /// again, and only when the geometry-detected band differs from the blind
 /// crop), two texture-suppression passes trail all of those when
 /// `SYNTHPASS_OCR_TEXTURE` enables them, and two quarter-turn band crops trail
 /// even those under [`RotateMode::Default`], so the worst case is
-/// 6 + 2 + 2 + 2 = [`MAX_RETRY_VARIANTS`] retry variants plus the general
-/// pass: **13**.
+/// 7 + 2 + 2 + 2 = [`MAX_RETRY_VARIANTS`] retry variants plus the general
+/// pass: **14**.
 /// Note the retry loop seeds its counter at 1
 /// for the *first* variant and breaks on `passes_run >= max_passes`, so the
 /// number of variants that can actually run is `max_passes - 1` — an
@@ -127,7 +129,7 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// budget is what actually bounds a pathological document.
 const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 
-/// Worst-case number of retry variants: `preprocess::mrz_variants`'s 6, plus
+/// Worst-case number of retry variants: `preprocess::mrz_variants`'s 7, plus
 /// `preprocess::geometry_band_variants`'s 2, plus the 2 trailing
 /// texture-suppression passes ([`TextureMode::On`] emits `plain_band` *and*
 /// `preprocess::texture_variants`, measured to recover different miss classes;
@@ -137,14 +139,15 @@ const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 /// [`ROTATION_RETRY_TURNS`]).
 ///
 /// This is the ceiling across every env arm, not the count any single arm
-/// produces: `RotateMode::Legacy` and `Off` emit 10, and the 2 spare passes in
-/// their budget simply go unused — the loop runs out of variants before it runs
-/// out of budget. A ceiling that covers the worst arm is the only value that
-/// cannot silently truncate one of them.
+/// produces: `RotateMode::Legacy` and `Off` emit 10, `preprocess::SkewMode::Legacy`
+/// emits one fewer than `Default`, and the spare passes in those budgets simply go
+/// unused — the loop runs out of variants before it runs out of budget. A ceiling
+/// that covers the worst arm is the only value that cannot silently truncate one
+/// of them.
 ///
 /// Single-sourced with [`DEFAULT_MAX_PASSES`] above so the budget and the
 /// variant count cannot drift apart silently — see that constant's doc comment.
-const MAX_RETRY_VARIANTS: usize = 12;
+const MAX_RETRY_VARIANTS: usize = 13;
 
 /// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock ceiling on the whole
 /// `recognize` call when the env var is unset or invalid. Measured
@@ -503,7 +506,8 @@ impl NativeOcr {
             }
         })
         .flatten();
-        let mut mrz_variants_list = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER);
+        let mut mrz_variants_list =
+            preprocess::mrz_variants_with(&image, NATIVE_UPSCALE_FILTER, skew_mode());
         // `OcrOrder::Control`'s reorder: swap the two blind-crop variants
         // (contrast-stretched, binarized) that neither `BandFirst` nor any
         // other hypothesis here expects to matter individually — see
@@ -1321,6 +1325,31 @@ fn rotate_mode() -> RotateMode {
     }
 }
 
+/// `SYNTHPASS_OCR_SKEW` — `default` or `legacy`, defaulting to
+/// [`preprocess::SkewMode::Default`] (ADR-0008 chunk 2, layer 2).
+///
+/// `default` estimates the skew angle in one pass over the probe's dark pixels
+/// and resamples at most once; `legacy` is the pre-chunk-2 search that rotated
+/// the probe once per candidate angle. The arm lives here, and not in
+/// `synthpass-imageprep`, because that crate has no `std::env` reads at all —
+/// a property that keeps it deterministic and `wasm32`-clean so the browser
+/// demo runs the same code. An env toggle there would always read the default
+/// under `wasm32` and let the two paths diverge without anyone noticing.
+///
+/// Unrecognised values fall back to the default, matching every other knob in
+/// this module.
+fn skew_mode() -> preprocess::SkewMode {
+    match std::env::var("SYNTHPASS_OCR_SKEW")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "legacy" => preprocess::SkewMode::Legacy,
+        _ => preprocess::SkewMode::Default,
+    }
+}
+
 /// `SYNTHPASS_OCR_DUMP_VARIANTS` — when set to a non-empty path, every
 /// preprocessed image [`NativeOcr::recognize_detailed`] hands the recognizer
 /// (the general full-page pass and each retry variant that actually runs) is
@@ -1672,13 +1701,39 @@ mod tests {
         // Two MRZ-like dark stripes tight against the bottom, isolated from
         // blank margin above — the same shape `preprocess.rs`'s own
         // isolation test uses to trigger the trailing isolated-band
-        // variants.
+        // variants — but tilted by a **half-integer** angle.
+        //
+        // The tilt is what makes this the worst case rather than merely a
+        // heavy one. `SkewMode::Default` appends a second deskew angle only
+        // when the two estimators disagree about the band, and they cannot
+        // disagree on an axis-aligned fixture: both answer 0.0, the seventh
+        // variant is never built, and a budget regression would hide in the
+        // gap. A half-integer tilt is the cheapest way to force disagreement,
+        // because the legacy search only offers integer degrees
+        // (`DESKEW_CANDIDATES_DEG`) while the estimator resolves 0.5° steps.
+        //
+        // It has to stay *small*, which is the non-obvious part: the fixture
+        // needs row-density isolation to fire as well, and isolation is what a
+        // tilt destroys first. At 1.5° the stripes drift ~10px across 400px —
+        // a full stripe height — smearing the row histogram until the band
+        // search finds nothing confident and falls back to the blind crop,
+        // collapsing this fixture from seven variants to three. 0.5° drifts
+        // ~3.5px: enough for the estimators to disagree, little enough that the
+        // band is still a band.
+        const TILT_DEG: f64 = 0.5;
+        let slope = TILT_DEG.to_radians().tan();
         for line in 0..2u32 {
             let y0 = 300 - (2 * 10 + 4) + line * 14;
-            for y in y0..y0 + 10 {
-                for x in 0..400u32 {
-                    if x % 3 != 0 {
-                        image.put_pixel(x, y, image::Rgb([10, 10, 10]));
+            for x in 0..400u32 {
+                if x % 3 == 0 {
+                    continue;
+                }
+                let drift = (f64::from(x) * slope).round() as i64;
+                for y in y0..y0 + 10 {
+                    let y = i64::from(y) - drift;
+                    if (0..300).contains(&y) {
+                        #[allow(clippy::cast_sign_loss)] // guarded by the range check
+                        image.put_pixel(x, y as u32, image::Rgb([10, 10, 10]));
                     }
                 }
             }
@@ -1686,8 +1741,9 @@ mod tests {
         let blind = preprocess::mrz_variants(&image, NATIVE_UPSCALE_FILTER);
         assert_eq!(
             blind.len(),
-            6,
-            "fixture should trigger row-density isolation (2 blind-crop + 1 full-page + 3 isolated)"
+            7,
+            "fixture should trigger row-density isolation and a disagreeing second deskew angle \
+             (2 blind-crop + 1 full-page + 4 isolated)"
         );
 
         // Far from the blind bottom-45% crop (top ~165 for this 300px-tall
@@ -1899,6 +1955,29 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
+    }
+
+    #[test]
+    fn skew_mode_defaults_to_default_and_parses_both_arms() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
+        assert_eq!(
+            skew_mode(),
+            preprocess::SkewMode::Default,
+            "unset must be the estimator, not the search it replaced"
+        );
+
+        for (raw, expected) in [
+            ("default", preprocess::SkewMode::Default),
+            ("  LEGACY  ", preprocess::SkewMode::Legacy),
+            ("legacy", preprocess::SkewMode::Legacy),
+            ("legacyy", preprocess::SkewMode::Default),
+            ("", preprocess::SkewMode::Default),
+        ] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_SKEW", raw) };
+            assert_eq!(skew_mode(), expected, "parsing {raw:?}");
+        }
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
     }
 
     #[test]
