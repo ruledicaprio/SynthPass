@@ -6,6 +6,16 @@ target/
 .claude/*
 !.claude/skills/
 
+# Local, machine-only strategic intent (intent/intent.md) — the AI-maintained
+# compass for product direction and commercial intent, subordinate to every
+# tracked document. Deliberately NOT in knowledge/: that tree is the tracked,
+# citable library (knowledge/decisions/ADR-0001-knowledge-tree.md), and an
+# untracked file sitting inside it reads as a missing doc rather than a private
+# one. Nothing tracked may link into intent/ — scripts/check-doc-links.sh
+# resolves relative links against the working tree, so such a link passes
+# locally and fails in CI, where the file does not exist.
+/intent/
+
 # Local LLM weights (~1 GB — download per README) and OCR model weights
 # (ocrs/rten — ~12 MB, auto-downloaded per README). Convention is to keep them
 # in models/ (README quickstart); the extension globs are the belt-and-braces.
