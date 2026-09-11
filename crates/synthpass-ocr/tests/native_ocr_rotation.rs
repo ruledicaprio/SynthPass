@@ -148,7 +148,7 @@ fn native_ocr_reads_the_genuinely_sideways_specimens() {
 /// keep reading **at 0°**.
 ///
 /// Each of these was a real-specimen miss on the CI gate report before chunk 2
-/// and a hit after it (per-document diff, 2026-09-10 → 2026-09-12: fifteen
+/// and a hit after it (per-document diff, 2026-09-10 → 2026-09-11: fifteen
 /// flips, every one toward HIT). Ten are the documents `choose_rotation` used to
 /// turn 90° on too little detected text, after which every crop presented the
 /// MRZ sideways; India 2022 is the band the second deskew angle recovers.
