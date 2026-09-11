@@ -104,3 +104,106 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
         page.rotation
     );
 }
+
+/// ADR-0008 chunk 2, layer 1: the corpus specimens that are genuinely
+/// photographed sideways must come back with a **checksum-valid** MRZ.
+///
+/// These three are the documents the chunk-2 sweep verified are actually
+/// rotated — by opening them, not by trusting a `_rotated` filename, which on
+/// this corpus is wrong at least once (`North_Macedonia_…_mrz_rotated` is
+/// upright, and its MRZ reads at 0°). Angola is the awkward one on purpose: it
+/// is a two-page spread whose facing page is horizontal while the biodata page
+/// is turned, so no whole-page orientation vote can be right about it. That is
+/// precisely why this passes now — nothing votes. Both quarter-turns are tried
+/// late in the retry chain and an ICAO check digit decides.
+///
+/// Asserted on **validity, not content**: a checksum-valid parse is the
+/// property that matters, and pinning MRZ characters in a non-fixture file
+/// would put specimen data somewhere it does not belong. The reported rotation
+/// is asserted as non-zero rather than as a specific angle — which turn wins is
+/// evidence's business, and Pakistan already resolved at 270° where reading the
+/// image predicted 90°.
+#[test]
+#[ignore]
+fn native_ocr_reads_the_genuinely_sideways_specimens() {
+    let (detection_path, recognition_path) = require_models();
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
+
+    for name in [
+        "Indonesia_Passport_Specimen_P0_IDN_2024_mrz_rotated.png",
+        "Pakistan_Passport_Specimen_P0_PAK_2024_mrz_rotated.png",
+        "Angola_Passport_Specimen_PN_AGO_2026_mrz_rotated_counterclockwise_90_deg.png",
+    ] {
+        let page = ocr
+            .recognize_detailed(&find_sample(name))
+            .unwrap_or_else(|e| panic!("{name}: recognition failed: {e}"));
+
+        assert!(
+            mrz::find_and_parse(&page.text).is_ok_and(|d| d.valid()),
+            "{name}: expected a checksum-valid MRZ once the page is turned; \
+             reported rotation {}°",
+            page.rotation
+        );
+        assert_ne!(
+            page.rotation, 0,
+            "{name}: a sideways page that reads must report the turn it took to read it"
+        );
+    }
+}
+
+/// ADR-0008 chunk 2, layer 1: a page handed to the engine a quarter-turn off
+/// must come back with the same MRZ fragment as the upright original, and must
+/// say how far it turned it to get there.
+///
+/// The synthetic counterpart to the corpus test above. That one proves three
+/// real specimens read; this one proves the property holds for a document whose
+/// upright answer is already known, in **both** directions — 90° and 270° are
+/// separate entries in `ROTATION_RETRY_TURNS`, and a transposition bug that
+/// swaps them still passes if only one is checked.
+///
+/// Asserted on the outcome, not the mechanism: whether the recovery comes from
+/// the retry chain (today) or from a future layer is not this test's business,
+/// which is what keeps it meaningful once layers 2 and 3 land.
+#[test]
+#[ignore]
+fn native_ocr_recovers_mrz_from_a_quarter_turned_page() {
+    let (detection_path, recognition_path) = require_models();
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
+
+    let source_path = find_sample("Canada_Passport_Specimen_2023_mrz.jpg");
+    let upright = image::open(&source_path)
+        .expect("sample image opens")
+        .into_rgb8();
+
+    for (turns, expected_correction) in [(1u8, 270u16), (3u8, 90u16)] {
+        let turned = match turns {
+            1 => image::imageops::rotate90(&upright),
+            _ => image::imageops::rotate270(&upright),
+        };
+        let turned_path = std::env::temp_dir().join(format!(
+            "synthpass_ocr_test_canadian_passport_{turns}turn.png"
+        ));
+        turned.save(&turned_path).expect("turned fixture writes");
+
+        let page = ocr
+            .recognize_detailed(&turned_path)
+            .expect("recognition succeeds on the turned fixture");
+        let _ = std::fs::remove_file(&turned_path);
+
+        let upper = page.text.to_uppercase();
+        assert!(
+            upper.contains("SARAH") || upper.contains("CAN"),
+            "a page turned {}° should still recover the upright MRZ fragment, got: {}",
+            u16::from(turns) * 90,
+            page.text
+        );
+        assert_eq!(
+            page.rotation,
+            expected_correction,
+            "a page turned {}° needs a {expected_correction}° correction to read upright; \
+             reported {}",
+            u16::from(turns) * 90,
+            page.rotation
+        );
+    }
+}
