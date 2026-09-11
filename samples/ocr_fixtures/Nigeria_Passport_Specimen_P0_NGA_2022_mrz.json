@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1997-11-03",
+  "date_of_expiry": "2027-09-19",
+  "document_number": "B01197660",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "IBRAHIM TUNDE",
+  "issuing_country": "NGA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<NGAUSAMAT<<IBRAHIM<TUNDE<<<<<<<<<<<<<<<<<<<\nB011976609NGA9711035M270919099396956448<<<20",
+  "nationality": "NGA",
+  "personal_number": "99396956448",
+  "sex": "M",
+  "surname": "USAMAT"
+}

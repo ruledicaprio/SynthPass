@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1973-03-25",
+  "date_of_expiry": "2023-11-29",
+  "document_number": "AA3456559",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ABDURAKHIMJON",
+  "issuing_country": "UZB",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<UZBURINBOEV<<ABDURAKHIMJON<<<<<<<<<<<<<<<<<\nAA34565591UZB7303250M23112963250373427012788",
+  "nationality": "UZB",
+  "personal_number": "32503734270127",
+  "sex": "M",
+  "surname": "URINBOEV"
+}

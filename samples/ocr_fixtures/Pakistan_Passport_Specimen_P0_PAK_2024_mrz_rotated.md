@@ -1,0 +1,34 @@
+ISLAMIC REPUBLIC OF PAKISTAN
+PASSPORT
+Type
+P
+Country Code
+PAK
+Passport No
+NK5169901
+Surname
+SHAMS
+Given Names
+ABDUL MANAN
+Nationality
+PAKISTANI
+Sex
+M
+Date of Birth
+01 JAN 1985
+Place of Birth
+DERA ISMAIL KHAN, PAK
+Date of Issue
+07 SEP 2024
+Date of Expiry
+07 SEP 2029
+Father Name
+SAWAN
+Citizenship Number
+42501-7845990-7
+Tracking Number
+10322373024
+Issuing Authority
+PAKISTAN
+P<PAKSHAMS<<ABDUL<MANAN<<<<<<<<<<<<<<<<<<<<<<
+NK51699014PAK8501019M29090714250178459907<16

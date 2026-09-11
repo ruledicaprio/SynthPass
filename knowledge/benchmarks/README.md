@@ -19,13 +19,13 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **118 / 142 = 83.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-10) |
-| Tier-1 hit rate, whole specimen corpus | 118 / 238 = 49.6% | same baseline; the gap is explained below |
+| **Tier-1 hit rate, real specimens** | **128 / 157 = 81.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-10) |
+| Tier-1 hit rate, whole specimen corpus | 128 / 254 = 50.4% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 96 of the 238 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 97 of the 254 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -33,22 +33,24 @@ the first moves when accuracy work lands. Full analysis:
 [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md) (the original 94),
 [`denominator-bucket-a-2026-09-10.md`](denominator-bucket-a-2026-09-10.md) (the Argentina 2026 pair).
 
-**Real-specimen outcomes** (238 documents):
+**Real-specimen outcomes** (254 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **118** | numerator | Checksum-valid MRZ, document number matches ground truth |
-| `no_mrz_found` | **17** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
-| `checksum_failed` | 7 | yes | Conforming printed zone, read wrong — a genuine OCR error |
+| **Tier-1 HIT** | **128** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| `no_mrz_found` | **21** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
+| `checksum_failed` | 8 | yes | Conforming printed zone, read wrong — a genuine OCR error |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
-| `no_mrz_expected` | 42 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `no_mrz_expected` | 43 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 36 | no | Zone blacked out by whoever published the specimen |
 | `checksum_failed_specimen` | 18 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
-readings, and stayed ahead after the denominator corrections (2.4:1). The bottleneck is MRZ
-*detection*, not *parsing*; see [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose
-target metric these corrections reduced from 85 documents to 17.
+readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
+(2.6:1). The bottleneck is MRZ *detection*, not *parsing*; see
+[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose target metric the denominator
+corrections reduced from 85 documents to 18 — it stands at 21 after the 2026-09-10 ingest added
+four more, all of them the sideways / low-signal books ADR-0008 chunk 2 targets.
 
 **The browser-vs-native row replaces ADR-0008's "64.2% vs 59.5%"**, neither side of which was
 current: the browser figure was the first of four measurements in `WEB_OCR_BASELINE.md` and had
@@ -700,3 +702,18 @@ not retry ordering, and only secondarily scale. OCR-B provenance (deliverable 9)
 not UNKNOWN (`mrz.traineddata`, BSD-3 © DoubangoTelecom, OEM 1, `MRZ_CHARSET` whitelist, no PSM on
 either side). [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s second amendment records
 the three pure-Rust changes this licenses; building them is the next chunk.
+
+### 2026-09-10 — 15 passport specimens ingested; baseline re-cut (ADR-0008 chunk 2, PR A)
+
+The corpus grew by 16 documents (15 hand-transcribed passport books + one Kenya no-MRZ front),
+so the CI baseline was regenerated: `documents` 238 → 254, `scored` 142 → 157, `tier1_hits`
+118 → **128**, `no_mrz_found` 17 → 21, `checksum_failed` 7 → 8. No regression bucket for an
+existing document grew — every count moved only by the new documents' own share. The scored
+rate dips 83.1% → 81.5% (the 15 books were chosen to be hard) while the corpus rate rises
+49.6% → 50.4%. Ten of the fifteen read today; the five misses are Angola and Pakistan
+(photographed sideways), Dominican Republic and Nepal (low-signal scans), and India 2022
+(`checksum_failed`) — the first four are exactly the chunk-2 orientation/detection targets.
+The **browser-vs-native row above (160 specimens, 2026-09-09) predates this ingest** and is not
+re-cut here — it is a frozen dated measurement; a fresh run belongs with chunk 2's own A/B.
+Coverage: DJI, NGA, SOM, UZB become HIT, IND and IDN flip MISS → HIT, DOM and PAK land as MISS
+([`CORPUS_COVERAGE.md`](../CORPUS_COVERAGE.md), 58 → 64 HIT codes).

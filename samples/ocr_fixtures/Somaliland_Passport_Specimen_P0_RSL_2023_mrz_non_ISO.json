@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2000-01-01",
+  "date_of_expiry": "2028-10-17",
+  "document_number": "P00040973",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MUSTAFE",
+  "issuing_country": "RSL",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<RSLSOMALILAND<SPECIMEN<<MUSTAFE<<<<<<<<<<<<\nP000409734RSL0001018M28101790000000033<<<<42",
+  "nationality": "RSL",
+  "personal_number": "0000000033",
+  "sex": "M",
+  "surname": "SOMALILAND SPECIMEN"
+}

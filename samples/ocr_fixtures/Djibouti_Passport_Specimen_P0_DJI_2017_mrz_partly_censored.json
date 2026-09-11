@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1998-08-23",
+  "date_of_expiry": "2022-04-11",
+  "document_number": "16RE99158",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "GOUMANEH AWALEH",
+  "issuing_country": "DJI",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<DJIHAMZA<GOUMANEH<AWALEH<<<<<<<<<<<<<<<<<<<\n16RE991586DJI9808232M2204112<<<<<<<<<<<<<<08",
+  "nationality": "DJI",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "HAMZA"
+}
