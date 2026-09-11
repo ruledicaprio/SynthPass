@@ -91,7 +91,8 @@ const NATIVE_UPSCALE_FILTER: UpscaleFilter = UpscaleFilter::Lanczos3;
 /// [`synthpass_imageprep::MRZ_CHARSET`].
 pub use synthpass_imageprep::MRZ_CHARSET;
 
-use image::RgbImage;
+use image::metadata::Orientation;
+use image::{ImageDecoder, RgbImage};
 use ocrs::{DecodeMethod, ImageSource, OcrEngine as OcrsEngine, OcrEngineParams, TextItem};
 use rten::Model;
 use std::path::{Path, PathBuf};
@@ -108,9 +109,11 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// blind-crop, one full-page, three trailing isolated-band),
 /// `preprocess::geometry_band_variants` appends at most 2 more (trailing
 /// again, and only when the geometry-detected band differs from the blind
-/// crop), and two texture-suppression passes trail all of those when
-/// `SYNTHPASS_OCR_TEXTURE` enables them, so the worst case is 6 + 2 + 2 =
-/// [`MAX_RETRY_VARIANTS`] retry variants plus the general pass: **11**.
+/// crop), two texture-suppression passes trail all of those when
+/// `SYNTHPASS_OCR_TEXTURE` enables them, and two quarter-turn band crops trail
+/// even those under [`RotateMode::Default`], so the worst case is
+/// 6 + 2 + 2 + 2 = [`MAX_RETRY_VARIANTS`] retry variants plus the general
+/// pass: **13**.
 /// Note the retry loop seeds its counter at 1
 /// for the *first* variant and breaks on `passes_run >= max_passes`, so the
 /// number of variants that can actually run is `max_passes - 1` — an
@@ -129,10 +132,19 @@ const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 /// texture-suppression passes ([`TextureMode::On`] emits `plain_band` *and*
 /// `preprocess::texture_variants`, measured to recover different miss classes;
 /// the [`TextureMode::Control`] placebo emits only the first, so `On` is the
-/// worst case — see [`trailing_texture_mode`]). Single-sourced with
-/// [`DEFAULT_MAX_PASSES`] above so the budget and the variant count cannot
-/// drift apart silently — see that constant's doc comment.
-const MAX_RETRY_VARIANTS: usize = 10;
+/// worst case — see [`trailing_texture_mode`]), plus the 2 quarter-turn band
+/// crops that trail everything under [`RotateMode::Default`] (see
+/// [`ROTATION_RETRY_TURNS`]).
+///
+/// This is the ceiling across every env arm, not the count any single arm
+/// produces: `RotateMode::Legacy` and `Off` emit 10, and the 2 spare passes in
+/// their budget simply go unused — the loop runs out of variants before it runs
+/// out of budget. A ceiling that covers the worst arm is the only value that
+/// cannot silently truncate one of them.
+///
+/// Single-sourced with [`DEFAULT_MAX_PASSES`] above so the budget and the
+/// variant count cannot drift apart silently — see that constant's doc comment.
+const MAX_RETRY_VARIANTS: usize = 12;
 
 /// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock ceiling on the whole
 /// `recognize` call when the env var is unset or invalid. Measured
@@ -146,7 +158,18 @@ const MAX_RETRY_VARIANTS: usize = 10;
 /// `Israel_Biometric_Passport.jpg` corpus entry, whose multi-minute cost was
 /// dominated by Tier 2's LLM generation on garbage OCR text, not the OCR
 /// passes themselves — this budget caps the OCR side of that problem).
-const DEFAULT_MAX_SECONDS: u64 = 45;
+///
+/// **Raised 45 → 52 by ADR-0008 chunk 2** for the two quarter-turn variants
+/// ([`ROTATION_RETRY_TURNS`]) now trailing the chain, at the ~2–3s per pass the
+/// measured worst case costs. The increase is sized to the new passes and
+/// nothing else: leaving it at 45 would have let the wall clock truncate
+/// exactly the sideways documents the new passes exist to recover, which is the
+/// silent-truncation failure [`DEFAULT_MAX_PASSES`]'s own doc comment describes
+/// one budget over.
+///
+/// Only documents that fail every upright variant ever reach the new ceiling —
+/// a document that validates earlier still finishes in the time it always did.
+const DEFAULT_MAX_SECONDS: u64 = 52;
 
 pub struct NativeOcr {
     /// General-purpose engine: full alphabet, greedy decode — produces the
@@ -334,7 +357,11 @@ impl NativeOcr {
         // — it is the one number that says how MRZ-shaped the band actually
         // looked, which a routing decision needs and a bounding box cannot
         // answer.
-        let (rotation, image, lines, word_boxes, band_scored) = if confident {
+        // `mut` because the retry chain's outermost tier can turn the page a
+        // further quarter (see `ROTATION_RETRY_TURNS`), and a reported rotation
+        // that does not describe the buffer the winning MRZ came off is a lie a
+        // caller cannot detect.
+        let (mut rotation, image, lines, word_boxes, band_scored) = if confident {
             (rotation, image, lines, word_boxes, scored)
         } else {
             let flipped = rotate_image(&image, 180);
@@ -484,13 +511,54 @@ impl NativeOcr {
         if order == OcrOrder::Control && mrz_variants_list.len() >= 2 {
             mrz_variants_list.swap(0, 1);
         }
+        // The outermost trailing tier (ADR-0008 chunk 2, layer 1): the page
+        // turned a quarter in each direction, band-cropped. This is the other
+        // half of gating `choose_rotation` — the gate stops a low-signal page
+        // from being turned on a guess, and these two passes recover the page
+        // that genuinely *was* sideways, by trying both turns instead of voting
+        // on which one to trust.
+        //
+        // Deliberately last, after `texture_variants`, mirroring `web/scan.js`
+        // ("only after EVERY upright attempt failed") and the same additive
+        // trailing contract every tier before it follows: the loop breaks on the
+        // first checksum-valid MRZ, so a document that already validates
+        // anywhere earlier never pays for these, and no specimen that passes
+        // today can regress onto them. Built lazily for the same reason — a
+        // document that never reaches them never allocates them.
+        //
+        // Absent under `Legacy`/`Off`, which is what makes those arms a clean
+        // baseline rather than "the gate, minus the gate".
+        let quarter_turn_variants = std::iter::once_with(|| {
+            if rotate_mode() == RotateMode::Default {
+                ROTATION_RETRY_TURNS
+                    .iter()
+                    .map(|&turn| {
+                        (
+                            turn,
+                            preprocess::plain_band(
+                                &rotate_image(&image, turn),
+                                NATIVE_UPSCALE_FILTER,
+                            ),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            }
+        })
+        .flatten();
+        // Every variant carries the cardinal turn its pixels came off, so the
+        // winning one can correct `rotation` below. Zero for all the upright
+        // tiers, which is the honest answer rather than a default.
         let variants = band_first_pass
             .into_iter()
             .chain(mrz_variants_list)
             .chain(geometry_variants)
             .chain(texture_variants)
+            .map(|variant| (0u16, variant))
+            .chain(quarter_turn_variants)
             .enumerate();
-        for (passes_run, (i, variant)) in (1usize..).zip(variants) {
+        for (passes_run, (i, (turn, variant))) in (1usize..).zip(variants) {
             if passes_run >= max_passes {
                 if verbose {
                     eprintln!(
@@ -548,8 +616,21 @@ impl NativeOcr {
             // Check just this pass's lines: a valid MRZ appended means Tier 1
             // will find it — later (costlier) variants have nothing to add.
             if has_valid_mrz(&candidates) {
+                // The reported rotation has to describe the buffer this MRZ was
+                // actually read off, or `OcrPage.rotation` stops being usable
+                // evidence for anything downstream.
+                if turn != 0 {
+                    rotation = (rotation + turn) % 360;
+                }
                 if verbose {
-                    eprintln!("[synthpass-ocr] variant {i}: valid MRZ found, stopping retries");
+                    if turn == 0 {
+                        eprintln!("[synthpass-ocr] variant {i}: valid MRZ found, stopping retries");
+                    } else {
+                        eprintln!(
+                            "[synthpass-ocr] variant {i}: valid MRZ found on the {turn}°-turned \
+                             page (reported rotation now {rotation}°), stopping retries"
+                        );
+                    }
                 }
                 break;
             } else if verbose {
@@ -606,21 +687,59 @@ impl NativeOcr {
 /// the benchmark *silently*, so a mislabelled file quietly shrinks the corpus),
 /// and two survey examples. One decoder they can all share is the only way that
 /// stays fixed.
+///
+/// **EXIF orientation is applied here** (ADR-0008 chunk 2, layer 1), which is
+/// why this calls `into_decoder` + `from_decoder` rather than the one-line
+/// `ImageReader::decode`: orientation lives on the *decoder*, and `decode()`
+/// drops it on the floor. A phone photo of a passport is commonly stored
+/// landscape with an orientation tag saying "rotate 90° to display" — every
+/// viewer honours that tag, so the user sees an upright page, and before this
+/// the pipeline saw the sideways buffer and had to guess its way back with
+/// [`choose_rotation`]. Applying the tag is the one orientation correction that
+/// is *stated by the file* rather than inferred from pixels, so it runs first
+/// and unconditionally.
+///
+/// The transform is lossless for all eight EXIF states — whole-pixel transposes
+/// and flips, no resampling — which is what keeps it compatible with the
+/// "layers never compound each other's interpolation loss" contract.
+///
+/// Corpus yield is low by design: the `_rotated` specimens in `samples/` are
+/// rotated *pixels* with no tag to read. This is correctness for real camera
+/// input, not a benchmark move.
 pub fn decode_image(path: &Path) -> Result<image::DynamicImage, String> {
     let reader = image::ImageReader::open(path)
         .map_err(|e| format!("failed to open image {}: {e}", path.display()))?
         .with_guessed_format()
         .map_err(|e| format!("failed to read image {}: {e}", path.display()))?;
-    reader.decode().map_err(|e| {
-        let hint = match sniff_unsupported(path) {
-            Some(f) => format!(
-                " — the file is {f}, whatever its extension says. \
-                 Convert it to JPEG or PNG first."
-            ),
-            None => String::new(),
-        };
-        format!("failed to decode image {}: {e}{hint}", path.display())
-    })
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| decode_failure(path, &e))?;
+    // Best-effort, like every other orientation step in this module: an
+    // unreadable or malformed EXIF block means "no transform", never a failed
+    // read. A file whose pixels decode is never rejected over its metadata.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
+    let mut image =
+        image::DynamicImage::from_decoder(decoder).map_err(|e| decode_failure(path, &e))?;
+    image.apply_orientation(orientation);
+    Ok(image)
+}
+
+/// The decode-failure message, with the magic-byte hint appended when the
+/// leading bytes name a container this pipeline cannot read.
+///
+/// Factored out because [`decode_image`] now has two fallible decode steps
+/// (build the decoder, then read the pixels) and a file that fails either one
+/// deserves the same explanation — a renamed PDF should not be described as a
+/// broken JPEG just because it failed at a different line.
+fn decode_failure(path: &Path, e: &image::ImageError) -> String {
+    let hint = match sniff_unsupported(path) {
+        Some(f) => format!(
+            " — the file is {f}, whatever its extension says. \
+             Convert it to JPEG or PNG first."
+        ),
+        None => String::new(),
+    };
+    format!("failed to decode image {}: {e}{hint}", path.display())
 }
 
 /// Reads the leading bytes of `path` and names the container if
@@ -683,6 +802,16 @@ const ROTATION_MARGIN: f64 = 1.2;
 /// honest miss, not a silent wrong answer.
 const BAND_FLIP_MARGIN: f64 = 1.2;
 
+/// The quarter-turns appended to the retry chain as its outermost trailing
+/// tier under [`RotateMode::Default`] — see the chain construction in
+/// [`NativeOcr::recognize_detailed`].
+///
+/// 180° is deliberately absent: `should_flip_180` already settles that axis
+/// from page *content*, one layer up, and it does so with a measured margin on
+/// 42 documents. Re-probing it here would spend two more passes re-deciding a
+/// question that is already answered better.
+const ROTATION_RETRY_TURNS: [u16; 2] = [90, 270];
+
 /// A3 — cheap, detection-only page-orientation heuristic. Scores how
 /// "line-shaped" the detected text is at each right-angle rotation: Latin
 /// text reads in wide, short horizontal lines once `find_text_lines` groups
@@ -710,22 +839,93 @@ const BAND_FLIP_MARGIN: f64 = 1.2;
 /// 0° by [`ROTATION_MARGIN`], including whenever `ocrs` detection itself
 /// fails on any candidate — orientation is a best-effort enhancement, never
 /// a reason to fail the whole recognition call.
+///
+/// **Retired from the default path by ADR-0008 chunk 2** — it runs only under
+/// [`RotateMode::Legacy`] now, as the arm every new number is measured against.
+///
+/// Chunk 1 established that this probe is what turns eleven readable documents
+/// into vertical crops that neither `ocrs` nor tesseract's OCR-B can read.
+/// Chunk 2 then asked the obvious follow-up — can it be *gated* rather than
+/// removed? — and measured sixteen documents to answer it. It cannot, and the
+/// numbers are worth keeping because they refute two plausible fixes at once.
+///
+/// Ratio of the winning candidate's score to 0°'s, wrongly-rotated pages
+/// against pages that genuinely are sideways:
+///
+/// | wrongly rotated | ratio | genuinely sideways | ratio |
+/// |---|---|---|---|
+/// | India 2024 | 1.23 | Pakistan 2024 *(not rotated today)* | 1.13 |
+/// | Russia 2014 | 1.24 | Angola 2026 *(not rotated today)* | 1.18 |
+/// | Finland 2007 | 1.28 | Ghana 2025 | 1.26 |
+/// | Oman 2004 | 1.29 | Indonesia 2024 | 1.48 |
+/// | Canada 2023 | 1.32 | | |
+/// | Vietnam 2023 | 1.34 | | |
+/// | Portugal 2017 | 1.42 | | |
+/// | Kuwait 2023 | 1.48 | | |
+/// | Argentina 2026 blur | 1.60 | | |
+/// | Finland 2023 | 1.67 | | |
+/// | Monaco back | 2.98 | | |
+///
+/// The ranges **overlap completely**, so no [`ROTATION_MARGIN`] separates them.
+/// Angola and Pakistan are the sharpest illustration: both genuinely need a
+/// 90° turn, and both miss today's 1.2 bar by a hair — while Monaco, which
+/// needs no turn at all, clears it three times over.
+///
+/// The second refuted fix was a floor on *how much* was detected, on the theory
+/// that these pages give the probe too little to work with. They do not:
+/// detection finds 27–88 words on the wrongly-rotated pages and 192 on Angola.
+/// What collapses on them is **recognition**, not detection — cell (b)'s 12–61
+/// recognised characters per page measured the wrong stage. Worse, at the
+/// *correct* orientation Angola detects 97 words against 192 wrong and Pakistan
+/// 66 against 113: a horizontal-text detector **fragments** sideways text into
+/// more boxes, so "more words" indicates *wrong*, not right, and a floor in
+/// either direction is unsound.
+///
+/// So the vote is not gated, tuned or inverted — it is removed from the path
+/// that matters, and the question it was guessing at is handed to evidence
+/// instead: [`ROTATION_RETRY_TURNS`] tries both quarter-turns late in the retry
+/// chain and an ICAO check digit decides which one was right. That is
+/// `project_principles.md` P1 applied to orientation — deterministic proof
+/// beating a heuristic that cannot be made reliable — and it is the same
+/// conclusion `web/scan.js` reached: *"wrong often enough to cost 9 upright
+/// documents."*
+///
+/// Removing it from [`RotateMode::Default`] also takes four `detect_words`
+/// passes off every document, which is a latency saving on the whole corpus,
+/// not only on the pages it was misreading.
 fn choose_rotation(engine: &OcrsEngine, image: &RgbImage) -> Option<(u16, RgbImage)> {
-    let zero_score = orientation_score(engine, image).unwrap_or(0.0);
+    // `Default` and `Off` both decline to vote; only the baseline arm probes.
+    if rotate_mode() != RotateMode::Legacy {
+        return None;
+    }
+    let verbose = verbose_enabled();
+    let zero = orientation_signal(engine, image).unwrap_or_default();
+    if verbose {
+        eprintln!(
+            "[synthpass-ocr] orientation: 0° score {:.3}, {} word(s), area fraction {:.4}",
+            zero.score, zero.words, zero.area_fraction
+        );
+    }
     let mut best: Option<(u16, RgbImage, f64)> = None;
     for &angle in &ROTATION_CANDIDATES {
         let candidate = rotate_image(image, angle);
-        let Ok(score) = orientation_score(engine, &candidate) else {
+        let Ok(signal) = orientation_signal(engine, &candidate) else {
             continue;
         };
-        if score <= zero_score * ROTATION_MARGIN {
+        if verbose {
+            eprintln!(
+                "[synthpass-ocr] orientation: {angle}° score {:.3}, {} word(s), area fraction {:.4}",
+                signal.score, signal.words, signal.area_fraction
+            );
+        }
+        if signal.score <= zero.score * ROTATION_MARGIN {
             continue;
         }
         if best
             .as_ref()
-            .is_none_or(|&(_, _, best_score)| score > best_score)
+            .is_none_or(|&(_, _, best_score)| signal.score > best_score)
         {
-            best = Some((angle, candidate, score));
+            best = Some((angle, candidate, signal.score));
         }
     }
     best.map(|(angle, rotated, _)| (angle, rotated))
@@ -743,9 +943,37 @@ fn should_flip_180(upright_score: f64, flipped_score: f64) -> bool {
     flipped_score > upright_score * BAND_FLIP_MARGIN && flipped_score > 0.0
 }
 
-/// Detection-only orientation score for one candidate rotation — see
-/// [`choose_rotation`]'s doc comment for what this measures and why.
-fn orientation_score(engine: &OcrsEngine, image: &RgbImage) -> Result<f64, String> {
+/// What one detection pass says about a candidate rotation: how *line-shaped*
+/// the text looks, and — added by ADR-0008 chunk 2 — how much text there was to
+/// look at in the first place.
+///
+/// The strength half exists because of what the ADR-0008 chunk-2 sweep found,
+/// and it is kept as the record of it: `score` is a **ratio**, so it is exactly
+/// as confident about four boxes of scanner noise as about a full page of MRZ,
+/// and the obvious fix — refuse to vote when detection found too little — was
+/// measured and **does not work**. See [`choose_rotation`] for the table.
+///
+/// These two numbers are what that sweep was taken in, so they stay behind the
+/// verbose log that produced them rather than being deleted along with the
+/// hypothesis. Re-deriving them cost a release build and sixteen documents.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct OrientationSignal {
+    /// Mean per-line width÷height over the grouped text lines. Wide, short
+    /// lines (upright Latin text) score high; tall, narrow single-word "lines"
+    /// (the same page turned sideways) score low.
+    score: f64,
+    /// How many words `detect_words` found.
+    words: usize,
+    /// Total detected word-box area as a fraction of the whole image area.
+    /// Scale-free, so it means the same thing on a 300px scan and a 4000px
+    /// photo — which a raw word count does not.
+    area_fraction: f64,
+}
+
+/// Detection-only orientation signal for one candidate rotation — see
+/// [`choose_rotation`]'s doc comment for what this measures and why, and
+/// [`OrientationSignal`] for what the three numbers are.
+fn orientation_signal(engine: &OcrsEngine, image: &RgbImage) -> Result<OrientationSignal, String> {
     let source = ImageSource::from_bytes(image.as_raw(), image.dimensions())
         .map_err(|e| format!("failed to prepare image source: {e}"))?;
     let input = engine
@@ -755,11 +983,31 @@ fn orientation_score(engine: &OcrsEngine, image: &RgbImage) -> Result<f64, Strin
         .detect_words(&input)
         .map_err(|e| format!("ocr word detection failed: {e}"))?;
     if words.is_empty() {
-        return Ok(0.0);
+        return Ok(OrientationSignal::default());
     }
+    // Measured off the detected boxes rather than the grouped lines: grouping is
+    // itself orientation-sensitive (that is what `score` exploits), so a
+    // strength taken after grouping would collapse on exactly the sideways pages
+    // this is meant to distinguish from empty ones.
+    let word_area: f64 = words
+        .iter()
+        .map(|w| f64::from(w.width()) * f64::from(w.height()))
+        .sum();
+    let image_area = f64::from(image.width()) * f64::from(image.height());
+    let area_fraction = if image_area > 0.0 {
+        word_area / image_area
+    } else {
+        0.0
+    };
+    let words_found = words.len();
+
     let lines = engine.find_text_lines(&input, &words);
     if lines.is_empty() {
-        return Ok(0.0);
+        return Ok(OrientationSignal {
+            score: 0.0,
+            words: words_found,
+            area_fraction,
+        });
     }
     let mut total = 0.0;
     for line_words in &lines {
@@ -776,7 +1024,11 @@ fn orientation_score(engine: &OcrsEngine, image: &RgbImage) -> Result<f64, Strin
             total += width_sum / height_mean;
         }
     }
-    Ok(total / lines.len() as f64)
+    Ok(OrientationSignal {
+        score: total / lines.len() as f64,
+        words: words_found,
+        area_fraction,
+    })
 }
 
 /// Rotate `image` clockwise by `angle` degrees (must be 0/90/180/270 — any
@@ -1001,6 +1253,71 @@ fn ocr_order() -> OcrOrder {
         "band-first" => OcrOrder::BandFirst,
         "control" => OcrOrder::Control,
         _ => OcrOrder::Default,
+    }
+}
+
+/// How page orientation is handled. See [`rotate_mode`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RotateMode {
+    /// ADR-0008 chunk 2, layer 1: **no upfront orientation vote at all**, and
+    /// two quarter-turn band crops trailing the retry chain so an ICAO check
+    /// digit settles the question the vote was guessing at. See
+    /// [`choose_rotation`] for the measurement that retired the vote.
+    ///
+    /// **This moves orientation recovery into the retry chain, which is a real
+    /// cost and not merely a refactor.** The retired probe ran *before* the
+    /// general pass, so it re-oriented a sideways page even with retries
+    /// switched off entirely. Recovery now lives in the chain's outermost tier,
+    /// so a tightened [`DEFAULT_MAX_PASSES`] override or an exhausted
+    /// [`DEFAULT_MAX_SECONDS`] budget loses sideways pages. They degrade to
+    /// "no MRZ found" rather than to a confident wrong answer, which is the
+    /// right direction to fail — but a caller trimming either budget for
+    /// latency is making that trade, and should know it.
+    ///
+    /// Found the honest way, by CI rather than by reasoning: `ci.yml` runs the
+    /// OCR smoke tests with `SYNTHPASS_OCR_MAX_PASSES=1` to assert the stage
+    /// executes at all, and that configuration cannot reach these variants.
+    Default,
+    /// The behaviour before chunk 2: [`choose_rotation`] probes all four
+    /// right angles and commits to any [`ROTATION_MARGIN`] win, with no
+    /// quarter-turn retry variants behind it. **The A/B baseline** — the arm
+    /// every `default` number is compared against, which is why it stays in the
+    /// binary rather than in git history.
+    Legacy,
+    /// No upfront probe and no quarter-turn retries. Isolates how much of the
+    /// measured delta is "rotating helps" from "rotating *upfront* helps" — if
+    /// `off` matches `default`, the gate could be stricter still and the probe
+    /// is carrying nothing.
+    ///
+    /// **Not "no rotation anywhere."** `recognize_detailed`'s 0°/180° content
+    /// tie-break ([`should_flip_180`]) still runs under every arm: it is a
+    /// separate mechanism, measured separately on 42 documents against its own
+    /// margin, and predates this chunk. An A/B that reads `off` as "zero
+    /// rotation in the pipeline" would mis-attribute every 180° recovery to
+    /// this enum.
+    Off,
+}
+
+/// `SYNTHPASS_OCR_ROTATE` — `default`, `legacy` or `off`, defaulting to
+/// [`RotateMode::Default`]. See [`RotateMode`] for what each arm does and
+/// `knowledge/decisions/ADR-0008-mrz-detection-track.md` for the measurement
+/// that motivated the gate.
+///
+/// Unrecognised values fall back to the default, matching
+/// [`trailing_texture_mode`] and [`ocr_order`]: this is a measurement knob, and
+/// a typo should not take down a production read. Note the direction that
+/// implies — a mistyped `legacy` measures `default`, so an A/B reading "no
+/// difference at all" should suspect its spelling before its hypothesis.
+fn rotate_mode() -> RotateMode {
+    match std::env::var("SYNTHPASS_OCR_ROTATE")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "legacy" => RotateMode::Legacy,
+        "off" => RotateMode::Off,
+        _ => RotateMode::Default,
     }
 }
 
@@ -1399,10 +1716,24 @@ mod tests {
             "the enabled texture stage contributes exactly two trailing variants"
         );
 
+        // The two quarter-turn band crops (ADR-0008 chunk 2), which chain
+        // outside even the texture stage under `RotateMode::Default`. Mirrors
+        // `recognize_detailed`'s construction, including the turns and order.
+        let quarter_turns: Vec<_> = ROTATION_RETRY_TURNS
+            .iter()
+            .map(|&turn| preprocess::plain_band(&rotate_image(&image, turn), NATIVE_UPSCALE_FILTER))
+            .collect();
+        assert_eq!(
+            quarter_turns.len(),
+            2,
+            "the default rotate mode contributes exactly two trailing quarter-turn variants"
+        );
+
         let all_variants: Vec<_> = blind
             .into_iter()
             .chain(geometry)
             .chain(texture.iter().cloned())
+            .chain(quarter_turns.iter().cloned())
             .collect();
         assert_eq!(
             all_variants.len(),
@@ -1410,13 +1741,21 @@ mod tests {
             "worst-case variant count this fixture was built to hit"
         );
         // Ordering is a correctness property here, not a style choice: the
-        // whole no-regression argument rests on the texture pass running
-        // *after* every variant that already validates specimens today.
-        // Nothing else in the codebase pins this.
+        // whole no-regression argument rests on each added tier running *after*
+        // every variant that already validates specimens today. The texture
+        // pass held this position until chunk 2 chained the quarter turns
+        // outside it — which is exactly the kind of move that silently demotes
+        // a tier, so the outermost one is pinned by name. Nothing else in the
+        // codebase pins this.
         assert_eq!(
             all_variants.last(),
+            quarter_turns.last(),
+            "the quarter-turn pass must be the last variant of all"
+        );
+        assert_eq!(
+            all_variants.get(all_variants.len() - quarter_turns.len() - 1),
             texture.last(),
-            "the texture pass must be the last variant of all"
+            "the texture pass must still run immediately before the quarter turns"
         );
 
         let mut passes_that_ran = 0usize;
@@ -1530,6 +1869,36 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
+    }
+
+    #[test]
+    fn rotate_mode_defaults_to_default_and_parses_all_three_arms() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
+        assert_eq!(
+            rotate_mode(),
+            RotateMode::Default,
+            "unset must be the gated behaviour — the fix, not the baseline it is measured against"
+        );
+
+        for (raw, expected) in [
+            ("default", RotateMode::Default),
+            ("DEFAULT", RotateMode::Default),
+            ("legacy", RotateMode::Legacy),
+            ("LEGACY", RotateMode::Legacy),
+            ("  off  ", RotateMode::Off),
+            // A typo is a measurement mistake, not a production outage: it
+            // falls back to the default, same as `trailing_texture_mode` and
+            // `ocr_order`. Note which way that cuts — a mistyped `legacy`
+            // measures `default`, so an A/B whose two arms agree exactly should
+            // check this spelling before believing the result.
+            ("legacyy", RotateMode::Default),
+            ("", RotateMode::Default),
+        ] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_ROTATE", raw) };
+            assert_eq!(rotate_mode(), expected, "parsing {raw:?}");
+        }
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
     }
 
     #[test]
