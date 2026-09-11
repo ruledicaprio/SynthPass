@@ -32,7 +32,7 @@ track opened*, `checksum_failed` (66) as the **largest** miss category — ahead
 than it wasn't found at all. (That premise held for the duration of this track and no longer
 does: closing it out with `mrz` 0.7.0 reclassified ~38 phantom `checksum_failed` into
 `no_mrz_found`, which then became the dominant miss — until ADR-0008's orientation fix brought
-the two level on 2026-09-12. That is a result of this work, not a
+the two level on 2026-09-11. That is a result of this work, not a
 contradiction of it.) `crates/mrz` already carries serious OCR-repair machinery —
 `repair.rs`'s bounded unknown-character solver, `checksum.rs`'s lookalike/defiller
 repair, `blindspot.rs`'s mod-10 residue-class analysis — that goes well beyond three

@@ -141,13 +141,13 @@ corpus. 150 codes still uncovered.
 | BLZ | Belize | -- | No specimen yet | -- |
 | BOL | Bolivia | -- | No specimen yet | -- |
 | BRA | Brazil | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| CAN | Canada | Passport | HIT (x4 specimens) | Contributor-supplied specimens (SPECIMEN watermark); the 2023-issue book, which found no MRZ in the 2026-08-17 real-OCR scan, reads since ADR-0008 chunk 2 (CI gate, 2026-09-12) |
+| CAN | Canada | Passport | HIT (x4 specimens) | Contributor-supplied specimens (SPECIMEN watermark); the 2023-issue book, which found no MRZ in the 2026-08-17 real-OCR scan, reads since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | CHL | Chile | -- | No specimen yet | -- |
 | COL | Colombia | Passport | MISS (x2, checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | CRI | Costa Rica | -- | No specimen yet | -- |
 | CUB | Cuba | -- | No specimen yet | -- |
 | DMA | Dominica | -- | No specimen yet | -- |
-| DOM | Dominican Republic | Passport | HIT | Ingested 2026-09-10 as a low-signal `no_mrz_found`; reads since ADR-0008 chunk 2 (CI gate, 2026-09-12) |
+| DOM | Dominican Republic | Passport | HIT | Ingested 2026-09-10 as a low-signal `no_mrz_found`; reads since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | ECU | Ecuador | -- | No specimen yet | -- |
 | SLV | El Salvador | -- | No specimen yet | -- |
 | GRD | Grenada | -- | No specimen yet | -- |
@@ -181,7 +181,7 @@ corpus. 150 codes still uncovered.
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
 | HKG | Hong Kong | -- | No specimen yet | -- |
-| IND | India | Passport | HIT (3 of 7 specimens; rest non-conforming or redacted) | The 2022, 2023 and 2024 books read checksum-valid — 2022 (was `checksum_failed`) and 2024 (was `no_mrz_found`) since ADR-0008 chunk 2; the other four are the 2013 specimen and its boxed copy, whose printed zones fail their own check digits, and 2 redacted (CI gate, 2026-09-12) |
+| IND | India | Passport | HIT (3 of 7 specimens; rest non-conforming or redacted) | The 2022, 2023 and 2024 books read checksum-valid — 2022 (was `checksum_failed`) and 2024 (was `no_mrz_found`) since ADR-0008 chunk 2; the other four are the 2013 specimen and its boxed copy, whose printed zones fail their own check digits, and 2 redacted (CI gate, 2026-09-11) |
 | IDN | Indonesia | Passport | HIT (1 of 3 specimens) | The 2024 specimen added 2026-09-10 (photographed sideways) reads checksum-valid; the 2011 specimen is non-conforming, the 2023 one redacted |
 | IRN | Iran | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | IRQ | Iraq | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
@@ -191,7 +191,7 @@ corpus. 150 codes still uncovered.
 | KAZ | Kazakhstan | Passport | HIT (+ 2 checksum-failed) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | PRK | Korea (Democratic People's Republic of) | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | KOR | Korea (Republic of) | Passport | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| KWT | Kuwait | Passport | HIT | Found no MRZ in the 2026-08-17 real-OCR scan; reads since ADR-0008 chunk 2 (CI gate, 2026-09-12) |
+| KWT | Kuwait | Passport | HIT | Found no MRZ in the 2026-08-17 real-OCR scan; reads since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | KGZ | Kyrgyzstan | -- | No specimen yet | -- |
 | LAO | Lao People's Democratic Republic | -- | No specimen yet | -- |
 | LBN | Lebanon | -- | No specimen yet | -- |
@@ -200,9 +200,9 @@ corpus. 150 codes still uncovered.
 | MDV | Maldives | -- | No specimen yet | -- |
 | MNG | Mongolia | -- | No specimen yet | -- |
 | MMR | Myanmar | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| NPL | Nepal | Passport | HIT (1 of 3 specimens; 2 redacted) | The 2019 book reads since ADR-0008 chunk 2 (CI gate, 2026-09-12); the 2011 specimen and its rotated copy carry a redacted zone and are scored out |
-| OMN | Oman | Passport | HIT | Reads since ADR-0008 chunk 2 (CI gate, 2026-09-12). The "no MRZ found" recorded here from 2026-08-17 was root-caused by ADR-0008 chunk 1: the page-orientation vote turned the page sideways before OCR |
-| PAK | Pakistan | Passport | HIT | Ingested 2026-09-10; photographed sideways, reads since ADR-0008 chunk 2 moved quarter-turns into the retry chain (CI gate, 2026-09-12) |
+| NPL | Nepal | Passport | HIT (1 of 3 specimens; 2 redacted) | The 2019 book reads since ADR-0008 chunk 2 (CI gate, 2026-09-11); the 2011 specimen and its rotated copy carry a redacted zone and are scored out |
+| OMN | Oman | Passport | HIT | Reads since ADR-0008 chunk 2 (CI gate, 2026-09-11). The "no MRZ found" recorded here from 2026-08-17 was root-caused by ADR-0008 chunk 1: the page-orientation vote turned the page sideways before OCR |
+| PAK | Pakistan | Passport | HIT | Ingested 2026-09-10; photographed sideways, reads since ADR-0008 chunk 2 moved quarter-turns into the retry chain (CI gate, 2026-09-11) |
 | PSE | Palestine | -- | No specimen yet | -- |
 | PHL | Philippines | -- | No specimen yet | -- |
 | QAT | Qatar | -- | No specimen yet | -- |
@@ -218,7 +218,7 @@ corpus. 150 codes still uncovered.
 | TKM | Turkmenistan | -- | No specimen yet | -- |
 | ARE | United Arab Emirates | Passport | HIT | Contributor-supplied specimen (watermarked reference) |
 | UZB | Uzbekistan | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
-| VNM | Viet Nam | Passport | HIT (+ 1 no-MRZ specimen) | The 2023 book reads since ADR-0008 chunk 2 (CI gate, 2026-09-12); its "no MRZ found" from 2026-08-17 was the page-orientation vote ADR-0008 chunk 1 root-caused. The 2022 specimen carries no MRZ |
+| VNM | Viet Nam | Passport | HIT (+ 1 no-MRZ specimen) | The 2023 book reads since ADR-0008 chunk 2 (CI gate, 2026-09-11); its "no MRZ found" from 2026-08-17 was the page-orientation vote ADR-0008 chunk 1 root-caused. The 2022 specimen carries no MRZ |
 | YEM | Yemen | -- | No specimen yet | -- |
 | ALB | Albania | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | AND | Andorra | -- | No specimen yet | -- |
@@ -231,7 +231,7 @@ corpus. 150 codes still uncovered.
 | CZE | Czechia | Passport | HIT (x2 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | DNK | Denmark | Passport | HIT (x3 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | EST | Estonia | Passport | HIT | Public-domain specimen |
-| FIN | Finland | Passport | HIT (x5 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2007 and 2023 books, which found no MRZ there, read since ADR-0008 chunk 2 (CI gate, 2026-09-12) |
+| FIN | Finland | Passport | HIT (x5 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2007 and 2023 books, which found no MRZ there, read since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | FRA | France | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | DEU | Germany | Passport | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | D | Germany | -- | No specimen yet | Legacy single-letter code, Doc 9303 Part 3 §5 Part A |
@@ -247,15 +247,15 @@ corpus. 150 codes still uncovered.
 | LUX | Luxembourg | ID card | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MLT | Malta | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MDA | Moldova | Passport | HIT (x2 of 3) | Manifest regeneration, 2026-09-04. 2023 and the 2014 `wide` crop read checksum-valid; the tighter 2014 crop of the same document does not. |
-| MCO | Monaco | ID card, Passport | HIT (passport, ID-card back) | Public-domain specimens; real-OCR scan, 2026-08-17. The ID-card back reads since ADR-0008 chunk 2 (CI gate, 2026-09-12); the front carries no MRZ |
+| MCO | Monaco | ID card, Passport | HIT (passport, ID-card back) | Public-domain specimens; real-OCR scan, 2026-08-17. The ID-card back reads since ADR-0008 chunk 2 (CI gate, 2026-09-11); the front carries no MRZ |
 | MNE | Montenegro | -- | No specimen yet | -- |
 | NLD | Netherlands | Driving license (no MRZ), Passport | HIT (passport) + driving license not wired | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
 | MKD | North Macedonia | Passport | HIT (x2 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | NOR | Norway | Passport, ID card | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | POL | Poland | Passport, ID card | HIT (x2 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| PRT | Portugal | Passport, ID card | HIT (x3: 2 passports, ID-card back) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the `PX_PRT_2017` book, which found no MRZ there, reads since ADR-0008 chunk 2 (CI gate, 2026-09-12). The ID-card front carries no MRZ |
+| PRT | Portugal | Passport, ID card | HIT (x3: 2 passports, ID-card back) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the `PX_PRT_2017` book, which found no MRZ there, reads since ADR-0008 chunk 2 (CI gate, 2026-09-11). The ID-card front carries no MRZ |
 | ROU | Romania | Passport, ID card | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| RUS | Russian Federation | Passport | HIT (x3 specimens) (+ 1 checksum-failed, 2 redacted) | `PD_RUS_2004` and `P0_RUS_2025` read; `P0_RUS_2014` since ADR-0008 chunk 2 (CI gate, 2026-09-12). `P0_RUS_2019` carries a checksum-valid zone that OCR misreads. This row said "No specimen yet" until 2026-09-12, though Russian specimens were already in the corpus |
+| RUS | Russian Federation | Passport | HIT (x3 specimens) (+ 1 checksum-failed, 2 redacted) | `PD_RUS_2004` and `P0_RUS_2025` read; `P0_RUS_2014` since ADR-0008 chunk 2 (CI gate, 2026-09-11). `P0_RUS_2019` carries a checksum-valid zone that OCR misreads. This row said "No specimen yet" until 2026-09-12, though Russian specimens were already in the corpus |
 | SMR | San Marino | -- | No specimen yet | -- |
 | SRB | Serbia | Passport, ID card (TD1) | HIT (x2 specimens) (+ negative control, 1 no-MRZ) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | SVK | Slovakia | Passport, Service Passport | HIT (x2) + negative control | Contributor-supplied specimens (Specimen/Vzorka placeholder name); corpus includes additional unlabelled specimens per real-OCR scan, 2026-08-17 |

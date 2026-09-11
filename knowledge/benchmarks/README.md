@@ -19,11 +19,11 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **128 / 157 = 81.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-10) |
-| Tier-1 hit rate, whole specimen corpus | 128 / 254 = 50.4% | same baseline; the gap is explained below |
+| **Tier-1 hit rate, real specimens** | **143 / 157 = 91.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-11) |
+| Tier-1 hit rate, whole specimen corpus | 143 / 254 = 56.3% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
-| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
+| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
 **Why two rates.** 97 of the 254 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
@@ -37,9 +37,9 @@ the first moves when accuracy work lands. Full analysis:
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **128** | numerator | Checksum-valid MRZ, document number matches ground truth |
-| `no_mrz_found` | **21** | yes | No MRZ located on a document that has one — **the dominant miss and the current bottleneck** |
-| `checksum_failed` | 8 | yes | Conforming printed zone, read wrong — a genuine OCR error |
+| **Tier-1 HIT** | **143** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| `no_mrz_found` | **7** | yes | No MRZ located on a document that has one — level with `checksum_failed` since 2026-09-11 |
+| `checksum_failed` | 7 | yes | Conforming printed zone, read wrong — a genuine OCR error |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 43 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 36 | no | Zone blacked out by whoever published the specimen |
@@ -47,10 +47,11 @@ the first moves when accuracy work lands. Full analysis:
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
 readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
-(2.6:1). The bottleneck is MRZ *detection*, not *parsing*; see
-[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md), whose target metric the denominator
-corrections reduced from 85 documents to 18 — it stands at 21 after the 2026-09-10 ingest added
-four more, all of them the sideways / low-signal books ADR-0008 chunk 2 targets.
+(2.6:1, 21 against 8). ADR-0008 chunk 2's orientation fix brought the two level at 7 each on
+2026-09-11 ([`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md)). Detection is no
+longer the dominant miss; the fourteen that remain are named in that file, split evenly between
+finding the zone and reading it. What that means for the track is in
+[`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s 2026-09-12 amendment.
 
 **The browser-vs-native row replaces ADR-0008's "64.2% vs 59.5%"**, neither side of which was
 current: the browser figure was the first of four measurements in `WEB_OCR_BASELINE.md` and had
@@ -717,3 +718,20 @@ The **browser-vs-native row above (160 specimens, 2026-09-09) predates this inge
 re-cut here — it is a frozen dated measurement; a fresh run belongs with chunk 2's own A/B.
 Coverage: DJI, NGA, SOM, UZB become HIT, IND and IDN flip MISS → HIT, DOM and PAK land as MISS
 ([`CORPUS_COVERAGE.md`](../CORPUS_COVERAGE.md), 58 → 64 HIT codes).
+
+### 2026-09-12 — the orientation fix: 128 → 143, and the two misses level (ADR-0008 chunk 2)
+
+The CI baseline was re-blessed after #262 and #269: `tier1_hits` 128 → **143** of 157 (81.5% →
+91.1%; corpus-wide 50.4% → 56.3%), `no_mrz_found` 21 → **7**, `checksum_failed` 8 → 7, and no
+other bucket moved. Fifteen documents flipped, all toward HIT and none away. Fourteen came from
+retiring the upfront orientation vote in favour of quarter-turns as the last retry tier, and one
+(India 2022) from running both skew estimates. Every scoreable document chunk 1 named as an
+orientation victim now reads. Three designs were measured and rejected on the way: a confidence
+floor on the vote, the new skew estimator on its own, and a text-height gate on the band upscale.
+The last fell to `ocrs`'s fixed model input geometry (800×600 detection, 64 px recognition lines).
+Full record: [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md).
+
+**The baseline this replaces was a day stale, by design and at a cost.** The re-bless was deferred
+to the end of the layer track, so from #262's merge the `tolerance: 0` gate compared against a
+floor fourteen hits too low and would have passed a change undoing all of it. A deferred re-bless
+disarms the gate for exactly as long as it is deferred.

@@ -1,7 +1,7 @@
 # ADR-0008 — MRZ detection succeeds sequence completeness as M6's accuracy track
 
 **Status:** Accepted. Target metric corrected 2026-09-09; the mandated measurement completed
-2026-09-10 (the gap is native page orientation); chunk 2 built and measured 2026-09-12, which
+2026-09-10 (the gap is native page orientation); chunk 2 built and measured by 2026-09-11, which
 leaves `no_mrz_found` level with `checksum_failed` and the track's premise spent — see the three
 amendments below.
 **Date:** 2026-09-09
