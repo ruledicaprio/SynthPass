@@ -159,6 +159,42 @@ The doc-link check is CI-enforced and gates docs-only PRs, which the three cargo
 commands do not touch. Run it whenever a change edits Markdown or moves a file
 that prose cites.
 
+## Branch state — check it before the first edit, and again before the PR
+
+Every item below was learned by getting it wrong. Checking branch state is cheap; each of
+these failures is expensive to unwind, and most of them look like success at the time.
+
+* **`git branch --show-current` before editing, and again before committing.** Edits land in
+  the working tree, not on the branch you think you are on. Two commits went onto the wrong
+  branch this way, one of them `main`.
+* **`git fetch origin`, then confirm the branch is based on current `origin/main`.** A branch
+  cut before someone else's merge lands yields a PR whose conflicts look like your own
+  changes. Rebase before opening it, not after a reviewer trips over it.
+* **Never open a PR from a branch with no upstream.** `git log @{u}..HEAD` cannot distinguish
+  "never pushed" from "zero commits ahead" — both print nothing. Test for the upstream
+  explicitly with `git rev-parse --abbrev-ref --symbolic-full-name '@{u}'`.
+* **Never switch branches while a build, test or benchmark is running.** Cargo reads the
+  working tree, not the commit the job was launched from, so the job finishes measuring
+  whatever is checked out when it gets there. A two-arm A/B whose arms both rebuilt from the
+  wrong branch agrees with itself and reads as a clean null result — a false negative that
+  nothing flags. To make progress during a long run, use **`git worktree add`**: a second
+  working tree leaves the running job's tree untouched, and needs no rebuild for a docs or
+  workflow change.
+* **Capture cargo's exit code directly** — `cargo clippy --workspace --all-targets; EXIT=$?`.
+  Piping through `tail` or `head` makes `$?` the pager's status, so a failed gauntlet reports
+  green.
+
+Two `PreToolUse` hooks in `.claude/settings.local.json` enforce two of these on this machine:
+one denies `git checkout`/`git switch` while a cargo or bench process is alive, the other asks
+for confirmation on `gh pr create` when the branch is `main`, dirty, unpushed, or has no
+upstream. They are local conveniences, not CI — they cover one machine, they are written with
+`grep` rather than `jq` because `jq` is not installed here, and the pre-PR one reads the
+session's working directory, so it reports the wrong branch when a PR is opened from a
+worktree. A guard that greps the raw tool payload must anchor on a **command boundary**: an
+unanchored `git (checkout|switch)` also matches the phrase inside a commit message, so the
+guard denies its own documentation — and it still misses `git -C <path> checkout`, which is a
+real switch.
+
 If CI exists
 
 review workflow failures before changing unrelated code.
