@@ -6,9 +6,19 @@ name: Real-specimen Tier-1 gate
 # the *synthetic* clean-TD3 corpus only; `bench-charts.yml` runs the real corpus
 # but weekly, and only opens an advisory chart PR).
 #
-# Runs `provider-bench --real-specimens --mrz-only`: the ~1-minute deterministic
-# pass, not the ~3 h Tier-2 LLM pass, so no GGUF is downloaded. The result is
-# compared against a committed, CI-measured baseline
+# Runs `provider-bench --real-specimens --mrz-only`: the deterministic Tier-1
+# pass, not the ~3 h Tier-2 LLM pass, so no GGUF is downloaded.
+#
+# It is not, however, quick. **Measured 39m29s** on this runner (#262,
+# 2026-09-11), and ~25-35 min per arm locally. This comment previously called it
+# "the ~1-minute deterministic pass" — wrong by a factor of forty, and repeated
+# as fact during review before anyone timed the job. Most of that cost is
+# documents which never yield a valid MRZ and therefore never break the retry
+# loop early: they run the entire variant chain, and 95 of them are excluded
+# from the hit rate by construction. See
+# `knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md`.
+#
+# The result is compared against a committed, CI-measured baseline
 # (`knowledge/benchmarks/real-specimen-mrz-baseline.json`) and the job fails on a
 # regression — HIT count down, or a miss bucket up, beyond the baseline's
 # `tolerance`. See `knowledge/benchmarks/README.md` for the design and the
@@ -37,10 +47,10 @@ on:
       - "Cargo.lock"
       - ".github/workflows/real-specimen-gate.yml"
       # Markdown under crates/ cannot change an extraction result, but it does
-      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a full
-      # ~1-minute corpus run on a docs-only PR. Exclusions are evaluated after
-      # the includes, so this restores the "never on a docs-only PR" property
-      # this workflow's header claims.
+      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a
+      # full corpus run (tens of minutes) on a docs-only PR. Exclusions are
+      # evaluated after the includes, so this restores the "never on a
+      # docs-only PR" property this workflow's header claims.
       - "!crates/**/*.md"
   push:
     branches: [main]
@@ -58,10 +68,10 @@ on:
       - "Cargo.lock"
       - ".github/workflows/real-specimen-gate.yml"
       # Markdown under crates/ cannot change an extraction result, but it does
-      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a full
-      # ~1-minute corpus run on a docs-only PR. Exclusions are evaluated after
-      # the includes, so this restores the "never on a docs-only PR" property
-      # this workflow's header claims.
+      # match the crate globs above -- crates/mrz/CHANGELOG.md triggered a
+      # full corpus run (tens of minutes) on a docs-only PR. Exclusions are
+      # evaluated after the includes, so this restores the "never on a
+      # docs-only PR" property this workflow's header claims.
       - "!crates/**/*.md"
   workflow_dispatch:
     inputs:

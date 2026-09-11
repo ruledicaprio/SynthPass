@@ -40,3 +40,4 @@ the record.
 | [0007](ADR-0007-dataset-export-format.md) | Dataset export format: adopt the DeepSeek-OCR 0–1000 convention, JSONL first | Accepted |
 | [0008](ADR-0008-mrz-detection-track.md) | MRZ detection succeeds sequence completeness as M6's accuracy track | Accepted |
 | [0009](ADR-0009-generator-as-a-service.md) | Generator-as-a-service: what it would cost the non-goals | Proposed |
+| [0010](ADR-0010-benchmark-cost-split-by-role.md) | Split the real-specimen benchmark by role, not by random sample | Proposed |
