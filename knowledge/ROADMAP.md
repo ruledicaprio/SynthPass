@@ -388,8 +388,10 @@ Beyond M6 and M7, and deliberately not committed:
   | **Qwen3-4B** | ~2.5 GB | **Apache-2.0** | **yes** |
 
   **Qwen2.5-3B is not Apache-2.0.** Recommending it would push a research-licensed weight into a
-  product with paid tiers ([`BRANDING.md`](BRANDING.md) §5) — so it is ruled out on licensing,
-  not capability. 7B is correctly licensed but does not fit a 4 GB consumer card. Qwen3-4B is
+  project with commercial revenue surfaces — corpora, benchmarking, integration, custom models
+  and support ([`BRANDING.md`](BRANDING.md) §5) — so it is ruled out on licensing, not
+  capability. The surfaces are what make the use commercial; §5 rejects a *feature-gated paid
+  tier* specifically, and the Qwen Research licence restricts commercial use either way. 7B is correctly licensed but does not fit a 4 GB consumer card. Qwen3-4B is
   Apache-2.0, fits, and is a model generation newer than anything the design record considered.
 
   No code is required to try one: `SYNTHPASS_MODEL_PATH` selects the GGUF and

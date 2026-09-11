@@ -113,10 +113,16 @@ adding one to the generator — so a module there pulls `serde` into the generat
 `synthpass-cli` strands the logic in a thin binary that `synthpass-bench` cannot reuse.
 
 **Leave export ungated, like `generate`.** The synthetic-data / no-PII argument is real and is
-why `generate` itself is ungated. But `BRANDING.md §5` puts *"higher-capacity generation …
-knobs"* in the paid tier, and a batch corpus builder is exactly that kind of knob. Gating the
+why `generate` itself is ungated. But bulk dataset production is a **capacity surface** rather
+than a product feature (`BRANDING.md §5`), and a batch corpus builder is exactly that. Gating the
 corpus builder while leaving single-document `generate` free is the same line the licensing
 model already draws for `batch` versus single-document `extract`.
+
+*(Citation corrected 2026-09-11: this paragraph previously quoted `BRANDING.md §5` as putting
+"higher-capacity generation … knobs" in "the paid tier". §5 has since rejected a feature-gated
+paid tier and retained `synthpass-license` as capacity metering — the framing
+`crates/synthpass-cli/src/export.rs` already uses in its own module docs. The decision recorded
+here is unchanged; only the quotation, which no longer matched its source.)*
 
 **Push finished datasets to the Hugging Face Hub.** Violates the `VISION.md` air-gap non-goal
 outright — a network call in a tool whose musl single-file air-gapped build is a shipped
