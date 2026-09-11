@@ -1263,6 +1263,20 @@ enum RotateMode {
     /// two quarter-turn band crops trailing the retry chain so an ICAO check
     /// digit settles the question the vote was guessing at. See
     /// [`choose_rotation`] for the measurement that retired the vote.
+    ///
+    /// **This moves orientation recovery into the retry chain, which is a real
+    /// cost and not merely a refactor.** The retired probe ran *before* the
+    /// general pass, so it re-oriented a sideways page even with retries
+    /// switched off entirely. Recovery now lives in the chain's outermost tier,
+    /// so a tightened [`DEFAULT_MAX_PASSES`] override or an exhausted
+    /// [`DEFAULT_MAX_SECONDS`] budget loses sideways pages. They degrade to
+    /// "no MRZ found" rather than to a confident wrong answer, which is the
+    /// right direction to fail — but a caller trimming either budget for
+    /// latency is making that trade, and should know it.
+    ///
+    /// Found the honest way, by CI rather than by reasoning: `ci.yml` runs the
+    /// OCR smoke tests with `SYNTHPASS_OCR_MAX_PASSES=1` to assert the stage
+    /// executes at all, and that configuration cannot reach these variants.
     Default,
     /// The behaviour before chunk 2: [`choose_rotation`] probes all four
     /// right angles and commits to any [`ROTATION_MARGIN`] win, with no
