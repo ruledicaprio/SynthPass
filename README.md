@@ -8,7 +8,7 @@ documents. **Zero cloud calls, ever.**
 [![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
 [![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-64%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-71%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 Pure Rust, one binary. `ocrs`/`rten` OCR and ICAO 9303 MRZ check digits run in-process;
