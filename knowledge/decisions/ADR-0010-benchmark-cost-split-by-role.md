@@ -25,9 +25,17 @@ Before redesigning the corpus, the cost was measured — over
 | Yields none | **110** | runs the **entire** retry chain — ~12 variants |
 | …and is **scored out of the hit rate** | **95** | fully OCR'd, then discarded from the metric |
 
-The 95 are 43 `no_mrz_expected`, 35 `redacted_mrz`, and 17 `checksum_failed_specimen`. They
-never produce a valid MRZ, so they never break early: they pay the **worst-case** cost on every
-run to produce a number the headline rate excludes by construction.
+The 95 are 43 `no_mrz_expected`, 35 `redacted_mrz` and 17 `checksum_failed_specimen`. They never
+produce a valid MRZ, so they never break early: they pay the **worst-case** cost on every run to
+produce a number the headline rate excludes by construction.
+
+Two denominators are in play here and they are not the same number, so both are stated once:
+the corpus splits **157 scored + 97 off-denominator = 254**, and separately **95 + 15 = 110**
+never yield a valid MRZ. The off-denominator set is 97; the 95 above is the subset of it that
+never reads a valid MRZ and therefore pays the full chain. The remaining 2 are off-denominator
+documents that *do* read a checksum-valid MRZ — see the canary note under Consequences. The
+committed baseline reconciles both ways: 142 hits + 15 scored misses = 157, and 142 + 2 = 144
+checksum-valid.
 
 **Cost tracks failures, not document count.** That single fact decides the shape of the fix, and
 it is what makes sampling a poor lever: a uniform sample removes cheap and expensive documents in
@@ -55,9 +63,10 @@ anything in particular.
 1. **The per-PR gate scores the scored population only** — the 157 documents that can yield a
    hit. Full coverage of the metric the gate actually asserts, still deterministic, so
    `tolerance: 0` stays valid and meaningful.
-2. **The off-denominator refusal set runs on a schedule, not per PR.** Those 95 documents verify
-   *correct refusal*, which is a real property and must not be deleted — only moved off the
-   critical path.
+2. **The off-denominator refusal set runs on a schedule, not per PR.** All 97 of those documents
+   verify *correct refusal*, which is a real property and must not be deleted — only moved off
+   the critical path. (95 of the 97 are also the expensive ones; the split matters for cost, not
+   for what the set is for.)
 3. **Random sampling is rejected for the gate** (see below). If per-PR cost is still too high
    after 1 and 2, the next step is **deterministic slots**: slot *k* always selects the same
    documents, seeded by slot index and never by the clock, with a per-slot expected HIT in the
@@ -118,10 +127,19 @@ at all — diversity is gained by ingest, not by sampling what is already there.
 **Negative**
 
 - **The hallucination canary moves from per-PR to scheduled.** The off-denominator set is what
-  catches a redacted-tagged specimen reading a checksum-valid MRZ — the bench already flags
-  exactly one (`Malaysia_…_redacted_mrz_blur`), which is either a mislabelled fixture or the
-  reader inventing a zone. That signal would fire daily instead of on every PR. This is the real
-  cost of the decision and it should not be discovered later.
+  would catch a document tagged as unreadable reading a checksum-valid MRZ anyway. Two documents
+  trip it today, and — stated plainly, because an alarm whose current firings are all explained
+  is easy to over-sell — **both are already accounted for**:
+  - `Argentina_Passport_Specimen_P0_ARG_2026_mrz` (`checksum_failed_specimen`): its printed MRZ is
+    internally checksum-consistent but its values are placeholders, which is exactly why
+    [#259](https://github.com/ruledicaprio/SynthPass/pull/259) scored it off the denominator.
+  - `Malaysia_Passport_Specimen_P0_MYS_2019_redacted_mrz_blur` (`redacted_mrz`): line 2 is intact
+    and genuinely validates; only line 1's `given_names` is covered.
+
+  So the canary's value is **prospective** — it is the only thing positioned to catch a *new*
+  invented zone — not that it is flagging an open mystery now. Moving it to a schedule delays that
+  detection by up to a day. That is the real cost of this decision, and it is cheaper than the
+  alternative only because nothing currently depends on same-PR detection.
 - The baseline gains a shape change (scored-only per-PR, full on the schedule), and two baselines
   are two things that can drift apart.
 - New work in `provider-bench`: a scored-only mode. `--limit` takes the first N and is not a
