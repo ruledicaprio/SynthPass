@@ -97,7 +97,8 @@ const TEXTURE_MEDIAN_MIN_RADIUS: u32 = 1;
 /// It also bounds [`median_filter`]'s stack buffer at `(2*3+1)^2 = 49`.
 const TEXTURE_MEDIAN_MAX_RADIUS: u32 = 3;
 
-/// Skew angles (degrees) probed by [`deskew`]. A handheld-photo tilt is a
+/// Skew angles (degrees) probed by [`skew_angle`] under [`SkewMode::Legacy`].
+/// A handheld-photo tilt is a
 /// few degrees, not a right angle — `ocrs`'s own detector already tolerates
 /// larger rotations via its `RotatedRect` output; this variant targets the
 /// smaller tilt that smears row projections just enough to fragment MRZ
@@ -181,11 +182,40 @@ pub fn mrz_variants_with(image: &RgbImage, filter: UpscaleFilter, skew: SkewMode
             BAND_MIN_WIDTH,
             filter,
         )));
+
+        // The deskewed band, trailing. Under `SkewMode::Default` this emits
+        // **both** estimators' angles rather than choosing between them, because
+        // measurement said choosing loses documents either way: over the
+        // 254-specimen corpus the estimator alone scores +1/-1 against the
+        // legacy search — it recovers an India passport whose band is tilted
+        // ~1.5° with a strong signal, and loses a 232x146 Swiss ID card back
+        // whose 232x57 band is so nearly information-free that the variance
+        // objective is flat and correctly declines to rotate, where the legacy
+        // contrast score does rotate and does read. Neither estimator is wrong;
+        // they optimise different objectives on an input that barely has one.
+        //
+        // Running both is cheap where it matters: the retry chain breaks on the
+        // first checksum-valid MRZ, so the second angle costs an extra OCR pass
+        // only on a document that was going to run the whole chain anyway, and
+        // the angles are compared *before* the second rotation, so a clean
+        // upright band — where both answer 0.0 — builds no duplicate at all.
+        let gray = to_gray(&isolated);
+        let primary = skew_angle(&gray, skew);
         variants.push(contrast_stretched(&upscale_to_width(
-            &deskew(&isolated, skew),
+            &deskew_by(&isolated, primary),
             BAND_MIN_WIDTH,
             filter,
         )));
+        if skew == SkewMode::Default {
+            let fallback = skew_angle(&gray, SkewMode::Legacy);
+            if fallback != primary {
+                variants.push(contrast_stretched(&upscale_to_width(
+                    &deskew_by(&isolated, fallback),
+                    BAND_MIN_WIDTH,
+                    filter,
+                )));
+            }
+        }
     }
     variants
 }
@@ -708,12 +738,21 @@ impl Integral {
 /// choice belongs at the call site, not in a default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SkewMode {
-    /// [`estimate_skew_deg`] — one estimation pass, no per-angle resampling.
+    /// [`estimate_skew_deg`] — one estimation pass, no per-angle resampling —
+    /// **and**, when the two estimators disagree about the band, the legacy
+    /// angle appended as one further trailing variant.
+    ///
+    /// It emits both because measurement said choosing loses documents in both
+    /// directions; [`mrz_variants_with`] carries the evidence and the reason the
+    /// extra pass is nearly free. This is the shipped path, so its worst case is
+    /// what the caller's retry budget has to cover — one variant more than the
+    /// arms below.
     #[default]
     Default,
-    /// The pre-ADR-0008 search: rotate the probe once per candidate angle in
-    /// [`DESKEW_CANDIDATES_DEG`] and keep the best-scoring. Retained as the A/B
-    /// baseline, not as a fallback.
+    /// The pre-ADR-0008 search on its own: rotate the probe once per candidate
+    /// angle in [`DESKEW_CANDIDATES_DEG`] and keep the best-scoring. Retained as
+    /// the A/B baseline — it is what [`SkewMode::Default`] is measured against,
+    /// and it never appends a second angle.
     Legacy,
 }
 
@@ -808,12 +847,19 @@ pub fn estimate_skew_deg(gray: &GrayImage) -> f64 {
 /// the image is resampled **once**, at the end, or not at all. Under
 /// [`SkewMode::Legacy`] the pre-ADR-0008 search runs, resampling the probe once
 /// per candidate angle.
-fn deskew(image: &RgbImage, mode: SkewMode) -> RgbImage {
-    let gray = to_gray(image);
-    let best = match mode {
-        SkewMode::Default => estimate_skew_deg(&gray),
+/// The angle, in degrees, that `mode` would correct `gray` by.
+///
+/// Kept separate from [`deskew_by`] so a caller can ask whether two modes
+/// *agree* before
+/// paying for a second rotation and a second OCR pass. That question is the
+/// whole reason [`mrz_variants_with`] can afford to run both estimators: on a
+/// clean upright scan they both answer `0.0`, and the duplicate variant is never
+/// built.
+fn skew_angle(gray: &GrayImage, mode: SkewMode) -> f64 {
+    match mode {
+        SkewMode::Default => estimate_skew_deg(gray),
         SkewMode::Legacy => {
-            let probe = downscale_longest_side(&gray, DESKEW_PROBE_MAX_DIM);
+            let probe = downscale_longest_side(gray, DESKEW_PROBE_MAX_DIM);
             DESKEW_CANDIDATES_DEG
                 .iter()
                 .copied()
@@ -824,11 +870,15 @@ fn deskew(image: &RgbImage, mode: SkewMode) -> RgbImage {
                 })
                 .unwrap_or(0.0)
         }
-    };
-    if best == 0.0 {
+    }
+}
+
+/// Rotate by a known angle, skipping the resample entirely at `0.0`.
+fn deskew_by(image: &RgbImage, angle: f64) -> RgbImage {
+    if angle == 0.0 {
         image.clone()
     } else {
-        rotate_rgb(image, best)
+        rotate_rgb(image, angle)
     }
 }
 
@@ -1304,9 +1354,23 @@ mod tests {
     #[test]
     fn deskew_is_a_noop_within_tolerance_for_already_level_text() {
         let img = image_with_bottom_stripes(300, 150, 2, 10, 5);
+        let gray = to_gray(&img);
         for mode in [SkewMode::Default, SkewMode::Legacy] {
-            let out = deskew(&img, mode);
-            assert_eq!(out.dimensions(), img.dimensions(), "{mode:?}");
+            // Level text must estimate *exactly* 0.0. That is a stronger claim
+            // than the dimensions coming back unchanged, and it is the one the
+            // name makes: `deskew_by` skips the resample entirely at 0.0, so a
+            // zero estimate is what makes this a no-op rather than a
+            // round-trip. It is also the property both callers rely on —
+            // `mrz_variants_with` compares the two modes' angles to decide
+            // whether a second variant is worth building, and on level text
+            // they must agree here or every clean scan pays a duplicate pass.
+            let angle = skew_angle(&gray, mode);
+            assert_eq!(angle, 0.0, "{mode:?}");
+            assert_eq!(
+                deskew_by(&img, angle).dimensions(),
+                img.dimensions(),
+                "{mode:?}"
+            );
         }
     }
 
