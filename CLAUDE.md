@@ -82,6 +82,11 @@ inconsistent.
 7. `CONTRIBUTING.md`
 8. `SECURITY.md`
 
+Some clones also carry `intent/intent.md` — local, gitignored strategic intent (product
+direction, commercial intent, and how to decide when no tracked document answers). Read it
+first when it is present. It never outranks the eight documents above, and it is never a
+citation in a commit message or PR description, since no reviewer can see it.
+
 ---
 
 # Rust philosophy
