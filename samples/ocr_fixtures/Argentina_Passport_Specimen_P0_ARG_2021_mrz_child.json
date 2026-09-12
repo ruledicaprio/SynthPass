@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "2012-11-01",
+  "date_of_expiry": "2026-06-18",
+  "document_number": "ZZZ000110",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "MARIA",
+  "issuing_country": "ARG",
+  "mrz_checksums_valid": false,
+  "mrz_line": "P<ARGVAZQUEZ<<MARIA<<<<<<<<<<<<<<<<<<<<<<<<<\nZZZ0001105ARG1211018F2606183999999999<<<<<86",
+  "nationality": "ARG",
+  "personal_number": "99999999",
+  "sex": "F",
+  "surname": "VAZQUEZ"
+}
