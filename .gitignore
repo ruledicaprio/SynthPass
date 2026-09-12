@@ -1,10 +1,15 @@
 # Rust
 target/
 
-# Claude Code local settings and locks — never commit. The shared workflow skill
-# under .claude/skills/ IS tracked and is re-included below.
+# Claude Code local settings and locks — never commit. The shared pieces ARE
+# tracked and re-included below: the workflow skill, the project subagents, and
+# the hook scripts those subagents reference (a subagent's frontmatter hook is
+# resolved relative to the checkout, so a clone or worktree without the script
+# runs the agent unguarded).
 .claude/*
 !.claude/skills/
+!.claude/agents/
+!.claude/hooks/
 
 # Local, machine-only strategic intent (intent/intent.md) — the AI-maintained
 # compass for product direction and commercial intent, subordinate to every
