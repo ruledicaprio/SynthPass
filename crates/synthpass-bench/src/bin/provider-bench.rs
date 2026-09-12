@@ -513,6 +513,12 @@ struct DocumentDetailReport {
     assertions_total: usize,
     assertions_unsupported: usize,
     unsupported_fields: Vec<&'static str>,
+    /// Wall-clock milliseconds of this document's OCR pass, the per-document
+    /// cost a real-specimen run is made of. The provider-level `speed` block
+    /// times `reader.read` alone, which for the deterministic `mrz` provider is
+    /// microseconds; this is the number that says where a 40-minute run went
+    /// (ADR-0010, step 5). Additive: older reports simply lack it.
+    ocr_ms: u128,
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -659,6 +665,7 @@ impl From<ProviderReport> for ProviderRow {
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
+                    ocr_ms: d.ocr_elapsed.as_millis(),
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),
@@ -1269,6 +1276,24 @@ async fn main() {
             r.accuracy.labelled_documents,
             r.speed.mean.as_millis(),
         );
+
+        // Where the time actually went. `mean` above times `reader.read` alone,
+        // microseconds for the deterministic provider, while the OCR pass each
+        // document shares across readers is where a real-specimen run spends its
+        // tens of minutes (ADR-0010, step 5).
+        let mut ocr_times: Vec<_> = r.documents_detail.iter().map(|d| d.ocr_elapsed).collect();
+        if !ocr_times.is_empty() {
+            ocr_times.sort();
+            let total: std::time::Duration = ocr_times.iter().sum();
+            println!(
+                "    ocr: total {:.1} min, mean {} ms, p50 {} ms, p95 {} ms, max {} ms",
+                total.as_secs_f64() / 60.0,
+                synthpass_bench::provider_bench::mean_duration(&ocr_times).as_millis(),
+                synthpass_bench::provider_bench::percentile_duration(&ocr_times, 0.50).as_millis(),
+                synthpass_bench::provider_bench::percentile_duration(&ocr_times, 0.95).as_millis(),
+                ocr_times.last().copied().unwrap_or_default().as_millis(),
+            );
+        }
 
         // Per-format document counts — the M6 plan's "report the unparsed
         // population separately; a specimen with no MRZ is not a
