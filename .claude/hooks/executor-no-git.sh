@@ -25,8 +25,12 @@ t='([[:space:]]|\\n|"|;|&|\|)'
 # Optional escaped closing quote after a quoted executable name (PowerShell: & "git.exe" commit).
 q='(\\")?'
 
+# Name the agent in the message so a denial read out of context still says who was bound.
+agent=$(printf '%s' "$in" | grep -oE '"agent_type":[[:space:]]*"[A-Za-z0-9_:-]*"' | head -1 | sed -E 's/.*:[[:space:]]*"//; s/"$//')
+[ -n "$agent" ] || agent="this subagent"
+
 deny() {
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"synthpass-engineer is an executor with no git, GitHub or publish rights (%s). Leave the working tree for the calling session to review and commit; put what you need in the handoff report."}}' "$1"
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"%s has no git, GitHub or publish rights (%s). Leave the working tree for the calling session to review and commit; put what you need in the handoff report."}}' "$agent" "$1"
   exit 0
 }
 
