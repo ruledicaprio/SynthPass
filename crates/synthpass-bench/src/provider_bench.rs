@@ -221,6 +221,12 @@ pub struct DocumentDetail {
     pub assertions_unsupported: usize,
     /// Which fields were asserted but absent from the OCR text. Names only.
     pub unsupported_fields: Vec<&'static str>,
+    /// Wall-clock time of this document's OCR pass (`recognize_detailed`),
+    /// carried through from preparation. The same for every reader, since OCR
+    /// runs once per document and is shared. Recorded per document because a
+    /// run's total cannot say *which* documents cost it
+    /// (`knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md`, step 5).
+    pub ocr_elapsed: Duration,
 }
 
 pub struct CapabilitySnapshot {
@@ -536,6 +542,10 @@ struct BenchPage {
     ///   `mrz_line` (`MrzFormat::guess_from_lines`), used only when no
     ///   provider's own Tier-1 read resolves a format for this document.
     known_or_guessed_format: Option<&'static str>,
+    /// Wall-clock time of this document's `recognize_detailed` call. Measured
+    /// once in [`prep_specimens`]/[`prep_corpus`] and shared by every reader,
+    /// the same way the OCR text is.
+    ocr_elapsed: Duration,
 }
 
 /// Writes `image` to a uniquely-named temp file and OCRs it via
@@ -546,18 +556,26 @@ struct BenchPage {
 /// specimens); the process id further disambiguates across concurrent runs,
 /// the same pattern [`crate::check_document`] and the original single-corpus
 /// version of this function both already used.
+///
+/// The returned [`Duration`] times `recognize_detailed` alone, not the temp
+/// file write, so it measures the OCR pipeline rather than the disk. It is
+/// where a real-specimen run spends almost all of its time, and until it was
+/// recorded nothing said which documents that time went to (ADR-0010, step 5).
 fn ocr_and_keep_path(
     ocr: &NativeOcr,
     image: &image::DynamicImage,
     name: &str,
-) -> Result<(OcrPage, PathBuf), String> {
+) -> Result<(OcrPage, PathBuf, Duration), String> {
     let path =
         std::env::temp_dir().join(format!("provider-bench-{}-{name}.png", std::process::id(),));
     image
         .save(&path)
         .map_err(|e| format!("failed to write temp image: {e}"))?;
-    match ocr.recognize_detailed(&path) {
-        Ok(page) => Ok((page, path)),
+    let started = Instant::now();
+    let result = ocr.recognize_detailed(&path);
+    let ocr_elapsed = started.elapsed();
+    match result {
+        Ok(page) => Ok((page, path, ocr_elapsed)),
         Err(e) => {
             let _ = std::fs::remove_file(&path);
             Err(e)
@@ -581,7 +599,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.seed);
             }
-            let (page, image_path) =
+            let (page, image_path, ocr_elapsed) =
                 ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
             let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
             // Read from the OCR text, never from `labels`: the question is
@@ -602,6 +620,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 printed_zone_nonconforming: false,
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
+                ocr_elapsed,
             })
         })
         .collect()
@@ -624,7 +643,8 @@ fn prep_specimens(
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.name);
             }
-            let (page, image_path) = ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
+            let (page, image_path, ocr_elapsed) =
+                ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             // The hand-transcribed true printed MRZ zone, when this specimen
             // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
@@ -673,6 +693,7 @@ fn prep_specimens(
                 printed_zone_nonconforming,
                 synthetic: false,
                 known_or_guessed_format,
+                ocr_elapsed,
             })
         })
         .collect()
@@ -910,6 +931,7 @@ async fn run_prepped(
                         assertions_total: 0,
                         assertions_unsupported: 0,
                         unsupported_fields: Vec::new(),
+                        ocr_elapsed: bench_page.ocr_elapsed,
                     });
                     if progress {
                         eprintln!(
@@ -1198,6 +1220,7 @@ async fn run_prepped(
                 assertions_total: doc_assertions,
                 assertions_unsupported: doc_unsupported_fields.len(),
                 unsupported_fields: doc_unsupported_fields,
+                ocr_elapsed: bench_page.ocr_elapsed,
             });
         }
 
@@ -1362,7 +1385,8 @@ async fn run_prepped(
     reports
 }
 
-fn mean_duration(sorted: &[Duration]) -> Duration {
+/// Mean of `sorted`, or [`Duration::ZERO`] when it is empty.
+pub fn mean_duration(sorted: &[Duration]) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
@@ -1370,7 +1394,7 @@ fn mean_duration(sorted: &[Duration]) -> Duration {
 }
 
 /// `sorted` must already be sorted ascending. `p` in `[0, 1]`.
-fn percentile_duration(sorted: &[Duration], p: f64) -> Duration {
+pub fn percentile_duration(sorted: &[Duration], p: f64) -> Duration {
     if sorted.is_empty() {
         return Duration::ZERO;
     }
@@ -1585,6 +1609,7 @@ mod tests {
                 printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
                 name: "fixture".to_string(),
@@ -1601,6 +1626,7 @@ mod tests {
                 printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
             }),
         ];
 
@@ -1639,6 +1665,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -1679,6 +1706,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -1754,6 +1782,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let dir = std::env::temp_dir().join(format!(
@@ -1830,6 +1859,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let dir = std::env::temp_dir().join(format!(
@@ -1907,6 +1937,7 @@ mod tests {
             printed_zone_nonconforming: true,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -1972,6 +2003,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2062,6 +2094,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2112,6 +2145,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2156,6 +2190,7 @@ mod tests {
                 printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
             })
         };
         let prepped = vec![
@@ -2215,6 +2250,7 @@ mod tests {
                 printed_zone_nonconforming: false,
                 synthetic: false,
                 known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
             })
         };
         let prepped = vec![
@@ -2276,6 +2312,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2325,6 +2362,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2383,6 +2421,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2427,6 +2466,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2477,6 +2517,7 @@ mod tests {
             printed_zone_nonconforming: false,
             synthetic: false,
             known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -2489,5 +2530,42 @@ mod tests {
                 )
             }
         }
+    }
+
+    /// The OCR time measured in preparation must reach the per-document row
+    /// unchanged. It is the only per-document timing a real-specimen run
+    /// records: `speed` times `reader.read` alone, microseconds for the
+    /// deterministic provider. A `DocumentDetail` built with `Duration::ZERO`
+    /// would compile, serialize, and quietly report every document as free.
+    #[tokio::test]
+    async fn ocr_elapsed_reaches_the_document_row_unchanged() {
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::model_reader(CostClass::Expensive),
+            surname: "SMITH",
+            evidence: Evidence::default(),
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let ocr_elapsed = Duration::from_millis(1234);
+        let prepped = vec![Some(BenchPage {
+            name: "fixture".to_string(),
+            page: OcrPage::default(),
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
+            mrz_found: false,
+            redacted: false,
+            mrz_expected: true,
+            printed_zone_nonconforming: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+            ocr_elapsed,
+        })];
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        assert_eq!(reports[0].documents_detail[0].ocr_elapsed, ocr_elapsed);
     }
 }
