@@ -1,7 +1,9 @@
 # ADR-0008 — MRZ detection succeeds sequence completeness as M6's accuracy track
 
 **Status:** Accepted. Target metric corrected 2026-09-09; the mandated measurement completed
-2026-09-10 (the gap is native page orientation) — see the two amendments below.
+2026-09-10 (the gap is native page orientation); chunk 2 built and measured by 2026-09-11, which
+leaves `no_mrz_found` level with `checksum_failed` and the track's premise spent — see the three
+amendments below.
 **Date:** 2026-09-09
 
 ## Context
@@ -194,3 +196,54 @@ same-binary A/B against the 11 named documents:
 
 **Still not licensed:** replacing `ocrs`/`rten`, adding tesseract or any dependency, or writing a
 new detector — until the three changes above are built and measured and shown insufficient.
+
+## Amendment 2026-09-12 — chunk 2 is built, and the premise has run out
+
+Chunk 2 built the orientation fix the previous amendment licensed, and measured every layer of it
+([`orientation-fix-2026-09-12.md`](../benchmarks/orientation-fix-2026-09-12.md)). Same corpus, CI
+gate reports before and after:
+
+| | before chunk 2 | after |
+| :-- | --: | --: |
+| Tier-1 hit rate | 128 / 157 = 81.5% | **143 / 157 = 91.1%** |
+| `no_mrz_found` (the target) | 21 | **7** |
+| `checksum_failed` | 8 | 7 |
+
+Fifteen documents flipped, all toward HIT: every scoreable one of chunk 1's eleven named victims,
+the two sideways books ingested for this chunk that did not already read, two low-signal scans, and
+one tilted band. None flipped away.
+
+**How each licensed change fared:**
+
+1. *Gate `choose_rotation` behind a detected-text confidence floor* — **refuted, then superseded.**
+   A 16-document sweep found detection healthy on the victims and word counts running inversely to
+   correctness, so no floor separates them. The vote was retired from the default path instead:
+   nothing decides orientation now before a check digit can.
+2. *Move 90°/270° into the retry chain* — **built** (#262), and fourteen of the fifteen came from
+   it. Paired with (1) it measured +14/−0; either half alone loses a document.
+3. *Upscale before the general detection pass* — **not built.** The retry chain's third variant
+   already is that pass, every miss reaches it, and the sub-300 px scans this lever was tied to all
+   read now.
+
+The fifteenth came from layer 2's skew estimator (#269), and only once it ran alongside the legacy
+search instead of replacing it (+1/−0). Its layer-3 companion, a conditional band upscale, was
+dropped before being built, on measured model input geometry.
+
+**What still holds.** Nothing here replaced `ocrs`/`rten`, added a dependency, or wrote a detector.
+The three changes were enough for the population they targeted, so the "until shown insufficient"
+condition was never met, and that exclusion stands unchanged.
+
+**What no longer holds is the premise.** This ADR made detection M6's accuracy track because
+`no_mrz_found` outnumbered `checksum_failed`: 3.5 : 1 as first written, 2.6 : 1 once corrected. It is
+now **7 : 7**. The property the Consequences section valued, the track pointing at the largest
+measured miss, no longer picks out one kind of miss. Two things follow, and neither is decided here:
+
+- **The next accuracy chunk should be chosen against the fourteen named misses, not assumed to be
+  detection.** For four of the seven `no_mrz_found` documents the manifest records no issuing state
+  or document code, so what their zones should read is not yet established; they need a manifest
+  review before they count as detection targets. All seven `checksum_failed` documents carry
+  checksum-valid printed zones, so each is a real recognition error.
+- **The deferral this ADR accepted is due for review.** Its Negative consequences said that if
+  accuracy work displaced packaging a third time, that would be evidence M6 should have been split.
+  With the scoreable rate at 91.1% and the remaining misses split evenly, choosing between a third
+  accuracy chunk and the packaging half of M6 is exactly that decision. It belongs in its own ADR.

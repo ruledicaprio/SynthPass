@@ -218,14 +218,14 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
 
 **Ships first — the deterministic core:**
 
-- **MRZ detection (Tier-1 real-document accuracy).** `no_mrz_found` — no MRZ located at all —
-  is the single largest real-specimen miss category at 18 of 144 scored documents, 2.6× the
-  7 that are found but fail a check digit. (It read 85 of 229 until the
-  [denominator correction](benchmarks/denominator-correction-2026-09-09.md) removed the
-  specimens that carry nothing to find.) Scoped in
-  [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md), whose first chunk is a measurement:
-  explain why the browser demo's tesseract.js stack out-reads the native `ocrs`/`rten` pipeline
-  on the same corpus before changing a detector.
+- **MRZ detection (Tier-1 real-document accuracy).** Scoped in
+  [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md). Chunk 1 traced the browser/native gap
+  to native page orientation; chunk 2 fixed it, and `no_mrz_found` went from the largest scored
+  miss to level with `checksum_failed`
+  ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md); live numbers in
+  [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What comes next is
+  the open decision ADR-0008's 2026-09-12 amendment hands on: a further accuracy chunk chosen
+  against the named residual, or M6's packaging half.
 - **MRZ sequence completeness — closed.** The predecessor track: a diagnostic /
   completeness-typing / TD2-repair backlog for `crates/mrz` and the `synthpass-die` pipeline
   layer around it. Complete, with the chunk-by-chunk record kept in
@@ -283,9 +283,10 @@ given.
 **Tier-1 accuracy** — M6's lead track ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)),
 and where recent effort has actually gone. The *sequence-completeness* half of it is closed;
 [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md) succeeds it with **MRZ detection**, on
-the evidence that `no_mrz_found` (18 of 144) outnumbers `checksum_failed` (7) by 2.6:1.
-Its first chunk is a measurement: explain why the browser demo's OCR out-reads the native
-pipeline ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) before changing any detector.
+the evidence that `no_mrz_found` then outnumbered `checksum_failed`. Its chunk 1 traced the
+browser/native gap ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) to page orientation and chunk 2
+fixed it, which left the two level; what the accuracy track does next is open (ADR-0008's
+2026-09-12 amendment).
 
 - MRZ sequence completeness — **done** ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
   All of its chunks shipped: typed `ChecksumFailed` sub-reasons (#163), the personal-number

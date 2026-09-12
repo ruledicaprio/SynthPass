@@ -23,6 +23,25 @@ use image::{GrayImage, RgbImage};
 const FULL_PAGE_MIN_DIM: u32 = 1000;
 
 /// Upscale target for the width of the bottom-band crop.
+///
+/// **Load-bearing on every band it touches.** Recorded at length because
+/// making it conditional was proposed once (ADR-0008 chunk 2, layer 3) and
+/// dropped on 2026-09-12 without being built. Both `ocrs` models fix their
+/// input geometry, read from the shipped `.rten` files: detection runs on
+/// exactly 800×600 (height × width) — smaller inputs are *padded*, not scaled
+/// up, and larger ones are resampled down — and recognition resizes every line
+/// crop to a fixed 64 px height, bilinearly. So:
+///
+/// - This upscale only fires on a band narrower than 1600 px, and at 1600 px
+///   the MRZ text rows measure 33–44 px on TD3 passports and 45–48 px on a TD1
+///   card back that the 5× [`MAX_SCALE`] cap stopped at 1270 px — below 64
+///   everywhere. Every upscale that happens is one recognition would otherwise
+///   do itself, bilinearly, from fewer pixels. Skipping it swaps Lanczos for
+///   bilinear; it does not save a resample.
+/// - For detection it is what normalises text height: a band from a 300 px
+///   scan would otherwise hand the detector glyphs a few pixels tall.
+/// - Detection costs the same whatever the input size (the tensor is always
+///   800×600), so the only thing a skip could save is this resize.
 const BAND_MIN_WIDTH: u32 = 1600;
 
 /// Never upscale beyond this factor — past it there is no new signal, only
@@ -937,6 +956,19 @@ fn rotate_gray(gray: &GrayImage, degrees: f64) -> GrayImage {
     })
 }
 
+/// Rotate by an arbitrary angle about the centre: one inverse-affine map,
+/// bilinear sampling, trig computed once per call, white fill.
+///
+/// **The only continuous resample applied to a buffer that gets OCR'd, and
+/// private on purpose.** ADR-0008 chunk 2 asked for "at most one continuous
+/// rotation per buffer" to be a type-level fact. Visibility already makes it
+/// one: this has a single caller, [`deskew_by`], and every buffer `deskew_by`
+/// receives is a fresh `mrz_band` crop of a page that upstream has only ever
+/// been turned by lossless quarter-turns. A second fine rotation would need a
+/// new call site inside this module, and a wrapper type would not make that
+/// any easier to catch in review. [`rotate_gray`] is the estimator-side twin,
+/// used only on the legacy skew search's downscaled probe, which is never
+/// recognised.
 fn rotate_rgb(image: &RgbImage, degrees: f64) -> RgbImage {
     if degrees == 0.0 {
         return image.clone();
