@@ -51,9 +51,10 @@ trend history is read.
   coverage in `knowledge/CORPUS_COVERAGE.md`. The specimen images live on `samples-data`, not
   `main`; `scripts/sync-samples.ps1` pulls them.
 - **CI** — `gh run list --workflow real-specimen-gate.yml`, `gh run view <id>`, `gh pr checks`.
-- **Decisions** — `knowledge/decisions/ADR-0006` (accuracy first), `ADR-0008` (detection track),
-  `ADR-0010` (benchmark cost by role), and `knowledge/project_principles.md` P6: a constant with no
-  measurement behind it does not ship.
+- **Decisions** — `knowledge/decisions/ADR-0006-m6-accuracy-first.md`,
+  `knowledge/decisions/ADR-0008-mrz-detection-track.md`,
+  `knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md`, and
+  `knowledge/project_principles.md` P6: a constant with no measurement behind it does not ship.
 
 ## How to read a number
 
