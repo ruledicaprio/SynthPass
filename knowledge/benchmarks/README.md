@@ -8,7 +8,10 @@ Principle 6: a constant with no measurement behind it does not ship.
 ## Current headline numbers
 
 **This section is the only place in the repo that carries live accuracy numbers.** Every other
-document — `README.md`, `ROADMAP.md`, an ADR — states at most one figure and links here. That rule
+document — `README.md`, `ROADMAP.md`, an ADR — states at most one *live* figure and links here.
+A dated measurement recorded inside an ADR as the evidence its decision rests on is not a live
+figure and is never updated: ADRs are amended, not rewritten, and a decision whose evidence is
+edited out cannot be audited. That rule
 exists because it was broken: the same numbers were restated in four documents, and `README.md`
 spent a release cycle advertising a hit rate ten points low while naming the wrong dominant miss.
 
