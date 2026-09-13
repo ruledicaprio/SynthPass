@@ -1,6 +1,10 @@
 # Rust
 target/
 
+# Python (tools/*.py)
+__pycache__/
+*.pyc
+
 # Claude Code local settings and locks — never commit. The shared pieces ARE
 # tracked and re-included below: the workflow skill, the project subagents, and
 # the hook scripts those subagents reference (a subagent's frontmatter hook is
