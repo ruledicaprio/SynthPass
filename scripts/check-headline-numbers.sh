@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify the README's headline accuracy figure matches the committed CI baseline.
+# Verify the README's and ROADMAP's headline accuracy figures match the committed CI baseline.
 #
 #   scripts/check-headline-numbers.sh
 #
@@ -11,9 +11,9 @@
 # the front page was told the wrong number *and* pointed at the wrong bottleneck.
 #
 # The rule that replaced it: knowledge/benchmarks/README.md is the only document
-# carrying live numbers, and README.md carries exactly one headline figure. This
-# script is what makes that rule load-bearing rather than aspirational -- it reads
-# the CI-written baseline and fails if README.md disagrees.
+# carrying live numbers, and README.md and ROADMAP.md each carry exactly one
+# headline figure. This script is what makes that rule load-bearing rather than
+# aspirational -- it reads the CI-written baseline and fails if either disagrees.
 #
 # The baseline itself is written only by CI:
 #   gh workflow run real-specimen-gate.yml -f mode=write-baseline
@@ -27,6 +27,7 @@ cd "$repo_root"
 
 baseline="knowledge/benchmarks/real-specimen-mrz-baseline.json"
 readme="README.md"
+roadmap="knowledge/ROADMAP.md"
 status=0
 
 fail() {
@@ -36,6 +37,7 @@ fail() {
 
 [ -f "$baseline" ] || { echo "FAIL: $baseline is missing" >&2; exit 1; }
 [ -f "$readme" ] || { echo "FAIL: $readme is missing" >&2; exit 1; }
+[ -f "$roadmap" ] || { echo "FAIL: $roadmap is missing" >&2; exit 1; }
 
 # Pull the three numbers we assert on. The baseline is machine-written and flat,
 # so a field grep is sufficient and avoids a jq dependency.
@@ -132,15 +134,31 @@ if [ "$false_positives" -gt 0 ]; then
     fail "(\`provider-bench --real-specimens --mrz-only --verbose\`) before this is baselined as normal."
 fi
 
+# 6. ROADMAP.md obeys the same one-figure rule as README.md: exactly one rate
+#    written "<hits> / <denominator> = <rate>%", and it must be the baseline's
+#    scored figure. A second rate, or one that trails the baseline, is the stale
+#    "119 / 144 = 82.6%" failure this script exists to catch.
+roadmap_rates="$(grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+[[:space:]]*=[[:space:]]*[0-9.]+%' "$roadmap" || true)"
+roadmap_count="$(printf '%s' "$roadmap_rates" | grep -c . || true)"
+if [ "$roadmap_count" -eq 0 ]; then
+    fail "ROADMAP.md states no rate as '<hits> / <denominator> = <rate>%'; it must state exactly one, '${hits} / ${scored} = ${rate}%'."
+elif [ "$roadmap_count" -gt 1 ]; then
+    fail "ROADMAP.md states ${roadmap_count} rates; only knowledge/benchmarks/README.md carries live numbers, so it must state exactly one ('${hits} / ${scored} = ${rate}%')."
+    fail "Found: $(printf '%s' "$roadmap_rates" | tr '\n' ' ')"
+elif ! grep -qE "${hits}[[:space:]]*/[[:space:]]*${scored}[[:space:]]*=[[:space:]]*${rate}%" "$roadmap"; then
+    fail "ROADMAP.md's one rate is not the baseline's scored figure '${hits} / ${scored} = ${rate}%'."
+    fail "Found instead: ${roadmap_rates}"
+fi
+
 if [ "$status" -eq 0 ]; then
-    echo "OK: README.md headline numbers match $baseline"
+    echo "OK: README.md and ROADMAP.md headline numbers match $baseline"
 else
     cat >&2 <<EOF
 
-The README's headline accuracy claim is out of step with the committed baseline.
-Update README.md's Accuracy section to the numbers printed above, and put any
-additional figures in knowledge/benchmarks/README.md rather than a second
-document -- that duplication is what this check exists to prevent.
+A headline accuracy claim is out of step with the committed baseline. Update the
+one figure in README.md or knowledge/ROADMAP.md to the numbers printed above,
+and put any additional figures in knowledge/benchmarks/README.md rather than a
+second document -- that duplication is what this check exists to prevent.
 EOF
 fi
 
