@@ -19,13 +19,13 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **143 / 155 = 92.3%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-13) |
+| **Tier-1 hit rate, real specimens** | **143 / 153 = 93.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-13) |
 | Tier-1 hit rate, whole specimen corpus | 143 / 254 = 56.3% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 99 of the 254 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 101 of the 254 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -33,29 +33,34 @@ the first moves when accuracy work lands. Full analysis:
 [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md) (the original 94),
 [`denominator-bucket-a-2026-09-10.md`](denominator-bucket-a-2026-09-10.md) (the Argentina 2026 pair),
 [`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md) (the
-Swedish card front and the Dutch licence).
+Swedish card front, the Dutch licence, Egypt 2012's masked zone and Argentina 2021 child's
+non-conforming one).
 
 **Real-specimen outcomes** (254 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
 | **Tier-1 HIT** | **143** | numerator | Checksum-valid MRZ, document number matches ground truth |
-| `no_mrz_found` | 5 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
+| `no_mrz_found` | 3 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
 | `checksum_failed` | **7** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13 |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 45 | no | Document carries no MRZ at all; none was read. A correct refusal |
-| `redacted_mrz` | 36 | no | Zone blacked out by whoever published the specimen |
-| `checksum_failed_specimen` | 18 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
+| `redacted_mrz` | 37 | no | Zone blacked out by whoever published the specimen |
+| `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
 readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
 (2.6:1, 21 against 8). ADR-0008 chunk 2's orientation fix brought the two level at 7 each on
 2026-09-11 ([`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md)). On 2026-09-13 a
-[manifest review](manifest-review-no-mrz-found-2026-09-13.md) found two of those seven had no ICAO
-zone to find — a Swedish card front tagged `_mrz` by mistake, and a Dutch driving licence whose one
-machine-readable line is not ICAO 9303 in any format — and renaming them on `samples-data` moved
-both to `no_mrz_expected`. That left **5 against 7**, with zero extraction change: recognition, not
-detection, is now the larger scored miss. The twelve that remain are named across those two files.
+[manifest review](manifest-review-no-mrz-found-2026-09-13.md) and the reclassification that
+followed found four of those seven could never have yielded a hit: a Swedish card front tagged
+`_mrz` by mistake and a Dutch driving licence whose one machine-readable line is not ICAO 9303 (both
+now `no_mrz_expected`), an Egyptian specimen whose zone the publisher pixel-masked (`redacted_mrz`),
+and an Argentine child passport whose printed zone fails four of its own five check digits
+(`checksum_failed_specimen`). That left **3 against 7**, with zero extraction change: recognition, not
+detection, is now the larger scored miss. The ten that remain are France ID 2020 back, Italy ID 2022
+back and Moldova `PA_MDA_2014` for detection, and the seven `checksum_failed` named in
+[`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md).
 What that means for the track is in
 [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s 2026-09-12 amendment.
 
@@ -778,3 +783,12 @@ changed since whatever pipeline version last read it. Renaming forced a fresh re
 stack returns no MRZ on that licence at all — so `observed` in `samples/corpus.jsonl` is a dated
 read, not a current one, and the false-positive exposure on this document is lower than stated.
 The mechanism finding stands unchanged: `present` still fell back to `observed.found`.
+
+**Then extended to four documents, and re-measured.** Two more of the seven turned out to be
+unreadable and were folded into the same PR, re-verified from the images before acting: Egypt
+`P0_EGY_2012`, whose zone lines are pixel-masked, renamed `_redacted_mrz` on `samples-data`; and
+Argentina `P0_ARG_2021_mrz_child`, whose hand-transcribed fixture fails four of its five check
+digits. This review had counted both as genuine detection targets, because it opened only the four
+rows with no recorded code or state. CI re-blessed the result (`measured_on_ci_sha` `1b2e3bc`,
+`samples-data` `da787de`): `scored` 155 → **153**, `no_mrz_found` 5 → **3**, `redacted_mrz` 36 → **37**,
+`checksum_failed_specimen` 18 → **19**, HIT **143** — the model again, exactly.
