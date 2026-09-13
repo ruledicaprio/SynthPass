@@ -52,7 +52,11 @@ an advisory signal rather than a requirement.
    Survivors are written to a Markdown packet for a human to fill in the provenance call; the
    tool itself never decides public/local/drop or a licence class.
 2. **Maintainer review.** The maintainer makes the provenance call and proposes a manifest row.
-3. **Human verification**, candidate by candidate: *public*, *local* or *drop*.
+3. **Human verification**, candidate by candidate: *public*, *local* or *drop*. Optionally done
+   through `tools/build_review_artifact.py`, which renders the packet as a single self-contained
+   HTML page (image plus every column, one click per verdict); `tools/apply_verdicts.py` then
+   syncs the saved result back into the packet's own Verdict column, which stays the record of
+   truth either way.
 
 Nothing reaches `samples-data` before step 3. The agent or service never ingests, commits or
 pushes. Everything it reports — a URL, a transcribed MRZ, a claim that it downloaded a file — is
