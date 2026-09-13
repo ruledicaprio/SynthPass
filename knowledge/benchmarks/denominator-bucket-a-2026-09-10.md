@@ -59,6 +59,13 @@ The user's hand-read flagged five candidates. Only Argentina (×2) is acted on h
   validates cleanly. Reclassifying reverses a recorded decision; left for the maintainer to
   reconcile.
 
+**Both deferrals closed 2026-09-13.** `Sweden_ID_Specimen_2027_mrz` was renamed `_front_no_mrz` and
+`Egypt_Passport_Specimen_P0_EGY_2012_mrz` `_redacted_mrz` on `samples-data`, in the same PR as the
+Dutch driving licence's `_no_mrz` rename and a hand-transcribed fixture for the Argentina 2021 child
+passport, whose printed zone fails four of its five check digits — see
+[`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md). Moldova
+was left as recorded.
+
 Genuine detector-movable miss set after this pass: **~22** (the 25 in-denominator misses minus
 Argentina ×2 minus the Sweden refusal once the rename lands). Croatia stays counted.
 
