@@ -29,11 +29,11 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 71 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 72 |
 | MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 15 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 150 |
+| No specimen yet | 149 |
 | **Total tracked codes** | **238** |
 
 Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
@@ -261,7 +261,7 @@ corpus. 150 codes still uncovered.
 | SVK | Slovakia | Passport, Service Passport | HIT (x2) + negative control | Contributor-supplied specimens (Specimen/Vzorka placeholder name); corpus includes additional unlabelled specimens per real-OCR scan, 2026-08-17 |
 | SVN | Slovenia | ID card (TD1), Passport | HIT (x2, ID card + passport) (+ negative control) | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
 | ESP | Spain | Passport | HIT (x2) | Contributor-supplied specimens (ESPECIMEN watermark / placeholder name); confirmed still HIT in real-OCR scan, 2026-08-17 |
-| SWE | Sweden | -- | No specimen yet | -- |
+| SWE | Sweden | Passport, ID card, Visa | HIT (x2, passport + visa) (+ 1 checksum-failed) | Real-specimen CI gate, 2026-09-13. The 2022 ID-card back is a named `checksum_failed` with a hand-verified fixture; the 2027 ID-card front carries no MRZ (renamed `_front_no_mrz` 2026-09-13 — see [`manifest-review-no-mrz-found-2026-09-13.md`](benchmarks/manifest-review-no-mrz-found-2026-09-13.md)) |
 | CHE | Switzerland | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | UKR | Ukraine | Passport | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GBR | United Kingdom | Passport | HIT (x3 specimens) (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
