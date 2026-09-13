@@ -409,11 +409,16 @@ fn a_stem_never_carries_two_different_mrz_present_values() {
 
 /// The manifest, not the filename, is what makes the MRZ expectation correct.
 ///
-/// The `_mrz`/`_no_mrz` naming convention postdates parts of the corpus:
-/// `driving_licenses/` names carry no tag at all. Resolving expectations from
-/// the filename alone would call those documents MRZ-bearing, and every one of
-/// them would then be scored as a detection failure for correctly finding
-/// nothing. This pins the population that only the manifest gets right.
+/// The `_mrz`/`_no_mrz` naming convention postdates parts of the corpus, so
+/// some `driving_licenses/` names carry no tag at all. Resolving expectations
+/// from the filename alone would call those documents MRZ-bearing, and every
+/// one of them would then be scored as a detection failure for correctly
+/// finding nothing. This pins the population that only the manifest gets right.
+///
+/// That population shrank to the two Bosnian licences on 2026-09-13, when the
+/// Dutch licence — the third untagged name, and the one the fallback got wrong
+/// — was renamed to carry `_no_mrz`
+/// (`knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md`).
 #[test]
 fn some_mrz_less_specimens_are_untagged_and_only_the_manifest_knows() {
     let untagged: Vec<String> = manifest_rows()
