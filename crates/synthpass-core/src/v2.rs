@@ -567,7 +567,11 @@ impl CoreField {
 
     /// The snake_case wire name, identical to the serde representation and to
     /// the JSON key in [`ExtractionFields`].
-    pub fn as_str(self) -> &'static str {
+    ///
+    /// `const` so downstream crates can pin their own field lists against this
+    /// one at compile time — see `synthpass_llm::grammar` and
+    /// `synthpass_bench`'s `COMPARED_FIELDS` guards.
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::DocumentType => "document_type",
             Self::IssuingCountry => "issuing_country",

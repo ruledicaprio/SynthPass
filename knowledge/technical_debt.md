@@ -85,7 +85,8 @@ framing — see `long-horizon-parsing.md` for the actual cost breakdown.
 
 ### Three parallel lists of ICAO field names
 
-- `synthpass_core::v2::ExtractionFields` — the schema, 10 fields
+- `synthpass_core::v2::ExtractionFields` — the schema: the 10 ICAO fields plus
+  the two derived `*_name` keys (`issuing_country_name`, `nationality_name`)
 - `synthpass_bench::COMPARED_FIELDS` — what the benchmark scores
 - `synthpass_llm::prompt::FIELDS` — what the prompt asks for, and the source
   `grammar.rs` generates the GBNF from
@@ -93,15 +94,19 @@ framing — see `long-horizon-parsing.md` for the actual cost breakdown.
 The third **deliberately differs** (it asks for `mrz_line`, omits
 `personal_number`), and `grammar.rs`'s "prompt and grammar cannot drift"
 invariant depends on it staying a Rust const. So this is not simply
-de-duplicable. `v2::CoreField` unifies the first two; the third stays separate.
+de-duplicable. `v2::CoreField` names the 10 ICAO fields; the third stays separate.
 
-**Consequence:** adding an ICAO field means editing three places, and nothing
-fails if you edit two.
+**Guarded since the `icao-fields-guard` change:** `CoreField::as_str` is `const`,
+and two `const _` blocks pin the lists at compile time — `synthpass-bench`
+asserts `COMPARED_FIELDS` equals `CoreField::ALL` name for name and in order;
+`synthpass-llm/src/grammar.rs` asserts every prompted field is a `CoreField` or
+listed in `PROMPT_ONLY_FIELDS`, and every `CoreField` is prompted or listed in
+`CORE_FIELDS_NOT_PROMPTED`. Adding a field to one list and not the others no
+longer compiles.
 
-**Fix:** a compile-time assertion that `CoreField` ⊇ `prompt::FIELDS` minus the
-documented exceptions, so divergence is deliberate rather than accidental.
-
-**Estimated effort:** half a day.
+**Still open:** the derived `*_name` keys have no `CoreField` variant, and
+`schema_keys.rs` checks `CoreField` → `ExtractionFields` keys in one direction
+only, so a new `ExtractionFields` key outside `CoreField` is still unguarded.
 
 ### Streaming bypasses the provider contract
 

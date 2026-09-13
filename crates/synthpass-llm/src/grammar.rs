@@ -21,6 +21,7 @@
 //! is permitted to emit cannot drift apart.
 
 use crate::prompt::FIELDS;
+use synthpass_core::v2::CoreField;
 
 /// The entry-point rule name, as passed to `LlamaSampler::grammar`.
 pub const GRAMMAR_ROOT: &str = "root";
@@ -37,6 +38,122 @@ value  ::= string | "null"
 string ::= "\"" ( [^"\\] | "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F]) )* "\""
 ws     ::= [ \t\n]*
 "#;
+
+/// Byte-wise string equality, usable in a `const` context: `PartialEq for str`
+/// is not `const`, so the drift guards below cannot use `==`.
+///
+/// Kept private to this crate, like the identical helper in `synthpass-bench`.
+/// Sharing one would mean exporting it from `synthpass-core`, adding public
+/// API to a published crate for an assertion no consumer can call.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// Fields [`FIELDS`] asks the model for that are not ICAO 9303 fields, and so
+/// have no [`CoreField`] variant.
+///
+/// `mrz_line` is the raw MRZ zone — the model is asked to transcribe the
+/// printed characters, not to name a parsed field, and the raw zone is not an
+/// ICAO 9303 field in its own right. [`CoreField`] deliberately does not cover
+/// it; see the "Deliberately **not** unified with `synthpass_llm::prompt::FIELDS`"
+/// note at `crates/synthpass-core/src/v2.rs:534-537`.
+const PROMPT_ONLY_FIELDS: &[&str] = &["mrz_line"];
+
+/// [`CoreField`]s deliberately not asked of the model.
+///
+/// `personal_number` has been absent from [`FIELDS`] since the list was
+/// written (`crate::prompt` describes the list as a subset of the canonical
+/// schema); no tracked document records a reason beyond that. Listing it here
+/// keeps the omission a stated fact rather than an accident — see
+/// `knowledge/technical_debt.md`, "Three parallel lists of ICAO field names".
+const CORE_FIELDS_NOT_PROMPTED: &[&str] = &["personal_number"];
+
+/// The drift guard: the prompt's field list and [`CoreField::ALL`] may differ
+/// only in the two documented directions above.
+///
+/// This is a compile error rather than a test because the failure it prevents
+/// is a schema field the model is never asked for — a runtime test would only
+/// notice once some document happened to exercise that field.
+const _: () = {
+    // (a) Every name the prompt asks for is either a CoreField or a documented
+    //     prompt-only field.
+    let mut i = 0;
+    while i < FIELDS.len() {
+        let mut known = false;
+
+        let mut j = 0;
+        while j < CoreField::ALL.len() {
+            if str_eq(FIELDS[i], CoreField::ALL[j].as_str()) {
+                known = true;
+            }
+            j += 1;
+        }
+
+        let mut k = 0;
+        while k < PROMPT_ONLY_FIELDS.len() {
+            if str_eq(FIELDS[i], PROMPT_ONLY_FIELDS[k]) {
+                known = true;
+            }
+            k += 1;
+        }
+
+        assert!(
+            known,
+            "prompt::FIELDS names a field that is neither a CoreField nor a \
+             documented PROMPT_ONLY_FIELDS entry. Two edits are required: add \
+             the field to CoreField::ALL in crates/synthpass-core/src/v2.rs, or \
+             list it in PROMPT_ONLY_FIELDS here if the model is deliberately \
+             asked for something that is not an ICAO 9303 field."
+        );
+
+        i += 1;
+    }
+
+    // (b) Every CoreField is either asked for or documented as deliberately
+    //     not asked for.
+    let mut i = 0;
+    while i < CoreField::ALL.len() {
+        let mut covered = false;
+
+        let mut j = 0;
+        while j < FIELDS.len() {
+            if str_eq(CoreField::ALL[i].as_str(), FIELDS[j]) {
+                covered = true;
+            }
+            j += 1;
+        }
+
+        let mut k = 0;
+        while k < CORE_FIELDS_NOT_PROMPTED.len() {
+            if str_eq(CoreField::ALL[i].as_str(), CORE_FIELDS_NOT_PROMPTED[k]) {
+                covered = true;
+            }
+            k += 1;
+        }
+
+        assert!(
+            covered,
+            "CoreField::ALL contains a field the prompt neither asks for nor \
+             records as deliberately unprompted. Two edits are required: add \
+             the field to prompt::FIELDS in crates/synthpass-llm/src/prompt.rs, \
+             or list it in CORE_FIELDS_NOT_PROMPTED here with the reason the \
+             model is not asked for it."
+        );
+
+        i += 1;
+    }
+};
 
 /// Build the GBNF constraining Tier-2 output to the extraction schema.
 ///

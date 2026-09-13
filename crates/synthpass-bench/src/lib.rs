@@ -12,6 +12,7 @@
 use image::DynamicImage;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use synthpass_core::v2::CoreField;
 use synthpass_gen::degrade::{apply_profile, CaptureProfile};
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
@@ -982,6 +983,54 @@ const COMPARED_FIELDS: [(&str, FieldAccessor); 10] = [
         m.personal_number.clone().unwrap_or_default()
     }),
 ];
+
+/// Byte-wise string equality, usable in a `const` context: `PartialEq for str`
+/// is not `const`, so the drift guard below cannot use `==`.
+///
+/// Kept private to this crate, like the identical helper in
+/// `synthpass_llm::grammar`. Sharing one would mean exporting it from
+/// `synthpass-core`, adding public API to a published crate for an assertion
+/// no consumer can call.
+const fn str_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
+
+/// The drift guard: [`COMPARED_FIELDS`] scores exactly the ICAO fields
+/// [`CoreField::ALL`] names, in the same order. Benchmark columns and the
+/// schema are otherwise two lists that agree only by convention.
+const _: () = {
+    assert!(
+        COMPARED_FIELDS.len() == CoreField::ALL.len(),
+        "COMPARED_FIELDS and CoreField::ALL have different lengths. Two edits \
+         are required: add the new field to CoreField::ALL in \
+         crates/synthpass-core/src/v2.rs, and add it to COMPARED_FIELDS here \
+         with its mrz::MrzData accessor."
+    );
+
+    let mut i = 0;
+    while i < COMPARED_FIELDS.len() {
+        assert!(
+            str_eq(COMPARED_FIELDS[i].0, CoreField::ALL[i].as_str()),
+            "COMPARED_FIELDS and CoreField::ALL name different fields at the \
+             same index, so the benchmark would score a field the schema does \
+             not report (or score none). Two edits are required: keep \
+             COMPARED_FIELDS in the same order as CoreField::ALL in \
+             crates/synthpass-core/src/v2.rs, or change both together."
+        );
+        i += 1;
+    }
+};
 
 fn compare_fields(truth: &mrz::MrzData, got: &mrz::MrzData) -> Vec<FieldOutcome> {
     let mut out: Vec<FieldOutcome> = COMPARED_FIELDS
