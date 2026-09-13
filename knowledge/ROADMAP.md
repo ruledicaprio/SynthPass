@@ -19,7 +19,7 @@
 > disagrees with *Current state* or `git log`, the latter win, and the planning text is the
 > thing to fix.
 
-The evolution is **linear, M1 through M7** — no parallel tracks. Each milestone builds on the
+The evolution is **linear, M1 through M8** — no parallel tracks. Each milestone builds on the
 last and ships with a **Definition of Done (DoD)**: specific, measurable criteria, in the
 spirit of the accuracy gates already used in the repo (checksum-proven Tier 1, corpus
 hit-rate). Timelines are targets, not commitments.
@@ -35,8 +35,11 @@ hit-rate). Timelines are targets, not commitments.
 >
 > M6's *internal* priority order was later corrected — the deterministic-core work
 > (Tier-1 real-document accuracy, format/provider completeness) leads, and the
-> enterprise/packaging track is sequenced behind it. This is a reframe, not a split: M6 stays
-> one milestone. See [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md).
+> enterprise/packaging track is sequenced behind it. That was a reframe inside one milestone,
+> not a split ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)). When the accuracy premise
+> ran out on 2026-09-12 the two halves were split for real: the deterministic core stays **M6**,
+> expansion and enterprise readiness became **M8** ([`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)). Still one milestone at a
+> time — M6 closes before M8 opens.
 
 ## Milestone overview
 
@@ -49,7 +52,8 @@ timeline
     M4 Regression & benchmarking : done
     M5 Extraction platform (Atlas) : done
     M7 Document Intelligence Engine : done
-    M6 Expansion & enterprise : in progress
+    M6 Deterministic core : in progress
+    M8 Expansion & enterprise : not started
 ```
 
 *(M7 appears before M6 above because that is the build order — see the note on the ordering
@@ -63,7 +67,8 @@ exception above. The numbering follows dependency, not schedule.)*
 | **M4 — Regression & Benchmarking** | ✅ Done | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented. Floor is `--min-hit-rate 0.30` on the synthetic clean TD3 corpus; measured ~55% synthetic clean / ~42% real corpus (the original 95% aspiration was dropped once measured — see [`benchmarks/README.md`](benchmarks/README.md)) |
 | **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
 | **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Expansion & Enterprise readiness** | 🚧 In progress — leads with Tier-1 real-document accuracy. Sequence completeness is **done**; the **MRZ detection** track's premise ran out on 2026-09-12 ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s amendment) and the next accuracy chunk is undecided, pending its own ADR. All five MRZ formats generate, render and benchmark; JSONL/HF exports shipped. Provider registration, layout plugins, COCO/YOLO, air-gapped guide and Pro beta still open. Priority order set by [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md) | MRZ **detection** / Tier-1 real-document accuracy ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md); sequence completeness closed in [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract** — *then* declarative document *layout* plugins; remaining dataset exports (COCO / YOLO); air-gapped deployment guide; commercial "Pro" closed beta | `no_mrz_found` is measurably reduced with no Tier-1 HIT regression against the committed baseline; non-TD3 formats generate/validate and each reads through a registered provider; at least one export format consumed by an external trainer end-to-end; a third-party *layout* definition drives generation without a code change; air-gapped install verified; Pro-beta feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
+| **M6 — Deterministic core: Tier-1 accuracy and MRZ formats** | 🚧 In progress — the deterministic half of the former M6, kept under its number; expansion and enterprise readiness moved to M8 by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md). Sequence completeness is **done**; the **MRZ detection** track's premise ran out on 2026-09-12 ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s amendment) and the residual is now a named list of scored misses, split between finding the zone and reading it. All five MRZ formats generate, render and benchmark; registering TD1/TD2/MRVA/MRVB as providers is the open build item | Tier-1 real-document accuracy against the **named** residual ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md); sequence completeness closed in [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **as providers against the M7 contract** | Every scored miss on the committed baseline is either a Tier-1 HIT or carries a dated attribution in `knowledge/benchmarks/` naming the mechanism that defeats it; no Tier-1 HIT regression, and every chunk that moves an outcome count re-blesses [`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json) in the same PR — the gate fails only on an increase, so it will not ask; each of TD1/TD2/MRVA/MRVB reads through a registered `synthpass-die` provider with its per-format rate published in [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers); no OCR engine replacement, vision provider or new dependency enters under this milestone — each would be its own ADR, benchmark-first |
+| **M8 — Expansion & Enterprise readiness** | ⏳ Not started — the packaging half of the former M6, split out by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) after two ADRs deferred it. One deliverable already shipped ahead of the split: JSONL / Hugging Face exports ([`EXPORTS.md`](EXPORTS.md)). COCO/YOLO, layout plugins, the air-gapped guide and the first commercial engagement are open. Opens when M6 closes — still one milestone at a time | Declarative document *layout* plugins; remaining dataset exports (COCO / YOLO); air-gapped deployment guide; first commercial engagement per [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) — a labelled corpus, an independent benchmark or an air-gapped integration, **not** a feature-gated tier | A third-party *layout* definition drives generation without a code change; at least one export format consumed by an external trainer end-to-end; an air-gapped install performed from a source build on a machine with no network, and written up — distribution is source-build only until the placeholder licensing key is replaced ([`technical_debt.md`](technical_debt.md)); one commercial engagement delivered with feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 ## Architecture evolution
 
@@ -109,14 +114,19 @@ platform (Atlas), and the Document Intelligence Engine provider contract have al
 card geometry; Tier 1 and Tier 2 both run through the `synthpass-die` catalog rather than a
 hardcoded `if`/`else`; prompts are versioned with a CI-pinned digest.
 
-**M6: in progress.** The generator-format gap is closed. M6 leads with the deterministic-core
-work ([`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md)): MRZ sequence completeness /
-Tier-1 real-document accuracy (see [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md))
-and TD1/TD2/MRVA/MRVB registered as `synthpass-die` providers. The enterprise/packaging track
-(layout plugins, dataset exports, air-gapped guide, Pro beta) is sequenced behind it — of which
-dataset exports has landed its first half: `synthpass export` writes JSONL / Hugging Face
-training datasets from a synthetic corpus ([`ADR-0007`](decisions/ADR-0007-dataset-export-format.md),
-[`EXPORTS.md`](EXPORTS.md)).
+**M6: in progress; M8 split out.** The generator-format gap is closed.
+[`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) split the former M6 in two once
+[`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s detection premise ran out: **M6** keeps
+the deterministic core — Tier-1 real-document accuracy against a named residual (the predecessor
+sequence-completeness track is closed, see
+[`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)) and TD1/TD2/MRVA/MRVB registered
+as `synthpass-die` providers — while **M8** takes expansion and enterprise readiness: declarative
+layout plugins, the remaining dataset exports, the air-gapped deployment guide, and a first
+commercial engagement in [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)'s terms rather than
+a feature-gated tier. M8 has one deliverable already shipped ahead of the split: `synthpass export`
+writes JSONL / Hugging Face training datasets from a synthetic corpus
+([`ADR-0007`](decisions/ADR-0007-dataset-export-format.md), [`EXPORTS.md`](EXPORTS.md)). The order
+is unchanged and still linear — M6 closes before M8 opens.
 
 ### Measured accuracy
 
@@ -211,18 +221,19 @@ licences need (see "Scoped separately" under M6 below) becomes a provider someon
 without touching the pipeline; and M6's "a third-party plugin builds against a stable interface"
 criterion is satisfied by an interface that exists.
 
-## M6 — Expansion & Enterprise readiness
+## M6 — Deterministic core: Tier-1 accuracy and MRZ formats
 
 M7's contract is what M6 was waiting on (see "What this buys M6" above). M6's priority order was
-corrected in [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md): the deterministic-core work
-leads, the enterprise/packaging track follows. The generator gap (once the stated bottleneck) is
+corrected in [`ADR-0006`](decisions/ADR-0006-m6-accuracy-first.md), and its two halves were then
+split by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md): this milestone is the deterministic core, and the enterprise/packaging
+track is M8, below. The generator gap (once the stated bottleneck) is
 already cleared — `synthpass-gen` emits all five formats onto their own ICAO card geometry, and
 `--document-type td1|td2|td3|mrva|mrvb` reaches it from `synthpass generate` and both bench
 binaries; per-format hit rates and the defects the first measurements exposed are in the
 execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md)) and
 `benchmarks/README.md`.
 
-**Ships first — the deterministic core:**
+**The deterministic core:**
 
 - **MRZ detection (Tier-1 real-document accuracy).** Scoped in
   [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md). Chunk 1 traced the browser/native gap
@@ -231,9 +242,10 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md)), then behind it
   once a manifest review removed four documents that could never have been read
   ([`manifest-review-no-mrz-found-2026-09-13.md`](benchmarks/manifest-review-no-mrz-found-2026-09-13.md); live numbers in
-  [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What comes next is
-  the open decision ADR-0008's 2026-09-12 amendment hands on: a further accuracy chunk chosen
-  against the named residual, or M6's packaging half.
+  [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What came next was
+  the decision ADR-0008's 2026-09-12 amendment handed on, and
+  [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) took it: M6 continues against the
+  named residual, one document at a time, and packaging moved to M8.
 - **MRZ sequence completeness — closed.** The predecessor track: a diagnostic /
   completeness-typing / TD2-repair backlog for `crates/mrz` and the `synthpass-die` pipeline
   layer around it. Complete, with the chunk-by-chunk record kept in
@@ -244,23 +256,6 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   contract (`IntelligenceProvider`/`Recognizer`/`FieldReader`), the same shape `MrzReader`
   already uses for TD3 — not a new branch in a growing `if`/`else`. See the M7 section above for
   the contract itself.
-
-**Then — expansion and enterprise readiness:**
-
-- **Declarative document layout plugins.** A third-party layout definition drives generation
-  without a code change — the M6 DoD criterion the milestone table already states.
-- **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
-  trainer end-to-end. Conventions fixed in
-  [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md) (DeepSeek-OCR 0–1000 coordinates,
-  JSONL first); spec in [`EXPORTS.md`](EXPORTS.md). **JSONL and Hugging Face shipped**
-  (`crates/synthpass-export`, `synthpass export`); COCO / YOLO still open (they need geometry
-  `synthpass_gen::Labels` does not yet surface — see `EXPORTS.md`, "Deferred").
-- **Air-gapped deployment guide**, verified by an actual air-gapped install, not just written.
-- **First commercial engagement**, with feedback collected — the last item, since it depends on
-  the rest existing first. Per [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) this is no
-  longer a feature-gated "Pro" tier: the software stays MIT and the offering is a labelled
-  corpus, an independent benchmark, or an air-gapped integration. None of those wait on the
-  Tier-1 accuracy number.
 
 **Scoped separately — not folded into this milestone**
 
@@ -273,12 +268,39 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   an M6 deliverable — worth picking up opportunistically, but doesn't block or get blocked by
   anything above.
 
-**Suggested order:** MRZ detection / Tier-1 accuracy ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md))
-→ TD1/TD2/MRVA/MRVB as providers
-against the M7 contract → layout plugins → dataset exports → deployment guide + Pro beta. The
-deterministic-core steps come first because they are what the product is sold on and where the
-real-specimen miss rate is; each expansion step after that makes the next one's accuracy numbers
-meaningful instead of TD3-only.
+**Suggested order:** the named Tier-1 residual ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md),
+chosen per document) → TD1/TD2/MRVA/MRVB as providers against the M7 contract → **M6 closes**, and
+M8 opens. The deterministic-core steps come first because they are what the product is sold on and
+where the real-specimen miss rate is.
+
+## M8 — Expansion & Enterprise readiness
+
+The packaging half of the former M6, split out by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) once
+[`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s accuracy premise ran out and two ADRs in a
+row had deferred it. **It opens when M6 closes** — still one milestone at a time. Pulling an item
+forward, including a commercial engagement that arrives early, is an ordering exception and needs
+its own ADR at [`ADR-0002`](decisions/ADR-0002-provider-model-before-layout-plugins.md)'s bar.
+
+- **Declarative document layout plugins.** A third-party layout definition drives generation
+  without a code change — the M8 DoD criterion the milestone table already states.
+- **Dataset exports** (COCO / YOLO / JSONL / Hugging Face), consumed by at least one external
+  trainer end-to-end. Conventions fixed in
+  [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md) (DeepSeek-OCR 0–1000 coordinates,
+  JSONL first); spec in [`EXPORTS.md`](EXPORTS.md). **JSONL and Hugging Face shipped**
+  (`crates/synthpass-export`, `synthpass export`); COCO / YOLO still open (they need geometry
+  `synthpass_gen::Labels` does not yet surface — see `EXPORTS.md`, "Deferred").
+- **Air-gapped deployment guide**, verified by an actual air-gapped install from a source build,
+  not just written. Distribution is source-build only until the placeholder licensing key is
+  replaced ([`technical_debt.md`](technical_debt.md)), so a guide to an official binary is not a
+  deliverable.
+- **First commercial engagement**, with feedback collected — the last item, since it depends on
+  the rest existing first. Per [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) this is no
+  longer a feature-gated "Pro" tier: the software stays MIT and the offering is a labelled
+  corpus, an independent benchmark, or an air-gapped integration. None of those wait on the
+  Tier-1 accuracy number.
+
+**Suggested order:** layout plugins → dataset exports → deployment guide → first commercial
+engagement.
 
 ## Open backlog
 

@@ -3,7 +3,8 @@
 **Status:** Accepted. Target metric corrected 2026-09-09; the mandated measurement completed
 2026-09-10 (the gap is native page orientation); chunk 2 built and measured by 2026-09-11, which
 leaves `no_mrz_found` level with `checksum_failed` and the track's premise spent — see the three
-amendments below.
+amendments below. The deferral review the third amendment hands on is decided in
+[`ADR-0011`](ADR-0011-split-m6-packaging-into-m8.md): M6 splits, and packaging becomes M8.
 **Date:** 2026-09-09
 
 ## Context

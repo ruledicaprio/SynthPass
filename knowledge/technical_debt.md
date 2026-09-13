@@ -32,6 +32,13 @@ persisted-random fallback). On Windows it degrades to `windows-dev-{COMPUTERNAME
 `unbound-dev-windows`, which binds nothing. Any Windows distribution needs a real fingerprint
 source first.
 
+**Decision (2026-09-13): distribution is source-build only** until a real keypair and a real Windows
+fingerprint exist. No official binary is a deliverable of any milestone as things stand;
+[`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) writes M8's air-gapped Definition of
+Done against a source build for exactly this reason. Shipping a binary later is its own decision,
+and the Fix above is its first step. The entry stays High because it still blocks that path — what
+changed is that the blockage is now a recorded position rather than an unnoticed gap.
+
 ### `synthpass-ocr`'s 18 `unsafe` blocks sit on the untrusted-image path
 
 `crates/synthpass-ocr` carries 18 `unsafe` blocks — the workspace's largest concentration by

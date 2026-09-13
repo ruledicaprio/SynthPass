@@ -1,6 +1,6 @@
 # ADR-0006 — Reframe M6 to lead with Tier-1 real-document accuracy
 
-**Status:** Accepted
+**Status:** Accepted. Its rejected split — M6 (accuracy) + a new M8 (enterprise & packaging) — was revisited on the condition [`ADR-0008`](ADR-0008-mrz-detection-track.md) set, and adopted on 2026-09-13: see [`ADR-0011`](ADR-0011-split-m6-packaging-into-m8.md).
 **Date:** 2026-09-07
 
 ## Context

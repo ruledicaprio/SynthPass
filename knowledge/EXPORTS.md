@@ -4,8 +4,9 @@
 `synthpass export` subcommand); COCO / YOLO deferred (see "Deferred" below). The formats and
 coordinate convention are fixed by
 [`decisions/ADR-0007-dataset-export-format.md`](decisions/ADR-0007-dataset-export-format.md);
-this is an M6 "Then — expansion and enterprise readiness" item
-([`ROADMAP.md`](ROADMAP.md#m6--expansion--enterprise-readiness)).
+this is an M8 "Expansion & Enterprise readiness" item
+([`ROADMAP.md`](ROADMAP.md#m8--expansion--enterprise-readiness)), split out of M6 by
+[`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md).
 
 `synthpass export` turns a deterministic `synthpass-gen` corpus into a training dataset in a
 standard on-disk shape. It is the sibling of [`SYNTHPASS.md`](SYNTHPASS.md)'s `synthpass-bench`

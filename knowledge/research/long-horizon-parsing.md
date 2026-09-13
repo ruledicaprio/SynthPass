@@ -40,8 +40,8 @@ truth. `synthpass-gen` produces labels that are **100% accurate by construction*
 — that is M2's Definition of Done, not an aspiration. On the axis that limited
 the SOTA model's training data, we are strictly ahead.
 
-**What it becomes.** [`ROADMAP.md`](../ROADMAP.md#m6--expansion--enterprise-readiness)
-commits M6 to "dataset exports (COCO / YOLO / JSONL / Hugging Face), consumed by
+**What it becomes.** [`ROADMAP.md`](../ROADMAP.md#m8--expansion--enterprise-readiness)
+commits M8 to "dataset exports (COCO / YOLO / JSONL / Hugging Face), consumed by
 at least one external trainer end-to-end" — and specifies no format for the JSONL
 and Hugging Face halves. Adopt this one. Normalised 0–1000 coordinates,
 block-concatenated content, `<page>` separators. Then "consumed by an external
@@ -53,7 +53,7 @@ which is currently a well-travelled path.
 about what the exporter writes, made before the exporter is written, which is the
 only cheap moment to make it.
 
-**Why it might not work.** The convention could be superseded before M6 lands —
+**Why it might not work.** The convention could be superseded before M8 lands —
 it is a 2026 recipe, not a standard. That risk is bounded: it costs one
 serialisation function either way, and a format nobody else reads is the status
 quo we would be choosing instead.

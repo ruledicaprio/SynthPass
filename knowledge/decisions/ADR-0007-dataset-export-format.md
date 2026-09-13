@@ -6,7 +6,7 @@
 ## Context
 
 M6 commits to *"dataset exports (COCO / YOLO / JSONL / Hugging Face), consumed by at least one
-external trainer end-to-end"* ([`ROADMAP.md`](../ROADMAP.md#m6--expansion--enterprise-readiness),
+external trainer end-to-end"* ([`ROADMAP.md`](../ROADMAP.md#m8--expansion--enterprise-readiness),
 "Then — expansion and enterprise readiness"). With the deterministic core done — MRZ sequence
 completeness and TD1/TD2/MRVA/MRVB reading through registered `synthpass-die` providers
 ([`ADR-0006`](ADR-0006-m6-accuracy-first.md)) — this is the next M6 track.
