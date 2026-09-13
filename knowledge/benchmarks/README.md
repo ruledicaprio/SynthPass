@@ -735,3 +735,30 @@ Full record: [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md).
 to the end of the layer track, so from #262's merge the `tolerance: 0` gate compared against a
 floor fourteen hits too low and would have passed a change undoing all of it. A deferred re-bless
 disarms the gate for exactly as long as it is deferred.
+
+### 2026-09-13 — two of the seven `no_mrz_found` documents have no ICAO zone to find
+
+Full writeup: [`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md).
+The manifest review the entry above asked for, on the four documents whose code and issuing state
+the manifest does not record. Opening the images splits them two and two. **France ID 2020 back and
+Italy CIE 2022 back print fully conforming TD1 zones** — all four check digits validate on each,
+transcribed in the writeup — so both are genuine detection targets and stay scored. **Sweden ID 2027
+is a card front with no zone at all** (its `_mrz` filename tag is simply wrong; the Swedish TD1 is on
+the back), and **the Netherlands licence carries one 30-character line with no `<` fillers**, which
+is no ICAO layout — TD1 is 3 × 30, TD2/MRV-B 2 × 36, TD3/MRV-A 2 × 44 — and satisfies the 7-3-1 rule
+at no position tested. `CORPUS_COVERAGE.md` was right about the Netherlands and `samples/corpus.jsonl`
+wrong. Scoring both out is modelled at `scored` 157 → 155, HIT unchanged at 143, **91.1% → 92.3%
+scored and 56.3% corpus-wide unchanged**, `no_mrz_found` 7 → 5. Detection has not been level with
+character accuracy since 2026-09-11; it has been **behind it, 5 : 7**.
+
+**The Netherlands row was wrong because OCR wrote it.** `corpus_manifest.rs` derives
+`mrz.present` as `claims.mrz_present.unwrap_or(observed.found)`, so a filename carrying neither
+`_mrz` nor `_no_mrz` falls through to what the recognizer returned — here a non-validating `A<` /
+`ADW` TD1 on a page with no ICAO zone — and `MrzExpectations::get` reads the manifest before the
+filename. Three of 254 names are untagged; the two Bosnian licences are right only because `ocrs`
+returned nothing on a GIF. Same class as the 2026-09-09 redaction and non-conformance bugs: **a
+property of the document decided by what the run returned.** Both fixes are renames on
+`samples-data`, since `present` is re-derived on every regeneration and a hand edit reverts.
+**And the gate will not ask for the re-bless** — `tier1_hits` holds at 143, `no_mrz_found` only
+falls, `documents` stays 254 — so merging without one leaves a `no_mrz_found` ceiling of 7 over a
+true value of 5.
