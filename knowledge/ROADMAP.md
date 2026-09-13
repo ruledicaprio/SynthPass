@@ -242,9 +242,10 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md)), then behind it
   once a manifest review removed four documents that could never have been read
   ([`manifest-review-no-mrz-found-2026-09-13.md`](benchmarks/manifest-review-no-mrz-found-2026-09-13.md); live numbers in
-  [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What comes next is
-  the open decision ADR-0008's 2026-09-12 amendment hands on: a further accuracy chunk chosen
-  against the named residual, or M6's packaging half.
+  [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What came next was
+  the decision ADR-0008's 2026-09-12 amendment handed on, and
+  [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) took it: M6 continues against the
+  named residual, one document at a time, and packaging moved to M8.
 - **MRZ sequence completeness — closed.** The predecessor track: a diagnostic /
   completeness-typing / TD2-repair backlog for `crates/mrz` and the `synthpass-die` pipeline
   layer around it. Complete, with the chunk-by-chunk record kept in

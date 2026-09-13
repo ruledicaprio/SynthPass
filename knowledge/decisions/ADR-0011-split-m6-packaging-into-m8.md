@@ -1,7 +1,5 @@
 # ADR-0011 — Split M6: the deterministic core keeps the number, packaging becomes M8
 
-<!-- TODO-VERIFY: the 3-vs-7 residual counts in Context fact 2, against the committed baseline -->
-
 **Status:** Accepted
 **Date:** 2026-09-13
 
@@ -18,7 +16,7 @@ in its own ADR."* This is that ADR. Five facts decide it.
 2.6 : 1 after the denominator correction. Chunk 2's orientation fix brought the two level; a
 reclassification on 2026-09-13 then took four documents that could never be read out of the
 denominator and left detection the *smaller* half, at a Tier-1 real-specimen rate of
-**TODO-FIGURE** on documents that can yield a hit
+**143 / 153 = 93.5%** on documents that can yield a hit
 ([`benchmarks/README.md`](../benchmarks/README.md#current-headline-numbers) — the one measured
 figure this ADR states). "Point the accuracy track at the largest measured miss" was the property
 both earlier ADRs used to order M6. It now points away from the track `ADR-0008` opened.
