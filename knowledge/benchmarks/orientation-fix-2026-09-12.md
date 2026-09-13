@@ -140,6 +140,12 @@ accuracy, down from 2.6 : 1 when ADR-0008 opened.
   ([`checksum-failed-real-specimens-2026-09-08.md`](checksum-failed-real-specimens-2026-09-08.md)),
   so each is a genuine character-recognition error.
 
+**2026-09-13: four of the seven `no_mrz_found` above could never have yielded a hit.** Sweden ID
+2027 is a card front and the Netherlands licence's line is not ICAO 9303 (both now
+`no_mrz_expected`); Egypt 2012's zone is pixel-masked (`redacted_mrz`); Argentina 2021 child's printed
+zone fails its own check digits (`checksum_failed_specimen`). The detection residual is France,
+Italy and Moldova — see [`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md).
+
 **One untested hypothesis, recorded rather than acted on.** Band variants are only ever scaled
 *up*. A band from a very large scan therefore reaches the 800×600 detector squeezed
 horizontally far harder than a 1600 px band: France's 4584 px band arrives at 13% of its width

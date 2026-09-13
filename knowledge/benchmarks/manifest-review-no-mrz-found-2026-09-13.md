@@ -233,6 +233,18 @@ is a fact about 254 files. The generator will fall back to OCR for the next unta
 exists in the corpus to pair it with; the claim is that *this file* carries no zone, not that
 this Swedish card design lacks one — it does not, and the 2022 back proves it.
 
+## Addendum, later on 2026-09-13 — two of the "five genuine targets" are not
+
+The five detection targets listed above included Egypt `P0_EGY_2012` and Argentina
+`P0_ARG_2021_mrz_child`. This review never opened either: both rows record a code and a state, so
+neither was among the four it set out to check. Opened since, neither can yield a hit. Egypt's two
+zone lines are pixel-masked by the publisher — only the `P<EGY` and `A…EGY` prefixes and the `<`
+fillers survive — so it belongs in `redacted_mrz`. Argentina's printed zone, transcribed character
+for character, fails four of its five ICAO check digits (only the document number validates), so a
+byte-perfect read still fails: `checksum_failed_specimen`. Both moved in the same PR as the two
+renames above, and CI measured the four together. The detection targets are **France, Italy and
+Moldova**; see [`README.md`](README.md#current-headline-numbers) for the live counts.
+
 ## Candidates considered and rejected
 
 - **Scoring the Netherlands licence as `checksum_failed_specimen`.** Tempting, because a

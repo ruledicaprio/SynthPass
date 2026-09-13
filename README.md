@@ -8,7 +8,7 @@ documents. **Zero cloud calls, ever.**
 [![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
 [![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-71%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-73%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 Pure Rust, one binary. `ocrs`/`rten` OCR and ICAO 9303 MRZ check digits run in-process;
@@ -122,20 +122,21 @@ one headline below is checked against the committed baseline by CI.
 Two rates, because one number cannot answer both questions honestly. A hit means a checksum-valid
 MRZ whose document number matches hand-verified ground truth.
 
-- **143 / 157 = 91.1% on documents that can yield a hit** — how often extraction succeeds when
+- **143 / 153 = 93.5% on documents that can yield a hit** — how often extraction succeeds when
   success is possible. This is the number accuracy work moves, and any PR that drops it is blocked
   by [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
   [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json).
 - **143 / 254 = 56.3% across the whole specimen corpus** — what happens if you point it at a pile
-  of real documents. The 97-specimen gap is not failure: those carry no machine-readable zone at
+  of real documents. The 101-specimen gap is not failure: those carry no machine-readable zone at
   all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
   whose own check digits are wrong by design. Returning nothing for them is the correct answer, and
   [until 2026-09-09 they were counted as failures](knowledge/benchmarks/denominator-correction-2026-09-09.md).
-- **The two scored misses are now level: `no_mrz_found` (7 of 157)**, where no MRZ is located at
-  all, and `checksum_failed` (7), where one is found but fails a check digit. Detection was the
-  bottleneck until the orientation fix in
-  [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; what is
-  left is split evenly between finding the zone and reading it.
+- **The larger scored miss is now reading, not finding: `checksum_failed` (7 of 153)**, where a
+  zone is found but fails a check digit, against `no_mrz_found` (3), where none is located at
+  all. Detection was the bottleneck until the orientation fix in
+  [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; a
+  [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md) then found four of the seven remaining detection
+  misses could never have yielded a hit.
 - Synthetic-corpus and Tier-2 parity numbers, per-format breakdowns, and the rejected candidates
   are all in [benchmarks/README.md](knowledge/benchmarks/README.md#current-headline-numbers).
 

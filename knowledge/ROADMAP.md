@@ -126,17 +126,19 @@ dated weak-spot findings. This section states one figure and the shape of the mi
 more specific belongs there, because restating numbers in a second document is precisely how
 `README.md` came to advertise a hit rate ten points stale.
 
-**Tier-1 on real specimens: 143 / 157 = 91.1%** over the documents that can yield a hit — from
+**Tier-1 on real specimens: 143 / 153 = 93.5%** over the documents that can yield a hit — from
 the CI-written baseline
-([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-11)
+([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-13)
 that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every
 PR. The rest of the corpus carries no MRZ, has it blacked out, or prints a zone whose own check
 digits fail; [the denominator correction](benchmarks/denominator-correction-2026-09-09.md)
 found those documents being scored as failures, and
 [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers) holds the corpus-level
-rate and the full bucket breakdown. The remaining scored misses are split evenly between
-detection (`no_mrz_found`) and recognition (`checksum_failed`) — see the
-[orientation fix](benchmarks/orientation-fix-2026-09-12.md) — and
+rate and the full bucket breakdown. The remaining scored misses now lean to recognition
+(`checksum_failed`) over detection (`no_mrz_found`) — see the
+[orientation fix](benchmarks/orientation-fix-2026-09-12.md), and the
+[manifest review](benchmarks/manifest-review-no-mrz-found-2026-09-13.md) that found four of the
+seven detection misses could never have yielded a hit — and
 [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s 2026-09-12 amendment says the next
 accuracy chunk is chosen against named documents, not assumed to be detection. Tier 2 is the
 enterprise add-on for the residual cases; **the deterministic Tier-1 core is the product.**
@@ -226,7 +228,9 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md). Chunk 1 traced the browser/native gap
   to native page orientation; chunk 2 fixed it, and `no_mrz_found` went from the largest scored
   miss to level with `checksum_failed`
-  ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md); live numbers in
+  ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md)), then behind it
+  once a manifest review removed four documents that could never have been read
+  ([`manifest-review-no-mrz-found-2026-09-13.md`](benchmarks/manifest-review-no-mrz-found-2026-09-13.md); live numbers in
   [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)). What comes next is
   the open decision ADR-0008's 2026-09-12 amendment hands on: a further accuracy chunk chosen
   against the named residual, or M6's packaging half.
