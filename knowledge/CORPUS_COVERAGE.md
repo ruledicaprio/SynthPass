@@ -29,8 +29,8 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 72 |
-| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 15 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 73 |
+| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 14 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
 | No specimen yet | 149 |
@@ -94,7 +94,7 @@ corpus. 150 codes still uncovered.
 | COD | Congo (Democratic Republic of the) | -- | No specimen yet | -- |
 | CIV | Côte d'Ivoire | -- | No specimen yet | -- |
 | DJI | Djibouti | Passport | HIT (x2) | Ingested 2026-09-10; both books read checksum-valid |
-| EGY | Egypt | Passport | HIT (+ 2 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| EGY | Egypt | Passport | HIT (x2) (+ 2 redacted) | Real-specimen CI gate, 2026-09-13: the 2017 and 2022 specimens read; the 2012 and an undated specimen have their zones masked by the publisher (2012 renamed `_redacted_mrz` 2026-09-13) |
 | GNQ | Equatorial Guinea | -- | No specimen yet | -- |
 | ERI | Eritrea | -- | No specimen yet | -- |
 | SWZ | Eswatini | -- | No specimen yet | -- |
@@ -135,7 +135,7 @@ corpus. 150 codes still uncovered.
 | ZWE | Zimbabwe | -- | No specimen yet | -- |
 | ESH | Western Sahara | -- | No specimen yet | -- |
 | ATG | Antigua and Barbuda | -- | No specimen yet | -- |
-| ARG | Argentina | Passport | MISS (checksum failed) (+ 1 no-MRZ) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
+| ARG | Argentina | Passport | HIT (emergency passport) (+ 3 non-conforming) | Real-specimen CI gate, 2026-09-13: the 2015 emergency passport reads; the 2026 pair and the 2021 child passport print zones that fail their own check digits and are scored out as `checksum_failed_specimen` — see [`denominator-bucket-a-2026-09-10.md`](benchmarks/denominator-bucket-a-2026-09-10.md) and [`manifest-review-no-mrz-found-2026-09-13.md`](benchmarks/manifest-review-no-mrz-found-2026-09-13.md) |
 | BHS | Bahamas | -- | No specimen yet | -- |
 | BRB | Barbados | -- | No specimen yet | -- |
 | BLZ | Belize | -- | No specimen yet | -- |
