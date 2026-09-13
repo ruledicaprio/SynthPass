@@ -42,11 +42,15 @@ an advisory signal rather than a requirement.
 
 ## Review gates for agent-found candidates
 
-1. **Automated screen.** The candidate is fetched again by the reviewer, not taken from the
-   agent's copy, and then:
+1. **Automated screen.** `tools/screen_candidates.py` performs this step: the candidate is
+   fetched again by the tool, not taken from the agent's copy, and then:
+   - its host is checked against the denylist above;
+   - its page is fetched and the image is confirmed to actually be linked from it;
    - its `sha256` is compared against the manifest, which rejects byte duplicates;
    - `check_sample` runs, including the vendor blocklist;
    - one OCR pass reads the MRZ.
+   Survivors are written to a Markdown packet for a human to fill in the provenance call; the
+   tool itself never decides public/local/drop or a licence class.
 2. **Maintainer review.** The maintainer makes the provenance call and proposes a manifest row.
 3. **Human verification**, candidate by candidate: *public*, *local* or *drop*.
 

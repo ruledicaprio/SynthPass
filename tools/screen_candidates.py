@@ -1,0 +1,740 @@
+#!/usr/bin/env python3
+"""
+screen_candidates.py
+
+Mechanically re-derives an agent-found specimen candidate before any human
+review: fetches the page itself (never trusting the worker's copy), downloads
+the image itself, hashes it, and runs the existing OCR sanity checker
+(`check_sample`). This is the "Automated screen" step in
+`knowledge/SPECIMEN_SOURCES.md`'s "Review gates for agent-found candidates".
+
+This tool never decides public/local/drop, never decides a licence class, and
+never writes a holder value (a name, a document number, a date of birth) to
+any output file. Those decisions -- and everything a human needs to make
+them -- belong to the "proposed destination" / "proposed licence" / "Verdict"
+columns of the Markdown packet this tool produces, which it always leaves
+blank.
+
+Standard library only. See tools/fetch_commons_mrz_specimens_v2.py for the
+sibling acquisition tool's User-Agent / retry-and-backoff conventions; this
+tool follows the same shape with urllib instead of requests.
+
+Usage:
+    python tools/screen_candidates.py --candidates <path.jsonl> --staging <dir> \\
+        --ledger <ledger.jsonl> --corpus samples/corpus.jsonl \\
+        --out <screened.jsonl> --packet <packet.md>
+
+Pipeline per candidate, cheapest check first. The first mechanical reject
+stops that candidate: a ledger row is appended and any staged file for it is
+deleted.
+
+    1. denylist            host is on the "never a source" list
+    2. ledger duplicate    image_url/page_url already rejected or admitted
+    3. fetch page_url      one retry, 15s timeout, polite per-host delay
+    4. linked-from-page    image_url must actually appear on the fetched page
+    5. evidence snippets   licence/specimen words, for human review only
+    6. download image_url  same fetch discipline as the page
+    7. byte duplicate      sha256 against --corpus and --ledger
+    8. check_sample        parses its stdout contract; missing VENDOR fails
+                            closed to "vendor", same as VENDOR BLOCKED
+    9. variant hint         in-memory only; the matched document number is
+                            never written to any output
+   10. needs_eyes           missing/conflicting signal, for the human packet
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import html.parser
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import date, datetime, timezone
+from urllib.parse import unquote, urljoin, urlparse
+
+USER_AGENT = (
+    "SynthPass-Specimen-Screener/1.0 "
+    "(https://github.com/ruledicaprio/SynthPass; rusmirskopljak@gmail.com)"
+)
+
+FETCH_TIMEOUT = 15  # seconds
+FETCH_RETRIES = 1  # one retry beyond the first attempt = 2 tries total
+HOST_DELAY = 1.0  # polite delay between requests to the same host, seconds
+
+CHECK_SAMPLE_TIMEOUT = 120  # seconds; OCR model load + inference
+
+# Domains knowledge/SPECIMEN_SOURCES.md's "Never a source" section forbids
+# outright. PRADO's own copyright notice prohibits harvesting or
+# redistributing its material outside official, non-commercial use -- it is
+# consulted only as a manual human reference, never scraped, never stored,
+# not even locally.
+DENYLISTED_HOSTS = {
+    "consilium.europa.eu",  # PRADO
+    "www.consilium.europa.eu",
+}
+
+LICENCE_WORDS = ["licen", "copyright", "\u00a9", "reuse", "creative commons", "public domain"]
+
+SPECIMEN_WORDS = [
+    "specimen",
+    "sample",
+    "muster",
+    "sp\u00e9cimen",
+    "esp\u00e9cimen",
+    "\u043e\u0431\u0440\u0430\u0437\u0435\u0446",
+    "uzorak",
+    "paraugs",
+    "pavyzdys",
+    "n\u00e4idis",
+    "wz\u00f3r",
+    "vzor",
+    "minta",
+]
+
+
+# --------------------------------------------------------------------------
+# Denylist
+# --------------------------------------------------------------------------
+
+
+def is_denylisted(host: str) -> bool:
+    host = (host or "").lower()
+    if not host:
+        return False
+    if host in DENYLISTED_HOSTS:
+        return True
+    return any(host.endswith("." + d) for d in DENYLISTED_HOSTS)
+
+
+# --------------------------------------------------------------------------
+# HTML parsing: link collection and plain-text extraction
+# --------------------------------------------------------------------------
+
+
+class _LinkCollector(html.parser.HTMLParser):
+    """Collects every src/href-style URL referenced by a page's markup."""
+
+    ATTR_NAMES = {"src", "href", "srcset", "data-src", "data-href"}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if value is None or name.lower() not in self.ATTR_NAMES:
+                continue
+            # srcset holds comma-separated "url descriptor" pairs.
+            for piece in value.split(","):
+                url = piece.strip().split(" ")[0].strip()
+                if url:
+                    self.links.append(url)
+
+
+def _filename_of(url: str) -> str:
+    return unquote(url.split("?")[0].rstrip("/").split("/")[-1])
+
+
+def image_linked_from_page(page_url: str, page_html: str, image_url: str) -> bool:
+    """True if `image_url` (absolute or by decoded filename) is among the
+    resources the fetched page actually links to."""
+    collector = _LinkCollector()
+    try:
+        collector.feed(page_html)
+    except Exception:
+        return False
+
+    image_decoded = unquote(image_url)
+    image_filename = _filename_of(image_url)
+
+    for link in collector.links:
+        absolute = urljoin(page_url, link)
+        if absolute == image_url or unquote(absolute) == image_decoded:
+            return True
+        if image_filename and _filename_of(absolute) == image_filename:
+            return True
+    return False
+
+
+class _TextExtractor(html.parser.HTMLParser):
+    """Strips tags, dropping script/style contents, for evidence-snippet scanning."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.chunks: list[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in ("script", "style"):
+            self._skip_depth += 1
+
+    def handle_endtag(self, tag):
+        if tag.lower() in ("script", "style") and self._skip_depth > 0:
+            self._skip_depth -= 1
+
+    def handle_data(self, data):
+        if self._skip_depth == 0:
+            self.chunks.append(data)
+
+
+def strip_tags(page_html: str) -> str:
+    extractor = _TextExtractor()
+    try:
+        extractor.feed(page_html)
+    except Exception:
+        return ""
+    return " ".join(extractor.chunks)
+
+
+def find_snippets(text: str, words: list[str], limit: int = 3, context: int = 80, max_len: int = 200) -> list[str]:
+    """At most `limit` short, deduplicated snippets around a case-insensitive
+    match of any of `words`. Human-review evidence only -- never a verdict."""
+    snippets: list[str] = []
+    lower = text.lower()
+    for word in words:
+        word_lower = word.lower()
+        idx = lower.find(word_lower)
+        while idx != -1 and len(snippets) < limit:
+            start = max(0, idx - context)
+            end = min(len(text), idx + len(word) + context)
+            snippet = re.sub(r"\s+", " ", text[start:end]).strip()
+            if len(snippet) > max_len:
+                snippet = snippet[:max_len].rstrip() + "\u2026"
+            if snippet and snippet not in snippets:
+                snippets.append(snippet)
+            idx = lower.find(word_lower, idx + len(word_lower))
+        if len(snippets) >= limit:
+            break
+    return snippets[:limit]
+
+
+# --------------------------------------------------------------------------
+# Fetching
+# --------------------------------------------------------------------------
+
+_last_request_time: dict[str, float] = {}
+
+
+def _polite_wait(host: str) -> None:
+    now = time.monotonic()
+    last = _last_request_time.get(host)
+    if last is not None:
+        elapsed = now - last
+        if elapsed < HOST_DELAY:
+            time.sleep(HOST_DELAY - elapsed)
+    _last_request_time[host] = time.monotonic()
+
+
+def fetch_url(url: str, opener=None):
+    """Fetch `url` with one retry and a polite per-host delay.
+
+    Returns (final_url, status_code, body_bytes) on success, or None after
+    retries are exhausted. `opener` is injectable for offline tests --
+    defaults to `urllib.request.urlopen`.
+    """
+    host = urlparse(url).netloc
+    opener_fn = opener or urllib.request.urlopen
+    last_error = None
+    for _attempt in range(FETCH_RETRIES + 1):
+        _polite_wait(host)
+        request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        try:
+            with opener_fn(request, timeout=FETCH_TIMEOUT) as resp:
+                body = resp.read()
+                final_url = resp.geturl() if hasattr(resp, "geturl") else url
+                status = getattr(resp, "status", None)
+                if status is None and hasattr(resp, "getcode"):
+                    status = resp.getcode()
+                return final_url, status, body
+        except urllib.error.HTTPError as e:
+            # An HTTPError is itself a response object with a body/status.
+            try:
+                body = e.read()
+            except Exception:
+                body = b""
+            return e.geturl() if hasattr(e, "geturl") else url, e.code, body
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last_error = e
+            continue
+    del last_error
+    return None
+
+
+# --------------------------------------------------------------------------
+# Image magic-byte detection
+# --------------------------------------------------------------------------
+
+
+def detect_image_type(data: bytes) -> str | None:
+    """Returns 'jpg' / 'png' / 'webp' / 'gif' from magic bytes, or None."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+# --------------------------------------------------------------------------
+# JSONL helpers
+# --------------------------------------------------------------------------
+
+
+def load_jsonl(path: str) -> list[dict]:
+    records = []
+    if not path or not os.path.exists(path):
+        return records
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            records.append(json.loads(line))
+    return records
+
+
+def append_jsonl(path: str, record: dict) -> None:
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# --------------------------------------------------------------------------
+# Duplicate detection
+# --------------------------------------------------------------------------
+
+
+def candidate_url(candidate: dict) -> str | None:
+    """The URL identity used for ledger comparisons: image_url when present,
+    page_url otherwise -- consistently, in both directions."""
+    return candidate.get("image_url") or candidate.get("page_url")
+
+
+def ledger_url_duplicate(candidate: dict, ledger_records: list[dict]) -> bool:
+    image_url = candidate.get("image_url")
+    page_url = candidate.get("page_url")
+    for row in ledger_records:
+        url = row.get("url")
+        if url and ((image_url and url == image_url) or (page_url and url == page_url)):
+            return True
+    return False
+
+
+def sha_duplicate(sha256: str, corpus_records: list[dict], ledger_records: list[dict]) -> str | None:
+    """Returns a human-readable match description, or None."""
+    for row in corpus_records:
+        if row.get("sha256") == sha256:
+            return row.get("filename") or "corpus-entry"
+    for row in ledger_records:
+        if row.get("sha256") == sha256:
+            return row.get("url") or "ledger-entry"
+    return None
+
+
+# --------------------------------------------------------------------------
+# check_sample stdout parsing
+# --------------------------------------------------------------------------
+
+
+def parse_check_sample_output(text: str) -> dict:
+    """Parses check_sample's stdout contract (crates/synthpass-ocr/examples/check_sample.rs).
+
+    Returns a dict:
+        mrz_status: 'hit' | 'miss' | 'error' | None
+        doc_number: str | None   (present only for 'hit'; keep this in memory
+                                   only -- never write it to an output file)
+        watermark:  True | False | None
+        vendor:     'clear' | 'blocked' | None
+
+    `vendor` is None when no VENDOR line appears at all (e.g. the process
+    crashed or exited before printing one, such as after OCR-ERROR). Callers
+    must fail closed on that -- treat a missing VENDOR line exactly like
+    VENDOR BLOCKED, never like VENDOR CLEAR.
+    """
+    result: dict = {"mrz_status": None, "doc_number": None, "watermark": None, "vendor": None}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("OCR-ERROR"):
+            result["mrz_status"] = "error"
+        elif line.startswith("MRZ HIT"):
+            result["mrz_status"] = "hit"
+            m = re.search(r"doc_number=(\S+)", line)
+            if m:
+                result["doc_number"] = m.group(1)
+        elif line.startswith("MRZ MISS"):
+            result["mrz_status"] = "miss"
+        elif line.startswith("WATERMARK"):
+            result["watermark"] = "contains" in line.lower()
+        elif line.startswith("VENDOR"):
+            if "BLOCKED" in line:
+                result["vendor"] = "blocked"
+            elif "CLEAR" in line:
+                result["vendor"] = "clear"
+    return result
+
+
+def run_check_sample(binary_path: str, image_path: str, timeout: int = CHECK_SAMPLE_TIMEOUT) -> dict:
+    try:
+        proc = subprocess.run(
+            [binary_path, image_path],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        output = (proc.stdout or "") + "\n" + (proc.stderr or "")
+    except (subprocess.TimeoutExpired, OSError) as e:
+        # Fails closed: no VENDOR line was ever produced.
+        return {"mrz_status": "error", "doc_number": None, "watermark": None, "vendor": None, "error": str(e)}
+    return parse_check_sample_output(output)
+
+
+def find_check_sample_binary(repo_root: str) -> str | None:
+    for name in ("check_sample.exe", "check_sample"):
+        candidate = os.path.join(repo_root, "target", "release", "examples", name)
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+# --------------------------------------------------------------------------
+# doc-claims-an-MRZ heuristic (for needs_eyes)
+# --------------------------------------------------------------------------
+
+
+def doc_claims_mrz(candidate: dict) -> bool:
+    """Whether the candidate's own metadata implies this image carries an
+    MRZ at all. A TD1 ID-card *front* image does not -- the MRZ is on the
+    back -- which is exactly the case a worker flagged in review_note for
+    the LVA proving candidates. Everything else is assumed to claim one."""
+    doc = (candidate.get("doc") or "").lower()
+    td = (candidate.get("td") or "").upper()
+    if td == "TD1" and "front" in doc and "back" not in doc:
+        return False
+    return True
+
+
+# --------------------------------------------------------------------------
+# Per-candidate pipeline
+# --------------------------------------------------------------------------
+
+
+def screen_candidate(
+    candidate: dict,
+    staging_dir: str,
+    ledger_records: list[dict],
+    corpus_records: list[dict],
+    binary_path: str,
+    fetch=None,
+) -> dict:
+    result = dict(candidate)
+    result.update(
+        {
+            "auto_reject": None,
+            "note": None,
+            "sha256": None,
+            "staged_path": None,
+            "page_url_final": None,
+            "page_status": None,
+            "image_url_final": None,
+            "image_status": None,
+            "licence_snippets": [],
+            "specimen_snippets": [],
+            "mrz_check": "none",
+            "needs_eyes": False,
+            "variant_of": None,
+        }
+    )
+
+    image_url = candidate.get("image_url")
+    page_url = candidate.get("page_url")
+
+    if not image_url or not page_url:
+        result["auto_reject"] = "off-scope"
+        result["note"] = "no image_url/page_url on this candidate row"
+        return result
+
+    # 1. denylist
+    for u in (image_url, page_url):
+        if is_denylisted(urlparse(u).netloc):
+            result["auto_reject"] = "denylisted"
+            return result
+
+    # 2. ledger duplicate
+    if ledger_url_duplicate(candidate, ledger_records):
+        result["auto_reject"] = "duplicate"
+        result["note"] = "url already in ledger"
+        return result
+
+    fetch_fn = fetch or fetch_url
+
+    # 3. fetch page_url
+    page_fetch = fetch_fn(page_url)
+    if page_fetch is None:
+        result["auto_reject"] = "unresolvable"
+        result["note"] = "page fetch failed after retry"
+        return result
+    final_page_url, page_status, page_body = page_fetch
+    result["page_url_final"] = final_page_url
+    result["page_status"] = page_status
+
+    try:
+        page_text = page_body.decode("utf-8")
+    except UnicodeDecodeError:
+        page_text = page_body.decode("latin-1", errors="replace")
+
+    # 4. linked-from-page
+    if not image_linked_from_page(final_page_url or page_url, page_text, image_url):
+        result["auto_reject"] = "unresolvable"
+        result["note"] = "not-linked-from-page"
+        return result
+
+    # 5. evidence snippets (human review only)
+    plain_text = strip_tags(page_text)
+    result["licence_snippets"] = find_snippets(plain_text, LICENCE_WORDS)
+    result["specimen_snippets"] = find_snippets(plain_text, SPECIMEN_WORDS)
+
+    # 6. download image_url
+    image_fetch = fetch_fn(image_url)
+    if image_fetch is None:
+        result["auto_reject"] = "unresolvable"
+        result["note"] = "image fetch failed after retry"
+        return result
+    final_image_url, image_status, image_body = image_fetch
+    result["image_url_final"] = final_image_url
+    result["image_status"] = image_status
+
+    sha256 = hashlib.sha256(image_body).hexdigest()
+    result["sha256"] = sha256
+
+    image_type = detect_image_type(image_body)
+    if image_type is None:
+        result["auto_reject"] = "off-scope"
+        result["note"] = "downloaded bytes are not a recognized image format"
+        return result
+
+    # 7. byte duplicate (checked before anything is written to staging)
+    dup = sha_duplicate(sha256, corpus_records, ledger_records)
+    if dup:
+        result["auto_reject"] = "duplicate"
+        result["note"] = f"byte-duplicate-of:{dup}"
+        return result
+
+    os.makedirs(staging_dir, exist_ok=True)
+    staged_path = os.path.join(staging_dir, f"{sha256[:12]}.{image_type}")
+    with open(staged_path, "wb") as f:
+        f.write(image_body)
+    result["staged_path"] = staged_path
+
+    # 8. check_sample (fails closed on a missing VENDOR line)
+    check = run_check_sample(binary_path, staged_path)
+    if check.get("vendor") != "clear":
+        result["auto_reject"] = "vendor"
+        result["note"] = "VENDOR BLOCKED" if check.get("vendor") == "blocked" else "no VENDOR line in check_sample output"
+        _delete_staged(staged_path)
+        result["staged_path"] = None
+        return result
+
+    if check.get("mrz_status") == "hit":
+        result["mrz_check"] = "valid"
+    elif check.get("mrz_status") == "miss":
+        result["mrz_check"] = "invalid"
+    else:
+        result["mrz_check"] = "none"
+
+    # 9. variant hint -- in-memory comparison only, doc_number never leaves
+    # this function.
+    doc_number = check.get("doc_number")
+    if doc_number:
+        for row in corpus_records:
+            row_mrz = row.get("mrz") or {}
+            if row.get("expected_document_number") == doc_number and row_mrz.get("issuing_state") == candidate.get(
+                "code"
+            ):
+                result["variant_of"] = row.get("filename")
+                break
+    del doc_number
+
+    # 10. needs_eyes
+    has_specimen_signal = bool(result["specimen_snippets"]) or check.get("watermark") is True
+    if not has_specimen_signal:
+        result["needs_eyes"] = True
+    if check.get("mrz_status") == "miss" and doc_claims_mrz(candidate):
+        result["needs_eyes"] = True
+
+    return result
+
+
+def _delete_staged(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
+# --------------------------------------------------------------------------
+# Packet (Markdown, survivors only)
+# --------------------------------------------------------------------------
+
+
+def _escape_md(text: str | None) -> str:
+    return (text or "").replace("|", "\\|").replace("\n", " ").strip()
+
+
+def write_packet(path: str, survivors: list[dict]) -> None:
+    lines = []
+    lines.append("# Specimen candidates -- automated screen survivors\n\n")
+    lines.append(
+        f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%MZ')} by "
+        "`tools/screen_candidates.py`. "
+        f"{len(survivors)} candidate(s) survived the automated screen. "
+        "\"Proposed destination\", \"proposed licence\" and \"Verdict\" are left blank for the "
+        "human reviewer -- see `knowledge/SPECIMEN_SOURCES.md`'s \"Review gates for agent-found "
+        "candidates\". No holder value (name, document number, date of birth) appears in this "
+        "file.\n\n"
+    )
+    header = (
+        "| # | Code | Doc/TD | Series | Host | Licence evidence | Specimen signal | MRZ check | "
+        "Proposed destination | Proposed licence | Local path | Note | Verdict |"
+    )
+    sep = "|---|---|---|---|---|---|---|---|---|---|---|---|---|"
+    lines.append(header + "\n")
+    lines.append(sep + "\n")
+
+    for i, rec in enumerate(survivors, 1):
+        code = rec.get("code", "")
+        td = rec.get("td", "")
+        doc_td = f"{rec.get('doc', '')} / {td}" if td else rec.get("doc", "")
+        series = rec.get("series", "")
+        host = urlparse(rec.get("page_url_final") or rec.get("page_url") or "").netloc
+        licence = "; ".join(rec.get("licence_snippets") or []) or rec.get("licence_evidence", "")
+        specimen = "; ".join(rec.get("specimen_snippets") or []) or rec.get("specimen_signal", "")
+        mrz_check = rec.get("mrz_check", "none")
+        staged_path = rec.get("staged_path") or ""
+        local_link = f"[{os.path.basename(staged_path)}]({staged_path})" if staged_path else ""
+
+        note_parts = []
+        if rec.get("needs_eyes"):
+            note_parts.append("needs eyes")
+        if rec.get("variant_of"):
+            note_parts.append(f"variant of {rec['variant_of']}")
+        note = "; ".join(note_parts)
+
+        row = (
+            f"| {i} | {_escape_md(code)} | {_escape_md(doc_td)} | {_escape_md(series)} | "
+            f"{_escape_md(host)} | {_escape_md(licence)} | {_escape_md(specimen)} | {mrz_check} | "
+            f"| | {local_link} | {_escape_md(note)} | |"
+        )
+        lines.append(row + "\n")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.writelines(lines)
+
+
+# --------------------------------------------------------------------------
+# Ledger row
+# --------------------------------------------------------------------------
+
+
+def build_ledger_row(candidate: dict, reason: str, sha256: str | None, cycle: str | None) -> dict:
+    return {
+        "url": candidate_url(candidate),
+        "sha256": sha256,
+        "code": candidate.get("code"),
+        "reason": reason,
+        "cycle": cycle,
+        "date": date.today().isoformat(),
+    }
+
+
+# --------------------------------------------------------------------------
+# Output record: never write a holder value
+# --------------------------------------------------------------------------
+
+
+def screened_record_for_output(result: dict) -> dict:
+    """Every field in `result` is already safe to write -- doc_number is
+    never stored on `result` (see screen_candidate's step 9 comment) -- but
+    this makes that guarantee explicit and in one place."""
+    record = dict(result)
+    record.pop("doc_number", None)  # defence in depth; never expected to be present
+    return record
+
+
+# --------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------
+
+
+def find_repo_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--candidates", required=True, help="JSONL file of worker-found candidates")
+    parser.add_argument("--staging", required=True, help="directory to stage downloaded images into")
+    parser.add_argument("--ledger", required=True, help="JSONL ledger of prior admit/reject decisions (appended to)")
+    parser.add_argument("--corpus", required=True, help="samples/corpus.jsonl, for byte-duplicate and variant checks")
+    parser.add_argument("--out", required=True, help="where to write one screened JSON record per candidate")
+    parser.add_argument("--packet", required=True, help="where to write the survivors-only Markdown packet")
+    parser.add_argument(
+        "--check-sample-bin",
+        default=None,
+        help="override the check_sample binary path (default: target/release/examples/check_sample[.exe])",
+    )
+    args = parser.parse_args(argv)
+
+    repo_root = find_repo_root()
+    binary_path = args.check_sample_bin or find_check_sample_binary(repo_root)
+    if not binary_path:
+        print(
+            "check_sample binary not found. Build it first:\n"
+            "  cargo build -p synthpass-ocr --release --example check_sample",
+            file=sys.stderr,
+        )
+        return 1
+
+    candidates = load_jsonl(args.candidates)
+    ledger_records = load_jsonl(args.ledger)
+    corpus_records = load_jsonl(args.corpus)
+
+    os.makedirs(args.staging, exist_ok=True)
+
+    screened: list[dict] = []
+    survivors: list[dict] = []
+
+    for candidate in candidates:
+        result = screen_candidate(candidate, args.staging, ledger_records, corpus_records, binary_path)
+        screened.append(result)
+        if result["auto_reject"] is None:
+            survivors.append(result)
+        else:
+            row = build_ledger_row(candidate, result["auto_reject"], result.get("sha256"), candidate.get("cycle"))
+            append_jsonl(args.ledger, row)
+            ledger_records.append(row)  # visible to later candidates in this same run
+
+    with open(args.out, "w", encoding="utf-8") as f:
+        for rec in screened:
+            f.write(json.dumps(screened_record_for_output(rec), ensure_ascii=False) + "\n")
+
+    write_packet(args.packet, survivors)
+
+    rejected = len(candidates) - len(survivors)
+    print(f"Screened {len(candidates)} candidate(s): {len(survivors)} survived, {rejected} auto-rejected.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
