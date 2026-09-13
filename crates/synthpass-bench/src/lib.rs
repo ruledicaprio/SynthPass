@@ -301,26 +301,35 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", 
 /// silently grow to include them (it did, once: 238 → 251 documents, with
 /// no warning). Case-insensitive rather than matching the `.gitignore`
 /// pattern's exact casing, because the directory itself is lowercase and a
-/// single consistent rule is less to get wrong than two. `include_private`
+/// single consistent rule is less to get wrong than two. `tracks.private`
 /// is that explicit opt-in — `provider-bench --include-private` sets it, and
 /// nothing else does; see [`load_real_specimens`].
-fn find_image_files(dir: &Path, include_private: bool) -> Vec<PathBuf> {
-    fn walk(dir: &Path, include_private: bool, out: &mut Vec<PathBuf>) {
+///
+/// **A directory named `local` (case-insensitive) is skipped the same way**
+/// unless `tracks.local` is set: `samples/local/` is the local-only track
+/// ([`LOCAL_TRACK_DIR`]). It is matched on the exact directory name rather
+/// than a substring the way `private` is — a specimen's filename never
+/// carries a track marker, and `local` is common enough as a word that a
+/// substring rule would eventually drop a public specimen from the walk.
+fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
+    fn walk(dir: &Path, tracks: OptInTracks, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if !include_private
-                && path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .is_some_and(|n| n.to_ascii_lowercase().contains("private"))
-            {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_ascii_lowercase);
+            if !tracks.private && name.as_deref().is_some_and(|n| n.contains("private")) {
                 continue;
             }
             if path.is_dir() {
-                walk(&path, include_private, out);
+                if !tracks.local && name.as_deref() == Some(LOCAL_TRACK_DIR) {
+                    continue;
+                }
+                walk(&path, tracks, out);
             } else if path
                 .extension()
                 .and_then(|e| e.to_str())
@@ -331,7 +340,7 @@ fn find_image_files(dir: &Path, include_private: bool) -> Vec<PathBuf> {
         }
     }
     let mut out = Vec::new();
-    walk(dir, include_private, &mut out);
+    walk(dir, tracks, &mut out);
     out.sort();
     out
 }
@@ -610,6 +619,28 @@ pub fn load_specimen(
     })
 }
 
+/// The directory under `samples/` that holds the local-only track: specimens
+/// usable on this machine whose source does not allow redistribution. It is
+/// gitignored, `scripts/sync-samples.ps1` never mirrors it to `samples-data`,
+/// and [`find_image_files`] leaves it out unless [`OptInTracks::local`] is set.
+pub const LOCAL_TRACK_DIR: &str = "local";
+
+/// Which opt-in tracks a real-specimen walk adds to the public corpus.
+///
+/// Both default to `false`, and the default is what CI and the committed
+/// baseline measure. Each track exists because a class of image sits under
+/// `samples/` on some machine without belonging to the public corpus, and
+/// the corpus denominator must not grow silently when one appears.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OptInTracks {
+    /// `samples/private/` and any `_Private_`-tagged name: real identity
+    /// documents a user keeps for their own benchmarking.
+    pub private: bool,
+    /// `samples/local/` ([`LOCAL_TRACK_DIR`]): specimens usable locally
+    /// whose source does not allow redistribution.
+    pub local: bool,
+}
+
 /// Loads every image file found recursively under `samples_root` as a
 /// [`RealSpecimenDoc`], attaching ground truth from `samples_root/
 /// ocr_fixtures/<stem>.json` wherever that file exists.
@@ -622,9 +653,12 @@ pub fn load_specimen(
 /// `samples_root` — there is no separate code path for them, and no
 /// specimen appears twice (`samples/ocr_fixtures/`'s images are not
 /// duplicated anywhere else in the tree).
-pub fn load_real_specimens(samples_root: &Path, include_private: bool) -> Vec<RealSpecimenDoc> {
+///
+/// `tracks` selects which opt-in tracks join the walk. The default adds none,
+/// and that default is what CI and the committed baseline measure.
+pub fn load_real_specimens(samples_root: &Path, tracks: OptInTracks) -> Vec<RealSpecimenDoc> {
     let expectations = MrzExpectations::load(samples_root);
-    find_image_files(samples_root, include_private)
+    find_image_files(samples_root, tracks)
         .into_iter()
         .filter_map(|path| load_specimen(samples_root, &path, &expectations))
         .collect()
@@ -1560,13 +1594,13 @@ mod tests {
         )
         .expect("temp fixture writes");
 
-        let paths = find_image_files(&root, false);
+        let paths = find_image_files(&root, OptInTracks::default());
         assert!(
             !paths.is_empty(),
             "the walk should find the images written to the temp tree"
         );
 
-        let paths_again = find_image_files(&root, false);
+        let paths_again = find_image_files(&root, OptInTracks::default());
         assert_eq!(
             paths, paths_again,
             "repeated walks of the same directory must yield the same order"
@@ -1620,8 +1654,14 @@ mod tests {
             .save(private_dir.join("unrelated_image_007.png"))
             .expect("temp fixture writes");
 
-        let default_paths = find_image_files(&root, false);
-        let with_private = find_image_files(&root, true);
+        let default_paths = find_image_files(&root, OptInTracks::default());
+        let with_private = find_image_files(
+            &root,
+            OptInTracks {
+                private: true,
+                local: false,
+            },
+        );
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(
@@ -1643,6 +1683,59 @@ mod tests {
         );
     }
 
+    /// `samples/local/` stays out of the default walk the way
+    /// `samples/private/` does, and only a directory with exactly that name
+    /// counts: a public specimen whose *filename* happens to contain `local`
+    /// must still be read. The directory is capitalised here on purpose — the
+    /// match is case-insensitive, like the `private` rule.
+    #[test]
+    fn find_image_files_excludes_the_local_track_directory_only() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-exclude-local-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let passports = root.join("passports");
+        let local_dir = root.join("Local");
+        std::fs::create_dir_all(&passports).expect("temp dir is creatable");
+        std::fs::create_dir_all(&local_dir).expect("temp dir is creatable");
+
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(passports.join("Localia_Passport_Specimen_P0_XXX_2020_mrz.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(local_dir.join("Scouted_Passport_Specimen_P0_XXX_2021_mrz.png"))
+            .expect("temp fixture writes");
+
+        let default_paths = find_image_files(&root, OptInTracks::default());
+        let with_local = find_image_files(
+            &root,
+            OptInTracks {
+                private: false,
+                local: true,
+            },
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(
+            default_paths.len(),
+            1,
+            "default walk: the local track is left out: {default_paths:?}"
+        );
+        assert!(
+            default_paths[0]
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("Localia_")),
+            "a filename containing `local` is not a track marker: {default_paths:?}"
+        );
+        assert_eq!(
+            with_local.len(),
+            2,
+            "include-local walk: both files are returned: {with_local:?}"
+        );
+    }
+
     /// The full, real end-to-end load — every image under `samples/`
     /// actually decoded via `load_real_specimens`, the way `provider-bench
     /// --real-specimens` uses it. Slow (~140 real photographs decoded), so
@@ -1653,8 +1746,8 @@ mod tests {
     #[ignore]
     fn load_real_specimens_decodes_every_image_under_samples() {
         let root = repo_root();
-        let specimens = load_real_specimens(&root.join("samples"), false);
-        let expected = find_image_files(&root.join("samples"), false).len();
+        let specimens = load_real_specimens(&root.join("samples"), OptInTracks::default());
+        let expected = find_image_files(&root.join("samples"), OptInTracks::default()).len();
         assert_eq!(
             specimens.len(),
             expected,

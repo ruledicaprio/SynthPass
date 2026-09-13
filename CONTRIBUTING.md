@@ -123,8 +123,13 @@ input to `fuzz/corpus/<target>/` as a permanent regression seed, add a matching 
 synced locally via `./scripts/sync-samples.ps1` (pull) / `-Push` (the same isolated-`git worktree`
 pattern `bench-data` uses). Bulk corpus growth is automated: `tools/fetch_commons_mrz_specimens_v2.py`
 stages Commons candidates in a gitignored directory, and `./scripts/ingest-fetched-samples.ps1`
-sifts them into `samples/` and pushes to `samples-data` — no human PR review gates a specimen
-entering the corpus anymore.
+sifts them into `samples/` and pushes to `samples-data`; that Commons path needs no PR review.
+
+**Specimens found by an agent or a scraping service are different.** They pass an automated
+screen, a maintainer's review, and a human's verification of every candidate before anything is
+pushed. Each image's source goes into the manifest's `origin` at fetch time. Which sources are
+allowed, and what is kept when a candidate is dropped, are in
+[`knowledge/SPECIMEN_SOURCES.md`](knowledge/SPECIMEN_SOURCES.md).
 
 The script screens candidates on one **blocking** rule and reports two **advisory** signals.
 

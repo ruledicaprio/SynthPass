@@ -156,6 +156,12 @@ struct Args {
     /// by any CI workflow: a private-track run's report names real identity
     /// documents and must not become a CI artifact. `--real-specimens` only.
     include_private: bool,
+    /// Add the gitignored `samples/local/` track back into the
+    /// `--real-specimens` walk: specimens usable on this machine whose source
+    /// does not allow redistribution. Excluded by default so the committed
+    /// baseline measures the public corpus only, and never set by any CI
+    /// workflow. `--real-specimens` only.
+    include_local: bool,
     /// Write the `mrz` provider's Tier-1 snapshot to this path as JSON and
     /// exit 0 — the regeneration path for the committed real-specimen
     /// baseline. CI-only by convention (`--assert-baseline`'s doc explains
@@ -185,6 +191,7 @@ impl Default for Args {
             document_type: None,
             mrz_only: false,
             include_private: false,
+            include_local: false,
             write_baseline: None,
             assert_baseline: None,
         }
@@ -241,6 +248,11 @@ fn usage() {
         "  --include-private  with --real-specimens: add the gitignored samples/private/ \
          real-PII specimens back into the walk (excluded by default; local opt-in only — a \
          private-track report must never become a CI artifact)"
+    );
+    eprintln!(
+        "  --include-local    with --real-specimens: add the gitignored samples/local/ track \
+         (specimens whose source does not allow redistribution) back into the walk (excluded \
+         by default; local opt-in only)"
     );
     eprintln!(
         "  --write-baseline PATH  write the mrz provider's Tier-1 snapshot (HIT count + \
@@ -351,6 +363,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.include_private = true;
                 i += 1;
             }
+            "--include-local" => {
+                parsed.include_local = true;
+                i += 1;
+            }
             "--write-baseline" => {
                 let v = args
                     .get(i + 1)
@@ -377,6 +393,9 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.include_private && !parsed.real_specimens {
         return Err("--include-private is only valid together with --real-specimens".to_string());
     }
+    if parsed.include_local && !parsed.real_specimens {
+        return Err("--include-local is only valid together with --real-specimens".to_string());
+    }
     if parsed.document_type.is_some() && parsed.real_specimens {
         return Err(
             "--document-type generates the synthetic corpus and is not valid together with \
@@ -388,6 +407,19 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
         return Err(
             "--write-baseline and --assert-baseline are mutually exclusive: one regenerates the \
              baseline, the other checks against it"
+                .to_string(),
+        );
+    }
+    // The committed baseline is defined over the public corpus. Writing it
+    // from a walk that includes an opt-in track would bless a denominator CI
+    // can never reproduce; asserting against it would report the extra
+    // documents as a corpus-size change on every run.
+    if (parsed.include_private || parsed.include_local)
+        && (parsed.write_baseline.is_some() || parsed.assert_baseline.is_some())
+    {
+        return Err(
+            "--include-private/--include-local cannot be combined with --write-baseline or \
+             --assert-baseline: the committed baseline measures the public corpus only"
                 .to_string(),
         );
     }
@@ -1145,7 +1177,11 @@ async fn main() {
     // `synthpass_bench::provider_bench`'s top doc comment for why both
     // sources feed the exact same reader loop and reporting shape.
     let (reports, source, profile, count, seed_start) = if parsed.real_specimens {
-        let mut specimens = load_real_specimens(&root.join("samples"), parsed.include_private);
+        let tracks = synthpass_bench::OptInTracks {
+            private: parsed.include_private,
+            local: parsed.include_local,
+        };
+        let mut specimens = load_real_specimens(&root.join("samples"), tracks);
         if specimens.is_empty() {
             eprintln!(
                 "❌ no image files found under samples/ — is this being run from the repo root?"
@@ -1609,6 +1645,43 @@ mod tests {
             parse_args(&bad).is_err(),
             "--include-private only makes sense scoping --real-specimens"
         );
+    }
+
+    #[test]
+    fn include_local_parses_alongside_real_specimens_and_is_rejected_without_it() {
+        let ok: Vec<String> = ["--real-specimens", "--include-local"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&ok).expect("valid combination");
+        assert!(parsed.include_local);
+        assert!(
+            !parsed.include_private,
+            "the two opt-in tracks are independent: asking for one must not add the other"
+        );
+
+        let bad: Vec<String> = ["--include-local"].iter().map(|s| s.to_string()).collect();
+        assert!(
+            parse_args(&bad).is_err(),
+            "--include-local only makes sense scoping --real-specimens"
+        );
+    }
+
+    #[test]
+    fn an_opt_in_track_is_rejected_with_either_baseline_flag() {
+        for track in ["--include-private", "--include-local"] {
+            for baseline in ["--write-baseline", "--assert-baseline"] {
+                let args: Vec<String> = ["--real-specimens", track, baseline, "baseline.json"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
+                assert!(
+                    parse_args(&args).is_err(),
+                    "{track} with {baseline}: the committed baseline measures the public corpus \
+                     only, so an opt-in track must never write or assert it"
+                );
+            }
+        }
     }
 
     #[test]

@@ -7,7 +7,8 @@ real-world corpus is the natural next accuracy milestone" note in
 checklist in `CONTRIBUTING.md`. **PRADO (`consilium.europa.eu/prado`) is never a source
 here** — its copyright notice prohibits harvesting/redistributing its material outside
 official, non-commercial use; it's consulted only as a manual human reference, never
-scraped or stored.
+scraped or stored. Which sources *are* allowed, and the review gates an agent-found candidate
+passes, are in [`SPECIMEN_SOURCES.md`](SPECIMEN_SOURCES.md).
 
 Tier-1 MRZ checksum/parsing logic itself is ICAO-9303-generic and not special-cased per
 country — a HIT here reflects real-world OCR/format validation on an actual specimen,
@@ -33,8 +34,21 @@ here to corpus coverage instead of a benchmark number).
 | MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 14 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
-| No specimen yet | 149 |
+| No legal source found (searched, dated) | 0 |
+| Not applicable by definition (no document can carry the code) | 1 |
+| No specimen yet | 148 |
 | **Total tracked codes** | **238** |
+
+**What "covered" means.** A code is covered when it appears *in its proper field* of a
+checksum-valid specimen. For states and organisations that is the issuing-state field (line 1).
+For the nationality-only codes — `GBD`, `GBN`, `GBO`, `GBP`, `GBS`, `XXA`, `XXB`, `XXC`, `XXX` — it
+is the nationality field, since a document records these about its holder, never as its issuer.
+`IAO` appears on no document at all (ICAO uses it only to sign a master list), so it is *not
+applicable by definition*. It stays in the table so the denominator is visibly every code.
+
+*No legal source found* is a searched status, recorded with the date of the search. It is
+distinct from *No specimen yet*, which means nobody has looked. What counts as a legal source is
+in [`SPECIMEN_SOURCES.md`](SPECIMEN_SOURCES.md).
 
 Grown substantially 2026-08-17: contributor additions plus a full real-OCR pass over
 `samples/passports/` and `samples/id_cards/` (`integrity_survey.rs --mrz-only`, added this
@@ -291,15 +305,15 @@ corpus. 150 codes still uncovered.
 | UTO | Utopia (ICAO specimen) | -- | No specimen yet | -- |
 | EUE | European Union | -- | No specimen yet | -- |
 | RKS | Kosovo | -- | No specimen yet | -- |
-| GBD | British Overseas Territories Citizen | -- | No specimen yet | -- |
-| GBN | British National (Overseas) | -- | No specimen yet | -- |
-| GBO | British Overseas Citizen | -- | No specimen yet | -- |
-| GBP | British Protected Person | -- | No specimen yet | -- |
-| GBS | British Subject | -- | No specimen yet | -- |
-| XXA | Stateless person (1954 Convention) | -- | No specimen yet | -- |
-| XXB | Refugee (1951 Convention) | -- | No specimen yet | -- |
-| XXC | Refugee (other) | -- | No specimen yet | -- |
-| XXX | Unspecified nationality | -- | No specimen yet | -- |
+| GBD | British Overseas Territories Citizen | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| GBN | British National (Overseas) | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| GBO | British Overseas Citizen | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| GBP | British Protected Person | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| GBS | British Subject | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| XXA | Stateless person (1954 Convention) | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| XXB | Refugee (1951 Convention) | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| XXC | Refugee (other) | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
+| XXX | Unspecified nationality | -- | No specimen yet | Nationality-field code; covered by a specimen whose nationality field carries it |
 | UNO | United Nations Organization | -- | No specimen yet | -- |
 | UNA | United Nations specialized agency | -- | No specimen yet | -- |
 | UNK | United Nations Interim Administration Mission in Kosovo | -- | No specimen yet | -- |
@@ -316,4 +330,4 @@ corpus. 150 codes still uncovered.
 | XDC | Southern African Development Community | -- | No specimen yet | -- |
 | ANT | Netherlands Antilles | -- | No specimen yet | Deprecated in ISO 3166; valid on documents issued before withdrawal |
 | NTZ | Neutral Zone | -- | No specimen yet | Deprecated in ISO 3166; valid on documents issued before withdrawal |
-| IAO | International Civil Aviation Organization | -- | No specimen yet | Used only when ICAO digitally signs a master list |
+| IAO | International Civil Aviation Organization | -- | Not applicable by definition | Used only when ICAO digitally signs a master list; no document carries it |

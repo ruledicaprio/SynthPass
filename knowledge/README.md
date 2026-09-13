@@ -45,6 +45,9 @@ the constraints and the direction before you open a source file:
   `verify-license`) and vendor (`keygen` → `issue-license`) CLI walkthrough.
 - **[CORPUS_COVERAGE.md](CORPUS_COVERAGE.md)** — per-country OCR corpus status
   and the checklist for adding a new specimen.
+- **[SPECIMEN_SOURCES.md](SPECIMEN_SOURCES.md)** — where a corpus specimen may
+  come from, the review gates for agent-found candidates, and what is kept when
+  one is dropped.
 - **[SYNTHPASS.md](SYNTHPASS.md)** — running the `synthpass-bench` corpus runner
   locally, its CLI flags, report format, and how the M4 CI accuracy gate works.
 - **[EXPORTS.md](EXPORTS.md)** — the `synthpass export` dataset formats, their
