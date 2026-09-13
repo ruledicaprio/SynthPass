@@ -195,6 +195,22 @@ unanchored `git (checkout|switch)` also matches the phrase inside a commit messa
 guard denies its own documentation — and it still misses `git -C <path> checkout`, which is a
 real switch.
 
+## Monitoring CI and long runs — pick the tier from the projected runtime
+
+State the expected runtime when launching anything slow, then:
+
+* **Under 5 minutes — don't monitor.** Run it and read the result when it returns: `cargo fmt
+  --check`, `scripts/check-headline-numbers.sh`, `scripts/check-changelog.sh`,
+  `scripts/check-doc-links.sh` (~2 min).
+* **5–10 minutes — monitor** with one background blocking watch that notifies on completion:
+  `ci.yml` on a PR (~7 min), `cargo test --workspace`.
+* **Over 10 minutes with a known estimate — one check, just before it should finish.** A
+  background `sleep` a few minutes short of the estimate, then `gh run watch <id>`: the
+  real-specimen gate (34–48 min in CI), a local real-specimen bench arm (~50–55 min).
+
+No manual status polls in between — `gh run view`, peeking at an output file. Each one is a turn
+that changes nothing.
+
 If CI exists
 
 review workflow failures before changing unrelated code.
