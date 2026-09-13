@@ -10908,3 +10908,203 @@
 {"run_timestamp_unix":1789200401,"git_sha":"4841e615f445a704a77e97f13290295283997826","seed":4142097,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1966}
 {"run_timestamp_unix":1789200401,"git_sha":"4841e615f445a704a77e97f13290295283997826","seed":4142098,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2874}
 {"run_timestamp_unix":1789200401,"git_sha":"4841e615f445a704a77e97f13290295283997826","seed":4142099,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":1985}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142100,"profile":"clean","hit":true,"reason":null,"elapsed_ms":5192}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142101,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1812}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142102,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":2463}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142103,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1718}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142104,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1943}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142105,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2445}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142106,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1811}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142107,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1704}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142108,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1712}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142109,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1589}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142110,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2360}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142111,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":8507}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142112,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1751}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142113,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, date_of_birth, date_of_expiry, personal_number, composite","elapsed_ms":6863}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142114,"profile":"border-kiosk","hit":false,"reason":"document number mismatch: got \"JZ0AGXNKS\", expected \"J7OAGXNKS\"","elapsed_ms":1612}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142115,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1750}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142116,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1857}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142117,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1756}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142118,"profile":"worn","hit":true,"reason":null,"elapsed_ms":3709}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142119,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":2371}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142120,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2989}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142121,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":8196}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142122,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1732}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142123,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2428}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142124,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":1681}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142125,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1737}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142126,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1717}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142127,"profile":"scanner","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":6724}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142128,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1787}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142129,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1968}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142130,"profile":"clean","hit":false,"reason":"no MRZ found: NotFound","elapsed_ms":7013}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142131,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":8151}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142132,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1743}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142133,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1788}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142134,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":4531}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142135,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1692}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142136,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1802}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142137,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1745}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142138,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1776}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142139,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":3621}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142140,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1671}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142141,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":8229}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142142,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1712}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142143,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2351}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142144,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1143}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142145,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1726}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142146,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1812}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142147,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1705}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142148,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1693}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142149,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1191}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142150,"profile":"clean","hit":false,"reason":"checksum invalid: document_number, personal_number, composite","elapsed_ms":6847}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142151,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1778}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142152,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1791}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142153,"profile":"worn","hit":false,"reason":"checksum invalid: document_number","elapsed_ms":6886}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142154,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":2001}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142155,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1762}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142156,"profile":"mobile","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":2465}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142157,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1862}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142158,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1744}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142159,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1609}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142160,"profile":"clean","hit":true,"reason":null,"elapsed_ms":5199}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142161,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1811}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142162,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1765}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142163,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2355}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142164,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":2036}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142165,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1756}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142166,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":2426}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142167,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":2449}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142168,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1736}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142169,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":4517}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142170,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1772}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142171,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1873}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142172,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1719}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142173,"profile":"worn","hit":true,"reason":null,"elapsed_ms":5182}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142174,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1144}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142175,"profile":"clean","hit":false,"reason":"checksum invalid: document_number, personal_number, composite","elapsed_ms":7180}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142176,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1820}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142177,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1730}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142178,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1749}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142179,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":2428}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142180,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1733}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142181,"profile":"mobile","hit":false,"reason":"document number mismatch: got \"7NABZEIR1\", expected \"ZN4BZEIR1\"","elapsed_ms":1818}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142182,"profile":"scanner","hit":false,"reason":"document number mismatch: got \"6YPOWCBO8\", expected \"6YP0WCB08\"","elapsed_ms":1752}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142183,"profile":"worn","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":6854}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142184,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":5737}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142185,"profile":"clean","hit":false,"reason":"document number mismatch: got \"SWOUTJP1U\", expected \"SW01IJP1U\"","elapsed_ms":2983}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142186,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, personal_number, composite","elapsed_ms":8344}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142187,"profile":"scanner","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":2491}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142188,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1781}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142189,"profile":"border-kiosk","hit":false,"reason":"document number mismatch: got \"OF4PO7VA7\", expected \"0F4P07VA7\"","elapsed_ms":1960}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142190,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1709}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142191,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1794}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142192,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":3645}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142193,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":6942}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142194,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1615}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142195,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1680}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142196,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1785}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142197,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1729}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142198,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1739}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142199,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":5339}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142200,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1740}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142201,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1758}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142202,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1768}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142203,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":2470}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142204,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1627}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142205,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1697}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142206,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":2465}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142207,"profile":"scanner","hit":false,"reason":"no MRZ found: NotFound","elapsed_ms":6044}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142208,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1715}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142209,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":1971}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142210,"profile":"clean","hit":true,"reason":null,"elapsed_ms":3650}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142211,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":2555}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142212,"profile":"scanner","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":7190}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142213,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2467}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142214,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":3671}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142215,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1790}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142216,"profile":"mobile","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":8258}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142217,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1787}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142218,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1718}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142219,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1157}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142220,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2440}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142221,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1790}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142222,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":2424}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142223,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2430}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142224,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, personal_number, composite","elapsed_ms":5993}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142225,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1705}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142226,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1755}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142227,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1759}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142228,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1740}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142229,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1899}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142230,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1776}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142231,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1742}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142232,"profile":"scanner","hit":false,"reason":"checksum invalid: document_number","elapsed_ms":7180}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142233,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":6704}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142234,"profile":"border-kiosk","hit":false,"reason":"document number mismatch: got \"EMZROY43Q\", expected \"EM7R0Y43Q\"","elapsed_ms":1600}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142235,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2386}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142236,"profile":"mobile","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":2490}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142237,"profile":"scanner","hit":false,"reason":"checksum invalid: document_number, personal_number","elapsed_ms":6843}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142238,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1693}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142239,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":1622}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142240,"profile":"clean","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":6963}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142241,"profile":"mobile","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":2487}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142242,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1733}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142243,"profile":"worn","hit":true,"reason":null,"elapsed_ms":2929}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142244,"profile":"border-kiosk","hit":false,"reason":"document number mismatch: got \"005YJM8G1\", expected \"OO5YJM8G1\"","elapsed_ms":2022}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142245,"profile":"clean","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":7469}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142246,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1811}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142247,"profile":"scanner","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":7138}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142248,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1715}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142249,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1613}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142250,"profile":"clean","hit":true,"reason":null,"elapsed_ms":3654}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142251,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1790}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142252,"profile":"scanner","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":2482}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142253,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1713}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142254,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":2440}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142255,"profile":"clean","hit":true,"reason":null,"elapsed_ms":2394}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142256,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1819}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142257,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1757}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142258,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1743}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142259,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1164}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142260,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1716}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142261,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1732}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142262,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1753}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142263,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1716}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142264,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1181}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142265,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1796}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142266,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1740}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142267,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":2958}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142268,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1765}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142269,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1658}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142270,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1756}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142271,"profile":"mobile","hit":false,"reason":"checksum invalid: document_number, personal_number, composite","elapsed_ms":8408}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142272,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1749}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142273,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1723}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142274,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1634}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142275,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1723}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142276,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1802}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142277,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1771}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142278,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1695}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142279,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, date_of_birth","elapsed_ms":6020}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142280,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1754}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142281,"profile":"mobile","hit":false,"reason":"checksum invalid: date_of_birth","elapsed_ms":2450}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142282,"profile":"scanner","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":6875}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142283,"profile":"worn","hit":true,"reason":null,"elapsed_ms":1754}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142284,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1557}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142285,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1705}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142286,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1810}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142287,"profile":"scanner","hit":true,"reason":null,"elapsed_ms":1767}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142288,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, personal_number","elapsed_ms":6846}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142289,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":1958}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142290,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1736}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142291,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1823}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142292,"profile":"scanner","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":7125}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142293,"profile":"worn","hit":false,"reason":"document number mismatch: got \"8P0UJOMOD\", expected \"8PQUJ0M0D\"","elapsed_ms":1687}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142294,"profile":"border-kiosk","hit":true,"reason":null,"elapsed_ms":1941}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142295,"profile":"clean","hit":true,"reason":null,"elapsed_ms":1708}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142296,"profile":"mobile","hit":true,"reason":null,"elapsed_ms":1794}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142297,"profile":"scanner","hit":false,"reason":"checksum invalid: personal_number, composite","elapsed_ms":7206}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142298,"profile":"worn","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":6726}
+{"run_timestamp_unix":1789288009,"git_sha":"6f95c1826468a8d0f33e84493e3c871457bbdfbf","seed":4142299,"profile":"border-kiosk","hit":false,"reason":"checksum invalid: document_number, composite","elapsed_ms":6075}
