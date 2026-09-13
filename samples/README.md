@@ -56,7 +56,8 @@ samples/
   ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
     derived/            generated, unreviewed parity candidates (.md + .json) — tracked
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
-  corpus.jsonl          one row per image: MRZ document code, issuing state, provenance, ground-truth link — tracked
+  local/                specimens usable locally whose source does not allow redistribution — gitignored, never pushed
+  corpus.jsonl          one row per image: MRZ document code, issuing state, provenance, origin, ground-truth link — tracked
   README.md
 ```
 
@@ -140,22 +141,57 @@ the generator prints the disagreement for review.
 both derived from the manifest, so a rename no longer strands them — which it
 previously did, silently, for 16 of 21 corpus entries and all 6 parity fixtures.
 
+### Where each image came from: `origin`
+
+Every row carries an `origin` object:
+
+| Field | Holds |
+|---|---|
+| `url` | the http(s) URL the image was fetched from |
+| `page` | the page that published it, when that is a different URL |
+| `licence` | the class the publishing page states: `public-domain`, `cc-by`, `cc-by-sa`, `gov-published`, or `none-stated` when it says nothing |
+| `fetched` | the fetch date, `YYYY-MM-DD` |
+| `found_by` | `human`, `commons-fetcher`, `dsh` or `firecrawl` |
+
+It is recorded when the image is fetched, because afterwards it cannot be. Rows
+that predate the field read `unrecorded` in `found_by` and `licence` with the
+other three `null`, and are never back-filled from memory — a reconstructed URL
+is a guess. The generator carries `origin` across regeneration the way it
+carries `notes`, and `crates/synthpass-bench/tests/corpus_manifest.rs` rejects
+an origin recorded only in part.
+
+The same test refuses an image recorded twice under two names (identical
+`sha256`): every walk of `samples/` would read it twice and count it twice.
+
 ## Provenance
 
 Images are public specimen / illustrative document images collected from
 Wikipedia's "Passports by country" category and related identity-document
-categories (national ID cards, driving licences). They depict specimen or
+categories (national ID cards, driving licences), and — for newer additions —
+from issuing authorities' own publications; the allowed sources are listed in
+[`knowledge/SPECIMEN_SOURCES.md`](../knowledge/SPECIMEN_SOURCES.md). They depict specimen or
 void documents published for public reference, not real issued documents
 belonging to private individuals, unless explicitly marked otherwise (e.g.
 filenames containing `_private`).
+
+## Local-only track
+
+`samples/local/` holds specimens that are fine to use on this machine but whose
+source does not allow redistribution. It is gitignored; `scripts/sync-samples.ps1`
+and the manifest generator both work from a fixed directory list that leaves it
+out; and `provider-bench --real-specimens` skips it unless `--include-local` is
+given, a flag it refuses to combine with `--write-baseline` or
+`--assert-baseline`. So the committed baseline and every CI run measure the
+public corpus only, and a local-track report never becomes a CI artifact.
 
 ## Licensing / usage
 
 These images are used here strictly for specimen/illustrative purposes —
 as test fixtures for MRZ/OCR parsing and layout detection. Refer to the
-original Wikipedia/Wikimedia Commons file pages for the specific license
-of each image if redistribution outside this repository's test suite is
-ever needed.
+original Wikipedia/Wikimedia Commons file pages — or, for a row with a
+recorded `origin`, its `page` and `licence` — for the specific licence of
+each image if redistribution outside this repository's test suite is ever
+needed.
 
 ## Format / count summary
 

@@ -39,10 +39,11 @@
 //! state of `DEL`. An earlier draft of this file fell back to OCR and recorded
 //! exactly that as truth.
 //!
-//! Everything else a human must decide — `year.kind`, `provenance`, and every
-//! `notes` string — is **preserved from the existing manifest** and never
-//! overwritten. The generator proposes; a person confirms; the result lands in
-//! git as reviewed text.
+//! Everything else a human must decide — `year.kind`, `provenance`, `origin`,
+//! and every `notes` string — is **preserved from the existing manifest** and
+//! never overwritten. The generator proposes; a person confirms; the result
+//! lands in git as reviewed text. A new image gets an `unrecorded` origin:
+//! where it came from is known only to whoever fetched it, so they record it.
 //!
 //! # Usage
 //!
@@ -516,6 +517,13 @@ fn build_row(
         provenance
     };
 
+    let origin = carried("origin");
+    let origin = if origin.is_null() {
+        unrecorded_origin()
+    } else {
+        origin
+    };
+
     // The manifest asserts only what a human verified: the filename claim, and
     // nothing else. There is deliberately no OCR fallback here.
     //
@@ -541,6 +549,7 @@ fn build_row(
         "dir": dir,
         "sha256": sha256,
         "provenance": provenance,
+        "origin": origin,
         "mrz": {
             "present": claims.mrz_present.unwrap_or(observed.found),
             "redacted": claims.redacted,
@@ -562,6 +571,22 @@ fn build_row(
         "ground_truth_stem": ground_truth.stem_for(filename),
         "expected_document_number": ground_truth.expected_document_number(filename, previous),
         "notes": carried("notes"),
+    })
+}
+
+/// The `origin` a row gets when nobody recorded where its image came from.
+///
+/// Every row that predates the field carries this, deliberately: a source URL
+/// reconstructed after the fact is a guess, and the manifest records only what
+/// someone verified. `crates/synthpass-bench/tests/corpus_manifest.rs` holds
+/// the closed sets and rejects a half-recorded origin.
+fn unrecorded_origin() -> serde_json::Value {
+    serde_json::json!({
+        "found_by": "unrecorded",
+        "licence": "unrecorded",
+        "url": null,
+        "page": null,
+        "fetched": null,
     })
 }
 

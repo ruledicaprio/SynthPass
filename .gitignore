@@ -77,6 +77,11 @@ samples/ocr_fixtures/derived/*
 # accident this guards against.
 samples/**/*Private*
 
+# The local-only track: specimens usable on this machine whose source does not
+# allow redistribution (samples/README.md). sync-samples.ps1 mirrors a fixed
+# directory list that excludes it; this keeps a manual `git add` off it too.
+samples/local/
+
 # v0.3.0 work-in-progress drafts (not yet wired into the build)
 drafts/
 

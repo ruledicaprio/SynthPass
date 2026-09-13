@@ -100,7 +100,7 @@ fn every_manifest_row_has_the_required_shape() {
             !name.is_empty() && !name.contains('/') && !name.contains('\\'),
             "{name}: filename must be a bare basename"
         );
-        for key in ["dir", "sha256", "mrz", "year", "variants"] {
+        for key in ["dir", "sha256", "mrz", "year", "variants", "origin"] {
             assert!(
                 row.get(key).is_some(),
                 "{name}: manifest row is missing `{key}`"
@@ -289,6 +289,167 @@ fn provenance_is_one_of_the_known_classes() {
         assert!(
             matches!(p, Some("specimen") | Some("private") | Some("template")),
             "{name}: provenance must be specimen, private or template, got {p:?}"
+        );
+    }
+}
+
+/// What found an image. `unrecorded` is every row that predates `origin`.
+const ORIGIN_FOUND_BY: &[&str] = &["unrecorded", "human", "commons-fetcher", "dsh", "firecrawl"];
+
+/// The licence class the publishing page states. `none-stated` is a real
+/// answer — the page says nothing — and is different from `unrecorded`,
+/// which means nobody looked.
+const ORIGIN_LICENCES: &[&str] = &[
+    "unrecorded",
+    "public-domain",
+    "cc-by",
+    "cc-by-sa",
+    "gov-published",
+    "none-stated",
+];
+
+fn is_http_url(v: &Value) -> bool {
+    v.as_str()
+        .is_some_and(|s| s.starts_with("https://") || s.starts_with("http://"))
+}
+
+fn is_iso_date(v: &Value) -> bool {
+    v.as_str().is_some_and(|s| {
+        s.len() == 10
+            && s.char_indices().all(|(i, c)| {
+                if i == 4 || i == 7 {
+                    c == '-'
+                } else {
+                    c.is_ascii_digit()
+                }
+            })
+    })
+}
+
+#[test]
+fn every_origin_is_either_wholly_unrecorded_or_wholly_recorded() {
+    // Where an image came from is the one fact about a specimen that cannot
+    // be recovered later: a URL reconstructed from memory is a guess, and a
+    // guess in a provenance field is worse than a gap. So a row either says
+    // nothing (`unrecorded`, the three free-text fields null) or states its
+    // source whole — never half of one.
+    for row in &manifest_rows() {
+        let name = row["filename"].as_str().unwrap_or_default();
+        let origin = &row["origin"];
+        let found_by = origin["found_by"].as_str();
+        let licence = origin["licence"].as_str();
+        assert!(
+            found_by.is_some_and(|f| ORIGIN_FOUND_BY.contains(&f)),
+            "{name}: origin.found_by must be one of {ORIGIN_FOUND_BY:?}, got {found_by:?}"
+        );
+        assert!(
+            licence.is_some_and(|l| ORIGIN_LICENCES.contains(&l)),
+            "{name}: origin.licence must be one of {ORIGIN_LICENCES:?}, got {licence:?}"
+        );
+        if found_by == Some("unrecorded") {
+            assert_eq!(
+                licence,
+                Some("unrecorded"),
+                "{name}: an unrecorded origin records no licence either"
+            );
+            for key in ["url", "page", "fetched"] {
+                assert!(
+                    origin[key].is_null(),
+                    "{name}: origin.found_by is unrecorded, so origin.{key} must be null — a \
+                     source is recorded whole or not at all"
+                );
+            }
+        } else {
+            assert_ne!(
+                licence,
+                Some("unrecorded"),
+                "{name}: a recorded origin states its licence class (`none-stated` when the \
+                 publishing page says nothing)"
+            );
+            assert!(
+                is_http_url(&origin["url"]),
+                "{name}: origin.url must be the http(s) URL the image was fetched from"
+            );
+            assert!(
+                origin["page"].is_null() || is_http_url(&origin["page"]),
+                "{name}: origin.page, when present, must be an http(s) URL"
+            );
+            assert!(
+                is_iso_date(&origin["fetched"]),
+                "{name}: origin.fetched must be a YYYY-MM-DD date"
+            );
+        }
+    }
+}
+
+/// Pairs of rows that are one image under two names — identical `sha256`.
+///
+/// Each is read twice by every walk of `samples/`, so the real-specimen gate
+/// counts it twice. Four are an older name left beside its current-convention
+/// copy; the Serbian pair are both current-convention and disagree on the
+/// year, and the image's printed expiry (2022-10-10) fits a ten-year book
+/// issued in 2012. Removing each stale copy changes the gate's denominator,
+/// so that happens in its own data PR with a re-blessed baseline — this list
+/// then empties, and the test below becomes a plain uniqueness check.
+const KNOWN_BYTE_DUPLICATES: &[(&str, &str)] = &[
+    (
+        "Canada_Passport_Specimen_2023_mrz.jpg",
+        "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg",
+    ),
+    (
+        "China_Passport_Specimen_2012_mrz.webp",
+        "China_Passport_Specimen_P0_CHN_2012_mrz.webp",
+    ),
+    (
+        "Serbia_Passport_Specimen_P0_SRB_2009_mrz.jpg",
+        "Serbia_Passport_Specimen_P0_SRB_2012_mrz.jpg",
+    ),
+    (
+        "Slovakia_Passport_Specimen_2014_mrz.jpg",
+        "Slovakia_Passport_Specimen_PS_SVK_2014_mrz.jpg",
+    ),
+    (
+        "United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg",
+        "United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg",
+    ),
+];
+
+#[test]
+fn no_image_is_recorded_twice_under_two_names() {
+    // The byte-level duplicate check for new specimens: a candidate whose hash
+    // is already in the manifest is the same file, whatever it is called. A
+    // crop or re-encode of a held specimen has different bytes and is not
+    // caught here — it may be worth keeping, as a variant.
+    let mut by_sha: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+    let rows = manifest_rows();
+    for row in &rows {
+        by_sha
+            .entry(row["sha256"].as_str().unwrap_or_default())
+            .or_default()
+            .push(row["filename"].as_str().unwrap_or_default());
+    }
+    let mut found: Vec<(&str, &str)> = Vec::new();
+    for names in by_sha.values().filter(|n| n.len() > 1) {
+        let mut names = names.clone();
+        names.sort_unstable();
+        assert_eq!(
+            names.len(),
+            2,
+            "{names:?}: one image is recorded under {} names",
+            names.len()
+        );
+        let pair = (names[0], names[1]);
+        assert!(
+            KNOWN_BYTE_DUPLICATES.contains(&pair),
+            "{pair:?}: the same image (identical sha256) is recorded under two names, so every \
+             walk reads it twice. Keep one of them."
+        );
+        found.push(pair);
+    }
+    for pair in KNOWN_BYTE_DUPLICATES {
+        assert!(
+            found.contains(pair),
+            "{pair:?} is no longer a duplicate pair — remove it from KNOWN_BYTE_DUPLICATES"
         );
     }
 }
