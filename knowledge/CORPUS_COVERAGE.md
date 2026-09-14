@@ -198,7 +198,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | BGD | Bangladesh | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | BTN | Bhutan | -- | No specimen yet | -- |
 | BRN | Brunei Darussalam | -- | No specimen yet | -- |
-| KHM | Cambodia | -- | No specimen yet | -- |
+| KHM | Cambodia | Passport | No specimen yet | Current-series passport bio-page added 2026-09-14 (public, none-stated licence, attributed to the Royal Embassy of Cambodia in Washington D.C.). A real person's document, admitted only because every personal field including the MRZ band is fully redacted (revised H5 standard, 2026-09-14) -- no MRZ present at all, so not a coverage HIT. |
 | CHN | China | Passport | HIT (x2 specimens) (+ 2 checksum-failed) | Contributor-supplied specimen (SPECIMEN watermark); corpus grew to 4 total in the real-OCR scan, 2026-08-17 |
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
