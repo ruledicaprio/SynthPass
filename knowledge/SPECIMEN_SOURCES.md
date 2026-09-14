@@ -97,6 +97,14 @@ Each admitted batch is its own data-only PR. It carries:
 No code change rides in the same PR. That way a moved number is attributable either to the
 corpus or to the code, never to both at once.
 
+`tools/apply_cohort.py` automates the mechanical half of admitting a verified packet: worktree
+setup, a cross-PR duplicate guard (so a second open cohort branch cannot fold a first PR's
+not-yet-merged images into its own manifest), image placement, manifest regeneration and
+`origin` patching, and the `samples-data` push -- gated behind a `-DryRun` check that refuses to
+proceed if it would delete anything. It never decides a licence class or writes unreviewed prose
+into `origin.notes` or [`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)'s Note column; those stay a
+human's draft to accept.
+
 ## The tooling boundary
 
 Acquisition may use network tools, including a hosted search or scraping service. The extraction
