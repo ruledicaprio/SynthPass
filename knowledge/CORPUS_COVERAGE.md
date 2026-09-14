@@ -30,13 +30,13 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 73 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 74 |
 | MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 14 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
 | No legal source found (searched, dated) | 0 |
 | Not applicable by definition (no document can carry the code) | 1 |
-| No specimen yet | 148 |
+| No specimen yet | 147 |
 | **Total tracked codes** | **238** |
 
 **What "covered" means.** A code is covered when it appears *in its proper field* of a
@@ -80,6 +80,14 @@ photographed sideways; both are chunk-2 targets). **IND and IDN flip MISS → HI
 2023 / 2024-rotated books. AGO, AZE, BGD already HIT (new specimens don't change the row).
 KEN's front page is in the corpus but carries no MRZ — a bio-page book specimen is still
 needed. 151 codes still uncovered.
+
+**2026-09-14 — cohort c01 (scout loop) added three specimens.** LVA and SMR each get a first
+specimen, LTU its first HIT. **LTU flips No specimen yet → HIT**: a checksum-valid TD3 passport
+(`Lithuania_Passport_Specimen_P0_LTU_2019_mrz.jpg`, CC BY-SA, self-published Commons upload).
+LVA and SMR stay *No specimen yet* — both new images are ID-card sides carrying no
+checksum-valid MRZ (an ID-card front and a blank-template back respectively), the same pattern
+as Kenya's front-only passport row above. Full provenance and review reasoning:
+`work/scouting/c01/packet-c01.md`. 149 codes still uncovered.
 
 **2026-09-12 — ADR-0008 chunk 2 read fifteen more specimens.** The orientation fix
 ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md)) took the CI gate's
@@ -255,9 +263,9 @@ corpus. 150 codes still uncovered.
 | IRL | Ireland | ID card front, Passport | HIT (passport) + ID card front not wired | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
 | ITA | Italy | Passport, ID card | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | XKX | Kosovo | Passport | HIT (x3 specimens) | Public-domain specimens; real-OCR scan, 2026-08-17 |
-| LVA | Latvia | -- | No specimen yet | -- |
+| LVA | Latvia | ID card (front) | No specimen yet | ID card front added 2026-09-14 (public, `Latvia_ID_Specimen_2021_front_no_mrz.png`); carries no MRZ (TD1 MRZ is on the back, not yet sourced) — same pattern as Kenya's front-only passport row |
 | LIE | Liechtenstein | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| LTU | Lithuania | -- | No specimen yet | -- |
+| LTU | Lithuania | Passport | HIT | Added 2026-09-14 (public, `Lithuania_Passport_Specimen_P0_LTU_2019_mrz.jpg`, CC BY-SA); checksum-valid TD3, self-published Commons upload, not the issuing authority |
 | LUX | Luxembourg | ID card | MISS (no MRZ found) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MLT | Malta | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MDA | Moldova | Passport | HIT (x2 of 3) | Manifest regeneration, 2026-09-04. 2023 and the 2014 `wide` crop read checksum-valid; the tighter 2014 crop of the same document does not. |
@@ -270,7 +278,7 @@ corpus. 150 codes still uncovered.
 | PRT | Portugal | Passport, ID card | HIT (x3: 2 passports, ID-card back) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the `PX_PRT_2017` book, which found no MRZ there, reads since ADR-0008 chunk 2 (CI gate, 2026-09-11). The ID-card front carries no MRZ |
 | ROU | Romania | Passport, ID card | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | RUS | Russian Federation | Passport | HIT (x3 specimens) (+ 1 checksum-failed, 2 redacted) | `PD_RUS_2004` and `P0_RUS_2025` read; `P0_RUS_2014` since ADR-0008 chunk 2 (CI gate, 2026-09-11). `P0_RUS_2019` carries a checksum-valid zone that OCR misreads. This row said "No specimen yet" until 2026-09-12, though Russian specimens were already in the corpus |
-| SMR | San Marino | -- | No specimen yet | -- |
+| SMR | San Marino | ID card (back) | No specimen yet | ID card back added 2026-09-14 (public, `San_Marino_ID_Specimen_2017_back_mrz.jpg`, public-domain); blank facsimile template, all-filler MRZ zone, OCR reads nothing parseable — not yet a HIT |
 | SRB | Serbia | Passport, ID card (TD1) | HIT (x2 specimens) (+ negative control, 1 no-MRZ) | Public-domain specimens; real-OCR scan, 2026-08-17 |
 | SVK | Slovakia | Passport, Service Passport | HIT (x2) + negative control | Contributor-supplied specimens (Specimen/Vzorka placeholder name); corpus includes additional unlabelled specimens per real-OCR scan, 2026-08-17 |
 | SVN | Slovenia | ID card (TD1), Passport | HIT (x2, ID card + passport) (+ negative control) | Public-domain specimen; passport HIT in real-OCR scan, 2026-08-17 |
