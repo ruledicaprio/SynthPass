@@ -22,13 +22,13 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **144 / 155 = 92.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-14) |
-| Tier-1 hit rate, whole specimen corpus | 144 / 257 = 56.0% | same baseline; the gap is explained below |
+| **Tier-1 hit rate, real specimens** | **145 / 159 = 91.2%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-14) |
+| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 102 of the 257 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 106 of the 265 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -39,15 +39,15 @@ the first moves when accuracy work lands. Full analysis:
 Swedish card front, the Dutch licence, Egypt 2012's masked zone and Argentina 2021 child's
 non-conforming one).
 
-**Real-specimen outcomes** (257 documents):
+**Real-specimen outcomes** (265 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **144** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| **Tier-1 HIT** | **145** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 4 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
-| `checksum_failed` | **7** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13 |
+| `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 2.5× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
-| `no_mrz_expected` | 46 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `no_mrz_expected` | 50 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 37 | no | Zone blacked out by whoever published the specimen |
 | `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
@@ -67,6 +67,13 @@ back and Moldova `PA_MDA_2014` for detection, and the seven `checksum_failed` na
 
 Cohort c01 made `no_mrz_found` read 4 on 2026-09-14 without adding a detection target — the fourth
 is a blank San Marino template with nothing printed in its zone to find; see the 2026-09-14 entry.
+
+The c03/c07/c09 cohort then took `checksum_failed` 7 → **10** later the same day, every one of the
+three from a newly ingested book (Germany `P0_D00_2024`, Hong Kong `P0_HKG_2019` and `P0_HKG_2007`)
+and none from a document already in the corpus. Fourteen scored misses now stand, **10 recognition
+against 4 detection**, of which 3 are real detection targets — and none of the three new
+recognition misses has a hand-transcribed fixture, so whether their printed zones conform is
+unmeasured. See the second 2026-09-14 entry.
 
 What that means for the track is in
 [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s 2026-09-12 amendment.
@@ -341,16 +348,19 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 ```
 
 **What counts as a regression.** The gate fails if `tier1_hits` drops below
-`baseline.tier1_hits - tolerance`, **or** if any of `checksum_failed`,
-`checksum_failed_specimen`, `no_mrz_found`, `ocr_error`, or
-`document_number_mismatch` exceeds its baseline value plus `tolerance`. Checking
+`baseline.tier1_hits - tolerance`, **or** if any of `checksum_failed`, `no_mrz_found`,
+`ocr_error`, `document_number_mismatch` or `false_positive_mrz` exceeds its baseline value plus
+`tolerance` (`REGRESSION_BUCKETS`, `crates/synthpass-bench/src/bin/provider-bench.rs`). Checking
 the whole histogram, not just the headline HIT count, catches a change that
 moves documents `checksum_failed → no_mrz_found` (or the reverse) while the net
-HIT count stays flat — a real behaviour change worth a human looking at.
-`redacted_mrz` is excluded (it sits outside the denominator); a change in its
-count, or in `documents`, is reported as a **warning, not a failure** — the
-corpus grew or shrank and the baseline needs regenerating, which is not a parser
-regression.
+HIT count stays flat — a real behaviour change worth a human looking at. The three
+off-denominator populations — `redacted_mrz`, `no_mrz_expected` and
+`checksum_failed_specimen` — are excluded; a change in any of them, or in `documents` or
+`scored`, is reported as a **warning, not a failure** — the corpus grew or shrank and the
+baseline needs regenerating, which is not a parser regression. *(Corrected 2026-09-14: this
+paragraph listed `checksum_failed_specimen` as a failing bucket and omitted
+`false_positive_mrz`, inverting both. `check_baseline` has always warned on the first and
+failed on the second.)*
 
 **`tolerance` is data, not code.** It lives in the JSON, starts at `0` (exact
 ratchet), and is raised by a one-line reviewed change only if CI runs prove
@@ -879,3 +889,96 @@ check-digit validity plus a human's visual comparison against the printed zone, 
 the 155 scored documents; only 42 are cross-checked against a hand-verified document number. The
 browser-vs-native row in this file is a frozen 2026-09-09 measurement over 160 specimens and was not
 re-cut for this cohort.
+
+### 2026-09-14 — cohorts c03/c07/c09: eight specimens, one HIT, and the first ingest the gate blocked
+
+The second corpus growth of the day and the largest since 2026-09-10: eight documents from three
+scout cycles, folded into one PR (`samples/corpus.jsonl` 257 → 265 rows). CI re-blessed on the
+branch — `gh workflow run real-specimen-gate.yml -r cohort-c03 -f mode=write-baseline`, run
+`34816030310`, green in 49m17s, `measured_on_ci_sha` `5e2aa67`, `samples_data_sha` `dc953e9`:
+`documents` 257 → **265**, `scored` 155 → **159**, `tier1_hits` 144 → **145**, `checksum_failed`
+7 → **10**, `no_mrz_expected` 46 → **50**; `no_mrz_found` (4), `checksum_failed_specimen` (19),
+`redacted_mrz` (37) and `false_positive_mrz` (0) unmoved.
+
+**Split new corpus from prior corpus, because an ingest must never be able to hide a regression.**
+
+| Population | Documents | Scored | HIT | Scored rate | Corpus rate |
+| --- | --- | --- | --- | --- | --- |
+| Prior corpus (c01 baseline, same day) | 257 | 155 | 144 | 144 / 155 = 92.9% | 144 / 257 = 56.0% |
+| New this PR (c03 + c07 + c09) | 8 | 4 | 1 | 1 of 4 | 1 of 8 |
+| **Whole corpus, 2026-09-14 (second re-bless)** | **265** | **159** | **145** | **145 / 159 = 91.2%** | **145 / 265 = 54.7%** |
+
+The prior-corpus row is subtraction across two CI baselines measured the same day, not a second
+run. Every bucket moves by exactly the eight new documents' own share — 144 + 1 = 145 hits,
+155 + 4 = 159 scored, 46 + 4 = 50 `no_mrz_expected`, 7 + 3 = 10 `checksum_failed` — and the four
+buckets no new document touches are byte-identical, so **no document already in the corpus changed
+class**. No code changed in this PR. Both rates therefore fall by dilution alone — **92.9% →
+91.2% scored, 56.0% → 54.7% corpus-wide** — and the scored rate falls further than c01's did
+because three of the four new scored documents are misses. An eight-document cohort has no rate
+worth quoting, which is why its row reads "1 of 4".
+
+The eight, and what each one's *role* makes possible, decided from the images before the run:
+
+- **`Singapore_Passport_Specimen_PA_SGP_2017_mrz.jpg` — HIT, scored.** A TD3 book page whose
+  document code is `PA`, not `P<`. Checksum-valid on the CI pass, on the manifest's own OCR read
+  (`observed.checksums_valid: true`, `agrees: true`) and under `check_sample`. First SGP specimen
+  and first SGP HIT ([`CORPUS_COVERAGE.md`](../CORPUS_COVERAGE.md), 74 → 75 HIT codes). Attributed
+  to the Immigration & Checkpoints Authority; `origin.licence` is honestly `none-stated`, as for
+  all four c09 rows.
+- **`Germany_Passport_Specimen_P0_D00_2024_mrz.jpg` — `checksum_failed`, scored.** Issuing state
+  `D<<`, the legacy single-letter code. The corpus already held a `D<<` book
+  (`P0_D00_2018`) that fails the same way, so `D` now carries two checksum-failed passports and
+  no HIT; `DEU` keeps its own HIT row.
+- **`Hong_Kong_Passport_Specimen_P0_HKG_2019_mrz.png` and `..._P0_HKG_2007_mrz.png` —
+  `checksum_failed`, scored, ×2.** First HKG specimens. Both find a TD3 zone and fail a check
+  digit, so HKG stays *No specimen yet* in coverage terms.
+- **`Germany_ID_Specimen_2024_front_no_mrz.jpg` — `no_mrz_expected`, not scored.** A TD1 card
+  front; the `Personalausweis` zone is on the back and only the front was sourced. Same call as
+  the Sweden and Latvia card fronts.
+- **`South_Africa_ID_Specimen_2013_front_no_mrz.png` and `..._back_no_mrz.png` —
+  `no_mrz_expected`, not scored, ×2.** The DHA smart ID card carries a chip and a 2D barcode and
+  prints **no MRZ on either side**, so both sides are scored out on the card type, not on what OCR
+  returned. The back is the useful precedent: a back is where a TD1 zone normally lives, and this
+  one is still correctly a refusal.
+- **`Philippines_ID_Specimen_XXXX_front_no_mrz.png` — `no_mrz_expected`, not scored.** PhilSys is
+  a national ID, not a travel document, and carries no zone at all.
+
+**This time the gate demanded the re-bless, and that is new.** The
+[c01 entry above](#2026-09-14--cohort-c01-three-specimens-one-hit-and-a-filler-template-in-no_mrz_found)
+noted that `--assert-baseline` fails only when `tier1_hits` falls, so an ingest that adds hits
+slides past a stale baseline unnoticed. That is only half the rule: `checksum_failed` is a
+`REGRESSION_BUCKETS` member, so this cohort's 7 → 10 exceeds `baseline + tolerance` with
+`tolerance: 0` and fails the assert run outright — **an ingest of MRZ-bearing-but-unreadable
+specimens is, to the gate, indistinguishable from a parser regression.** Two ingests on one day
+therefore exercised both halves: c01 (hits only) needed author discipline, c03/c07/c09 (misses)
+could not have been merged without a re-bless. The population split table above is what tells the
+two apart; the gate cannot.
+
+**Three new `checksum_failed` with no ground truth behind them.** None of Germany `P0_D00_2024`,
+Hong Kong `P0_HKG_2019` or `P0_HKG_2007` has a `samples/ocr_fixtures/<stem>.json`, a
+`ground_truth_stem` or an `expected_document_number`. That is exactly the gap the
+[2026-09-08 entry](#2026-09-08--checksum_failed-is-not-a-clean-ocr-accuracy-signal) closed once
+for the then-23 `checksum_failed` specimens: without a hand-transcribed zone, a genuine OCR error
+(`checksum_failed`, in the denominator, an accuracy target) cannot be told from a non-conforming
+printed zone (`checksum_failed_specimen`, off the denominator, nothing to fix).
+`CORPUS_COVERAGE.md`'s new HKG and `D` rows both attribute these three to "the
+single-character-misread pattern" — plausible, and **not measured**: no fixture exists to compare
+against, and no `--dump-ocr` row was pulled for them. Until three transcriptions land, the
+published scored rate of 91.2% is a floor that may be up to three documents pessimistic.
+
+**What this does not claim.** Not an accuracy result: no code, threshold or model moved, and no
+A/B was run, so nothing here says anything about the pipeline. The prior-corpus row is arithmetic
+across two CI baselines, not an independent re-measurement of the 257. Eight documents carry no
+statistical weight; the 1.7 pp scored-rate move is dilution by construction, not a behaviour
+change. Singapore's HIT carries no `expected_document_number` — only 42 rows in the whole 265
+do — so it rests on check-digit validity plus a human's visual comparison against the printed
+zone. Whether the three new `checksum_failed` books are OCR errors or non-conforming specimens is
+unknown, so their contribution to the denominator is provisional. The browser-vs-native row in
+this file remains a frozen 2026-09-09 measurement over 160 specimens and was not re-cut.
+
+**Deferred, not done.** The San Marino reclassification the c01 entry modelled (`scored` 155 →
+154, `no_mrz_found` 4 → 3) was *not* folded in here either, so it is now two cohorts old and
+ADR-0008's detection metric still reads 4 against a true 3. Transcribing the three new zones into
+`samples/ocr_fixtures/` was also left out, to keep this PR data-only and its baseline delta
+attributable to the ingest alone. Both are re-bless-bearing changes and should travel together in
+the next corpus PR rather than one each.

@@ -136,7 +136,7 @@ dated weak-spot findings. This section states one figure and the shape of the mi
 more specific belongs there, because restating numbers in a second document is precisely how
 `README.md` came to advertise a hit rate ten points stale.
 
-**Tier-1 on real specimens: 144 / 155 = 92.9%** over the documents that can yield a hit — from
+**Tier-1 on real specimens: 145 / 159 = 91.2%** over the documents that can yield a hit — from
 the CI-written baseline
 ([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-14)
 that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every

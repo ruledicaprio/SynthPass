@@ -97,6 +97,18 @@ checksum-valid MRZ (an ID-card front and a blank-template back respectively), th
 as Kenya's front-only passport row above. Full provenance and review reasoning:
 `work/scouting/c01/packet-c01.md`. 149 codes still uncovered.
 
+**2026-09-14 — cohorts c03/c07/c09 (scout loop) added eight specimens.** `D` moves *No specimen
+yet* → **MISS (checksum failed)**: two `D<<` passports (2018, already in corpus; 2024, added
+here) both fail checksum on this OCR pass, not yet a HIT. **SGP flips No specimen yet → HIT**: a
+checksum-valid TD3 passport (`Singapore_Passport_Specimen_PA_SGP_2017_mrz.jpg`, attributed to the
+Immigration & Checkpoints Authority), confirmed by both `check_sample` and the manifest's own OCR
+pass — the first clean HIT this loop produced outside Germany's partial case. `HKG`, `PHL` and
+`ZAF` each get a first specimen but stay *No specimen yet*: HKG's two passports both fail
+checksum (same single-character-misread pattern as `D`), PHL's PhilSys card and ZAF's DHA smart
+ID both carry no MRZ zone at all by design. Full provenance and review reasoning:
+`work/scouting/c03/packet-c03.md`, `work/scouting/c07/packet-c07.md`,
+`work/scouting/c09/packet-c09.md`. 145 codes still uncovered.
+
 ## Full table
 
 | Code | Country/Entity | Document type(s) | Status | Note |
