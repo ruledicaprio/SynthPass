@@ -146,7 +146,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | SYC | Seychelles | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SLE | Sierra Leone | -- | No specimen yet | -- |
 | SOM | Somalia | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
-| ZAF | South Africa | -- | No specimen yet | -- |
+| ZAF | South Africa | ID card (front+back) | No specimen yet | DHA smart ID card front+back added 2026-09-14 (public, public-domain, Commons, author credited as the Department of Home Affairs). Illustrative template card (alphabet-placeholder name, sequential ID number, generic silhouette photo), not a real person. Card carries no printed MRZ (chip + 2D barcode instead) -- not a coverage HIT, same as Kenya's front-only row above. |
 | SSD | South Sudan | -- | No specimen yet | -- |
 | SDN | Sudan | Passport | Candidate rejected | No SPECIMEN watermark, read as real personal data -- excluded per vetting checklist |
 | TZA | Tanzania | -- | No specimen yet | -- |
