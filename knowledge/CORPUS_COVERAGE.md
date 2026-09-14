@@ -31,12 +31,12 @@ here to corpus coverage instead of a benchmark number).
 | Status | Countries |
 |---|---|
 | HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 74 |
-| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 14 |
+| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 15 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
 | No legal source found (searched, dated) | 0 |
 | Not applicable by definition (no document can carry the code) | 1 |
-| No specimen yet | 147 |
+| No specimen yet | 146 |
 | **Total tracked codes** | **238** |
 
 **What "covered" means.** A code is covered when it appears *in its proper field* of a
@@ -256,7 +256,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | FIN | Finland | Passport | HIT (x5 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2007 and 2023 books, which found no MRZ there, read since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | FRA | France | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | DEU | Germany | Passport | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| D | Germany | -- | No specimen yet | Legacy single-letter code, Doc 9303 Part 3 §5 Part A |
+| D | Germany | Passport (x2), ID card front | MISS (checksum failed) | Legacy single-letter code, Doc 9303 Part 3 §5 Part A. Both passport specimens (`Germany_Passport_Specimen_P0_D00_2018_mrz.webp`, pre-existing; `Germany_Passport_Specimen_P0_D00_2024_mrz.jpg`, added 2026-09-14, public, official Bundesgesetzblatt `PassV` Anlage 2a) read an MRZ but fail checksum on this OCR pass -- the single-character-misread pattern (see `knowledge/benchmarks/README.md`), not confirmed evidence either specimen itself is invalid. Not yet a HIT for `D`. ID card front (`Germany_ID_Specimen_2024_front_no_mrz.jpg`, added 2026-09-14, public, official `PAuswV` Anlage 1) carries no MRZ -- `Personalausweis` MRZ is on the back, not sourced here; same front-only gap as Latvia's and Ireland's ID card rows. |
 | GRC | Greece | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | HUN | Hungary | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | ISL | Iceland | Passport | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
