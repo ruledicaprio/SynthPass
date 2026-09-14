@@ -39,8 +39,8 @@ fatal: No tags can describe 'f735dc2'.
 ```
 
 So `git log v1.3.0..v1.4.0` is fatal, GitHub's tag compare is meaningless, and fifteen of the
-sixteen tags never got a GitHub Release. `crates/mrz` shipped nine versions — 0.5.1 through
-0.7.1 — with no tags at all.
+sixteen tags never got a GitHub Release. `crates/mrz` published fourteen versions and tagged two
+of them: 0.1.0–0.3.0 and 0.5.1–0.7.0 have no tag at all.
 
 Automating it is not about saving keystrokes. A workflow triggered by the version change can
 only ever tag the commit that made it, and that commit is on `main` by construction. The class
@@ -102,18 +102,40 @@ covers `mrz` — which is the crate where getting it wrong reaches other people.
 
 ## Releasing `mrz`
 
-Same shape, with two differences.
+Same shape, with three differences.
 
 - Fragments live in [`changelog.d/mrz/`](changelog.d/mrz/README.md) and assemble into
-  `crates/mrz/CHANGELOG.md`, not the root one.
-- **The bump happens in the PR that makes the change**, not in a separate release PR. CI's
+  `crates/mrz/CHANGELOG.md`, not the root one. `--write` inserts into the topmost section, which
+  is `## [Unreleased]`; rename it to `## [X.Y.Z] — YYYY-MM-DD` and open a fresh
+  `## [Unreleased]` above it. The fragments that PR deletes are its entries, so
+  `check-changelog.sh` accepts the `crates/mrz/CHANGELOG.md` edit in place of a new fragment.
+- **A breaking change bumps in the PR that makes it**, not in a separate release PR. CI's
   `semver` job derives the permitted bump from `crates/mrz/Cargo.toml` and diffs against
   crates.io, so a breaking change only goes green once the version already reflects it.
+- **Cross-check the changelog against git before publishing.** Every commit that shipped should
+  be covered by an entry:
+  ```bash
+  git log --oneline mrz-v<previous>..HEAD -- crates/mrz ':!crates/mrz/tests'
+  ```
+  When the previous version has no tag, read its commit from the published crate: every
+  `.crate` carries a `.cargo_vcs_info.json` naming the SHA it was packaged from. That is how
+  `crates/mrz/CHANGELOG.md`'s sections for 0.1.0–0.7.0 were reconstructed.
 
 Merging tags `mrz-vX.Y.Z`. Publishing to crates.io is a **separate, gated step**: the
 `publish-mrz` job runs in the `crates-io` GitHub environment, which requires a manual approval,
 because a publish cannot be undone — a version can be yanked but never replaced. The job re-runs
 the full `mrz` test suite and a `-D warnings` rustdoc build before it publishes.
+
+Two things the workflow cannot do for itself:
+
+- **The environment and its token must exist.** Create the `crates-io` environment with a
+  required reviewer, and give it a `CARGO_REGISTRY_TOKEN` secret. GitHub creates an environment
+  a workflow names on first use *without* protection rules, so a missing environment removes the
+  approval gate silently, and a missing token fails the publish. Neither existed on 2026-09-14.
+- **It only sees versions that move.** The trigger is a commit that changes the version. A
+  version bumped before `release.yml` existed — `mrz` 0.7.1, bumped in #245 — is never tagged
+  or published by it; that one is published by hand with `cargo publish -p mrz` from a clean,
+  merged `main`.
 
 ## When something is deliberately not in the changelog
 

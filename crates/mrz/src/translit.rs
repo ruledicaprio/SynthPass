@@ -137,6 +137,18 @@ const TABLE_A: &[(char, &[&str])] = &[
 /// Every value in that table is one ICAO actually lists (`:703-807`); the
 /// *grouping into these three named styles* is this crate's own organisation
 /// of a choice ICAO leaves open, not something Doc 9303 names.
+///
+/// ```
+/// use mrz::{transliterate, TransliterationStyle};
+///
+/// // One German name, three conformant MRZ spellings.
+/// assert_eq!(transliterate("Jürgen", TransliterationStyle::Expanded), "JUERGEN");
+/// assert_eq!(transliterate("Jürgen", TransliterationStyle::Simple), "JURGEN");
+/// assert_eq!(transliterate("Jürgen", TransliterationStyle::XxSuffix), "JUXXRGEN");
+///
+/// // The emitters use the default, `Expanded`.
+/// assert_eq!(TransliterationStyle::default(), TransliterationStyle::Expanded);
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub enum TransliterationStyle {
@@ -216,8 +228,11 @@ pub fn transliterate_char(c: char, style: TransliterationStyle) -> Option<&'stat
 /// correct answers for the same input, and nothing in the MRZ records which
 /// the issuer picked.
 ///
-/// Only Latin-based characters (§6 A) are implemented. Cyrillic (§6 B) and
-/// Arabic (§6 C) are out of scope.
+/// This function covers Latin-based characters (§6 A) only. Cyrillic (§6 B)
+/// has its own entry point, [`transliterate_cyrillic`], because its output
+/// depends on the name's *language* rather than on an issuer's style choice;
+/// Cyrillic characters pass through this function unchanged. Arabic (§6 C) is
+/// not implemented.
 ///
 /// ```
 /// use mrz::{transliterate, TransliterationStyle};

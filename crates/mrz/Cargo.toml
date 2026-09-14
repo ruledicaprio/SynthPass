@@ -24,6 +24,7 @@ rust-version = "1.82"
 description = "Zero-dependency ICAO 9303 Machine Readable Zone (MRZ) parser, emitter, and check-digit validator for TD1/TD2/TD3 and MRV-A/MRV-B (visa) documents."
 license = "MIT"
 repository = "https://github.com/ruledicaprio/SynthPass"
+documentation = "https://docs.rs/mrz"
 readme = "README.md"
 keywords = ["mrz", "icao", "passport", "9303", "ocr"]
 categories = ["parser-implementations", "text-processing"]

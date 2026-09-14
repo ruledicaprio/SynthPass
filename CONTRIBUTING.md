@@ -308,8 +308,11 @@ on every consumer.
 
 Which slot a change lands in follows from how the type is declared:
 
-- `MrzData`, `Checks` and `Format` are `#[non_exhaustive]`. Callers already cannot match or
-  construct them exhaustively, so **adding a field or variant is a patch** (`0.5.1`).
+- The output types — `MrzData`, `Checks`, `Format`, `Field`, `MrzError`,
+  `SequenceCompleteness`, and the enums `PassportType`, `DateCompleteness`, `Blindspot`,
+  `Resolution`, `FieldKind`, `TransliterationStyle` and `CyrillicLanguage` — are
+  `#[non_exhaustive]`. Callers already cannot match or construct them exhaustively, so **adding
+  a field or variant is a patch** (`0.5.1`).
 - The five emit-side input structs — `Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`,
   `MrvBFields` — are deliberately left exhaustive, because `#[non_exhaustive]` rejects *every*
   struct expression from another crate (`..Default::default()` is refused too, E0639), leaving
@@ -326,9 +329,10 @@ from `version` in `crates/mrz/Cargo.toml`, **a PR that breaks the API must bump 
 that same PR** to go green.
 
 This is enforced rather than documented because `cargo test -p mrz` and `cargo publish --dry-run`
-both build the crate in isolation and cannot see the breakage: 0.3.0 shipped a break that passed
-both and only surfaced when `synthpass-pipeline` failed to compile with E0004. Reproduce the job
-locally with `cargo semver-checks --package mrz`.
+both build the crate in isolation and cannot see the breakage. A downstream exhaustive `match` is
+where it surfaces: when 0.4.0 made `Format` `#[non_exhaustive]`, both passed, and only
+`synthpass-pipeline` failing to compile with E0004 showed the cost. Reproduce the job locally
+with `cargo semver-checks --package mrz`.
 
 ## Git workflow
 

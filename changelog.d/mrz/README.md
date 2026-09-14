@@ -28,4 +28,11 @@ union of the fragments pending at the base commit and the ones this PR adds.
 
 Test-only and CI-only changes under `crates/mrz/` ship no release and need no fragment.
 
+**Releasing assembles them.** The pull request that releases a version runs
+`scripts/assemble-changelog.sh --scope mrz --write`, which moves every fragment here into the
+`## [Unreleased]` section of [`crates/mrz/CHANGELOG.md`](../../crates/mrz/CHANGELOG.md) and
+deletes it; that pull request then renames the section to the version. The fragments it deletes
+*are* its changelog entries, so `scripts/check-changelog.sh` accepts an edit to
+`crates/mrz/CHANGELOG.md` in place of a new fragment.
+
 Full release procedure: [`../../RELEASING.md`](../../RELEASING.md).
