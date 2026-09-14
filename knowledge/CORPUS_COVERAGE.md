@@ -81,14 +81,6 @@ photographed sideways; both are chunk-2 targets). **IND and IDN flip MISS → HI
 KEN's front page is in the corpus but carries no MRZ — a bio-page book specimen is still
 needed. 151 codes still uncovered.
 
-**2026-09-14 — cohort c01 (scout loop) added three specimens.** LVA and SMR each get a first
-specimen, LTU its first HIT. **LTU flips No specimen yet → HIT**: a checksum-valid TD3 passport
-(`Lithuania_Passport_Specimen_P0_LTU_2019_mrz.jpg`, CC BY-SA, self-published Commons upload).
-LVA and SMR stay *No specimen yet* — both new images are ID-card sides carrying no
-checksum-valid MRZ (an ID-card front and a blank-template back respectively), the same pattern
-as Kenya's front-only passport row above. Full provenance and review reasoning:
-`work/scouting/c01/packet-c01.md`. 149 codes still uncovered.
-
 **2026-09-12 — ADR-0008 chunk 2 read fifteen more specimens.** The orientation fix
 ([`orientation-fix-2026-09-12.md`](benchmarks/orientation-fix-2026-09-12.md)) took the CI gate's
 `tier1_hits` 128 → 143 with nothing lost. **DOM, KWT, NPL, OMN, PAK and VNM flip MISS → HIT**, and
@@ -96,6 +88,14 @@ CAN, FIN, IND, MCO and PRT gain specimens that had found no MRZ. OMN's and VNM's
 root-caused" rows were the page-orientation vote ADR-0008 chunk 1 attributed. **RUS moves from
 "No specimen yet" to HIT**: that row was wrong, and Russian passport specimens were already in the
 corpus. 150 codes still uncovered.
+
+**2026-09-14 — cohort c01 (scout loop) added three specimens.** LVA and SMR each get a first
+specimen, LTU its first HIT. **LTU flips No specimen yet → HIT**: a checksum-valid TD3 passport
+(`Lithuania_Passport_Specimen_P0_LTU_2019_mrz.jpg`, CC BY-SA, self-published Commons upload).
+LVA and SMR stay *No specimen yet* — both new images are ID-card sides carrying no
+checksum-valid MRZ (an ID-card front and a blank-template back respectively), the same pattern
+as Kenya's front-only passport row above. Full provenance and review reasoning:
+`work/scouting/c01/packet-c01.md`. 149 codes still uncovered.
 
 ## Full table
 
