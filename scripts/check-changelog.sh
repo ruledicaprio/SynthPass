@@ -15,7 +15,9 @@
 #   2. A PR touching crates/** adds at least one fragment. Escape hatch: the
 #      `skip-changelog` label, for genuinely invisible internal changes.
 #   3. A PR touching crates/mrz/** adds an mrz-scoped fragment, because mrz has
-#      its own published version line and its own CHANGELOG.
+#      its own published version line and its own CHANGELOG. A release PR, which
+#      assembles those fragments into crates/mrz/CHANGELOG.md instead, satisfies
+#      rules 2 and 3 through that CHANGELOG edit.
 #   4. If a PR moves a version in Cargo.toml or crates/mrz/Cargo.toml, that
 #      version must equal what the pending fragments imply. This is the
 #      discriminator: the number and the diff have to agree, checked rather
@@ -86,6 +88,11 @@ changed_files="$(git diff --name-only "$base"...HEAD)"
 added_files="$(git diff --name-only --diff-filter=A "$base"...HEAD)"
 
 has() { printf '%s\n' "$changed_files" | grep -qE "$1"; }
+# An mrz release PR assembles the pending mrz fragments into crates/mrz/CHANGELOG.md and deletes
+# them in the same change, so it adds no fragment -- the CHANGELOG edit is its entry. Without
+# this, the release flow RELEASING.md documents for mrz could only pass under `skip-changelog`,
+# whose meaning ("nobody downstream is affected") is the opposite of a release.
+mrz_changelog_edited() { printf '%s\n' "$changed_files" | grep -qx 'crates/mrz/CHANGELOG\.md'; }
 # The README.md files documenting changelog.d/ and changelog.d/mrz/ match the
 # same globs the fragments do. Counting one as a fragment let a PR that added
 # only a directory README satisfy the "you owe a fragment" rule — observed in
@@ -104,11 +111,13 @@ elif ! printf '%s\n' "$changed_files" | grep -E '^crates/' | grep -qvE '\.md$'; 
     # real-specimen-gate.yml's path filter.
     echo "    skipped: crates/ changes are documentation only"
 elif has '^crates/'; then
-    if [ -z "$(added_matching '^changelog\.d/.*\.md$')" ]; then
+    if [ -n "$(added_matching '^changelog\.d/.*\.md$')" ]; then
+        echo "    ok: $(added_matching '^changelog\.d/.*\.md$' | wc -l) fragment(s) added"
+    elif mrz_changelog_edited; then
+        echo "    ok: crates/mrz/CHANGELOG.md edited directly (an mrz release PR)"
+    else
         fail "this PR touches crates/ but adds no changelog.d/ fragment."
         fail "add one (see changelog.d/README.md), or label the PR 'skip-changelog'"
-    else
-        echo "    ok: $(added_matching '^changelog\.d/.*\.md$' | wc -l) fragment(s) added"
     fi
 else
     echo "    skipped: no crates/ changes"
@@ -124,11 +133,13 @@ elif has '^crates/mrz/'; then
     if ! printf '%s\n' "$changed_files" | grep -E '^crates/mrz/' \
          | grep -qvE '^crates/mrz/(tests|fuzz)/|\.md$'; then
         echo "    skipped: mrz changes are test-only or documentation"
-    elif [ -z "$(added_matching '^changelog\.d/mrz/.*\.md$')" ]; then
+    elif [ -n "$(added_matching '^changelog\.d/mrz/.*\.md$')" ]; then
+        echo "    ok: mrz fragment present"
+    elif mrz_changelog_edited; then
+        echo "    ok: crates/mrz/CHANGELOG.md edited directly (an mrz release PR)"
+    else
         fail "this PR touches crates/mrz/ but adds no changelog.d/mrz/ fragment."
         fail "mrz has its own published version line -- its entries do not go in the workspace set"
-    else
-        echo "    ok: mrz fragment present"
     fi
 else
     echo "    skipped: no crates/mrz/ changes"

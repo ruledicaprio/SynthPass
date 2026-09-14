@@ -43,15 +43,28 @@ pub fn expand_date(yymmdd: &str, is_birth: bool) -> String {
 /// to the 1900s.
 ///
 /// Deliberately a hardcoded constant, not a clock read: this crate stays
-/// deterministic and clock-free (see the module doc above), so the constant
-/// must be bumped by hand as time passes rather than drift silently. A stale
-/// pivot degrades gracefully in general but genuinely misreads at the
+/// deterministic and clock-free (its date judgements take an explicit "today"
+/// instead — see [`MrzData::validity`](crate::MrzData::validity)), so the
+/// constant must be bumped by hand as time passes rather than drift silently.
+/// A stale pivot degrades gracefully in general but genuinely misreads at the
 /// boundary — with this constant stuck at 26, a person born in 2027
-/// (`yy == 27`) would be dated to 1927 once such people exist.
+/// (`yy == 27`) would be dated to 1927 once such people exist. Bumping it is a
+/// patch release. To pin the pivot independently of the crate version, pass
+/// [`ParseOptions`](crate::ParseOptions) to a `*_with` parser.
 ///
 /// `scripts/check-century-pivot.sh` runs in CI on every push and fails once
 /// this constant is more than 2 years behind the wall clock, so the review
 /// cadence is enforced rather than left to memory.
+///
+/// ```
+/// use mrz::{expand_date, CURRENT_YY};
+///
+/// // A birth year at the pivot stays in this century; one past it rolls back.
+/// let at_pivot = format!("{CURRENT_YY:02}0101");
+/// let past_pivot = format!("{:02}0101", CURRENT_YY + 1);
+/// assert!(expand_date(&at_pivot, true).starts_with("20"));
+/// assert!(expand_date(&past_pivot, true).starts_with("19"));
+/// ```
 pub const CURRENT_YY: u32 = 26;
 
 /// Like [`expand_date`] but with a caller-supplied two-digit-year pivot.
@@ -86,6 +99,15 @@ pub fn expand_date_with_pivot(yymmdd: &str, is_birth: bool, pivot_yy: u32) -> St
 
 /// Gregorian leap-year rule: divisible by 4, except century years, which must
 /// also be divisible by 400 (so 2000 is a leap year but 1900 is not).
+///
+/// The rule [`Date::is_well_formed`] applies to February.
+///
+/// ```
+/// assert!(mrz::is_leap_year(2024));
+/// assert!(mrz::is_leap_year(2000)); // a century year divisible by 400
+/// assert!(!mrz::is_leap_year(1900)); // a century year that is not
+/// assert!(!mrz::is_leap_year(2023));
+/// ```
 pub fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
@@ -99,6 +121,26 @@ pub fn is_leap_year(year: i32) -> bool {
 /// the two apart. See [`date_completeness`] to classify a raw field, and
 /// [`crate::MrzData::date_of_birth_completeness`] for where a parsed value
 /// ends up.
+///
+/// ```
+/// use mrz::{format_td3, parse_td3, DateCompleteness, Td3Fields};
+///
+/// // An issuer that does not know the holder's date of birth prints fillers.
+/// let zone = format_td3(&Td3Fields {
+///     issuing_country: "UTO".into(),
+///     document_number: "L898902C3".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "<<<<<<".into(),
+///     date_of_expiry: "301231".into(),
+///     ..Default::default()
+/// });
+/// let (l1, l2) = zone.split_once('\n').unwrap();
+/// let doc = parse_td3(l1, l2).unwrap();
+///
+/// assert!(doc.valid()); // every check digit verifies ...
+/// assert_eq!(doc.date_of_birth_completeness, DateCompleteness::Unknown); // ... honestly
+/// assert_eq!(doc.date_of_birth, "<<<<<<"); // left raw, never invented
+/// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -183,6 +225,20 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 
 /// A simple proleptic-Gregorian calendar date. Used as the "today" reference
 /// for [`crate::MrzData::validity`] and to measure days-until-expiry.
+///
+/// The crate never reads the system clock, so a caller turns its own clock
+/// into a `Date` once, at the edge, and passes it in:
+///
+/// ```
+/// use mrz::Date;
+/// use std::time::{SystemTime, UNIX_EPOCH};
+///
+/// let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+/// let today = Date::from_epoch_days((secs / 86_400) as i64);
+/// assert!(today.is_well_formed());
+///
+/// assert_eq!(Date::from_epoch_days(0), Date::new(1970, 1, 1));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Date {
@@ -213,6 +269,15 @@ impl Date {
     /// Month and day fall within the true calendar range for `year` — Feb 30,
     /// Feb 29 in a non-leap year, and April 31 are all rejected rather than
     /// silently accepted the way a generous 1..=31 day check would.
+    ///
+    /// ```
+    /// use mrz::Date;
+    ///
+    /// assert!(Date::new(2024, 2, 29).is_well_formed()); // leap day
+    /// assert!(!Date::new(2023, 2, 29).is_well_formed()); // not a leap year
+    /// assert!(!Date::new(2023, 4, 31).is_well_formed()); // April has 30 days
+    /// assert!(!Date::new(2023, 13, 1).is_well_formed()); // no thirteenth month
+    /// ```
     pub fn is_well_formed(self) -> bool {
         (1..=12).contains(&self.month)
             && (1..=days_in_month(self.year, self.month)).contains(&self.day)
@@ -220,6 +285,19 @@ impl Date {
 
     /// Days since the Unix epoch (1970-01-01), proleptic Gregorian.
     /// Howard Hinnant's `days_from_civil` — pure integer math, no_std-friendly.
+    ///
+    /// Subtracting two of these is how [`MrzData::validity`](crate::MrzData::validity)
+    /// measures days until expiry.
+    ///
+    /// ```
+    /// use mrz::Date;
+    ///
+    /// assert_eq!(Date::new(1970, 1, 2).to_epoch_days(), 1);
+    ///
+    /// // 2012 is a leap year: Jan 31 + Feb 29 + Mar 31 + 14 days = 105.
+    /// let span = Date::new(2012, 4, 15).to_epoch_days() - Date::new(2012, 1, 1).to_epoch_days();
+    /// assert_eq!(span, 105);
+    /// ```
     pub fn to_epoch_days(self) -> i64 {
         let y = if self.month <= 2 {
             self.year - 1
@@ -238,6 +316,17 @@ impl Date {
     /// Inverse of [`to_epoch_days`]: build a date from a Unix day number.
     /// Howard Hinnant's `civil_from_days`. Lets a caller turn a system clock
     /// (days since epoch) into a [`Date`] to use as "today".
+    ///
+    /// ```
+    /// use mrz::Date;
+    ///
+    /// assert_eq!(Date::from_epoch_days(0), Date::new(1970, 1, 1));
+    /// assert_eq!(Date::from_epoch_days(-1), Date::new(1969, 12, 31));
+    ///
+    /// // An exact round trip, leap days included.
+    /// let leap_day = Date::new(2024, 2, 29);
+    /// assert_eq!(Date::from_epoch_days(leap_day.to_epoch_days()), leap_day);
+    /// ```
     ///
     /// [`to_epoch_days`]: Date::to_epoch_days
     pub fn from_epoch_days(days: i64) -> Date {
@@ -274,7 +363,25 @@ pub(crate) fn parse_iso(date: &str) -> Option<Date> {
 
 /// Date-plausibility summary for an MRZ, relative to a reference "today".
 /// Distinct from the check digits: a checksum-valid MRZ can still be expired
-/// or carry impossible dates.
+/// or carry impossible dates. Obtain one from
+/// [`MrzData::validity`](crate::MrzData::validity).
+///
+/// ```
+/// use mrz::Date;
+///
+/// // The ICAO specimen expires 2012-04-15.
+/// let doc = mrz::parse_td3(
+///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+/// )
+/// .unwrap();
+///
+/// let report = doc.validity(Date::new(2012, 4, 5));
+/// assert!(report.dates_well_formed);
+/// assert!(report.dob_before_expiry);
+/// assert!(report.in_date);
+/// assert_eq!(report.days_until_expiry, Some(10));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DateValidity {
@@ -291,6 +398,21 @@ pub struct DateValidity {
 
 impl DateValidity {
     /// Dates are well-formed, internally consistent, and the document is in date.
+    ///
+    /// ```
+    /// use mrz::Date;
+    ///
+    /// let doc = mrz::parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    ///
+    /// assert!(doc.validity(Date::new(2012, 4, 15)).all_ok()); // the last valid day
+    /// let expired = doc.validity(Date::new(2012, 4, 16));
+    /// assert!(!expired.all_ok());
+    /// assert_eq!(expired.days_until_expiry, Some(-1));
+    /// ```
     pub fn all_ok(&self) -> bool {
         self.dates_well_formed && self.in_date && self.dob_before_expiry
     }

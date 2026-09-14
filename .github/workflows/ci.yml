@@ -294,13 +294,14 @@ jobs:
       - name: Rustdoc builds clean at the docs.rs feature set
         run: cargo doc -p mrz --all-features --no-deps
 
-  # Every breaking release `mrz` has ever shipped was an accidental addition to
-  # a public type — `Format` gained MrvA/MrvB in 0.3.0, `MrzData` gained
-  # `document_number_full` in 0.4.0 — and each forced downstream Cargo.toml
-  # churn under Cargo's 0.x rules, where the *minor* slot is the breaking slot.
-  # The 0.3.0 break passed both `cargo test -p mrz` and `cargo publish
-  # --dry-run` (each builds mrz in isolation) and only surfaced as an E0004 in
-  # synthpass-pipeline. This job diffs the crate's public API against the
+  # `mrz`'s early breaking releases were additions to a public type — `Format`
+  # gained MrvA/MrvB in 0.2.0, `MrzData` gained `document_number_full` in
+  # 0.4.0 — and each forced downstream Cargo.toml churn under Cargo's 0.x
+  # rules, where the *minor* slot is the breaking slot. A break like that
+  # passes both `cargo test -p mrz` and `cargo publish --dry-run` (each builds
+  # mrz in isolation) and surfaces only downstream: synthpass-pipeline's
+  # exhaustive match on `Format` failed with E0004 the moment 0.4.0 made it
+  # `#[non_exhaustive]`. This job diffs the crate's public API against the
   # published baseline on crates.io instead, so the compatibility rule in
   # CONTRIBUTING.md is enforced rather than asserted.
   #

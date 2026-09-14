@@ -66,9 +66,32 @@ use crate::dates::Date;
 /// character here" indistinguishable from "the character here is a filler".
 /// Outside the ICAO alphabet by design, so a string still carrying one can
 /// never be mistaken for a parseable line.
+///
+/// ```
+/// use mrz::{solve_field, width_candidates, FieldKind, UNKNOWN};
+///
+/// // A date of birth that lost a glyph to a punched hole arrives one short.
+/// // Mark where the glyph could have been, then let the check digit decide.
+/// let candidates = width_candidates("74082", 6);
+/// assert!(candidates.contains(&format!("7408{UNKNOWN}2")));
+/// assert_eq!(
+///     solve_field(&format!("7408{UNKNOWN}2"), '2', FieldKind::Date).unique(),
+///     Some("740812"),
+/// );
+///
+/// // A string still carrying one is never a parseable MRZ field.
+/// assert!(mrz::check_digit(&format!("7408{UNKNOWN}2")).is_err());
+/// ```
 pub const UNKNOWN: char = '?';
 
 /// The 37-character ICAO 9303 MRZ alphabet, in the order the solver sweeps it.
+///
+/// ```
+/// assert_eq!(mrz::MRZ_ALPHABET.len(), 37);
+/// // Exactly the characters a check digit accepts — nothing more.
+/// assert!(mrz::MRZ_ALPHABET.chars().all(|c| mrz::check_digit(&c.to_string()).is_ok()));
+/// assert!(mrz::check_digit("a").is_err()); // lowercase is not MRZ
+/// ```
 pub const MRZ_ALPHABET: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<";
 
 /// Most [`UNKNOWN`] positions [`solve_field`] will sweep in one field.
@@ -88,6 +111,16 @@ const MAX_WIDTH_DEFICIT: usize = 2;
 
 /// Which ICAO field a [`solve_field`] call is resolving. Selects the
 /// structural constraint applied *after* the check digit, never instead of it.
+///
+/// ```
+/// use mrz::{solve_field, FieldKind};
+///
+/// // The same damaged field under two structural rules. Four glyphs satisfy
+/// // the check digit at the lost position — `2`, `C`, `M` and `W` — but only
+/// // a digit makes a date.
+/// assert_eq!(solve_field("74081?", '2', FieldKind::Date).unique(), Some("740812"));
+/// assert_eq!(solve_field("74081?", '2', FieldKind::Other).unique(), None);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FieldKind {
@@ -104,6 +137,23 @@ pub enum FieldKind {
 }
 
 /// What the check digit could prove about a field carrying [`UNKNOWN`]s.
+///
+/// ```
+/// use mrz::{solve_field, FieldKind, Resolution};
+///
+/// // The ICAO specimen document number `L898902C3` with one glyph unread.
+/// // Every character in the lost `0`'s residue class verifies, and a document
+/// // number may legitimately hold letters — so nothing separates them.
+/// match solve_field("L8989?2C3", '6', FieldKind::DocumentNumber) {
+///     Resolution::Ambiguous { candidates } => {
+///         assert_eq!(candidates, ["L898902C3", "L8989A2C3", "L8989K2C3", "L8989U2C3"]);
+///     }
+///     other => panic!("expected an ambiguous answer, got {other:?}"),
+/// }
+///
+/// // A check digit that was itself unread proves nothing.
+/// assert_eq!(solve_field("L898902C3", '?', FieldKind::DocumentNumber), Resolution::Unresolvable);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Resolution {
@@ -128,6 +178,15 @@ impl Resolution {
     /// The proven reading, if there is exactly one. `Ambiguous` deliberately
     /// yields `None` — a caller that wants "the first candidate" has to reach
     /// into the variant and own that decision explicitly.
+    ///
+    /// ```
+    /// use mrz::{solve_field, FieldKind};
+    ///
+    /// // A date has one digit per residue class, so one lost glyph is provable.
+    /// assert_eq!(solve_field("7?0812", '2', FieldKind::Date).unique(), Some("740812"));
+    /// // A document number does not: four readings verify, none is "the" one.
+    /// assert_eq!(solve_field("L8989?2C3", '6', FieldKind::DocumentNumber).unique(), None);
+    /// ```
     pub fn unique(&self) -> Option<&str> {
         match self {
             Resolution::Unique(s) => Some(s.as_str()),
@@ -301,7 +360,7 @@ const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
 ///
 /// Deliberately small and shape-driven (round vs. round, vertical stroke vs.
 /// vertical stroke), not derived from [`crate::CLASSES`]. A residue class is
-/// check-digit-equivalent at *every* weight (see the module doc), but `K` and
+/// check-digit-equivalent at *every* weight (see [`crate::Blindspot`]), but `K` and
 /// `U` are not plausible misreads of `0` — restricting this table to glyphs
 /// that actually look alike is what keeps [`solve_substitution`]'s answers
 /// meaningfully unique instead of reproducing the whole residue class.
@@ -315,6 +374,20 @@ const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
 /// there the check digit itself rejects the wrong reading. Both directions are
 /// still worth carrying: the point of the table is which glyph OCR plausibly
 /// emitted, and the arithmetic is a separate gate downstream.
+///
+/// ```
+/// use mrz::{solve_substitution, FieldKind, Resolution, CONFUSABLES};
+///
+/// // Rows are bidirectional: `0` may be read as `O`, `D` or `Q`, and back.
+/// assert!(CONFUSABLES.contains(&('0', "ODQ")));
+///
+/// // `2` ↔ `7` crosses residue classes, so the check digit alone rejects
+/// // the wrong reading: expiry 120415 (check digit 9) misread as 170415.
+/// assert_eq!(
+///     solve_substitution("170415", '9', FieldKind::Date),
+///     Resolution::Unique("120415".to_string()),
+/// );
+/// ```
 pub const CONFUSABLES: &[(char, &str)] = &[
     ('0', "ODQ"),
     ('1', "ILTU"),

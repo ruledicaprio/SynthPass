@@ -620,7 +620,7 @@ before, which it never had.
 
 ### Fixed
 - **`mrz` recovers a spurious inserted character shifting line 1 right on TD3/MRV-A/MRV-B (`mrz`
-  0.6.3, no API change).** Real-specimen scans (`integrity_survey.rs --dir passports --mrz-only`,
+  0.6.5, no API change).** Real-specimen scans (`integrity_survey.rs --dir passports --mrz-only`,
   ~125 specimens) found `UnrecognizedIssuingCountry` firing on 57 checksum-valid real passports;
   34 of them (60%, 24 distinct countries) shared one exact shape — a single spurious character
   inserted right after line 1's position-1 filler, shifting `issuing_country` one position right
@@ -755,7 +755,7 @@ printed date correctly while the normalizer discarded it** — overall Tier-2 fi
 - **The automated corpus-ingest gate accepted nothing at all; now it works.** `scripts/ingest-fetched-samples.ps1` matched its vendor blocklist against `check_sample`'s whole stdout, but `check_sample` never prints the OCR text — so the only thing those words could ever match was its own trailing advisory, which mentions "novelty/fake-ID-vendor" and prints on every run. Every candidate scored a vendor hit, and acceptance requires the absence of one, so the script rejected 100% of candidates for as long as that advisory existed. The blocklist now lives in `check_sample.rs`, which actually has the text, and is reported as a machine-readable `VENDOR CLEAR`/`VENDOR BLOCKED` line the script reads. On a real 30-candidate staging directory this moves the gate from 0 accepted to a genuine verdict per file.
 - **Ingested ID cards were filed as `misc/`.** `Get-DocTypeDir`'s `\bid\b` can never match a `Country_ID_Specimen_...` filename, because underscore is a word character and so there is no word boundary around `_ID_`. Every ID card the script routed fell through to `misc/` — which `synthpass_bench::classify_specimen` reads as the document class, so a misrouted card was also benchmarked as the wrong kind of document.
 - **An OCR failure no longer aborts the whole ingest batch.** `check_sample` exits before printing any verdict when it cannot read an image; that candidate is now rejected with a clear reason and the run continues.
-- **`mrz` recovers a dropped MRZ name-separator filler (`mrz` 0.6.3, no API change).** OCR
+- **`mrz` recovers a dropped MRZ name-separator filler (`mrz` 0.6.4, no API change).** OCR
   routinely drops one (or both) of the two `<` filler characters in the `<<` primary/secondary
   name separator — `ESKANDARI<<MAREN` read as `KIRSCHNER<LUCA` or even `ESKANDARIMAREN` — and
   `clean_name` required a literal `"<<"` to split at all, so a collapsed separator silently sent
@@ -778,7 +778,7 @@ printed date correctly while the normalizer discarded it** — overall Tier-2 fi
 
   Four regressions in `crates/mrz/tests/name_separator_collapse.rs` pin the recovery on MRV-A,
   MRV-B, TD3, and the still-unrecoverable fully-collapsed case.
-- **`mrz` recovers a dropped MRZ line-1 position-1 filler on TD3/MRV-A/MRV-B (`mrz` 0.6.3, no API
+- **`mrz` recovers a dropped MRZ line-1 position-1 filler on TD3/MRV-A/MRV-B (`mrz` 0.6.4, no API
   change).** The same OCR-glyph-drop mechanism `repair_td1_line1_unshifted` already fixes for
   TD1 (`P<BRA...` read as `PBRA...`, shifting every field from `issuing_country` onward one
   position left) was never generalized to TD3/MRV-A/MRV-B. It was silent there: TD1 needed the

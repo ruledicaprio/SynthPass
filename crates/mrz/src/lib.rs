@@ -1,7 +1,8 @@
 //! ICAO 9303 Machine Readable Zone parser, emitter, and check-digit validator.
 //!
-//! Zero runtime dependencies so it compiles to native and `wasm32-unknown-unknown`
-//! targets alike. Supports:
+//! Zero runtime dependencies, no `unsafe`, and no clock or network access, so it
+//! compiles to native and `wasm32-unknown-unknown` targets alike and gives the
+//! same answer on both. Supports:
 //! - **TD3** (passports): 2 lines × 44 characters
 //! - **TD2** (official travel documents / ID cards): 2 lines × 36 characters
 //! - **TD1** (ID cards): 3 lines × 30 characters
@@ -29,28 +30,68 @@
 //! ```
 //!
 //! `parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other
-//! formats. From there:
+//! formats.
 //!
-//! - [`find_and_parse`] — scan free-form OCR text for an MRZ
-//! - [`format_td3`] and its siblings — emit an MRZ, national characters and all
-//! - [`MrzData::full_document_number`] — numbers too long for the printed field
-//! - [`transliterate`] — Doc 9303 Part 3 §6 A (Latin), including its multi-valued cells
-//! - [`transliterate_cyrillic`] — Doc 9303 Part 3 §6 B (Cyrillic), per [`CyrillicLanguage`]
-//! - [`MrzData::validity`] — why a proven *read* is not a valid *document*
-//! - [`Blindspot`] — the substitutions no check digit can ever catch
+//! # Where to start
 //!
-//! The engine is split across (private) modules, whose public items are all
+//! | You have | Reach for |
+//! | --- | --- |
+//! | MRZ lines, already separated | [`parse_td3`], [`parse_td2`], [`parse_td1`], [`parse_mrv_a`], [`parse_mrv_b`] |
+//! | Free-form OCR text | [`find_and_parse`] — finds the zone, repairs it under check-digit proof |
+//! | Fields to print as an MRZ | [`format_td3`] and its siblings, fed by [`Td3Fields`] and friends |
+//! | A name in a national script | [`transliterate`] (Doc 9303 Part 3 §6 A, Latin), [`transliterate_cyrillic`] (§6 B, Cyrillic), [`encode_name_component`] |
+//! | A number too long for its field | [`MrzData::full_document_number`] |
+//! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
+//! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
+//!
+//! A valid composite check digit proves a faithful *read*. It does not prove
+//! the document is in date — see [`MrzData::validity`] — and it has a known,
+//! exactly characterised blind set — see [`Blindspot`].
+//!
+//! # Feature flags
+//!
+//! Both are off by default, which keeps the default build zero-dependency:
+//!
+//! - **`serde`** — derives `Serialize` and `Deserialize` on the data types:
+//!   [`MrzData`], [`Checks`], [`Format`], [`Field`], [`SequenceCompleteness`],
+//!   [`ParseOptions`], [`Date`], [`DateValidity`], [`DateCompleteness`], and the
+//!   five emitter inputs ([`Td3Fields`], [`Td2Fields`], [`Td1Fields`],
+//!   [`MrvAFields`], [`MrvBFields`]).
+//! - **`zeroize`** — derives `ZeroizeOnDrop` on [`MrzData`], wiping its
+//!   PII-bearing strings from memory when the value is dropped.
+//!
+//! # Stability
+//!
+//! The crate is pre-1.0, so the **minor** version is the breaking slot: `^0.7`
+//! resolves any `0.7.x` but never `0.8.0`. Output types ([`MrzData`],
+//! [`Checks`], [`Format`], [`Field`], [`MrzError`], [`SequenceCompleteness`] and
+//! the other enums) are `#[non_exhaustive]`, so they can grow in a patch
+//! release; the five `*Fields` emitter inputs are deliberately exhaustive, so
+//! that struct-update syntax (`..Default::default()`) keeps working. The minimum
+//! supported Rust version is 1.82, and raising it is a minor-version change.
+//!
+//! Release history is in the
+//! [changelog](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/CHANGELOG.md),
+//! and what each version slot is for, up to 1.0, is in the
+//! [roadmap](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/ROADMAP.md).
+//!
+//! # Source layout
+//!
+//! The engine is split across private modules, whose public items are all
 //! re-exported at the crate root:
-//! - `checksum` — check-digit math and generic OCR-repair primitives
-//! - `blindspot` — the substitutions check digits provably cannot catch
-//! - `parser` — the TD1/TD2/TD3 parsers and the free-text scanner
-//! - `dates` — `YYMMDD` expansion and date-plausibility checks
-//! - `countries` — ICAO/ISO 3166-1 code → country name
 //!
-//! A valid composite check digit proves a faithful *read*; it does not prove
-//! the document is in date — see [`MrzData::validity`].
+//! - `parser` — the five fixed-layout parsers and the free-text scanner
+//! - `emit` — the five emitters and Part 3 §4.6 name encoding
+//! - `checksum` — check-digit math and OCR line normalization
+//! - `repair` — check-digit-guided recovery of damaged or misread fields
+//! - `blindspot` — the substitutions check digits provably cannot catch
+//! - `dates` — `YYMMDD` expansion, the calendar, and date plausibility
+//! - `countries` — the Part 3 §5 registry of state and organization codes
+//! - `doccode` — Part 4 §4.4 secondary passport document codes
+//! - `translit` — Part 3 §6 A (Latin) and §6 B (Cyrillic) transliteration
 
 #![warn(missing_docs)]
+#![forbid(unsafe_code)]
 
 /// Compiles and runs every Rust example in `README.md` as a doctest, so a
 /// README snippet can never drift from the API it demonstrates. `cfg(doctest)`
@@ -80,8 +121,8 @@ pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};
 pub use checksum::{check_digit, verify};
 pub use countries::{code_for_name, codes, codes_equivalent, country_name};
 pub use dates::{
-    date_completeness, expand_date, expand_date_with_pivot, Date, DateCompleteness, DateValidity,
-    CURRENT_YY,
+    date_completeness, expand_date, expand_date_with_pivot, is_leap_year, Date, DateCompleteness,
+    DateValidity, CURRENT_YY,
 };
 pub use doccode::{passport_type, PassportType};
 pub use emit::{
@@ -106,6 +147,20 @@ pub use translit::{
 ///
 /// Every `parse_*` / [`find_and_parse`] function is the `ParseOptions::default()`
 /// case of its `*_with` counterpart, so existing calls are unaffected.
+///
+/// ```
+/// use mrz::{find_and_parse_with, ParseOptions, CURRENT_YY};
+///
+/// assert_eq!(ParseOptions::default().pivot_yy, CURRENT_YY);
+///
+/// // Pin the pivot so that replaying archived reads gives the same dates no
+/// // matter which crate version (and so which `CURRENT_YY`) runs the replay.
+/// let opts = ParseOptions { pivot_yy: 30 };
+/// let text = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+///             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+/// let doc = find_and_parse_with(text, &opts).unwrap();
+/// assert_eq!(doc.date_of_birth, "1974-08-12"); // 74 > 30, so last century
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ParseOptions {
@@ -128,24 +183,57 @@ impl Default for ParseOptions {
 /// `#[non_exhaustive]`: a future MRZ format may carry a check digit these five
 /// fields don't name, and adding it should not be a breaking change. Construct
 /// one from a `parse_*` function rather than by literal.
+///
+/// A format that prints no such check digit reports that field as `true`: a
+/// check digit that does not exist cannot fail. So `personal_number` is `true`
+/// on every format but TD3, and `composite` is `true` on MRV-A and MRV-B.
+///
+/// ```
+/// // The ICAO specimen with its date of birth altered: 740812 → 750812.
+/// let doc = mrz::parse_td3(
+///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C36UTO7508122F1204159ZE184226B<<<<<10",
+/// )
+/// .unwrap();
+///
+/// // The damage is located, not merely detected.
+/// assert!(doc.checks.document_number);
+/// assert!(!doc.checks.date_of_birth);
+/// assert!(doc.checks.date_of_expiry);
+/// assert!(!doc.checks.composite); // the composite covers the date of birth too
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub struct Checks {
-    /// The primary document-number field.
+    /// The primary document-number field (or, for a number too long for it,
+    /// the reassembled number — see [`MrzData::full_document_number`]).
     pub document_number: bool,
     /// The date-of-birth field.
     pub date_of_birth: bool,
     /// The date-of-expiry field.
     pub date_of_expiry: bool,
-    /// TD3 only; `true` for TD1/TD2 (no such check digit exists there).
+    /// TD3's personal-number field. `true` on TD1, TD2, MRV-A and MRV-B, which
+    /// print no such check digit.
     pub personal_number: bool,
-    /// The composite check digit over the whole zone.
+    /// The composite check digit over the zone. `true` on MRV-A and MRV-B,
+    /// which print none.
     pub composite: bool,
 }
 
 impl Checks {
     /// All check digits valid — the MRZ read is mathematically verified.
+    ///
+    /// ```
+    /// let doc = mrz::parse_td2(
+    ///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+    ///     "D231458907UTO7408122F1204159<<<<<<<6",
+    /// )
+    /// .unwrap();
+    /// assert!(doc.checks.all_valid());
+    /// // TD2 prints no personal-number check digit, so that field is vacuously true.
+    /// assert!(doc.checks.personal_number);
+    /// ```
     pub fn all_valid(&self) -> bool {
         self.document_number
             && self.date_of_birth
@@ -155,21 +243,23 @@ impl Checks {
     }
 }
 
-/// A single, coordinated completeness signal spanning both outcomes of a
-/// [`find_and_parse`] attempt — the "several
-/// separate vocabularies for 'is this record complete'" gap
-/// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 5 exists to close.
+/// A single completeness signal spanning both outcomes of a
+/// [`find_and_parse`] attempt.
+///
+/// A successful read reports how complete it is through [`MrzData`]'s
+/// `checks` and `date_of_birth_completeness`; a scan that found only part of
+/// a zone reports it through [`MrzError::IncompleteSequence`]. Those are two
+/// differently shaped vocabularies, and this type lets a caller hold *one*
+/// value instead of branching on both arms of `Result<MrzData, MrzError>` —
+/// [`from_parse_result`](Self::from_parse_result) is the constructor meant
+/// for that.
 ///
 /// Deliberately **not** a struct that duplicates [`MrzData`]'s own fields
 /// (a second, independently-stale source of truth for the same facts):
 /// [`Complete`](Self::Complete) is built from the values already on
 /// `MrzData` via [`MrzData::sequence_completeness`], and
 /// [`Partial`](Self::Partial) mirrors [`MrzError::IncompleteSequence`]'s
-/// own fields exactly. This type's only job is to be the *one* thing a
-/// caller can hold instead of separately branching on
-/// `Result<MrzData, MrzError>`'s two differently-shaped arms —
-/// [`from_parse_result`](Self::from_parse_result) is the constructor meant
-/// for that.
+/// own fields exactly.
 ///
 /// `lines_found`/`lines_expected` never actually differ inside `Complete`:
 /// an `MrzData` cannot exist at all without every line the format's
@@ -178,12 +268,43 @@ impl Checks {
 /// those two fields live only on `Partial`, not duplicated onto `Complete`
 /// as a pair of always-equal constants.
 ///
-/// Deliberately does **not** fold in
-/// `synthpass_core::fusion::check_line1_integrity`'s verdict — that
-/// heuristic layer (`document_type`/`issuing_country`/`surname`/
-/// `given_names` carry no check digit at all) lives one layer up in
-/// `synthpass-core` on purpose; this type unifies only the vocabularies
-/// that already live inside `crates/mrz` itself.
+/// It covers only what check digits and the zone's shape can establish.
+/// Whether line 1's document code, issuing state and name are plausible —
+/// none of which any check digit covers — is a heuristic judgement this type
+/// deliberately leaves to the caller.
+///
+/// ```
+/// use mrz::{find_and_parse, format_td3, Format, SequenceCompleteness, Td3Fields};
+///
+/// let zone = format_td3(&Td3Fields {
+///     issuing_country: "UTO".into(),
+///     document_number: "E00000000".into(),
+///     surname: "ESKANDARI".into(),
+///     given_names: "MAREN".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "800101".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "301230".into(),
+///     ..Default::default()
+/// });
+///
+/// // Both lines found: a complete sequence, carrying its per-field proof.
+/// assert!(matches!(
+///     SequenceCompleteness::from_parse_result(&find_and_parse(&zone)),
+///     Some(SequenceCompleteness::Complete { .. }),
+/// ));
+///
+/// // Line 1 alone: recognizably a passport, but only half of one.
+/// let line1 = zone.lines().next().unwrap();
+/// assert_eq!(
+///     SequenceCompleteness::from_parse_result(&find_and_parse(line1)),
+///     Some(SequenceCompleteness::Partial {
+///         format: Format::Td3,
+///         lines_found: 1,
+///         lines_expected: 2,
+///     }),
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
@@ -219,6 +340,14 @@ impl SequenceCompleteness {
     /// [`MrzError::NotFound`] (nothing MRZ-shaped at all) or one of the
     /// other structural/checksum error variants, which are about a
     /// *specific* zone a caller already had in hand, not a free-text scan.
+    ///
+    /// ```
+    /// use mrz::{find_and_parse, SequenceCompleteness};
+    ///
+    /// // Nothing MRZ-shaped at all: there is no sequence to be complete.
+    /// let nothing = find_and_parse("just a regular paragraph\nwith two lines");
+    /// assert_eq!(SequenceCompleteness::from_parse_result(&nothing), None);
+    /// ```
     pub fn from_parse_result(result: &Result<MrzData, MrzError>) -> Option<Self> {
         match result {
             Ok(data) => Some(data.sequence_completeness()),
@@ -236,10 +365,33 @@ impl SequenceCompleteness {
     }
 }
 
+/// Which ICAO 9303 layout a zone uses.
+///
 /// `#[non_exhaustive]`: ICAO 9303 defines formats this crate does not parse yet
 /// (MRP-style variants, future parts), so `match` on this must carry a `_` arm
-/// and gaining a variant is not a breaking change. Adding MRV-A/MRV-B in 0.3.0
-/// was breaking precisely because this attribute was missing.
+/// and gaining a variant is not a breaking change. Adding MRV-A/MRV-B in 0.2.0
+/// was breaking precisely because this attribute was missing; it arrived in
+/// 0.4.0.
+///
+/// ```
+/// use mrz::Format;
+///
+/// let doc = mrz::parse_td1(
+///     "I<UTOD231458907<<<<<<<<<<<<<<<",
+///     "7408122F1204159UTO<<<<<<<<<<<6",
+///     "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+/// )
+/// .unwrap();
+/// assert_eq!(doc.format, Format::Td1);
+///
+/// // Outside this crate, a match needs a wildcard arm for formats added later.
+/// let lines = match doc.format {
+///     Format::Td1 => 3,
+///     Format::Td2 | Format::Td3 | Format::MrvA | Format::MrvB => 2,
+///     _ => 0,
+/// };
+/// assert_eq!(lines, 3);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
@@ -262,6 +414,30 @@ pub enum Format {
 
 /// Parsed and validated MRZ data.
 ///
+/// Every field is decoded from the zone's fixed positions; nothing is taken
+/// from outside it. Whether the *read* is proven is [`valid`](Self::valid)
+/// and, per field, [`checks`](Self::checks); whether the *document* is in date
+/// is a separate question, answered by [`validity`](Self::validity).
+///
+/// ```
+/// let doc = mrz::parse_td3(
+///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+/// )
+/// .unwrap();
+///
+/// assert_eq!(doc.document_type, "P"); // trailing `<` filler trimmed
+/// assert_eq!(doc.issuing_country, "UTO");
+/// assert_eq!(doc.document_number, "L898902C3");
+/// assert_eq!(doc.surname, "ERIKSSON");
+/// assert_eq!(doc.given_names, "ANNA MARIA"); // `<` separators become spaces
+/// assert_eq!(doc.nationality, "UTO");
+/// assert_eq!(doc.sex, "F");
+/// assert_eq!(doc.date_of_expiry, "2012-04-15");
+/// assert_eq!(doc.personal_number.as_deref(), Some("ZE184226B"));
+/// assert_eq!(doc.mrz_lines.lines().count(), 2); // exactly what was validated
+/// ```
+///
 /// The `zeroize` feature (off by default, kept off for the `wasm32-unknown-unknown`
 /// browser-demo build so this crate stays zero-dependency there) derives
 /// `ZeroizeOnDrop`, wiping the PII-bearing `String` fields from memory when a
@@ -280,7 +456,9 @@ pub struct MrzData {
     /// Which ICAO 9303 layout this was parsed from.
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub format: Format,
-    /// Document code, e.g. "P" (passport), "ID"/"I" (identity card).
+    /// Document code as printed, trailing filler trimmed: `"P"` for a passport
+    /// printed `P<`, `"PD"` for a diplomatic one, `"I"` or `"ID"` for an
+    /// identity card, `"V"` for a visa.
     pub document_type: String,
     /// Issuing state or organization (3-letter ICAO code).
     pub issuing_country: String,
@@ -289,9 +467,9 @@ pub struct MrzData {
     pub document_number: String,
     /// The reassembled document number when it overflows the 9-character field
     /// (ICAO 9303 Part 5 note j / §4.2.4 for TD1, Part 6 note j for TD2; Part 4
-    /// defines no such rule, so TD3 gets it by a deliberate extension — see
-    /// `parser::read_overflow`'s doc comment. MRVs have no overflow encoding at
-    /// all, per Part 7). `None` when the number fits, in which case
+    /// defines no such rule, so TD3 gets it by a deliberate extension, because
+    /// issuers do it in practice. MRVs have no overflow encoding at all, per
+    /// Part 7). `None` when the number fits, in which case
     /// [`document_number`](Self::document_number) is already complete.
     pub document_number_full: Option<String>,
     /// `true` when the long document number was recovered from the pre-0.6
@@ -331,10 +509,13 @@ pub struct MrzData {
     pub date_of_birth_completeness: DateCompleteness,
     /// "M", "F" or "X" (unspecified).
     pub sex: String,
-    /// ISO 8601 (`YYYY-MM-DD`).
+    /// ISO 8601 (`YYYY-MM-DD`), always read as 20xx (see [`expand_date`]).
+    /// Holds the raw `YYMMDD` field instead when it is not six digits.
     pub date_of_expiry: String,
-    /// TD3: personal number field. TD1: optional data 1 + 2 joined.
-    /// TD2: optional data field.
+    /// TD3: the personal-number field. TD1: optional data 1 and 2, joined.
+    /// TD2, MRV-A and MRV-B: the optional-data field. `None` when the field
+    /// is all filler, and without the overflow remainder when a long document
+    /// number spilled into it.
     pub personal_number: Option<String>,
     /// The raw MRZ lines, newline-joined, exactly as validated.
     pub mrz_lines: String,
@@ -345,6 +526,18 @@ pub struct MrzData {
 
 impl MrzData {
     /// Shorthand for `checks.all_valid()`.
+    ///
+    /// A failed check digit is a verdict on the read, not a parse error: the
+    /// zone still parses, and this is where the verdict lives.
+    ///
+    /// ```
+    /// let l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    /// assert!(mrz::parse_td3(l1, "L898902C36UTO7408122F1204159ZE184226B<<<<<10").unwrap().valid());
+    ///
+    /// // One digit of the expiry altered: still an `Ok`, no longer valid.
+    /// let tampered = mrz::parse_td3(l1, "L898902C36UTO7408122F1204169ZE184226B<<<<<10").unwrap();
+    /// assert!(!tampered.valid());
+    /// ```
     pub fn valid(&self) -> bool {
         self.checks.all_valid()
     }
@@ -389,6 +582,15 @@ impl MrzData {
     }
 
     /// Human-readable name of the issuing state, if the code is recognized.
+    ///
+    /// ```
+    /// let doc = mrz::parse_td2(
+    ///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+    ///     "D231458907UTO7408122F1204159<<<<<<<6",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(doc.issuing_country_name(), Some("Utopia (ICAO specimen)"));
+    /// ```
     pub fn issuing_country_name(&self) -> Option<&'static str> {
         country_name(&self.issuing_country)
     }
@@ -406,13 +608,43 @@ impl MrzData {
     ///
     /// Check [`format`](Self::format) and [`document_type`](Self::document_type)
     /// when the difference matters. A code outside the table never makes a
-    /// document unparseable — see the [`doccode`](crate::PassportType) docs for
-    /// why recognition here is deliberately not rejection.
+    /// document unparseable — see [`PassportType`] for why recognition here is
+    /// deliberately not rejection.
+    ///
+    /// ```
+    /// use mrz::{format_td3, parse_td3, PassportType, Td3Fields};
+    ///
+    /// // A diplomatic passport carries the secondary code `PD`.
+    /// let zone = format_td3(&Td3Fields { document_code: "PD".into(), ..Default::default() });
+    /// let (l1, l2) = zone.split_once('\n').unwrap();
+    /// assert_eq!(parse_td3(l1, l2).unwrap().passport_type(), Some(PassportType::Diplomatic));
+    ///
+    /// // The ICAO specimen prints `P<`: no secondary code, which is conformant.
+    /// let specimen = parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(specimen.passport_type(), None);
+    /// ```
     pub fn passport_type(&self) -> Option<PassportType> {
         passport_type(&self.document_type)
     }
 
     /// Human-readable name of the nationality, if the code is recognized.
+    ///
+    /// The holder's nationality need not be the issuing state's:
+    ///
+    /// ```
+    /// // Part 7-style visa issued by Utopia to a Brazilian national.
+    /// let visa = mrz::parse_mrv_a(
+    ///     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "XK93054875BRA8502212F2703143R5T6U7V8W9<<<<<<",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(visa.issuing_country_name(), Some("Utopia (ICAO specimen)"));
+    /// assert_eq!(visa.nationality_name(), Some("Brazil"));
+    /// ```
     pub fn nationality_name(&self) -> Option<&'static str> {
         country_name(&self.nationality)
     }
@@ -424,6 +656,23 @@ impl MrzData {
     /// [`SequenceCompleteness::from_parse_result`] on the `Err` side of a
     /// [`find_and_parse`] call, since a `Partial`
     /// read has no `MrzData` to hang this method off of in the first place.
+    ///
+    /// ```
+    /// use mrz::{DateCompleteness, SequenceCompleteness};
+    ///
+    /// let doc = mrz::parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    /// match doc.sequence_completeness() {
+    ///     SequenceCompleteness::Complete { checks, date_of_birth } => {
+    ///         assert!(checks.all_valid());
+    ///         assert_eq!(date_of_birth, DateCompleteness::Complete);
+    ///     }
+    ///     other => panic!("an MrzData is always a complete sequence, got {other:?}"),
+    /// }
+    /// ```
     pub fn sequence_completeness(&self) -> SequenceCompleteness {
         SequenceCompleteness::Complete {
             checks: self.checks.clone(),
@@ -433,6 +682,21 @@ impl MrzData {
 }
 
 /// Which check-digit-bearing field an error refers to.
+///
+/// ```
+/// use mrz::Field;
+///
+/// // The ICAO specimen with its expiry altered: 120415 → 120416.
+/// let doc = mrz::parse_td3(
+///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+///     "L898902C36UTO7408122F1204169ZE184226B<<<<<10",
+/// )
+/// .unwrap();
+/// assert!(doc.checks.failed().contains(&Field::DateOfExpiry));
+///
+/// // `Display` uses the same name as the `Checks` field.
+/// assert_eq!(Field::DateOfExpiry.to_string(), "date_of_expiry");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
@@ -451,6 +715,11 @@ pub enum Field {
 
 impl Field {
     /// Field name as it appears on [`Checks`].
+    ///
+    /// ```
+    /// assert_eq!(mrz::Field::DocumentNumber.as_str(), "document_number");
+    /// assert_eq!(mrz::Field::Composite.as_str(), "composite");
+    /// ```
     pub fn as_str(self) -> &'static str {
         match self {
             Self::DocumentNumber => "document_number",
@@ -471,6 +740,18 @@ impl core::fmt::Display for Field {
 impl Checks {
     /// The fields whose check digits failed, in field order. Empty when
     /// [`all_valid`](Checks::all_valid) is `true`.
+    ///
+    /// ```
+    /// use mrz::Field;
+    ///
+    /// // The ICAO specimen with its date of birth altered: 740812 → 750812.
+    /// let doc = mrz::parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7508122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(doc.checks.failed(), [Field::DateOfBirth, Field::Composite]);
+    /// ```
     pub fn failed(&self) -> Vec<Field> {
         [
             (self.document_number, Field::DocumentNumber),
@@ -493,6 +774,30 @@ impl Checks {
 
 /// Why parsing an MRZ zone failed outright — distinct from a failed check
 /// digit, which `parse_*` reports through [`Checks`] instead of an error.
+///
+/// ```
+/// use mrz::{find_and_parse, parse_td3, MrzError};
+///
+/// const L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+///
+/// // Structural failures are errors ...
+/// assert_eq!(parse_td3("P<UTOERIKSSON", L2), Err(MrzError::BadLength { expected: 44, got: 13 }));
+/// assert_eq!(
+///     parse_td3("I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2),
+///     Err(MrzError::BadDocumentCode("I<".into())), // not a passport code
+/// );
+/// assert_eq!(
+///     find_and_parse("just a regular paragraph\nwith two lines"),
+///     Err(MrzError::NotFound),
+/// );
+///
+/// // ... a failed check digit is not: the zone still parses, and says which.
+/// let doc = parse_td3("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2).unwrap();
+/// assert!(doc.valid());
+///
+/// // Every variant renders a readable message.
+/// assert_eq!(MrzError::NotFound.to_string(), "no MRZ found in text");
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MrzError {
@@ -526,7 +831,8 @@ pub enum MrzError {
     /// at all. `lines_found` is always `1` today: only line 1's document-code
     /// prefix is a reliably shape-checkable signal on its own (a format's
     /// other lines carry no distinguishing prefix to detect in isolation).
-    /// See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 4.
+    /// [`SequenceCompleteness`] folds this and a successful read into one
+    /// value.
     IncompleteSequence {
         /// The format whose line 1 was recognized.
         format: Format,

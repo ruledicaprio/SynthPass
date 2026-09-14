@@ -62,11 +62,38 @@ use crate::checksum::check_digit;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-/// Raw TD3 sub-fields, in MRZ-native form (see module docs).
+/// Raw TD3 sub-fields, in MRZ-native form.
 ///
-/// `document_number` and `personal_number` are limited to 9 and 14 characters
-/// respectively (the field widths); longer input is silently truncated.
-/// `date_of_birth` / `date_of_expiry` are `YYMMDD`, not ISO dates.
+/// The inputs are what the MRZ prints, not what a parser returns: dates are
+/// `YYMMDD` rather than ISO, and states are 3-letter ICAO codes. Every field is
+/// uppercased, any character outside `[A-Z0-9]` becomes the filler `<`, and
+/// the result is padded or truncated to the field's exact width, so emitting
+/// never panics and never produces a line of the wrong length. The two name
+/// fields are the exception: they are encoded per Doc 9303 Part 3 §4.6 and
+/// transliterated per §6 A/§6 B, exactly as [`encode_name_component`] does,
+/// and a name too long for the field is truncated the way ICAO prescribes.
+///
+/// A `document_number` longer than the 9-character field overflows into the
+/// personal-number field when the remainder fits (up to 12 more characters);
+/// see [`MrzData::full_document_number`](crate::MrzData::full_document_number).
+/// Otherwise it is truncated to 9. `personal_number` holds up to 14 characters.
+///
+/// ```
+/// use mrz::Td3Fields;
+///
+/// // Struct-update syntax is the intended way to build one: unset fields
+/// // emit as fillers, and the document code defaults to "P".
+/// let fields = Td3Fields {
+///     issuing_country: "UTO".into(),
+///     surname: "Eriksson".into(),
+///     given_names: "Anna Maria".into(),
+///     ..Default::default()
+/// };
+/// assert_eq!(fields.document_code, "P");
+///
+/// let zone = mrz::format_td3(&fields);
+/// assert!(zone.starts_with("P<UTOERIKSSON<<ANNA<MARIA<<"));
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td3Fields {
@@ -74,13 +101,13 @@ pub struct Td3Fields {
     pub document_code: String,
     /// Issuing state (3-letter ICAO code).
     pub issuing_country: String,
-    /// Document number, up to 9 characters.
+    /// Document number. Up to 9 characters fit the field; a longer one
+    /// overflows into the personal-number field (see the type docs).
     pub document_number: String,
-    /// Primary identifier / surname, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Primary identifier / surname, encoded per [`encode_name_component`].
     pub surname: String,
-    /// Secondary identifier / given names, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Secondary identifier / given names, encoded per
+    /// [`encode_name_component`].
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -154,8 +181,13 @@ fn field(s: &str, width: usize) -> String {
 ///      characters using only the allowed OCR-B characters") and fixes what
 ///      was previously silent data loss: `MÜLLER` used to emit as `MLLER`,
 ///      now `MUELLER`.
-///   2. else if `u` is `A`-`Z` or `0`-`9`, it is kept as-is.
-///   3. else the existing punctuation rules below apply to `u`.
+///   2. else if `u` is one of the 48 Cyrillic code points of Part 3 §6 B
+///      (`:809-863`), it is replaced by its base-column (≈ Russian)
+///      transliteration — e.g. `Ж`→`ZH` — for the same reason. This path has
+///      no language context, so a name whose language's column differs must
+///      be pre-transliterated with `transliterate_cyrillic`.
+///   3. else if `u` is `A`-`Z` or `0`-`9`, it is kept as-is.
+///   4. else the existing punctuation rules below apply to `u`.
 /// - Hyphen (`:517-521`), comma (`:523-532`), and whitespace each become a
 ///   single separator filler `<`.
 /// - **Apostrophe is dropped entirely, with no filler in its place**
@@ -601,14 +633,25 @@ fn digit_char(field: &str) -> char {
 ///
 /// # National characters
 ///
-/// Doc 9303 Part 3 §6 A defines a recommended transliteration for Latin
-/// national characters that do not fit the MRZ's `[A-Z0-9<]` alphabet. It is
-/// applied automatically, so accented letters survive instead of being
-/// silently deleted — see [`crate::transliterate`] for the cases where the
-/// standard admits more than one correct answer.
+/// Characters that do not fit the MRZ's `[A-Z0-9<]` alphabet are
+/// transliterated automatically, so a national name survives instead of being
+/// silently deleted. Every emitter does this, through
+/// [`encode_name_component`]:
+///
+/// - **Latin** — Doc 9303 Part 3 §6 A: `Ü`→`UE`, `É`→`E`, `ß`→`SS`. Five
+///   characters have more than one recommended form; the emitters use the
+///   `Expanded` one. See [`crate::transliterate`] for the others.
+/// - **Cyrillic** — Part 3 §6 B: `ИВАНОВ`→`IVANOV`. Twelve rows and five
+///   word-initial rules depend on the name's *language*, which an emitter
+///   cannot know, so it applies §6 B's base (≈ Russian) column. For a
+///   Belarusian, Bulgarian, Macedonian, Serbian or Ukrainian name, run
+///   [`crate::transliterate_cyrillic`] with the right
+///   [`CyrillicLanguage`](crate::CyrillicLanguage) first.
+///
+/// Arabic (§6 C) is not implemented.
 ///
 /// ```
-/// use mrz::{format_td3, Td3Fields};
+/// use mrz::{format_td3, transliterate_cyrillic, CyrillicLanguage, Td3Fields};
 ///
 /// let lines = format_td3(&Td3Fields {
 ///     issuing_country: "DEU".into(),
@@ -619,6 +662,17 @@ fn digit_char(field: &str) -> char {
 /// let line1 = lines.split_once('\n').unwrap().0;
 /// assert!(line1.contains("MUELLER"));
 /// assert!(line1.contains("TERESA"));
+///
+/// // Cyrillic, base column: `Ж` becomes `ZH`.
+/// let base = format_td3(&Td3Fields { surname: "Живков".into(), ..Default::default() });
+/// assert!(base.starts_with("P<<<<ZHIVKOV<<"));
+///
+/// // The same name as a Serbian issuer writes it: `Ж` becomes `Z`.
+/// let serbian = format_td3(&Td3Fields {
+///     surname: transliterate_cyrillic("Живков", CyrillicLanguage::Serbian),
+///     ..Default::default()
+/// });
+/// assert!(serbian.starts_with("P<<<<ZIVKOV<<"));
 /// ```
 pub fn format_td3(fields: &Td3Fields) -> String {
     let doc_code = field(&fields.document_code, 2);
@@ -675,11 +729,35 @@ pub fn format_td3(fields: &Td3Fields) -> String {
     format!("{line1}\n{line2}")
 }
 
-/// Raw TD2 sub-fields, in MRZ-native form (see module docs).
+/// Raw TD2 sub-fields, in MRZ-native form — the same input conventions as
+/// [`Td3Fields`].
 ///
-/// `document_number` is limited to 9 characters (the field width); longer
-/// input is silently truncated. `date_of_birth` / `date_of_expiry` are
-/// `YYMMDD`, not ISO dates.
+/// A `document_number` longer than the 9-character field overflows into
+/// `optional_data` when the remainder fits (up to 5 more characters, per
+/// Doc 9303 Part 6 note j); otherwise it is truncated to 9.
+///
+/// ```
+/// use mrz::{format_td2, Td2Fields};
+///
+/// let fields = Td2Fields {
+///     issuing_country: "UTO".into(),
+///     document_number: "D23145890".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "740812".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "120415".into(),
+///     ..Default::default()
+/// };
+/// assert_eq!(fields.document_code, "I"); // the default document code
+///
+/// // ICAO 9303 Part 6's published specimen, byte for byte.
+/// assert_eq!(
+///     format_td2(&fields),
+///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\nD231458907UTO7408122F1204159<<<<<<<6",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td2Fields {
@@ -687,13 +765,13 @@ pub struct Td2Fields {
     pub document_code: String,
     /// Issuing state (3-letter ICAO code).
     pub issuing_country: String,
-    /// Document number, up to 9 characters.
+    /// Document number. Up to 9 characters fit the field; a longer one
+    /// overflows into `optional_data` (see the type docs).
     pub document_number: String,
-    /// Primary identifier / surname, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Primary identifier / surname, encoded per [`encode_name_component`].
     pub surname: String,
-    /// Secondary identifier / given names, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Secondary identifier / given names, encoded per
+    /// [`encode_name_component`].
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -803,11 +881,37 @@ pub fn format_td2(fields: &Td2Fields) -> String {
     format!("{line1}\n{line2}")
 }
 
-/// Raw TD1 sub-fields, in MRZ-native form (see module docs).
+/// Raw TD1 sub-fields, in MRZ-native form — the same input conventions as
+/// [`Td3Fields`].
 ///
-/// `document_number` is limited to 9 characters (the field width); longer
-/// input is silently truncated. `date_of_birth` / `date_of_expiry` are
-/// `YYMMDD`, not ISO dates.
+/// A `document_number` longer than the 9-character field overflows into
+/// `optional_data_1` when the remainder fits (up to 13 more characters, per
+/// Doc 9303 Part 5 note j / §4.2.4); otherwise it is truncated to 9.
+///
+/// ```
+/// use mrz::{format_td1, Td1Fields};
+///
+/// let fields = Td1Fields {
+///     issuing_country: "UTO".into(),
+///     document_number: "D23145890".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "740812".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "120415".into(),
+///     ..Default::default()
+/// };
+/// assert_eq!(fields.document_code, "I"); // the default document code
+///
+/// // Three lines; the name moves to line 3 on an ID card.
+/// assert_eq!(
+///     format_td1(&fields),
+///     "I<UTOD231458907<<<<<<<<<<<<<<<\n\
+///      7408122F1204159UTO<<<<<<<<<<<6\n\
+///      ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td1Fields {
@@ -815,16 +919,16 @@ pub struct Td1Fields {
     pub document_code: String,
     /// Issuing state (3-letter ICAO code).
     pub issuing_country: String,
-    /// Document number, up to 9 characters.
+    /// Document number. Up to 9 characters fit the field; a longer one
+    /// overflows into `optional_data_1` (see the type docs).
     pub document_number: String,
     /// Optional data on line 1, up to 15 characters. TD1 has no separate
     /// check digit over this field on its own — it only feeds the composite.
     pub optional_data_1: Option<String>,
-    /// Primary identifier / surname, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Primary identifier / surname, encoded per [`encode_name_component`].
     pub surname: String,
-    /// Secondary identifier / given names, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Secondary identifier / given names, encoded per
+    /// [`encode_name_component`].
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -941,12 +1045,38 @@ pub fn format_td1(fields: &Td1Fields) -> String {
     format!("{line1}\n{line2}\n{line3}")
 }
 
-/// Raw MRV-A sub-fields, in MRZ-native form (see module docs).
+/// Raw MRV-A sub-fields, in MRZ-native form — the same input conventions as
+/// [`Td3Fields`].
 ///
-/// `document_number` is limited to 9 characters (the field width); longer
-/// input is silently truncated. `date_of_birth` / `date_of_expiry` are
-/// `YYMMDD`, not ISO dates. MRV-A has no personal-number or composite check
-/// digit — `optional_data` is free-form data up to 16 characters.
+/// Visas define no overflow encoding (Doc 9303 Part 7), so a `document_number`
+/// longer than 9 characters is truncated to 9. MRV-A has no personal-number or
+/// composite check digit — `optional_data` is free-form data up to 16
+/// characters.
+///
+/// ```
+/// use mrz::{format_mrv_a, MrvAFields};
+///
+/// let fields = MrvAFields {
+///     issuing_country: "UTO".into(),
+///     document_number: "L898902C".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "690806".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "940623".into(),
+///     optional_data: Some("ZE184226B".into()),
+///     ..Default::default()
+/// };
+/// assert_eq!(fields.document_code, "V"); // the default document code
+///
+/// // ICAO 9303 Part 7's published MRV-A specimen, byte for byte.
+/// assert_eq!(
+///     format_mrv_a(&fields),
+///     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+///      L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvAFields {
@@ -956,11 +1086,10 @@ pub struct MrvAFields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
-    /// Primary identifier / surname, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Primary identifier / surname, encoded per [`encode_name_component`].
     pub surname: String,
-    /// Secondary identifier / given names, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Secondary identifier / given names, encoded per
+    /// [`encode_name_component`].
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -1046,12 +1175,38 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
     format!("{line1}\n{line2}")
 }
 
-/// Raw MRV-B sub-fields, in MRZ-native form (see module docs).
+/// Raw MRV-B sub-fields, in MRZ-native form — the same input conventions as
+/// [`Td3Fields`].
 ///
-/// `document_number` is limited to 9 characters (the field width); longer
-/// input is silently truncated. `date_of_birth` / `date_of_expiry` are
-/// `YYMMDD`, not ISO dates. MRV-B has no personal-number or composite check
-/// digit — `optional_data` is free-form data up to 8 characters.
+/// Visas define no overflow encoding (Doc 9303 Part 7), so a `document_number`
+/// longer than 9 characters is truncated to 9. MRV-B has no personal-number or
+/// composite check digit — `optional_data` is free-form data up to 8
+/// characters.
+///
+/// ```
+/// use mrz::{format_mrv_b, MrvBFields};
+///
+/// let fields = MrvBFields {
+///     issuing_country: "UTO".into(),
+///     document_number: "L898902C".into(),
+///     surname: "ERIKSSON".into(),
+///     given_names: "ANNA MARIA".into(),
+///     nationality: "UTO".into(),
+///     date_of_birth: "690806".into(),
+///     sex: "F".into(),
+///     date_of_expiry: "940623".into(),
+///     optional_data: Some("ZE184226".into()),
+///     ..Default::default()
+/// };
+/// assert_eq!(fields.document_code, "V"); // the default document code
+///
+/// // ICAO 9303 Part 7's published MRV-B specimen, byte for byte.
+/// assert_eq!(
+///     format_mrv_b(&fields),
+///     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\n\
+///      L898902C<3UTO6908061F9406236ZE184226",
+/// );
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvBFields {
@@ -1061,11 +1216,10 @@ pub struct MrvBFields {
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
-    /// Primary identifier / surname, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Primary identifier / surname, encoded per [`encode_name_component`].
     pub surname: String,
-    /// Secondary identifier / given names, per this module's name-field
-    /// punctuation and transliteration rules (see the module docs).
+    /// Secondary identifier / given names, encoded per
+    /// [`encode_name_component`].
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,

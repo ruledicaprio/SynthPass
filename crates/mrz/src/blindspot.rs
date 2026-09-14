@@ -93,6 +93,14 @@ impl Blindspot {
     /// `true` only for [`Blindspot::Blind`] — a substitution no check digit
     /// can see. [`Identical`](Blindspot::Identical) is deliberately *not*
     /// blind: nothing was substituted.
+    ///
+    /// ```
+    /// use mrz::blindspot;
+    ///
+    /// assert!(blindspot('B', 'L').is_blind()); // 11 vs 21: congruent mod 10
+    /// assert!(!blindspot('B', '8').is_blind()); // 11 vs 8: caught
+    /// assert!(!blindspot('A', 'A').is_blind()); // identical: nothing substituted
+    /// ```
     pub fn is_blind(self) -> bool {
         matches!(self, Self::Blind { .. })
     }
@@ -132,6 +140,21 @@ pub fn blindspot(a: char, b: char) -> Blindspot {
 /// *within* a row is invisible to every check digit, and any swap *across*
 /// rows is caught. Note class 0 has five members because `<` and `0` share
 /// the value 0.
+///
+/// ```
+/// use mrz::{blindspot, CLASSES, MRZ_ALPHABET};
+///
+/// // Every swap inside a row is blind ...
+/// for row in CLASSES {
+///     for &a in row {
+///         for &b in row {
+///             assert!(a == b || blindspot(a, b).is_blind());
+///         }
+///     }
+/// }
+/// // ... and the rows partition the whole 37-character alphabet.
+/// assert_eq!(CLASSES.iter().map(|row| row.len()).sum::<usize>(), MRZ_ALPHABET.len());
+/// ```
 pub const CLASSES: [&[char]; 10] = [
     &['0', 'A', 'K', 'U', '<'],
     &['1', 'B', 'L', 'V'],

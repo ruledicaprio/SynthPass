@@ -47,11 +47,41 @@
 
 /// The passport type a §4.4 secondary document code designates.
 ///
-/// Obtained from [`MrzData::passport_type`](crate::MrzData::passport_type).
-/// `None` there covers three distinct situations that callers usually want to
-/// keep apart, and which this enum deliberately does not merge: a non-passport
-/// format, the `P<` filler form carrying no secondary code, and a second
-/// character outside the table.
+/// MRZ line 1 positions 1-2 hold the document code. For a machine readable
+/// passport the first character is `P`, and ICAO 9303 Part 4 §4.4 gives the
+/// second a closed table of meanings: `PP` national, `PE` emergency,
+/// `PD` diplomatic, `PO` official, `PR` refugee, `PT` alien, `PS` stateless,
+/// `PL` laissez-passer, `PM` military, and `PU` for Part 8's single-sheet
+/// document. TD1 and TD2 get no such table — Parts 5 and 6 leave their second
+/// character to the issuer — so there is nothing to recognize there.
+///
+/// Obtained from [`MrzData::passport_type`](crate::MrzData::passport_type) or
+/// [`passport_type`]. `None` there covers three distinct situations that
+/// callers usually want to keep apart, and which this enum deliberately does
+/// not merge: a non-passport format, the `P<` filler form carrying no
+/// secondary code, and a second character outside the table.
+///
+/// # Recognition, never rejection
+///
+/// An unrecognised second character does not make a passport unparseable, and
+/// [`parse_td3`](crate::parse_td3) still accepts any character the MRZ alphabet
+/// allows. §4.4 is explicit that conformance is still arriving: from
+/// 1 January 2028 every newly issued passport must carry a §4.4 code, and
+/// passports issued without one remain valid until 1 January 2038. So `P<` —
+/// the filler form, by far the most common in real documents today — is
+/// conformant, and this type reports what a code *means* without ever deciding
+/// whether a document is acceptable.
+///
+/// ```
+/// use mrz::{passport_type, PassportType};
+///
+/// let t = PassportType::Diplomatic;
+/// assert_eq!(t.code(), "PD");
+/// assert_eq!(t.name(), "Diplomatic passport");
+///
+/// // Every code in the table round-trips through the lookup.
+/// assert!(PassportType::ALL.iter().all(|&t| passport_type(t.code()) == Some(t)));
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum PassportType {
