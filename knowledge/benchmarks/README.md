@@ -374,6 +374,20 @@ mode=write-baseline`, download the artifact, commit it). The `assert` run on tha
 PR then compares against the updated file and goes green. This is the forcing
 function that keeps the committed number honest.
 
+**One command (`tools/rebless.py`).** Every step above, plus the parts that used
+to be done by hand for every cohort PR — classifying the diff, installing the new
+baseline, rewriting README.md's gap sentence and this section's live block, and
+appending a templated `## Weak-spot findings` entry — is now
+`python tools/rebless.py --cohort-branch <branch> --confirm`. It classifies the
+diff into `identical` / `non-scored delta` / `scored delta` first: the first two
+get the mechanical doc rewrite described above and are safe to commit, push,
+re-assert and mark ready automatically; a **scored delta** (`tier1_hits` or a
+scored miss bucket moved) always stops after installing the baseline and
+printing the diff table, because that class needs `synthpass-analyst`'s prose,
+not a template. `--dry-run` previews without dispatching anything; `--run-id`
+reuses an already-completed `write-baseline` run instead of dispatching a new
+one. See the tool's own docstring for the two independent safety gates.
+
 **Rollout.** The gate lands **advisory** (visible, red on a regression, but not a
 required check). Once a handful of `assert` runs confirm the HIT count and
 histogram are identical run-to-run across CI runner SKUs, it is promoted to a

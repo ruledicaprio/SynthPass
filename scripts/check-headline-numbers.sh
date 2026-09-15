@@ -15,6 +15,13 @@
 # headline figure. This script is what makes that rule load-bearing rather than
 # aspirational -- it reads the CI-written baseline and fails if either disagrees.
 #
+# knowledge/benchmarks/README.md's own "Current headline numbers" live block is
+# checked too (added for T12, tools/rebless.py): it is the document that actually
+# carries the numbers README.md and ROADMAP.md only summarize -- both rates, the
+# outcomes heading's document count, all six outcome-table bucket counts, and the
+# "N of the <documents> specimens cannot produce" sentence. This gap is real: on
+# cohort c12 the live block went stale and nobody noticed until a hand check.
+#
 # The baseline itself is written only by CI:
 #   gh workflow run real-specimen-gate.yml -f mode=write-baseline
 # Local runs differ (OCR-inference float variance), so never hand-edit the counts.
@@ -28,6 +35,7 @@ cd "$repo_root"
 baseline="knowledge/benchmarks/real-specimen-mrz-baseline.json"
 readme="README.md"
 roadmap="knowledge/ROADMAP.md"
+bench_readme="knowledge/benchmarks/README.md"
 status=0
 
 fail() {
@@ -38,6 +46,7 @@ fail() {
 [ -f "$baseline" ] || { echo "FAIL: $baseline is missing" >&2; exit 1; }
 [ -f "$readme" ] || { echo "FAIL: $readme is missing" >&2; exit 1; }
 [ -f "$roadmap" ] || { echo "FAIL: $roadmap is missing" >&2; exit 1; }
+[ -f "$bench_readme" ] || { echo "FAIL: $bench_readme is missing" >&2; exit 1; }
 
 # Pull the three numbers we assert on. The baseline is machine-written and flat,
 # so a field grep is sufficient and avoids a jq dependency.
@@ -63,6 +72,9 @@ json_int_or_zero() {
     printf '%s' "${v:-0}"
 }
 false_positives="$(json_int_or_zero false_positive_mrz)"
+no_mrz_expected="$(json_int_or_zero no_mrz_expected)"
+redacted_mrz="$(json_int_or_zero redacted_mrz)"
+checksum_failed_specimen="$(json_int_or_zero checksum_failed_specimen)"
 
 # One decimal place, rounded half-up, matching how the README states it.
 rate="$(awk -v h="$hits" -v s="$scored" 'BEGIN { printf "%.1f", (h * 100.0) / s }')"
@@ -150,15 +162,56 @@ elif ! grep -qE "${hits}[[:space:]]*/[[:space:]]*${scored}[[:space:]]*=[[:space:
     fail "Found instead: ${roadmap_rates}"
 fi
 
+# 7. knowledge/benchmarks/README.md's "Current headline numbers" live block must
+#    state both rates itself -- it is the document README.md and ROADMAP.md are
+#    summarizing, not a third copy of their claim.
+check_bench_rate() { # <denominator> <rate> <what>
+    if ! grep -qE "${hits}[[:space:]]*/[[:space:]]*$1[[:space:]]*=[[:space:]]*$2%" "$bench_readme"; then
+        fail "$bench_readme does not state the $3 rate '${hits} / $1 = $2%' in its live block."
+        fail "Found instead: $(grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+[[:space:]]*=[[:space:]]*[0-9.]+%' "$bench_readme" | head -5 | tr '\n' ' ')"
+    fi
+}
+check_bench_rate "$scored" "$rate" "scored"
+check_bench_rate "$documents" "$corpus_rate" "corpus-level"
+
+# 8. The "Real-specimen outcomes" heading states the current document count.
+if ! grep -qE "\(${documents} documents\)" "$bench_readme"; then
+    fail "$bench_readme's outcomes heading does not state '(${documents} documents)'."
+fi
+
+# 9. The outcome table's per-bucket counts, each `| \`bucket\` | N |` (a count
+#    may be bold, e.g. '| `checksum_failed` | **10** |', so the digits are
+#    matched with optional surrounding '**' rather than an exact cell).
+check_bucket_count() { # <bucket key> <count>
+    if ! grep -qE "\`$1\`[^|]*\|[[:space:]]*\*{0,2}$2\*{0,2}[[:space:]]*\|" "$bench_readme"; then
+        fail "$bench_readme's outcome table does not show \`$1\` = $2."
+    fi
+}
+check_bucket_count no_mrz_found "$no_mrz"
+check_bucket_count checksum_failed "$checksum"
+check_bucket_count false_positive_mrz "$false_positives"
+check_bucket_count no_mrz_expected "$no_mrz_expected"
+check_bucket_count redacted_mrz "$redacted_mrz"
+check_bucket_count checksum_failed_specimen "$checksum_failed_specimen"
+
+# 10. The "Why two rates" paragraph's "N of the <documents> specimens cannot
+#     produce a Tier-1 hit" sentence -- N is documents - scored, stated
+#     explicitly rather than left as arithmetic for the reader.
+unattackable=$((documents - scored))
+if ! grep -qE "${unattackable}[[:space:]]+of[[:space:]]+the[[:space:]]+${documents}[[:space:]]+specimens[[:space:]]+cannot[[:space:]]+produce" "$bench_readme"; then
+    fail "$bench_readme does not state '${unattackable} of the ${documents} specimens cannot produce a Tier-1 hit'."
+fi
+
 if [ "$status" -eq 0 ]; then
-    echo "OK: README.md and ROADMAP.md headline numbers match $baseline"
+    echo "OK: README.md, ROADMAP.md and $bench_readme's live block match $baseline"
 else
     cat >&2 <<EOF
 
 A headline accuracy claim is out of step with the committed baseline. Update the
 one figure in README.md or knowledge/ROADMAP.md to the numbers printed above,
-and put any additional figures in knowledge/benchmarks/README.md rather than a
-second document -- that duplication is what this check exists to prevent.
+and knowledge/benchmarks/README.md's own live block to match -- that is the
+document the other two summarize, and duplication elsewhere is what this check
+exists to prevent.
 EOF
 fi
 
