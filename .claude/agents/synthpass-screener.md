@@ -89,6 +89,9 @@ present, and treat the rules restated below as binding either way.
      `gov-published`, `none-stated`. `gov-published` needs quoted text or a cited statute saying
      official publications may be reused — the tool's licence snippets are where to look. A
      bare copyright notice is `none-stated`.
+   - **a cover** (`side: cover`, no data page): propose on the source's licence exactly as for a
+     data page and say "cover only" in the note. It is a labelled class (ADR-0012), filed with
+     the `cover` variant token, and never a coverage claim; H5 still applies to a visible name.
    - **note:** one line a reviewer can act on — what the image shows (structure only), why the
      host counts as official, what you checked for H5, and anything the user must weigh.
 
