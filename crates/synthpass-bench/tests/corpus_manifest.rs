@@ -472,8 +472,12 @@ fn the_directory_agrees_with_the_document_type_in_the_name() {
         } else {
             None
         };
-        // `ocr_fixtures/` and `misc/` deliberately mix formats.
-        if dir == "ocr_fixtures" || dir == "misc" {
+        // `ocr_fixtures/` and `misc/` deliberately mix formats. `covers/`
+        // does too, on purpose (ADR-0012's amendment): a cover of a passport
+        // and a cover of an ID card sit side by side, since the directory
+        // itself is the label `classify_specimen` reads, not the document
+        // type inside it.
+        if dir == "ocr_fixtures" || dir == "misc" || dir == "covers" {
             continue;
         }
         if let Some(expected) = claimed {

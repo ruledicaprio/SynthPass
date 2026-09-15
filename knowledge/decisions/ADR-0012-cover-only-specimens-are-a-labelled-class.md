@@ -1,6 +1,6 @@
 # ADR-0012 — Cover-only specimens are a labelled class, not a drop
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-09-15)
 **Date:** 2026-09-15
 
 ## Context
@@ -77,3 +77,36 @@ specimen, and never as a coverage claim.
 - The corpus README's variant list, the screener agent and the scout prefix name the token.
   No crate changes; no ADR is needed for the first *reader* of covers until one exists outside a
   test, per [`ADR-0009`](ADR-0009-generator-as-a-service.md)'s shape-only rule for the registry.
+
+## Amendment (2026-09-15)
+
+The trade-off in "A separate `samples/covers/` directory" above is reversed: covers now go to
+their own `samples/covers/` directory, outside the default real-specimen benchmark walk, opt-in
+via `provider-bench --real-specimens --include-covers`. The `cover` filename variant token stays
+— a file's name must still say what it is — but it no longer decides where the file lives.
+
+The reason is runtime, not a change of mind about the labelling question above. The real-specimen
+CI gate walks every image under `samples/` and OCRs each one (about 10 seconds per image, ~45
+minutes for the corpus as this is written). A cover never carries an MRZ, so it can never move the
+Tier-1 hit rate and never enters the scored denominator — but the gate does not know that until
+after it has paid for the OCR pass. A hundred covers filed alongside data pages, as the original
+decision had it, would add roughly 17 minutes to every PR's gate for zero accuracy information.
+That cost was not weighed against the directory-split cost the original alternatives list
+priced (Rust plumbing in the manifest's directory list and in `classify_specimen`) — comparing
+them now, the runtime cost is the one that recurs on every PR indefinitely, and the plumbing cost
+is paid once.
+
+A cover's only benchmark value is the hallucination check: a checksum-valid MRZ read off a cover
+is `MissReason::FalsePositiveMrz`, exactly as before. That check does not need to run on every
+PR — scheduling it (a periodic `--include-covers` sweep, or a dedicated CI job) is a later
+decision, out of scope here.
+
+What stays exactly as decided above: the label is still the `cover` filename token next to
+`no_mrz`; a cover never changes a code's status in `CORPUS_COVERAGE.md`; provenance, review
+gates and H5 are unchanged; the verdict vocabulary still does not grow. What changes: the
+directory is `samples/covers/` instead of the document type's own directory, `classify_specimen`
+gains a `SpecimenClass::Cover` variant read directly off that directory (never falling back to a
+label, since a cover has none to fall back to), `find_image_files` excludes `covers/` from the
+default walk the same way it excludes `local/`, and `corpus_manifest.rs` / the manifest
+validators treat `covers/` as a fourth directory that is allowed to mix document types, the way
+`ocr_fixtures/` and `misc/` already are.

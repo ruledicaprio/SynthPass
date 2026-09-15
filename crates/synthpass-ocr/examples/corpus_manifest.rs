@@ -74,12 +74,18 @@ use synthpass_ocr::NativeOcr;
 const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
 
 /// Directories mirrored to `samples-data`, plus the tracked fixture directory.
-const CORPUS_DIRS: [&str; 5] = [
+///
+/// `covers` holds cover-only images of any document type (ADR-0012's
+/// amendment) — it gets manifest rows the same as every other directory, so
+/// `origin` provenance and `mrz.present` (always `false`) are recorded for
+/// covers exactly like the rest of the corpus.
+const CORPUS_DIRS: [&str; 6] = [
     "passports",
     "id_cards",
     "driving_licenses",
     "misc",
     "ocr_fixtures",
+    "covers",
 ];
 
 fn main() {

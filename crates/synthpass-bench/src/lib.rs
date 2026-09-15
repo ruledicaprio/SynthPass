@@ -202,6 +202,12 @@ pub enum SpecimenClass {
     Passport,
     IdCard,
     DrivingLicense,
+    /// `samples/covers/` ([`COVERS_TRACK_DIR`]): a cover-only image of any
+    /// document type, never a data page. See [`ADR-0012`'s amendment](
+    /// ../../../knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)
+    /// for why this is its own directory rather than a subclass of
+    /// `Passport`/`IdCard`.
+    Cover,
     /// `misc/`, or an `ocr_fixtures/`/`misc/` specimen whose label (if any)
     /// has no recognizable `document_type` — never guessed.
     Unclassified,
@@ -213,8 +219,9 @@ impl SpecimenClass {
             "passport" => Ok(Self::Passport),
             "id_card" => Ok(Self::IdCard),
             "driving_license" => Ok(Self::DrivingLicense),
+            "cover" => Ok(Self::Cover),
             other => Err(format!(
-                "unknown format '{other}' (valid: passport, id_card, driving_license; \
+                "unknown format '{other}' (valid: passport, id_card, driving_license, cover; \
                  omit --format entirely to run everything)"
             )),
         }
@@ -225,6 +232,7 @@ impl SpecimenClass {
             Self::Passport => "passport",
             Self::IdCard => "id_card",
             Self::DrivingLicense => "driving_license",
+            Self::Cover => "cover",
             Self::Unclassified => "unclassified",
         }
     }
@@ -235,14 +243,21 @@ impl SpecimenClass {
 /// unnormalized long form seen in a couple of hand-written fixtures — e.g.
 /// `PASSPORT` alongside `P`) for the two directories that mix formats
 /// (`ocr_fixtures/`, which holds specimens hand-labelled from more than one
-/// directory, and `misc/`).
+/// directory, and `misc/`). [`COVERS_TRACK_DIR`] (`samples/covers/`) is a
+/// third kind of exception: it mixes document types on purpose (a cover of a
+/// passport and a cover of an ID card sit side by side), but never falls back
+/// to the label lookup — a cover carries no MRZ to derive a `document_type`
+/// from, and the directory alone is exactly the signal `--format cover`
+/// needs.
 ///
 /// The gap that used to be documented here — passport specimens misfiled under
 /// `id_cards/`, which classified as `IdCard` and made `--format passport`
 /// under-count — is closed: the corpus reorganisation moved them, and
 /// `crates/synthpass-bench/tests/corpus_manifest.rs`'s
 /// `the_directory_agrees_with_the_document_type_in_the_name` now fails if a
-/// specimen is ever refiled into a directory that contradicts its own name.
+/// specimen is ever refiled into a directory that contradicts its own name
+/// (`covers/` is exempted from that check the same way `ocr_fixtures/` and
+/// `misc/` are, since it deliberately mixes document types).
 /// Directory-first classification is therefore load-bearing on a checked
 /// invariant rather than on the corpus happening to be tidy.
 pub fn classify_specimen(
@@ -257,6 +272,7 @@ pub fn classify_specimen(
         Some("passports") => return SpecimenClass::Passport,
         Some("id_cards") => return SpecimenClass::IdCard,
         Some("driving_licenses") => return SpecimenClass::DrivingLicense,
+        Some(COVERS_TRACK_DIR) => return SpecimenClass::Cover,
         _ => {}
     }
     match labels
@@ -311,6 +327,14 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", 
 /// than a substring the way `private` is — a specimen's filename never
 /// carries a track marker, and `local` is common enough as a word that a
 /// substring rule would eventually drop a public specimen from the walk.
+///
+/// **A directory named `covers` (case-insensitive) is skipped the same
+/// way** unless `tracks.covers` is set: `samples/covers/` is the cover-only
+/// track ([`COVERS_TRACK_DIR`]). ADR-0012's amendment moved covers out of the
+/// default real-specimen walk because they never carry an MRZ and so never
+/// enter the scored denominator — walking a hundred of them would cost the
+/// per-PR real-specimen gate real OCR minutes for zero accuracy signal.
+/// Exact directory name, same reasoning as `local`.
 fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
     fn walk(dir: &Path, tracks: OptInTracks, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -327,6 +351,9 @@ fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
             }
             if path.is_dir() {
                 if !tracks.local && name.as_deref() == Some(LOCAL_TRACK_DIR) {
+                    continue;
+                }
+                if !tracks.covers && name.as_deref() == Some(COVERS_TRACK_DIR) {
                     continue;
                 }
                 walk(&path, tracks, out);
@@ -625,6 +652,19 @@ pub fn load_specimen(
 /// and [`find_image_files`] leaves it out unless [`OptInTracks::local`] is set.
 pub const LOCAL_TRACK_DIR: &str = "local";
 
+/// The directory under `samples/` that holds cover-only images (no data
+/// page, of any document type) — ADR-0012's amendment. It is mirrored to
+/// `samples-data` like the public tracks (a cover is public specimen
+/// material, not a redistribution restriction), but [`find_image_files`]
+/// leaves it out of the default real-specimen walk unless
+/// [`OptInTracks::covers`] is set: a cover never carries an MRZ, so it never
+/// enters the Tier-1 hit-rate denominator, and walking it on every PR would
+/// spend real-specimen-gate OCR time for no accuracy signal. Its only
+/// benchmark value is the hallucination check — a checksum-valid MRZ read
+/// off a cover is [`MissReason::FalsePositiveMrz`] — which does not need to
+/// run on every PR.
+pub const COVERS_TRACK_DIR: &str = "covers";
+
 /// Which opt-in tracks a real-specimen walk adds to the public corpus.
 ///
 /// Both default to `false`, and the default is what CI and the committed
@@ -639,6 +679,10 @@ pub struct OptInTracks {
     /// `samples/local/` ([`LOCAL_TRACK_DIR`]): specimens usable locally
     /// whose source does not allow redistribution.
     pub local: bool,
+    /// `samples/covers/` ([`COVERS_TRACK_DIR`]): cover-only images, opt-in
+    /// because they never enter the scored denominator and walking them
+    /// costs real-specimen-gate OCR time for no accuracy information.
+    pub covers: bool,
 }
 
 /// Loads every image file found recursively under `samples_root` as a
@@ -1363,6 +1407,26 @@ mod tests {
         );
     }
 
+    /// `samples/covers/` classifies as `Cover` regardless of what document
+    /// type the cover shows — a cover of a passport and a cover of an ID card
+    /// both live under the same directory (ADR-0012's amendment).
+    #[test]
+    fn classify_specimen_recognizes_the_covers_directory() {
+        assert_eq!(
+            classify_specimen(Path::new("samples/covers/Foo.jpg"), None),
+            SpecimenClass::Cover
+        );
+        let passport_label = extraction_with_document_type("P");
+        assert_eq!(
+            classify_specimen(
+                Path::new("samples/covers/Foo_Passport_XXXX_no_mrz_cover.jpg"),
+                Some(&passport_label)
+            ),
+            SpecimenClass::Cover,
+            "directory wins over any label, the same as passports/id_cards/driving_licenses"
+        );
+    }
+
     /// `ocr_fixtures/` and `misc/` mix formats, so classification falls back
     /// to the specimen's own labelled `document_type` — both the ICAO short
     /// code (`P`, `ID`, `I`) and the unnormalized long form seen in one real
@@ -1659,7 +1723,7 @@ mod tests {
             &root,
             OptInTracks {
                 private: true,
-                local: false,
+                ..OptInTracks::default()
             },
         );
         std::fs::remove_dir_all(&root).ok();
@@ -1711,8 +1775,8 @@ mod tests {
         let with_local = find_image_files(
             &root,
             OptInTracks {
-                private: false,
                 local: true,
+                ..OptInTracks::default()
             },
         );
         std::fs::remove_dir_all(&root).ok();
@@ -1733,6 +1797,59 @@ mod tests {
             with_local.len(),
             2,
             "include-local walk: both files are returned: {with_local:?}"
+        );
+    }
+
+    /// `samples/covers/` stays out of the default walk the same way
+    /// `samples/local/` does, and only a directory with exactly that name
+    /// counts: a public specimen whose *filename* happens to contain `covers`
+    /// must still be read. The directory is capitalised here on purpose — the
+    /// match is case-insensitive, like the `local` rule.
+    #[test]
+    fn find_image_files_excludes_the_covers_track_directory_only() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-exclude-covers-{}-{}",
+            std::process::id(),
+            fastrand_seed()
+        ));
+        let passports = root.join("passports");
+        let covers_dir = root.join("Covers");
+        std::fs::create_dir_all(&passports).expect("temp dir is creatable");
+        std::fs::create_dir_all(&covers_dir).expect("temp dir is creatable");
+
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(passports.join("Coversland_Passport_Specimen_P0_XXX_2020_mrz.png"))
+            .expect("temp fixture writes");
+        image::DynamicImage::new_rgb8(2, 2)
+            .save(covers_dir.join("Scouted_Passport_Specimen_XXX_XXX_2021_no_mrz_cover.png"))
+            .expect("temp fixture writes");
+
+        let default_paths = find_image_files(&root, OptInTracks::default());
+        let with_covers = find_image_files(
+            &root,
+            OptInTracks {
+                covers: true,
+                ..OptInTracks::default()
+            },
+        );
+        std::fs::remove_dir_all(&root).ok();
+
+        assert_eq!(
+            default_paths.len(),
+            1,
+            "default walk: the covers track is left out: {default_paths:?}"
+        );
+        assert!(
+            default_paths[0]
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("Coversland_")),
+            "a filename containing `covers` is not a track marker: {default_paths:?}"
+        );
+        assert_eq!(
+            with_covers.len(),
+            2,
+            "include-covers walk: both files are returned: {with_covers:?}"
         );
     }
 

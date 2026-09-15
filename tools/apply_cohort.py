@@ -130,7 +130,7 @@ ORIGIN_LICENCES = (
 # not a rule this tool enforces or silently papers over.
 DOUBTFUL_LICENCES = ("none-stated", "unrecorded", "")
 
-CORPUS_DIRS = ("passports", "id_cards", "driving_licenses", "misc", "ocr_fixtures")
+CORPUS_DIRS = ("passports", "id_cards", "driving_licenses", "misc", "ocr_fixtures", "covers")
 IMAGE_EXTENSIONS = ("jpg", "jpeg", "png", "webp", "gif")
 
 VALID_VERDICTS = ("public", "local", "drop")
@@ -283,6 +283,10 @@ def validate_target_filename(verdict: str, target_rel_path: str) -> list[str]:
     the right extension, and the `DocType` token agreeing with the target
     subdirectory (mirroring
     `corpus_manifest.rs::the_directory_agrees_with_the_document_type_in_the_name`).
+    `covers/` is exempt from the DocType-vs-directory check, the same way
+    `corpus_manifest.rs`'s Rust mirror exempts it: a cover-only image can be
+    of any document type (ADR-0012's amendment), so the directory alone is
+    the label, not the `DocType` token in the name.
     Never invents or corrects a filename; returns a list of error strings,
     empty when the structural checks pass."""
     errors: list[str] = []
