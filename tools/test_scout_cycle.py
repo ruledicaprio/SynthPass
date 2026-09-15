@@ -359,5 +359,26 @@ class MergeCandidatesTests(unittest.TestCase):
         )
         self.assertEqual(rows[0]["note"], "from PDF p.4 (raster)")
 
+class PlanSlicesTests(unittest.TestCase):
+    PICKS = [("Americas", "PAN", "Panama"), ("Americas", "ATG", "Antigua"), ("Asia", "MNG", "Mongolia"),
+             ("Americas", "PER", "Peru"), ("Oceania", "FSM", "Micronesia"), ("Asia", "LKA", "Sri Lanka")]
+
+    def test_priority_tiers(self):
+        ordered = [c for _, c, _ in scy.prioritise_codes(self.PICKS, {"PAN": "x", "PER": "y"})]
+        self.assertEqual(ordered, ["PAN", "PER", "MNG", "LKA", "ATG", "FSM"])
+
+    def test_round_robin_split_and_cap(self):
+        self.assertEqual(scy.plan_slices(["a", "b", "c", "d", "e"], 2, 2), [["a", "c"], ["b", "d"]])
+        self.assertEqual(scy.plan_slices(["a"], 3, 6), [["a"]])
+
+    def test_parse_plan(self):
+        self.assertEqual(scy.parse_plan("3x6"), (3, 6))
+        self.assertEqual(scy.parse_plan(" 2 X 4 "), (2, 4))
+        with self.assertRaises(RuntimeError):
+            scy.parse_plan("3")
+        with self.assertRaises(RuntimeError):
+            scy.parse_plan("0x6")
+
+
 if __name__ == "__main__":
     unittest.main()

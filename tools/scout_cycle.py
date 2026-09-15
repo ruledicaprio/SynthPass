@@ -8,7 +8,9 @@ mechanical half of P-SCOUT, P-SCREEN and P-PACKET from
 command instead of a dozen hand-typed steps that each had a way to go wrong:
 
     suggest   pick uncovered codes from CORPUS_COVERAGE.md, minus what STATE.md
-              already marks exhausted or tried, grouped by region
+              already marks exhausted or tried, grouped by region; `--plan 3x6`
+              prints ready --slice arguments (legal-portal codes first,
+              low-web-presence micro-states last)
     task      write work/scouting/cNN/task-wK.txt = the byte-stable PREFIX
               (tools/scout_prefix.txt) + the SUFFIX (codes with full names, held
               series from samples/corpus.jsonl)
@@ -83,6 +85,14 @@ DEPRIORITISED_REGIONS = (
     "Territories & dependencies commonly seen on documents",
     "ICAO 9303 special / non-ISO codes",
 )
+
+# Codes that ran 0-for-N across c08 and c11 and share a cause the prompt cannot fix: a
+# state with almost no web-published document material (Pacific and Caribbean micro-states).
+# `suggest --plan` puts them last, never out; a phase-4 monitor still revisits them.
+LOW_WEB_PRESENCE_CODES = {
+    "FSM", "MHL", "NRU", "PLW", "TUV", "KIR", "WSM", "TON", "SLB", "VUT", "COK", "NIU",
+    "ATG", "DMA", "GRD", "KNA", "LCA", "VCT", "BRB", "BHS", "STP", "COM",
+}
 
 # Fields every worker candidate must carry to count as a record at all. The
 # prefix's OUTPUT block names more, but these are the ones later stages read.
@@ -413,6 +423,34 @@ def suggest_codes(
     return out
 
 
+def prioritise_codes(picks: list[tuple[str, str, str]], portals: dict[str, str]) -> list[tuple[str, str, str]]:
+    """Pace v3 (plan §7, T10): codes with a legal-acts portal first (both gazette hits
+    so far came from one), then everything else in countries.rs order, then the
+    low-web-presence micro-states last. Stable within each tier."""
+    tier1 = [t for t in picks if t[1] in portals]
+    tier3 = [t for t in picks if t[1] in LOW_WEB_PRESENCE_CODES and t[1] not in portals]
+    tier2 = [t for t in picks if t[1] not in portals and t[1] not in LOW_WEB_PRESENCE_CODES]
+    return tier1 + tier2 + tier3
+
+
+def plan_slices(ordered: list[str], workers: int, per_worker: int) -> list[list[str]]:
+    """Deals the first workers*per_worker codes round-robin into `workers`
+    slices, so each worker gets a mix of the priority tiers rather than one
+    worker getting every good code."""
+    take = ordered[: workers * per_worker]
+    slices: list[list[str]] = [[] for _ in range(workers)]
+    for i, code in enumerate(take):
+        slices[i % workers].append(code)
+    return [sl for sl in slices if sl]
+
+
+def parse_plan(spec: str) -> tuple[int, int]:
+    m = re.fullmatch(r"\s*(\d+)\s*[xX×]\s*(\d+)\s*", spec or "")
+    if not m or int(m.group(1)) < 1 or int(m.group(2)) < 1:
+        raise RuntimeError(f"--plan wants WORKERSxCODES, e.g. 3x6, got {spec!r}")
+    return int(m.group(1)), int(m.group(2))
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
 
@@ -617,6 +655,18 @@ def step_suggest(args, repo_root: Path) -> int:
     print(f"{len(uncovered)} codes read 'No specimen yet'; {len(mentioned)} already appear in STATE.md's Codes section.")
     if not picks:
         print("nothing left to suggest under these filters")
+        return 0
+    if args.plan:
+        workers, per_worker = parse_plan(args.plan)
+        portals = load_legal_portals(Path(__file__).resolve().parent / LEGAL_PORTALS_FILENAME)
+        ordered = [code for _, code, _ in prioritise_codes(picks, portals)]
+        slices = plan_slices(ordered, workers, per_worker)
+        names = {code: name for _, code, name in picks}
+        print(f"\nplan {workers}x{per_worker}: portal codes first, low-web-presence micro-states last")
+        for i, sl in enumerate(slices, 1):
+            print(f"  w{i}: " + "  ".join(f"{c} ({names[c]}{'; portal' if c in portals else ''})" for c in sl))
+        cycle = args.cycle or "cNN"
+        print("\n  python tools/scout_cycle.py run --cycle " + cycle + " " + " ".join(f'--slice "{" ".join(sl)}"' for sl in slices))
         return 0
     by_region: dict[str, list[tuple[str, str]]] = {}
     for reg, code, name in picks:
@@ -994,6 +1044,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--region", default=None, help="substring of a countries.rs region comment, e.g. Asia")
     p.add_argument("--exclude", nargs="*", default=[])
     p.add_argument("--include-orgs", action="store_true", help="include the deprioritised org/territory codes")
+    p.add_argument("--plan", default=None, help="WORKERSxCODES, e.g. 3x6: print ready --slice arguments in priority order")
+    p.add_argument("--cycle", default=None, help="with --plan: the cycle id to put in the printed run command")
 
     p = sub.add_parser("task", help="write the task file for one worker")
     p.add_argument("--cycle", required=True)
