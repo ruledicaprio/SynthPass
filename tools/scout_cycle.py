@@ -211,6 +211,23 @@ def extract_candidates(worker_output: str) -> tuple[list[dict], dict[str, str]]:
     return list(seen.values()), per_code
 
 
+def extract_blocked(worker_output: str) -> list[dict]:
+    """`BLOCKED: <url> — <reason>` lines from the worker's final answer (prefix
+    v3). The URL is copied verbatim; the reason is free text. Duplicates by
+    URL keep the last occurrence, like candidates."""
+    seen: dict[str, dict] = {}
+    for raw in worker_output.splitlines():
+        m = re.match(r"^[^A-Za-z0-9]*BLOCKED:\s*(\S+)\s*(?:[—–-]|:)?\s*(.*)$", raw.strip())
+        if not m:
+            continue
+        url = m.group(1).rstrip(".,;:")
+        if not url.startswith("http"):
+            continue
+        seen.pop(url, None)
+        seen[url] = {"url": url, "reason": m.group(2).strip() or "unspecified"}
+    return list(seen.values())
+
+
 def tag_candidates(candidates: list[dict], cycle: str, worker: str) -> list[dict]:
     tagged = []
     for c in candidates:
@@ -635,6 +652,7 @@ class WorkerResult:
         self.wall_s = 0.0
         self.exit_code: int | None = None
         self.candidates: list[dict] = []
+        self.blocked: list[dict] = []
         self.per_code: dict[str, str] = {}
         self.tokens: dict[str, int] | None = None
         self.faults: list[str] = []
@@ -696,6 +714,7 @@ def run_worker(repo_root: Path, cycle: str, worker: str, task_path: Path, codes:
     output = out_path.read_text(encoding="utf-8", errors="replace")
     candidates, per_code = extract_candidates(output)
     result.candidates = tag_candidates(candidates, cycle, worker)
+    result.blocked = [dict(b, cycle=cycle, worker=worker) for b in extract_blocked(output)]
     result.per_code = per_code
     result.tokens = find_session_tokens(dsh_home, worktree, since_ms)
 
@@ -727,6 +746,13 @@ def record_scout(repo_root: Path, results: list[WorkerResult]) -> Path:
         for c in all_candidates:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
+    blocked_all = [b for r in results for b in r.blocked]
+    blocked_path = cycle_dir / f"blocked-{cycle}.jsonl"
+    if blocked_all:
+        with open(blocked_path, "w", encoding="utf-8") as f:
+            for b in blocked_all:
+                f.write(json.dumps(b, ensure_ascii=False) + chr(10))
+
     codes = " ".join(c for r in results for c in r.codes)
     wall = max(r.wall_s for r in results)
     tokens_sum: dict[str, int] | None = None
@@ -752,12 +778,15 @@ def record_scout(repo_root: Path, results: list[WorkerResult]) -> Path:
                 f"{len(r.candidates)} candidate(s) {json.dumps(found) if found else ''}; "
                 f"none found: {' '.join(none_found) or '—'}; tokens {format_tokens(r.tokens)}; "
                 f"faults {len(r.faults)}{' -- ' + '; '.join(r.faults) if r.faults else ''}"
+                f"{'; blocked ' + str(len(r.blocked)) + ' (see blocked-' + cycle + '.jsonl, retry session-side)' if r.blocked else ''}"
             )
             text = append_log(text, line)
         return text
 
     edit_state(repo_root, apply)
     print(f"wrote {cand_path} ({len(all_candidates)} candidate(s)); STATE.md updated")
+    if blocked_all:
+        print(f"{len(blocked_all)} blocked URL(s) -> {blocked_path.name}; retry them session-side (Firecrawl), never from repository code")
     return cand_path
 
 
