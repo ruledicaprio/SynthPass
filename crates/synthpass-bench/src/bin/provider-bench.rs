@@ -36,8 +36,8 @@
 //!   --limit N          with --real-specimens: run N specimens spread evenly
 //!                      across the (possibly --format-scoped) corpus
 //!   --format NAME      with --real-specimens: restrict to one document
-//!                      class — passport|id_card|driving_license (default:
-//!                      all classes), applied before --limit
+//!                      class — passport|id_card|driving_license|cover
+//!                      (default: all classes), applied before --limit
 //!   --verbose, -v      print the per-document breakdown behind each
 //!                      provider's aggregates
 //!   --dump-ocr         with --real-specimens: for every checksum_failed
@@ -162,6 +162,15 @@ struct Args {
     /// baseline measures the public corpus only, and never set by any CI
     /// workflow. `--real-specimens` only.
     include_local: bool,
+    /// Add the `samples/covers/` track back into the `--real-specimens`
+    /// walk: cover-only images of any document type (ADR-0012's amendment).
+    /// Excluded by default because a cover never carries an MRZ and so never
+    /// enters the scored denominator — walking it on every run would spend
+    /// real-specimen-gate OCR time for no accuracy signal. The one thing this
+    /// flag is for: the hallucination check, since a checksum-valid MRZ read
+    /// off a cover is `MissReason::FalsePositiveMrz`, which does not need to
+    /// run on every PR. `--real-specimens` only.
+    include_covers: bool,
     /// Write the `mrz` provider's Tier-1 snapshot to this path as JSON and
     /// exit 0 — the regeneration path for the committed real-specimen
     /// baseline. CI-only by convention (`--assert-baseline`'s doc explains
@@ -192,6 +201,7 @@ impl Default for Args {
             mrz_only: false,
             include_private: false,
             include_local: false,
+            include_covers: false,
             write_baseline: None,
             assert_baseline: None,
         }
@@ -253,6 +263,12 @@ fn usage() {
         "  --include-local    with --real-specimens: add the gitignored samples/local/ track \
          (specimens whose source does not allow redistribution) back into the walk (excluded \
          by default; local opt-in only)"
+    );
+    eprintln!(
+        "  --include-covers   with --real-specimens: add the samples/covers/ track (cover-only \
+         images, any document type) back into the walk, for the hallucination check — a \
+         checksum-valid MRZ read off a cover. Off by default: covers never enter the scored \
+         denominator, so they are excluded from the per-PR gate's default walk"
     );
     eprintln!(
         "  --write-baseline PATH  write the mrz provider's Tier-1 snapshot (HIT count + \
@@ -367,6 +383,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.include_local = true;
                 i += 1;
             }
+            "--include-covers" => {
+                parsed.include_covers = true;
+                i += 1;
+            }
             "--write-baseline" => {
                 let v = args
                     .get(i + 1)
@@ -396,6 +416,9 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.include_local && !parsed.real_specimens {
         return Err("--include-local is only valid together with --real-specimens".to_string());
     }
+    if parsed.include_covers && !parsed.real_specimens {
+        return Err("--include-covers is only valid together with --real-specimens".to_string());
+    }
     if parsed.document_type.is_some() && parsed.real_specimens {
         return Err(
             "--document-type generates the synthetic corpus and is not valid together with \
@@ -414,12 +437,13 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     // from a walk that includes an opt-in track would bless a denominator CI
     // can never reproduce; asserting against it would report the extra
     // documents as a corpus-size change on every run.
-    if (parsed.include_private || parsed.include_local)
+    if (parsed.include_private || parsed.include_local || parsed.include_covers)
         && (parsed.write_baseline.is_some() || parsed.assert_baseline.is_some())
     {
         return Err(
-            "--include-private/--include-local cannot be combined with --write-baseline or \
-             --assert-baseline: the committed baseline measures the public corpus only"
+            "--include-private/--include-local/--include-covers cannot be combined with \
+             --write-baseline or --assert-baseline: the committed baseline measures the public \
+             corpus only"
                 .to_string(),
         );
     }
@@ -1180,6 +1204,7 @@ async fn main() {
         let tracks = synthpass_bench::OptInTracks {
             private: parsed.include_private,
             local: parsed.include_local,
+            covers: parsed.include_covers,
         };
         let mut specimens = load_real_specimens(&root.join("samples"), tracks);
         if specimens.is_empty() {
@@ -1668,8 +1693,28 @@ mod tests {
     }
 
     #[test]
+    fn include_covers_parses_alongside_real_specimens_and_is_rejected_without_it() {
+        let ok: Vec<String> = ["--real-specimens", "--include-covers"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&ok).expect("valid combination");
+        assert!(parsed.include_covers);
+        assert!(
+            !parsed.include_local && !parsed.include_private,
+            "the opt-in tracks are independent: asking for one must not add another"
+        );
+
+        let bad: Vec<String> = ["--include-covers"].iter().map(|s| s.to_string()).collect();
+        assert!(
+            parse_args(&bad).is_err(),
+            "--include-covers only makes sense scoping --real-specimens"
+        );
+    }
+
+    #[test]
     fn an_opt_in_track_is_rejected_with_either_baseline_flag() {
-        for track in ["--include-private", "--include-local"] {
+        for track in ["--include-private", "--include-local", "--include-covers"] {
             for baseline in ["--write-baseline", "--assert-baseline"] {
                 let args: Vec<String> = ["--real-specimens", track, baseline, "baseline.json"]
                     .iter()

@@ -89,10 +89,14 @@ different image from the one it described.
 |---|---|
 | `samples/` → `samples-data` (public) | The source allows redistribution |
 | `samples/local/` (the local-only track) | The source does not allow redistribution, or states no terms and the verifier is not satisfied it does |
+| `samples/covers/` (verified, but opt-in to the benchmark) | The image is cover-only (no data page), of any document type |
 
-A cover-only image (no data page) goes to the same two destinations on the same licence
-test, named with the `cover` variant token, and never changes a code's coverage status
-([`ADR-0012`](decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)).
+A cover-only image goes through the same licence test as any other specimen — public vs.
+local-only — but always lands under `samples/covers/` regardless of which side of that test it
+falls on (`samples/covers/` for a redistributable cover, `samples/local/covers/` otherwise),
+named with the `cover` variant token, and never changes a code's coverage status
+([`ADR-0012`](decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md) and its
+2026-09-15 amendment, which moved covers out of the default real-specimen benchmark walk).
 
 Either way, the image's source goes into the manifest's `origin` when it is fetched (see
 [`samples/README.md`](../samples/README.md)), because afterwards it cannot be recovered. The

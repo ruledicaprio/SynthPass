@@ -16,12 +16,13 @@ local `samples/`, additively -- it never deletes a local file, so it's safe
 to run against a working tree that already has extra/staged specimens.
 
 -Push: mirrors the image files under
-`samples/{passports,id_cards,driving_licenses,misc,ocr_fixtures}/` into the
-worktree, commits, and pushes. `*.json`/`*.md` are excluded from **every** one
-of those directories -- hand-verified ground truth is reviewed text that stays
-on `main`, wherever in `samples/` it happens to sit next to its image. Uses a
-cross-platform mirror, so a local deletion is reflected on `samples-data` too,
-and ground truth previously pushed there is cleaned up as an orphan.
+`samples/{passports,id_cards,driving_licenses,misc,ocr_fixtures,covers}/` into
+the worktree, commits, and pushes. `*.json`/`*.md` are excluded from **every**
+one of those directories -- hand-verified ground truth is reviewed text that
+stays on `main`, wherever in `samples/` it happens to sit next to its image.
+Uses a cross-platform mirror, so a local deletion is reflected on
+`samples-data` too, and ground truth previously pushed there is cleaned up as
+an orphan.
 
 All git writes happen inside an isolated worktree, never in this repo's own
 working tree -- safe to run with uncommitted changes on your current branch.
@@ -64,8 +65,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $repoRoot
 
-# Whole directories: every file in them is a corpus image.
-$imageDirs = @("passports", "id_cards", "driving_licenses", "misc")
+# Whole directories: every file in them is a corpus image. `covers` holds
+# cover-only images of any document type (ADR-0012's amendment) -- mirrored
+# like every other public track, just left out of the default benchmark walk.
+$imageDirs = @("passports", "id_cards", "driving_licenses", "misc", "covers")
 
 # Hand-verified ground truth (`synthpass_core::Extraction` JSON, and the OCR
 # Markdown its parity fixtures read) is reviewed text that lives on `main`, not

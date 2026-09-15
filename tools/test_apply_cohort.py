@@ -298,6 +298,24 @@ class ValidateTargetFilenameTests(unittest.TestCase):
         errors = ac.validate_target_filename("public", "driving_licenses/Foo_Driving_License_Specimen_2020_mrz.jpg")
         self.assertEqual(errors, [])
 
+    def test_covers_dir_accepts_a_passport_cover(self):
+        errors = ac.validate_target_filename(
+            "public", "covers/Foo_Passport_Specimen_XXX_XXX_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
+    def test_covers_dir_accepts_an_id_card_cover(self):
+        errors = ac.validate_target_filename(
+            "public", "covers/Foo_ID_Specimen_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
+    def test_covers_dir_is_a_recognized_subdirectory(self):
+        errors = ac.validate_target_filename(
+            "local", "local/covers/Foo_Passport_Specimen_XXX_XXX_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
 
 # --------------------------------------------------------------------------
 # Licence-vs-verdict warning (must warn, never block)
@@ -378,6 +396,20 @@ class ScreenedSidecarTests(unittest.TestCase):
     def test_missing_staged_path_is_skipped(self):
         text = '{"staged_path": null}\n{"no_staged_path_field": true}\n'
         self.assertEqual(ac.load_screened_sidecar(text), {})
+
+
+class SidecarPathTests(unittest.TestCase):
+    def test_sidecar_follows_the_packet_not_the_branch(self):
+        from pathlib import Path
+
+        p = Path("work/scouting/c12/packet-c12.md")
+        self.assertEqual(ac.sidecar_path_for(p, "cohort-c10"), Path("work/scouting/c12/screened-c12.jsonl"))
+
+    def test_sidecar_falls_back_to_the_branch_name(self):
+        from pathlib import Path
+
+        p = Path("work/scouting/x/combined.md")
+        self.assertEqual(ac.sidecar_path_for(p, "cohort-c03"), Path("work/scouting/x/screened-c03.jsonl"))
 
 
 if __name__ == "__main__":
