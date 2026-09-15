@@ -12,6 +12,11 @@ NEVER: consilium.europa.eu/prado or any PRADO mirror; commercial document databa
 aggregators; novelty/fake-ID sellers; forums, social media, blogs, news galleries, paste or leak
 sites; any image that might show a real person's actual document.
 
+THE IMAGE ITSELF: it must show the document — a cover, a data page, a card face, a visa sticker.
+Not a flag, a coat of arms, a building, an official at a podium, people holding a document, a
+blank application form, or a web screenshot. If what you found is one of those, it is not a
+candidate — keep looking or report none found.
+
 SPECIMEN SIGNAL (report which): a SPECIMEN/MUSTER/SPÉCIMEN/ОБРАЗЕЦ-style watermark or
 overprint, an obvious placeholder holder name, or the hosting page explicitly says the image is a
 specimen/sample of the document. An image of the document published on an ALLOWED HOST as an
@@ -19,7 +24,11 @@ illustration of that document also counts, even when the page says nothing about
 many issuers publish their specimens this way: report it with
 "specimen_signal":"official-host-only" and say in notes what the page calls it; the reviewer
 checks the image itself. A bare cover or design rendering is still worth reporting, as
-"side":"cover".
+"side":"cover" — but only when you found no data-page image for that code, and at most one per
+code: a cover is a fallback, never the goal. Report "side" as what you actually saw in the image,
+not what a caption or page title claims — Commons titles often say "biometric passport" for a
+plain cover photo — and write "side":"unknown" rather than guessing "biodata" when you inferred
+it from text instead of the pixels.
 
 PDF FILES: your fetch tool cannot open PDFs or images. A PDF linked from a page you opened (a
 gazette annex, a regulation, a guide) may still be reported without opening it: copy the link
@@ -34,7 +43,7 @@ for, go straight to searching.
 
 OUTPUT: first one line per code: `<CODE>: <n> found` or `<CODE>: none found — <where you looked>`.
 Then one JSON object per line per candidate, nothing else on those lines:
-{"code":"","doc":"passport|id-card|visa|laissez-passer|travel-document|other","side":"biodata|front|back|full|cover",
+{"code":"","doc":"passport|id-card|visa|laissez-passer|travel-document|other","side":"biodata|front|back|full|cover|unknown",
  "td":"TD1|TD2|TD3|MRV-A|MRV-B|unknown","series":"year or regulation","format":"image|pdf","image_url":"","page_url":"",
  "host_kind":"mfa|interior|police|passport-office|consular|gazette|intergov|icao|commons|other-gov",
  "licence_evidence":"exact quote or none stated","specimen_signal":"watermark|placeholder-name|page-says-specimen|official-host-only",

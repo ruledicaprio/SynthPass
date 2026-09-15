@@ -50,6 +50,17 @@ session-side (see "The tooling boundary"). A person adding a specimen by hand
 follows [`CONTRIBUTING.md`](../CONTRIBUTING.md#adding-a-corpus-specimen), where the watermark is
 an advisory signal rather than a requirement.
 
+The image itself must show the document — a cover, a data page, a card face, a visa sticker —
+not a flag, a coat of arms, a building, an official at a podium, people holding a document, a
+blank application form or a web screenshot (scout prefix v3.1, added after cycle c13 returned
+several non-document photos). A cover (`"side":"cover"`) is reported only as a fallback, when no
+data-page image was found for that code, and at most one per code — never the goal. The worker
+reports `"side"` as what it actually saw in the image, not what a page title or caption claims;
+`"side":"unknown"` is the honest answer when the side was inferred from text rather than the
+pixels (Commons titles commonly say "biometric passport" for a plain cover photo). The
+automated screen and the screener both treat a worker's `side` as a claim, never a fact, and
+re-derive it from the pixels — see the screener's judgement pass.
+
 ## Review gates for agent-found candidates
 
 1. **Automated screen.** `tools/screen_candidates.py` performs this step (`tools/scout_cycle.py`

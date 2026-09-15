@@ -82,6 +82,11 @@ present, and treat the rules restated below as binding either way.
    the image itself shows a specimen signal, or when it is plainly the issuer's own illustration
    of the document with no real-person signal at all — say which in the note. An official host
    never excuses a real holder's data: if the image shows one, H5 applies exactly as elsewhere.
+   Treat the worker's `side` field as a claim, not a fact — reclassify it from what the pixels
+   actually show (a page title calling something "biometric passport" does not make it a data
+   page). An image that is not the document itself — a flag, a building, a press photo, a
+   screenshot — is off-scope: ledger it `off-scope` and delete the file, the same as any other
+   non-candidate.
 3. **Variants.** A `variant of <filename>` note means the corpus already holds this document
    number. Keep the row only if its resolution, crop, side or series genuinely differs; say
    which in the note. Otherwise ledger it as `duplicate` and delete the file.

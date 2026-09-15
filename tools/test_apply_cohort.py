@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -410,6 +413,335 @@ class SidecarPathTests(unittest.TestCase):
 
         p = Path("work/scouting/x/combined.md")
         self.assertEqual(ac.sidecar_path_for(p, "cohort-c03"), Path("work/scouting/x/screened-c03.jsonl"))
+
+
+# --------------------------------------------------------------------------
+# T11 / A3: CORPUS_COVERAGE.md cover-row templates
+# --------------------------------------------------------------------------
+
+SAMPLE_COVERAGE_TABLE = """# Corpus coverage
+
+## Full table
+
+| Code | Country/Entity | Document type(s) | Status | Note |
+|---|---|---|---|---|
+| BEN | Benin | -- | No specimen yet | -- |
+| KHM | Cambodia | Passport | No specimen yet | Current-series passport bio-page, no MRZ present at all |
+| GTM | Guatemala | -- | No specimen yet | -- |
+"""
+
+
+class LicenceSummaryTests(unittest.TestCase):
+    def test_commons_cc_by_sa(self):
+        self.assertEqual(ac.licence_summary("commons.wikimedia.org", "cc-by-sa"), "Commons CC-BY-SA")
+
+    def test_commons_public_domain(self):
+        self.assertEqual(ac.licence_summary("upload.wikimedia.org", "public-domain"), "Commons public domain")
+
+    def test_none_stated_uses_host(self):
+        self.assertEqual(ac.licence_summary("example.gov", "none-stated"), "example.gov, none-stated licence")
+
+    def test_unrecorded_treated_like_none_stated(self):
+        self.assertEqual(ac.licence_summary("example.gov", "unrecorded"), "example.gov, none-stated licence")
+
+    def test_non_commons_host_with_a_stated_licence(self):
+        self.assertEqual(ac.licence_summary("example.gov", "cc-by"), "example.gov, CC-BY")
+
+
+class JoinSeriesTests(unittest.TestCase):
+    def test_single(self):
+        self.assertEqual(ac.join_series(["2024 series"]), "2024 series")
+
+    def test_pair(self):
+        self.assertEqual(ac.join_series(["2024 series", "XXXX series"]), "2024 series and XXXX series")
+
+    def test_three_or_more(self):
+        self.assertEqual(
+            ac.join_series(["a series", "b series", "c series"]), "a series, b series and c series"
+        )
+
+    def test_empty(self):
+        self.assertEqual(ac.join_series([]), "")
+
+
+class CoverDoctypeLabelTests(unittest.TestCase):
+    def test_passport_token(self):
+        self.assertEqual(ac.cover_doctype_label("Guatemala_Passport_Specimen_P0_GTM_2018_no_mrz_cover.jpg"), "Passport")
+
+    def test_id_token(self):
+        self.assertEqual(ac.cover_doctype_label("Foo_ID_Specimen_2020_no_mrz_cover.jpg"), "ID")
+
+    def test_neither_token_falls_back(self):
+        self.assertEqual(ac.cover_doctype_label("Foo_Specimen_2020_cover.jpg"), "Document")
+
+
+class IsCoverTargetTests(unittest.TestCase):
+    def test_public_covers_dir(self):
+        self.assertTrue(ac.is_cover_target("covers/Foo_Passport_Specimen_2020_no_mrz_cover.jpg"))
+
+    def test_local_covers_dir(self):
+        self.assertTrue(ac.is_cover_target("local/covers/Foo_Passport_Specimen_2020_no_mrz_cover.jpg"))
+
+    def test_non_cover_dir(self):
+        self.assertFalse(ac.is_cover_target("passports/Foo_Passport_Specimen_P0_FOO_2020_mrz.jpg"))
+
+
+class BuildCoverCoverageUpdateTests(unittest.TestCase):
+    def test_single_entry(self):
+        entries = [{"basename": "x_Passport_cover.jpg", "year_label": "2018", "host": "commons.wikimedia.org", "licence": "public-domain"}]
+        docs, note = ac.build_cover_coverage_update("GTM", entries, "c13", "2026-09-15")
+        self.assertEqual(docs, "Passport (cover)")
+        self.assertIn("Cover only in `samples/covers/`", note)
+        self.assertIn("(c13, 2026-09-15, Commons public domain)", note)
+        self.assertIn("ADR-0012", note)
+        self.assertNotIn("Covers only", note)  # singular phrasing only
+
+    def test_multi_entry(self):
+        entries = [
+            {"basename": "x_Passport_2024_cover.jpg", "year_label": "2024", "host": "commons.wikimedia.org", "licence": "public-domain"},
+            {"basename": "x_Passport_XXXX_cover.jpg", "year_label": "XXXX", "host": "commons.wikimedia.org", "licence": "public-domain"},
+        ]
+        docs, note = ac.build_cover_coverage_update("LKA", entries, "c12", "2026-09-15")
+        self.assertEqual(docs, "Passport (cover, 2 series)")
+        self.assertIn("Covers only in `samples/covers/`", note)
+        self.assertIn("2024 series and XXXX series", note)
+
+    def test_different_licences_are_joined(self):
+        entries = [
+            {"basename": "a_Passport_cover.jpg", "year_label": "2020", "host": "commons.wikimedia.org", "licence": "cc-by-sa"},
+            {"basename": "b_Passport_cover.jpg", "year_label": "2021", "host": "commons.wikimedia.org", "licence": "public-domain"},
+        ]
+        _docs, note = ac.build_cover_coverage_update("XYZ", entries, "c13", "2026-09-15")
+        self.assertIn("Commons CC-BY-SA / Commons public domain", note)
+
+
+class UpdateCorpusCoverageForCoverTests(unittest.TestCase):
+    def test_untouched_row_gets_docs_and_note(self):
+        result = ac.update_corpus_coverage_for_cover(
+            SAMPLE_COVERAGE_TABLE, "GTM", "Passport (cover)", "Cover only in `samples/covers/` (...)"
+        )
+        self.assertIn("| GTM | Guatemala | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (...) |", result)
+        # Status column (No specimen yet) is never touched.
+        self.assertIn("No specimen yet", result)
+
+    def test_row_with_existing_docs_gets_cover_appended_and_note_untouched(self):
+        result = ac.update_corpus_coverage_for_cover(
+            SAMPLE_COVERAGE_TABLE, "KHM", "Passport (cover)", "would-be-overwritten"
+        )
+        self.assertIn("| KHM | Cambodia | Passport; cover | No specimen yet | Current-series passport bio-page, no MRZ present at all |", result)
+        self.assertNotIn("would-be-overwritten", result)
+
+    def test_other_rows_are_left_byte_identical(self):
+        result = ac.update_corpus_coverage_for_cover(SAMPLE_COVERAGE_TABLE, "GTM", "Passport (cover)", "note")
+        self.assertIn("| BEN | Benin | -- | No specimen yet | -- |", result)
+
+    def test_unknown_code_raises(self):
+        with self.assertRaises(ValueError):
+            ac.update_corpus_coverage_for_cover(SAMPLE_COVERAGE_TABLE, "ZZZ", "Passport (cover)", "note")
+
+
+class CodeToCountryNameTests(unittest.TestCase):
+    def test_parses_full_table_rows(self):
+        names = ac.code_to_country_name(SAMPLE_COVERAGE_TABLE)
+        self.assertEqual(names["GTM"], "Guatemala")
+        self.assertEqual(names["KHM"], "Cambodia")
+        self.assertNotIn("Code", names)  # header row excluded
+
+
+# --------------------------------------------------------------------------
+# T11 / A4: cover-only changelog fragment
+# --------------------------------------------------------------------------
+
+
+class LicenceCountSentenceTests(unittest.TestCase):
+    def test_mixed_licences_and_none_stated(self):
+        sentence = ac.licence_count_sentence(["cc-by-sa", "cc-by-sa", "public-domain", "none-stated"])
+        self.assertIn("2 CC-BY-SA", sentence)
+        self.assertIn("1 public-domain", sentence)
+        self.assertIn("1 kept public", sentence)
+
+    def test_all_stated(self):
+        sentence = ac.licence_count_sentence(["public-domain", "public-domain"])
+        self.assertIn("2 public-domain", sentence)
+        self.assertNotIn("kept public on a none-stated", sentence)
+
+    def test_all_none_stated(self):
+        sentence = ac.licence_count_sentence(["none-stated"])
+        self.assertIn("1 kept public on a none-stated licence.", sentence)
+
+
+class BuildCoverOnlyChangelogFragmentTests(unittest.TestCase):
+    def test_shape_matches_house_style(self):
+        cover_entries_by_code = {
+            "GTM": [{"basename": "Guatemala_Passport_Specimen_cover.jpg", "year_label": "2018", "host": "commons.wikimedia.org", "licence": "public-domain"}],
+            "LKA": [
+                {"basename": "Sri_Lanka_Passport_Specimen_2024_cover.jpg", "year_label": "2024", "host": "commons.wikimedia.org", "licence": "public-domain"},
+                {"basename": "Sri_Lanka_Passport_Specimen_XXXX_cover.jpg", "year_label": "XXXX", "host": "commons.wikimedia.org", "licence": "public-domain"},
+            ],
+        }
+        text = ac.build_cover_only_changelog_fragment(
+            "cohort-c12",
+            cover_entries_by_code,
+            ["public-domain", "public-domain", "public-domain"],
+            266,
+            3,
+            {"GTM": "Guatemala", "LKA": "Sri Lanka"},
+        )
+        first_nonblank = next(line for line in text.splitlines() if line.strip())
+        self.assertTrue(first_nonblank.startswith("- "))
+        self.assertIn("Cohort c12: 3 passport covers in `samples/covers/`", text)
+        self.assertIn("Guatemala", text)
+        self.assertIn("Sri Lanka (2024, XXXX)", text)
+        self.assertIn("`samples/corpus.jsonl` 266 -> 269 rows", text)
+        self.assertIn("ADR-0012 as amended", text)
+        self.assertIn("2 codes' Docs column now reads `Passport (cover)`", text)
+
+    def test_single_code_singular_wording(self):
+        cover_entries_by_code = {
+            "GTM": [{"basename": "Guatemala_Passport_Specimen_cover.jpg", "year_label": "2018", "host": "commons.wikimedia.org", "licence": "public-domain"}],
+        }
+        text = ac.build_cover_only_changelog_fragment(
+            "cohort-c20", cover_entries_by_code, ["public-domain"], 300, 1, {"GTM": "Guatemala"}
+        )
+        self.assertIn("Cohort c20: 1 passport cover in `samples/covers/`", text)
+        self.assertIn("1 code's Docs column now reads `Passport (cover)`", text)
+
+
+# --------------------------------------------------------------------------
+# T11 / A6: Git for Windows bash.exe resolution
+# --------------------------------------------------------------------------
+
+
+class FindGitBashTests(unittest.TestCase):
+    def _make_git_for_windows_layout(self, root: Path, git_relpath: str, bash_relpath: str) -> Path:
+        git_path = root / git_relpath
+        git_path.parent.mkdir(parents=True, exist_ok=True)
+        git_path.write_text("", encoding="utf-8")
+        bash_path = root / bash_relpath
+        bash_path.parent.mkdir(parents=True, exist_ok=True)
+        bash_path.write_text("", encoding="utf-8")
+        return git_path
+
+    def test_resolves_from_mingw64_bin_git_exe(self):
+        # git.exe found under mingw64/bin -- a naive parent.parent would land
+        # on mingw64 itself, which has no bash.exe; must walk further up.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "Git"
+            git_path = self._make_git_for_windows_layout(root, "mingw64/bin/git.exe", "bin/bash.exe")
+            with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(
+                ac.shutil, "which", return_value=str(git_path)
+            ):
+                self.assertEqual(ac.find_git_bash(), str((root / "bin" / "bash.exe").resolve()))
+
+    def test_resolves_from_cmd_git_exe_with_usr_bin_bash(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "Git"
+            git_path = self._make_git_for_windows_layout(root, "cmd/git.exe", "usr/bin/bash.exe")
+            with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(
+                ac.shutil, "which", return_value=str(git_path)
+            ):
+                self.assertEqual(ac.find_git_bash(), str((root / "usr" / "bin" / "bash.exe").resolve()))
+
+    def test_raises_when_no_bash_found(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "Git"
+            git_path = root / "cmd" / "git.exe"
+            git_path.parent.mkdir(parents=True, exist_ok=True)
+            git_path.write_text("", encoding="utf-8")
+            with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(
+                ac.shutil, "which", return_value=str(git_path)
+            ):
+                with self.assertRaises(RuntimeError):
+                    ac.find_git_bash()
+
+    def test_raises_when_git_not_on_path(self):
+        with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(ac.shutil, "which", return_value=None):
+            with self.assertRaises(RuntimeError):
+                ac.find_git_bash()
+
+
+class ToMsysPathTests(unittest.TestCase):
+    def test_converts_drive_letter_form(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            posix = ac.to_msys_path(root)
+            resolved = str(root.resolve())
+            drive, rest = resolved.split(":", 1)
+            self.assertEqual(posix, "/" + drive.lower() + rest.replace("\\", "/"))
+            self.assertTrue(posix.startswith("/"))
+            self.assertNotIn(":", posix)
+
+
+class RunBashScriptTests(unittest.TestCase):
+    def test_win32_wraps_in_cd_to_posix_path(self):
+        calls = []
+
+        def fake_run_cmd(cmd, cwd=None, dry_run=False, check=True):
+            calls.append((cmd, cwd, dry_run))
+            return ""
+
+        with tempfile.TemporaryDirectory() as td:
+            worktree = Path(td)
+            with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(
+                ac, "run_cmd", side_effect=fake_run_cmd
+            ):
+                ac.run_bash_script("bash.exe", "scripts/check-doc-links.sh", worktree, dry_run=False)
+
+        self.assertEqual(len(calls), 1)
+        cmd, cwd, dry_run = calls[0]
+        self.assertEqual(cmd[0], "bash.exe")
+        self.assertEqual(cmd[1], "-c")
+        self.assertIn("cd '", cmd[2])
+        self.assertIn("scripts/check-doc-links.sh", cmd[2])
+        self.assertNotIn(":", cmd[2].split("&&")[0])  # the cd target is POSIX-form, no drive letter
+        self.assertEqual(cwd, worktree)
+        self.assertFalse(dry_run)
+
+    def test_non_windows_runs_plainly(self):
+        calls = []
+
+        def fake_run_cmd(cmd, cwd=None, dry_run=False, check=True):
+            calls.append((cmd, cwd, dry_run))
+            return ""
+
+        with tempfile.TemporaryDirectory() as td:
+            worktree = Path(td)
+            with mock.patch.object(ac.sys, "platform", "linux"), mock.patch.object(
+                ac, "run_cmd", side_effect=fake_run_cmd
+            ):
+                ac.run_bash_script("/bin/bash", "scripts/check-doc-links.sh", worktree, dry_run=False)
+
+        self.assertEqual(calls[0][0], ["/bin/bash", "scripts/check-doc-links.sh"])
+        self.assertEqual(calls[0][1], worktree)
+
+
+# --------------------------------------------------------------------------
+# T11 / A2: release examples are always rebuilt, not just missing ones
+# --------------------------------------------------------------------------
+
+
+class EnsureBinariesBuiltTests(unittest.TestCase):
+    def test_always_runs_the_build_command_with_both_examples(self):
+        calls = []
+
+        def fake_run_cmd(cmd, cwd=None, dry_run=False, check=True):
+            calls.append(cmd)
+            return ""
+
+        with mock.patch.object(ac, "run_cmd", side_effect=fake_run_cmd):
+            ac.ensure_binaries_built(Path("unused-worktree"), dry_run=False)
+
+        self.assertEqual(len(calls), 1)
+        cmd = calls[0]
+        self.assertIn("--example", cmd)
+        self.assertIn("corpus_manifest", cmd)
+        self.assertIn("check_sample", cmd)
+        self.assertEqual(cmd[:2], ["cargo", "build"])
+
+    def test_dry_run_still_prints_command_without_running(self):
+        with mock.patch.object(ac.subprocess, "run") as mock_run:
+            ac.ensure_binaries_built(Path("unused-worktree"), dry_run=True)
+        mock_run.assert_not_called()
 
 
 if __name__ == "__main__":

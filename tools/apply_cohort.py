@@ -12,11 +12,20 @@ and the `samples-data` push.
 
 This tool never decides a licence class, never writes prose it wasn't given,
 and never silently lets a `samples-data` push delete another PR's images (see
-"The single most important guardrail" below). Origin `notes` and the
-`CORPUS_COVERAGE.md` prose Note column are always written as a labelled DRAFT
-for a human to review, never committed unreviewed. Everything genuinely
-mechanical -- HIT / MISS (checksum_failed) / no-coverage-claim -- is derived
-from the regenerated manifest and reported plainly instead.
+"The single most important guardrail" below). The per-image `origin.notes`
+field in `samples/corpus.jsonl` is always written as a labelled DRAFT for a
+human to review, never committed unreviewed. Everything genuinely mechanical
+-- HIT / MISS (checksum_failed) / no-coverage-claim -- is derived from the
+regenerated manifest and reported plainly instead.
+
+`knowledge/CORPUS_COVERAGE.md`'s Docs/Note columns are the one place this
+tool writes real prose, not a draft, and only for a row whose target path is
+under `covers/`: a cover is never a coverage claim (ADR-0012), so there is no
+Status decision for a human to make, and the Docs cell + Note text follow a
+fixed template (see "CORPUS_COVERAGE.md cover-row templates" below). Every
+other row -- one with a data page -- still gets a labelled DRAFT coverage
+note for a human to fold in by hand, because a Status move there is a human
+call this tool does not make.
 
 Standard library only, matching tools/screen_candidates.py and
 tools/apply_verdicts.py.
@@ -106,6 +115,7 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+from urllib.parse import urlparse
 
 # --------------------------------------------------------------------------
 # Constants mirrored from the Rust side of the manifest contract. Keep these
@@ -514,6 +524,150 @@ def draft_coverage_note(filename: str, status: str, licence: str, verdict: str, 
 
 
 # ==========================================================================
+# CORPUS_COVERAGE.md cover-row templates (A3, T11)
+# ==========================================================================
+#
+# A cover is never a coverage claim (ADR-0012 and its 2026-09-15 amendment) --
+# there is no Status decision for a human to make, so this is the one place
+# this tool writes real `knowledge/CORPUS_COVERAGE.md` prose instead of a
+# labelled DRAFT. The templates below are the shape used by hand on main for
+# cohort c12 (the PAN/GTM/HND/LKA/PNG rows) and cohort c13.
+
+COVER_NOTE_SINGLE = (
+    "Cover only in `samples/covers/` ({cycle}, {date}, {licence}); no data page, never a "
+    "coverage claim (ADR-0012)"
+)
+COVER_NOTE_MULTI = (
+    "Covers only in `samples/covers/` ({cycle}, {date}, {licence}): {series}; no data page, "
+    "never a coverage claim (ADR-0012)"
+)
+
+# origin.licence's closed set (ORIGIN_LICENCES above) collapsed to the short
+# label this prose uses. Note that "cc0" is not a distinct origin.licence
+# value -- it buckets to "public-domain" -- so a Commons CC0 file and a
+# Commons public-domain file both read "public domain" here. That is a real
+# simplification versus c12's fully hand-written prose, which knew the exact
+# Commons licence tag from the file page; this tool only has the closed-set
+# class the packet's proposed licence was recorded as.
+LICENCE_SUMMARY_LABELS = {
+    "cc-by-sa": "CC-BY-SA",
+    "cc-by": "CC-BY",
+    "public-domain": "public domain",
+    "gov-published": "gov-published",
+}
+COMMONS_HOSTS = {"commons.wikimedia.org", "upload.wikimedia.org"}
+
+
+def licence_summary(host: str, licence: str) -> str:
+    """The short licence phrase a cover-row Note uses, e.g. `Commons
+    CC-BY-SA` or `example.gov, none-stated licence`."""
+    host = (host or "").strip()
+    licence = (licence or "").strip().lower()
+    if licence in ("none-stated", "unrecorded", ""):
+        return f"{host}, none-stated licence" if host else "none-stated licence"
+    label = LICENCE_SUMMARY_LABELS.get(licence, licence)
+    if host in COMMONS_HOSTS or host.endswith(".wikimedia.org"):
+        return f"Commons {label}"
+    return f"{host}, {label}" if host else label
+
+
+def join_series(labels: list[str]) -> str:
+    """Oxford-joins `"<year> series"`-shaped labels: one label unchanged,
+    two joined with `"and"`, three or more comma-separated with `"and"`
+    before the last."""
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    if len(labels) == 2:
+        return f"{labels[0]} and {labels[1]}"
+    return ", ".join(labels[:-1]) + f" and {labels[-1]}"
+
+
+def cover_doctype_label(basename: str) -> str:
+    """`Passport` / `ID` from the filename's DocType token -- the same
+    tokens `validate_target_filename` checks for `passports/`/`id_cards/`;
+    `covers/` is exempt from that check, so a cover can legitimately carry
+    either token."""
+    stem = basename.rsplit(".", 1)[0] if "." in basename else basename
+    tokens = [t.lower() for t in stem.split("_")]
+    if "passport" in tokens:
+        return "Passport"
+    if "id" in tokens:
+        return "ID"
+    return "Document"
+
+
+def is_cover_target(target_rel_path: str) -> bool:
+    """True when a `--filenames` target path places the image under
+    `covers/` (public track) or `local/covers/` (local track)."""
+    parts = target_rel_path.replace("\\", "/").strip("/").split("/")
+    if parts and parts[0] == "local":
+        parts = parts[1:]
+    return bool(parts) and parts[0] == "covers"
+
+
+def build_cover_coverage_update(code: str, entries: list[dict], cycle_id: str, today: str) -> tuple[str, str]:
+    """`entries` is `[{"basename":..., "year_label":..., "host":..., "licence":...}, ...]`
+    for one code's cover row(s) in this cohort. Returns `(docs_cell, note_text)`
+    in the shape of the PAN/GTM/HND/LKA/PNG rows on main."""
+    doctype_labels = sorted({cover_doctype_label(e["basename"]) for e in entries})
+    doctype_label = "/".join(doctype_labels)
+    licence_labels: list[str] = []
+    for e in entries:
+        summary = licence_summary(e["host"], e["licence"])
+        if summary not in licence_labels:
+            licence_labels.append(summary)
+    licence_text = " / ".join(licence_labels)
+    if len(entries) == 1:
+        docs = f"{doctype_label} (cover)"
+        note = COVER_NOTE_SINGLE.format(cycle=cycle_id, date=today, licence=licence_text)
+    else:
+        docs = f"{doctype_label} (cover, {len(entries)} series)"
+        series = join_series([f"{e['year_label']} series" for e in entries])
+        note = COVER_NOTE_MULTI.format(cycle=cycle_id, date=today, licence=licence_text, series=series)
+    return docs, note
+
+
+def split_coverage_row(line: str) -> list[str] | None:
+    """Splits one `knowledge/CORPUS_COVERAGE.md` table row on `|`. Unlike
+    `split_table_row` (the packet parser), this table has no escaped-pipe
+    convention -- it is hand-maintained prose, not machine-generated -- so a
+    plain split is the faithful round trip. Returns `None` for a line that
+    isn't a table row at all."""
+    stripped = line.strip()
+    if not (stripped.startswith("|") and stripped.endswith("|") and len(stripped) >= 2):
+        return None
+    return [c.strip() for c in stripped[1:-1].split("|")]
+
+
+def update_corpus_coverage_for_cover(text: str, code: str, docs_addendum: str, note_text: str) -> str:
+    """Rewrites `knowledge/CORPUS_COVERAGE.md`'s Full-table row for `code`.
+    A cover never moves Status (ADR-0012), so that column is untouched. When
+    the row's Docs cell already carries a value other than `--` (an existing
+    data page), `; cover` is appended to it instead and the Note is left
+    alone, rather than overwriting prose a human wrote. Raises `ValueError`
+    when no row for `code` is found -- silently doing nothing would leave
+    the cohort's cover undocumented."""
+    lines = text.split("\n")
+    updated = False
+    for i, line in enumerate(lines):
+        cells = split_coverage_row(line)
+        if cells and len(cells) == 5 and cells[0] == code:
+            docs_cell = cells[2]
+            if docs_cell and docs_cell != "--":
+                new_docs, new_note = f"{docs_cell}; cover", cells[4]
+            else:
+                new_docs, new_note = docs_addendum, note_text
+            lines[i] = f"| {cells[0]} | {cells[1]} | {new_docs} | {cells[3]} | {new_note} |"
+            updated = True
+            break
+    if not updated:
+        raise ValueError(f"knowledge/CORPUS_COVERAGE.md: no Full-table row found for code {code!r}")
+    return "\n".join(lines)
+
+
+# ==========================================================================
 # Changelog fragment draft
 # ==========================================================================
 
@@ -537,6 +691,91 @@ def build_changelog_fragment(cohort_branch: str, public_rows: list[tuple[str, st
         "licence for each >>>"
     )
     return "\n".join(lines) + "\n"
+
+
+def code_to_country_name(coverage_text: str) -> dict[str, str]:
+    """code -> Country/Entity name, parsed from
+    `knowledge/CORPUS_COVERAGE.md`'s Full table -- so a cover-only changelog
+    fragment can name codes by their country without inventing text this
+    tool wasn't given."""
+    names: dict[str, str] = {}
+    for line in coverage_text.split("\n"):
+        cells = split_coverage_row(line)
+        if cells and len(cells) == 5 and re.fullmatch(r"[A-Z0-9<]{1,4}", cells[0] or ""):
+            names[cells[0]] = cells[1]
+    return names
+
+
+def licence_count_sentence(licences: list[str]) -> str:
+    """One sentence for a cover-only changelog fragment: how many cover rows
+    used each `origin.licence` class, and how many were kept public despite
+    a none-stated licence. `"cc0"` is not a distinct `origin.licence` value
+    (see `LICENCE_SUMMARY_LABELS`'s docstring), so it is not distinguishable
+    from `"public-domain"` here."""
+    counts: dict[str, int] = {}
+    for licence in licences:
+        counts[licence] = counts.get(licence, 0) + 1
+    order = [
+        ("cc-by-sa", "CC-BY-SA"),
+        ("cc-by", "CC-BY"),
+        ("public-domain", "public-domain"),
+        ("gov-published", "gov-published"),
+    ]
+    parts = [f"{counts[key]} {label}" for key, label in order if counts.get(key)]
+    none_stated = counts.get("none-stated", 0) + counts.get("unrecorded", 0)
+    if parts and none_stated:
+        return (
+            f"{', '.join(parts)} from Wikimedia Commons or an official host under their stated "
+            f"licence, {none_stated} kept public on a none-stated licence."
+        )
+    if parts:
+        return f"{', '.join(parts)} from Wikimedia Commons or an official host under their stated licence."
+    return f"{none_stated} kept public on a none-stated licence."
+
+
+def build_cover_only_changelog_fragment(
+    cohort_branch: str,
+    cover_entries_by_code: dict[str, list[dict]],
+    licences: list[str],
+    corpus_count_before: int,
+    n_images: int,
+    country_names: dict[str, str],
+) -> str:
+    """The real (non-draft) fragment for a cohort whose every placed row is a
+    cover (A4). Follows the template the task specifies, not a verbatim
+    reproduction of an existing hand-written fragment: the headline image
+    count and the trailing "N codes' Docs column" count use different
+    numbers when one code carries more than one cover (as on main's c12
+    fragment: six covers, five codes), a distinction this preserves rather
+    than collapsing to one count."""
+    cycle = cohort_branch.removeprefix("cohort-")
+    codes = sorted(cover_entries_by_code)
+    n_codes = len(codes)
+    country_parts = []
+    for code in codes:
+        name = country_names.get(code, code)
+        entries = cover_entries_by_code[code]
+        if len(entries) > 1:
+            years = ", ".join(e["year_label"] for e in entries)
+            country_parts.append(f"{name} ({years})")
+        else:
+            country_parts.append(name)
+    country_list = join_series(country_parts)
+    doctype_labels = sorted(
+        {cover_doctype_label(e["basename"]) for entries in cover_entries_by_code.values() for e in entries}
+    )
+    docs_phrase = " / ".join(f"{d} (cover)" for d in doctype_labels)
+    after = corpus_count_before + n_images
+    licence_sentence = licence_count_sentence(licences)
+    image_word = "cover" if n_images == 1 else "covers"
+    codes_possessive = "code's" if n_codes == 1 else "codes'"
+    return (
+        f"- **Cohort {cycle}: {n_images} passport {image_word} in `samples/covers/`** -- "
+        f"{country_list} (`samples/corpus.jsonl` {corpus_count_before} -> {after} rows). "
+        f"{licence_sentence} Covers carry no MRZ and never enter the scored denominator "
+        "(ADR-0012 as amended), so no `CORPUS_COVERAGE.md` status moves; the "
+        f"{n_codes} {codes_possessive} Docs column now reads `{docs_phrase}`.\n"
+    )
 
 
 # ==========================================================================
@@ -625,6 +864,111 @@ def run_cmd(cmd: list[str], cwd: Path | None = None, dry_run: bool = False, chec
     return proc.stdout
 
 
+def find_git_bash() -> str:
+    """Resolves Git for Windows' `bash.exe` explicitly. Plain `run_cmd(["bash",
+    ...])` resolves to WSL bash on this machine, which fails immediately on a
+    `D:\\` path (`/mnt/d ... not a git repository` fatal) -- `scripts/check-doc-links.sh`
+    and `scripts/check-changelog.sh` must run under Git Bash instead.
+
+    Derives the location from wherever `git` itself is found on PATH, since
+    Git for Windows puts `bash.exe` at `<root>/bin/bash.exe` or
+    `<root>/usr/bin/bash.exe` and `git.exe` can be found at any of
+    `<root>/cmd`, `<root>/bin` or `<root>/mingw64/bin` depending on install
+    and PATH order -- so this walks every ancestor of the resolved `git`
+    path rather than assuming a fixed number of `..` steps."""
+    if sys.platform != "win32":
+        found = shutil.which("bash")
+        if found:
+            return found
+        raise RuntimeError("no 'bash' found on PATH")
+    git_path = shutil.which("git")
+    if git_path:
+        for ancestor in Path(git_path).resolve().parents:
+            for rel in ("bin/bash.exe", "usr/bin/bash.exe"):
+                candidate = ancestor / rel
+                if candidate.is_file():
+                    return str(candidate)
+    raise RuntimeError(
+        f"could not resolve Git for Windows' bash.exe from 'git' at {git_path!r} -- "
+        "install Git for Windows, or ensure it is on PATH"
+    )
+
+
+def to_msys_path(path: Path) -> str:
+    """`D:\\foo\\bar` -> `/d/foo/bar`, the POSIX form Git for Windows' bash
+    expects."""
+    resolved = str(path.resolve())
+    drive, rest = resolved.split(":", 1)
+    return "/" + drive.lower() + rest.replace("\\", "/")
+
+
+def run_bash_script(bash_exe: str, script_rel_path: str, worktree: Path, dry_run: bool) -> str:
+    """Runs a repo shell script under `bash_exe`.
+
+    On Windows, wraps the script in `cd '<posix path>' && <script>` and lets
+    bash's own `cd` builtin set `$PWD`, instead of relying on
+    `subprocess.run(cwd=...)`'s externally-set Win32 working directory: MSYS
+    bash launched that way (as every `run_cmd` call does) reports `$PWD` in
+    drive-letter form (`D:/...`) rather than POSIX form (`/d/...`). That
+    silently breaks `scripts/check-doc-links.sh`'s
+    `realpath --relative-to="$repo_root"` logic -- every relative link
+    resolves to a bogus doubled path (`D:/foo/d/foo/bar`) and the check
+    fails on files that plainly exist, discovered running this tool's own
+    checks step. A normal interactive Git Bash session does not hit this,
+    because its `$PWD` is set by its own `cd` at shell startup, which is
+    exactly what this reproduces."""
+    if sys.platform == "win32":
+        posix = to_msys_path(worktree)
+        cmd = [bash_exe, "-c", f"cd '{posix}' && {script_rel_path}"]
+        return run_cmd(cmd, cwd=worktree, dry_run=dry_run)
+    return run_cmd([bash_exe, script_rel_path], cwd=worktree, dry_run=dry_run)
+
+
+def gh_repo_owner_and_name(repo_root: Path) -> tuple[str, str]:
+    out = run_cmd(["gh", "repo", "view", "--json", "owner,name"], cwd=repo_root)
+    data = json.loads(out)
+    return data["owner"]["login"], data["name"]
+
+
+def gh_pr_number_for_branch(repo_root: Path, branch: str) -> int | None:
+    out = run_cmd(["gh", "pr", "list", "--head", branch, "--json", "number", "--limit", "1"], cwd=repo_root)
+    try:
+        data = json.loads(out or "[]")
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"could not parse `gh pr list --head {branch}` output as JSON: {e}") from e
+    return data[0]["number"] if data else None
+
+
+def build_pr_title(cohort_branch: str, public_count: int, local_count: int, summary: str | None = None) -> str:
+    cycle = cohort_branch.removeprefix("cohort-")
+    body_summary = summary or f"{public_count} public specimen(s)"
+    return f"data(corpus): cohort {cycle} -- {body_summary} ({public_count}/{local_count})"
+
+
+def gh_patch_pr_title_and_body(
+    repo_root: Path, owner: str, name: str, pr_number: int, title: str, body_file: Path, dry_run: bool
+) -> None:
+    """PATCHes an existing PR's title and body via the raw GitHub API --
+    `gh pr edit` fails on this machine for lack of the `read:org` scope, so
+    `gh api -X PATCH repos/<owner>/<repo>/pulls/<n>` is used instead, which
+    only needs the `repo` scope."""
+    run_cmd(
+        [
+            "gh",
+            "api",
+            "-X",
+            "PATCH",
+            f"repos/{owner}/{name}/pulls/{pr_number}",
+            "-f",
+            f"title={title}",
+            "-F",
+            f"body=@{body_file}",
+        ],
+        cwd=repo_root,
+        dry_run=dry_run,
+    )
+
+
 def gh_list_open_cohort_prs(repo_root: Path) -> list[dict]:
     out = run_cmd(
         ["gh", "pr", "list", "--state", "open", "--json", "headRefName", "--limit", "200"],
@@ -661,13 +1005,26 @@ def find_release_binary(root: Path, name: str) -> Path | None:
 
 
 def ensure_binaries_built(worktree: Path, dry_run: bool) -> None:
-    missing = [n for n in ("check_sample", "corpus_manifest") if find_release_binary(worktree, n) is None]
-    if not missing:
-        print("release binaries already built (check_sample, corpus_manifest)")
-        return
-    cmd = ["cargo", "build", "-p", "synthpass-ocr", "--release"]
-    for n in missing:
-        cmd += ["--example", n]
+    """Always rebuilds both release example binaries this tool depends on,
+    rather than only building whichever one is missing. A build that only
+    filled in a missing binary silently reused a stale
+    `target/release/examples/corpus_manifest.exe` whose source was newer
+    than it (a worktree created before a crate change) and produced zero
+    cover rows on cohort c12. `cargo build` is incremental, so a no-op
+    rebuild finishes in seconds; `--dry-run` prints the command without
+    running it, same as every other command this tool runs."""
+    cmd = [
+        "cargo",
+        "build",
+        "-p",
+        "synthpass-ocr",
+        "--release",
+        "--example",
+        "corpus_manifest",
+        "--example",
+        "check_sample",
+    ]
+    print("rebuilding release examples (corpus_manifest, check_sample) -- cargo is incremental:")
     run_cmd(cmd, cwd=worktree, dry_run=dry_run)
 
 
@@ -774,6 +1131,10 @@ def main(argv: list[str] | None = None) -> int:
 
     repo_root = (args.repo_root or Path(__file__).resolve().parent.parent).resolve()
     worktree = repo_root.parent / "worktrees" / repo_root.name / args.cohort_branch
+    # Every path this run itself writes, staged explicitly at commit time
+    # (`git add <touched_paths>`) instead of `git add -A`, so the commit
+    # never picks up an unrelated pre-existing change in the worktree.
+    touched_paths: set[str] = set()
 
     packet_text = args.packet.read_text(encoding="utf-8")
     rows = parse_packet(packet_text)
@@ -829,6 +1190,7 @@ def main(argv: list[str] | None = None) -> int:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
         placed.append((row, target_rel))
+        touched_paths.add(f"samples/{Path(target_rel).as_posix()}")
 
     for row in drop_rows:
         print(f"drop row {row.get('row_number')}: nothing to place (see task note: drop's ledger entry stays manual)")
@@ -840,8 +1202,11 @@ def main(argv: list[str] | None = None) -> int:
     run_cmd([str(binary)], cwd=worktree, dry_run=args.dry_run)
 
     manifest_path = worktree / "samples" / "corpus.jsonl"
-    coverage_report: list[tuple[str, str]] = []
     public_coverage: list[tuple[str, str]] = []
+    draft_entries: list[tuple[str, str]] = []  # non-cover rows: still a human's coverage call
+    cover_entries_by_code: dict[str, list[dict]] = {}
+    cover_licences: list[str] = []
+    country_names: dict[str, str] = {}
     corpus_count_before = 0
     public_added_count = 0
     if not args.dry_run and manifest_path.is_file():
@@ -856,6 +1221,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"WARNING: no screened sidecar at {screened_path}; origin.url/page will be null and the manifest test will fail")
 
         today = date.today().isoformat()
+        local_new_rows = []
         for row, target_rel in placed:
             filename = Path(target_rel).name
             manifest_row = by_name.get(filename)
@@ -863,38 +1229,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"WARNING: {filename} not found in regenerated manifest after copy -- check the target path")
                 continue
             status = determine_coverage_status(manifest_row)
-            coverage_report.append((filename, status))
             print(f"coverage: {filename} -> {status}")
 
-            if row["verdict"] == "public":
-                sidecar = screened_sidecar.get(row_key(row), {})
-                origin = build_origin_patch(
-                    found_by="dsh",
-                    url=sidecar.get("image_url_final") or sidecar.get("image_url"),
-                    page=sidecar.get("page_url_final") or sidecar.get("page_url"),
-                    licence=row.get("proposed_licence", "").strip() or "none-stated",
-                    fetched=today,
-                )
-                manifest_row["origin"] = origin
-                manifest_row["notes"] = draft_coverage_note(
-                    filename, status, origin["licence"], row["verdict"], today
-                )
-                public_added_count += 1
-                public_coverage.append((filename, status))
-
-        manifest_path.write_text(
-            "\n".join(json.dumps(r, ensure_ascii=False) for r in manifest_rows) + "\n", encoding="utf-8"
-        )
-        print(f"patched origin/notes for {public_added_count} public row(s)")
-
-        # --- local-track manifest ---
-        local_manifest_path = worktree / "samples" / "local" / "local-manifest.jsonl"
-        local_new_rows = []
-        for row, target_rel in placed:
-            if row["verdict"] != "local":
-                continue
-            filename = Path(target_rel).name
-            manifest_row = by_name.get(filename, {})
             sidecar = screened_sidecar.get(row_key(row), {})
             origin = build_origin_patch(
                 found_by="dsh",
@@ -903,45 +1239,119 @@ def main(argv: list[str] | None = None) -> int:
                 licence=row.get("proposed_licence", "").strip() or "none-stated",
                 fetched=today,
             )
-            status = determine_coverage_status(manifest_row) if manifest_row else "no-coverage-claim"
-            local_new_rows.append(
-                build_local_manifest_row(
-                    filename,
-                    Path(target_rel).parts[1] if len(Path(target_rel).parts) > 1 else "",
-                    manifest_row.get("sha256", ""),
-                    origin,
-                    draft_coverage_note(filename, status, origin["licence"], "local", today),
+
+            if row["verdict"] == "public":
+                manifest_row["origin"] = origin
+                manifest_row["notes"] = draft_coverage_note(
+                    filename, status, origin["licence"], row["verdict"], today
                 )
-            )
+                public_added_count += 1
+                public_coverage.append((filename, status))
+            else:  # local
+                local_new_rows.append(
+                    build_local_manifest_row(
+                        filename,
+                        Path(target_rel).parts[1] if len(Path(target_rel).parts) > 1 else "",
+                        manifest_row.get("sha256", ""),
+                        origin,
+                        draft_coverage_note(filename, status, origin["licence"], "local", today),
+                    )
+                )
+
+            if is_cover_target(target_rel):
+                code = (row.get("code") or "").strip()
+                year_value = (manifest_row.get("year") or {}).get("value")
+                year_label = str(year_value) if year_value else "XXXX"
+                host = urlparse(origin.get("url") or origin.get("page") or "").netloc
+                cover_entries_by_code.setdefault(code, []).append(
+                    {"basename": filename, "year_label": year_label, "host": host, "licence": origin["licence"]}
+                )
+                cover_licences.append(origin["licence"])
+            else:
+                # A row with a data page still needs a human's Status call --
+                # a cover never does (ADR-0012), see the CORPUS_COVERAGE.md
+                # block below.
+                draft_entries.append((filename, status))
+
+        manifest_path.write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in manifest_rows) + "\n", encoding="utf-8"
+        )
+        touched_paths.add("samples/corpus.jsonl")
+        print(f"patched origin/notes for {public_added_count} public row(s)")
+
+        # --- local-track manifest ---
+        local_manifest_path = worktree / "samples" / "local" / "local-manifest.jsonl"
         if local_new_rows:
             local_manifest_path.parent.mkdir(parents=True, exist_ok=True)
             with local_manifest_path.open("a", encoding="utf-8") as f:
                 for r in local_new_rows:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
             print(f"appended {len(local_new_rows)} row(s) to {local_manifest_path}")
+            touched_paths.add("samples/local/local-manifest.jsonl")
 
-        coverage_draft_path = args.packet.parent / f"coverage-draft-{args.cohort_branch.removeprefix('cohort-')}.md"
-        coverage_draft_path.write_text(
-            "DRAFT -- review before pasting into knowledge/CORPUS_COVERAGE.md\n\n"
-            + "\n".join(f"- {n}: {s}" for n, s in coverage_report)
-            + "\n",
-            encoding="utf-8",
-        )
-        print(f"wrote coverage draft to {coverage_draft_path}")
+        # --- CORPUS_COVERAGE.md: real Docs/Note prose for cover rows, never
+        # a Status move (ADR-0012) -- see "CORPUS_COVERAGE.md cover-row
+        # templates" above. A row with a data page still gets the labelled
+        # DRAFT file below instead, since a Status move there is a human call.
+        if cover_entries_by_code:
+            coverage_md_path = worktree / "knowledge" / "CORPUS_COVERAGE.md"
+            coverage_text = coverage_md_path.read_text(encoding="utf-8")
+            country_names = code_to_country_name(coverage_text)
+            cycle_id = args.cohort_branch.removeprefix("cohort-")
+            for code, entries in sorted(cover_entries_by_code.items()):
+                docs_cell, note_text = build_cover_coverage_update(code, entries, cycle_id, today)
+                coverage_text = update_corpus_coverage_for_cover(coverage_text, code, docs_cell, note_text)
+                print(f"CORPUS_COVERAGE.md: {code} Docs -> {docs_cell!r}")
+            coverage_md_path.write_text(coverage_text, encoding="utf-8")
+            touched_paths.add("knowledge/CORPUS_COVERAGE.md")
+
+        if draft_entries:
+            coverage_draft_path = args.packet.parent / f"coverage-draft-{args.cohort_branch.removeprefix('cohort-')}.md"
+            coverage_draft_path.write_text(
+                "DRAFT -- review before pasting into knowledge/CORPUS_COVERAGE.md\n\n"
+                + "\n".join(f"- {n}: {s}" for n, s in draft_entries)
+                + "\n",
+                encoding="utf-8",
+            )
+            print(f"wrote coverage draft to {coverage_draft_path} ({len(draft_entries)} row(s) needing a human Status call)")
 
     # --- checks ---
     print("\n=== checks (stop on first failure) ===")
     run_cmd([str(binary), "--", "--check"], cwd=worktree, dry_run=args.dry_run)
     run_cmd(["cargo", "test", "-p", "synthpass-bench", "--test", "corpus_manifest"], cwd=worktree, dry_run=args.dry_run)
-    run_cmd(["bash", "scripts/check-doc-links.sh"], cwd=worktree, dry_run=args.dry_run)
-    run_cmd(["bash", "scripts/check-changelog.sh"], cwd=worktree, dry_run=args.dry_run)
+    bash_exe = find_git_bash()
+    run_bash_script(bash_exe, "scripts/check-doc-links.sh", worktree, args.dry_run)
+    run_bash_script(bash_exe, "scripts/check-changelog.sh", worktree, args.dry_run)
 
-    # --- changelog fragment draft ---
-    fragment = build_changelog_fragment(args.cohort_branch, public_coverage, corpus_count_before)
-    fragment_path = worktree / "changelog.d" / f"corpus-{args.cohort_branch.removeprefix('cohort-')}.added.md"
-    print(f"writing draft changelog fragment to {fragment_path}")
-    if not args.dry_run:
-        fragment_path.write_text(fragment, encoding="utf-8")
+    # --- changelog fragment: real prose for a covers-only cohort (A4), the
+    # existing labelled-draft shape otherwise. Unified on the
+    # corpus-cohort-cNN.added.md name the fragments on main actually use
+    # (the tool previously wrote corpus-cNN.added.md, a stale name that
+    # never matched); a leftover file under that stale name from an earlier
+    # run of this tool in the same worktree is removed rather than left to
+    # confuse `scripts/check-changelog.sh`.
+    cycle_id = args.cohort_branch.removeprefix("cohort-")
+    fragment_path = worktree / "changelog.d" / f"corpus-cohort-{cycle_id}.added.md"
+    stale_fragment_path = worktree / "changelog.d" / f"corpus-{cycle_id}.added.md"
+    if stale_fragment_path != fragment_path and stale_fragment_path.is_file():
+        print(f"removing stale fragment from an earlier naming convention: {stale_fragment_path}")
+        stale_fragment_path.unlink()
+
+    all_cover = bool(placed) and all(is_cover_target(target_rel) for _, target_rel in placed)
+    if all_cover:
+        fragment = build_cover_only_changelog_fragment(
+            args.cohort_branch,
+            cover_entries_by_code,
+            cover_licences,
+            corpus_count_before,
+            len(placed),
+            country_names,
+        )
+    else:
+        fragment = build_changelog_fragment(args.cohort_branch, public_coverage, corpus_count_before)
+    print(f"writing changelog fragment to {fragment_path}")
+    fragment_path.write_text(fragment, encoding="utf-8")
+    touched_paths.add(f"changelog.d/corpus-cohort-{cycle_id}.added.md")
 
     # --- git commit / push / PR: gated behind --confirm, never automatic ---
     print("\n=== commit / push / PR (requires --confirm) ===")
@@ -960,10 +1370,28 @@ def main(argv: list[str] | None = None) -> int:
         print("with --confirm once satisfied.")
         return 0
 
-    run_cmd(["git", "add", "-A", "samples", "changelog.d"], cwd=worktree, dry_run=args.dry_run)
+    run_cmd(["git", "add"] + sorted(touched_paths), cwd=worktree, dry_run=args.dry_run)
     run_cmd(["git", "commit", "-m", commit_message], cwd=worktree, dry_run=args.dry_run)
     if args.reuse_existing:
         run_cmd(["git", "push"], cwd=worktree, dry_run=args.dry_run)
+        pr_number = gh_pr_number_for_branch(repo_root, args.cohort_branch)
+        if pr_number is None:
+            print(
+                f"WARNING: --reuse-existing was given but no open PR was found for branch "
+                f"{args.cohort_branch!r}; not patching a PR title/body -- open one by hand."
+            )
+        else:
+            owner, name = gh_repo_owner_and_name(repo_root)
+            pr_title = build_pr_title(args.cohort_branch, len(public_rows), len(local_rows))
+            body_file = args.commit_message_file
+            temp_body_file = None
+            if body_file is None:
+                temp_body_file = worktree / ".pr-body-draft.md"
+                temp_body_file.write_text(commit_message, encoding="utf-8")
+                body_file = temp_body_file
+            gh_patch_pr_title_and_body(repo_root, owner, name, pr_number, pr_title, body_file, args.dry_run)
+            if temp_body_file is not None and temp_body_file.is_file():
+                temp_body_file.unlink()
     else:
         run_cmd(["git", "push", "-u", "origin", args.cohort_branch], cwd=worktree, dry_run=args.dry_run)
         run_cmd(

@@ -1,0 +1,5 @@
+{
+  "_about": "Hosts that are not an issuing authority and have surfaced non-document images (flags, buildings, press photos, vendor marketing) in the specimen-acquisition loop's automated screen (tools/screen_candidates.py). Parallel in shape to legal_portals.json: one domain per entry, keys starting with `_` are documentation. A candidate whose image_url or page_url host, or a subdomain of it, matches an entry here is auto-rejected with reason \"denylisted-host\" before any fetch -- the same mechanism DENYLISTED_HOSTS uses for PRADO, kept in its own file because this list grows from screener findings rather than SPECIMEN_SOURCES.md's fixed \"Never a source\" set. Add a host here when a cycle's screener report names it, with the one-line reason from that report.",
+  "guineaecuatorialpress.com": "press agency, not an issuing authority -- surfaced non-document photos in cycle c13's screener report",
+  "digitalinvea.com": "third-party vendor site (footer: \"Powered by Viditure Inc.\"), not an issuing authority -- surfaced non-document photos in cycle c13's screener report"
+}
