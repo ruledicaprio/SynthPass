@@ -42,8 +42,9 @@ an advisory signal rather than a requirement.
 
 ## Review gates for agent-found candidates
 
-1. **Automated screen.** `tools/screen_candidates.py` performs this step: the candidate is
-   fetched again by the tool, not taken from the agent's copy, and then:
+1. **Automated screen.** `tools/screen_candidates.py` performs this step (`tools/scout_cycle.py`
+   drives it, together with the worker launch before it and the review page after it): the
+   candidate is fetched again by the tool, not taken from the agent's copy, and then:
    - its host is checked against the denylist above;
    - its page is fetched and the image is confirmed to actually be linked from it;
    - its `sha256` is compared against the manifest, which rejects byte duplicates;
@@ -51,7 +52,10 @@ an advisory signal rather than a requirement.
    - one OCR pass reads the MRZ.
    Survivors are written to a Markdown packet for a human to fill in the provenance call; the
    tool itself never decides public/local/drop or a licence class.
-2. **Maintainer review.** The maintainer makes the provenance call and proposes a manifest row.
+2. **Maintainer review.** The maintainer — or the `synthpass-screener` subagent, which opens
+   every staged image, checks the host and proposes a destination and licence class, and whose
+   write scope is limited to `work/scouting/` — makes the provenance call and proposes a
+   manifest row. A proposal is never a verdict.
 3. **Human verification**, candidate by candidate: *public*, *local* or *drop*. Optionally done
    through `tools/build_review_artifact.py`, which renders the packet as a single self-contained
    HTML page (image plus every column, one click per verdict); `tools/apply_verdicts.py` then
