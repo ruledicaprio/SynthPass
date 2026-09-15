@@ -15,7 +15,9 @@ them -- belong to the "proposed destination" / "proposed licence" / "Verdict"
 columns of the Markdown packet this tool produces, which it always leaves
 blank.
 
-Standard library only. See tools/fetch_commons_mrz_specimens_v2.py for the
+Standard library only, except PyMuPDF (`pip install pymupdf`) for the PDF
+lane, imported lazily so everything else runs without it. See
+tools/fetch_commons_mrz_specimens_v2.py for the
 sibling acquisition tool's User-Agent / retry-and-backoff conventions; this
 tool follows the same shape with urllib instead of requests.
 
@@ -33,7 +35,11 @@ deleted.
     3. fetch page_url      one retry, 15s timeout, polite per-host delay
     4. linked-from-page    image_url must actually appear on the fetched page
     5. evidence snippets   licence/specimen words, for human review only
-    6. download image_url  same fetch discipline as the page
+    6. download image_url  same fetch discipline as the page; a PDF (magic
+                            bytes) takes the PDF lane: pages with specimen
+                            words, embedded images extracted at their original
+                            bytes (PyMuPDF, optional import), each then
+                            screened as its own candidate with `#page=N`
     7. byte duplicate      sha256 against --corpus and --ledger
     8. check_sample        parses its stdout contract; missing VENDOR fails
                             closed to "vendor", same as VENDOR BLOCKED
@@ -57,6 +63,11 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
 from urllib.parse import unquote, urljoin, urlparse
+
+try:
+    import fitz  # PyMuPDF -- only the PDF lane uses it; see "PDF lane" below
+except ImportError:  # pragma: no cover
+    fitz = None
 
 USER_AGENT = (
     "SynthPass-Specimen-Screener/1.0 "
@@ -423,6 +434,168 @@ def doc_claims_mrz(candidate: dict) -> bool:
 
 
 # --------------------------------------------------------------------------
+# PDF lane (gazette annexes, regulations, guides)
+# --------------------------------------------------------------------------
+#
+# The scout worker cannot open PDFs, so prefix v3 lets it report a PDF it saw
+# linked from an opened page. Here the PDF is downloaded like any other
+# candidate, its pages are scanned for the same specimen words the page text
+# is scanned for, and the images on those pages are pulled out -- the embedded
+# raster at its original bytes when there is one (a stable sha256, no
+# resampling), a page render only when a page has none. Every extracted image
+# then goes through exactly the checks a directly linked image gets. PyMuPDF
+# is the only non-standard-library dependency in tools/ and only this lane
+# imports it; the extraction path never does.
+
+PDF_MAX_PAGES = 60  # pages scanned per PDF; a gazette issue can run to hundreds
+PDF_MAX_IMAGES = 20  # extracted images per PDF, after the size filter
+PDF_MIN_IMAGE_SIDE = 150  # px; drops logos, seals and icons
+PDF_RASTER_DPI = 200
+
+
+def detect_pdf(data: bytes) -> bool:
+    return data[:5] == b"%PDF-"
+
+
+def select_pdf_pages(page_texts: list[str], max_pages: int = PDF_MAX_PAGES) -> list[int]:
+    """Zero-based indexes of the pages worth extracting from: those whose
+    text mentions a specimen word. A PDF with no such page (a scanned
+    gazette without a text layer, an image-only annex) falls back to every
+    page, so a specimen is never missed for want of OCR -- the caps bound
+    the cost."""
+    texts = page_texts[:max_pages]
+    hits = [i for i, t in enumerate(texts) if any(w in (t or "").lower() for w in SPECIMEN_WORDS)]
+    return hits if hits else list(range(len(texts)))
+
+
+def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
+    """Returns ([{page, xref, kind, ext, width, height, data}], page_texts of
+    the selected pages). `page` is 1-based for humans and ledger URLs.
+    Requires PyMuPDF; the caller checks `fitz is not None` first."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        page_count = min(doc.page_count, PDF_MAX_PAGES)
+        texts = [doc[i].get_text() or "" for i in range(page_count)]
+        selected = select_pdf_pages(texts)
+        images: list[dict] = []
+        selected_texts: list[str] = []
+        for i in selected:
+            if len(images) >= PDF_MAX_IMAGES:
+                break
+            page = doc[i]
+            selected_texts.append(texts[i])
+            found_on_page = 0
+            for info in page.get_images(full=True):
+                if len(images) >= PDF_MAX_IMAGES:
+                    break
+                xref = info[0]
+                try:
+                    extracted = doc.extract_image(xref)
+                except Exception:  # noqa: BLE001 -- a broken stream is skipped, not fatal
+                    continue
+                width, height = extracted.get("width", 0), extracted.get("height", 0)
+                if min(width, height) < PDF_MIN_IMAGE_SIDE:
+                    continue
+                ext = (extracted.get("ext") or "").lower()
+                data = extracted.get("image") or b""
+                if ext in ("jpeg", "jpg") and detect_image_type(data) == "jpg":
+                    ext = "jpg"
+                elif detect_image_type(data) is None:
+                    # Uncommon encodings (JBIG2, CCITT, raw): rasterise via a pixmap instead.
+                    try:
+                        pix = fitz.Pixmap(doc, xref)
+                        if pix.n - pix.alpha >= 4:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        data, ext = pix.tobytes("png"), "png"
+                    except Exception:  # noqa: BLE001
+                        continue
+                images.append(
+                    {"page": i + 1, "xref": xref, "kind": "embedded", "ext": ext, "width": width, "height": height, "data": data}
+                )
+                found_on_page += 1
+            if found_on_page == 0:
+                pix = page.get_pixmap(dpi=PDF_RASTER_DPI)
+                images.append(
+                    {"page": i + 1, "xref": None, "kind": "raster", "ext": "png", "width": pix.width, "height": pix.height, "data": pix.tobytes("png")}
+                )
+        return images, selected_texts
+    finally:
+        doc.close()
+
+
+def expand_pdf_candidate(
+    parent: dict,
+    staging_dir: str,
+    ledger_records: list[dict],
+    corpus_records: list[dict],
+    binary_path: str,
+) -> list[dict]:
+    """Turns a screened PDF parent (auto_reject None, `is_pdf` set) into one
+    result per extracted image, each run through the byte-duplicate, staging,
+    check_sample, variant and needs_eyes steps like a directly linked image.
+    The child's `image_url` gains `#page=N` so the ledger and later origin
+    rows point at the page, not just the file. A PDF with no usable image is
+    returned as a single off-scope reject."""
+    pdf_bytes = parent.pop("_pdf_bytes", b"")
+    parent.pop("is_pdf", None)
+    pdf_url = parent.get("image_url_final") or parent.get("image_url") or ""
+    pdf_sha = parent.get("sha256")
+
+    if fitz is None:
+        parent["auto_reject"] = "unresolvable"
+        parent["note"] = "pdf: PyMuPDF is not installed (pip install pymupdf); retry after installing"
+        return [parent]
+
+    dup = sha_duplicate(pdf_sha, corpus_records, ledger_records) if pdf_sha else None
+    if dup:
+        parent["auto_reject"] = "duplicate"
+        parent["note"] = f"byte-duplicate-of:{dup}"
+        return [parent]
+
+    try:
+        images, page_texts = extract_pdf_images(pdf_bytes)
+    except Exception as e:  # noqa: BLE001 -- a malformed PDF is a reject, not a crash
+        parent["auto_reject"] = "off-scope"
+        parent["note"] = f"pdf: could not be read ({type(e).__name__})"
+        return [parent]
+
+    if not images:
+        parent["auto_reject"] = "off-scope"
+        parent["note"] = "pdf: no usable image on its pages"
+        return [parent]
+
+    pdf_specimen_snippets: list[str] = []
+    pdf_licence_snippets: list[str] = []
+    for text in page_texts:
+        pdf_specimen_snippets += [f"pdf: {s}" for s in find_snippets(text, SPECIMEN_WORDS, limit=2)]
+        pdf_licence_snippets += [f"pdf: {s}" for s in find_snippets(text, LICENCE_WORDS, limit=2)]
+
+    children: list[dict] = []
+    for img in images:
+        child = dict(parent)
+        child["image_url"] = f"{pdf_url}#page={img['page']}"
+        child["pdf_source"] = {
+            "url": pdf_url,
+            "pdf_sha256": pdf_sha,
+            "page": img["page"],
+            "xref": img["xref"],
+            "kind": img["kind"],
+            "width": img["width"],
+            "height": img["height"],
+        }
+        child["specimen_snippets"] = (parent.get("specimen_snippets") or []) + pdf_specimen_snippets[:3]
+        child["licence_snippets"] = (parent.get("licence_snippets") or []) + pdf_licence_snippets[:3]
+        child_sha = hashlib.sha256(img["data"]).hexdigest()
+        child["sha256"] = child_sha
+        children.append(
+            _screen_image_bytes(
+                child, child, img["data"], child_sha, img["ext"], staging_dir, ledger_records, corpus_records, binary_path
+            )
+        )
+    return children
+
+
+# --------------------------------------------------------------------------
 # Per-candidate pipeline
 # --------------------------------------------------------------------------
 
@@ -515,12 +688,38 @@ def screen_candidate(
     sha256 = hashlib.sha256(image_body).hexdigest()
     result["sha256"] = sha256
 
+    if detect_pdf(image_body):
+        # PDF lane: main() expands this into one result per extracted image
+        # (expand_pdf_candidate). Nothing is staged for the PDF itself.
+        result["is_pdf"] = True
+        result["_pdf_bytes"] = image_body
+        return result
+
     image_type = detect_image_type(image_body)
     if image_type is None:
         result["auto_reject"] = "off-scope"
         result["note"] = "downloaded bytes are not a recognized image format"
         return result
 
+    return _screen_image_bytes(
+        result, candidate, image_body, sha256, image_type, staging_dir, ledger_records, corpus_records, binary_path
+    )
+
+
+def _screen_image_bytes(
+    result: dict,
+    candidate: dict,
+    image_body: bytes,
+    sha256: str,
+    image_type: str,
+    staging_dir: str,
+    ledger_records: list[dict],
+    corpus_records: list[dict],
+    binary_path: str,
+) -> dict:
+    """Steps 7-10 on image bytes already in hand: byte duplicate, staging,
+    check_sample, the variant hint and needs_eyes. Shared by directly linked
+    images and by every image extracted from a PDF."""
     # 7. byte duplicate (checked before anything is written to staging)
     dup = sha_duplicate(sha256, corpus_records, ledger_records)
     if dup:
@@ -629,6 +828,8 @@ def write_packet(path: str, survivors: list[dict]) -> None:
             note_parts.append("needs eyes")
         if rec.get("variant_of"):
             note_parts.append(f"variant of {rec['variant_of']}")
+        if rec.get("pdf_source"):
+            note_parts.append(f"from PDF p.{rec['pdf_source'].get('page')} ({rec['pdf_source'].get('kind')})")
         note = "; ".join(note_parts)
 
         row = (
@@ -669,6 +870,8 @@ def screened_record_for_output(result: dict) -> dict:
     this makes that guarantee explicit and in one place."""
     record = dict(result)
     record.pop("doc_number", None)  # defence in depth; never expected to be present
+    record.pop("_pdf_bytes", None)  # the PDF lane's in-memory hand-off, never an output field
+    record.pop("is_pdf", None)
     return record
 
 
@@ -710,6 +913,14 @@ def main(argv: list[str] | None = None) -> int:
     ledger_records = load_jsonl(args.ledger)
     corpus_records = load_jsonl(args.corpus)
 
+    if fitz is None and any((c.get("format") or "").lower() == "pdf" for c in candidates):
+        print(
+            "a candidate declares format=pdf but PyMuPDF is not installed; nothing was screened.\n"
+            "  pip install pymupdf   (tools-only dependency; the extraction path never imports it)",
+            file=sys.stderr,
+        )
+        return 1
+
     os.makedirs(args.staging, exist_ok=True)
 
     screened: list[dict] = []
@@ -717,13 +928,18 @@ def main(argv: list[str] | None = None) -> int:
 
     for candidate in candidates:
         result = screen_candidate(candidate, args.staging, ledger_records, corpus_records, binary_path)
-        screened.append(result)
-        if result["auto_reject"] is None:
-            survivors.append(result)
-        else:
-            row = build_ledger_row(candidate, result["auto_reject"], result.get("sha256"), candidate.get("cycle"))
-            append_jsonl(args.ledger, row)
-            ledger_records.append(row)  # visible to later candidates in this same run
+        outcomes = [result]
+        if result.get("is_pdf") and result["auto_reject"] is None:
+            outcomes = expand_pdf_candidate(result, args.staging, ledger_records, corpus_records, binary_path)
+        for outcome in outcomes:
+            screened.append(outcome)
+            if outcome["auto_reject"] is None:
+                survivors.append(outcome)
+            else:
+                # A PDF child carries its own `image_url#page=N`, so the ledger row names the page.
+                row = build_ledger_row(outcome, outcome["auto_reject"], outcome.get("sha256"), candidate.get("cycle"))
+                append_jsonl(args.ledger, row)
+                ledger_records.append(row)  # visible to later candidates in this same run
 
     with open(args.out, "w", encoding="utf-8") as f:
         for rec in screened:
