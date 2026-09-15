@@ -380,5 +380,19 @@ class ScreenedSidecarTests(unittest.TestCase):
         self.assertEqual(ac.load_screened_sidecar(text), {})
 
 
+class SidecarPathTests(unittest.TestCase):
+    def test_sidecar_follows_the_packet_not_the_branch(self):
+        from pathlib import Path
+
+        p = Path("work/scouting/c12/packet-c12.md")
+        self.assertEqual(ac.sidecar_path_for(p, "cohort-c10"), Path("work/scouting/c12/screened-c12.jsonl"))
+
+    def test_sidecar_falls_back_to_the_branch_name(self):
+        from pathlib import Path
+
+        p = Path("work/scouting/x/combined.md")
+        self.assertEqual(ac.sidecar_path_for(p, "cohort-c03"), Path("work/scouting/x/screened-c03.jsonl"))
+
+
 if __name__ == "__main__":
     unittest.main()
