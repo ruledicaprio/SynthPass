@@ -34,24 +34,44 @@ A candidate proposed by an agent or a scraping service must carry at least one o
 - a specimen watermark, in any language;
 - a placeholder holder name or number (`MUSTERMANN`, `000000000`);
 - a hosting page that calls the image a specimen or sample — for example, a regulation annex
-  titled as the document's specimen.
+  titled as the document's specimen;
+- publication by the issuing authority itself, on one of the allowed hosts, as an illustration
+  of its own document — even when the page says nothing about specimens. Many issuers publish
+  their specimens this way. An agent reports such a candidate as `official-host-only`; the
+  automated screen and the reviewer then confirm the signal on the image itself, and the
+  real-person check applies in full (a real holder's document on an official page is still a
+  real holder's document).
 
-Candidates without any of these are not proposed at all. A person adding a specimen by hand
+Candidates without any of these are not proposed at all. A PDF linked from an allowed host (a
+gazette annex, a regulation) may be proposed as a candidate even though the agent cannot open
+it; the automated screen extracts its images and checks each one on the same terms. A page on
+an allowed host that would not load is reported as blocked, so the maintainer can retry it
+session-side (see "The tooling boundary"). A person adding a specimen by hand
 follows [`CONTRIBUTING.md`](../CONTRIBUTING.md#adding-a-corpus-specimen), where the watermark is
 an advisory signal rather than a requirement.
 
 ## Review gates for agent-found candidates
 
-1. **Automated screen.** `tools/screen_candidates.py` performs this step: the candidate is
-   fetched again by the tool, not taken from the agent's copy, and then:
+1. **Automated screen.** `tools/screen_candidates.py` performs this step (`tools/scout_cycle.py`
+   drives it, together with the worker launch before it and the review page after it): the
+   candidate is fetched again by the tool, not taken from the agent's copy, and then:
    - its host is checked against the denylist above;
    - its page is fetched and the image is confirmed to actually be linked from it;
    - its `sha256` is compared against the manifest, which rejects byte duplicates;
    - `check_sample` runs, including the vendor blocklist;
-   - one OCR pass reads the MRZ.
+   - one OCR pass reads the MRZ;
+   - a candidate that turns out to be a PDF (a gazette annex, a regulation) takes the tool's PDF
+     lane: its pages are scanned for the same specimen words, the images on those pages are
+     extracted at their original bytes (PyMuPDF, the one non-standard-library dependency in
+     `tools/`, imported only there), and each extracted image is then screened exactly as a
+     directly linked image would be, with `#page=N` on its URL so the ledger and the manifest
+     `origin` name the page.
    Survivors are written to a Markdown packet for a human to fill in the provenance call; the
    tool itself never decides public/local/drop or a licence class.
-2. **Maintainer review.** The maintainer makes the provenance call and proposes a manifest row.
+2. **Maintainer review.** The maintainer — or the `synthpass-screener` subagent, which opens
+   every staged image, checks the host and proposes a destination and licence class, and whose
+   write scope is limited to `work/scouting/` — makes the provenance call and proposes a
+   manifest row. A proposal is never a verdict.
 3. **Human verification**, candidate by candidate: *public*, *local* or *drop*. Optionally done
    through `tools/build_review_artifact.py`, which renders the packet as a single self-contained
    HTML page (image plus every column, one click per verdict); `tools/apply_verdicts.py` then
@@ -69,6 +89,10 @@ different image from the one it described.
 |---|---|
 | `samples/` → `samples-data` (public) | The source allows redistribution |
 | `samples/local/` (the local-only track) | The source does not allow redistribution, or states no terms and the verifier is not satisfied it does |
+
+A cover-only image (no data page) goes to the same two destinations on the same licence
+test, named with the `cover` variant token, and never changes a code's coverage status
+([`ADR-0012`](decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)).
 
 Either way, the image's source goes into the manifest's `origin` when it is fetched (see
 [`samples/README.md`](../samples/README.md)), because afterwards it cannot be recovered. The
@@ -97,8 +121,22 @@ Each admitted batch is its own data-only PR. It carries:
 No code change rides in the same PR. That way a moved number is attributable either to the
 corpus or to the code, never to both at once.
 
+`tools/apply_cohort.py` automates the mechanical half of admitting a verified packet: worktree
+setup, a cross-PR duplicate guard (so a second open cohort branch cannot fold a first PR's
+not-yet-merged images into its own manifest), image placement, manifest regeneration and
+`origin` patching, and the `samples-data` push -- gated behind a `-DryRun` check that refuses to
+proceed if it would delete anything. It never decides a licence class or writes unreviewed prose
+into `origin.notes` or [`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)'s Note column; those stay a
+human's draft to accept.
+
 ## The tooling boundary
 
 Acquisition may use network tools, including a hosted search or scraping service. The extraction
 path may not, and that line does not move. No repository code calls a scraping service or a
 search API. A tool's terms never widen what a source's terms allow.
+
+In practice: when a scout worker reports an allowed-host page as blocked, the maintainer's own
+session retries it with the scraping service and hands any candidate it finds back to the loop
+through `tools/scout_cycle.py add-candidates`, in the worker's own record shape and tagged as
+found by the session. Those rows then pass the automated screen like every other candidate; the
+service is never called from the repository's tools.

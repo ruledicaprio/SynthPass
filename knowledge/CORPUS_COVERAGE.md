@@ -30,13 +30,13 @@ here to corpus coverage instead of a benchmark number).
 
 | Status | Countries |
 |---|---|
-| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 74 |
-| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 14 |
+| HIT (checksum-valid real specimen, `mrz_corpus.rs` and/or the 2026-08-17 real-OCR scan) | 75 |
+| MISS (checksum failed or no MRZ found, real-OCR scan, 2026-08-17) | 15 |
 | Known MISS (documented, e.g. physically redacted specimen) | 1 |
 | Candidate specimen rejected per the vetting checklist | 1 |
 | No legal source found (searched, dated) | 0 |
 | Not applicable by definition (no document can carry the code) | 1 |
-| No specimen yet | 147 |
+| No specimen yet | 145 |
 | **Total tracked codes** | **238** |
 
 **What "covered" means.** A code is covered when it appears *in its proper field* of a
@@ -97,6 +97,18 @@ checksum-valid MRZ (an ID-card front and a blank-template back respectively), th
 as Kenya's front-only passport row above. Full provenance and review reasoning:
 `work/scouting/c01/packet-c01.md`. 149 codes still uncovered.
 
+**2026-09-14 — cohorts c03/c07/c09 (scout loop) added eight specimens.** `D` moves *No specimen
+yet* → **MISS (checksum failed)**: two `D<<` passports (2018, already in corpus; 2024, added
+here) both fail checksum on this OCR pass, not yet a HIT. **SGP flips No specimen yet → HIT**: a
+checksum-valid TD3 passport (`Singapore_Passport_Specimen_PA_SGP_2017_mrz.jpg`, attributed to the
+Immigration & Checkpoints Authority), confirmed by both `check_sample` and the manifest's own OCR
+pass — the first clean HIT this loop produced outside Germany's partial case. `HKG`, `PHL` and
+`ZAF` each get a first specimen but stay *No specimen yet*: HKG's two passports both fail
+checksum (same single-character-misread pattern as `D`), PHL's PhilSys card and ZAF's DHA smart
+ID both carry no MRZ zone at all by design. Full provenance and review reasoning:
+`work/scouting/c03/packet-c03.md`, `work/scouting/c07/packet-c07.md`,
+`work/scouting/c09/packet-c09.md`. 145 codes still uncovered.
+
 ## Full table
 
 | Code | Country/Entity | Document type(s) | Status | Note |
@@ -146,7 +158,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | SYC | Seychelles | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SLE | Sierra Leone | -- | No specimen yet | -- |
 | SOM | Somalia | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
-| ZAF | South Africa | -- | No specimen yet | -- |
+| ZAF | South Africa | ID card (front+back) | No specimen yet | DHA smart ID card front+back added 2026-09-14 (public, public-domain, Commons, author credited as the Department of Home Affairs). Illustrative template card (alphabet-placeholder name, sequential ID number, generic silhouette photo), not a real person. Card carries no printed MRZ (chip + 2D barcode instead) -- not a coverage HIT, same as Kenya's front-only row above. |
 | SSD | South Sudan | -- | No specimen yet | -- |
 | SDN | Sudan | Passport | Candidate rejected | No SPECIMEN watermark, read as real personal data -- excluded per vetting checklist |
 | TZA | Tanzania | -- | No specimen yet | -- |
@@ -202,7 +214,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | CHN | China | Passport | HIT (x2 specimens) (+ 2 checksum-failed) | Contributor-supplied specimen (SPECIMEN watermark); corpus grew to 4 total in the real-OCR scan, 2026-08-17 |
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
-| HKG | Hong Kong | -- | No specimen yet | -- |
+| HKG | Hong Kong | Passport (x2 specimens) | No specimen yet | 2019 + 2007 e-Passport design illustrations added 2026-09-14 (public, attributed to Hong Kong Immigration Department, none-stated licence). Both checksum-failed on this OCR pass (single-character misread pattern) -- not yet a HIT. |
 | IND | India | Passport | HIT (3 of 7 specimens; rest non-conforming or redacted) | The 2022, 2023 and 2024 books read checksum-valid — 2022 (was `checksum_failed`) and 2024 (was `no_mrz_found`) since ADR-0008 chunk 2; the other four are the 2013 specimen and its boxed copy, whose printed zones fail their own check digits, and 2 redacted (CI gate, 2026-09-11) |
 | IDN | Indonesia | Passport | HIT (1 of 3 specimens) | The 2024 specimen added 2026-09-10 (photographed sideways) reads checksum-valid; the 2011 specimen is non-conforming, the 2023 one redacted |
 | IRN | Iran | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
@@ -226,10 +238,10 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | OMN | Oman | Passport | HIT | Reads since ADR-0008 chunk 2 (CI gate, 2026-09-11). The "no MRZ found" recorded here from 2026-08-17 was root-caused by ADR-0008 chunk 1: the page-orientation vote turned the page sideways before OCR |
 | PAK | Pakistan | Passport | HIT | Ingested 2026-09-10; photographed sideways, reads since ADR-0008 chunk 2 moved quarter-turns into the retry chain (CI gate, 2026-09-11) |
 | PSE | Palestine | -- | No specimen yet | -- |
-| PHL | Philippines | -- | No specimen yet | -- |
+| PHL | Philippines | ID card (front) | No specimen yet | PhilSys national ID sample added 2026-09-14 (public, public-domain, PSA-attributed). No MRZ zone -- PhilSys is a national ID, not a travel document. |
 | QAT | Qatar | -- | No specimen yet | -- |
 | SAU | Saudi Arabia | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| SGP | Singapore | -- | No specimen yet | -- |
+| SGP | Singapore | Passport | HIT | 2017 biometric-passport design illustration added 2026-09-14 (public, attributed to Singapore's Immigration & Checkpoints Authority, none-stated licence), checksum-valid TD3, confirmed by both `check_sample` and this manifest's OCR pass. |
 | LKA | Sri Lanka | -- | No specimen yet | -- |
 | SYR | Syrian Arab Republic | -- | No specimen yet | -- |
 | TWN | Taiwan | -- | No specimen yet | -- |
@@ -256,7 +268,7 @@ as Kenya's front-only passport row above. Full provenance and review reasoning:
 | FIN | Finland | Passport | HIT (x5 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`); the 2007 and 2023 books, which found no MRZ there, read since ADR-0008 chunk 2 (CI gate, 2026-09-11) |
 | FRA | France | Passport, ID card | HIT (+ 2 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | DEU | Germany | Passport | HIT (+ 1 checksum-failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| D | Germany | -- | No specimen yet | Legacy single-letter code, Doc 9303 Part 3 §5 Part A |
+| D | Germany | Passport (x2), ID card front | MISS (checksum failed) | Legacy single-letter code, Doc 9303 Part 3 §5 Part A. Both passport specimens (`Germany_Passport_Specimen_P0_D00_2018_mrz.webp`, pre-existing; `Germany_Passport_Specimen_P0_D00_2024_mrz.jpg`, added 2026-09-14, public, official Bundesgesetzblatt `PassV` Anlage 2a) read an MRZ but fail checksum on this OCR pass -- the single-character-misread pattern (see `knowledge/benchmarks/README.md`), not confirmed evidence either specimen itself is invalid. Not yet a HIT for `D`. ID card front (`Germany_ID_Specimen_2024_front_no_mrz.jpg`, added 2026-09-14, public, official `PAuswV` Anlage 1) carries no MRZ -- `Personalausweis` MRZ is on the back, not sourced here; same front-only gap as Latvia's and Ireland's ID card rows. |
 | GRC | Greece | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | HUN | Hungary | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | ISL | Iceland | Passport | HIT (x2 specimens) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
