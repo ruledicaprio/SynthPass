@@ -34,9 +34,19 @@ A candidate proposed by an agent or a scraping service must carry at least one o
 - a specimen watermark, in any language;
 - a placeholder holder name or number (`MUSTERMANN`, `000000000`);
 - a hosting page that calls the image a specimen or sample — for example, a regulation annex
-  titled as the document's specimen.
+  titled as the document's specimen;
+- publication by the issuing authority itself, on one of the allowed hosts, as an illustration
+  of its own document — even when the page says nothing about specimens. Many issuers publish
+  their specimens this way. An agent reports such a candidate as `official-host-only`; the
+  automated screen and the reviewer then confirm the signal on the image itself, and the
+  real-person check applies in full (a real holder's document on an official page is still a
+  real holder's document).
 
-Candidates without any of these are not proposed at all. A person adding a specimen by hand
+Candidates without any of these are not proposed at all. A PDF linked from an allowed host (a
+gazette annex, a regulation) may be proposed as a candidate even though the agent cannot open
+it; the automated screen extracts its images and checks each one on the same terms. A page on
+an allowed host that would not load is reported as blocked, so the maintainer can retry it
+session-side (see "The tooling boundary"). A person adding a specimen by hand
 follows [`CONTRIBUTING.md`](../CONTRIBUTING.md#adding-a-corpus-specimen), where the watermark is
 an advisory signal rather than a requirement.
 
