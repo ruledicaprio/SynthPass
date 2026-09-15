@@ -187,25 +187,25 @@ MRVB
 
 </text>
 <polyline fill="none" opacity="1" stroke="#000000" stroke-width="1" points="679,404 679,409 "/>
-<rect x="70" y="196" width="121" height="207" opacity="1" fill="#FF0000" stroke="none"/>
-<text x="70" y="186" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-58.0%
+<rect x="70" y="211" width="121" height="192" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="70" y="200" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+54.0%
 </text>
-<rect x="191" y="129" width="122" height="274" opacity="1" fill="#0000FF" stroke="none"/>
-<text x="191" y="118" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-77.0%
+<rect x="191" y="143" width="122" height="260" opacity="1" fill="#0000FF" stroke="none"/>
+<text x="191" y="132" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+73.0%
 </text>
-<rect x="313" y="136" width="122" height="267" opacity="1" fill="#00FF00" stroke="none"/>
-<text x="313" y="125" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-75.0%
+<rect x="313" y="125" width="122" height="278" opacity="1" fill="#00FF00" stroke="none"/>
+<text x="313" y="114" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+78.0%
 </text>
-<rect x="435" y="89" width="122" height="314" opacity="1" fill="#FF00FF" stroke="none"/>
-<text x="435" y="79" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-88.0%
+<rect x="435" y="100" width="122" height="303" opacity="1" fill="#FF00FF" stroke="none"/>
+<text x="435" y="89" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+85.0%
 </text>
-<rect x="557" y="96" width="122" height="307" opacity="1" fill="#FF0000" stroke="none"/>
-<text x="557" y="86" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
-86.0%
+<rect x="557" y="93" width="122" height="310" opacity="1" fill="#FF0000" stroke="none"/>
+<text x="557" y="82" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="12.903225806451614" opacity="1" fill="#000000">
+87.0%
 </text>
 <text x="20" y="440" dy="0.76em" text-anchor="start" font-family="sans-serif" font-size="10.483870967741936" opacity="1" fill="#000000">
 TD1: n=100  ·  TD2: n=100  ·  TD3: n=100  ·  MRVA: n=100  ·  MRVB: n=100
