@@ -447,8 +447,8 @@ def doc_claims_mrz(candidate: dict) -> bool:
 # is the only non-standard-library dependency in tools/ and only this lane
 # imports it; the extraction path never does.
 
-PDF_MAX_PAGES = 60  # pages scanned per PDF; a gazette issue can run to hundreds
-PDF_MAX_IMAGES = 20  # extracted images per PDF, after the size filter
+PDF_MAX_PAGES = 200  # pages scanned per PDF; PassV.pdf (the German passport regulation) has 148
+PDF_MAX_IMAGES = 40  # extracted images per PDF, after the size filter; a booklet annex draws one per page
 PDF_MIN_IMAGE_SIDE = 150  # px; drops logos, seals and icons
 PDF_RASTER_DPI = 200
 
@@ -469,26 +469,44 @@ def select_pdf_pages(page_texts: list[str], max_pages: int = PDF_MAX_PAGES) -> l
 
 
 def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
-    """Returns ([{page, xref, kind, ext, width, height, data}], page_texts of
-    the selected pages). `page` is 1-based for humans and ledger URLs.
+    """Returns ([{page, xref, kind, ext, width, height, data, page_text}],
+    page_texts of the pages that mention a specimen word). `page` is 1-based
+    for humans and ledger URLs.
+
+    Images are taken from what a page actually *draws* (`get_image_info`),
+    not from its resource dictionary: a gazette PDF commonly shares one
+    resource dictionary across every page, so `get_images` lists all 173
+    images of a 148-page regulation on page 1 (seen on PassV.pdf,
+    2026-09-15). Pages that mention a specimen word come first, then the
+    rest in page order, because an annex's heading sits on its first page
+    while its images run on for pages; an xref is extracted once. Only when
+    the whole PDF yields no usable embedded image (a scanned gazette, vector
+    artwork) are the specimen-word pages rendered instead -- rendering a
+    table of contents because it says "Muster" is noise, not a specimen.
     Requires PyMuPDF; the caller checks `fitz is not None` first."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
         page_count = min(doc.page_count, PDF_MAX_PAGES)
         texts = [doc[i].get_text() or "" for i in range(page_count)]
-        selected = select_pdf_pages(texts)
+        has_words = [any(w in (t or "").lower() for w in SPECIMEN_WORDS) for t in texts]
+        with_words = [i for i in range(page_count) if has_words[i]]
+        order = with_words + [i for i in range(page_count) if not has_words[i]]
+        specimen_texts = [texts[i] for i in with_words]
         images: list[dict] = []
-        selected_texts: list[str] = []
-        for i in selected:
+        seen_xrefs: set[int] = set()
+        for i in order:
             if len(images) >= PDF_MAX_IMAGES:
                 break
             page = doc[i]
-            selected_texts.append(texts[i])
-            found_on_page = 0
-            for info in page.get_images(full=True):
-                if len(images) >= PDF_MAX_IMAGES:
-                    break
-                xref = info[0]
+            try:
+                drawn = page.get_image_info(xrefs=True)
+            except Exception:  # noqa: BLE001
+                drawn = []
+            for info in drawn:
+                xref = info.get("xref")
+                if not xref or xref in seen_xrefs or len(images) >= PDF_MAX_IMAGES:
+                    continue
+                seen_xrefs.add(xref)
                 try:
                     extracted = doc.extract_image(xref)
                 except Exception:  # noqa: BLE001 -- a broken stream is skipped, not fatal
@@ -501,7 +519,7 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
                 if ext in ("jpeg", "jpg") and detect_image_type(data) == "jpg":
                     ext = "jpg"
                 elif detect_image_type(data) is None:
-                    # Uncommon encodings (JBIG2, CCITT, raw): rasterise via a pixmap instead.
+                    # Uncommon encodings (JBIG2, CCITT, raw): go through a pixmap instead.
                     try:
                         pix = fitz.Pixmap(doc, xref)
                         if pix.n - pix.alpha >= 4:
@@ -510,15 +528,17 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
                     except Exception:  # noqa: BLE001
                         continue
                 images.append(
-                    {"page": i + 1, "xref": xref, "kind": "embedded", "ext": ext, "width": width, "height": height, "data": data}
+                    {"page": i + 1, "xref": xref, "kind": "embedded", "ext": ext, "width": width, "height": height, "data": data, "page_text": texts[i]}
                 )
-                found_on_page += 1
-            if found_on_page == 0:
-                pix = page.get_pixmap(dpi=PDF_RASTER_DPI)
+        if not images:
+            for i in with_words or list(range(page_count)):
+                if len(images) >= PDF_MAX_IMAGES:
+                    break
+                pix = doc[i].get_pixmap(dpi=PDF_RASTER_DPI)
                 images.append(
-                    {"page": i + 1, "xref": None, "kind": "raster", "ext": "png", "width": pix.width, "height": pix.height, "data": pix.tobytes("png")}
+                    {"page": i + 1, "xref": None, "kind": "raster", "ext": "png", "width": pix.width, "height": pix.height, "data": pix.tobytes("png"), "page_text": texts[i]}
                 )
-        return images, selected_texts
+        return images, specimen_texts
     finally:
         doc.close()
 
@@ -569,6 +589,8 @@ def expand_pdf_candidate(
     for text in page_texts:
         pdf_specimen_snippets += [f"pdf: {s}" for s in find_snippets(text, SPECIMEN_WORDS, limit=2)]
         pdf_licence_snippets += [f"pdf: {s}" for s in find_snippets(text, LICENCE_WORDS, limit=2)]
+        if len(pdf_specimen_snippets) >= 3 and len(pdf_licence_snippets) >= 3:
+            break
 
     children: list[dict] = []
     for img in images:
@@ -583,7 +605,8 @@ def expand_pdf_candidate(
             "width": img["width"],
             "height": img["height"],
         }
-        child["specimen_snippets"] = (parent.get("specimen_snippets") or []) + pdf_specimen_snippets[:3]
+        own_page = [f"pdf p.{img['page']}: {s}" for s in find_snippets(img.get("page_text") or "", SPECIMEN_WORDS, limit=2)]
+        child["specimen_snippets"] = (parent.get("specimen_snippets") or []) + own_page + [s for s in pdf_specimen_snippets[:3] if s not in own_page]
         child["licence_snippets"] = (parent.get("licence_snippets") or []) + pdf_licence_snippets[:3]
         child_sha = hashlib.sha256(img["data"]).hexdigest()
         child["sha256"] = child_sha
@@ -947,8 +970,9 @@ def main(argv: list[str] | None = None) -> int:
 
     write_packet(args.packet, survivors)
 
-    rejected = len(candidates) - len(survivors)
-    print(f"Screened {len(candidates)} candidate(s): {len(survivors)} survived, {rejected} auto-rejected.")
+    rejected = len(screened) - len(survivors)
+    expanded = f" ({len(screened)} after PDF expansion)" if len(screened) != len(candidates) else ""
+    print(f"Screened {len(candidates)} candidate(s){expanded}: {len(survivors)} survived, {rejected} auto-rejected.")
     return 0
 
 
