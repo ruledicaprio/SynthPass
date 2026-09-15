@@ -185,14 +185,14 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 | ECU | Ecuador | -- | No specimen yet | -- |
 | SLV | El Salvador | -- | No specimen yet | -- |
 | GRD | Grenada | -- | No specimen yet | -- |
-| GTM | Guatemala | -- | No specimen yet | -- |
+| GTM | Guatemala | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c12, 2026-09-15, Commons CC0); no data page, never a coverage claim (ADR-0012) |
 | GUY | Guyana | -- | No specimen yet | -- |
 | HTI | Haiti | -- | No specimen yet | -- |
-| HND | Honduras | -- | No specimen yet | -- |
+| HND | Honduras | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c12, 2026-09-15, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | JAM | Jamaica | -- | No specimen yet | -- |
 | MEX | Mexico | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | NIC | Nicaragua | Passport | HIT (x2 specimens) | Manifest regeneration, 2026-09-08. Both specimens (2001 and 2015 issues) read checksum-valid (`P<NIC` Td3). |
-| PAN | Panama | -- | No specimen yet | -- |
+| PAN | Panama | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c12, 2026-09-15, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | PRY | Paraguay | -- | No specimen yet | -- |
 | PER | Peru | -- | No specimen yet | -- |
 | KNA | Saint Kitts and Nevis | -- | No specimen yet | -- |
@@ -210,7 +210,7 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 | BGD | Bangladesh | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | BTN | Bhutan | -- | No specimen yet | -- |
 | BRN | Brunei Darussalam | -- | No specimen yet | -- |
-| KHM | Cambodia | -- | No specimen yet | -- |
+| KHM | Cambodia | Passport | No specimen yet | Current-series passport bio-page added 2026-09-14 (public, none-stated licence, attributed to the Royal Embassy of Cambodia in Washington D.C.). A real person's document, admitted only because every personal field including the MRZ band is fully redacted (revised H5 standard, 2026-09-14) -- no MRZ present at all, so not a coverage HIT. |
 | CHN | China | Passport | HIT (x2 specimens) (+ 2 checksum-failed) | Contributor-supplied specimen (SPECIMEN watermark); corpus grew to 4 total in the real-OCR scan, 2026-08-17 |
 | CYP | Cyprus | Passport | HIT (x3 specimens) | Contributor-supplied specimens (2010/2020/2026-issue, SPECIMEN watermark); the 2026 one is the first corpus specimen with Cyprus's new "PP" document-type code (effective 15 December 2025) |
 | GEO | Georgia | -- | No specimen yet | -- |
@@ -242,7 +242,7 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 | QAT | Qatar | -- | No specimen yet | -- |
 | SAU | Saudi Arabia | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | SGP | Singapore | Passport | HIT | 2017 biometric-passport design illustration added 2026-09-14 (public, attributed to Singapore's Immigration & Checkpoints Authority, none-stated licence), checksum-valid TD3, confirmed by both `check_sample` and this manifest's OCR pass. |
-| LKA | Sri Lanka | -- | No specimen yet | -- |
+| LKA | Sri Lanka | Passport (cover, 2 series) | No specimen yet | Covers only in `samples/covers/` (c12, 2026-09-15, Commons CC0 / public domain): 2024 P series and the earlier N series; no data page, never a coverage claim (ADR-0012) |
 | SYR | Syrian Arab Republic | -- | No specimen yet | -- |
 | TWN | Taiwan | -- | No specimen yet | -- |
 | TJK | Tajikistan | -- | No specimen yet | -- |
@@ -308,7 +308,7 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 | NRU | Nauru | -- | No specimen yet | -- |
 | NZL | New Zealand | -- | No specimen yet | -- |
 | PLW | Palau | -- | No specimen yet | -- |
-| PNG | Papua New Guinea | -- | No specimen yet | -- |
+| PNG | Papua New Guinea | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c12, 2026-09-15, Commons public domain, low-res); no data page, never a coverage claim (ADR-0012) |
 | WSM | Samoa | -- | No specimen yet | -- |
 | SLB | Solomon Islands | -- | No specimen yet | -- |
 | TON | Tonga | -- | No specimen yet | -- |

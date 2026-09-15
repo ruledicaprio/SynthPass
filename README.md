@@ -126,8 +126,8 @@ MRZ whose document number matches hand-verified ground truth.
   success is possible. This is the number accuracy work moves, and any PR that drops it is blocked
   by [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
   [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json).
-- **145 / 265 = 54.7% across the whole specimen corpus** — what happens if you point it at a pile
-  of real documents. The 106-specimen gap is not failure: those carry no machine-readable zone at
+- **145 / 266 = 54.5% across the whole specimen corpus** — what happens if you point it at a pile
+  of real documents. The 107-specimen gap is not failure: those carry no machine-readable zone at
   all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
   whose own check digits are wrong by design. Returning nothing for them is the correct answer, and
   [until 2026-09-09 they were counted as failures](knowledge/benchmarks/denominator-correction-2026-09-09.md).
