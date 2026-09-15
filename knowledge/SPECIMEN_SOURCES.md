@@ -144,6 +144,13 @@ proceed if it would delete anything. It never decides a licence class or writes 
 into `origin.notes` or [`CORPUS_COVERAGE.md`](CORPUS_COVERAGE.md)'s Note column; those stay a
 human's draft to accept.
 
+`tools/rebless.py` picks up from there: dispatches the real-specimen re-bless workflow on the
+cohort branch, waits for it, classifies the resulting baseline diff, and -- for a result that
+only moved an off-denominator bucket or nothing at all -- writes the mechanical doc updates
+[`benchmarks/README.md`](benchmarks/README.md#the-per-pr-real-specimen-regression-gate) describes
+and takes the PR to ready for review. A diff that moved the scored rate always stops for
+`synthpass-analyst` to write instead; this tool never drafts that prose.
+
 ## The tooling boundary
 
 Acquisition may use network tools, including a hosted search or scraping service. The extraction
