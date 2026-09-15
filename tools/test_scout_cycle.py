@@ -115,13 +115,18 @@ class PrefixTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scy.load_prefix_text("ROLE: x\n")
 
-    def test_shipped_prefix_is_v2(self):
+    def test_shipped_prefix_is_v3(self):
         prefix_path = Path(__file__).resolve().parent / scy.PREFIX_FILENAME
-        text = scy.load_prefix_text(prefix_path.read_text(encoding="utf-8"))
-        self.assertTrue(text.startswith("ROLE: You are a research scout."))
-        # The v2 change (plan §8.1): tell the worker the full name is the answer.
+        raw = scy.load_prefix_text(prefix_path.read_text(encoding="utf-8"))
+        self.assertTrue(raw.startswith("ROLE: You are a research scout."))
+        text = " ".join(raw.split())  # phrases may wrap across lines
+        # v2 (plan §8.1): tell the worker the full name is the answer.
         self.assertIn("do not spend time researching what a code stands for", text)
         self.assertIn("NEVER: consilium.europa.eu/prado", text)
+        # v3 (plan §8.1): official-host-only signal, PDFs reported unopened, BLOCKED lines.
+        self.assertIn('"specimen_signal":"official-host-only"', text)
+        self.assertIn('"format":"pdf"', text)
+        self.assertIn("BLOCKED: <url>", text)
 
 
 class SuffixTests(unittest.TestCase):
@@ -183,6 +188,20 @@ class CandidateExtractionTests(unittest.TestCase):
         self.assertEqual(per_code["KHM"], "2")
         self.assertTrue(per_code["THA"].startswith("none found"))
         self.assertIn("MFA pages", per_code["THA"])
+
+    def test_blocked_lines(self):
+        out = (
+            "- THA: none found — looked\n"
+            "BLOCKED: https://a.example/p.html — 403 Cloudflare\n"
+            "- BLOCKED: https://b.example/x.pdf: unsupported content type application/pdf\n"
+            "BLOCKED: https://a.example/p.html — retried, still 403\n"
+            "BLOCKED: not-a-url — junk\n"
+        )
+        blocked = scy.extract_blocked(out)
+        self.assertEqual([b["url"] for b in blocked], ["https://b.example/x.pdf", "https://a.example/p.html"])
+        self.assertEqual(blocked[1]["reason"], "retried, still 403")
+        self.assertEqual(blocked[0]["reason"], "unsupported content type application/pdf")
+        self.assertEqual(scy.extract_blocked("nothing here"), [])
 
     def test_tagging(self):
         tagged = scy.tag_candidates([{"code": "KHM"}], "c11", "w2")

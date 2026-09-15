@@ -78,6 +78,10 @@ present, and treat the rules restated below as binding either way.
 2. **Eyes on every image**, not just the `needs eyes` rows: open each staged file with Read.
    Look for the specimen signal (a SPECIMEN / MUSTER / SPÉCIMEN / ОБРАЗЕЦ watermark, an obvious
    placeholder name, a blank or filler template) and for any real-person signal (H5).
+   A row whose signal is `official-host-only` has no page wording to lean on: it is valid when
+   the image itself shows a specimen signal, or when it is plainly the issuer's own illustration
+   of the document with no real-person signal at all — say which in the note. An official host
+   never excuses a real holder's data: if the image shows one, H5 applies exactly as elsewhere.
 3. **Variants.** A `variant of <filename>` note means the corpus already holds this document
    number. Keep the row only if its resolution, crop, side or series genuinely differs; say
    which in the note. Otherwise ledger it as `duplicate` and delete the file.
