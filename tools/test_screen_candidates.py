@@ -403,12 +403,170 @@ class ScreenCandidatePipelineTests(unittest.TestCase):
             if url == candidate["page_url"]:
                 return url, 200, html_text.encode("utf-8")
             if url == candidate["image_url"]:
-                return url, 200, b"%PDF-1.4 not an image"
+                return url, 200, b"<html>not an image</html>"
             raise AssertionError(f"unexpected fetch {url}")
 
         result = sc.screen_candidate(candidate, self.tmp, [], [], "fake-binary", fetch=fake_fetch)
         self.assertEqual(result["auto_reject"], "off-scope")
 
+
+class PdfLaneTests(unittest.TestCase):
+    """The PDF lane: page selection, image extraction and the expansion of a
+    screened PDF into per-image results. Extraction tests need PyMuPDF and
+    skip without it; the rest run anywhere."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.orig_run_check_sample = sc.run_check_sample
+
+    def tearDown(self):
+        sc.run_check_sample = self.orig_run_check_sample
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    @staticmethod
+    def _pdf(pages):
+        """pages: list of (text, image_wh or None) -> PDF bytes."""
+        fitz = sc.fitz
+        doc = fitz.open()
+        for text, wh in pages:
+            page = doc.new_page()
+            page.insert_text((72, 72), text)
+            if wh:
+                pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, wh[0], wh[1]), False)
+                pix.clear_with(180)
+                page.insert_image(fitz.Rect(72, 100, 472, 400), stream=pix.tobytes("png"))
+        data = doc.tobytes()
+        doc.close()
+        return data
+
+    def test_detect_pdf(self):
+        self.assertTrue(sc.detect_pdf(b"%PDF-1.7 ..."))
+        self.assertFalse(sc.detect_pdf(b"\x89PNG\r\n\x1a\n"))
+        self.assertFalse(sc.detect_pdf(b""))
+
+    def test_select_pdf_pages_prefers_specimen_pages(self):
+        texts = ["Verordnung ueber Reisepaesse", "Anlage 2 Muster des Reisepasses", "Anhang", "wzór dokumentu"]
+        self.assertEqual(sc.select_pdf_pages(texts), [1, 3])
+
+    def test_select_pdf_pages_falls_back_to_every_page(self):
+        self.assertEqual(sc.select_pdf_pages(["", "no words here"]), [0, 1])
+        self.assertEqual(sc.select_pdf_pages(["x"] * 100, max_pages=3), [0, 1, 2])
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_extract_embedded_image_from_specimen_page_only(self):
+        pdf = self._pdf([("Verordnung. Anlage 1.", None), ("Anlage 2 Muster des Reisepasses", (320, 200))])
+        images, texts = sc.extract_pdf_images(pdf)
+        self.assertEqual(len(images), 1)
+        img = images[0]
+        self.assertEqual((img["page"], img["kind"], img["ext"]), (2, "embedded", "png"))
+        self.assertEqual((img["width"], img["height"]), (320, 200))
+        self.assertEqual(sc.detect_image_type(img["data"]), "png")
+        self.assertEqual(len(texts), 1)
+        self.assertIn("Muster", texts[0])
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_small_images_are_dropped_and_page_is_rasterised(self):
+        pdf = self._pdf([("specimen page with only a seal", (40, 40))])
+        images, _ = sc.extract_pdf_images(pdf)
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["kind"], "raster")
+        self.assertEqual(sc.detect_image_type(images[0]["data"]), "png")
+        self.assertGreater(images[0]["width"], 1000)  # 200 dpi of a Letter/A4 page
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_pipeline_expands_pdf_into_children(self):
+        pdf = self._pdf([("Anlage 1 Muster des Reisepasses", (320, 200))])
+        candidate = {
+            "code": "D",
+            "format": "pdf",
+            "image_url": "https://example.gov/gazette/annex.pdf",
+            "page_url": "https://example.gov/gazette/page.html",
+        }
+        html_text = '<a href="annex.pdf">Anlage</a>'
+
+        def fake_fetch(url, opener=None):
+            del opener
+            if url == candidate["page_url"]:
+                return url, 200, html_text.encode("utf-8")
+            if url == candidate["image_url"]:
+                return url, 200, pdf
+            raise AssertionError(f"unexpected fetch {url}")
+
+        sc.run_check_sample = lambda binary_path, image_path, timeout=None: {
+            "mrz_status": "miss",
+            "doc_number": None,
+            "watermark": True,
+            "vendor": "clear",
+        }
+        parent = sc.screen_candidate(candidate, self.tmp, [], [], "fake-binary", fetch=fake_fetch)
+        self.assertTrue(parent.get("is_pdf"))
+        self.assertIsNone(parent["auto_reject"])
+        self.assertEqual(os.listdir(self.tmp), [])  # nothing staged for the PDF itself
+
+        children = sc.expand_pdf_candidate(parent, self.tmp, [], [], "fake-binary")
+        self.assertEqual(len(children), 1)
+        child = children[0]
+        self.assertIsNone(child["auto_reject"])
+        self.assertEqual(child["image_url"], "https://example.gov/gazette/annex.pdf#page=1")
+        self.assertEqual(child["pdf_source"]["page"], 1)
+        self.assertEqual(child["pdf_source"]["kind"], "embedded")
+        self.assertEqual(child["pdf_source"]["url"], "https://example.gov/gazette/annex.pdf")
+        self.assertTrue(child["staged_path"].endswith(child["sha256"][:12] + ".png"))
+        self.assertTrue(os.path.isfile(child["staged_path"]))
+        self.assertEqual(child["mrz_check"], "invalid")
+        self.assertTrue(any(s.startswith("pdf: ") for s in child["specimen_snippets"]))
+        out = sc.screened_record_for_output(child)
+        self.assertNotIn("_pdf_bytes", out)
+        self.assertNotIn("is_pdf", out)
+
+    def test_pdf_without_pymupdf_is_unresolvable_not_ledger_poison(self):
+        parent = {
+            "auto_reject": None,
+            "is_pdf": True,
+            "_pdf_bytes": b"%PDF-1.4",
+            "sha256": "ab" * 32,
+            "image_url": "https://example.gov/a.pdf",
+            "image_url_final": "https://example.gov/a.pdf",
+        }
+        orig = sc.fitz
+        sc.fitz = None
+        try:
+            out = sc.expand_pdf_candidate(parent, self.tmp, [], [], "fake-binary")
+        finally:
+            sc.fitz = orig
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["auto_reject"], "unresolvable")
+        self.assertIn("pymupdf", out[0]["note"])
+        self.assertNotIn("_pdf_bytes", out[0])
+
+    def test_pdf_byte_duplicate_short_circuits(self):
+        parent = {
+            "auto_reject": None,
+            "is_pdf": True,
+            "_pdf_bytes": b"%PDF-1.4",
+            "sha256": "cd" * 32,
+            "image_url": "https://example.gov/a.pdf",
+        }
+        ledger = [{"url": "https://other.example/x", "sha256": "cd" * 32}]
+        out = sc.expand_pdf_candidate(parent, self.tmp, ledger, [], "fake-binary")
+        self.assertEqual(out[0]["auto_reject"], "duplicate")
+
+    def test_packet_note_names_the_pdf_page(self):
+        survivors = [
+            {
+                "code": "D",
+                "doc": "passport",
+                "td": "TD3",
+                "page_url": "https://example.gov/p",
+                "mrz_check": "invalid",
+                "staged_path": "work/scouting/c12/staging/abcdef123456.png",
+                "pdf_source": {"page": 3, "kind": "embedded"},
+            }
+        ]
+        path = os.path.join(self.tmp, "packet.md")
+        sc.write_packet(path, survivors)
+        text = open(path, encoding="utf-8").read()
+        self.assertIn("from PDF p.3 (embedded)", text)
 
 if __name__ == "__main__":
     unittest.main()
