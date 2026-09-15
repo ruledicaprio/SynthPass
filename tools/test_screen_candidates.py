@@ -456,7 +456,7 @@ class PdfLaneTests(unittest.TestCase):
     def test_extract_embedded_image_from_specimen_page_only(self):
         pdf = self._pdf([("Verordnung. Anlage 1.", None), ("Anlage 2 Muster des Reisepasses", (320, 200))])
         images, texts = sc.extract_pdf_images(pdf)
-        self.assertEqual(len(images), 1)
+        self.assertEqual(len(images), 1)  # page 1 draws nothing and has no specimen word: not rendered
         img = images[0]
         self.assertEqual((img["page"], img["kind"], img["ext"]), (2, "embedded", "png"))
         self.assertEqual((img["width"], img["height"]), (320, 200))
@@ -472,6 +472,23 @@ class PdfLaneTests(unittest.TestCase):
         self.assertEqual(images[0]["kind"], "raster")
         self.assertEqual(sc.detect_image_type(images[0]["data"]), "png")
         self.assertGreater(images[0]["width"], 1000)  # 200 dpi of a Letter/A4 page
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_text_only_specimen_pages_are_not_rendered_when_embedded_images_exist(self):
+        # A table of contents that says "Muster" must not become a row when the annex pages
+        # carry real embedded images (PassV.pdf produced 7 such renders before this rule).
+        pdf = self._pdf([("Inhalt: Anlage 1 Muster des Reisepasses", None), ("", (320, 200))])
+        images, _ = sc.extract_pdf_images(pdf)
+        self.assertEqual([(img["page"], img["kind"]) for img in images], [(2, "embedded")])
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_shared_resources_do_not_attribute_every_image_to_page_one(self):
+        # Three pages, one drawn image each; the heading word only on page 1. Every image must
+        # come out once, attributed to the page that draws it, specimen page first.
+        pdf = self._pdf([("Anlage 1 Muster", (320, 200)), ("", (321, 200)), ("", (322, 200))])
+        images, _ = sc.extract_pdf_images(pdf)
+        self.assertEqual([img["page"] for img in images], [1, 2, 3])
+        self.assertEqual(len({img["xref"] for img in images}), 3)
 
     @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
     def test_pipeline_expands_pdf_into_children(self):
