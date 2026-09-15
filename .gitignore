@@ -60,6 +60,7 @@ samples/passports/
 samples/id_cards/
 samples/driving_licenses/
 samples/misc/
+samples/covers/
 samples/ocr_fixtures/*
 !samples/ocr_fixtures/*.json
 !samples/ocr_fixtures/*.md
