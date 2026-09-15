@@ -56,6 +56,7 @@ samples/
   ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
     derived/            generated, unreviewed parity candidates (.md + .json) — tracked
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
+  covers/                cover-only images (no data page), any document type — gitignored, local mirror; outside the default benchmark walk, opt-in via --include-covers
   local/                specimens usable locally whose source does not allow redistribution — gitignored, never pushed
   corpus.jsonl          one row per image: MRZ document code, issuing state, provenance, origin, ground-truth link — tracked
   README.md
@@ -75,6 +76,7 @@ since it is not itself a test fixture.
 | `id_cards/`           | National identity card      | TD1 (3 x 30) or TD2 (2 x 36); MRZ is often on the *back/rear* image of a front+back pair |
 | `driving_licenses/`   | Driving licence              | No MRZ — not a machine-readable travel document |
 | `ocr_fixtures/`       | Mixed (passport/ID pages used as OCR ground truth) | Varies; see each fixture's `.md`/`.json` |
+| `covers/`             | Mixed (cover-only images, any document type)       | No MRZ — always tagged `no_mrz` |
 
 ## Naming convention
 
@@ -89,7 +91,10 @@ Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ex
   (e.g. `Croatia`, `North_Macedonia`).
 - `DocType` — `Passport` or `ID`, matching the subdirectory. That agreement is
   load-bearing: `synthpass_bench::classify_specimen` reads the document class
-  off the directory, never the filename.
+  off the directory, never the filename. `covers/` is the one exception: it
+  holds cover-only images of any `DocType`, so the directory itself is the
+  class (`Cover`), and the `DocType` token in the name still says what the
+  cover shows.
 - `Specimen` / `Private` — provenance.
 - `Code` — MRZ line 1 positions 1–2, the ICAO document code, with `0` standing
   in for the filler `<` (a path cannot hold `<`). So `P0` is `P<`, `PP` is
@@ -106,8 +111,10 @@ Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ex
 - `variant…` — free-form tags for how the image is degraded or framed:
   `blur`, `rotated`, `highlight`, `contrast`, `pixelated`, `wide`, `child`,
   `emergency`, `inner_page`, and `cover` for a cover-only image (always with
-  `no_mrz`; a labelled class that never counts toward coverage, see
-  [`ADR-0012`](../knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)).
+  `no_mrz`; filed under `covers/` regardless of document type, and a class
+  that never counts toward coverage, see
+  [`ADR-0012`](../knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)
+  and its amendment).
 - `ext` — prefer `jpg`/`png`; `webp` only when that is the source format.
 
 `id_cards/` and `driving_licenses/` predate the `Code`/`State` slots and keep
@@ -185,6 +192,29 @@ out; and `provider-bench --real-specimens` skips it unless `--include-local` is
 given, a flag it refuses to combine with `--write-baseline` or
 `--assert-baseline`. So the committed baseline and every CI run measure the
 public corpus only, and a local-track report never becomes a CI artifact.
+
+## Covers track
+
+`samples/covers/` holds cover-only images — a rendering of a passport's cover
+or a card's face, never a data page — of any document type, always tagged
+`no_mrz` plus the `cover` variant token
+([`ADR-0012`](../knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)
+and its amendment). Unlike `samples/local/`, it is mirrored to `samples-data`
+like the rest of the public corpus: a cover carries the same provenance and
+licence review as any other specimen.
+
+It is **outside the default real-specimen walk**, opt-in via
+`provider-bench --real-specimens --include-covers` (a flag it refuses to
+combine with `--write-baseline` or `--assert-baseline`, the same as
+`--include-local`). The reason is runtime, not licensing: the real-specimen
+gate OCRs every image it walks (~10 seconds each), a cover never carries an
+MRZ and so never enters the scored denominator, and a hundred covers would
+add real minutes to every PR's gate for no accuracy information. A cover's
+only benchmark value is the hallucination check — a checksum-valid MRZ read
+off one is `false_positive_mrz` — which does not need to run on every PR.
+Longer term the directory is a verified validation set for issuer/document-type
+recognition (the VIZ facet). **Never a coverage claim**: a cover never changes
+a code's status in [`CORPUS_COVERAGE.md`](../knowledge/CORPUS_COVERAGE.md).
 
 ## Licensing / usage
 

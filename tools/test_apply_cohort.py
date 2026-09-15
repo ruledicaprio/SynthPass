@@ -298,6 +298,24 @@ class ValidateTargetFilenameTests(unittest.TestCase):
         errors = ac.validate_target_filename("public", "driving_licenses/Foo_Driving_License_Specimen_2020_mrz.jpg")
         self.assertEqual(errors, [])
 
+    def test_covers_dir_accepts_a_passport_cover(self):
+        errors = ac.validate_target_filename(
+            "public", "covers/Foo_Passport_Specimen_XXX_XXX_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
+    def test_covers_dir_accepts_an_id_card_cover(self):
+        errors = ac.validate_target_filename(
+            "public", "covers/Foo_ID_Specimen_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
+    def test_covers_dir_is_a_recognized_subdirectory(self):
+        errors = ac.validate_target_filename(
+            "local", "local/covers/Foo_Passport_Specimen_XXX_XXX_2020_no_mrz_cover.jpg"
+        )
+        self.assertEqual(errors, [])
+
 
 # --------------------------------------------------------------------------
 # Licence-vs-verdict warning (must warn, never block)
