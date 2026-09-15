@@ -59,7 +59,13 @@ an advisory signal rather than a requirement.
    - its page is fetched and the image is confirmed to actually be linked from it;
    - its `sha256` is compared against the manifest, which rejects byte duplicates;
    - `check_sample` runs, including the vendor blocklist;
-   - one OCR pass reads the MRZ.
+   - one OCR pass reads the MRZ;
+   - a candidate that turns out to be a PDF (a gazette annex, a regulation) takes the tool's PDF
+     lane: its pages are scanned for the same specimen words, the images on those pages are
+     extracted at their original bytes (PyMuPDF, the one non-standard-library dependency in
+     `tools/`, imported only there), and each extracted image is then screened exactly as a
+     directly linked image would be, with `#page=N` on its URL so the ledger and the manifest
+     `origin` name the page.
    Survivors are written to a Markdown packet for a human to fill in the provenance call; the
    tool itself never decides public/local/drop or a licence class.
 2. **Maintainer review.** The maintainer — or the `synthpass-screener` subagent, which opens
@@ -128,3 +134,9 @@ human's draft to accept.
 Acquisition may use network tools, including a hosted search or scraping service. The extraction
 path may not, and that line does not move. No repository code calls a scraping service or a
 search API. A tool's terms never widen what a source's terms allow.
+
+In practice: when a scout worker reports an allowed-host page as blocked, the maintainer's own
+session retries it with the scraping service and hands any candidate it finds back to the loop
+through `tools/scout_cycle.py add-candidates`, in the worker's own record shape and tagged as
+found by the session. Those rows then pass the automated screen like every other candidate; the
+service is never called from the repository's tools.

@@ -19,6 +19,11 @@ command instead of a dozen hand-typed steps that each had a way to go wrong:
               write the packet's JSON twin for the review artifact
     review    render work/scouting/cNN/review-cNN.html for the user's verdicts
     run       task -> scout (one worker per --slice, in parallel) -> screen
+    add-candidates
+              append candidates the session found itself (a Firecrawl retry of
+              the worker's BLOCKED pages, a hand-found URL) to a cycle, tagged
+              as worker "session", before `screen` -- the retry itself is done
+              by the Claude session, never by repository code (H14)
 
 What stays with a human or a Claude session, deliberately:
 
@@ -341,6 +346,8 @@ def packet_rows_from_screened(screened: list[dict]) -> list[dict]:
             note_parts.append("needs eyes")
         if rec.get("variant_of"):
             note_parts.append(f"variant of {rec['variant_of']}")
+        if rec.get("pdf_source"):
+            note_parts.append(f"from PDF p.{rec['pdf_source'].get('page')} ({rec['pdf_source'].get('kind')})")
         if (rec.get("side") or "").lower() == "cover":
             note_parts.append("cover only (ADR-0012: labelled class, never a coverage claim)")
         rows.append(
@@ -832,6 +839,44 @@ def step_scout(args, repo_root: Path) -> list[WorkerResult]:
     return results
 
 
+def merge_candidates(existing: list[dict], incoming: list[dict], cycle: str, worker: str) -> tuple[list[dict], int]:
+    """Appends session-found candidates (a Firecrawl retry of a BLOCKED page,
+    a hand-found URL) to a cycle's candidate list, tagged like a worker's,
+    skipping any (image_url, page_url) pair already present. Returns the
+    merged list and how many were added. The candidates still go through
+    screen_candidates.py like everything else (H2)."""
+    seen = {(c.get("image_url"), c.get("page_url")) for c in existing}
+    merged = list(existing)
+    added = 0
+    for c in incoming:
+        if not (c.get("code") and c.get("image_url") and c.get("page_url")):
+            continue
+        key = (c.get("image_url"), c.get("page_url"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.extend(tag_candidates([c], cycle, worker))
+        added += 1
+    return merged, added
+
+
+def step_add_candidates(args, repo_root: Path) -> int:
+    cycle_dir = repo_root / SCOUTING_DIR / args.cycle
+    cycle_dir.mkdir(parents=True, exist_ok=True)
+    cand_path = cycle_dir / f"candidates-{args.cycle}.jsonl"
+    incoming = load_jsonl(Path(args.source))
+    merged, added = merge_candidates(load_jsonl(cand_path), incoming, args.cycle, args.worker)
+    with open(cand_path, "w", encoding="utf-8") as f:
+        for c in merged:
+            f.write(json.dumps(c, ensure_ascii=False) + chr(10))
+    edit_state(
+        repo_root,
+        lambda t: append_log(t, f"{args.cycle} add-candidates: {added} of {len(incoming)} row(s) from {Path(args.source).name} appended as worker {args.worker}; run screen next"),
+    )
+    print(f"{added} candidate(s) added to {cand_path.name} ({len(merged)} total); next: python tools/scout_cycle.py screen --cycle {args.cycle}")
+    return 0
+
+
 def step_screen(args, repo_root: Path) -> int:
     cycle = args.cycle
     cycle_dir = repo_root / SCOUTING_DIR / cycle
@@ -964,6 +1009,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--dry-run", action="store_true", help="write task files only")
         p.add_argument("--check-sample-bin", default=None)
 
+    p = sub.add_parser("add-candidates", help="append session-found candidates (e.g. a Firecrawl retry of BLOCKED pages) to a cycle")
+    p.add_argument("--cycle", required=True)
+    p.add_argument("--from", dest="source", required=True, help="JSONL of candidate records in the worker's shape")
+    p.add_argument("--worker", default="session", help="tag for the rows, default 'session'")
+
     p = sub.add_parser("screen", help="screen the cycle's candidates and write the packet JSON twin")
     p.add_argument("--cycle", required=True)
     p.add_argument("--check-sample-bin", default=None)
@@ -986,6 +1036,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "scout":
             step_scout(args, repo_root)
             return 0
+        if args.command == "add-candidates":
+            return step_add_candidates(args, repo_root)
         if args.command == "screen":
             return step_screen(args, repo_root)
         if args.command == "review":

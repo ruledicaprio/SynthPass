@@ -337,5 +337,27 @@ class EnvTests(unittest.TestCase):
         self.assertEqual(scy.worktrees_root(Path("D:/Projects/SynthPass")), Path("D:/Projects/worktrees/SynthPass"))
 
 
+class MergeCandidatesTests(unittest.TestCase):
+    def test_merge_skips_duplicates_and_incomplete_rows(self):
+        existing = [{"code": "D", "image_url": "https://a/x.jpg", "page_url": "https://a/p", "worker": "w1"}]
+        incoming = [
+            {"code": "D", "image_url": "https://a/x.jpg", "page_url": "https://a/p"},  # duplicate
+            {"code": "D", "image_url": "https://a/y.pdf", "page_url": "https://a/p", "format": "pdf"},
+            {"code": "D", "image_url": "", "page_url": "https://a/p"},  # incomplete
+        ]
+        merged, added = scy.merge_candidates(existing, incoming, "c12", "session")
+        self.assertEqual(added, 1)
+        self.assertEqual(len(merged), 2)
+        self.assertEqual(merged[1]["worker"], "session")
+        self.assertEqual(merged[1]["cycle"], "c12")
+        self.assertEqual(merged[1]["status"], "unreviewed")
+        self.assertEqual(merged[0]["worker"], "w1")  # untouched
+
+    def test_packet_row_note_names_pdf_page(self):
+        rows = scy.packet_rows_from_screened(
+            [{"code": "D", "auto_reject": None, "staged_path": "work/scouting/c12/staging/abc123abc123.png", "pdf_source": {"page": 4, "kind": "raster"}}]
+        )
+        self.assertEqual(rows[0]["note"], "from PDF p.4 (raster)")
+
 if __name__ == "__main__":
     unittest.main()
