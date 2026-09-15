@@ -35,6 +35,73 @@ class DenylistTests(unittest.TestCase):
         self.assertFalse(sc.is_denylisted(None))
 
 
+class HostDenylistTests(unittest.TestCase):
+    DENYLIST = {
+        "guineaecuatorialpress.com": "press agency, not an issuing authority",
+        "digitalinvea.com": "third-party vendor",
+    }
+
+    def test_exact_host_match(self):
+        self.assertEqual(
+            sc.is_host_denylisted("digitalinvea.com", self.DENYLIST), "third-party vendor"
+        )
+
+    def test_subdomain_matches(self):
+        self.assertEqual(
+            sc.is_host_denylisted("www.guineaecuatorialpress.com", self.DENYLIST),
+            "press agency, not an issuing authority",
+        )
+
+    def test_longer_unrelated_host_does_not_match(self):
+        # "notdigitalinvea.com" is a different registrable domain entirely,
+        # and "digitalinvea.com.evil.example" does not end with
+        # ".digitalinvea.com" -- neither may match.
+        self.assertIsNone(sc.is_host_denylisted("notdigitalinvea.com", self.DENYLIST))
+        self.assertIsNone(sc.is_host_denylisted("digitalinvea.com.evil.example", self.DENYLIST))
+
+    def test_empty_or_missing_denylist(self):
+        self.assertIsNone(sc.is_host_denylisted("digitalinvea.com", {}))
+        self.assertIsNone(sc.is_host_denylisted("digitalinvea.com", None))
+        self.assertIsNone(sc.is_host_denylisted("", self.DENYLIST))
+
+    def test_load_host_denylist_missing_file_is_empty(self):
+        self.assertEqual(sc.load_host_denylist("/no/such/path/host_denylist.json"), {})
+
+    def test_load_host_denylist_skips_about_key(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "host_denylist.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"_about": "docs", "Example.COM": "reason"}, f)
+            self.assertEqual(sc.load_host_denylist(path), {"example.com": "reason"})
+
+    def test_shipped_host_denylist_has_the_two_c13_hosts(self):
+        path = os.path.join(os.path.dirname(os.path.abspath(sc.__file__)), sc.HOST_DENYLIST_FILENAME)
+        denylist = sc.load_host_denylist(path)
+        self.assertIn("guineaecuatorialpress.com", denylist)
+        self.assertIn("digitalinvea.com", denylist)
+
+    def test_screen_candidate_rejects_denylisted_host(self):
+        candidate = {
+            "code": "XXX",
+            "image_url": "https://digitalinvea.com/a.jpg",
+            "page_url": "https://digitalinvea.com/page",
+        }
+        result = sc.screen_candidate(candidate, "/unused", [], [], "/unused/bin", host_denylist=self.DENYLIST)
+        self.assertEqual(result["auto_reject"], "denylisted-host")
+        self.assertEqual(result["note"], "third-party vendor")
+
+    def test_screen_candidate_with_no_denylist_arg_is_unaffected(self):
+        candidate = {
+            "code": "XXX",
+            "image_url": "https://digitalinvea.com/a.jpg",
+            "page_url": "https://digitalinvea.com/page",
+        }
+        result = sc.screen_candidate(candidate, "/unused", [], [], "/unused/bin", fetch=lambda u: None)
+        # Falls through to the next mechanical step (fetch failure) rather
+        # than being denylisted, since no host_denylist was passed.
+        self.assertEqual(result["auto_reject"], "unresolvable")
+
+
 class LinkCheckTests(unittest.TestCase):
     def test_absolute_url_linked_via_img_src(self):
         html_text = '<html><body><img src="https://example.com/a/b.jpg"></body></html>'

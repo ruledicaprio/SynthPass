@@ -30,7 +30,8 @@ Pipeline per candidate, cheapest check first. The first mechanical reject
 stops that candidate: a ledger row is appended and any staged file for it is
 deleted.
 
-    1. denylist            host is on the "never a source" list
+    1. denylist            host is on the "never a source" list, or the screener-grown
+                            host_denylist.json list (reason "denylisted-host")
     2. ledger duplicate    image_url/page_url already rejected or admitted
     3. fetch page_url      one retry, 15s timeout, polite per-host delay
     4. linked-from-page    image_url must actually appear on the fetched page
@@ -89,6 +90,43 @@ DENYLISTED_HOSTS = {
     "consilium.europa.eu",  # PRADO
     "www.consilium.europa.eu",
 }
+
+# The screener-grown counterpart to DENYLISTED_HOSTS above: hosts that are not
+# an issuing authority and have surfaced non-document images in a screening
+# cycle, kept in their own file (tools/host_denylist.json, parallel in shape
+# to tools/legal_portals.json) rather than hardcoded here, since this list
+# grows from screener reports rather than SPECIMEN_SOURCES.md's fixed "Never
+# a source" set. Loaded once at import time; missing file means no host is
+# denylisted this way, same "absence is not an error" convention
+# load_legal_portals uses in tools/scout_cycle.py.
+HOST_DENYLIST_FILENAME = "host_denylist.json"
+
+
+def load_host_denylist(path) -> dict:
+    """host (lowercase) -> reason, from `tools/host_denylist.json`. Keys
+    starting with `_` are documentation, not hosts. Missing file: no
+    denylisted hosts, never an error -- mirrors `load_legal_portals` in
+    `tools/scout_cycle.py`."""
+    if not os.path.isfile(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return {k.lower(): v for k, v in data.items() if not k.startswith("_")}
+
+
+def is_host_denylisted(host: str, denylist: dict) -> str | None:
+    """Returns the reason string when `host` (or a parent domain of it)
+    matches an entry in `denylist`, else `None`. Same exact-or-subdomain
+    matching shape as `is_denylisted` above."""
+    host = (host or "").lower()
+    if not host or not denylist:
+        return None
+    if host in denylist:
+        return denylist[host]
+    for domain, reason in denylist.items():
+        if host.endswith("." + domain):
+            return reason
+    return None
 
 LICENCE_WORDS = ["licen", "copyright", "\u00a9", "reuse", "creative commons", "public domain"]
 
@@ -630,6 +668,7 @@ def screen_candidate(
     corpus_records: list[dict],
     binary_path: str,
     fetch=None,
+    host_denylist: dict | None = None,
 ) -> dict:
     result = dict(candidate)
     result.update(
@@ -660,8 +699,14 @@ def screen_candidate(
 
     # 1. denylist
     for u in (image_url, page_url):
-        if is_denylisted(urlparse(u).netloc):
+        host = urlparse(u).netloc
+        if is_denylisted(host):
             result["auto_reject"] = "denylisted"
+            return result
+        reason = is_host_denylisted(host, host_denylist)
+        if reason:
+            result["auto_reject"] = "denylisted-host"
+            result["note"] = reason
             return result
 
     # 2. ledger duplicate
@@ -935,6 +980,7 @@ def main(argv: list[str] | None = None) -> int:
     candidates = load_jsonl(args.candidates)
     ledger_records = load_jsonl(args.ledger)
     corpus_records = load_jsonl(args.corpus)
+    host_denylist = load_host_denylist(os.path.join(os.path.dirname(os.path.abspath(__file__)), HOST_DENYLIST_FILENAME))
 
     if fitz is None and any((c.get("format") or "").lower() == "pdf" for c in candidates):
         print(
@@ -950,7 +996,9 @@ def main(argv: list[str] | None = None) -> int:
     survivors: list[dict] = []
 
     for candidate in candidates:
-        result = screen_candidate(candidate, args.staging, ledger_records, corpus_records, binary_path)
+        result = screen_candidate(
+            candidate, args.staging, ledger_records, corpus_records, binary_path, host_denylist=host_denylist
+        )
         outcomes = [result]
         if result.get("is_pdf") and result["auto_reject"] is None:
             outcomes = expand_pdf_candidate(result, args.staging, ledger_records, corpus_records, binary_path)

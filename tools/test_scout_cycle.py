@@ -127,6 +127,13 @@ class PrefixTests(unittest.TestCase):
         self.assertIn('"specimen_signal":"official-host-only"', text)
         self.assertIn('"format":"pdf"', text)
         self.assertIn("BLOCKED: <url>", text)
+        # v3.1 (T11, cycle c13 findings): the image must show the document itself, at most
+        # one cover per code as a fallback, and "side" reports what was actually seen.
+        self.assertIn("it must show the document", text)
+        self.assertIn("Not a flag, a coat of arms, a building", text)
+        self.assertIn("at most one per code: a cover is a fallback, never the goal", text)
+        self.assertIn('"side":"unknown" rather than guessing "biodata"', text)
+        self.assertIn('"side":"biodata|front|back|full|cover|unknown"', text)
 
 
 class SuffixTests(unittest.TestCase):
