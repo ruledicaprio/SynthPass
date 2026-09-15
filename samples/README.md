@@ -105,7 +105,9 @@ Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ex
   `no_mrz` (a *negative* filter — an image with no `_mrz` tag at all is kept).
 - `variant…` — free-form tags for how the image is degraded or framed:
   `blur`, `rotated`, `highlight`, `contrast`, `pixelated`, `wide`, `child`,
-  `emergency`, `inner_page`.
+  `emergency`, `inner_page`, and `cover` for a cover-only image (always with
+  `no_mrz`; a labelled class that never counts toward coverage, see
+  [`ADR-0012`](../knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)).
 - `ext` — prefer `jpg`/`png`; `webp` only when that is the source format.
 
 `id_cards/` and `driving_licenses/` predate the `Code`/`State` slots and keep

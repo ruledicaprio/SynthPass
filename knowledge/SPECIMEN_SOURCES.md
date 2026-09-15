@@ -90,6 +90,10 @@ different image from the one it described.
 | `samples/` → `samples-data` (public) | The source allows redistribution |
 | `samples/local/` (the local-only track) | The source does not allow redistribution, or states no terms and the verifier is not satisfied it does |
 
+A cover-only image (no data page) goes to the same two destinations on the same licence
+test, named with the `cover` variant token, and never changes a code's coverage status
+([`ADR-0012`](decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)).
+
 Either way, the image's source goes into the manifest's `origin` when it is fetched (see
 [`samples/README.md`](../samples/README.md)), because afterwards it cannot be recovered. The
 local-only track stays out of the default benchmark walk, and out of every CI run.

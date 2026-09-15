@@ -144,6 +144,32 @@ class SuffixTests(unittest.TestCase):
         self.assertEqual(scy.held_series(self.CORPUS, "HKG", "Hong Kong"), "passport 2019")
         self.assertEqual(scy.held_series(self.CORPUS, "THA", "Thailand"), "none held")
 
+    def test_suffix_carries_legal_portal_hint(self):
+        names = {"SVK": "Slovakia", "THA": "Thailand"}
+        held = {"SVK": "passport 2005, 2014", "THA": "none held"}
+        out = scy.build_suffix(["SVK", "THA"], names, held, {"SVK": "slov-lex.sk"})
+        self.assertIn("SVK (Slovakia; legal-acts portal: slov-lex.sk), THA (Thailand).", out)
+
+    def test_shipped_legal_portals_table_is_well_formed(self):
+        tools_dir = Path(__file__).resolve().parent
+        portals = scy.load_legal_portals(tools_dir / scy.LEGAL_PORTALS_FILENAME)
+        self.assertGreater(len(portals), 50)
+        self.assertEqual(portals["LVA"], "likumi.lv")
+        real = tools_dir.parent / "crates" / "mrz" / "src" / "countries.rs"
+        if real.is_file():
+            known = {c for _, c, _ in scy.parse_country_table(real.read_text(encoding="utf-8"))}
+            self.assertEqual(sorted(set(portals) - known), [])  # every key is a real code
+        for domain in portals.values():
+            self.assertNotIn("/", domain)
+            self.assertNotIn("http", domain)
+        self.assertEqual(scy.load_legal_portals(tools_dir / "does-not-exist.json"), {})
+
+    def test_packet_row_note_flags_a_cover(self):
+        rows = scy.packet_rows_from_screened(
+            [{"code": "KEN", "side": "cover", "auto_reject": None, "staged_path": "work/scouting/c12/staging/abc123abc123.jpg"}]
+        )
+        self.assertIn("cover only", rows[0]["note"])
+
     def test_suffix_shape_matches_plan_section_8(self):
         names = {"THA": "Thailand", "KHM": "Cambodia"}
         held = {"THA": "none held", "KHM": "none held"}

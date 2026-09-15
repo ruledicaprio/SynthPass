@@ -171,9 +171,28 @@ def held_series(corpus_rows: list[dict], code: str, name: str) -> str:
     return "; ".join(parts)
 
 
-def build_suffix(codes: list[str], names: dict[str, str], held: dict[str, str]) -> str:
-    """The variable tail of the task, exactly in the plan's §8 shape."""
-    scout = ", ".join(f"{c} ({names[c]})" for c in codes)
+LEGAL_PORTALS_FILENAME = "legal_portals.json"
+
+
+def load_legal_portals(path: Path) -> dict[str, str]:
+    """code -> portal domain from tools/legal_portals.json; keys starting with
+    `_` are documentation. Missing file: no hints, never an error."""
+    if not path.is_file():
+        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {k: v["portal"] for k, v in data.items() if not k.startswith("_") and isinstance(v, dict) and v.get("portal")}
+
+
+def build_suffix(codes: list[str], names: dict[str, str], held: dict[str, str], portals: dict[str, str] | None = None) -> str:
+    """The variable tail of the task, exactly in the plan's §8 shape. A code
+    with a known legal-acts portal gets it as a search hint next to its name:
+    the regulation defining a document is where its specimen annex lives."""
+    portals = portals or {}
+
+    def label(c: str) -> str:
+        return f"{c} ({names[c]}; legal-acts portal: {portals[c]})" if c in portals else f"{c} ({names[c]})"
+
+    scout = ", ".join(label(c) for c in codes)
     held_part = "; ".join(f"{c}: {held.get(c, 'none held')}" for c in codes)
     return f"Codes to scout: {scout}. Already held (skip these series): {held_part}.\n"
 
@@ -329,6 +348,8 @@ def packet_rows_from_screened(screened: list[dict]) -> list[dict]:
             note_parts.append(f"variant of {rec['variant_of']}")
         if rec.get("pdf_source"):
             note_parts.append(f"from PDF p.{rec['pdf_source'].get('page')} ({rec['pdf_source'].get('kind')})")
+        if (rec.get("side") or "").lower() == "cover":
+            note_parts.append("cover only (ADR-0012: labelled class, never a coverage claim)")
         rows.append(
             {
                 "id": row_id,
@@ -619,7 +640,8 @@ def build_task_text(repo_root: Path, codes: list[str]) -> str:
     prefix = load_prefix_text(prefix_path.read_text(encoding="utf-8"))
     corpus_rows = load_jsonl(repo_root / CORPUS_REL)
     held = {c: held_series(corpus_rows, c, names[c]) for c in codes}
-    return prefix + build_suffix(codes, names, held)
+    portals = load_legal_portals(Path(__file__).resolve().parent / LEGAL_PORTALS_FILENAME)
+    return prefix + build_suffix(codes, names, held, portals)
 
 
 def warn_on_state_history(repo_root: Path, codes: list[str]) -> None:
