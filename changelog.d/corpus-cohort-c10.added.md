@@ -1,4 +1,4 @@
-- One specimen added to the real-specimen corpus (`samples/corpus.jsonl` 257 → 258 rows) from the
+- One specimen added to the real-specimen corpus (`samples/corpus.jsonl` 265 → 266 rows) from the
   specimen-acquisition loop's tenth scout cycle (`c10`): a Cambodian passport bio-page, attributed
   to the Royal Embassy of Cambodia in Washington D.C. Unlike every other specimen in this corpus,
   this is a real person's actual document rather than an official blank template -- admitted only

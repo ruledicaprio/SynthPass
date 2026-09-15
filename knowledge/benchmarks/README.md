@@ -23,12 +23,12 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | Metric | Value | Source |
 | --- | --- | --- |
 | **Tier-1 hit rate, real specimens** | **145 / 159 = 91.2%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-14) |
-| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |
+| Tier-1 hit rate, whole specimen corpus | 145 / 266 = 54.5% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100-seed) | ~55% — TD3 74%, TD2 76%, TD1 56%, MRV-A 87%, MRV-B 93% | `synthpass-bench`, v1.4.0 cycle |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 106 of the 265 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 107 of the 266 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -39,7 +39,7 @@ the first moves when accuracy work lands. Full analysis:
 Swedish card front, the Dutch licence, Egypt 2012's masked zone and Argentina 2021 child's
 non-conforming one).
 
-**Real-specimen outcomes** (265 documents):
+**Real-specimen outcomes** (266 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
@@ -47,7 +47,7 @@ non-conforming one).
 | `no_mrz_found` | 4 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
 | `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 2.5× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
-| `no_mrz_expected` | 50 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 37 | no | Zone blacked out by whoever published the specimen |
 | `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
@@ -982,3 +982,68 @@ ADR-0008's detection metric still reads 4 against a true 3. Transcribing the thr
 `samples/ocr_fixtures/` was also left out, to keep this PR data-only and its baseline delta
 attributable to the ingest alone. Both are re-bless-bearing changes and should travel together in
 the next corpus PR rather than one each.
+
+### 2026-09-15 — cohorts c10/c12: one redacted bio page in the walk, six covers outside it
+
+Seven specimens in one PR (`samples/corpus.jsonl` 265 → 272 rows) — and the baseline's `documents`
+moves by **one**, not seven. Six of the seven are passport covers, and
+[ADR-0012](../decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md)'s 2026-09-15
+amendment put `samples/covers/` outside the default `provider-bench --real-specimens` walk, behind
+`--include-covers`. That is the whole shape of this delta. CI re-blessed on the branch —
+`real-specimen-gate.yml` dispatched on `cohort-c10` with `mode=write-baseline`, run `34980671424`,
+green in 41m42s, `measured_on_ci_sha` `12b6858`, `samples_data_sha` `46b8473`: `documents` 265 →
+**266**, `no_mrz_expected` 50 → **51**, and **every other count byte-identical** — `scored` 159,
+`tier1_hits` 145, `checksum_failed` 10, `checksum_failed_specimen` 19, `no_mrz_found` 4,
+`redacted_mrz` 37, `false_positive_mrz` 0.
+
+**Split new corpus from prior corpus, because an ingest must never be able to hide a regression.**
+
+| Population | Documents | Scored | HIT | Scored rate | Corpus rate |
+| --- | --- | --- | --- | --- | --- |
+| Prior corpus (c03/c07/c09 baseline, 2026-09-14) | 265 | 159 | 145 | 145 / 159 = 91.2% | 145 / 265 = 54.7% |
+| New in the default walk (c10) | 1 | 0 | 0 | — | 0 of 1 |
+| **Whole corpus, 2026-09-15** | **266** | **159** | **145** | **145 / 159 = 91.2%** | **145 / 266 = 54.5%** |
+| Off the walk, opt-in only: `samples/covers/` (c12) | 6 | 0 | 0 | — | not counted |
+
+The prior-corpus row is subtraction across two CI baselines, not a second run: the single in-walk
+document lands off the denominator, so `scored` does not move and no document already in the corpus
+changed class. This is the first corpus growth that leaves the **scored** population untouched —
+**91.2% scored, unchanged** — while the corpus-wide rate falls 54.7% → **54.5%** by the dilution of
+one document. No code changed in this PR.
+
+The seven, and what each one's *role* makes possible, decided from the images before the run:
+
+- **`Cambodia_Passport_Specimen_PN_KHM_XXXX_no_mrz.jpg` — `no_mrz_expected`, not scored.** A `PN`
+  bio page, and the only specimen in this corpus that is a real person's document rather than an
+  official blank — admitted under the revised H5 standard (2026-09-14) precisely because every
+  personal field *including the MRZ band* is fully redacted. There is no zone left to find, so
+  returning nothing is the correct answer and the document is scored out on its role, as the Sweden
+  and Latvia card fronts are. `KHM` stays *No specimen yet*: this is document-type depth, not a
+  coverage HIT.
+- **Six passport covers — Panama, Guatemala, Honduras, Sri Lanka (2024 `P` series and the earlier
+  `N` series) and Papua New Guinea — the first rows of `samples/covers/`, outside the walk.** A
+  cover has no data page and no MRZ, so it can never be scored either way; ADR-0012's amendment
+  keeps the class out of the default corpus rather than parking six permanent refusals in
+  `no_mrz_expected` and quietly moving the corpus-wide rate. They are reachable only with
+  `provider-bench --real-specimens --include-covers`, never in CI. Five `CORPUS_COVERAGE.md` rows
+  gain a `Passport (cover)` Docs entry and none gains a status.
+
+**The gate would not have asked for this re-bless.** `tier1_hits` held at 145 and no
+`REGRESSION_BUCKETS` member moved, so the assert run passes against the 2026-09-14 baseline;
+`documents` and `no_mrz_expected` are warn-only. Same half of the rule as
+[c01](#2026-09-14--cohort-c01-three-specimens-one-hit-and-a-filler-template-in-no_mrz_found), and
+the reason the re-bless was done in the same PR anyway. Provenance note: c12 was the first scout
+cycle run under prefix v3 (official-host-only signal) and the first cohort judged by the
+`synthpass-screener` agent.
+
+**What this does not claim.** Not an accuracy result: no code, threshold or model moved, and no A/B
+was run. The prior-corpus row is arithmetic across two CI baselines, not an independent
+re-measurement of the 265. One in-walk document carries no statistical weight; the 0.2 pp
+corpus-rate move is dilution by construction. The six covers are **unmeasured** by this baseline,
+not measured-and-zero — nothing here says what the reader returns on them. The browser-vs-native
+row in this file remains a frozen 2026-09-09 measurement over 160 specimens and was not re-cut.
+
+**Still deferred.** The San Marino reclassification modelled in the c01 entry (`scored` 155 → 154,
+`no_mrz_found` 4 → 3) is now three cohorts old, so ADR-0008's detection metric still reads 4
+against a true 3; the three c03/c07/c09 `checksum_failed` books still have no hand-transcribed
+`samples/ocr_fixtures/` zone.
