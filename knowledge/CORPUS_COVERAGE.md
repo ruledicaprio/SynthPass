@@ -115,28 +115,28 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 |---|---|---|---|---|
 | DZA | Algeria | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | AGO | Angola | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| BEN | Benin | -- | No specimen yet | -- |
+| BEN | Benin | Passport (cover, 2 series) | No specimen yet | Covers only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0 / CC0): 2018 and 2026 series; no data page, never a coverage claim (ADR-0012) |
 | BWA | Botswana | -- | No specimen yet | -- |
-| BFA | Burkina Faso | -- | No specimen yet | -- |
-| BDI | Burundi | -- | No specimen yet | -- |
-| CPV | Cabo Verde | -- | No specimen yet | -- |
-| CMR | Cameroon | -- | No specimen yet | -- |
-| CAF | Central African Republic | -- | No specimen yet | -- |
-| TCD | Chad | -- | No specimen yet | -- |
+| BFA | Burkina Faso | Passport (cover, 2 series) | No specimen yet | Covers only in `samples/covers/` (c13, 2026-09-15): the 2018 ECOWAS-era book from police.gov.bf (none-stated licence, kept public on the user's call) and the 2025 AES book from Commons (CC-BY-SA 4.0); no data page, never a coverage claim (ADR-0012) |
+| BDI | Burundi | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0); no data page, never a coverage claim (ADR-0012) |
+| CPV | Cabo Verde | Passport (cover, 2 series) | No specimen yet | Covers only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0 / CC0): 2015 and 2012 series; no data page, never a coverage claim (ADR-0012) |
+| CMR | Cameroon | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, passcam.cm -- the DGSN enrolment portal run by AUGENTIC PassCam, none-stated licence, kept public on the user's call); no data page, never a coverage claim (ADR-0012) |
+| CAF | Central African Republic | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons public domain); no data page, never a coverage claim (ADR-0012) |
+| TCD | Chad | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 3.0, very low-res); no data page, never a coverage claim (ADR-0012) |
 | COM | Comoros | -- | No specimen yet | -- |
 | COG | Congo | -- | No specimen yet | -- |
-| COD | Congo (Democratic Republic of the) | -- | No specimen yet | -- |
-| CIV | Côte d'Ivoire | -- | No specimen yet | -- |
+| COD | Congo (Democratic Republic of the) | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons public domain under the DRC official-acts exemption; the Commons page names PRADO as its copy path -- kept on the user's explicit call, not a precedent for H1); no data page, never a coverage claim (ADR-0012) |
+| CIV | Côte d'Ivoire | Passport (cover, 2 series) | No specimen yet | Covers only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0): 2014 (open-flat shot) and 2018 (low-res); no data page, never a coverage claim (ADR-0012) |
 | DJI | Djibouti | Passport | HIT (x2) | Ingested 2026-09-10; both books read checksum-valid |
 | EGY | Egypt | Passport | HIT (x2) (+ 2 redacted) | Real-specimen CI gate, 2026-09-13: the 2017 and 2022 specimens read; the 2012 and an undated specimen have their zones masked by the publisher (2012 renamed `_redacted_mrz` 2026-09-13) |
 | GNQ | Equatorial Guinea | -- | No specimen yet | -- |
-| ERI | Eritrea | -- | No specimen yet | -- |
-| SWZ | Eswatini | -- | No specimen yet | -- |
-| ETH | Ethiopia | -- | No specimen yet | -- |
-| GAB | Gabon | -- | No specimen yet | -- |
+| ERI | Eritrea | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 3.0 / GFDL); no data page, never a coverage claim (ADR-0012) |
+| SWZ | Eswatini | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 3.0); no data page, never a coverage claim (ADR-0012) |
+| ETH | Ethiopia | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons public domain, credited to the Government of Ethiopia); no data page, never a coverage claim (ADR-0012) |
+| GAB | Gabon | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0); no data page, never a coverage claim (ADR-0012) |
 | GMB | Gambia | -- | No specimen yet | -- |
 | GHA | Ghana | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| GIN | Guinea | -- | No specimen yet | -- |
+| GIN | Guinea | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0, dark interior/back-cover shot); no data page, never a coverage claim (ADR-0012) |
 | GNB | Guinea-Bissau | -- | No specimen yet | -- |
 | KEN | Kenya | Passport (front) | No specimen yet | Front page in corpus 2026-09-10, no MRZ; bio-page book specimen still needed |
 | LSO | Lesotho | -- | No specimen yet | -- |
