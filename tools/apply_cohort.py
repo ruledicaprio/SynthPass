@@ -450,6 +450,20 @@ def build_origin_patch(found_by: str, url: str | None, page: str | None, licence
     return {"found_by": found_by, "url": url, "page": page, "licence": licence, "fetched": fetched}
 
 
+def sidecar_path_for(packet_path: Path, cohort_branch: str) -> Path:
+    """The `screened-cNN.jsonl` that belongs to a packet. Derived from the
+    packet's own name (`packet-c12.md` -> `screened-c12.jsonl`), because an
+    accumulating cohort branch (`cohort-c10`) folds in later cycles' packets
+    and the branch name then says nothing about which cycle a row came from
+    -- deriving it from the branch left every c12 origin url/page null on
+    2026-09-15. The branch-derived name stays as the fallback for packets
+    not named `packet-<cycle>`."""
+    stem = packet_path.stem
+    if stem.startswith("packet-"):
+        return packet_path.parent / f"screened-{stem.removeprefix('packet-')}.jsonl"
+    return packet_path.parent / f"screened-{cohort_branch.removeprefix('cohort-')}.jsonl"
+
+
 def load_screened_sidecar(jsonl_text: str) -> dict[str, dict]:
     """Keys `screened-cNN.jsonl` records by the sha12 stem of their staged
     file, matching `row_key`'s id -- this is where a raw fetched `url`/`page`
@@ -835,9 +849,11 @@ def main(argv: list[str] | None = None) -> int:
         by_name = {r["filename"]: r for r in manifest_rows}
         corpus_count_before = len(manifest_rows) - len(placed)
         screened_sidecar: dict[str, dict] = {}
-        screened_path = args.packet.parent / f"screened-{args.cohort_branch.removeprefix('cohort-')}.jsonl"
+        screened_path = sidecar_path_for(args.packet, args.cohort_branch)
         if screened_path.is_file():
             screened_sidecar = load_screened_sidecar(screened_path.read_text(encoding="utf-8"))
+        else:
+            print(f"WARNING: no screened sidecar at {screened_path}; origin.url/page will be null and the manifest test will fail")
 
         today = date.today().isoformat()
         for row, target_rel in placed:
