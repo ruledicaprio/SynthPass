@@ -419,6 +419,8 @@ impl NativeOcr {
                 portrait,
                 rotation,
                 text_sanity,
+                retry_variant_id: Some("general".to_string()),
+                retry_budget_hit: false,
             });
         }
         if verbose {
@@ -430,6 +432,8 @@ impl NativeOcr {
 
         let max_passes = max_passes();
         let max_duration = max_duration();
+        let mut retry_variant_id = Some("general".to_string());
+        let mut retry_budget_hit = false;
 
         // `passes_run` counts total passes including the general one above
         // (seeded at 1) — a `zip` counter rather than a manually incremented
@@ -572,6 +576,7 @@ impl NativeOcr {
                 break;
             }
             if overall_started.elapsed() >= max_duration {
+                retry_budget_hit = true;
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] time budget ({max_duration:?}) reached before variant {i}; stopping retries"
@@ -580,6 +585,7 @@ impl NativeOcr {
                 break;
             }
 
+            retry_variant_id = Some(format!("retry-{i:02}"));
             let variant_started = Instant::now();
             if let Some(dir) = &dump_dir {
                 dump_pass_image(
@@ -653,6 +659,8 @@ impl NativeOcr {
             portrait,
             rotation,
             text_sanity,
+            retry_variant_id,
+            retry_budget_hit,
         })
     }
 }

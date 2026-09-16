@@ -42,6 +42,7 @@ function parseArgs(argv) {
     site: join(REPO, '_site'),
     samples: join(REPO, 'samples'),
     out: null,
+    nativeReport: null,
     limit: Infinity,
     floor: null,
     rotate: 0,
@@ -54,6 +55,7 @@ function parseArgs(argv) {
     else if (a === '--site') args.site = resolve(argv[++i]);
     else if (a === '--samples') args.samples = resolve(argv[++i]);
     else if (a === '--out') args.out = resolve(argv[++i]);
+    else if (a === '--native-report') args.nativeReport = resolve(argv[++i]);
     else if (a === '--limit') args.limit = Number(argv[++i]);
     else if (a === '--floor') args.floor = Number(argv[++i]);
     else if (a === '--rotate') args.rotate = Number(argv[++i]);
@@ -123,6 +125,18 @@ async function main() {
 
   const rows = (await readFile(manifestPath, 'utf8'))
     .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  let nativeByAsset = new Map();
+  let nativeReport = null;
+  if (args.nativeReport) {
+    nativeReport = JSON.parse(await readFile(args.nativeReport, "utf8"));
+    const native = nativeReport.providers?.find((p) => p.provider_id === "mrz");
+    if (!native) throw new Error("native report has no mrz provider: " + args.nativeReport);
+    for (const detail of native.documents_detail ?? []) {
+      const key = detail.asset_id ?? detail.name;
+      nativeByAsset.set(key, detail);
+    }
+  }
+
   const candidates = rows.filter((r) => r.mrz?.present).slice(0, args.limit);
 
   if (candidates.length === 0) {
@@ -149,6 +163,11 @@ async function main() {
     n++;
     const url = `/corpus/${row.dir}/${encodeURIComponent(row.filename)}`;
     const stem = row.filename.replace(/\.[^.]+$/, '');
+    const assetId = String(row.dir) + '/' + String(row.filename);
+    const nativeDetail = nativeByAsset.get(assetId);
+    if (args.nativeReport && !nativeDetail) {
+      throw new Error('native report has no row for asset ' + assetId);
+    }
 
     // page.evaluate takes no timeout option, so bound it here — one wedged
     // document must not stall a 190-image sweep.
@@ -182,12 +201,18 @@ async function main() {
       }
     }
 
-    const nativeValid = !!row.mrz?.observed?.checksums_valid;
+    const nativeValid = nativeDetail ? !!nativeDetail.mrz_checksums_valid : null;
     documents.push({
+      asset_id: assetId,
       filename: row.filename,
       dir: row.dir,
       web_checksum_valid: scan.valid,
       native_checksum_valid: nativeValid,
+      native_miss_reason: nativeDetail?.miss_reason ?? null,
+      native_retry_variant_id: nativeDetail?.retry_variant_id ?? null,
+      native_retry_budget_hit: nativeDetail?.retry_budget_hit ?? null,
+      native_names_exact: nativeDetail?.names_exact ?? null,
+      native_name_error: nativeDetail?.name_error ?? null,
       // Strictest available check: the exact two/three MRZ lines, not just
       // the fields parsed out of them.
       mrz_line_matches_fixture:
@@ -217,7 +242,7 @@ async function main() {
 
   // ---- aggregate -----------------------------------------------------------
   const webHits = documents.filter((d) => d.web_checksum_valid).length;
-  const natHits = documents.filter((d) => d.native_checksum_valid).length;
+  const natHits = documents.filter((d) => d.native_checksum_valid === true).length;
   const both = documents.filter((d) => d.web_checksum_valid && d.native_checksum_valid).length;
   const webOnly = documents.filter((d) => d.web_checksum_valid && !d.native_checksum_valid).length;
   const natOnly = documents.filter((d) => !d.web_checksum_valid && d.native_checksum_valid).length;
@@ -242,6 +267,7 @@ async function main() {
   const times = documents.map((d) => d.ms).filter((m) => m !== null).sort((a, b) => a - b);
 
   const report = {
+    provenance: nativeReport?.provenance ?? null,
     generated: new Date().toISOString(),
     // Non-zero means every image was turned by this many degrees before
     // scanning — an orientation test, not a like-for-like corpus run.

@@ -544,6 +544,9 @@ struct AssertionBucketReport {
 #[derive(Serialize)]
 struct DocumentDetailReport {
     name: String,
+    /// Exact samples-relative asset identity for real specimens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset_id: Option<String>,
     mrz_found: bool,
     /// The document's resolved ICAO 9303 MRZ format ("TD1"/"TD2"/"TD3"/
     /// "MRVA"/"MRVB"), `null` when none could be resolved — see
@@ -575,6 +578,9 @@ struct DocumentDetailReport {
     /// microseconds; this is the number that says where a 40-minute run went
     /// (ADR-0010, step 5). Additive: older reports simply lack it.
     ocr_ms: u128,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_variant_id: Option<String>,
+    retry_budget_hit: bool,
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -709,6 +715,7 @@ impl From<ProviderReport> for ProviderRow {
                 .into_iter()
                 .map(|d| DocumentDetailReport {
                     name: d.name,
+                    asset_id: d.asset_id,
                     mrz_found: d.mrz_found,
                     mrz_format: d.mrz_format,
                     read_ok: d.read_ok,
@@ -722,6 +729,8 @@ impl From<ProviderReport> for ProviderRow {
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
                     ocr_ms: d.ocr_elapsed.as_millis(),
+                    retry_variant_id: d.retry_variant_id,
+                    retry_budget_hit: d.retry_budget_hit,
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),

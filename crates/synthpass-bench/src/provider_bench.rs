@@ -185,6 +185,8 @@ pub struct DocumentDetail {
     /// Corpus-local identity: a synthetic document's seed, or a real
     /// specimen's file stem. Public-domain specimen filenames, not PII.
     pub name: String,
+    /// Exact samples-relative asset identity for real-specimen joins.
+    pub asset_id: Option<String>,
     /// Whether `mrz::find_and_parse` recovered an MRZ from this document's
     /// OCR text — which bucket this document counted toward.
     pub mrz_found: bool,
@@ -227,6 +229,10 @@ pub struct DocumentDetail {
     /// run's total cannot say *which* documents cost it
     /// (`knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md`, step 5).
     pub ocr_elapsed: Duration,
+    /// Native OCR retry variant selected for this asset, when available.
+    pub retry_variant_id: Option<String>,
+    /// Whether the native retry loop hit its wall-clock budget.
+    pub retry_budget_hit: bool,
 }
 
 pub struct CapabilitySnapshot {
@@ -480,6 +486,8 @@ struct BenchPage {
     /// Corpus-local identity, carried for `DocumentDetail`: a synthetic
     /// document's seed or a real specimen's file stem.
     name: String,
+    /// Explicit real-asset identity for cross-provider joins; synthetic rows have none.
+    asset_id: Option<String>,
     page: OcrPage,
     ground_truth: Option<HashMap<CoreField, String>>,
     /// The hand-transcribed true printed MRZ zone (`Extraction::mrz_line` from
@@ -609,6 +617,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             Some(BenchPage {
                 name: doc.seed.to_string(),
+                asset_id: None,
                 page,
                 ground_truth: Some(mrz_ground_truth(&truth)),
                 ground_truth_mrz: None,
@@ -679,6 +688,7 @@ fn prep_specimens(
                 .map(mrz_format_str);
             Some(BenchPage {
                 name: doc.name.clone(),
+                asset_id: Some(doc.asset_id.clone()),
                 page,
                 ground_truth,
                 ground_truth_mrz,
@@ -923,6 +933,7 @@ async fn run_prepped(
                     // document it handled cleanly with no assertions.
                     documents_detail.push(DocumentDetail {
                         name: bench_page.name.clone(),
+                        asset_id: bench_page.asset_id.clone(),
                         mrz_found: bench_page.mrz_found,
                         mrz_format: resolve_format(None),
                         read_ok: false,
@@ -932,6 +943,8 @@ async fn run_prepped(
                         assertions_unsupported: 0,
                         unsupported_fields: Vec::new(),
                         ocr_elapsed: bench_page.ocr_elapsed,
+                        retry_variant_id: bench_page.page.retry_variant_id.clone(),
+                        retry_budget_hit: bench_page.page.retry_budget_hit,
                     });
                     if progress {
                         eprintln!(
@@ -1212,6 +1225,7 @@ async fn run_prepped(
 
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
+                asset_id: bench_page.asset_id.clone(),
                 mrz_found: bench_page.mrz_found,
                 mrz_format,
                 read_ok: true,
@@ -1221,6 +1235,8 @@ async fn run_prepped(
                 assertions_unsupported: doc_unsupported_fields.len(),
                 unsupported_fields: doc_unsupported_fields,
                 ocr_elapsed: bench_page.ocr_elapsed,
+                retry_variant_id: bench_page.page.retry_variant_id.clone(),
+                retry_budget_hit: bench_page.page.retry_budget_hit,
             });
         }
 
@@ -1595,6 +1611,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
+                asset_id: None,
                 name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -1612,6 +1629,7 @@ mod tests {
                 ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
+                asset_id: None,
                 name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE, no label file for this one".to_string(),
@@ -1651,6 +1669,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE".to_string(),
@@ -1692,6 +1711,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -1768,6 +1788,7 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "corrupted-td3-fixture".to_string(),
             page: OcrPage {
                 text: mrz.to_string(),
@@ -1845,6 +1866,7 @@ mod tests {
         // OCR text with nothing MRZ-shaped in it: an MRZ is expected
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "no-mrz-found-fixture".to_string(),
             page: OcrPage {
                 text: "REPUBLIC OF EXAMPLE\nNAME  JANE DOE\n".to_string(),
@@ -1923,6 +1945,7 @@ mod tests {
         assert!(!recovered.valid());
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "labelled-nonconforming-specimen".to_string(),
             page: OcrPage {
                 text: zone.to_string(),
@@ -1989,6 +2012,7 @@ mod tests {
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "labelled-ocr-misread".to_string(),
             page: OcrPage {
                 text: ocr_zone,
@@ -2080,6 +2104,7 @@ mod tests {
         let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
             page: OcrPage {
                 text: zone.to_string(),
@@ -2131,6 +2156,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
             page: OcrPage {
                 text: "just some redaction smudge, nothing MRZ-shaped".to_string(),
@@ -2176,6 +2202,7 @@ mod tests {
 
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
+                asset_id: None,
                 name: name.to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -2236,6 +2263,7 @@ mod tests {
         // so it lands in `no_mrz_expected`.
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
+                asset_id: None,
                 name: name.to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -2298,6 +2326,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
             page: OcrPage {
                 text: "IDENTITY CARD  DOE  JANE".to_string(),
@@ -2348,6 +2377,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
             page: OcrPage {
                 text: "I<UTODOE<<JANE<<<<<<<<<<<<<<<<".to_string(),
@@ -2407,6 +2437,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, no SMITH anywhere in this text".to_string(),
@@ -2452,6 +2483,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -2503,6 +2535,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -2551,6 +2584,7 @@ mod tests {
 
         let ocr_elapsed = Duration::from_millis(1234);
         let prepped = vec![Some(BenchPage {
+            asset_id: None,
             name: "fixture".to_string(),
             page: OcrPage::default(),
             ground_truth: None,

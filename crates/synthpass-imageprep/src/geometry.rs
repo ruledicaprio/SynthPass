@@ -140,6 +140,10 @@ pub struct OcrPage {
     ///
     /// `None` when no text was recognized.
     pub text_sanity: Option<f32>,
+    /// Stable identifier for the final OCR pass selected by the native retry loop.
+    pub retry_variant_id: Option<String>,
+    /// Whether the native retry loop stopped because its wall-clock budget elapsed.
+    pub retry_budget_hit: bool,
 }
 
 /// Heuristic confidence proxy in `[0, 1]` for a recognized line's text.
