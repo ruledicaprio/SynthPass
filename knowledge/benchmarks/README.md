@@ -97,6 +97,40 @@ detection count is 17 after the Argentina 2026 pair was scored out; see the outc
 - **Metric definitions** — precisely what each number counts. "Hit rate" means
   *the MRZ provider produced a checksum-valid record whose document number matches
   ground truth*, not "the extraction was correct."
+- **Strict name hit rate** — two related, differently-denominated numbers, named for what
+  they divide by (the benchmark maintenance contract is explicit that two similarly-named
+  rates over different denominators is exactly the trap to avoid):
+  - `strict_tier1_hit_rate`: `strict_hits / name_scorable_documents`, where a document is
+    "name-scorable" when its ground truth carries both `surname` and `given_names`, and the
+    denominator's population is every name-scorable document inside `tier1_hit_rate`'s own
+    scored population (so a labelled miss, or a labelled document whose read errored, still
+    counts in the denominator — just not as a strict hit). `synthpass-bench` reports it as
+    `strict_hits`/`strict_hit_rate` (denominator: `count`, since every synthetic document is
+    name-scorable by construction); `provider-bench` reports it as `strict_tier1_hit_rate`
+    (`Computed { strict_hits, name_scorable_documents, name_scorable_hits,
+    strict_tier1_hit_rate, names_exact_among_hits }` or `NotApplicable { reason }` when no
+    document in the scored population is name-scorable — never a fabricated `0.0`).
+  - `names_exact_among_hits`: `strict_hits / name_scorable_hits`, the same count restricted to
+    documents that are *also* a Tier-1 hit — isolating the name-read question from detection
+    accuracy. Both harnesses report this field explicitly (`synthpass-bench`'s `Report` JSON,
+    `provider-bench`'s `StrictNameHitRate::Computed`).
+
+  Neither number redefines `hit`/`hit_rate`/`tier1_hit_rate`: no ICAO 9303 check digit covers
+  either name field in any MRZ format, so a checksum-valid Tier-1 hit can still carry a wrong
+  name. Each miss is classified as `separator_lost`, `split_shifted`, `filler_read_as_letters`,
+  or `other` (`synthpass_bench::NameError`) — the first three name specific CTC-decoder
+  artifacts around the MRZ `<<`/`<` filler/separator character (a repeated glyph a CTC collapse
+  step can lose or under-collapse), not an ordinary character misread. Why names are scored
+  only against MRZ-form truth, and why they stay out of `hit`:
+  [`ADR-0013`](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md).
+
+  **Derived** (per the maintenance contract — this metric has not itself been run in CI yet,
+  which would be Observed) from the 2026-09-16 harness-comparison run's `synthpass-bench`
+  reports (MAIN `c617254`, local, seed 0, 100 clean documents/format —
+  [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md)),
+  by checking each Tier-1 hit's per-field CER for `surname`/`given_names` > 0: of 377 Tier-1
+  hits across the five synthetic formats, **178 carry a wrong name** — TD3 39/78, TD2 37/73,
+  TD1 39/54, MRV-A 35/85, MRV-B 28/87.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 

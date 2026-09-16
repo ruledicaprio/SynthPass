@@ -24,7 +24,7 @@
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
 
-use crate::{miss_kind, CorpusDoc, MissReason, RealSpecimenDoc};
+use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -169,6 +169,13 @@ pub struct ProviderReport {
     /// `NotApplicable` for a non-`capability.deterministic` provider — see
     /// [`Tier1HitRate`]'s doc for why.
     pub tier1_hit_rate: Tier1HitRate,
+    /// Of the *name-scorable* documents in `tier1_hit_rate`'s own scored
+    /// denominator (ground truth carries both `surname` and `given_names`),
+    /// what fraction were both a Tier-1 hit and read both names exactly —
+    /// see [`StrictNameHitRate`]'s doc for the exact denominator and why it
+    /// needs its own `Option`-shaped outcome rather than folding into
+    /// `tier1_hit_rate` itself.
+    pub strict_tier1_hit_rate: StrictNameHitRate,
 }
 
 /// What one provider did on one document. **Shape only, never content**:
@@ -223,6 +230,35 @@ pub struct DocumentDetail {
     pub assertions_unsupported: usize,
     /// Which fields were asserted but absent from the OCR text. Names only.
     pub unsupported_fields: Vec<&'static str>,
+    /// Whether this document's `surname` and `given_names` both matched
+    /// ground truth exactly (`crate::classify_names` returning `None`).
+    ///
+    /// `None` means "not name-scorable" — this document's ground truth is
+    /// missing `surname` and/or `given_names` entirely, so there is nothing
+    /// to compare against. `Some(_)` — including `Some(false)` — means
+    /// ground truth had both fields, so this document counts toward
+    /// [`StrictNameHitRate`]'s denominator regardless of whether the read
+    /// itself succeeded: a provider whose read *errored* on a name-scorable
+    /// document is `Some(false)` here (with `name_error: None`, since there
+    /// is no read to classify the shape of), not `None` — an error is not
+    /// the same fact as "nothing to measure". This is the one place
+    /// `names_exact.is_some()` alone tells you "name-scorable"; every other
+    /// reader of this field should ask that question, not re-derive it from
+    /// `read_ok`/`miss_reason`.
+    ///
+    /// See `crate::NameError`'s doc for why this is a reporting-only axis
+    /// distinct from `miss_reason`/the Tier-1 hit itself, and
+    /// `mrz_ground_truth`/`extraction_ground_truth` for why real-specimen
+    /// ground truth is scorable here at all (both are hand-transcribed from
+    /// the printed MRZ zone in ICAO/MRZ form, not the visual zone — see
+    /// `CORPUS_COVERAGE.md`'s 2026-09-08 note and
+    /// `knowledge/benchmarks/README.md`'s name-accuracy section).
+    pub names_exact: Option<bool>,
+    /// Which way the names diverged, as `crate::NameError::as_str()` — KIND
+    /// ONLY, per this struct's module doc: never the surname/given-names
+    /// values themselves. `None` both when `names_exact` is `Some(true)` and
+    /// when it is `None`.
+    pub name_error: Option<&'static str>,
     /// Wall-clock time of this document's OCR pass (`recognize_detailed`),
     /// carried through from preparation. The same for every reader, since OCR
     /// runs once per document and is shared. Recorded per document because a
@@ -391,6 +427,83 @@ const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — th
     asserts ICAO checksum validity, so a checksum-validated Tier-1 hit rate can't be computed for \
     it; its Evidence::mrz_checksums_valid defaulting to false would otherwise fabricate a rate of \
     exactly 0.0 regardless of actual accuracy";
+
+/// Whether [`ProviderReport::strict_tier1_hit_rate`] could be computed.
+///
+/// **Two related but differently-denominated numbers live here, and the
+/// benchmark maintenance contract (`knowledge/benchmarks/README.md`) is
+/// explicit that two similarly-named rates with different denominators is
+/// exactly the trap to avoid — so both are named for what they divide by,
+/// not just for what they count:**
+///
+/// - **`strict_tier1_hit_rate`** (this type's own name): `strict_hits /
+///   name_scorable_documents`. The denominator is every document in
+///   [`Tier1HitRate`]'s own scored population (i.e. excluding the same three
+///   off-denominator kinds `no_mrz_expected`/`redacted_mrz`/
+///   `checksum_failed_specimen` — see `run_prepped`'s `tier1_hit_rate`
+///   computation, which this reuses) that is *also* name-scorable
+///   (`DocumentDetail::names_exact` is `Some(_)`) — a document is counted
+///   here whether it ended up a hit, a miss, or an errored read, as long as
+///   its ground truth had both name fields. This is the rate that answers
+///   "of everything I could have checked a name on, how often did I get a
+///   correct, checksum-valid, name-matching read".
+/// - **[`StrictNameHitRate::Computed`]'s `names_exact_among_hits`**: `strict_hits /
+///   name_scorable_hits`, i.e. of the *Tier-1 hits* specifically that are
+///   also name-scorable, how many also read both names exactly. This is the
+///   number the CTC-collapse finding is stated in terms of (roughly half of
+///   every synthetic format's hits carry a wrong name) — it isolates the
+///   name-read question from detection accuracy, since a document that
+///   missed Tier-1 for an unrelated reason never enters this denominator.
+///
+/// No ICAO check digit covers `surname`/`given_names` in any format, so a
+/// Tier-1 hit proves nothing about them — see `crate::NameError`'s doc for
+/// the CTC-decoder cause this metric exists to track.
+///
+/// A third, honest "nothing to report" case sits alongside
+/// [`Tier1HitRate::NotApplicable`]'s reason: even for a deterministic
+/// provider, both rates need at least one name-scorable document in the
+/// scored population. An all-unlabelled real-specimen run — most of
+/// `samples/`, by construction — has zero such documents, and reporting
+/// `0.0` there would fabricate "every name wrong" out of "nothing was
+/// measured", the exact bug [`AccuracyStats`]'s `Option`s and
+/// [`AssertionBucket::rate`] both already exist to prevent.
+pub enum StrictNameHitRate {
+    /// `strict_hits`, `name_scorable_documents` and `name_scorable_hits` are
+    /// carried alongside both rates (rather than just the rates) so a caller
+    /// can always tell "high rate over a handful of documents" from "over
+    /// most of them" — see `AssertionBucket`'s identical reasoning for
+    /// carrying `documents` next to `rate`.
+    Computed {
+        /// Tier-1 hits whose read also matched both name fields exactly.
+        strict_hits: usize,
+        /// Documents in the scored Tier-1 population whose ground truth
+        /// carries both `surname` and `given_names` — `strict_tier1_hit_rate`'s
+        /// denominator.
+        name_scorable_documents: usize,
+        /// Of `name_scorable_documents`, the ones that were also a Tier-1
+        /// hit — `names_exact_among_hits`'s denominator.
+        name_scorable_hits: usize,
+        /// `strict_hits / name_scorable_documents`.
+        strict_tier1_hit_rate: f64,
+        /// `strict_hits / name_scorable_hits`. `0.0`, not fabricated,
+        /// exactly when `name_scorable_hits` is `0` (every name-scorable
+        /// document happened to miss Tier-1) — `name_scorable_documents`
+        /// being nonzero already proves this is a measured, not absent,
+        /// population, which is what keeps this `0.0` legitimate where
+        /// `NotApplicable` below is for a population that never existed.
+        names_exact_among_hits: f64,
+    },
+    /// Not computed. Either [`Tier1HitRate`] itself was `NotApplicable`
+    /// (same `reason`), or no document in the scored population had ground
+    /// truth for both name fields.
+    NotApplicable { reason: &'static str },
+}
+
+const NO_NAME_SCORABLE_DOCUMENTS_REASON: &str = "no document in this run's scored Tier-1 \
+    population had ground truth for both surname and given_names — most real specimens only \
+    carry a hand-verified document_number, so an all-unlabelled or partially-labelled run has \
+    nothing to compute a strict name hit rate over; reporting 0.0 here would fabricate \"every \
+    name wrong\" out of \"nothing measured\"";
 
 pub struct SpeedStats {
     pub mean: Duration,
@@ -786,6 +899,38 @@ fn is_supported(field: CoreField, value: &str, ocr_text_lower: &str) -> bool {
     false
 }
 
+/// Whether `ground_truth` carries both name fields — the "name-scorable"
+/// predicate [`StrictNameHitRate`]'s two denominators are built from.
+/// `DocumentDetail::names_exact.is_some()` is equivalent and usually more
+/// convenient once a `DocumentDetail` exists; this exists for the one call
+/// site (an errored read) that has to decide the answer before one does.
+fn has_name_ground_truth(ground_truth: Option<&HashMap<CoreField, String>>) -> bool {
+    ground_truth.is_some_and(|gt| {
+        gt.contains_key(&CoreField::Surname) && gt.contains_key(&CoreField::GivenNames)
+    })
+}
+
+/// Whether `miss_reason` sits inside [`Tier1HitRate`]'s scored population —
+/// the three off-denominator kinds (`no_mrz_expected`/`redacted_mrz`/
+/// `checksum_failed_specimen`) can never yield a Tier-1 hit however good the
+/// pipeline gets, so they are excluded the same way from *both*
+/// `tier1_hit_rate` and [`StrictNameHitRate`]'s denominators. One predicate
+/// so the two computations cannot silently diverge on what "scored" means —
+/// see `run_prepped`'s `tier1_hit_rate` computation, and this list's own
+/// "must stay identical to `RealSpecimenSnapshot`'s off-denominator set in
+/// `bin/provider-bench.rs`" note there.
+fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
+    !matches!(
+        miss_reason,
+        Some(MissReason::Redacted)
+            | Some(MissReason::NoMrzExpected)
+            | Some(MissReason::ChecksumFailed {
+                specimen_nonconforming: true,
+                ..
+            })
+    )
+}
+
 /// The shared reader loop both [`run_provider_bench`] and
 /// [`run_provider_bench_real`] funnel into — the one place accuracy and
 /// unsupported-assertion are computed, so the two corpus sources cannot
@@ -942,6 +1087,15 @@ async fn run_prepped(
                         assertions_total: 0,
                         assertions_unsupported: 0,
                         unsupported_fields: Vec::new(),
+                        // `Some(false)` when this document is name-scorable:
+                        // an error is not exact, and it is not the same fact
+                        // as "nothing to measure" — see
+                        // `DocumentDetail::names_exact`'s doc. There is no
+                        // read to classify the shape of, so `name_error`
+                        // stays `None` either way.
+                        names_exact: has_name_ground_truth(bench_page.ground_truth.as_ref())
+                            .then_some(false),
+                        name_error: None,
                         ocr_elapsed: bench_page.ocr_elapsed,
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
                         retry_budget_hit: bench_page.page.retry_budget_hit,
@@ -1223,6 +1377,37 @@ async fn run_prepped(
                 );
             }
 
+            // Scored only when ground truth carries both name fields — an
+            // absent field (most real specimens: only `document_number` is
+            // hand-verified on many) must read as "not scored", never as a
+            // fabricated miss. See `DocumentDetail::names_exact`'s doc.
+            let (names_exact, name_error) = match bench_page.ground_truth.as_ref().and_then(|gt| {
+                Some((
+                    gt.get(&CoreField::Surname)?,
+                    gt.get(&CoreField::GivenNames)?,
+                ))
+            }) {
+                Some((truth_surname, truth_given)) => {
+                    let got_surname = reading
+                        .extraction
+                        .fields
+                        .get(CoreField::Surname)
+                        .unwrap_or("");
+                    let got_given = reading
+                        .extraction
+                        .fields
+                        .get(CoreField::GivenNames)
+                        .unwrap_or("");
+                    let name_error =
+                        classify_names(truth_surname, truth_given, got_surname, got_given);
+                    (
+                        Some(name_error.is_none()),
+                        name_error.map(NameError::as_str),
+                    )
+                }
+                None => (None, None),
+            };
+
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
                 asset_id: bench_page.asset_id.clone(),
@@ -1234,6 +1419,8 @@ async fn run_prepped(
                 assertions_total: doc_assertions,
                 assertions_unsupported: doc_unsupported_fields.len(),
                 unsupported_fields: doc_unsupported_fields,
+                names_exact,
+                name_error,
                 ocr_elapsed: bench_page.ocr_elapsed,
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
                 retry_budget_hit: bench_page.page.retry_budget_hit,
@@ -1304,19 +1491,13 @@ async fn run_prepped(
             // off-denominator set in `bin/provider-bench.rs` — they are two
             // computations of the same number, and a divergence would put the
             // reported hit rate and the committed baseline quietly at odds.
+            // `in_scored_tier1_population` is also `StrictNameHitRate`'s own
+            // denominator's starting population, below — one predicate, so
+            // the two computations cannot silently diverge on what "scored"
+            // means.
             let scored = documents_detail
                 .iter()
-                .filter(|d| {
-                    !matches!(
-                        d.miss_reason,
-                        Some(MissReason::Redacted)
-                            | Some(MissReason::NoMrzExpected)
-                            | Some(MissReason::ChecksumFailed {
-                                specimen_nonconforming: true,
-                                ..
-                            })
-                    )
-                })
+                .filter(|d| in_scored_tier1_population(&d.miss_reason))
                 .count();
             let tier1_hits = documents_detail
                 .iter()
@@ -1327,6 +1508,56 @@ async fn run_prepped(
             } else {
                 tier1_hits as f64 / scored as f64
             })
+        };
+
+        let strict_name_hit_rate = match &tier1_hit_rate {
+            Tier1HitRate::NotApplicable { reason } => StrictNameHitRate::NotApplicable { reason },
+            Tier1HitRate::Computed(_) => {
+                // Name-scorable: in the scored Tier-1 population (see
+                // `in_scored_tier1_population`'s doc) *and* ground truth has
+                // both name fields (`names_exact.is_some()` — true whether
+                // the document ended up a hit, a miss, or an errored read;
+                // see `DocumentDetail::names_exact`'s doc). This is
+                // `strict_tier1_hit_rate`'s denominator.
+                let name_scorable: Vec<&DocumentDetail> = documents_detail
+                    .iter()
+                    .filter(|d| {
+                        in_scored_tier1_population(&d.miss_reason) && d.names_exact.is_some()
+                    })
+                    .collect();
+                let name_scorable_documents = name_scorable.len();
+                // Of those, the ones that were also a Tier-1 hit —
+                // `names_exact_among_hits`'s denominator.
+                let name_scorable_hits = name_scorable
+                    .iter()
+                    .filter(|d| d.miss_reason.is_none())
+                    .count();
+                let strict_hits = name_scorable
+                    .iter()
+                    .filter(|d| d.miss_reason.is_none() && d.names_exact == Some(true))
+                    .count();
+                if name_scorable_documents == 0 {
+                    StrictNameHitRate::NotApplicable {
+                        reason: NO_NAME_SCORABLE_DOCUMENTS_REASON,
+                    }
+                } else {
+                    StrictNameHitRate::Computed {
+                        strict_hits,
+                        name_scorable_documents,
+                        name_scorable_hits,
+                        strict_tier1_hit_rate: strict_hits as f64 / name_scorable_documents as f64,
+                        // `0.0`, not fabricated, when `name_scorable_hits` is
+                        // `0` — `name_scorable_documents` above being nonzero
+                        // already proves this is a measured population, not
+                        // an absent one.
+                        names_exact_among_hits: if name_scorable_hits == 0 {
+                            0.0
+                        } else {
+                            strict_hits as f64 / name_scorable_hits as f64
+                        },
+                    }
+                }
+            }
         };
 
         reports.push(ProviderReport {
@@ -1351,6 +1582,7 @@ async fn run_prepped(
             declared_resident_bytes: capability.estimated_resident_bytes,
             documents_detail,
             tier1_hit_rate,
+            strict_tier1_hit_rate: strict_name_hit_rate,
             measured_rss_delta_bytes: match (rss_before, rss_after) {
                 (Some(before), Some(after)) => Some(after as i64 - before as i64),
                 _ => None,
@@ -1447,11 +1679,30 @@ mod tests {
     struct FixedReader {
         capability: Capability,
         surname: &'static str,
+        /// Defaults to `""` (`Default for FixedReader`, below) for every test
+        /// that predates the name-accuracy metric and only ever cared about
+        /// `surname` — an empty string never contributes an assertion (see
+        /// `run_prepped`'s `!value.is_empty()` gate) and is never scored
+        /// against ground truth unless a test's `BenchPage::ground_truth`
+        /// actually carries `CoreField::GivenNames`, so those tests are
+        /// unaffected by this field's addition.
+        given_names: &'static str,
         /// The `Evidence` every `read` returns. `Evidence::default()` for most
         /// tests (nothing proven); a test that needs the provider to look like
         /// a successful deterministic read sets `mrz_found` /
         /// `mrz_checksums_valid` here.
         evidence: Evidence,
+    }
+
+    impl Default for FixedReader {
+        fn default() -> Self {
+            Self {
+                capability: Capability::deterministic_reader(),
+                surname: "",
+                given_names: "",
+                evidence: Evidence::default(),
+            }
+        }
     }
 
     #[async_trait::async_trait]
@@ -1477,6 +1728,7 @@ mod tests {
             // restriction.
             let mut extraction = ExtractionV2::default();
             extraction.fields.surname = Some(self.surname.to_string());
+            extraction.fields.given_names = Some(self.given_names.to_string());
             Ok(Reading {
                 extraction,
                 evidence: self.evidence.clone(),
@@ -1551,6 +1803,7 @@ mod tests {
         let reader = FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         };
         let ctx = DocumentContext::from_text("surname DOE date of birth 1990");
@@ -1564,6 +1817,7 @@ mod tests {
         let reader = FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH",
+            given_names: "",
             evidence: Evidence::default(),
         };
         let ctx = DocumentContext::from_text("surname DOE date of birth 1990");
@@ -1600,6 +1854,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1661,6 +1916,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1703,6 +1959,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH", // absent from the OCR text below
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1770,6 +2027,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1856,6 +2114,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "UNUSED",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1930,6 +2189,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -1993,6 +2253,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "ERIKSSON",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2092,6 +2353,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2148,6 +2410,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2193,6 +2456,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: hit_evidence,
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2249,6 +2513,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: hit_evidence,
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2318,6 +2583,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2369,6 +2635,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "DOE",
+            given_names: "",
             evidence,
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2429,6 +2696,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader().with_vision(true),
             surname: "SMITH", // absent from the OCR text — must not be penalized
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2475,6 +2743,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::deterministic_reader(),
             surname: "SMITH",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2527,6 +2796,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::model_reader(CostClass::Expensive),
             surname: "SMITH",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2575,6 +2845,7 @@ mod tests {
         let reader = std::sync::Arc::new(FixedReader {
             capability: Capability::model_reader(CostClass::Expensive),
             surname: "SMITH",
+            given_names: "",
             evidence: Evidence::default(),
         });
         let catalog = synthpass_die::ProviderCatalog::builder()
@@ -2601,5 +2872,207 @@ mod tests {
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
         assert_eq!(reports[0].documents_detail[0].ocr_elapsed, ocr_elapsed);
+    }
+
+    /// `strict_tier1_hit_rate`/`names_exact_among_hits` over five documents,
+    /// covering every population the two rates need to tell apart:
+    ///
+    /// 1. `exact-hit` — a Tier-1 hit, name-scorable, names read exactly.
+    /// 2. `wrong-name-hit` — a Tier-1 hit, name-scorable, names read wrong
+    ///    (`FixedReader` always answers `"JOHN"`, so the document whose
+    ///    truth is `"JANE"` is a hit with a wrong name — this is exactly the
+    ///    checksum-valid-but-wrong-name gap `NameError` exists to surface).
+    /// 3. `miss-with-name-truth` — no MRZ found, but still name-scorable: a
+    ///    miss must count toward `strict_tier1_hit_rate`'s denominator
+    ///    (`name_scorable_documents`) without counting toward
+    ///    `names_exact_among_hits`'s narrower one (`name_scorable_hits`) —
+    ///    the whole reason the two rates need different names, not just
+    ///    different numbers.
+    /// 4. `unlabelled-hit` — a Tier-1 hit with no ground truth for either
+    ///    name field at all: not name-scorable, excluded from both
+    ///    denominators.
+    /// 5. `off-denominator` — carries name ground truth but is
+    ///    `no_mrz_expected` (outside `tier1_hit_rate`'s own scored
+    ///    population): excluded from both denominators despite having a
+    ///    name truth to score against, proving `in_scored_tier1_population`
+    ///    gates `StrictNameHitRate` the same way it gates `tier1_hit_rate`.
+    ///
+    /// Expected: `name_scorable_documents` = 3 (docs 1-3), `name_scorable_hits`
+    /// = 2 (docs 1-2), `strict_hits` = 1 (doc 1) — `strict_tier1_hit_rate` =
+    /// 1/3, `names_exact_among_hits` = 1/2.
+    #[tokio::test]
+    async fn strict_tier1_hit_rate_and_names_exact_among_hits_use_different_denominators() {
+        let mut hit_evidence = Evidence::default();
+        hit_evidence.mrz_found = true;
+        hit_evidence.mrz_checksums_valid = true;
+
+        let mut exact_truth = HashMap::new();
+        exact_truth.insert(CoreField::Surname, "SMITH".to_string());
+        exact_truth.insert(CoreField::GivenNames, "JOHN".to_string());
+
+        let mut wrong_given_truth = HashMap::new();
+        wrong_given_truth.insert(CoreField::Surname, "SMITH".to_string());
+        wrong_given_truth.insert(CoreField::GivenNames, "JANE".to_string());
+
+        let mut miss_truth = HashMap::new();
+        miss_truth.insert(CoreField::Surname, "SMITH".to_string());
+        miss_truth.insert(CoreField::GivenNames, "JOHN".to_string());
+
+        let mut off_denominator_truth = HashMap::new();
+        off_denominator_truth.insert(CoreField::Surname, "SMITH".to_string());
+        off_denominator_truth.insert(CoreField::GivenNames, "JOHN".to_string());
+
+        let prepped = vec![
+            // 1: Tier-1 hit, names read exactly right.
+            Some(BenchPage {
+                name: "exact-hit".to_string(),
+                page: OcrPage::default(),
+                ground_truth: Some(exact_truth),
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("does-not-need-to-exist-for-this-test-1.png"),
+                mrz_found: true,
+                redacted: false,
+                mrz_expected: true,
+                printed_zone_nonconforming: false,
+                synthetic: false,
+                known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
+            }),
+            // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
+            // this document's true given names.
+            Some(BenchPage {
+                name: "wrong-name-hit".to_string(),
+                page: OcrPage::default(),
+                ground_truth: Some(wrong_given_truth),
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
+                mrz_found: true,
+                redacted: false,
+                mrz_expected: true,
+                printed_zone_nonconforming: false,
+                synthetic: false,
+                known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
+            }),
+            // 3: no MRZ found, but still labelled with a name truth —
+            // name-scorable, not a hit.
+            Some(BenchPage {
+                name: "miss-with-name-truth".to_string(),
+                page: OcrPage::default(),
+                ground_truth: Some(miss_truth),
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("does-not-need-to-exist-for-this-test-3.png"),
+                mrz_found: false,
+                redacted: false,
+                mrz_expected: true,
+                printed_zone_nonconforming: false,
+                synthetic: false,
+                known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
+            }),
+            // 4: a Tier-1 hit with no ground truth for either name field —
+            // not name-scorable.
+            Some(BenchPage {
+                name: "unlabelled-hit".to_string(),
+                page: OcrPage::default(),
+                ground_truth: None,
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("does-not-need-to-exist-for-this-test-4.png"),
+                mrz_found: true,
+                redacted: false,
+                mrz_expected: true,
+                printed_zone_nonconforming: false,
+                synthetic: false,
+                known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
+            }),
+            // 5: carries a name truth, but is outside `tier1_hit_rate`'s own
+            // scored population (`mrz_expected: false` and `mrz_found:
+            // false` together resolve to `NoMrzExpected`, not
+            // `FalsePositiveMrz` — see `run_prepped`'s `miss_reason`
+            // derivation).
+            Some(BenchPage {
+                name: "off-denominator".to_string(),
+                page: OcrPage::default(),
+                ground_truth: Some(off_denominator_truth),
+                ground_truth_mrz: None,
+                image_path: PathBuf::from("does-not-need-to-exist-for-this-test-5.png"),
+                mrz_found: false,
+                redacted: false,
+                mrz_expected: false,
+                printed_zone_nonconforming: false,
+                synthetic: false,
+                known_or_guessed_format: None,
+                ocr_elapsed: Duration::ZERO,
+            }),
+        ];
+        // `FixedReader` returns the same `hit_evidence` for every document
+        // regardless of which one it is asked about, but `miss_reason` is
+        // driven by each `BenchPage`'s own `mrz_found`/`mrz_expected`/
+        // `redacted` flags, not by `Evidence` alone (see `run_prepped`'s
+        // `miss_reason` derivation), so docs 3 and 5 are still correctly
+        // `NoMrzFound`/`NoMrzExpected` despite sharing this reader.
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "SMITH",
+            given_names: "JOHN",
+            evidence: hit_evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("no duplicate ids");
+
+        let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+        let detail = &reports[0].documents_detail;
+        assert_eq!(detail[0].miss_reason, None, "doc 1 is a Tier-1 hit");
+        assert_eq!(detail[0].names_exact, Some(true));
+        assert_eq!(detail[1].miss_reason, None, "doc 2 is a Tier-1 hit");
+        assert_eq!(detail[1].names_exact, Some(false));
+        assert_eq!(detail[1].name_error, Some(NameError::Other.as_str()));
+        assert!(detail[2].miss_reason.is_some(), "doc 3 is a genuine miss");
+        assert_eq!(
+            detail[2].names_exact,
+            Some(true),
+            "doc 3 is still name-scorable"
+        );
+        assert_eq!(
+            detail[3].names_exact, None,
+            "doc 4 has no name truth at all"
+        );
+        assert!(
+            matches!(detail[4].miss_reason, Some(MissReason::NoMrzExpected)),
+            "doc 5 must resolve to the off-denominator miss kind: {:?}",
+            detail[4].miss_reason
+        );
+
+        match reports[0].strict_tier1_hit_rate {
+            StrictNameHitRate::Computed {
+                strict_hits,
+                name_scorable_documents,
+                name_scorable_hits,
+                strict_tier1_hit_rate,
+                names_exact_among_hits,
+            } => {
+                assert_eq!(
+                    name_scorable_documents, 3,
+                    "docs 1-3 are name-scorable and in the scored population; \
+                     doc 4 has no name truth, doc 5 is off-denominator"
+                );
+                assert_eq!(
+                    name_scorable_hits, 2,
+                    "docs 1-2 are the name-scorable documents that are also Tier-1 hits"
+                );
+                assert_eq!(
+                    strict_hits, 1,
+                    "only doc 1 is a hit that also read both names exactly"
+                );
+                assert_eq!(strict_tier1_hit_rate, 1.0 / 3.0);
+                assert_eq!(names_exact_among_hits, 0.5);
+            }
+            StrictNameHitRate::NotApplicable { reason } => {
+                panic!("expected a computed strict name hit rate, got NotApplicable: {reason}")
+            }
+        }
     }
 }

@@ -80,8 +80,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport, Tier1HitRate,
-    UnsupportedAssertion,
+    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
+    StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::{
     generate_corpus, load_real_specimens, miss_kind, MissReason, ProfileChoice, SpecimenClass,
@@ -572,6 +572,17 @@ struct DocumentDetailReport {
     assertions_total: usize,
     assertions_unsupported: usize,
     unsupported_fields: Vec<&'static str>,
+    /// `synthpass_bench::provider_bench::DocumentDetail::names_exact`
+    /// passthrough — `null` when not scored (either name field is missing
+    /// from this document's ground truth, or the read errored), never a
+    /// fabricated `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    names_exact: Option<bool>,
+    /// `crate::NameError::as_str()` — KIND ONLY, same discipline as
+    /// `unsupported_fields` above. `null` both when `names_exact` is
+    /// `Some(true)` and when it is `null`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_error: Option<&'static str>,
     /// Wall-clock milliseconds of this document's OCR pass, the per-document
     /// cost a real-specimen run is made of. The provider-level `speed` block
     /// times `reader.read` alone, which for the deterministic `mrz` provider is
@@ -630,6 +641,54 @@ impl From<Tier1HitRate> for Tier1HitRateReport {
     }
 }
 
+/// Mirrors `synthpass_bench::provider_bench::StrictNameHitRate` for JSON, the
+/// same tagged shape as `Tier1HitRateReport` above and for the same reason:
+/// a bare number would look identical whether it was measured or skipped
+/// (no deterministic provider, or no document in the scored Tier-1
+/// population has ground truth for both name fields — see
+/// `StrictNameHitRate`'s doc).
+///
+/// Two rates, two denominators, two names — see `StrictNameHitRate`'s doc
+/// for why: `strict_tier1_hit_rate` divides by `name_scorable_documents`
+/// (every name-scorable document in the scored Tier-1 population, hit or
+/// not); `names_exact_among_hits` divides by `name_scorable_hits` (the
+/// narrower population that is *also* a Tier-1 hit).
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum StrictNameHitRateReport {
+    Computed {
+        strict_hits: usize,
+        name_scorable_documents: usize,
+        name_scorable_hits: usize,
+        strict_tier1_hit_rate: f64,
+        names_exact_among_hits: f64,
+    },
+    NotApplicable {
+        reason: &'static str,
+    },
+}
+
+impl From<StrictNameHitRate> for StrictNameHitRateReport {
+    fn from(s: StrictNameHitRate) -> Self {
+        match s {
+            StrictNameHitRate::Computed {
+                strict_hits,
+                name_scorable_documents,
+                name_scorable_hits,
+                strict_tier1_hit_rate,
+                names_exact_among_hits,
+            } => Self::Computed {
+                strict_hits,
+                name_scorable_documents,
+                name_scorable_hits,
+                strict_tier1_hit_rate,
+                names_exact_among_hits,
+            },
+            StrictNameHitRate::NotApplicable { reason } => Self::NotApplicable { reason },
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct SpeedReport {
     mean_ms: u128,
@@ -670,6 +729,10 @@ struct ProviderRow {
     /// `NotApplicable` for a non-`capability.deterministic` provider — see
     /// `Tier1HitRate`'s doc.
     tier1_hit_rate: Tier1HitRateReport,
+    /// Two name-accuracy rates over two different denominators — see
+    /// `synthpass_bench::provider_bench::StrictNameHitRate`'s doc for
+    /// `strict_tier1_hit_rate` vs `names_exact_among_hits`.
+    strict_tier1_hit_rate: StrictNameHitRateReport,
 }
 
 impl From<ProviderReport> for ProviderRow {
@@ -728,12 +791,15 @@ impl From<ProviderReport> for ProviderRow {
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
+                    names_exact: d.names_exact,
+                    name_error: d.name_error,
                     ocr_ms: d.ocr_elapsed.as_millis(),
                     retry_variant_id: d.retry_variant_id,
                     retry_budget_hit: d.retry_budget_hit,
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),
+            strict_tier1_hit_rate: r.strict_tier1_hit_rate.into(),
         }
     }
 }
@@ -1347,6 +1413,37 @@ async fn main() {
             r.accuracy.labelled_documents,
             r.speed.mean.as_millis(),
         );
+
+        // Two name-accuracy rates over two different denominators — no ICAO
+        // check digit covers `surname`/`given_names`, so `tier1_hit_rate`
+        // alone says nothing about them. See
+        // `synthpass_bench::provider_bench::StrictNameHitRate`'s doc for
+        // exactly what each divides by and the "not computed" reasons this
+        // can print.
+        match &r.strict_tier1_hit_rate {
+            StrictNameHitRate::Computed {
+                strict_hits,
+                name_scorable_documents,
+                name_scorable_hits,
+                strict_tier1_hit_rate,
+                names_exact_among_hits,
+            } => {
+                println!(
+                    "    strict Tier-1 hit rate: {:.1}% ({strict_hits}/{name_scorable_documents} \
+                     name-scorable documents in the scored Tier-1 population are both a hit and \
+                     read exactly)",
+                    strict_tier1_hit_rate * 100.0
+                );
+                println!(
+                    "    names exact among hits: {:.1}% ({strict_hits}/{name_scorable_hits} \
+                     name-scorable Tier-1 hits read both names exactly)",
+                    names_exact_among_hits * 100.0
+                );
+            }
+            StrictNameHitRate::NotApplicable { reason } => {
+                println!("    strict Tier-1 hit rate: n/a ({reason})");
+            }
+        }
 
         // Where the time actually went. `mean` above times `reader.read` alone,
         // microseconds for the deterministic provider, while the OCR pass each
