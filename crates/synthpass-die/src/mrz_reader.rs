@@ -34,6 +34,16 @@ pub const MRZ_PROVIDER_ID: ProviderId = ProviderId("mrz");
 ///
 /// Zero configuration and zero state: the whole provider is a pure function of
 /// the text it is given, which is what `deterministic: true` promises.
+///
+/// Reads all five ICAO 9303 MRZ formats — TD1, TD2, TD3, MRV-A and MRV-B — as
+/// one provider. Which format a text holds is decided inside
+/// [`mrz::find_and_parse`], in the fixed priority order ARCHITECTURE.md §13.3
+/// records (TD3 → MRV-B → MRV-A → TD1 → TD2), and reported per read in
+/// [`Evidence::mrz_format`]. It is deliberately not five providers: splitting
+/// would move that ordering out of the parser and into catalog insertion
+/// order. [`Capability`] carries no format list because nothing routes on one;
+/// add it when a second MRZ-capable provider exists and routing must choose
+/// between them.
 #[derive(Debug, Clone)]
 pub struct MrzReader {
     capability: Capability,
@@ -508,5 +518,46 @@ mod tests {
         assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
         assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
         assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+    }
+
+    /// M6's "TD1/TD2/MRVA/MRVB as providers" criterion, proven against the
+    /// catalog rather than against `MrzReader` directly: this is not "the
+    /// parser handles five formats" (the specimen tests above already prove
+    /// that) but "the one *registered provider*, looked up the exact way
+    /// `synthpass-pipeline`'s `ocr_and_tier1` looks it up
+    /// (`find_reader(CostClass::Free, |c| c.deterministic)`),
+    /// reads all five ICAO 9303 formats." A catalog holding only `MrzReader`
+    /// is the whole point: no second provider exists to register per format,
+    /// which is the ADR-0011 amendment's argument made executable.
+    #[test]
+    fn all_five_formats_read_through_the_provider_catalog() {
+        let catalog = crate::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(MrzReader::new()))
+            .build()
+            .expect("MrzReader is the only registered id");
+
+        let reader = catalog
+            .find_reader(CostClass::Free, |c| c.deterministic)
+            .expect("the deterministic MRZ provider is always registered");
+
+        for (text, expected_format) in [
+            (SPECIMEN, MrzFormat::Td3),
+            (TD1_SPECIMEN, MrzFormat::Td1),
+            (TD2_SPECIMEN, MrzFormat::Td2),
+            (MRV_A_SPECIMEN, MrzFormat::MrvA),
+            (MRV_B_SPECIMEN, MrzFormat::MrvB),
+        ] {
+            let reading = block_on(reader.read(&DocumentContext::from_text(text)))
+                .expect("the MRZ reader never returns Err");
+            assert!(
+                reading.evidence.mrz_checksums_valid,
+                "{expected_format:?} specimen must validate through the catalog lookup"
+            );
+            assert_eq!(
+                reading.evidence.mrz_format,
+                Some(expected_format),
+                "catalog-routed read must report the same format as a direct read"
+            );
+        }
     }
 }

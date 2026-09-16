@@ -297,7 +297,12 @@ pub enum CostClass {
 /// What a provider declares it can do.
 ///
 /// `#[non_exhaustive]` with `Default`, so adding a capability later is additive
-/// for out-of-tree providers: they construct with `..Capability::default()`.
+/// for out-of-tree providers: `Capability` cannot be struct-literalled outside
+/// this crate (that is what `#[non_exhaustive]` forbids), so a provider
+/// constructs one of [`Capability::deterministic_reader`],
+/// [`Capability::model_reader`] or [`Capability::recognizer`] and adjusts it
+/// with the `with_*` builders below, exactly as the [`FieldReader`] doc-test's
+/// `BarcodeReader` does.
 ///
 /// Deliberately a struct rather than bitflags — half these are not booleans
 /// (`max_context`, `estimated_resident_bytes`, `weights_license`), and

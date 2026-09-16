@@ -1,6 +1,6 @@
 # ADR-0011 — Split M6: the deterministic core keeps the number, packaging becomes M8
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-09-16)
 **Date:** 2026-09-13
 
 ## Context
@@ -211,3 +211,37 @@ is the one `ADR-0006` reserved for this.
 - `ADR-0002` and `ADR-0006` both acquire a forward link and a partially revised conclusion. The
   record shows a decision made, tested against evidence, and changed — which is what this directory
   is for, but it does mean three ADRs must be read together to reconstruct M6's shape.
+
+## Amendment (2026-09-16)
+
+The Decision's third M6 criterion — *"Each of TD1 / TD2 / MRVA / MRVB reads through a
+registered `synthpass-die` provider against the M7 contract, with its per-format rate
+published in `benchmarks/README.md`"* — is met by **one** provider, not four.
+
+`MrzReader` (provider id `mrz`) already reads all five ICAO 9303 formats: it calls
+`mrz::find_and_parse`, which tries them in the fixed order `ARCHITECTURE.md` §13.3 records
+(TD3 → MRV-B → MRV-A → TD1 → TD2) to avoid cross-format cannibalization, and it reports the
+format it read in `Evidence::mrz_format`. `ROADMAP.md` described that provider as TD3-only,
+which the code does not bear out. What the criterion was actually missing is measurement: the
+published per-format synthetic rates came from `synthpass-bench`, which calls
+`mrz::find_and_parse` directly and never touches the catalog.
+
+The criterion therefore reads: *each of TD1/TD2/MRVA/MRVB reads through the registered
+deterministic MRZ provider, with its per-format synthetic rate measured through that provider
+(`provider-bench --mrz-only --document-type <format>`) and published in
+`benchmarks/README.md`.* Before the published row changes source, both harnesses are run once
+on identical seeds and the comparison is recorded in `knowledge/benchmarks/`, so a changed
+figure is never also a silently changed method. `synthpass-bench` and its `--min-hit-rate`
+gate are unchanged.
+
+**Rejected: one registered provider per format** (`mrz-td1` … `mrz-mrvb`, each wrapping the
+same parser). Each wrapper would either run the full five-format search and discard the
+others — five parses per document, with catalog insertion order silently becoming the
+cross-format tiebreak §13.3 keeps inside the parser — or require per-format entry points in
+the published `mrz` crate, which M7 declined to add. It would also replace the single `mrz`
+identity that the Tier-1 routing, the real-specimen baseline gate and the benchmark history
+all key on. `ADR-0002`'s concern was formats arriving as branches in the pipeline; none do.
+
+**Rejected for now: a `formats` field on `Capability`.** Nothing would read it — the router
+cannot select by format before a read, and the benchmark does not snapshot it. It becomes
+worth adding when a second MRZ-capable provider exists and routing must choose between them.
