@@ -396,9 +396,11 @@ fn no_image_is_recorded_twice_under_two_names() {
             .or_default()
             .push(row["filename"].as_str().unwrap_or_default());
     }
-    for names in by_sha.values().filter(|n| n.len() > 1) {
-        panic!("{names:?}: the same image (identical sha256) is recorded under multiple names, so every walk reads it twice. Keep one of them.");
-    }
+    let dups: Vec<_> = by_sha.values().filter(|paths| paths.len() > 1).collect();
+    assert!(
+        dups.is_empty(),
+        "duplicate benchmark image SHA groups found: {dups:?}"
+    );
 }
 
 #[test]

@@ -31,8 +31,9 @@ fn require_models() -> (PathBuf, PathBuf) {
 /// Locates `name` anywhere under `samples/`, or `None` when it is absent.
 ///
 /// `None` is the ordinary case in CI and in a fresh clone, not an error: only
-/// four fixture images under `samples/ocr_fixtures/` are tracked in git. The
-/// rest of the corpus lives on the orphan `samples-data` branch and arrives via
+/// a small set of fixture-derived passport images under `samples/passports/`
+/// is tracked in git. The rest of the corpus lives on the orphan
+/// `samples-data` branch and arrives via `scripts/sync-samples.ps1`. A test that needs one of those must **skip**
 /// `scripts/sync-samples.ps1`. A test that needs one of those must **skip**
 /// rather than fail, or it reports "the corpus is missing" as "orientation
 /// recovery is broken".

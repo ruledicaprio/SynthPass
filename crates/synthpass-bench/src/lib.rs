@@ -691,12 +691,12 @@ pub struct OptInTracks {
 ///
 /// Callers pass `repo_root().join("samples")` — the same directory every
 /// other real-corpus harness in this workspace reads from
-/// (`crates/synthpass-ocr/examples/mrz_corpus.rs`). `samples/ocr_fixtures/`
-/// itself holds specimen images too (the ones someone has hand-labelled),
-/// and those are included in the walk like any other image under
-/// `samples_root` — there is no separate code path for them, and no
-/// specimen appears twice (`samples/ocr_fixtures/`'s images are not
-/// duplicated anywhere else in the tree).
+/// (`crates/synthpass-ocr/examples/mrz_corpus.rs`).
+/// The `samples/ocr_fixtures/` directory holds JSON/Markdown ground-truth
+/// files for hand-labelled specimens, while tracked clean-checkout image
+/// exceptions live under `samples/passports/`. Those passport images are
+/// included in the walk like any other image under `samples_root`; fixture
+/// metadata does not add another image path.
 ///
 /// `tracks` selects which opt-in tracks join the walk. The default adds none,
 /// and that default is what CI and the committed baseline measure.
@@ -1574,8 +1574,8 @@ mod tests {
 
     /// Written to a temp tree rather than `samples/`, so this doesn't depend
     /// on any specific file surviving in the real (gitignored, local-mirror-
-    /// only) bulk corpus — only `samples/ocr_fixtures/` is tracked, and nothing
-    /// there is deliberately unlabelled.
+    /// only) bulk corpus — reviewed JSON/Markdown under `samples/ocr_fixtures/`
+    /// is tracked, and no fixture metadata is deliberately unlabelled.
     #[test]
     fn specimen_loader_reports_no_labels_when_absent() {
         let root = std::env::temp_dir().join(format!(
@@ -1629,8 +1629,9 @@ mod tests {
     /// behind `--ignored`, not the default `cargo test` loop.
     ///
     /// Written to a temp tree rather than the real `samples/`: only
-    /// `samples/ocr_fixtures/` is tracked in git, and every image there is
-    /// hand-labelled by construction, so a fresh checkout with no local
+    /// the reviewed JSON/Markdown under `samples/ocr_fixtures/` is tracked in git,
+    /// while the clean-checkout image exceptions are under `samples/passports/`.
+    /// A fresh checkout with no local
     /// mirror of the gitignored bulk corpus has no unlabelled specimen at
     /// all — this test's "covers unlabelled" half must not depend on that.
     #[test]
