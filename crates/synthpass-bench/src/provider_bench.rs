@@ -2925,6 +2925,7 @@ mod tests {
         let prepped = vec![
             // 1: Tier-1 hit, names read exactly right.
             Some(BenchPage {
+                asset_id: None,
                 name: "exact-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(exact_truth),
@@ -2941,6 +2942,7 @@ mod tests {
             // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
             // this document's true given names.
             Some(BenchPage {
+                asset_id: None,
                 name: "wrong-name-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(wrong_given_truth),
@@ -2957,6 +2959,7 @@ mod tests {
             // 3: no MRZ found, but still labelled with a name truth —
             // name-scorable, not a hit.
             Some(BenchPage {
+                asset_id: None,
                 name: "miss-with-name-truth".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(miss_truth),
@@ -2973,6 +2976,7 @@ mod tests {
             // 4: a Tier-1 hit with no ground truth for either name field —
             // not name-scorable.
             Some(BenchPage {
+                asset_id: None,
                 name: "unlabelled-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: None,
@@ -2992,6 +2996,7 @@ mod tests {
             // `FalsePositiveMrz` — see `run_prepped`'s `miss_reason`
             // derivation).
             Some(BenchPage {
+                asset_id: None,
                 name: "off-denominator".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(off_denominator_truth),
