@@ -1628,12 +1628,11 @@ mod tests {
     /// image with the `image` crate — real disk-and-CPU cost that belongs
     /// behind `--ignored`, not the default `cargo test` loop.
     ///
-    /// Written to a temp tree rather than the real `samples/`: only
-    /// the reviewed JSON/Markdown under `samples/ocr_fixtures/` is tracked in git,
-    /// while the clean-checkout image exceptions are under `samples/passports/`.
-    /// A fresh checkout with no local
-    /// mirror of the gitignored bulk corpus has no unlabelled specimen at
-    /// all — this test's "covers unlabelled" half must not depend on that.
+    /// Written to a temp tree rather than the real `samples/`: the reviewed
+    /// JSON/Markdown under `samples/ocr_fixtures/` is tracked in git, while the
+    /// clean-checkout image exceptions are under `samples/passports/`. The test
+    /// constructs labelled and unlabelled cases in the temp tree, so it does not
+    /// depend on whether a fresh checkout contains an unlabelled specimen.
     #[test]
     fn find_image_files_is_deterministic_and_covers_labelled_and_unlabelled_specimens() {
         let root = std::env::temp_dir().join(format!(
