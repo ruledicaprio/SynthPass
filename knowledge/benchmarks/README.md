@@ -1061,3 +1061,26 @@ row in this file remains a frozen 2026-09-09 measurement over 160 specimens and 
 `no_mrz_found` 4 → 3) is now three cohorts old, so ADR-0008's detection metric still reads 4
 against a true 3; the three c03/c07/c09 `checksum_failed` books still have no hand-transcribed
 `samples/ocr_fixtures/` zone.
+
+### 2026-09-16 — no image in the default walk is cover-like, and OCR volume cannot find one
+
+The plan's cover-like detector (T15) was run as an analyst report before anything moved: every
+`no_mrz_expected` document of the default walk (51 of 266) was OCR'd for text volume from the exact
+`samples-data` bytes behind the committed baseline, and the two most recent CI gate reports agree on
+all 266 `miss_reason` values. The 22 images below the Kenya control's text volume (501 characters, a
+redacted bio spread that must not be listed) were opened one by one: all are data faces — ID-card
+fronts and backs, passport bio-data pages — and the two lowest-text images are a driving-licence
+category table and a Swiss ID card face, both small scans of dense documents. Text volume ranks how
+legible a scan is, not what the document is. **Relocation candidates: 0.** Both denominators are
+unchanged: 145 / 159 = 91.2% scored, 145 / 266 = 54.5% corpus-wide. The label, not a detector, stays
+the class boundary (ADR-0012).
+
+Two things surfaced on the way. `United_Arab_Emirates_Passport_Specimen_P0_ARE_2018_no_mrz.png` and
+`Vietnam_Passport_Specimen_P0_VNM_2022_no_mrz.jpg` do carry a zone (barred out and blurred
+respectively), so their `_no_mrz` token is wrong: a checksum-valid read on the Vietnam page would
+land in `false_positive_mrz` and fail the build, where `_redacted_mrz` would absorb it. The rename
+is owed (`no_mrz_expected` 51 → 49, `redacted_mrz` 37 → 39, scored rate untouched). And three
+specimens sit in the walk twice in two formats (Azerbaijan 2013, China 2012, Türkiye ID 2020), two
+of them HIT twice, so de-duplicated the scored rate reads 143 / 157 = 91.1%; any per-document join
+on `documents_detail` must not key by name. Full method, table and the control case:
+[`cover-like-detector-2026-09-16.md`](cover-like-detector-2026-09-16.md).
