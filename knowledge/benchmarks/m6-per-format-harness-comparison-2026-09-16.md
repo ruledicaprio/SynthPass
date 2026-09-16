@@ -73,8 +73,17 @@ source "`synthpass-bench`, v1.4.0 cycle" (written in #248, 2026-09-09).
 ## What the row carries after the source switch
 
     Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) |
-    377 / 500 = 75.4% — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% |
-    `provider-bench --mrz-only --document-type <fmt>`, 2026-09-16 (`c617254`); matches CI 2026-09-14
+    377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) |
+    Observed in CI: bench-charts.yml run 34831258506, 2026-09-14, MAIN 9c8f03d (synthpass-bench);
+    re-observed locally through provider-bench --mrz-only at MAIN c617254, identical per seed
+
+**Evidence labels** (per the benchmark maintenance contract): the per-format counts are
+**Observed** twice — in CI (`bench-charts.yml` run 34831258506, `synthpass-bench`) and in this
+local run through both harnesses; the pooled 377 / 500 is **Derived**; the attribution of the
+09-07 → 09-14 movement to ADR-0008 chunk 2 is **Hypothesized**. The corpus is generated from the
+seed, so there is no `samples-data` revision to pin. CI does not yet observe the provider path
+itself: moving `bench-charts.yml`'s synthetic tracks to `provider-bench --mrz-only` is the
+follow-up that would, and it would mark the change in each row's `invocation`.
 
 Unlike the real-specimen rows, this row is written by hand. The weekly `bench-data` rows are the
 closest thing it has to a CI source, and they agree with it today.

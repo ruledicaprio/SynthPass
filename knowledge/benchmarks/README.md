@@ -24,7 +24,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | --- | --- | --- |
 | **Tier-1 hit rate, real specimens** | **140 / 154 = 90.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-16) |
 | Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
-| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% | `provider-bench --mrz-only --document-type <fmt>` through the registered `mrz` provider, 2026-09-16 (`c617254`); matches CI 2026-09-14 — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
+| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
@@ -1113,8 +1113,9 @@ on `documents_detail` must not key by name. Full method, table and the control c
 
 Before the per-format synthetic rates changed source to the provider path (M6, `ADR-0011`'s
 amendment), both harnesses were run on the same inputs: five formats × 100 documents, seed 0,
-profile `clean`, `c617254`. Same hit count and same per-seed outcome in every format, 377 / 500 =
-75.4%, matching the CI rows of 2026-09-14. The published synthetic row it replaced was stale on
+profile `clean`, MAIN `c617254`, run locally. **Observed:** same hit count and same per-seed outcome
+in every format, and the same per-format counts as CI (`bench-charts.yml` run 34831258506, MAIN
+`9c8f03d`); **Derived:** 377 / 500 = 75.4% pooled. The published synthetic row it replaced was stale on
 three counts: TD3/TD2/TD1 were the 2026-08-31 values, MRV-A 87% and MRV-B 93% were 30-document
 figures in a column labelled 100-seed, and its "~55%" aggregate matched no run. Full table:
 [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md).
