@@ -25,7 +25,8 @@ consistency), not merely that individual characters parsed. See
 ## Why this exists
 
 SynthPass's product is the deterministic Tier-1 MRZ core; Tier-2 LLM inference is
-the enterprise add-on for the residual ~1%, not the thing being sold. Real-specimen
+the enterprise add-on for the residual — Hypothesized at ~1% when this was written;
+today's scored miss share is 14/154 (see [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers)) — not the thing being sold. Real-specimen
 benchmarking (`knowledge/benchmarks/README.md`, 2026-08-16 run) showed, *at the time this
 track opened*, `checksum_failed` (66) as the **largest** miss category — ahead of
 `no_mrz_found` (51). In other words: the MRZ was *found* but didn't fully validate more often

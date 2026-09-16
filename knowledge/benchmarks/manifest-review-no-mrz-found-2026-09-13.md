@@ -1,5 +1,8 @@
 # Two of the seven `no_mrz_found` documents have no ICAO zone to find
 
+**Superseded by:** the live headline in
+[`README.md#current-headline-numbers`](README.md#current-headline-numbers).
+
 **2026-09-13.** The manifest review
 [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md) asked for, before its four
 unattributed detection failures count as ADR-0008 targets. Read-only on the corpus; no

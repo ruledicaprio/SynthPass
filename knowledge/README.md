@@ -63,7 +63,9 @@ the constraints and the direction before you open a source file:
   workspace release line.
 - **[WEB_OCR_BASELINE.md](WEB_OCR_BASELINE.md)** — the browser OCR stack
   (tesseract.js + an OCR-B model) and its dated measurement log. It is a separate
-  stack from the native `ocrs`/`rten` pipeline, and currently out-reads it.
+  stack from the native `ocrs`/`rten` pipeline, and out-read it as of the
+  2026-09-09 re-measurement (80.0% vs 74.4%,
+  [`benchmarks/ocr-stack-gap-2026-09-09.md`](benchmarks/ocr-stack-gap-2026-09-09.md)).
 - **[VIZ_TIER2_DESIGN.md](VIZ_TIER2_DESIGN.md)** — the VIZ → Tier-2 design and its
   ordered plan; §2.1 measured and refuted, §5.3's holdout mode shipped, the rest open.
 - **[MRZ_SEQUENCE_COMPLETENESS.md](MRZ_SEQUENCE_COMPLETENESS.md)** — **closed record.**

@@ -29,10 +29,11 @@ They live in `crates/synthpass-llm/prompts/` and are compiled in with
   fixtures scored on all nine prompt fields, and 54 generated ones scored only on
   the fields an ICAO check digit proves (see
   `crates/synthpass-bench/examples/ground_truth_candidates.rs` for why that
-  distinction is load-bearing). Baseline at PROMPT_VERSION 2 with
-  `qwen2.5-1.5b-instruct-q4_k_m`: reviewed **43/162 (26.5%)**, derived **47/162
-  (29.0%)**, repair fallbacks **0**. Full per-field figures in
-  `knowledge/ROADMAP.md`.
+  distinction is load-bearing). Current, with `qwen2.5-1.5b-instruct-q4_k_m` and
+  the deterministic normalizers folded in: reviewed **95/162 (58.6%)**, derived
+  **85/162 (52.5%)**, **55.6% overall**. Full per-field figures and the version
+  history are in `crates/synthpass-llm/tests/parity.rs`'s module doc and
+  [`knowledge/benchmarks/README.md`](../benchmarks/README.md#current-headline-numbers).
 
   Note when comparing against anything recorded before that date: the fixtures
   themselves changed. The `.md` inputs came from `docling` (retired in v0.7.5) and

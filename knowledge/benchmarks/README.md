@@ -170,7 +170,7 @@ with the reason. Without that note, someone re-proposes it every year.
 
 When a sweep produces a constant, the constant's doc comment names this file and
 the invocation. See `MRZ_BAND_CONFIDENT_SCORE` in
-`crates/synthpass-ocr/src/geometry.rs` for the pattern.
+`crates/synthpass-imageprep/src/geometry.rs` for the pattern.
 
 ## The local bench loop (tracks)
 
@@ -1165,5 +1165,18 @@ profile `clean`, MAIN `c617254`, run locally. **Observed:** same hit count and s
 in every format, and the same per-format counts as CI (`bench-charts.yml` run 34831258506, MAIN
 `9c8f03d`); **Derived:** 377 / 500 = 75.4% pooled. The published synthetic row it replaced was stale on
 three counts: TD3/TD2/TD1 were the 2026-08-31 values, MRV-A 87% and MRV-B 93% were 30-document
-figures in a column labelled 100-seed, and its "~55%" aggregate matched no run. Full table:
+figures in a column labelled 100-seed, and its M4-era "~55%" aggregate matched no run. Full table:
 [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md).
+
+### 2026-09-16 — duplicate-byte migration re-bless: five duplicate assets removed
+
+Five duplicate-byte pairs identified in
+[`duplicate-byte-migration.md`](duplicate-byte-migration.md) were reconciled to one canonical path
+each, and CI re-blessed the result: `real-specimen-gate.yml` dispatched with `mode=write-baseline`,
+run `35120396453`, `measured_on_ci_sha` `2f14e00`. **Observed**, and matching the counterfactual
+arithmetic worked out before the run: `documents` 266 → **261**, `scored` 159 → **154**,
+`tier1_hits` 145 → **140** (140 / 154 = 90.9% scored, 140 / 261 = 53.6% corpus-wide, both rates
+unchanged from before the migration), `no_mrz_expected` 51 → **49**, `redacted_mrz` 37 → **39**
+(the `no_mrz_expected` → `redacted_mrz` rename from the 2026-09-16 cover-like-detector entry above,
+folded into the same re-bless), `checksum_failed`, `checksum_failed_specimen` and `no_mrz_found`
+unchanged. No code, threshold or model moved — this is corpus bookkeeping, not an accuracy result.

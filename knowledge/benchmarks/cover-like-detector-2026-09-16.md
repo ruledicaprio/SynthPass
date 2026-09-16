@@ -1,5 +1,8 @@
 # No image in the default real-specimen walk is cover-like
 
+**Superseded by:** the live headline in
+[`README.md#current-headline-numbers`](README.md#current-headline-numbers).
+
 **2026-09-16.** Task T15 of the specimen-acquisition loop, asked before any file is moved:
 which images in the default `provider-bench --real-specimens` walk (`samples/passports`,
 `id_cards`, `driving_licenses`, `misc` — not `samples/covers`, `local` or `private`) are

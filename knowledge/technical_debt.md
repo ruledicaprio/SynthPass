@@ -176,7 +176,9 @@ not run the LLM.
 entry.** `parity` is no longer six documents — it is 72, and it reports a
 per-field breakdown plus separate rates for hand-verified and generated fixtures
 (`crates/synthpass-bench/examples/ground_truth_candidates.rs`,
-`knowledge/ROADMAP.md` for the baseline). So the "16/42 either way" check that
+`crates/synthpass-llm/tests/parity.rs`'s module doc and
+[`knowledge/benchmarks/README.md`](benchmarks/README.md#current-headline-numbers) for the current
+baseline). So the "16/42 either way" check that
 cleared the 0.1.151 → 0.1.154 bump would now be a 162-field measurement with
 visible per-field movement, which is the difference between a number that can
 detect a regression and one that cannot. What has *not* changed is the part this

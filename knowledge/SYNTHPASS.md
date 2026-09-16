@@ -122,15 +122,16 @@ cargo run -p synthpass-bench --release --bin synthpass-bench -- \
 right after the existing native-OCR smoke test steps, reusing the `.rten` models already
 downloaded earlier in the job.
 
-**Why 30% and not the measured ~55%:** the CI runner is a different machine than the one the
+**Why 30% and not the M4-era measured ~55%:** the CI runner is a different machine than the one the
 number was measured on, and OCR inference involves floating-point computation whose exact results
 can vary slightly across CPUs/architectures — a borderline image's pass/fail could flip on that
 variance even though the aggregate rate stays close. 30% is a deliberate floor with real margin
 below the honestly-measured number, so the gate catches genuine regressions (a rendering bug, a
 broken OCR integration) without being flaky. It was verified passing on GitHub's own Linux runner
-before being merged.
+before being merged. The current per-format synthetic rate is in
+[`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers).
 
-**Why the measured number is ~55%, not the roadmap's original 95% target:** see
+**Why the M4-era measured number was ~55%, not the roadmap's original 95% target:** see
 [`knowledge/ROADMAP.md`](ROADMAP.md)'s M4 row and
 [`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md) for the full account — in short, a
 real MRZ glyph-rendering bug in `synthpass-gen` was found and fixed (misaligned character cells,

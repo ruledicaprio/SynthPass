@@ -7,3 +7,9 @@ The four reviewed fixture images moved to their canonical passport paths and the
 The exact byte hashes and path operations are immutable in `duplicate-byte-migration.json`. The corresponding samples-data operation is commit `469a4ee7723148917cf023f1a7ab2af80a0ef7d3`.
 
 Counterfactual arithmetic, not a measured result: 261 candidate assets, 154 scored, 140 HIT, 140/154 (90.9%) and 140/261 corpus-wide (53.6%), assuming retained rows reproduce their former outcomes.
+
+**CI then measured it (Observed).** `real-specimen-gate.yml` dispatched with `mode=write-baseline`,
+run `35120396453`, on commit `2f14e00`, 2026-09-16: the counterfactual arithmetic above matched the
+CI run exactly, and the result is the committed
+[`real-specimen-mrz-baseline.json`](real-specimen-mrz-baseline.json) — `documents` 261, `scored`
+154, `tier1_hits` 140.

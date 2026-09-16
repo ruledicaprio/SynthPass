@@ -93,6 +93,18 @@ jobs:
       - name: Clippy (workspace, all targets)
         run: cargo clippy --workspace --all-targets
 
+      # A broken `[`Item`]` intra-doc link renders as dead prose on docs.rs and
+      # nothing else in this job would notice — clippy and the compiler are both
+      # silent about it, the same gap the `docs` job below closed for `mrz`
+      # alone. Only `broken_intra_doc_links` is promoted to fatal here (not
+      # `private_intra_doc_links`, which every crate in this workspace trips
+      # routinely on non-`pub` items linked from doc comments describing
+      # internal design).
+      - name: Rustdoc — broken intra-doc links are fatal (workspace)
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+        run: cargo doc --workspace --no-deps
+
       - name: Test (workspace)
         run: cargo test --workspace
 
@@ -180,8 +192,9 @@ jobs:
       # M4 regression gate: measures the Tier-1 (checksum-valid MRZ) hit rate
       # over a fixed, deterministic synthetic corpus and fails the build if it
       # drops meaningfully below the honestly-measured floor. 30% is set well
-      # under the ~55% measured locally over a 100-seed sample (see
-      # knowledge/ROADMAP.md and PR #30) — the margin absorbs cross-platform
+      # under the M4-era ~55% measured locally over a 100-seed sample (see
+      # knowledge/ROADMAP.md and PR #30; current per-format rate is in
+      # knowledge/benchmarks/README.md) — the margin absorbs cross-platform
       # floating-point variance in OCR inference between this runner and the
       # machine the number was measured on, so the gate catches real
       # regressions without being flaky. A 50-seed corpus keeps this step's

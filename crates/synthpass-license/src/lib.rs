@@ -1,10 +1,11 @@
-//! Offline cryptographic licensing: Ed25519-signed license files so a
-//! shipped `synthpass`/`synthpass-serve` binary can be sold and metered for air-gapped
-//! enterprise distribution without ever phoning home.
+//! Offline cryptographic licensing: Ed25519-signed license files that record
+//! what an official `synthpass`/`synthpass-serve` build is entitled to, for
+//! air-gapped deployments, without ever phoning home. This is capacity metering
+//! and entitlement, not a feature gate (`knowledge/BRANDING.md` §5).
 //!
 //! **Threat model, stated plainly (matches this project's house style of
 //! documenting limitations rather than overselling — see
-//! `knowledge/ARCHITECTURE.md` §7):** the source is public, so anyone who
+//! `knowledge/ARCHITECTURE.md` §6):** the source is public, so anyone who
 //! rebuilds from source can strip this check entirely. This meters and gates
 //! the *official pre-built binary*, deters casual license-sharing, and
 //! produces a compliance artifact — it is **not DRM** and is not sold as
@@ -65,9 +66,10 @@ pub enum Tier {
 }
 
 impl Tier {
-    /// The feature set an issuer stamps for this tier. Mirrors the tier table
-    /// in `knowledge/BRANDING.md` §5: Professional adds capacity knobs, Enterprise
-    /// adds reporting on top.
+    /// The feature set an issuer stamps for this tier: a preset for entitlement
+    /// records, not a paywall — `knowledge/BRANDING.md` §5 explains why no
+    /// feature is sold behind the gate. Pro adds capacity knobs; Enterprise adds
+    /// reporting on top.
     pub fn default_features(self) -> Vec<String> {
         let names: &[&str] = match self {
             Self::Trial => &[FEATURE_EXTRACT],

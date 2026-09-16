@@ -15,6 +15,12 @@ and the threat model stated plainly — see
 [ARCHITECTURE.md §6](ARCHITECTURE.md#6-offline-cryptographic-licensing-v080). This document is
 just the CLI steps.
 
+> **No production license can be issued yet.** The verifying key compiled into the binary is
+> still a placeholder ([`technical_debt.md`](technical_debt.md#the-licensing-public-key-is-still-a-placeholder)),
+> so the flows below describe the mechanism, not an offering; distribution is source-build only
+> until it is replaced ([`ROADMAP.md`](ROADMAP.md) M8). What the crate is for is in
+> [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy).
+
 ## Customer flow
 
 ```powershell

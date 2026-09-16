@@ -8,7 +8,7 @@ documents. **Zero cloud calls, ever.**
 [![CI](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/ruledicaprio/SynthPass/actions/workflows/ci.yml)
 [![mrz on crates.io](https://img.shields.io/crates/v/mrz.svg?label=mrz)](https://crates.io/crates/mrz)
 [![Live demo](https://img.shields.io/badge/live%20demo-GitHub%20Pages-222222?style=flat&logo=github&logoColor=white)](https://ruledicaprio.github.io/SynthPass/)
-[![Corpus coverage](https://img.shields.io/badge/world%20coverage-73%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
+[![Corpus coverage](https://img.shields.io/badge/world%20coverage-75%2F238%20countries-yellow?style=flat)](knowledge/CORPUS_COVERAGE.md)
 ![License](https://img.shields.io/badge/license-MIT-blue?style=flat)
 
 Pure Rust, one binary. `ocrs`/`rten` OCR and ICAO 9303 MRZ check digits run in-process;
@@ -123,9 +123,12 @@ Two rates, because one number cannot answer both questions honestly. A hit means
 MRZ whose document number matches hand-verified ground truth.
 
 - **140 / 154 = 90.9% on documents that can yield a hit** — how often extraction succeeds when
-  success is possible. This is the number accuracy work moves, and any PR that drops it is blocked
-  by [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml) against
-  [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json).
+  success is possible. This is the number accuracy work moves, and any PR touching the extraction
+  path is checked against it by
+  [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml), which reports a
+  regression against
+  [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json) — advisory today,
+  not yet a required check.
 - **140 / 261 = 53.6% across the whole specimen corpus** — what happens if you point it at a pile
   of real documents. The 107-specimen gap is not failure: those carry no machine-readable zone at
   all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
@@ -149,9 +152,9 @@ MRZ whose document number matches hand-verified ground truth.
 **TD1 vs. TD2 vs. TD3**, each track's latest run:
 ![Tier-1 hit rate by MRZ format](knowledge/img/format-comparison.svg)
 
-M1–M5 and M7 are complete; M6 (the deterministic core — Tier-1 real-document accuracy and the
-remaining MRZ formats) is in progress, with packaging and enterprise readiness split out as M8 —
-[knowledge/ROADMAP.md](knowledge/ROADMAP.md).
+M1–M5 and M7 are complete; M6 (the deterministic core — Tier-1 real-document accuracy against a
+named residual; all five MRZ formats already read through the registered provider) is in progress,
+with packaging and enterprise readiness split out as M8 — [knowledge/ROADMAP.md](knowledge/ROADMAP.md).
 
 ## Documentation
 
@@ -160,7 +163,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 | Doc | What it covers |
 | --- | --- |
 | [VISION.md](knowledge/VISION.md) | Why the project exists, its principles, and permanent non-goals |
-| [ROADMAP.md](knowledge/ROADMAP.md) | M1–M7 milestones, a Definition of Done each, current state |
+| [ROADMAP.md](knowledge/ROADMAP.md) | M1–M8 milestones, a Definition of Done each, current state |
 | [ARCHITECTURE.md](knowledge/ARCHITECTURE.md) | Engineering rationale, trade-offs, design history, full configuration reference |
 | [LICENSING.md](knowledge/LICENSING.md) | Offline Ed25519 licensing — customer and vendor CLI walkthroughs |
 | [benchmarks/README.md](knowledge/benchmarks/README.md) | Accuracy methodology, metric definitions, live trend charts |
