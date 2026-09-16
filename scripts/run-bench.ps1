@@ -278,11 +278,12 @@ if ($isSyntheticTrack) {
     })
 } else {
     # One flattened row per provider -- an aggregate per (run, provider), not
-    # The chart workflow sets SAMPLES_DATA_SHA to the baseline pin. A local
-    # run without that env var remains unpinned rather than claiming provenance.
+    # a per-document row. The chart workflow sets SAMPLES_DATA_SHA to the
+    # baseline pin. A local run without that env var remains unpinned rather
+    # than claiming provenance.
     $samplesDataSha = if ([string]::IsNullOrWhiteSpace($env:SAMPLES_DATA_SHA)) { $null } else { $env:SAMPLES_DATA_SHA }
 
-    # a per-document row. Matches results/<track>-bench/history.jsonl's
+    # Matches results/<track>-bench/history.jsonl's
     # schema documented in knowledge/benchmarks/README.md.
     #
     # `read_ok_rate` = `tier1_hit_rate` (2026-08-16 onward), NOT a

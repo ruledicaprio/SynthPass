@@ -267,7 +267,7 @@ per-document row, since the point is a trend line across runs, not a
 document-level dataset):
 
 ```json
-{"run_timestamp_unix": 1785565270, "git_sha": "abcd123", "invocation": "provider-bench --real-specimens --format passport --verbose --out ... --limit 30", "documents": 30, "provider_id": "mrz", "read_ok_rate": 0.93, "labelled_documents": 8, "field_match_rate": 0.92, "mean_cer": 0.03, "unsupported_assertion_rate": 0.25, "mean_ms": 3}
+{"run_timestamp_unix": 1785565270, "git_sha": "abcd123", "samples_data_sha": "469a4ee...", "invocation": "provider-bench --real-specimens --format passport --verbose --out ... --limit 30", "documents": 30, "provider_id": "mrz", "read_ok_rate": 0.93, "labelled_documents": 8, "field_match_rate": 0.92, "mean_cer": 0.03, "unsupported_assertion_rate": 0.25, "mean_ms": 3}
 ```
 
 `read_ok_rate` (fraction of documents where OCR + parse produced a result at
@@ -403,10 +403,14 @@ tuned from measurement rather than guessed up front.
 
 **Re-blessing (for PR authors).** A PR that legitimately moves the numbers —
 a parser improvement, or adding/removing specimens — must regenerate the
-baseline in the same PR (`gh workflow run real-specimen-gate.yml -r <branch> -f
-mode=write-baseline`, download the artifact, commit it). The `assert` run on that
-PR then compares against the updated file and goes green. This is the forcing
-function that keeps the committed number honest.
+baseline in the same PR. For a cohort that has pushed new images to
+`samples-data`, `tools/rebless.py` resolves that branch tip and passes it as the
+write-baseline run's exact `data_ref`; the assert-mode gate continues to use the
+committed baseline pin. Until the new baseline, with its new DATA pin, is
+committed to the cohort branch, the assert run is expected to remain red.
+Download the artifact and commit the generated file only after reviewing the
+measured population. This is the forcing function that keeps the committed
+number honest.
 
 **One command (`tools/rebless.py`).** Every step above, plus the parts that used
 to be done by hand for every cohort PR — classifying the diff, installing the new

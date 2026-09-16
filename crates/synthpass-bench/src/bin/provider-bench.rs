@@ -892,8 +892,8 @@ struct RealSpecimenBaseline {
     measured_on_ci_sha: String,
     measured_date: String,
     /// Exact `samples-data` commit used by the measured run. CI resolves the
-    /// baseline pin before materializing the corpus; this field is retained
-    /// in the baseline as reproducibility provenance.
+    /// baseline pin before materializing the corpus; this field is the
+    /// authoritative DATA revision for reproducing that population.
     samples_data_sha: String,
     documents: usize,
     scored: usize,

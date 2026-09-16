@@ -21,6 +21,7 @@ class IdentityAuditTests(unittest.TestCase):
             "unlisted_assets": [],
             "hash_mismatches": [],
             "unsynced_data_assets": [],
+            "same_path_byte_conflicts": [],
             "duplicate_sha256": {},
         }), [])
 
@@ -32,11 +33,13 @@ class IdentityAuditTests(unittest.TestCase):
             "unlisted_assets": ["passports/extra.jpg"],
             "hash_mismatches": ["passports/wrong.jpg"],
             "unsynced_data_assets": ["other/hidden.jpg"],
+            "same_path_byte_conflicts": [{"asset_id": "x.jpg"}],
             "duplicate_sha256": {"deadbeef": ["a.jpg", "b.jpg"]},
         })
-        self.assertEqual(len(failures), 6)
+        self.assertEqual(len(failures), 7)
         self.assertTrue(any("count mismatch" in failure for failure in failures))
         self.assertTrue(any("duplicate SHA" in failure for failure in failures))
+        self.assertTrue(any("same-path byte conflicts" in failure for failure in failures))
 
     def test_equal_bytes_preserve_both_sources(self):
         assets = {}
@@ -45,12 +48,15 @@ class IdentityAuditTests(unittest.TestCase):
         self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data", "main"])
         self.assertEqual(len(assets), 1)
 
-    def test_conflicting_bytes_fail(self):
+    def test_conflicting_bytes_are_reported(self):
         assets = {}
         audit.merge_asset(assets, "ocr_fixtures/same.gif", "abc", "samples-data")
-        with self.assertRaisesRegex(ValueError, "byte conflict"):
-            audit.merge_asset(assets, "ocr_fixtures/same.gif", "def", "main")
-        self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data"])
+        conflicts = []
+        audit.merge_asset(assets, "ocr_fixtures/same.gif", "def", "main", conflicts)
+        self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data", "main"])
+        self.assertEqual(conflicts[0]["asset_id"], "ocr_fixtures/same.gif")
+        self.assertEqual(conflicts[0]["existing_sha256"], "abc")
+        self.assertEqual(conflicts[0]["incoming_sha256"], "def")
 
     def test_baseline_default_and_explicit_override(self):
         pinned = "a" * 40

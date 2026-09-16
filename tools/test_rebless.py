@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -408,6 +409,26 @@ class VerifyWorktreeOnBranchTests(unittest.TestCase):
             worktree = Path(td)
             with self.assertRaises(rb.WorktreeBranchMismatch):
                 rb.verify_worktree_on_branch(worktree, "cohort-c14", current_branch_fn=lambda w: "")
+
+
+class DispatchCommandTests(unittest.TestCase):
+    def test_write_baseline_includes_exact_data_ref(self):
+        command = rb.build_workflow_dispatch_command("cohort-c14", "write-baseline", "a" * 40)
+        self.assertEqual(command[-2:], ["-f", "data_ref=" + "a" * 40])
+
+    def test_assert_rejects_data_ref(self):
+        with self.assertRaises(ValueError):
+            rb.build_workflow_dispatch_command("cohort-c14", "assert", "a" * 40)
+
+    def test_resolves_single_samples_data_tip(self):
+        with mock.patch.object(rb.ac, "run_cmd", return_value=("b" * 40) + "  refs/heads/samples-data\n") as run:
+            self.assertEqual(rb.resolve_samples_data_ref(Path(".")), "b" * 40)
+        run.assert_called_once_with(["git", "ls-remote", "origin", "refs/heads/samples-data"], cwd=Path("."))
+
+    def test_rejects_ambiguous_samples_data_tip(self):
+        with mock.patch.object(rb.ac, "run_cmd", return_value="not-a-sha\n"):
+            with self.assertRaises(ValueError):
+                rb.resolve_samples_data_ref(Path("."))
 
 
 class WatchCommandTests(unittest.TestCase):

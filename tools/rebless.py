@@ -456,7 +456,26 @@ def gh_pr_title_and_body(repo_root: Path, pr_number: int) -> tuple[str, str]:
     return data.get("title", ""), data.get("body", "") or ""
 
 
-def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: bool) -> str | None:
+def build_workflow_dispatch_command(cohort_branch: str, mode: str, data_ref: str | None = None) -> list[str]:
+    command = ["gh", "workflow", "run", WORKFLOW, "--ref", cohort_branch, "-f", f"mode={mode}"]
+    if mode == "write-baseline":
+        if not data_ref:
+            raise ValueError("write-baseline dispatch requires an exact samples-data commit")
+        command += ["-f", f"data_ref={data_ref}"]
+    elif data_ref is not None:
+        raise ValueError("data_ref is valid only for write-baseline dispatches")
+    return command
+
+
+def resolve_samples_data_ref(repo_root: Path) -> str:
+    out = ac.run_cmd(["git", "ls-remote", "origin", "refs/heads/samples-data"], cwd=repo_root)
+    candidates = [line.split()[0] for line in out.splitlines() if line.split()]
+    if len(candidates) != 1 or not re.fullmatch(r"[0-9a-f]{40}", candidates[0]):
+        raise ValueError("origin/samples-data did not resolve to exactly one full commit SHA")
+    return candidates[0]
+
+
+def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: bool, data_ref: str | None = None) -> str | None:
     """Dispatches `real-specimen-gate.yml -f mode=<mode>` on `cohort_branch`,
     finds the run this dispatch itself created (`select_dispatch_run`), and
     blocks on it with a single `watch_run` (one wait, `--interval 60`, output
@@ -465,7 +484,7 @@ def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: b
     Returns the run id, or `None` under `--dry-run` (nothing was dispatched
     to find)."""
     dispatched_at = datetime.now(timezone.utc)
-    ac.run_cmd(["gh", "workflow", "run", WORKFLOW, "--ref", cohort_branch, "-f", f"mode={mode}"], cwd=repo_root, dry_run=dry_run)
+    ac.run_cmd(build_workflow_dispatch_command(cohort_branch, mode, data_ref), cwd=repo_root, dry_run=dry_run)
     if dry_run:
         print(f"expected runtime: {EXPECTED_RUNTIME}")
         return None
@@ -530,7 +549,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.run_id:
             print(f"  - reuse already-completed run {args.run_id} (no dispatch)")
         else:
-            print(f"  $ gh workflow run {WORKFLOW} --ref {args.cohort_branch} -f mode=write-baseline  (needs --confirm)")
+            print(f"  $ gh workflow run {WORKFLOW} --ref {args.cohort_branch} -f mode=write-baseline -f data_ref=<exact origin/samples-data tip>  (needs --confirm)")
         print(f"  $ gh run download <run-id> -D <tmpdir>")
         print(f"  - classify the diff against {worktree / BASELINE_REL_PATH}, write doc edits for identical/non-scored-delta")
         print(f"  $ bash scripts/check-headline-numbers.sh  (in the worktree)")
@@ -546,7 +565,9 @@ def main(argv: list[str] | None = None) -> int:
             print("confirm-gated action (see the module docstring's 'Two independent safety layers').")
             print("Re-run with --confirm to dispatch, or pass --run-id to reuse an already-completed run.")
             return 0
-        run_id = dispatch_and_wait(repo_root, args.cohort_branch, "write-baseline", dry_run=False)
+        data_ref = resolve_samples_data_ref(repo_root)
+        print(f"resolved origin/samples-data for this cohort: {data_ref}")
+        run_id = dispatch_and_wait(repo_root, args.cohort_branch, "write-baseline", dry_run=False, data_ref=data_ref)
 
     baseline_artifact, _report_artifact = download_baseline_artifacts(repo_root, run_id)
     new_baseline = json.loads(baseline_artifact.read_text(encoding="utf-8"))

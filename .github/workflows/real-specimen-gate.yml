@@ -155,8 +155,10 @@ jobs:
             fi
             pin="$REQUESTED_DATA_REF"
             echo "Using explicit write-baseline DATA ref: $pin"
+            echo "DATA_REF_SOURCE=explicit override" >> "$GITHUB_ENV"
           else
             pin=$(python -c 'import json; print(json.load(open("knowledge/benchmarks/real-specimen-mrz-baseline.json"))["samples_data_sha"])')
+            echo "DATA_REF_SOURCE=committed baseline" >> "$GITHUB_ENV"
           fi
           if ! [[ "$pin" =~ ^[0-9a-f]{40}$ ]]; then
             echo "❌ baseline samples_data_sha is not a full commit SHA: $pin" >&2
@@ -181,7 +183,11 @@ jobs:
 
       - name: Reconcile the pinned benchmark population
         run: |
-          python tools/audit_benchmark_identity.py --check --data-ref "$SAMPLES_DATA_SHA" --output artifacts/identity-audit.json
+          audit_args=(--check --output artifacts/identity-audit.json --data-ref-source "$DATA_REF_SOURCE")
+          if [ "$DATA_REF_SOURCE" = "explicit override" ]; then
+            audit_args+=(--data-ref "$SAMPLES_DATA_SHA")
+          fi
+          python tools/audit_benchmark_identity.py "${audit_args[@]}"
 
       # Specimen images are not on `main` (CONTRIBUTING.md). Pull the exact
       # baseline revision; the hand-verified ground truth under
