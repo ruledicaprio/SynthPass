@@ -91,6 +91,25 @@ single-threaded for this reason.
 
 `reason` is omitted (not `null`) on a hit.
 
+**`strict_hits`/`strict_hit_rate`/`names_exact_among_hits`** (added alongside `hits`/`hit_rate`,
+never redefining them): `strict_hits` is the Tier-1 hits that also read `surname` and
+`given_names` exactly right; `strict_hit_rate` is `strict_hits / count` (every synthetic
+document is name-scorable by construction, so this is also "of everything I could have checked
+a name on"); `names_exact_among_hits` is `strict_hits / hits` — the same count restricted to
+Tier-1 hits, isolating the name-read question from detection accuracy. No ICAO check digit
+covers either name field in any MRZ format, so `hit`/`hit_rate` — and the M4 CI gate's
+`--min-hit-rate`, which is defined on `hit_rate` — say nothing about them; a document can be a
+checksum-valid Tier-1 hit with a wrong name. Each `results[]` entry also carries `names_exact`
+(`bool`) and, when it is `false`, `name_error` (one of `separator_lost`, `split_shifted`,
+`filler_read_as_letters`, `other` — see `synthpass_bench::NameError`'s doc for what each names
+and why: a CTC-decoder artifact around the MRZ `<<`/`<` filler/separator character, not an
+ordinary misread). Why names are scored only against MRZ-form truth, and why they stay out of
+`hit`: [`ADR-0013`](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md). **Derived**
+from the 2026-09-16 harness-comparison run's reports (MAIN `c617254`, local, seed 0, 100 clean
+documents/format — see [`benchmarks/README.md`](benchmarks/README.md)'s metric-definitions
+section for the full citation and per-format wrong-name counts): of 377 Tier-1 hits across the
+five synthetic formats, 178 carry a wrong name.
+
 ## The CI gate
 
 `.github/workflows/ci.yml`'s `rust` job runs:

@@ -219,6 +219,16 @@ struct SeedResult {
     /// `given_names` in the first place (see `knowledge/ROADMAP.md`'s per-field
     /// CER note). `false` when no MRZ was read at all.
     line1_flagged: bool,
+    /// `synthpass_bench::HitResult::names_exact` passthrough — `true` iff
+    /// `surname` and `given_names` both matched ground truth exactly.
+    /// `false` when no MRZ parsed, same as `line1_flagged`. See `Report`'s
+    /// `strict_hit_rate` for the aggregate this feeds.
+    names_exact: bool,
+    /// `synthpass_bench::HitResult::name_error` passthrough, as its stable
+    /// `NameError::as_str()` string — `None` both when `names_exact` is
+    /// `true` and when no MRZ parsed (distinguish via `names_exact`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_error: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -247,6 +257,33 @@ struct Report {
     seed_start: u64,
     hits: u64,
     hit_rate: f64,
+    /// Tier-1 hits that *also* read both name fields exactly right (`hit &&
+    /// names_exact`). **Not** a redefinition of `hits`/`hit_rate` — those
+    /// stay exactly what the M4 CI gate (`--min-hit-rate`) and every
+    /// existing measurement were calibrated against: checksum-valid
+    /// document-number match, nothing about names. `strict_hits` answers a
+    /// different question — what a user actually wants from an identity
+    /// read — that no ICAO check digit and no existing metric covers. See
+    /// `knowledge/benchmarks/README.md`.
+    strict_hits: u64,
+    /// `strict_hits / count`, the same denominator `hit_rate` uses. Every
+    /// synthetic document carries ground truth for both name fields by
+    /// construction (`Labels`), so "name-scorable documents" and `count` are
+    /// the same population here — `provider-bench`'s `strict_tier1_hit_rate`
+    /// divides by the narrower "name-scorable documents in the scored
+    /// denominator" population instead, because a real specimen can lack a
+    /// name label. See `knowledge/benchmarks/README.md`'s "Strict name hit
+    /// rate" entry for why the two harnesses need different denominators to
+    /// mean the same thing.
+    strict_hit_rate: f64,
+    /// `strict_hits / hits` — of the Tier-1 hits specifically (not of every
+    /// document), how many also read both names exactly. Distinct from
+    /// `strict_hit_rate`: a document that missed Tier-1 for an unrelated
+    /// reason (checksum failure, no MRZ found) never enters this ratio's
+    /// denominator, so it isolates the name-read question from detection
+    /// accuracy. `0.0` when `hits` is `0` — there is no hit population to
+    /// divide by, not a measured "every hit had a wrong name".
+    names_exact_among_hits: f64,
     results: Vec<SeedResult>,
 }
 
@@ -308,6 +345,8 @@ fn main() {
                 }
                 _ => Vec::new(),
             };
+            let names_exact = result.names_exact;
+            let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
@@ -317,6 +356,8 @@ fn main() {
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
                 line1_flagged,
+                names_exact,
+                name_error,
                 fields: result
                     .fields
                     .into_iter()
@@ -404,6 +445,38 @@ fn main() {
         );
     }
 
+    // Strict hit rate: of the documents that were already a Tier-1 hit, how
+    // many also read both name fields exactly right. Measured 2026-09-16
+    // (seed 0, 100 clean synthetic documents/format) at roughly half across every
+    // format — see `knowledge/benchmarks/README.md`. `hit_rate` above stays
+    // the M4 CI gate's number unchanged; this is a second, additive metric,
+    // never a redefinition of it.
+    let strict_hits = results.iter().filter(|r| r.hit && r.names_exact).count() as u64;
+    let strict_hit_rate = strict_hits as f64 / parsed.count.max(1) as f64;
+    let names_exact_among_hits = strict_hits as f64 / hits.max(1) as f64;
+    if hits > 0 {
+        println!(
+            "\nof {hits} Tier-1 hits, {strict_hits} ({:.1}%) read both names exactly — strict \
+             hit rate {strict_hits}/{} = {:.1}%",
+            names_exact_among_hits * 100.0,
+            parsed.count,
+            strict_hit_rate * 100.0
+        );
+
+        let mut name_error_kinds: BTreeMap<&'static str, usize> = BTreeMap::new();
+        for r in results.iter().filter(|r| r.hit) {
+            if let Some(kind) = r.name_error {
+                *name_error_kinds.entry(kind).or_default() += 1;
+            }
+        }
+        if !name_error_kinds.is_empty() {
+            println!("\nname errors among Tier-1 hits, by kind:");
+            for (kind, n) in &name_error_kinds {
+                println!("  {n:>4}  {kind}");
+            }
+        }
+    }
+
     // Mean CER per field, over every document — including those that never
     // produced an MRZ, which count as a total loss. This is the number that
     // says *where* the accuracy goes, rather than only how much of it.
@@ -440,6 +513,9 @@ fn main() {
         seed_start: parsed.seed,
         hits,
         hit_rate,
+        strict_hits,
+        strict_hit_rate,
+        names_exact_among_hits,
         results,
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
@@ -678,6 +754,8 @@ mod tests {
                 })
                 .collect(),
             line1_flagged: false,
+            names_exact: false,
+            name_error: None,
         }
     }
 

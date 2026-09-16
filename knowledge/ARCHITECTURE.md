@@ -356,6 +356,8 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
 - Names are transliterated per ICAO 9303 Part 3 §6 — Latin national characters per §6 A
   (`mrz::transliterate`) and Cyrillic per §6 B (`mrz::transliterate_cyrillic`, with a
   `CyrillicLanguage`); §6 C (Arabic) is not implemented.
+- Benchmark name accuracy is scored only against this transliterated MRZ form, never against
+  visual-zone spelling ([ADR-0013](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)).
 - The five MRZ formats are tried in a fixed priority order (TD3 → MRV-B → MRV-A →
   TD1 → TD2) to avoid cross-format cannibalization; every candidate is
   check-digit-verified before it is accepted.
