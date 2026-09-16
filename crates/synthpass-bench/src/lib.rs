@@ -855,6 +855,117 @@ pub struct FieldOutcome {
     pub cer: f64,
 }
 
+/// How a read's `(surname, given_names)` pair diverged from ground truth, in
+/// a way distinct from "some characters were misread" — reporting-only, and
+/// **never** a repair: `classify_names` names what happened for a bench
+/// summary, it does not correct the read it is describing (see `CLAUDE.md`'s
+/// LLM philosophy — deterministic parsing is scored honestly, never patched
+/// to look better).
+///
+/// This exists because no ICAO 9303 check digit covers `surname` or
+/// `given_names` in any format, so a checksum-valid Tier-1 hit — the number
+/// every gate in this repo is defined on — can still carry a name the read
+/// got wrong. The specific failure mode measured 2026-09-16 (seed 0, 100
+/// clean synthetic documents/format; see `knowledge/benchmarks/README.md`) is a
+/// CTC-decoder artifact: SynthPass's OCR recognizer sees `<<`/`<`, the ICAO
+/// filler character used both as the surname/given-names separator and to
+/// pad every name field to its fixed width, as a long run of one repeated
+/// glyph. A CTC decoder's collapse step (merge repeats, then drop blanks)
+/// can eat that whole run — losing the separator entirely — or under-collapse
+/// it, leaving spurious characters behind. Both are decode-time artifacts of
+/// the repetition, not a garden-variety substitution error, so they get their
+/// own bucket instead of vanishing into an undifferentiated "wrong" count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NameError {
+    /// `given_names` came back empty and the two truth names, concatenated,
+    /// equal the read `surname` — the `<<` separator was lost entirely and
+    /// both names landed in one field (e.g. `KOVALENKO<<ANDRII` read as
+    /// `surname: "KOVALENKOANDRII", given_names: ""`).
+    SeparatorLost,
+    /// Both names are present, in order, once the read is rejoined and
+    /// spaces are stripped — but the boundary between them landed somewhere
+    /// other than where the truth's does (a partial, rather than total,
+    /// collapse of the separator run).
+    SplitShifted,
+    /// `surname` matched exactly, `given_names` starts with the true given
+    /// names, and everything after that is one or more stray `C`/`K`
+    /// characters — a trailing run of `<` filler the decoder read as letters
+    /// instead of dropping (e.g. `CASTELLANO<<ANIKA` read as `given_names:
+    /// "ANIKACC"`, `TSVIETKOV<<PETRO` read as `given_names: "PETROC"`).
+    FillerReadAsLetters,
+    /// Diverged some other way — an ordinary character misread
+    /// (`TARIQ` -> `TARIG`), a shifted split compounded with a genuine
+    /// misread so the rejoined strings no longer match
+    /// (`CASTELLANO<<MATEO` read with the leading `C` also lost from
+    /// `surname`), or anything else none of the three specific rules above
+    /// names.
+    Other,
+}
+
+impl NameError {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SeparatorLost => "separator_lost",
+            Self::SplitShifted => "split_shifted",
+            Self::FillerReadAsLetters => "filler_read_as_letters",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Classifies how `(got_surname, got_given)` diverged from ground truth
+/// `(truth_surname, truth_given)`. `None` means both fields matched exactly
+/// — see [`NameError`]'s doc for why this is a separate axis from
+/// [`FieldOutcome`]'s per-field CER, and why it only ever *reports*, never
+/// repairs, the read.
+///
+/// Rules, evaluated in order. The "joined" comparisons strip every space
+/// before comparing, since a lost or shifted separator does not care where
+/// SynthPass's own space-for-`<` normalization happened to land a space —
+/// only whether the same characters, in the same order, are present:
+///
+/// 1. `got_surname == truth_surname && got_given == truth_given` -> `None`.
+/// 2. `got_given` is empty, `truth_given` is not, and `got_surname` equals
+///    `truth_surname` + `truth_given` joined with spaces stripped ->
+///    [`NameError::SeparatorLost`].
+/// 3. Otherwise, `got_surname` + `got_given` joined equals `truth_surname` +
+///    `truth_given` joined (spaces stripped from both) ->
+///    [`NameError::SplitShifted`].
+/// 4. `got_surname == truth_surname`, `got_given` starts with `truth_given`,
+///    and the remainder — with spaces stripped — is non-empty and consists
+///    only of `C`/`K` characters -> [`NameError::FillerReadAsLetters`].
+/// 5. Otherwise -> [`NameError::Other`].
+pub fn classify_names(
+    truth_surname: &str,
+    truth_given: &str,
+    got_surname: &str,
+    got_given: &str,
+) -> Option<NameError> {
+    if got_surname == truth_surname && got_given == truth_given {
+        return None;
+    }
+
+    let strip_spaces = |s: &str| s.chars().filter(|c| *c != ' ').collect::<String>();
+    let truth_joined = strip_spaces(&format!("{truth_surname}{truth_given}"));
+    let got_joined = strip_spaces(&format!("{got_surname}{got_given}"));
+
+    if got_given.is_empty() && !truth_given.is_empty() && got_joined == truth_joined {
+        return Some(NameError::SeparatorLost);
+    }
+    if got_joined == truth_joined {
+        return Some(NameError::SplitShifted);
+    }
+    if got_surname == truth_surname {
+        if let Some(remainder) = got_given.strip_prefix(truth_given) {
+            let remainder = strip_spaces(remainder);
+            if !remainder.is_empty() && remainder.chars().all(|c| c == 'C' || c == 'K') {
+                return Some(NameError::FillerReadAsLetters);
+            }
+        }
+    }
+    Some(NameError::Other)
+}
+
 /// Outcome of running one generated document through OCR + checksum
 /// validation.
 #[derive(Debug, Clone)]
@@ -881,6 +992,21 @@ pub struct HitResult {
     /// here, since the checksum never covered `document_type`,
     /// `issuing_country`, `surname`, or `given_names` in the first place.
     pub line1_integrity: Option<synthpass_core::fusion::Verdict>,
+    /// Whether the read's `surname` and `given_names` both matched ground
+    /// truth exactly. `false` when no MRZ parsed at all — there is nothing to
+    /// compare, and "exact" would be the wrong word for "absent". This is
+    /// deliberately a `bool`, not an `Option`: `synthpass-bench` runs the
+    /// synthetic corpus, where ground truth is always present by
+    /// construction (`Labels`), so there is no "not scored" case the way
+    /// `provider-bench`'s real-specimen track has — see that crate's
+    /// `DocumentDetail::names_exact` for the `Option<bool>` real-specimen
+    /// counterpart.
+    pub names_exact: bool,
+    /// Which way the names diverged, when they did. `None` both when
+    /// `names_exact` is `true` and when no MRZ parsed — the two cases where
+    /// there is nothing to classify. Distinguish them via `names_exact`, not
+    /// via `Some`/`None` here.
+    pub name_error: Option<NameError>,
     /// The raw OCR text `mrz::find_and_parse` was handed, whenever OCR
     /// itself succeeded (`None` only on `MissReason::OcrError`, where there
     /// is no text to show). Threaded through unconditionally rather than
@@ -906,7 +1032,8 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         fastrand_seed()
     ));
     let write_result = image.save(&path);
-    let (reason, fields, line1_integrity, raw_text) = run_check(&path, write_result, ocr, expected);
+    let (reason, fields, line1_integrity, raw_text, names_exact, name_error) =
+        run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -915,12 +1042,15 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         elapsed: start.elapsed(),
         fields,
         line1_integrity,
+        names_exact,
+        name_error,
         raw_text,
     }
 }
 
-/// Returns the miss reason (`None` on a hit), the per-field breakdown, and
-/// the line-1 integrity verdict.
+/// Returns the miss reason (`None` on a hit), the per-field breakdown, the
+/// line-1 integrity verdict, the raw OCR text, and the name-accuracy
+/// classification (`names_exact`, `name_error`).
 ///
 /// Structured so the breakdown survives a miss: the old version returned
 /// early on a checksum failure, which threw away the read it had just
@@ -930,6 +1060,8 @@ type CheckOutcome = (
     Vec<FieldOutcome>,
     Option<synthpass_core::fusion::Verdict>,
     Option<String>,
+    bool,
+    Option<NameError>,
 );
 
 /// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
@@ -970,12 +1102,23 @@ fn run_check(
             Vec::new(),
             None,
             None,
+            false,
+            None,
         );
     }
 
     let text = match ocr.recognize(path) {
         Ok(text) => text,
-        Err(e) => return (Some(MissReason::OcrError(e)), Vec::new(), None, None),
+        Err(e) => {
+            return (
+                Some(MissReason::OcrError(e)),
+                Vec::new(),
+                None,
+                None,
+                false,
+                None,
+            )
+        }
     };
 
     // Ground truth is the generator's own MRZ lines parsed back through the
@@ -996,6 +1139,8 @@ fn run_check(
                 Vec::new(),
                 None,
                 Some(text),
+                false,
+                None,
             )
         }
     };
@@ -1008,12 +1153,25 @@ fn run_check(
                 total_loss(&truth),
                 None,
                 Some(text),
+                false,
+                None,
             )
         }
     };
 
     let fields = compare_fields(&truth, &decoded);
     let line1_integrity = Some(synthpass_core::fusion::check_line1_integrity(&decoded));
+    // Computed whenever an MRZ parsed at all, including a checksum-invalid
+    // one — the same "the breakdown survives a miss" reasoning `fields`
+    // already follows, since no ICAO check digit covers either name field in
+    // the first place and a checksum-valid hit can still carry a wrong name.
+    let name_error = classify_names(
+        &truth.surname,
+        &truth.given_names,
+        &decoded.surname,
+        &decoded.given_names,
+    );
+    let names_exact = name_error.is_none();
 
     if !decoded.valid() {
         return (
@@ -1027,6 +1185,8 @@ fn run_check(
             fields,
             line1_integrity,
             Some(text),
+            names_exact,
+            name_error,
         );
     }
     if decoded.document_number != truth.document_number {
@@ -1038,9 +1198,18 @@ fn run_check(
             fields,
             line1_integrity,
             Some(text),
+            names_exact,
+            name_error,
         );
     }
-    (None, fields, line1_integrity, Some(text))
+    (
+        None,
+        fields,
+        line1_integrity,
+        Some(text),
+        names_exact,
+        name_error,
+    )
 }
 
 /// The fields compared per document, as `(name, accessor)` pairs. One list so
@@ -1248,6 +1417,104 @@ mod tests {
             "an insertion-heavy misread is allowed to exceed 1.0 rather than \
              being clamped into looking better than it is"
         );
+    }
+
+    /// Every observed shape from the 2026-09-16 name-accuracy measurement
+    /// (seed 0, 100 clean synthetic documents/format), plus the constructed cases
+    /// that pin down rules `classify_names` doesn't otherwise exercise.
+    mod classify_names_tests {
+        use super::*;
+
+        #[test]
+        fn both_names_exact_is_none() {
+            assert_eq!(
+                classify_names("HASHIMI", "SAYED ESHAQ", "HASHIMI", "SAYED ESHAQ"),
+                None
+            );
+        }
+
+        #[test]
+        fn separator_lost_when_given_names_is_empty_and_the_names_are_concatenated() {
+            assert_eq!(
+                classify_names("KOVALENKO", "ANDRII", "KOVALENKOANDRII", ""),
+                Some(NameError::SeparatorLost)
+            );
+            assert_eq!(
+                classify_names("VANTERPOOL", "LEILANI", "VANTERPOOLLEILANI", ""),
+                Some(NameError::SeparatorLost)
+            );
+        }
+
+        #[test]
+        fn filler_read_as_letters_when_given_names_carries_a_trailing_c_or_k_run() {
+            assert_eq!(
+                classify_names("CASTELLANO", "ANIKA", "CASTELLANO", "ANIKACC"),
+                Some(NameError::FillerReadAsLetters)
+            );
+            assert_eq!(
+                classify_names("TSVIETKOV", "PETRO", "TSVIETKOV", "PETROC"),
+                Some(NameError::FillerReadAsLetters)
+            );
+        }
+
+        /// `CASTELLANO<<MATEO` read as `surname: "ASTELLANO", given_names:
+        /// "MATEOCCCCCCCKCC"`: the leading `C` of the surname was also lost
+        /// (a genuine misread compounding the split shift), so `surname` no
+        /// longer matches truth and rule 4 (which requires an exact surname
+        /// match) cannot fire — this is `Other`, not `FillerReadAsLetters`.
+        #[test]
+        fn a_wrong_surname_alongside_a_filler_looking_given_names_run_is_other() {
+            assert_eq!(
+                classify_names("CASTELLANO", "MATEO", "ASTELLANO", "MATEOCCCCCCCKCC"),
+                Some(NameError::Other)
+            );
+        }
+
+        /// `HALVORSEN<<TARIQ` read as `surname: "HALVORSENTARIG", given_names:
+        /// ""`: the separator was lost *and* `Q` was misread as `G`, so the
+        /// rejoined strings differ by one character and neither the
+        /// separator-lost nor split-shifted equality holds.
+        #[test]
+        fn a_lost_separator_compounded_with_a_character_misread_is_other() {
+            assert_eq!(
+                classify_names("HALVORSEN", "TARIQ", "HALVORSENTARIG", ""),
+                Some(NameError::Other)
+            );
+        }
+
+        /// A boundary shift with both sides non-empty — the separator was
+        /// only partially collapsed, moving one character across the split
+        /// rather than destroying it, so rule 2 (`SeparatorLost`, which
+        /// requires an empty `got_given`) must not fire and rule 3 must.
+        #[test]
+        fn split_shifted_when_both_sides_are_non_empty_but_the_boundary_moved() {
+            assert_eq!(
+                classify_names("ABC", "DE", "AB", "CDE"),
+                Some(NameError::SplitShifted)
+            );
+        }
+
+        /// An ordinary character-level misread with the split intact is
+        /// `Other` — this classifier exists to name separator/filler
+        /// artifacts specifically, not to relabel every wrong name.
+        #[test]
+        fn an_ordinary_misread_with_the_split_intact_is_other() {
+            assert_eq!(
+                classify_names("SMITH", "JOHN", "SMITH", "JOHM"),
+                Some(NameError::Other)
+            );
+        }
+
+        #[test]
+        fn name_error_as_str_is_stable_and_snake_case() {
+            assert_eq!(NameError::SeparatorLost.as_str(), "separator_lost");
+            assert_eq!(NameError::SplitShifted.as_str(), "split_shifted");
+            assert_eq!(
+                NameError::FillerReadAsLetters.as_str(),
+                "filler_read_as_letters"
+            );
+            assert_eq!(NameError::Other.as_str(), "other");
+        }
     }
 
     /// A checksum failure must still produce a breakdown — that is the whole
