@@ -61,6 +61,11 @@ def tree(ref):
     return result
 
 
+def metadata_blob(ref, path):
+    """Read metadata from the same Git state as the asset tree."""
+    return git("show", f":{path}" if ref == "WORKTREE" else f"{ref}:{path}")
+
+
 def merge_asset(assets, asset_id, digest, source):
     if asset_id in assets:
         if assets[asset_id]["sha256"] != digest:
@@ -98,7 +103,8 @@ def audit(data_ref=None, working_tree=False):
                 raise ValueError(f"cannot model non-regular image entry: {source}:{asset_id}")
             digest = hashlib.sha256(git("cat-file", "blob", blob)).hexdigest()
             merge_asset(assets, asset_id, digest, source)
-    manifest_bytes = (Path("samples/corpus.jsonl").read_bytes() if working_tree else git("show", f"{main_sha}:samples/corpus.jsonl"))
+    metadata_ref = "WORKTREE" if working_tree else main_sha
+    manifest_bytes = metadata_blob(metadata_ref, "samples/corpus.jsonl")
     manifest = {}
     for line in manifest_bytes.decode("utf-8").splitlines():
         row = json.loads(line)
@@ -114,7 +120,7 @@ def audit(data_ref=None, working_tree=False):
         row["ground_truth_stem"] = m.get("ground_truth_stem")
         row["loader_label_exists"] = "ocr_fixtures/" + row["stem"] + ".json" in main_tree
     return dict(population="clean-checkout default-walk candidates; before decode/preparation",
-                main_sha=main_sha, metadata_source="working tree (staged assets/manifest)" if working_tree else "committed main_sha (not working tree)",
+                main_sha=main_sha, metadata_source="index (staged assets/manifest)" if working_tree else "committed main_sha (not working tree)",
                 baseline_path=BASELINE_PATH, baseline_sha256=hashlib.sha256(baseline_bytes).hexdigest(),
                 baseline_measured_on_ci_sha=baseline["measured_on_ci_sha"],
                 baseline_samples_data_sha=baseline["samples_data_sha"],

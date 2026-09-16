@@ -51,6 +51,11 @@ class IdentityAuditTests(unittest.TestCase):
         with patch.object(audit, "git", return_value=listing):
             self.assertEqual(audit.tree("ref"), {'ocr_fixtures/a\tquote".gif': ('100644', 'blob', 'abc')})
 
+    def test_working_tree_metadata_comes_from_index(self):
+        with patch.object(audit, "git", return_value=b"index manifest") as git:
+            self.assertEqual(audit.metadata_blob("WORKTREE", "samples/corpus.jsonl"), b"index manifest")
+            git.assert_called_once_with("show", ":samples/corpus.jsonl")
+
     def test_sync_directories_match_script(self):
         script = (ROOT / "scripts/sync-samples.ps1").read_text(encoding="utf-8")
         dirs = set(re.findall(r'"([a-z_]+)"', re.search(r'\$imageDirs = @\(([^)]*)\)', script)[1]))

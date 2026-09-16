@@ -59,8 +59,8 @@ $env:SYNTHPASS_OCR_MODEL_DIR = "models"
 cargo run -p synthpass-cli -- doctor          # preflight: OCR, inferer, license, config
 
 $env:SYNTHPASS_LICENSE_SKIP = "1"             # skip the license gate for local dev
-cargo run -p synthpass-cli -- samples/ocr_fixtures/Canada_Passport_Specimen_2023_mrz.jpg
-cargo run -p synthpass-cli -- batch "samples/ocr_fixtures/*.jpg"   # many at once
+cargo run -p synthpass-cli -- samples/passports/Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg
+cargo run -p synthpass-cli -- batch "samples/passports/*.jpg"   # many at once
 cargo run -p synthpass-serve                  # web app + JSON API on http://127.0.0.1:8080
 ```
 
@@ -192,7 +192,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 ├── knowledge/              Vision, roadmap, branding, architecture, licensing, corpus coverage
 ├── docker/                 Builder, musl and serve images + compose file
 ├── fuzz/                   cargo-fuzz targets for the untrusted OCR ingest path
-├── samples/                Public-domain specimens — only ocr_fixtures/ is tracked in git
+├── samples/                Public-domain specimens — corpus metadata and reviewed fixtures are tracked; images are on samples-data
 ├── scripts/ · tools/       Development helpers; standalone scripts (e.g. the specimen scraper)
 └── web/                    GitHub Pages demo (static, client-side only)
 ```

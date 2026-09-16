@@ -56,8 +56,7 @@ work/
 # samples/README.md and samples/ocr_fixtures/*.json + *.md -- plus the
 # fixture-derived passport images below, force-added because required CI
 # (native_ocr_e2e, rust_ocr_smoke) does not sync samples-data first.
-samples/passports/
-!samples/passports/
+samples/passports/*
 !samples/passports/Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg
 !samples/passports/China_Passport_Specimen_2012_mrz.webp
 !samples/passports/China_Passport_Specimen_P0_CHN_2012_mrz.png

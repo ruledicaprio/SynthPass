@@ -8,16 +8,11 @@ below), with the per-file metadata recorded in `corpus.jsonl`.
 **Images are not tracked on `main`.** They live on the orphan `samples-data`
 branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
 you want the latest corpus) to populate this directory locally; it's
-`.gitignore`d otherwise. Four `ocr_fixtures/` images are the exception: they
-are force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`)
-panics without them and does not sync the corpus first.
+`.gitignore`d otherwise. A small set of fixture-derived passport images under `passports/` is force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`) does not sync the corpus first.
 
 Tracked under `samples/` on `main`: this README, `corpus.jsonl` (the manifest),
 `ocr_fixtures/*.json` + `*.md` (the hand-verified ground truth),
-`ocr_fixtures/derived/*.json` + `*.md` (generated parity candidates), and those
-four images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every**
-mirrored directory, so ground truth cannot drift onto `samples-data` even when
-it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
+`ocr_fixtures/derived/*.json` + `*.md` (generated parity candidates), and the required fixture-derived passport images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every** mirrored directory, so ground truth cannot drift onto `samples-data` even when it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
 section and `knowledge/benchmarks/README.md`'s "local bench loop" for how the
 corpus grows now.
 
@@ -53,7 +48,7 @@ samples/
   passports/          passport specimen images (TD3 MRZ format) — gitignored, local mirror
   id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
   driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
-  ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
+  ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; no benchmark images
     derived/            generated, unreviewed parity candidates (.md + .json) — tracked
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
   covers/                cover-only images (no data page), any document type — gitignored, local mirror; outside the default benchmark walk, opt-in via --include-covers
