@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1988-08-08",
+  "date_of_expiry": "2029-05-14",
+  "document_number": "H00000000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "LOK YAU",
+  "issuing_country": "CHN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<CHNCHAI<<LOK<YAU<<<<<<<<<<<<<<<<<<<<<<<<<<\nH000000009CHN8808084F2905143HK8888888<<<<<34",
+  "nationality": "CHN",
+  "personal_number": "HK8888888",
+  "sex": "F",
+  "surname": "CHAI"
+}

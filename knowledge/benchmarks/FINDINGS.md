@@ -24,6 +24,7 @@ regenerate.
 | 2026-09-17 | [Where the real-specimen gate spends its time, by outcome class](gate-cost-by-role-2026-09-17.md) | Observed | current | gate-cost-by-role-2026-09-17.md |
 | 2026-09-17 | [Phase D provider-gap measurement setup](phase-d-measurement-2026-09-17.md) | unlabelled (pre-standard) | current | phase-d-measurement-2026-09-17.md |
 | 2026-09-16 | [No image in the default real-specimen walk is cover-like](cover-like-detector-2026-09-16.md) | unlabelled (pre-standard) | superseded by [README.md#current-headline-numbers](README.md#current-headline-numbers) | cover-like-detector-2026-09-16.md |
+| 2026-09-16 | [Closing the denominator before the next accuracy chunk](denominator-t14-2026-09-16.md) | unlabelled (pre-standard) | current | denominator-t14-2026-09-16.md |
 | 2026-09-16 | [no image in the default walk is cover-like, and OCR volume cannot find one](#2026-09-16--no-image-in-the-default-walk-is-cover-like-and-ocr-volume-cannot-find-one) | — | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-16 | [provider-bench and synthpass-bench agree on every synthetic document](#2026-09-16--provider-bench-and-synthpass-bench-agree-on-every-synthetic-document) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-16 | [duplicate-byte migration re-bless: five duplicate assets removed](#2026-09-16--duplicate-byte-migration-re-bless-five-duplicate-assets-removed) | Observed | current | FINDINGS.md (Weak-spot findings) |
@@ -556,6 +557,15 @@ printed zone (`checksum_failed_specimen`, off the denominator, nothing to fix).
 single-character-misread pattern" — plausible, and **not measured**: no fixture exists to compare
 against, and no `--dump-ocr` row was pulled for them. Until three transcriptions land, the
 published scored rate of 91.2% is a floor that may be up to three documents pessimistic.
+
+> **Resolved 2026-09-16 — the floor reading was wrong, and 91.2% is the rate.** All three are now
+> transcribed and carry a `samples/ocr_fixtures/<stem>.json`. Each prints a zone whose five ICAO
+> check digits validate, so none of them is a non-conforming specimen and none moves off the
+> denominator: all three stay in as genuine read failures and no bucket count changes. Germany
+> `P0_D00_2024` is further confirmed as a true one-character miss (`Z` read as `7`) on a
+> sideways-stored page, which makes the "single-character-misread pattern" attribution measured
+> rather than assumed. See
+> [denominator-t14-2026-09-16.md](denominator-t14-2026-09-16.md).
 
 **What this does not claim.** Not an accuracy result: no code, threshold or model moved, and no
 A/B was run, so nothing here says anything about the pipeline. The prior-corpus row is arithmetic

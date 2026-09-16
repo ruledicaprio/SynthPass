@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1980-08-08",
+  "date_of_expiry": "2017-02-05",
+  "document_number": "K00000000",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "KWOK SUN",
+  "issuing_country": "CHN",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<CHNCHUNG<<KWOK<SUN<<<<<<<<<<<<<<<<<<<<<<<<\nK000000000CHN8008080F1702057HK8888888<<<<<34",
+  "nationality": "CHN",
+  "personal_number": "HK8888888",
+  "sex": "F",
+  "surname": "CHUNG"
+}

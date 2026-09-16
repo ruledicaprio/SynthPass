@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1983-08-12",
+  "date_of_expiry": "2034-05-01",
+  "document_number": "CZ6311T47",
+  "document_type": "P",
+  "extraction_method": "hand-transcribed",
+  "given_names": "ERIKA",
+  "issuing_country": "D",
+  "mrz_checksums_valid": true,
+  "mrz_line": "P<D<<MUSTERMANN<<ERIKA<<<<<<<<<<<<<<<<<<<<<<\nCZ6311T472D<<8308126F34050192405<<<<<<<<<<10",
+  "nationality": "D",
+  "personal_number": "2405",
+  "sex": "F",
+  "surname": "MUSTERMANN"
+}
