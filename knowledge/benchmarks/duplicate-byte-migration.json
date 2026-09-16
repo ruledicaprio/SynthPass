@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "status": "migrated-on-local-branches",
+  "data_commit": "469a4ee7723148917cf023f1a7ab2af80a0ef7d3",
+  "historical_baseline": "145/159 scored; 145/266 corpus-wide",
+  "pairs": [
+    {
+      "pair": "Canada 2023",
+      "retain": "passports/Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg",
+      "remove": [
+        "ocr_fixtures/Canada_Passport_Specimen_2023_mrz.jpg"
+      ],
+      "label_stem": "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide",
+      "sha256": "53f01e156b44eb5afc7c7be7094b762b6bff94229f1f9ca2a6b858b2dcd2063e"
+    },
+    {
+      "pair": "China 2012",
+      "retain": "passports/China_Passport_Specimen_2012_mrz.webp",
+      "remove": [
+        "ocr_fixtures/China_Passport_Specimen_2012_mrz.webp",
+        "passports/China_Passport_Specimen_P0_CHN_2012_mrz.webp"
+      ],
+      "label_stem": "China_Passport_Specimen_2012_mrz",
+      "sha256": "edd5f036f0f667684786c14f1de24e69571fb35a8a9e3a86552c148a119e9d51"
+    },
+    {
+      "pair": "Slovakia 2014",
+      "retain": "passports/Slovakia_Passport_Specimen_PS_SVK_2014_mrz.jpg",
+      "remove": [
+        "ocr_fixtures/Slovakia_Passport_Specimen_2014_mrz.jpg"
+      ],
+      "label_stem": "Slovakia_Passport_Specimen_PS_SVK_2014_mrz",
+      "sha256": "6baf5db51d9ebb1bfdd8282560c3b69e820a117b467e80e1da5ec2b080573c2b"
+    },
+    {
+      "pair": "UAE 2011",
+      "retain": "passports/United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg",
+      "remove": [
+        "ocr_fixtures/United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg"
+      ],
+      "label_stem": "United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz",
+      "sha256": "8ac6b9a0bf2a08cffea59839272011220d34dabcd8ce093cf7db3737c3effb5c"
+    },
+    {
+      "pair": "Serbia 2009/2012",
+      "retain": "passports/Serbia_Passport_Specimen_P0_SRB_2012_mrz.jpg",
+      "remove": [
+        "passports/Serbia_Passport_Specimen_P0_SRB_2009_mrz.jpg"
+      ],
+      "label_stem": "Serbia_Passport_Specimen_P0_SRB_2012_mrz",
+      "sha256": "0b956aabc5d095651e9c0fd5b9d523bcea856ca3d11c6397b76008be1191130a",
+      "history": [
+        "e2b2b43",
+        "392d3f3",
+        "8e89d5b",
+        "dd30891",
+        "fb67ebc"
+      ]
+    }
+  ]
+}

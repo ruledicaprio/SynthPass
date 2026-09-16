@@ -244,7 +244,7 @@ fn native_ocr_recovers_mrz_from_a_quarter_turned_page() {
     let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
 
     let source_path =
-        find_sample("Canada_Passport_Specimen_2023_mrz.jpg").expect("a tracked fixture image");
+        find_sample("Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg").expect("a tracked fixture image");
     let upright = image::open(&source_path)
         .expect("sample image opens")
         .into_rgb8();

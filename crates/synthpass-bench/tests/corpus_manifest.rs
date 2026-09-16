@@ -391,28 +391,8 @@ fn every_origin_is_either_wholly_unrecorded_or_wholly_recorded() {
 /// issued in 2012. Removing each stale copy changes the gate's denominator,
 /// so that happens in its own data PR with a re-blessed baseline — this list
 /// then empties, and the test below becomes a plain uniqueness check.
-const KNOWN_BYTE_DUPLICATES: &[(&str, &str)] = &[
-    (
-        "Canada_Passport_Specimen_2023_mrz.jpg",
-        "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg",
-    ),
-    (
-        "China_Passport_Specimen_2012_mrz.webp",
-        "China_Passport_Specimen_P0_CHN_2012_mrz.webp",
-    ),
-    (
-        "Serbia_Passport_Specimen_P0_SRB_2009_mrz.jpg",
-        "Serbia_Passport_Specimen_P0_SRB_2012_mrz.jpg",
-    ),
-    (
-        "Slovakia_Passport_Specimen_2014_mrz.jpg",
-        "Slovakia_Passport_Specimen_PS_SVK_2014_mrz.jpg",
-    ),
-    (
-        "United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg",
-        "United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg",
-    ),
-];
+const KNOWN_BYTE_DUPLICATES: &[(&str, &str)] = &[];
+
 
 #[test]
 fn no_image_is_recorded_twice_under_two_names() {
