@@ -137,34 +137,34 @@ ID both carry no MRZ zone at all by design. Full provenance and review reasoning
 | GMB | Gambia | -- | No specimen yet | -- |
 | GHA | Ghana | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | GIN | Guinea | Passport (cover) | No specimen yet | Cover only in `samples/covers/` (c13, 2026-09-15, Commons CC-BY-SA 4.0, dark interior/back-cover shot); no data page, never a coverage claim (ADR-0012) |
-| GNB | Guinea-Bissau | -- | No specimen yet | -- |
+| GNB | Guinea-Bissau | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons public domain); no data page, never a coverage claim (ADR-0012) |
 | KEN | Kenya | Passport (front) | No specimen yet | Front page in corpus 2026-09-10, no MRZ; bio-page book specimen still needed |
 | LSO | Lesotho | -- | No specimen yet | -- |
-| LBR | Liberia | -- | No specimen yet | -- |
-| LBY | Libya | -- | No specimen yet | -- |
+| LBR | Liberia | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
+| LBY | Libya | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons public domain); no data page, never a coverage claim (ADR-0012) |
 | MDG | Madagascar | -- | No specimen yet | -- |
 | MWI | Malawi | -- | No specimen yet | -- |
 | MLI | Mali | -- | No specimen yet | -- |
 | MRT | Mauritania | Passport | MISS (checksum failed) | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
 | MUS | Mauritius | -- | No specimen yet | -- |
 | MAR | Morocco | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| MOZ | Mozambique | -- | No specimen yet | -- |
+| MOZ | Mozambique | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | NAM | Namibia | -- | No specimen yet | -- |
 | NER | Niger | -- | No specimen yet | -- |
 | NGA | Nigeria | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
-| RWA | Rwanda | -- | No specimen yet | -- |
+| RWA | Rwanda | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | STP | Sao Tome and Principe | -- | No specimen yet | -- |
 | SEN | Senegal | -- | No specimen yet | -- |
 | SYC | Seychelles | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| SLE | Sierra Leone | -- | No specimen yet | -- |
+| SLE | Sierra Leone | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons public domain); no data page, never a coverage claim (ADR-0012) |
 | SOM | Somalia | Passport | HIT | Ingested 2026-09-10; reads checksum-valid |
 | ZAF | South Africa | ID card (front+back) | No specimen yet | DHA smart ID card front+back added 2026-09-14 (public, public-domain, Commons, author credited as the Department of Home Affairs). Illustrative template card (alphabet-placeholder name, sequential ID number, generic silhouette photo), not a real person. Card carries no printed MRZ (chip + 2D barcode instead) -- not a coverage HIT, same as Kenya's front-only row above. |
-| SSD | South Sudan | -- | No specimen yet | -- |
+| SSD | South Sudan | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | SDN | Sudan | Passport | Candidate rejected | No SPECIMEN watermark, read as real personal data -- excluded per vetting checklist |
-| TZA | Tanzania | -- | No specimen yet | -- |
-| TGO | Togo | -- | No specimen yet | -- |
+| TZA | Tanzania | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
+| TGO | Togo | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, dgdn.gouv.tg, none-stated licence); no data page, never a coverage claim (ADR-0012) |
 | TUN | Tunisia | Passport | HIT | Real-OCR scan, 2026-08-17 (`integrity_survey.rs --mrz-only`) |
-| UGA | Uganda | -- | No specimen yet | -- |
+| UGA | Uganda | Passport (cover); cover | No specimen yet | Cover only in `samples/covers/` (c14, 2026-09-16, Commons CC-BY-SA); no data page, never a coverage claim (ADR-0012) |
 | ZMB | Zambia | -- | No specimen yet | -- |
 | ZWE | Zimbabwe | -- | No specimen yet | -- |
 | ESH | Western Sahara | -- | No specimen yet | -- |
