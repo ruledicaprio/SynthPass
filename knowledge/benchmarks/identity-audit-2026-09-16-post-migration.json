@@ -1,7 +1,7 @@
 {
   "population": "clean-checkout default-walk candidates; before decode/preparation",
-  "main_sha": "20a7f6e09490da18d06311b7459e111f73e551e2",
-  "metadata_source": "working tree (staged assets/manifest)",
+  "main_sha": "06c181b2ce1a599eb580e6915f586fc39fd4ec91",
+  "metadata_source": "committed main_sha (not working tree)",
   "baseline_path": "knowledge/benchmarks/real-specimen-mrz-baseline.json",
   "baseline_sha256": "12cfaaafa41e95d2d76e9befd8da201bbd3ec424c06a1c8d5e92110554aadbf9",
   "baseline_measured_on_ci_sha": "0b879eeffea520175a24830da1c4772218cef3f1",
@@ -9,7 +9,7 @@
   "data_ref_selection": "explicit override",
   "requested_data_ref": "469a4ee7723148917cf023f1a7ab2af80a0ef7d3",
   "samples_data_sha": "469a4ee7723148917cf023f1a7ab2af80a0ef7d3",
-  "manifest_sha256": "2e0a67a717c69ccbee29bcec1a3071f80389d54fe4d96e43276b77b0af2fcd1a",
+  "manifest_sha256": "d108d452008afaf1a9bb95cfdce89e860e8038a8e7281d0588ca6f2f64b6c0e2",
   "candidate_assets": 261,
   "baseline_reported_documents": 266,
   "manifest_assets": 261,
