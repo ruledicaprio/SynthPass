@@ -85,9 +85,49 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Pull the samples corpus from samples-data
+      - name: Resolve the pinned samples-data revision
+        id: resolve_data
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.track == '' || github.event.inputs.track == 'all' || contains('passport,id_card,driving_license,real-specimens', github.event.inputs.track) }}
+        continue-on-error: ${{ github.event_name == 'schedule' || github.event.inputs.track == '' || github.event.inputs.track == 'all' }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          pin=$(python -c 'import json; print(json.load(open("knowledge/benchmarks/real-specimen-mrz-baseline.json"))["samples_data_sha"])')
+          if ! [[ "$pin" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "❌ baseline samples_data_sha is not a full commit SHA: $pin" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin "+refs/heads/samples-data:refs/remotes/origin/samples-data"
+          if ! git cat-file -e "$pin^{commit}" && [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            # checkout@v7 is shallow by default; deepen only when the pinned
+            # baseline commit is older than the branch tip.
+            git fetch --unshallow --no-tags origin "+refs/heads/samples-data:refs/remotes/origin/samples-data"
+          fi
+          if ! git cat-file -e "$pin^{commit}"; then
+            echo "❌ pinned samples-data commit is unavailable: $pin" >&2
+            exit 1
+          fi
+          tip=$(git rev-parse refs/remotes/origin/samples-data)
+          echo "Pinned samples-data: $pin (remote tip: $tip)"
+          echo "SAMPLES_DATA_SHA=$pin" >> "$GITHUB_ENV"
+          echo "SAMPLES_DATA_TIP=$tip" >> "$GITHUB_ENV"
+
+      - name: Reconcile the pinned real-specimen population
+        id: reconcile_data
+        if: steps.resolve_data.outcome == 'success'
+        continue-on-error: ${{ github.event_name == 'schedule' || github.event.inputs.track == '' || github.event.inputs.track == 'all' }}
+        run: |
+          python tools/audit_benchmark_identity.py --check --data-ref-source "committed baseline" --output artifacts/identity-audit.json
+
+      # Synthetic tracks do not consume samples-data, but this workflow also
+      # runs real tracks. Materialize the exact baseline corpus so chart history
+      # remains comparable to the measured gate population.
+      - name: Pull the pinned samples corpus
+        id: sync_data
+        if: steps.reconcile_data.outcome == 'success'
+        continue-on-error: ${{ github.event_name == 'schedule' || github.event.inputs.track == '' || github.event.inputs.track == 'all' }}
         shell: pwsh
-        run: ./scripts/sync-samples.ps1
+        run: ./scripts/sync-samples.ps1 -DataRef $env:SAMPLES_DATA_SHA
 
       - name: Run bench track(s)
         shell: pwsh
@@ -101,10 +141,20 @@ jobs:
           # different axis from `passport` -- see scripts/run-bench.ps1's
           # module doc comment on why the two are not the same thing despite
           # the acronym overlap.
-          $tracks = if ($env:TRACK_INPUT -eq 'all' -or [string]::IsNullOrEmpty($env:TRACK_INPUT)) {
-            @("passport", "id_card", "driving_license", "real-specimens", "td1", "td2", "td3", "mrva", "mrvb")
+          $runAll = $env:TRACK_INPUT -eq 'all' -or [string]::IsNullOrEmpty($env:TRACK_INPUT)
+          $realTracks = @("passport", "id_card", "driving_license", "real-specimens")
+          $syntheticTracks = @("td1", "td2", "td3", "mrva", "mrvb")
+          $realRequested = $runAll -or $env:TRACK_INPUT -in $realTracks
+          $realReady = -not $realRequested -or ("${{ steps.reconcile_data.outcome }}" -eq 'success' -and "${{ steps.sync_data.outcome }}" -eq 'success')
+          if ($runAll) {
+            if ($realReady) {
+              $tracks = $realTracks + $syntheticTracks
+            } else {
+              Write-Warning "Pinned real-specimen reconciliation failed; continuing with synthetic tracks only."
+              $tracks = $syntheticTracks
+            }
           } else {
-            @($env:TRACK_INPUT)
+            $tracks = @($env:TRACK_INPUT)
           }
 
           foreach ($track in $tracks) {
@@ -147,6 +197,14 @@ jobs:
               }
             }
           }
+
+      - name: Preserve the identity audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-identity-audit-${{ github.run_id }}
+          path: artifacts/identity-audit.json
+          if-no-files-found: ignore
 
       # `if: always()` is the whole point: the 2026-08-03 failure came *after*
       # an hour of benching, with the reports written and then thrown away when

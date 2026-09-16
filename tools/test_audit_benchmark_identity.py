@@ -13,6 +13,34 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IdentityAuditTests(unittest.TestCase):
+    def test_validate_accepts_clean_reconciliation(self):
+        self.assertEqual(audit.validate({
+            "candidate_assets": 2,
+            "manifest_assets": 2,
+            "missing_assets": [],
+            "unlisted_assets": [],
+            "hash_mismatches": [],
+            "unsynced_data_assets": [],
+            "same_path_byte_conflicts": [],
+            "duplicate_sha256": {},
+        }), [])
+
+    def test_validate_reports_every_structural_finding(self):
+        failures = audit.validate({
+            "candidate_assets": 2,
+            "manifest_assets": 1,
+            "missing_assets": ["passports/missing.jpg"],
+            "unlisted_assets": ["passports/extra.jpg"],
+            "hash_mismatches": ["passports/wrong.jpg"],
+            "unsynced_data_assets": ["other/hidden.jpg"],
+            "same_path_byte_conflicts": [{"asset_id": "x.jpg"}],
+            "duplicate_sha256": {"deadbeef": ["a.jpg", "b.jpg"]},
+        })
+        self.assertEqual(len(failures), 7)
+        self.assertTrue(any("count mismatch" in failure for failure in failures))
+        self.assertTrue(any("duplicate SHA" in failure for failure in failures))
+        self.assertTrue(any("same-path byte conflicts" in failure for failure in failures))
+
     def test_equal_bytes_preserve_both_sources(self):
         assets = {}
         audit.merge_asset(assets, "ocr_fixtures/same.gif", "abc", "samples-data")
@@ -20,12 +48,15 @@ class IdentityAuditTests(unittest.TestCase):
         self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data", "main"])
         self.assertEqual(len(assets), 1)
 
-    def test_conflicting_bytes_fail(self):
+    def test_conflicting_bytes_are_reported(self):
         assets = {}
         audit.merge_asset(assets, "ocr_fixtures/same.gif", "abc", "samples-data")
-        with self.assertRaisesRegex(ValueError, "byte conflict"):
-            audit.merge_asset(assets, "ocr_fixtures/same.gif", "def", "main")
-        self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data"])
+        conflicts = []
+        audit.merge_asset(assets, "ocr_fixtures/same.gif", "def", "main", conflicts)
+        self.assertEqual(assets["ocr_fixtures/same.gif"]["sources"], ["samples-data", "main"])
+        self.assertEqual(conflicts[0]["asset_id"], "ocr_fixtures/same.gif")
+        self.assertEqual(conflicts[0]["existing_sha256"], "abc")
+        self.assertEqual(conflicts[0]["incoming_sha256"], "def")
 
     def test_baseline_default_and_explicit_override(self):
         pinned = "a" * 40
@@ -55,6 +86,12 @@ class IdentityAuditTests(unittest.TestCase):
         with patch.object(audit, "git", return_value=b"index manifest") as git:
             self.assertEqual(audit.metadata_blob("WORKTREE", "samples/corpus.jsonl"), b"index manifest")
             git.assert_called_once_with("show", ":samples/corpus.jsonl")
+
+    def test_sync_script_has_explicit_exact_ref_path(self):
+        script = (ROOT / "scripts/sync-samples.ps1").read_text(encoding="utf-8")
+        self.assertIn('[string]$DataRef', script)
+        self.assertIn('git worktree add --detach $worktree $resolvedDataRef', script)
+        self.assertIn('refusing to fall back to origin/samples-data', script)
 
     def test_sync_directories_match_script(self):
         script = (ROOT / "scripts/sync-samples.ps1").read_text(encoding="utf-8")

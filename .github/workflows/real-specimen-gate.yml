@@ -42,6 +42,9 @@ on:
       - "crates/synthpass-pipeline/**"
       - "crates/synthpass-bench/**"
       - "samples/ocr_fixtures/**"
+      - "samples/corpus.jsonl"
+      - "tools/audit_benchmark_identity.py"
+      - "tools/test_audit_benchmark_identity.py"
       - "knowledge/benchmarks/real-specimen-mrz-baseline.json"
       - "scripts/sync-samples.ps1"
       - "Cargo.lock"
@@ -63,6 +66,9 @@ on:
       - "crates/synthpass-pipeline/**"
       - "crates/synthpass-bench/**"
       - "samples/ocr_fixtures/**"
+      - "samples/corpus.jsonl"
+      - "tools/audit_benchmark_identity.py"
+      - "tools/test_audit_benchmark_identity.py"
       - "knowledge/benchmarks/real-specimen-mrz-baseline.json"
       - "scripts/sync-samples.ps1"
       - "Cargo.lock"
@@ -80,6 +86,11 @@ on:
         type: choice
         options: [assert, write-baseline]
         default: assert
+      data_ref:
+        description: "optional exact samples-data commit for deliberate write-baseline measurement"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -130,18 +141,60 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      # Specimen images are not on `main` (CONTRIBUTING.md) — pulled from the
-      # orphan `samples-data` branch, additively, exactly as bench-charts.yml
-      # does. The hand-verified ground truth under samples/ocr_fixtures/ is
-      # already in the checkout.
-      - name: Pull the samples corpus from samples-data
-        shell: pwsh
-        run: ./scripts/sync-samples.ps1
-
-      - name: Record the samples-data sha (baseline provenance)
+      - name: Resolve the pinned samples-data revision
+        env:
+          REQUESTED_DATA_REF: ${{ github.event.inputs.data_ref || '' }}
+          MODE: ${{ github.event.inputs.mode || 'assert' }}
         run: |
-          sha=$(git rev-parse refs/remotes/origin/samples-data 2>/dev/null || echo unknown)
-          echo "SAMPLES_DATA_SHA=$sha" >> "$GITHUB_ENV"
+          set -euo pipefail
+          mkdir -p artifacts
+          if [ -n "$REQUESTED_DATA_REF" ]; then
+            if [ "$MODE" != write-baseline ]; then
+              echo "❌ data_ref is allowed only for deliberate write-baseline measurement" >&2
+              exit 1
+            fi
+            pin="$REQUESTED_DATA_REF"
+            echo "Using explicit write-baseline DATA ref: $pin"
+            echo "DATA_REF_SOURCE=explicit override" >> "$GITHUB_ENV"
+          else
+            pin=$(python -c 'import json; print(json.load(open("knowledge/benchmarks/real-specimen-mrz-baseline.json"))["samples_data_sha"])')
+            echo "DATA_REF_SOURCE=committed baseline" >> "$GITHUB_ENV"
+          fi
+          if ! [[ "$pin" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "❌ baseline samples_data_sha is not a full commit SHA: $pin" >&2
+            exit 1
+          fi
+          # The branch may advance, but this exact baseline object must remain
+          # reachable. Never substitute the moving branch tip for a missing pin.
+          git fetch --no-tags origin "+refs/heads/samples-data:refs/remotes/origin/samples-data"
+          if ! git cat-file -e "$pin^{commit}" && [ -f "$(git rev-parse --git-dir)/shallow" ]; then
+            # checkout@v7 is shallow by default; deepen only when the pinned
+            # baseline commit is older than the branch tip.
+            git fetch --unshallow --no-tags origin "+refs/heads/samples-data:refs/remotes/origin/samples-data"
+          fi
+          if ! git cat-file -e "$pin^{commit}"; then
+            echo "❌ pinned samples-data commit is unavailable: $pin" >&2
+            exit 1
+          fi
+          tip=$(git rev-parse refs/remotes/origin/samples-data)
+          echo "Pinned samples-data: $pin (remote tip: $tip)"
+          echo "SAMPLES_DATA_SHA=$pin" >> "$GITHUB_ENV"
+          echo "SAMPLES_DATA_TIP=$tip" >> "$GITHUB_ENV"
+
+      - name: Reconcile the pinned benchmark population
+        run: |
+          audit_args=(--check --output artifacts/identity-audit.json --data-ref-source "$DATA_REF_SOURCE")
+          if [ "$DATA_REF_SOURCE" = "explicit override" ]; then
+            audit_args+=(--data-ref "$SAMPLES_DATA_SHA")
+          fi
+          python tools/audit_benchmark_identity.py "${audit_args[@]}"
+
+      # Specimen images are not on `main` (CONTRIBUTING.md). Pull the exact
+      # baseline revision; the hand-verified ground truth under
+      # samples/ocr_fixtures/ is already in the checkout.
+      - name: Pull the pinned samples corpus
+        shell: pwsh
+        run: ./scripts/sync-samples.ps1 -DataRef $env:SAMPLES_DATA_SHA
 
       - name: Real-specimen mrz pass + no-regression gate
         env:
@@ -160,6 +213,15 @@ jobs:
         with:
           name: real-specimen-mrz-baseline
           path: knowledge/benchmarks/real-specimen-mrz-baseline.json
+
+      # Preserve the identity report even when the benchmark itself fails.
+      - name: Preserve the identity audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: real-specimen-identity-audit
+          path: artifacts/identity-audit.json
+          if-no-files-found: ignore
 
       - name: Preserve the run report
         if: always()

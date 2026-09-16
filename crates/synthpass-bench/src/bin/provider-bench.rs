@@ -891,8 +891,9 @@ struct RealSpecimenBaseline {
     /// The commit the baseline run measured against (`GITHUB_SHA` on CI).
     measured_on_ci_sha: String,
     measured_date: String,
-    /// `samples-data` branch HEAD at measurement time. The corpus is not
-    /// pinned, so this is provenance only.
+    /// Exact `samples-data` commit used by the measured run. CI resolves the
+    /// baseline pin before materializing the corpus; this field is the
+    /// authoritative DATA revision for reproducing that population.
     samples_data_sha: String,
     documents: usize,
     scored: usize,

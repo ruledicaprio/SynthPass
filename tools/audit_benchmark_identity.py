@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import subprocess
+import sys
 
 BASELINE_PATH = "knowledge/benchmarks/real-specimen-mrz-baseline.json"
 # Equivalence to the actual Rust find_image_files function is tested by compiling
@@ -66,14 +67,52 @@ def metadata_blob(ref, path):
     return git("show", f":{path}" if ref == "WORKTREE" else f"{ref}:{path}")
 
 
-def merge_asset(assets, asset_id, digest, source):
+def merge_asset(assets, asset_id, digest, source, conflicts=None):
     if asset_id in assets:
         if assets[asset_id]["sha256"] != digest:
-            raise ValueError(f"main/samples-data byte conflict: {asset_id}")
+            if conflicts is None:
+                raise ValueError(f"main/samples-data byte conflict: {asset_id}")
+            conflicts.append({
+                "asset_id": asset_id,
+                "existing_sha256": assets[asset_id]["sha256"],
+                "incoming_sha256": digest,
+                "existing_sources": list(assets[asset_id]["sources"]),
+                "incoming_source": source,
+            })
+            assets[asset_id]["sources"].append(source)
+            return
         assets[asset_id]["sources"].append(source)
     else:
         assets[asset_id] = dict(asset_id=asset_id, stem=PurePosixPath(asset_id).stem,
                                 sha256=digest, sources=[source])
+
+
+def validate(result):
+    """Return structural failures for a completed audit result.
+
+    The walk and merge logic above remains the single implementation of corpus
+    identity. This validator only turns its reported findings into a CI
+    failure; it does not reimplement candidate discovery.
+    """
+    failures = []
+    if result["candidate_assets"] != result["manifest_assets"]:
+        failures.append(
+            f"candidate/manifest count mismatch: {result['candidate_assets']} candidates, "
+            f"{result['manifest_assets']} manifest assets"
+        )
+    for key, label in (
+        ("missing_assets", "missing assets"),
+        ("unlisted_assets", "unlisted assets"),
+        ("hash_mismatches", "manifest SHA mismatches"),
+        ("unsynced_data_assets", "unsynced DATA assets"),
+    ):
+        if result[key]:
+            failures.append(f"{label}: {result[key]}")
+    if result["duplicate_sha256"]:
+        failures.append(f"duplicate SHA groups: {result['duplicate_sha256']}")
+    if result["same_path_byte_conflicts"]:
+        failures.append(f"same-path byte conflicts: {result['same_path_byte_conflicts']}")
+    return failures
 
 
 def resolve_data_ref(data_ref, baseline):
@@ -84,7 +123,7 @@ def resolve_data_ref(data_ref, baseline):
     return git("rev-parse", "--verify", selected + "^{commit}").decode().strip()
 
 
-def audit(data_ref=None, working_tree=False):
+def audit(data_ref=None, working_tree=False, data_ref_selection=None):
     main_sha = git("rev-parse", "--verify", "HEAD^{commit}").decode().strip()
     baseline_bytes = git("show", f"{main_sha}:{BASELINE_PATH}")
     baseline = json.loads(baseline_bytes)
@@ -92,6 +131,7 @@ def audit(data_ref=None, working_tree=False):
     main_tree = tree("WORKTREE" if working_tree else main_sha)
     assets = {}
     unsynced = []
+    conflicts = []
     for source, entries in (("samples-data", tree(sha)), ("main", main_tree)):
         for asset_id, (mode, kind, blob) in sorted(entries.items()):
             if not included(asset_id):
@@ -102,7 +142,7 @@ def audit(data_ref=None, working_tree=False):
             if kind != "blob" or mode not in {"100644", "100755"}:
                 raise ValueError(f"cannot model non-regular image entry: {source}:{asset_id}")
             digest = hashlib.sha256(git("cat-file", "blob", blob)).hexdigest()
-            merge_asset(assets, asset_id, digest, source)
+            merge_asset(assets, asset_id, digest, source, conflicts)
     metadata_ref = "WORKTREE" if working_tree else main_sha
     manifest_bytes = metadata_blob(metadata_ref, "samples/corpus.jsonl")
     manifest = {}
@@ -124,7 +164,7 @@ def audit(data_ref=None, working_tree=False):
                 baseline_path=BASELINE_PATH, baseline_sha256=hashlib.sha256(baseline_bytes).hexdigest(),
                 baseline_measured_on_ci_sha=baseline["measured_on_ci_sha"],
                 baseline_samples_data_sha=baseline["samples_data_sha"],
-                data_ref_selection="explicit override" if data_ref is not None else "committed baseline",
+                data_ref_selection=data_ref_selection or ("explicit override" if data_ref is not None else "committed baseline"),
                 requested_data_ref=data_ref, samples_data_sha=sha,
                 manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
                 candidate_assets=len(rows), baseline_reported_documents=baseline["documents"],
@@ -132,6 +172,7 @@ def audit(data_ref=None, working_tree=False):
                 missing_assets=sorted(manifest.keys() - assets.keys()),
                 unlisted_assets=sorted(assets.keys() - manifest.keys()),
                 hash_mismatches=[r["asset_id"] for r in rows if r["asset_id"] in manifest and not r["manifest_sha_matches"]],
+                same_path_byte_conflicts=conflicts,
                 duplicate_stems=groups(rows, "stem"), duplicate_sha256=groups(rows, "sha256"),
                 assets=rows)
 
@@ -139,11 +180,20 @@ def audit(data_ref=None, working_tree=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-ref", help="override committed baseline samples_data_sha")
+    parser.add_argument("--data-ref-source", choices=("committed baseline", "explicit override"),
+                        help="provenance label for the selected DATA ref")
     parser.add_argument("--working-tree", action="store_true", help="read staged MAIN samples/ assets and manifest")
+    parser.add_argument("--check", action="store_true", help="fail on structural identity findings")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    result = json.dumps(audit(args.data_ref, args.working_tree), indent=2) + "\n"
+    result = json.dumps(audit(args.data_ref, args.working_tree, args.data_ref_source), indent=2) + "\n"
     if args.output:
         args.output.write_text(result, encoding="utf-8")
     else:
         print(result, end="")
+    if args.check:
+        failures = validate(json.loads(result))
+        if failures:
+            for failure in failures:
+                print(f"identity audit: {failure}", file=sys.stderr)
+            raise SystemExit(1)

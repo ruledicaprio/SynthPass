@@ -35,6 +35,12 @@ With -Push: stage the mirrored corpus and print the rename-detected diffstat,
 then stop without committing or pushing. The worktree is left in place so the
 staged change can be inspected further.
 
+.PARAMETER DataRef
+Select an exact samples-data commit (or another explicit Git commit ref) for
+this pull. The ref must resolve locally after fetching the samples-data branch;
+when omitted, the moving origin/samples-data branch is used for the convenient
+additive local-sync behavior.
+
 Worth using before any large push. `Copy-Mirror` deletes by *filename*, so a
 renamed specimen reads as a delete plus an add; a diffstat without `-M` makes a
 lossless rename look like data loss, and a genuine loss look like a rename.
@@ -58,10 +64,14 @@ Push whatever is currently in local samples/ to samples-data.
 param(
     [switch]$Push,
     [switch]$DryRun,
-    [string]$Message
+    [string]$Message,
+    [string]$DataRef
 )
 
 $ErrorActionPreference = "Stop"
+if ($Push -and $DataRef) {
+    throw "-DataRef is only valid for pulling an exact samples-data revision"
+}
 $repoRoot = (Resolve-Path "$PSScriptRoot/..").Path
 Set-Location $repoRoot
 
@@ -235,7 +245,18 @@ git fetch origin "+refs/heads/samples-data:refs/remotes/origin/samples-data" 2>$
 git rev-parse --verify --quiet refs/remotes/origin/samples-data | Out-Null
 $branchExists = ($LASTEXITCODE -eq 0)
 
-if ($branchExists) {
+if ($DataRef) {
+    $resolvedDataRef = (& git rev-parse --verify "$($DataRef)^{commit}" 2>$null | Out-String).Trim()
+    if (($LASTEXITCODE -ne 0 -or -not $resolvedDataRef) -and (Test-Path (Join-Path (& git rev-parse --git-dir).Trim() "shallow"))) {
+        git fetch --unshallow origin "+refs/heads/samples-data:refs/remotes/origin/samples-data" 2>$null
+        $resolvedDataRef = (& git rev-parse --verify "$($DataRef)^{commit}" 2>$null | Out-String).Trim()
+    }
+    if ($LASTEXITCODE -ne 0 -or -not $resolvedDataRef) {
+        throw "requested samples-data ref '$DataRef' is unavailable; refusing to fall back to origin/samples-data"
+    }
+    Write-Host "Using exact samples-data revision $resolvedDataRef"
+    git worktree add --detach $worktree $resolvedDataRef | Out-Null
+} elseif ($branchExists) {
     git worktree add $worktree origin/samples-data | Out-Null
     Push-Location $worktree
     git checkout -B samples-data | Out-Null
@@ -245,12 +266,15 @@ if ($branchExists) {
     git checkout --orphan samples-data | Out-Null
     git rm -rf . 2>$null | Out-Null
 }
-Pop-Location
+if (-not $DataRef) {
+    Pop-Location
+}
 
 # --- Pull: additive copy from worktree to local samples/ ---
 
 if (-not $Push) {
-    if (-not $branchExists) {
+    $dataAvailable = $DataRef -or $branchExists
+    if (-not $dataAvailable) {
         Write-Host "origin/samples-data does not exist yet -- nothing to pull. Run -Push first."
     } else {
         foreach ($dir in $imageDirs) {
