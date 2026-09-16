@@ -104,7 +104,10 @@ Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ex
 - `YYYY` — the year. Which year it means is recorded per file in the manifest's
   `year.kind`, because it is the issue year in most names and the expiry year
   in at least one.
-- `_redacted` — the MRZ is physically blacked out on the source.
+- `_redacted` — the publisher removed holder data on the source. Two forms: `_redacted_mrz` when a
+  zone is still there but blacked out or blurred (the reader must refuse it), and `_redacted_no_mrz`
+  when the redaction removed the zone entirely, so no MRZ is present at all (decided 2026-09-16;
+  a document with no zone by design is plain `_no_mrz`).
 - `_mrz` / `_no_mrz` — whether this image carries an MRZ at all. Not optional:
   it keys `integrity_survey.rs --mrz-only`, which skips names containing
   `no_mrz` (a *negative* filter — an image with no `_mrz` tag at all is kept).
