@@ -12,6 +12,7 @@ may be used to cover them. The mechanics of adding a file are in
 |---|---|
 | The issuing authority's own publication | Foreign-ministry, interior-ministry and passport-office pages; embassy and consulate pages; the official gazette that publishes the regulation defining a document, whose annex is often the document's specimen |
 | An intergovernmental organisation's own pages, for its own travel document | A laissez-passer specimen published by the organisation that issues it |
+| An intergovernmental organisation's own pages, for a harmonised document its member states issue | The EAC e-passport page on `eac.int`; the ECOWAS passport on `ecowas.int`. Destination public, `origin.licence` `gov-published`, and the coverage row and PR prose attribute the image to the organisation rather than to one member state |
 | ICAO's own Doc 9303 material | Where ICAO's terms allow the use |
 | Wikimedia Commons | Each file states its licence on its own page |
 
@@ -50,6 +51,18 @@ session-side (see "The tooling boundary"). A person adding a specimen by hand
 follows [`CONTRIBUTING.md`](../CONTRIBUTING.md#adding-a-corpus-specimen), where the watermark is
 an advisory signal rather than a requirement.
 
+Who applies the real-person rule matters, because the scout worker cannot see pixels. A worker
+excludes an image itself only when the source says the image is a real individual's document —
+"my passport", a named holder the page treats as a real person, a news photo of someone's
+document. An image on an allowed host that may carry a photograph is reported with
+`"h5_check": true` rather than dropped, and the screener — who opens every staged image — makes
+the H5 call on it (scout prefix v3.2, added after cycles c13 and c14 returned 28 covers and no
+data page, with worker transcripts reasoning that "a cover is safer, it shows no person"). A
+specimen's own sample photograph is not a person: a placeholder identity such as Erika
+Mustermann, or a SPECIMEN overprint across the portrait, is part of the specimen. None of this
+relaxes the rule it serves — a private upload of a real person's document never enters the
+corpus, redacted or not, and H5 still fires at screening.
+
 The image itself must show the document — a cover, a data page, a card face, a visa sticker —
 not a flag, a coat of arms, a building, an official at a podium, people holding a document, a
 blank application form or a web screenshot (scout prefix v3.1, added after cycle c13 returned
@@ -67,7 +80,9 @@ re-derive it from the pixels — see the screener's judgement pass.
    drives it, together with the worker launch before it and the review page after it): the
    candidate is fetched again by the tool, not taken from the agent's copy, and then:
    - its host is checked against the denylist above;
-   - its page is fetched and the image is confirmed to actually be linked from it;
+   - its page is fetched — or, for a host that will not answer the tool, a session-fetched copy
+     of that page is used (`--page-html-dir`, see "The tooling boundary") — and the image is
+     confirmed to actually be linked from it;
    - its `sha256` is compared against the manifest, which rejects byte duplicates;
    - `check_sample` runs, including the vendor blocklist;
    - one OCR pass reads the MRZ;
@@ -162,3 +177,15 @@ session retries it with the scraping service and hands any candidate it finds ba
 through `tools/scout_cycle.py add-candidates`, in the worker's own record shape and tagged as
 found by the session. Those rows then pass the automated screen like every other candidate; the
 service is never called from the repository's tools.
+
+The same boundary applies to the screen's own page fetch. Many official hosts answer
+`tools/screen_candidates.py`'s plain `urllib` request with 403/503, an anti-bot interstitial or a
+JavaScript-only shell, which fails the linked-from-page check and loses a real candidate.
+`tools/scout_cycle.py blocked --cycle cNN` lists those URLs, grouped by cause; the session —
+never the tool — fetches them by its own means and saves the HTML under
+`work/scouting/cNN/pages/` (a `pages.jsonl` index plus one file per page, named by
+`screen_candidates.py`'s `page_html_filename`). `screen` then passes that directory to
+`--page-html-dir`, and the screened record says `page_source: "session-fetched"` so the packet's
+Note column tells the screener the page was not re-derived by the tool. The image itself is
+still fetched by the tool, unchanged: it is the byte stream everything downstream hashes and
+OCRs.

@@ -100,6 +100,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -392,6 +393,34 @@ class WorktreeBranchMismatch(RuntimeError):
     pass
 
 
+def build_watch_command(run_id: str) -> list[str]:
+    """The blocking wait on one CI run. `--interval 60` because the default
+    redraws the run's job list every few seconds and every redraw is a line in
+    a captured log: one cohort's wait left 33,000 of them behind.
+    `--exit-status` is what makes the wait report the run's own result."""
+    return ["gh", "run", "watch", run_id, "--interval", "60", "--exit-status"]
+
+
+def watch_run(repo_root: Path, run_id: str) -> None:
+    """Blocks on `run_id` with the progress output discarded -- two printed
+    lines, one before and one after, instead of a live-redrawn job table.
+    Raises `RuntimeError` when the run did not succeed."""
+    print(f"watching run {run_id}, expected {EXPECTED_RUNTIME}")
+    proc = subprocess.run(
+        build_watch_command(run_id),
+        cwd=repo_root,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"run {run_id}: did not succeed (the wait exited {proc.returncode})\n{proc.stderr}"
+        )
+    print(f"run {run_id}: success")
+
+
 def verify_worktree_on_branch(worktree: Path, expected_branch: str, current_branch_fn=None) -> None:
     """Fails loudly when `worktree` does not exist, or exists but is not
     checked out on `expected_branch`. `current_branch_fn` is injected for
@@ -401,8 +430,6 @@ def verify_worktree_on_branch(worktree: Path, expected_branch: str, current_bran
     if not worktree.is_dir():
         raise WorktreeBranchMismatch(f"worktree {worktree} does not exist -- create it first (see tools/apply_cohort.py)")
     if current_branch_fn is None:
-        import subprocess
-
         proc = subprocess.run(
             ["git", "-C", str(worktree), "branch", "--show-current"], capture_output=True, text=True, check=False
         )
@@ -432,14 +459,15 @@ def gh_pr_title_and_body(repo_root: Path, pr_number: int) -> tuple[str, str]:
 def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: bool) -> str | None:
     """Dispatches `real-specimen-gate.yml -f mode=<mode>` on `cohort_branch`,
     finds the run this dispatch itself created (`select_dispatch_run`), and
-    blocks on it with a single `gh run watch --exit-status` -- never a
-    short-interval polling loop (see `CLAUDE.md`'s CI-monitoring rule).
+    blocks on it with a single `watch_run` (one wait, `--interval 60`, output
+    discarded) -- never a short-interval polling loop (see `CLAUDE.md`'s
+    CI-monitoring rule).
     Returns the run id, or `None` under `--dry-run` (nothing was dispatched
     to find)."""
     dispatched_at = datetime.now(timezone.utc)
     ac.run_cmd(["gh", "workflow", "run", WORKFLOW, "--ref", cohort_branch, "-f", f"mode={mode}"], cwd=repo_root, dry_run=dry_run)
-    print(f"expected runtime: {EXPECTED_RUNTIME}")
     if dry_run:
+        print(f"expected runtime: {EXPECTED_RUNTIME}")
         return None
 
     runs: list[dict] = []
@@ -462,7 +490,7 @@ def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: b
                 raise
             time.sleep(5)
     run_id = str(run["databaseId"])
-    ac.run_cmd(["gh", "run", "watch", run_id, "--exit-status"], cwd=repo_root)
+    watch_run(repo_root, run_id)
     return run_id
 
 

@@ -78,6 +78,10 @@ present, and treat the rules restated below as binding either way.
 2. **Eyes on every image**, not just the `needs eyes` rows: open each staged file with Read.
    Look for the specimen signal (a SPECIMEN / MUSTER / SPÉCIMEN / ОБРАЗЕЦ watermark, an obvious
    placeholder name, a blank or filler template) and for any real-person signal (H5).
+   A row the tool noted **`h5 check`** is one the worker flagged rather than dropped, because
+   the source might carry a photograph and only you can see it: do the field-by-field H5 pass on
+   that row first, before anything else about it, and remember a placeholder identity (Erika
+   Mustermann, a SPECIMEN overprint across the portrait) is part of the specimen, not a holder.
    A row whose signal is `official-host-only` has no page wording to lean on: it is valid when
    the image itself shows a specimen signal, or when it is plainly the issuer's own illustration
    of the document with no real-person signal at all — say which in the note. An official host
@@ -98,6 +102,12 @@ present, and treat the rules restated below as binding either way.
      `gov-published`, `none-stated`. `gov-published` needs quoted text or a cited statute saying
      official publications may be reused — the tool's licence snippets are where to look. A
      bare copyright notice is `none-stated`.
+   - **an intergovernmental host** publishing a harmonised document its member states issue
+     (the EAC e-passport on `eac.int`, the ECOWAS passport on `ecowas.int`) is an allowed host,
+     not off-scope: propose `public` / `gov-published` and attribute the image to the
+     organisation in the note. The image must still be the document itself, one document, for
+     the code the row claims — a photograph of three member states' books is off-scope for the
+     usual reason, not because of the host.
    - **a cover** (`side: cover`, no data page): propose on the source's licence exactly as for a
      data page and say "cover only" in the note. It is a labelled class (ADR-0012), filed with
      the `cover` variant token, and never a coverage claim; H5 still applies to a visible name.

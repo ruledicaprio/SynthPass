@@ -33,7 +33,9 @@ deleted.
     1. denylist            host is on the "never a source" list, or the screener-grown
                             host_denylist.json list (reason "denylisted-host")
     2. ledger duplicate    image_url/page_url already rejected or admitted
-    3. fetch page_url      one retry, 15s timeout, polite per-host delay
+    3. fetch page_url      one retry, 15s timeout, polite per-host delay --
+                            unless --page-html-dir holds a session-fetched copy
+                            of that page, which is used instead (see below)
     4. linked-from-page    image_url must actually appear on the fetched page
     5. evidence snippets   licence/specimen words, for human review only
     6. download image_url  same fetch discipline as the page; a PDF (magic
@@ -47,6 +49,34 @@ deleted.
     9. variant hint         in-memory only; the matched document number is
                             never written to any output
    10. needs_eyes           missing/conflicting signal, for the human packet
+
+Session-fetched pages (`--page-html-dir`)
+-----------------------------------------
+Many official hosts answer this tool's plain urllib fetch with 403/503, an
+anti-bot 202, or a JavaScript-only shell, so step 3 fails and a real candidate
+is never screened at all. The maintainer's own session can fetch such a page by
+other means and drop the HTML into a directory; this tool then uses that copy
+instead of fetching the page itself. The retry is always the session's, never
+this tool's: no repository code calls a scraping service or a search API (H14,
+`knowledge/SPECIMEN_SOURCES.md`'s "The tooling boundary").
+
+    <dir>/pages.jsonl   one record per page:
+                        {"page_url": ..., "file": "<relative filename>",
+                         "fetched_at": "<ISO>", "fetched_by": "session",
+                         "note": "..."}
+    <dir>/<file>        the HTML itself, named `page_html_filename(page_url)`
+                        (sha256 of the URL, first 12 hex chars, + ".html") so
+                        the session and this tool agree without a lookup.
+
+A screened record whose page came from such a copy carries
+`page_source: "session-fetched"` and `page_fetched_at`; the normal path sets
+`page_source: "tool"`. The packet's Note column says "page: session-fetched" so
+the screener knows the page was not re-derived by the tool.
+
+Out of scope, deliberately: the IMAGE is still fetched by this tool (step 6),
+because that is the byte stream everything downstream hashes and OCRs. A
+candidate whose image fetch is also blocked stays blocked -- it is not a
+candidate this directory can rescue.
 """
 
 from __future__ import annotations
@@ -127,6 +157,67 @@ def is_host_denylisted(host: str, denylist: dict) -> str | None:
         if host.endswith("." + domain):
             return reason
     return None
+
+
+# --------------------------------------------------------------------------
+# Session-fetched page HTML (--page-html-dir); see the module docstring
+# --------------------------------------------------------------------------
+
+PAGES_INDEX_FILENAME = "pages.jsonl"
+
+
+def page_html_filename(page_url: str) -> str:
+    """The filename a session-fetched copy of `page_url` is stored under:
+    the first 12 hex chars of the URL's sha256, plus `.html`. A single
+    function both sides call, so the session naming a file and this tool
+    looking one up can never disagree -- and so a URL with a query string,
+    percent-escapes or a fragment needs no escaping rules of its own."""
+    digest = hashlib.sha256(page_url.encode("utf-8")).hexdigest()
+    return f"{digest[:12]}.html"
+
+
+def load_page_html_dir(dir_path: str | None) -> dict[str, dict]:
+    """`page_url -> record` from `<dir>/pages.jsonl`, each record's `path`
+    resolved to the HTML file next to the index.
+
+    A missing directory or index means "no session-fetched pages" and is
+    never an error, the same convention `load_host_denylist` uses. A record
+    that names a file which is not there IS an error and raises: the session
+    said it saved that page, and silently falling back to this tool's own
+    fetch would re-block the very candidate the copy exists to unblock."""
+    if not dir_path:
+        return {}
+    index_path = os.path.join(dir_path, PAGES_INDEX_FILENAME)
+    if not os.path.isfile(index_path):
+        return {}
+    pages: dict[str, dict] = {}
+    for record in load_jsonl(index_path):
+        page_url = record.get("page_url")
+        if not page_url:
+            continue
+        filename = record.get("file") or page_html_filename(page_url)
+        path = os.path.join(dir_path, filename)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(
+                f"{index_path}: record for {page_url} names {filename!r}, which is not in {dir_path}"
+            )
+        entry = dict(record)
+        entry["path"] = path
+        pages[page_url] = entry
+    return pages
+
+
+def read_page_html(record: dict) -> str:
+    """The HTML of a session-fetched page, decoded the way a fetched body is
+    (UTF-8, latin-1 replacement fallback), so the link check sees exactly the
+    text it would have seen from this tool's own fetch."""
+    with open(record["path"], "rb") as f:
+        body = f.read()
+    try:
+        return body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body.decode("latin-1", errors="replace")
+
 
 LICENCE_WORDS = ["licen", "copyright", "\u00a9", "reuse", "creative commons", "public domain"]
 
@@ -489,6 +580,12 @@ PDF_MAX_PAGES = 200  # pages scanned per PDF; PassV.pdf (the German passport reg
 PDF_MAX_IMAGES = 40  # extracted images per PDF, after the size filter; a booklet annex draws one per page
 PDF_MIN_IMAGE_SIDE = 150  # px; drops logos, seals and icons
 PDF_RASTER_DPI = 200
+# A raster fallback page whose own text runs longer than this, and which draws
+# no image at all, is a text leaflet, not a specimen plate: a Liberia PDF on
+# cycle c14 put a full page of prose in front of the screener that way. The
+# page text is already in hand from `get_text()`, so this costs no OCR.
+PDF_TEXT_PAGE_MAX_WORDS = 120
+PDF_SKIP_TEXT_PAGE = "pdf-text-page"
 
 
 def detect_pdf(data: bytes) -> bool:
@@ -506,10 +603,10 @@ def select_pdf_pages(page_texts: list[str], max_pages: int = PDF_MAX_PAGES) -> l
     return hits if hits else list(range(len(texts)))
 
 
-def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
+def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str], dict[str, int]]:
     """Returns ([{page, xref, kind, ext, width, height, data, page_text}],
-    page_texts of the pages that mention a specimen word). `page` is 1-based
-    for humans and ledger URLs.
+    page_texts of the pages that mention a specimen word, {skip reason: count}).
+    `page` is 1-based for humans and ledger URLs.
 
     Images are taken from what a page actually *draws* (`get_image_info`),
     not from its resource dictionary: a gazette PDF commonly shares one
@@ -520,7 +617,12 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
     while its images run on for pages; an xref is extracted once. Only when
     the whole PDF yields no usable embedded image (a scanned gazette, vector
     artwork) are the specimen-word pages rendered instead -- rendering a
-    table of contents because it says "Muster" is noise, not a specimen.
+    table of contents because it says "Muster" is noise, not a specimen. A
+    rendered page that draws no image at all and carries more than
+    `PDF_TEXT_PAGE_MAX_WORDS` words of its own text is skipped as
+    `pdf-text-page` and counted in the returned skip map: it is a leaflet
+    page, and a full-page raster of prose costs the screener a packet row and
+    an open (a Liberia PDF did exactly that on cycle c14).
     Requires PyMuPDF; the caller checks `fitz is not None` first."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     try:
@@ -531,6 +633,8 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
         order = with_words + [i for i in range(page_count) if not has_words[i]]
         specimen_texts = [texts[i] for i in with_words]
         images: list[dict] = []
+        skipped: dict[str, int] = {}
+        draws_an_image: dict[int, bool] = {}
         seen_xrefs: set[int] = set()
         for i in order:
             if len(images) >= PDF_MAX_IMAGES:
@@ -540,6 +644,7 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
                 drawn = page.get_image_info(xrefs=True)
             except Exception:  # noqa: BLE001
                 drawn = []
+            draws_an_image[i] = bool(drawn)
             for info in drawn:
                 xref = info.get("xref")
                 if not xref or xref in seen_xrefs or len(images) >= PDF_MAX_IMAGES:
@@ -572,11 +677,14 @@ def extract_pdf_images(pdf_bytes: bytes) -> tuple[list[dict], list[str]]:
             for i in with_words or list(range(page_count)):
                 if len(images) >= PDF_MAX_IMAGES:
                     break
+                if not draws_an_image.get(i, False) and len((texts[i] or "").split()) > PDF_TEXT_PAGE_MAX_WORDS:
+                    skipped[PDF_SKIP_TEXT_PAGE] = skipped.get(PDF_SKIP_TEXT_PAGE, 0) + 1
+                    continue
                 pix = doc[i].get_pixmap(dpi=PDF_RASTER_DPI)
                 images.append(
                     {"page": i + 1, "xref": None, "kind": "raster", "ext": "png", "width": pix.width, "height": pix.height, "data": pix.tobytes("png"), "page_text": texts[i]}
                 )
-        return images, specimen_texts
+        return images, specimen_texts, skipped
     finally:
         doc.close()
 
@@ -587,13 +695,19 @@ def expand_pdf_candidate(
     ledger_records: list[dict],
     corpus_records: list[dict],
     binary_path: str,
+    skipped_counter: dict[str, int] | None = None,
 ) -> list[dict]:
     """Turns a screened PDF parent (auto_reject None, `is_pdf` set) into one
     result per extracted image, each run through the byte-duplicate, staging,
     check_sample, variant and needs_eyes steps like a directly linked image.
     The child's `image_url` gains `#page=N` so the ledger and later origin
     rows point at the page, not just the file. A PDF with no usable image is
-    returned as a single off-scope reject."""
+    returned as a single off-scope reject.
+
+    `skipped_counter`, when given, is a caller-owned `{reason: count}` dict
+    this function adds each PDF's skipped pages to (`pdf-text-page` today), so
+    the run's summary can state them without this function returning a second
+    value every caller would have to unpack."""
     pdf_bytes = parent.pop("_pdf_bytes", b"")
     parent.pop("is_pdf", None)
     pdf_url = parent.get("image_url_final") or parent.get("image_url") or ""
@@ -611,15 +725,20 @@ def expand_pdf_candidate(
         return [parent]
 
     try:
-        images, page_texts = extract_pdf_images(pdf_bytes)
+        images, page_texts, skipped = extract_pdf_images(pdf_bytes)
     except Exception as e:  # noqa: BLE001 -- a malformed PDF is a reject, not a crash
         parent["auto_reject"] = "off-scope"
         parent["note"] = f"pdf: could not be read ({type(e).__name__})"
         return [parent]
 
+    if skipped_counter is not None:
+        for reason, count in skipped.items():
+            skipped_counter[reason] = skipped_counter.get(reason, 0) + count
+    skipped_note = "".join(f" ({count} skipped: {reason})" for reason, count in sorted(skipped.items()))
+
     if not images:
         parent["auto_reject"] = "off-scope"
-        parent["note"] = "pdf: no usable image on its pages"
+        parent["note"] = f"pdf: no usable image on its pages{skipped_note}"
         return [parent]
 
     pdf_specimen_snippets: list[str] = []
@@ -669,6 +788,7 @@ def screen_candidate(
     binary_path: str,
     fetch=None,
     host_denylist: dict | None = None,
+    page_html: dict[str, dict] | None = None,
 ) -> dict:
     result = dict(candidate)
     result.update(
@@ -679,6 +799,8 @@ def screen_candidate(
             "staged_path": None,
             "page_url_final": None,
             "page_status": None,
+            "page_source": None,
+            "page_fetched_at": None,
             "image_url_final": None,
             "image_status": None,
             "licence_snippets": [],
@@ -717,20 +839,32 @@ def screen_candidate(
 
     fetch_fn = fetch or fetch_url
 
-    # 3. fetch page_url
-    page_fetch = fetch_fn(page_url)
-    if page_fetch is None:
-        result["auto_reject"] = "unresolvable"
-        result["note"] = "page fetch failed after retry"
-        return result
-    final_page_url, page_status, page_body = page_fetch
-    result["page_url_final"] = final_page_url
-    result["page_status"] = page_status
+    # 3. fetch page_url -- unless the session already fetched it for us
+    supplied = (page_html or {}).get(page_url)
+    if supplied is not None:
+        # The session's copy of a page this tool's plain fetch cannot get
+        # (403/503, an anti-bot 202, a JavaScript-only shell). The image is
+        # still fetched below by this tool; only the page is borrowed.
+        page_text = read_page_html(supplied)
+        final_page_url = page_url
+        result["page_url_final"] = page_url
+        result["page_source"] = "session-fetched"
+        result["page_fetched_at"] = supplied.get("fetched_at")
+    else:
+        page_fetch = fetch_fn(page_url)
+        if page_fetch is None:
+            result["auto_reject"] = "unresolvable"
+            result["note"] = "page fetch failed after retry"
+            return result
+        final_page_url, page_status, page_body = page_fetch
+        result["page_url_final"] = final_page_url
+        result["page_status"] = page_status
+        result["page_source"] = "tool"
 
-    try:
-        page_text = page_body.decode("utf-8")
-    except UnicodeDecodeError:
-        page_text = page_body.decode("latin-1", errors="replace")
+        try:
+            page_text = page_body.decode("utf-8")
+        except UnicodeDecodeError:
+            page_text = page_body.decode("latin-1", errors="replace")
 
     # 4. linked-from-page
     if not image_linked_from_page(final_page_url or page_url, page_text, image_url):
@@ -894,10 +1028,16 @@ def write_packet(path: str, survivors: list[dict]) -> None:
         note_parts = []
         if rec.get("needs_eyes"):
             note_parts.append("needs eyes")
+        if rec.get("h5_check"):
+            # The worker saw a source that may carry a photograph and left the
+            # real-person call to the screener, who opens the image (prefix v3.2).
+            note_parts.append("h5 check")
         if rec.get("variant_of"):
             note_parts.append(f"variant of {rec['variant_of']}")
         if rec.get("pdf_source"):
             note_parts.append(f"from PDF p.{rec['pdf_source'].get('page')} ({rec['pdf_source'].get('kind')})")
+        if rec.get("page_source") == "session-fetched":
+            note_parts.append("page: session-fetched")
         note = "; ".join(note_parts)
 
         row = (
@@ -965,6 +1105,14 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="override the check_sample binary path (default: target/release/examples/check_sample[.exe])",
     )
+    parser.add_argument(
+        "--page-html-dir",
+        default=None,
+        help=(
+            "directory of session-fetched page HTML (pages.jsonl + <sha12>.html) used instead of "
+            "fetching page_url; the session, never this tool, does that retry (H14)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     repo_root = find_repo_root()
@@ -981,6 +1129,13 @@ def main(argv: list[str] | None = None) -> int:
     ledger_records = load_jsonl(args.ledger)
     corpus_records = load_jsonl(args.corpus)
     host_denylist = load_host_denylist(os.path.join(os.path.dirname(os.path.abspath(__file__)), HOST_DENYLIST_FILENAME))
+    try:
+        page_html = load_page_html_dir(args.page_html_dir)
+    except FileNotFoundError as e:
+        print(f"--page-html-dir: {e}", file=sys.stderr)
+        return 1
+    if page_html:
+        print(f"{len(page_html)} session-fetched page(s) available from {args.page_html_dir}")
 
     if fitz is None and any((c.get("format") or "").lower() == "pdf" for c in candidates):
         print(
@@ -994,14 +1149,23 @@ def main(argv: list[str] | None = None) -> int:
 
     screened: list[dict] = []
     survivors: list[dict] = []
+    pdf_skipped: dict[str, int] = {}
 
     for candidate in candidates:
         result = screen_candidate(
-            candidate, args.staging, ledger_records, corpus_records, binary_path, host_denylist=host_denylist
+            candidate,
+            args.staging,
+            ledger_records,
+            corpus_records,
+            binary_path,
+            host_denylist=host_denylist,
+            page_html=page_html,
         )
         outcomes = [result]
         if result.get("is_pdf") and result["auto_reject"] is None:
-            outcomes = expand_pdf_candidate(result, args.staging, ledger_records, corpus_records, binary_path)
+            outcomes = expand_pdf_candidate(
+                result, args.staging, ledger_records, corpus_records, binary_path, skipped_counter=pdf_skipped
+            )
         for outcome in outcomes:
             screened.append(outcome)
             if outcome["auto_reject"] is None:
@@ -1021,6 +1185,11 @@ def main(argv: list[str] | None = None) -> int:
     rejected = len(screened) - len(survivors)
     expanded = f" ({len(screened)} after PDF expansion)" if len(screened) != len(candidates) else ""
     print(f"Screened {len(candidates)} candidate(s){expanded}: {len(survivors)} survived, {rejected} auto-rejected.")
+    if pdf_skipped:
+        print("PDF pages skipped: " + ", ".join(f"{count} {reason}" for reason, count in sorted(pdf_skipped.items())))
+    session_pages = sum(1 for rec in screened if rec.get("page_source") == "session-fetched")
+    if session_pages:
+        print(f"{session_pages} candidate(s) used a session-fetched page (page_source=session-fetched).")
     return 0
 
 

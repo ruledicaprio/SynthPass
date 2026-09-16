@@ -744,5 +744,61 @@ class EnsureBinariesBuiltTests(unittest.TestCase):
         mock_run.assert_not_called()
 
 
+class StageablePathsTests(unittest.TestCase):
+    """C1: the placed images are not tracked on main (they live on
+    samples-data), and `git add` fails outright on an ignored path -- which is
+    how a cohort c14 run died at the commit step. Only tracked text is staged."""
+
+    TOUCHED = {
+        "samples/corpus.jsonl",
+        "knowledge/CORPUS_COVERAGE.md",
+        "changelog.d/corpus-cohort-c14.added.md",
+        "samples/covers/Togo_Passport_Specimen_TGO_2021_cover.jpg",
+        "samples/passports/Mozambique_Passport_Specimen_P0_MOZ_2020_mrz.png",
+        "samples/id_cards/Rwanda_ID_Specimen_2019_front_no_mrz.webp",
+        "samples/driving_licenses/Uganda_DL_Specimen_2018.jpeg",
+        "samples/misc/Liberia_Other_Specimen_2022.gif",
+        "samples/local/covers/Libya_Passport_Specimen_LBY_2013_cover.jpg",
+        "samples/local/local-manifest.jsonl",
+    }
+
+    def test_no_image_under_a_samples_image_directory_is_ever_staged(self):
+        stageable, _skipped = ac.stageable_paths(self.TOUCHED)
+        for path in stageable:
+            parts = path.split("/")
+            extension = path.rsplit(".", 1)[-1].lower()
+            if parts[0] == "samples" and len(parts) > 1:
+                self.assertNotIn(
+                    parts[1],
+                    ("covers", "passports", "id_cards", "driving_licenses", "misc", "local"),
+                    msg=f"{path} is under an untracked samples directory",
+                )
+            self.assertNotIn(extension, ac.IMAGE_EXTENSIONS, msg=f"{path} is an image")
+
+    def test_the_tracked_text_paths_survive(self):
+        stageable, skipped = ac.stageable_paths(self.TOUCHED)
+        self.assertEqual(
+            stageable,
+            ["changelog.d/corpus-cohort-c14.added.md", "knowledge/CORPUS_COVERAGE.md", "samples/corpus.jsonl"],
+        )
+        self.assertEqual(len(skipped), 7)
+
+    def test_samples_local_is_skipped_whole_manifest_included(self):
+        # .gitignore ignores samples/local/ outright -- the local-only track is
+        # deliberately never committed, manifest and all.
+        self.assertTrue(ac.is_untracked_sample_path("samples/local/local-manifest.jsonl"))
+        self.assertTrue(ac.is_untracked_sample_path("samples/local/passports/X_Passport_2020_mrz.jpg"))
+
+    def test_tracked_ground_truth_and_non_samples_paths_are_not_touched(self):
+        self.assertFalse(ac.is_untracked_sample_path("samples/corpus.jsonl"))
+        self.assertFalse(ac.is_untracked_sample_path("samples/README.md"))
+        self.assertFalse(ac.is_untracked_sample_path("samples/ocr_fixtures/X_Passport_2020_mrz.json"))
+        self.assertFalse(ac.is_untracked_sample_path("knowledge/CORPUS_COVERAGE.md"))
+        self.assertFalse(ac.is_untracked_sample_path(""))
+
+    def test_windows_separators_are_handled(self):
+        self.assertTrue(ac.is_untracked_sample_path(r"samples\covers\X_Passport_2020_cover.jpg"))
+
+
 if __name__ == "__main__":
     unittest.main()

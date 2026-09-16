@@ -28,7 +28,10 @@ note for a human to fold in by hand, because a Status move there is a human
 call this tool does not make.
 
 Standard library only, matching tools/screen_candidates.py and
-tools/apply_verdicts.py.
+tools/apply_verdicts.py. The one non-stdlib import is its sibling
+`tools/scout_cycle.py`, for the STATE.md helpers a covers-only cohort needs
+(`cover_only_codes_line`, `edit_state`, `add_codes_line`) -- that module is
+standard library only too and has no import-time side effects.
 
 ## Packet format
 
@@ -117,6 +120,10 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import scout_cycle as scy  # noqa: E402 -- STATE.md lives behind these helpers; no import-time side effects
+
 # --------------------------------------------------------------------------
 # Constants mirrored from the Rust side of the manifest contract. Keep these
 # in sync with crates/synthpass-bench/tests/corpus_manifest.rs -- that file,
@@ -142,6 +149,17 @@ DOUBTFUL_LICENCES = ("none-stated", "unrecorded", "")
 
 CORPUS_DIRS = ("passports", "id_cards", "driving_licenses", "misc", "ocr_fixtures", "covers")
 IMAGE_EXTENSIONS = ("jpg", "jpeg", "png", "webp", "gif")
+
+# Specimen images are not tracked on main: every one of these directories is
+# ignored in `.gitignore` because the images live on the orphan `samples-data`
+# branch (`scripts/sync-samples.ps1`), and `samples/local/` -- the local-only
+# track, its manifest included -- is ignored outright and deliberately never
+# committed. Staging one of those paths does not merely do nothing: it makes
+# the whole `git add` fail ("paths are ignored by one of your .gitignore
+# files"), which is how a cohort c14 run died at the commit step with every
+# other step already done. `samples/ocr_fixtures/` is absent on purpose -- its
+# JSON/Markdown ground truth (and four force-added images) IS tracked.
+UNTRACKED_SAMPLE_DIRS = ("passports", "id_cards", "driving_licenses", "misc", "covers", "local")
 
 VALID_VERDICTS = ("public", "local", "drop")
 
@@ -335,6 +353,32 @@ def validate_target_filename(verdict: str, target_rel_path: str) -> list[str]:
         errors.append(f"{basename!r}: filed under id_cards/ but the name has no 'ID' token")
 
     return errors
+
+
+# ==========================================================================
+# What may be staged (see UNTRACKED_SAMPLE_DIRS above)
+# ==========================================================================
+
+
+def is_untracked_sample_path(path: str) -> bool:
+    """True for a path under one of the `samples/` directories that is not
+    tracked on main -- every placed specimen image, and anything at all under
+    `samples/local/`. `samples/corpus.jsonl`, `knowledge/...` and
+    `changelog.d/...` are tracked text and return False."""
+    parts = (path or "").replace("\\", "/").strip("/").split("/")
+    return len(parts) >= 2 and parts[0] == "samples" and parts[1] in UNTRACKED_SAMPLE_DIRS
+
+
+def stageable_paths(paths) -> tuple[list[str], list[str]]:
+    """Splits the paths a run touched into `(stageable, skipped)`, sorted.
+    Only the tracked text products of a cohort -- `samples/corpus.jsonl`,
+    `knowledge/CORPUS_COVERAGE.md`, the changelog fragment -- are ever staged;
+    the images themselves reach `samples-data` through
+    `scripts/sync-samples.ps1`, never through this commit."""
+    stageable, skipped = [], []
+    for path in paths:
+        (skipped if is_untracked_sample_path(path) else stageable).append(path)
+    return sorted(stageable), sorted(skipped)
 
 
 # ==========================================================================
@@ -1132,8 +1176,10 @@ def main(argv: list[str] | None = None) -> int:
     repo_root = (args.repo_root or Path(__file__).resolve().parent.parent).resolve()
     worktree = repo_root.parent / "worktrees" / repo_root.name / args.cohort_branch
     # Every path this run itself writes, staged explicitly at commit time
-    # (`git add <touched_paths>`) instead of `git add -A`, so the commit
-    # never picks up an unrelated pre-existing change in the worktree.
+    # instead of `git add -A`, so the commit never picks up an unrelated
+    # pre-existing change in the worktree -- and filtered through
+    # `stageable_paths`, since the placed images are not tracked on main at
+    # all and naming one of them fails the whole staging step.
     touched_paths: set[str] = set()
 
     packet_text = args.packet.read_text(encoding="utf-8")
@@ -1305,6 +1351,17 @@ def main(argv: list[str] | None = None) -> int:
             coverage_md_path.write_text(coverage_text, encoding="utf-8")
             touched_paths.add("knowledge/CORPUS_COVERAGE.md")
 
+            # A cover leaves CORPUS_COVERAGE.md's Status alone (ADR-0012), so
+            # nothing in the repo records that the code was scouted at all and
+            # `scout_cycle.py suggest` re-proposes it at full priority -- it
+            # re-proposed all fourteen c13 codes for c14. The one place that
+            # history belongs is STATE.md's `## Codes` section, in the same
+            # wording used by hand for c12/c13/c14; `suggest` ranks a code
+            # named only there after every fresh code, never out.
+            codes_line = scy.cover_only_codes_line(cycle_id, list(cover_entries_by_code))
+            scy.edit_state(repo_root, lambda t: scy.add_codes_line(t, codes_line))
+            print(f"STATE.md: {codes_line}")
+
         if draft_entries:
             coverage_draft_path = args.packet.parent / f"coverage-draft-{args.cohort_branch.removeprefix('cohort-')}.md"
             coverage_draft_path.write_text(
@@ -1370,7 +1427,12 @@ def main(argv: list[str] | None = None) -> int:
         print("with --confirm once satisfied.")
         return 0
 
-    run_cmd(["git", "add"] + sorted(touched_paths), cwd=worktree, dry_run=args.dry_run)
+    to_stage, not_staged = stageable_paths(touched_paths)
+    for path in not_staged:
+        print(f"not staged (not tracked on main; reaches samples-data through sync-samples.ps1): {path}")
+    if not to_stage:
+        raise RuntimeError("nothing tracked to stage -- expected at least samples/corpus.jsonl and a changelog fragment")
+    run_cmd(["git", "add"] + to_stage, cwd=worktree, dry_run=args.dry_run)
     run_cmd(["git", "commit", "-m", commit_message], cwd=worktree, dry_run=args.dry_run)
     if args.reuse_existing:
         run_cmd(["git", "push"], cwd=worktree, dry_run=args.dry_run)
