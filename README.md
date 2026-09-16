@@ -140,8 +140,8 @@ MRZ whose document number matches hand-verified ground truth.
 - Synthetic-corpus and Tier-2 parity numbers, per-format breakdowns, and the rejected candidates
   are all in [benchmarks/README.md](knowledge/benchmarks/README.md#current-headline-numbers).
 
-**Tier-1 on synthetic passports, over time:**
-![Tier-1 hit rate on the synthetic passport corpus](knowledge/img/passport-bench-trend.svg)
+**Tier-1 on real passport specimens (`samples/passports/`), over time:**
+![Tier-1 hit rate on the real passport-specimen corpus](knowledge/img/passport-bench-trend.svg)
 
 **Real specimens** — the harder, more honest population:
 ![Provider benchmark trend on the real-specimen corpus](knowledge/img/real-specimens-bench-trend.svg)
