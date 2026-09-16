@@ -22,13 +22,13 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **145 / 159 = 91.2%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-14) |
-| Tier-1 hit rate, whole specimen corpus | 145 / 266 = 54.5% | same baseline; the gap is explained below |
+| **Tier-1 hit rate, real specimens** | **140 / 154 = 90.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-16) |
+| Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% | `provider-bench --mrz-only --document-type <fmt>` through the registered `mrz` provider, 2026-09-16 (`c617254`); matches CI 2026-09-14 — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 107 of the 266 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 107 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -39,16 +39,16 @@ the first moves when accuracy work lands. Full analysis:
 Swedish card front, the Dutch licence, Egypt 2012's masked zone and Argentina 2021 child's
 non-conforming one).
 
-**Real-specimen outcomes** (266 documents):
+**Real-specimen outcomes** (261 documents):
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **145** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| **Tier-1 HIT** | **140** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 4 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
 | `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 2.5× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
-| `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
-| `redacted_mrz` | 37 | no | Zone blacked out by whoever published the specimen |
+| `no_mrz_expected` | 49 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
 | `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible

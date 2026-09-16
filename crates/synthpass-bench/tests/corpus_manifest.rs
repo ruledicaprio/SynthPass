@@ -382,38 +382,6 @@ fn every_origin_is_either_wholly_unrecorded_or_wholly_recorded() {
     }
 }
 
-/// Pairs of rows that are one image under two names — identical `sha256`.
-///
-/// Each is read twice by every walk of `samples/`, so the real-specimen gate
-/// counts it twice. Four are an older name left beside its current-convention
-/// copy; the Serbian pair are both current-convention and disagree on the
-/// year, and the image's printed expiry (2022-10-10) fits a ten-year book
-/// issued in 2012. Removing each stale copy changes the gate's denominator,
-/// so that happens in its own data PR with a re-blessed baseline — this list
-/// then empties, and the test below becomes a plain uniqueness check.
-const KNOWN_BYTE_DUPLICATES: &[(&str, &str)] = &[
-    (
-        "Canada_Passport_Specimen_2023_mrz.jpg",
-        "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg",
-    ),
-    (
-        "China_Passport_Specimen_2012_mrz.webp",
-        "China_Passport_Specimen_P0_CHN_2012_mrz.webp",
-    ),
-    (
-        "Serbia_Passport_Specimen_P0_SRB_2009_mrz.jpg",
-        "Serbia_Passport_Specimen_P0_SRB_2012_mrz.jpg",
-    ),
-    (
-        "Slovakia_Passport_Specimen_2014_mrz.jpg",
-        "Slovakia_Passport_Specimen_PS_SVK_2014_mrz.jpg",
-    ),
-    (
-        "United_Arab_Emirates_Passport_Specimen_2011_mrz.jpg",
-        "United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg",
-    ),
-];
-
 #[test]
 fn no_image_is_recorded_twice_under_two_names() {
     // The byte-level duplicate check for new specimens: a candidate whose hash
@@ -428,30 +396,11 @@ fn no_image_is_recorded_twice_under_two_names() {
             .or_default()
             .push(row["filename"].as_str().unwrap_or_default());
     }
-    let mut found: Vec<(&str, &str)> = Vec::new();
-    for names in by_sha.values().filter(|n| n.len() > 1) {
-        let mut names = names.clone();
-        names.sort_unstable();
-        assert_eq!(
-            names.len(),
-            2,
-            "{names:?}: one image is recorded under {} names",
-            names.len()
-        );
-        let pair = (names[0], names[1]);
-        assert!(
-            KNOWN_BYTE_DUPLICATES.contains(&pair),
-            "{pair:?}: the same image (identical sha256) is recorded under two names, so every \
-             walk reads it twice. Keep one of them."
-        );
-        found.push(pair);
-    }
-    for pair in KNOWN_BYTE_DUPLICATES {
-        assert!(
-            found.contains(pair),
-            "{pair:?} is no longer a duplicate pair — remove it from KNOWN_BYTE_DUPLICATES"
-        );
-    }
+    let dups: Vec<_> = by_sha.values().filter(|paths| paths.len() > 1).collect();
+    assert!(
+        dups.is_empty(),
+        "duplicate benchmark image SHA groups found: {dups:?}"
+    );
 }
 
 #[test]

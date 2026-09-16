@@ -14,7 +14,7 @@
 //! ```powershell
 //! $env:SYNTHPASS_OCR_DUMP_VARIANTS = "artifacts/cell-c/crops"
 //! cargo run -p synthpass-ocr --release --example dump_variants -- `
-//!   Canada_Passport_Specimen_2023_mrz.jpg samples/passports/Oman_Passport_Specimen_P0_OMN_2004_mrz.jpg
+//!   Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg samples/passports/Oman_Passport_Specimen_P0_OMN_2004_mrz.jpg
 //! ```
 //!
 //! Each argument is either a path to an image or a bare filename found anywhere
