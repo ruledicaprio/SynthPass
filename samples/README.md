@@ -8,16 +8,11 @@ below), with the per-file metadata recorded in `corpus.jsonl`.
 **Images are not tracked on `main`.** They live on the orphan `samples-data`
 branch — run `./scripts/sync-samples.ps1` after a fresh clone (or any time
 you want the latest corpus) to populate this directory locally; it's
-`.gitignore`d otherwise. Four `ocr_fixtures/` images are the exception: they
-are force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`)
-panics without them and does not sync the corpus first.
+`.gitignore`d otherwise. A small set of fixture-derived passport images under `passports/` is force-added because required CI (`native_ocr_e2e`, `rust_ocr_smoke`) does not sync the corpus first.
 
 Tracked under `samples/` on `main`: this README, `corpus.jsonl` (the manifest),
 `ocr_fixtures/*.json` + `*.md` (the hand-verified ground truth),
-`ocr_fixtures/derived/*.json` + `*.md` (generated parity candidates), and those
-four images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every**
-mirrored directory, so ground truth cannot drift onto `samples-data` even when
-it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
+`ocr_fixtures/derived/*.json` + `*.md` (generated parity candidates), and the required fixture-derived passport images. `scripts/sync-samples.ps1` excludes `*.json`/`*.md` from **every** mirrored directory, so ground truth cannot drift onto `samples-data` even when it sits next to its image. See CONTRIBUTING.md's "Adding a corpus specimen"
 section and `knowledge/benchmarks/README.md`'s "local bench loop" for how the
 corpus grows now.
 
@@ -53,7 +48,7 @@ samples/
   passports/          passport specimen images (TD3 MRZ format) — gitignored, local mirror
   id_cards/            national identity card images (TD1 / TD2 MRZ format) — gitignored, local mirror
   driving_licenses/     driving licence specimen images (no MRZ) — gitignored, local mirror
-  ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; 4 images force-added for CI
+  ocr_fixtures/         hand-verified OCR ground truth (.md + .json) — tracked; no benchmark images
     derived/            generated, unreviewed parity candidates (.md + .json) — tracked
   misc/                 unclassifiable specimens (e.g. border-pass documents, wiki reference image) — gitignored, local mirror
   covers/                cover-only images (no data page), any document type — gitignored, local mirror; outside the default benchmark walk, opt-in via --include-covers
@@ -104,7 +99,10 @@ Country_DocType_Specimen_Code_State_YYYY[_redacted]_(mrz|no_mrz)[_variant…].ex
 - `YYYY` — the year. Which year it means is recorded per file in the manifest's
   `year.kind`, because it is the issue year in most names and the expiry year
   in at least one.
-- `_redacted` — the MRZ is physically blacked out on the source.
+- `_redacted` — the publisher removed holder data on the source. Two forms: `_redacted_mrz` when a
+  zone is still there but blacked out or blurred (the reader must refuse it), and `_redacted_no_mrz`
+  when the redaction removed the zone entirely, so no MRZ is present at all (decided 2026-09-16;
+  a document with no zone by design is plain `_no_mrz`).
 - `_mrz` / `_no_mrz` — whether this image carries an MRZ at all. Not optional:
   it keys `integrity_survey.rs --mrz-only`, which skips names containing
   `no_mrz` (a *negative* filter — an image with no `_mrz` tag at all is kept).
