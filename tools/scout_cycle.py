@@ -17,8 +17,11 @@ command instead of a dozen hand-typed steps that each had a way to go wrong:
     scout     run one dsh scout worker in its own worktree, capture its output,
               extract the JSONL candidates, read its token usage, count faults,
               remove the worktree, record the cycle in STATE.md
+    blocked   print the cycle's BLOCKED URLs grouped by reason, so the session
+              can pick which to retry; --to-fetch prints just the page URLs
     screen    run tools/screen_candidates.py over the cycle's candidates and
-              write the packet's JSON twin for the review artifact
+              write the packet's JSON twin for the review artifact; picks up
+              work/scouting/cNN/pages/ (session-fetched page HTML) when present
     review    render work/scouting/cNN/review-cNN.html for the user's verdicts
     run       task -> scout (one worker per --slice, in parallel) -> screen
     add-candidates
@@ -35,6 +38,10 @@ What stays with a human or a Claude session, deliberately:
   * every verdict (H4) and every merge.
   * the worker never fetches anything into the repo (H3): this tool runs the
     fetches itself through screen_candidates.py, on the orchestrator's side.
+  * retrying a page that answered the tool with 403/503/an anti-bot shell
+    (H14): `blocked` says which pages those are, the session fetches them by
+    its own means and drops the HTML into work/scouting/cNN/pages/, and
+    `screen` uses it. No repository code calls a scraping service.
 
 Standard library only, matching the sibling tools. `DSH_HOME` is resolved
 from the environment or the user-level registry value and always passed to
@@ -354,10 +361,14 @@ def packet_rows_from_screened(screened: list[dict]) -> list[dict]:
         note_parts = []
         if rec.get("needs_eyes"):
             note_parts.append("needs eyes")
+        if rec.get("h5_check"):
+            note_parts.append("h5 check")
         if rec.get("variant_of"):
             note_parts.append(f"variant of {rec['variant_of']}")
         if rec.get("pdf_source"):
             note_parts.append(f"from PDF p.{rec['pdf_source'].get('page')} ({rec['pdf_source'].get('kind')})")
+        if rec.get("page_source") == "session-fetched":
+            note_parts.append("page: session-fetched")
         if (rec.get("side") or "").lower() == "cover":
             note_parts.append("cover only (ADR-0012: labelled class, never a coverage claim)")
         rows.append(
@@ -377,6 +388,76 @@ def packet_rows_from_screened(screened: list[dict]) -> list[dict]:
             }
         )
     return rows
+
+
+COVER_ONLY_PREFIX = "cover only, data page still wanted"
+
+
+def cover_only_codes_line(cycle: str, codes: list[str]) -> str:
+    """The STATE.md `## Codes` line a cohort that placed only covers leaves
+    behind, in the wording already used by hand for c12/c13/c14. A cover never
+    moves a code's CORPUS_COVERAGE.md status (ADR-0012), so without this line
+    the code looks untried and `suggest` re-proposes it at full priority --
+    which is exactly what happened to all fourteen c13 codes on c14."""
+    return f"{COVER_ONLY_PREFIX} ({cycle}): {' '.join(codes)}"
+
+
+def cover_only_codes(state_text: str, known_codes: set[str]) -> set[str]:
+    """Codes whose ONLY history in STATE.md's `## Codes` section is a
+    `cover only, data page still wanted (cNN): ...` line. A code named on such
+    a line and also anywhere else in the section (exhausted, 1/2, a narrative
+    line) keeps that other history and stays excluded -- the cover line is a
+    demotion, never a promotion."""
+    m = re.search(r"^## Codes\s*$(.*?)(?=^## |\Z)", state_text, re.M | re.S)
+    if not m:
+        return set()
+    on_cover_lines: set[str] = set()
+    elsewhere: set[str] = set()
+    for line in m.group(1).splitlines():
+        tokens = set(re.findall(r"(?<![A-Za-z0-9_])([A-Z<]{1,3})(?![A-Za-z0-9_])", line)) & known_codes
+        if line.strip().startswith(COVER_ONLY_PREFIX):
+            on_cover_lines |= tokens
+        else:
+            elsewhere |= tokens
+    return on_cover_lines - elsewhere
+
+
+BLOCKED_REASON_BUCKETS = (
+    ("403", "403 forbidden"),
+    ("401", "401 unauthorized"),
+    ("429", "429 rate-limited"),
+    ("503", "503 unavailable"),
+    ("500", "500 server error"),
+    ("202", "202 anti-bot interstitial"),
+    ("cloudflare", "anti-bot / Cloudflare"),
+    ("captcha", "anti-bot / Cloudflare"),
+    ("timeout", "timeout"),
+    ("timed out", "timeout"),
+    ("content type", "unreadable content type"),
+    ("javascript", "JavaScript-only page"),
+    ("404", "404 not found"),
+)
+
+
+def blocked_reason_bucket(reason: str) -> str:
+    """The worker writes free text after `BLOCKED: <url> -- `, so grouping on
+    the raw string gives one group per URL. This buckets it to the handful of
+    causes that decide what the session should do: a 403/503/anti-bot page is
+    worth a session-side refetch, a 404 is not."""
+    text = (reason or "").lower()
+    for needle, bucket in BLOCKED_REASON_BUCKETS:
+        if needle in text:
+            return bucket
+    return "other"
+
+
+def group_blocked(rows: list[dict]) -> dict[str, list[dict]]:
+    """Blocked rows grouped by `blocked_reason_bucket`, buckets in first-seen
+    order, rows in file order."""
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        groups.setdefault(blocked_reason_bucket(row.get("reason", "")), []).append(row)
+    return groups
 
 
 def coverage_uncovered_codes(coverage_text: str) -> list[str]:
@@ -423,14 +504,22 @@ def suggest_codes(
     return out
 
 
-def prioritise_codes(picks: list[tuple[str, str, str]], portals: dict[str, str]) -> list[tuple[str, str, str]]:
+def prioritise_codes(
+    picks: list[tuple[str, str, str]],
+    portals: dict[str, str],
+    cover_only: set[str] | frozenset[str] = frozenset(),
+) -> list[tuple[str, str, str]]:
     """Pace v3 (plan §7, T10): codes with a legal-acts portal first (both gazette hits
-    so far came from one), then everything else in countries.rs order, then the
-    low-web-presence micro-states last. Stable within each tier."""
-    tier1 = [t for t in picks if t[1] in portals]
-    tier3 = [t for t in picks if t[1] in LOW_WEB_PRESENCE_CODES and t[1] not in portals]
-    tier2 = [t for t in picks if t[1] not in portals and t[1] not in LOW_WEB_PRESENCE_CODES]
-    return tier1 + tier2 + tier3
+    so far came from one), then every other fresh code in countries.rs order, then
+    codes a past cycle found a cover for but no data page (T13 B3 -- worth
+    revisiting, but after anything untried), then the low-web-presence
+    micro-states last. Stable within each tier."""
+    fresh = [t for t in picks if t[1] not in cover_only and t[1] not in LOW_WEB_PRESENCE_CODES]
+    tier1 = [t for t in fresh if t[1] in portals]
+    tier2 = [t for t in fresh if t[1] not in portals]
+    tier3 = [t for t in picks if t[1] in cover_only and t[1] not in LOW_WEB_PRESENCE_CODES]
+    tier4 = [t for t in picks if t[1] in LOW_WEB_PRESENCE_CODES]
+    return tier1 + tier2 + tier3 + tier4
 
 
 def plan_slices(ordered: list[str], workers: int, per_worker: int) -> list[list[str]]:
@@ -453,6 +542,16 @@ def parse_plan(spec: str) -> tuple[int, int]:
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _int_or_zero(value: str | None) -> int:
+    """A Cycles cell read back as a count. Anything that is not a plain integer
+    (the placeholder dash, a merged note) counts as zero rather than raising --
+    a malformed cell must not cost a cycle its candidates."""
+    try:
+        return int((value or "").strip())
+    except ValueError:
+        return 0
 
 
 def cycle_row(cycle: str, codes: str, wall: str, tokens: str, scouted: int, faults: int) -> str:
@@ -501,6 +600,61 @@ def update_cycle_cells(state_text: str, cycle: str, cells: dict[str, str]) -> st
         lines[i] = "|".join(parts) + "\n"
         return "".join(lines)
     return state_text
+
+
+def read_cycle_cells(state_text: str, cycle: str) -> dict[str, str] | None:
+    """The named columns of an existing `| cNN | ...` Cycles row, stripped, or
+    `None` when the cycle has no row yet. The counterpart to
+    `update_cycle_cells`: a rerun of one failed slice has to add to what the
+    finished workers already recorded, which means reading it first."""
+    for line in state_text.splitlines():
+        if not line.startswith(f"| {cycle} |"):
+            continue
+        parts = line.rstrip().split("|")
+        return {name: parts[idx + 1].strip() if idx + 1 < len(parts) else "" for name, idx in CYCLE_COL.items()}
+    return None
+
+
+def merge_codes_cell(old: str, new: str) -> str:
+    """The Cycles row's codes cell after a rerun: the codes already recorded,
+    then any the rerun added, first occurrence wins."""
+    seen: list[str] = []
+    for code in (old or "").split() + (new or "").split():
+        if code and code not in seen:
+            seen.append(code)
+    return " ".join(seen)
+
+
+def merge_token_cells(old: str, new: str) -> str:
+    """The Cycles row's token cell after a rerun. The cell holds already
+    formatted values (`205.1k / 2.36M / 21.1k`), which cannot be added back up
+    without inventing precision the format threw away -- so two runs are
+    stated as a sum of terms rather than one wrong number."""
+    old, new = (old or "").strip(), (new or "").strip()
+    if not old or old in ("-", "—", "unrecorded"):
+        return new or "unrecorded"
+    if not new or new == "unrecorded":
+        return old
+    return f"{old} + {new}"
+
+
+def merge_worker_candidates(existing: list[dict], incoming: list[dict]) -> tuple[list[dict], int]:
+    """Appends already-tagged worker candidates to a cycle's list, skipping any
+    (image_url, page_url) pair already present, and returns `(merged, added)`.
+    `merge_candidates` above is the session-side twin (it tags and validates
+    rows the session hands in); this one takes rows a worker produced and a
+    rerun must not duplicate or overwrite (T13 B2)."""
+    seen = {(c.get("image_url"), c.get("page_url")) for c in existing}
+    merged = list(existing)
+    added = 0
+    for c in incoming:
+        key = (c.get("image_url"), c.get("page_url"))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(c)
+        added += 1
+    return merged, added
 
 
 def add_codes_line(state_text: str, line: str) -> str:
@@ -649,22 +803,42 @@ def step_suggest(args, repo_root: Path) -> int:
     uncovered = coverage_uncovered_codes(coverage)
     state_path = repo_root / STATE_REL
     known = {code for _, code, _ in table}
-    mentioned = state_codes_mentioned(state_path.read_text(encoding="utf-8"), known) if state_path.is_file() else set()
-    exclude = mentioned | set(args.exclude or [])
+    state_text = state_path.read_text(encoding="utf-8") if state_path.is_file() else ""
+    mentioned = state_codes_mentioned(state_text, known)
+    covers = cover_only_codes(state_text, known)
+    # A cover-only code is not exhausted -- a cycle found a cover for it and no
+    # data page -- so it stays in the suggestion list and is ranked down instead
+    # (prioritise_codes' third tier). Everything else named in `## Codes` is out.
+    exclude = (mentioned - covers) | set(args.exclude or [])
     picks = suggest_codes(table, uncovered, exclude, args.region, args.include_orgs)
-    print(f"{len(uncovered)} codes read 'No specimen yet'; {len(mentioned)} already appear in STATE.md's Codes section.")
+    print(
+        f"{len(uncovered)} codes read 'No specimen yet'; {len(mentioned)} already appear in STATE.md's "
+        f"Codes section ({len(covers)} of them only as '{COVER_ONLY_PREFIX}', kept and ranked after fresh codes)."
+    )
     if not picks:
         print("nothing left to suggest under these filters")
         return 0
     if args.plan:
         workers, per_worker = parse_plan(args.plan)
         portals = load_legal_portals(Path(__file__).resolve().parent / LEGAL_PORTALS_FILENAME)
-        ordered = [code for _, code, _ in prioritise_codes(picks, portals)]
+        ordered = [code for _, code, _ in prioritise_codes(picks, portals, covers)]
         slices = plan_slices(ordered, workers, per_worker)
         names = {code: name for _, code, name in picks}
-        print(f"\nplan {workers}x{per_worker}: portal codes first, low-web-presence micro-states last")
+        print(
+            f"\nplan {workers}x{per_worker}: portal codes first, then fresh codes, then cover-only "
+            "codes, low-web-presence micro-states last"
+        )
+
+        def tag(c: str) -> str:
+            marks = []
+            if c in portals:
+                marks.append("portal")
+            if c in covers:
+                marks.append("cover only")
+            return ("; " + ", ".join(marks)) if marks else ""
+
         for i, sl in enumerate(slices, 1):
-            print(f"  w{i}: " + "  ".join(f"{c} ({names[c]}{'; portal' if c in portals else ''})" for c in sl))
+            print(f"  w{i}: " + "  ".join(f"{c} ({names[c]}{tag(c)})" for c in sl))
         cycle = args.cycle or "cNN"
         print("\n  python tools/scout_cycle.py run --cycle " + cycle + " " + " ".join(f'--slice "{" ".join(sl)}"' for sl in slices))
         return 0
@@ -747,23 +921,64 @@ def find_session_tokens(dsh_home: str, worktree: Path, since_ms: int) -> dict[st
     return best
 
 
-def run_worker(repo_root: Path, cycle: str, worker: str, task_path: Path, codes: list[str], route: str | None, keep_worktree: bool) -> WorkerResult:
-    """P-SCOUT steps 3-5 for one worker: worktree off origin/main, dsh headless
-    with the task text, output captured, candidates extracted, tokens and
-    faults recorded, worktree and branch removed."""
+CONFIG_LOCK_RETRY_DELAY_S = 2.0
+
+
+def is_git_config_lock_error(message: str) -> bool:
+    """True for git's "could not lock config file .git/config: File exists".
+    Three worktree creations issued from three pool threads at once race on
+    that one lock file, and the loser dies -- w1 was lost that way on cycle
+    c14. Creation is sequential now (see `step_scout`); this is the second
+    line of defence, for a lock another process happens to hold."""
+    text = (message or "").lower()
+    return "could not lock config file" in text or ("config.lock" in text and "file exists" in text)
+
+
+def worker_worktree(repo_root: Path, cycle: str, worker: str) -> tuple[str, Path]:
+    """`(branch name, worktree path)` for one scout worker -- one place, so the
+    sequential setup, the run and the sequential teardown cannot disagree."""
+    name = f"scout-{cycle}-{worker}"
+    return name, worktrees_root(repo_root) / name
+
+
+def add_scout_worktree(repo_root: Path, name: str, worktree: Path) -> None:
+    """Creates one worker's worktree off `origin/main`, retrying once after
+    `CONFIG_LOCK_RETRY_DELAY_S` when git reports a config lock. Called
+    sequentially from the main thread before the pool starts."""
+    if worktree.exists():
+        raise RuntimeError(f"worktree already exists: {worktree} (a previous run did not clean up)")
+    cmd = ["git", "-C", str(repo_root), "worktree", "add", "-b", name, str(worktree), "origin/main"]
+    try:
+        run_cmd(cmd)
+    except RuntimeError as e:
+        if not is_git_config_lock_error(str(e)):
+            raise
+        print(f"git config was locked creating {name}; retrying once in {CONFIG_LOCK_RETRY_DELAY_S:.0f} s")
+        time.sleep(CONFIG_LOCK_RETRY_DELAY_S)
+        run_cmd(cmd)
+
+
+def remove_scout_worktree(repo_root: Path, name: str, worktree: Path) -> None:
+    """Removes one worker's worktree and its branch. Never raises: a leftover
+    worktree is a nuisance the next run reports, not a reason to lose a
+    cycle's candidates."""
+    run_cmd(["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree)], check=False)
+    run_cmd(["git", "-C", str(repo_root), "branch", "-D", name], check=False)
+
+
+def run_worker(repo_root: Path, cycle: str, worker: str, task_path: Path, codes: list[str], route: str | None, worktree: Path) -> WorkerResult:
+    """P-SCOUT steps 3-5 for one worker, in the worktree `step_scout` already
+    created for it: dsh headless with the task text, output captured,
+    candidates extracted, tokens and faults recorded. Creating and removing
+    the worktree is deliberately NOT done here -- that writes `.git/config`,
+    and three of these running in parallel raced on its lock (cycle c14)."""
     result = WorkerResult(cycle, worker, codes)
     dsh_home = resolve_dsh_home()
     dsh_cmd = resolve_dsh_command()
-    name = f"scout-{cycle}-{worker}"
-    worktree = worktrees_root(repo_root) / name
+    name = worktree.name
     cycle_dir = repo_root / SCOUTING_DIR / cycle
     out_path = cycle_dir / f"worker-{worker}.out"
     result.out_path = out_path
-
-    run_cmd(["git", "-C", str(repo_root), "fetch", "origin", "--quiet"])
-    if worktree.exists():
-        raise RuntimeError(f"worktree already exists: {worktree} (a previous run did not clean up)")
-    run_cmd(["git", "-C", str(repo_root), "worktree", "add", "-b", name, str(worktree), "origin/main"])
 
     env = dict(os.environ)
     env["DSH_HOME"] = dsh_home
@@ -800,26 +1015,38 @@ def run_worker(repo_root: Path, cycle: str, worker: str, task_path: Path, codes:
         # on it -- a route error or a truncated run looks exactly like "none found" otherwise.
         result.faults.append(f"no summary line for {' '.join(missing)} (see {out_path.name})")
 
-    if not keep_worktree:
-        run_cmd(["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree)], check=False)
-        run_cmd(["git", "-C", str(repo_root), "branch", "-D", name], check=False)
     print(f"[{worker}] done in {format_wall(result.wall_s)}: {len(result.candidates)} candidate(s), faults {len(result.faults)}")
     return result
 
 
 def record_scout(repo_root: Path, results: list[WorkerResult]) -> Path:
     """Writes candidates-cNN.jsonl (all workers), then the Cycles row and Log
-    lines in STATE.md."""
+    lines in STATE.md.
+
+    Both files and the Cycles row are MERGED, never overwritten: when one
+    worker of a cycle failed and its slice is rerun on its own
+    (`scout --cycle cNN --slice "..."`), the workers that did finish have
+    already been recorded, and this second write must add to them. Candidates
+    are keyed by (image_url, page_url), blocked URLs by url, and the row's
+    codes/scouted/tokens cells are combined with the values already there."""
     cycle = results[0].cycle
     cycle_dir = repo_root / SCOUTING_DIR / cycle
     cand_path = cycle_dir / f"candidates-{cycle}.jsonl"
-    all_candidates = [c for r in results for c in r.candidates]
+    prior_candidates = load_jsonl(cand_path)
+    all_candidates, added = merge_worker_candidates(prior_candidates, [c for r in results for c in r.candidates])
     with open(cand_path, "w", encoding="utf-8") as f:
         for c in all_candidates:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
 
-    blocked_all = [b for r in results for b in r.blocked]
     blocked_path = cycle_dir / f"blocked-{cycle}.jsonl"
+    prior_blocked = load_jsonl(blocked_path)
+    seen_blocked = {b.get("url") for b in prior_blocked}
+    blocked_all = list(prior_blocked)
+    for b in (b for r in results for b in r.blocked):
+        if b.get("url") in seen_blocked:
+            continue
+        seen_blocked.add(b.get("url"))
+        blocked_all.append(b)
     if blocked_all:
         with open(blocked_path, "w", encoding="utf-8") as f:
             for b in blocked_all:
@@ -834,12 +1061,26 @@ def record_scout(repo_root: Path, results: list[WorkerResult]) -> Path:
             for k in tokens_sum:
                 tokens_sum[k] += r.tokens[k]
     faults = sum(len(r.faults) for r in results)
-    row = cycle_row(cycle, codes, format_wall(wall), format_tokens(tokens_sum), len(all_candidates), faults)
+    tokens_cell = format_tokens(tokens_sum)
+    row = cycle_row(cycle, codes, format_wall(wall), tokens_cell, len(all_candidates), faults)
 
     none_found_all = [c for r in results for c, v in r.per_code.items() if v.startswith("none found")]
 
     def apply(text: str) -> str:
-        text = insert_cycle_row(text, row)
+        prior_cells = read_cycle_cells(text, cycle)
+        if prior_cells is None:
+            text = insert_cycle_row(text, row)
+        else:
+            # A rerun of one slice: add to the row the first run left behind.
+            text = update_cycle_cells(
+                text,
+                cycle,
+                {
+                    "codes": merge_codes_cell(prior_cells.get("codes", ""), codes),
+                    "scouted": str(_int_or_zero(prior_cells.get("scouted")) + added),
+                    "tokens": merge_token_cells(prior_cells.get("tokens", ""), tokens_cell),
+                },
+            )
         if none_found_all:
             text = add_codes_line(text, f"tried ({cycle}), none found: {' '.join(none_found_all)}")
         for r in results:
@@ -856,13 +1097,24 @@ def record_scout(repo_root: Path, results: list[WorkerResult]) -> Path:
         return text
 
     edit_state(repo_root, apply)
-    print(f"wrote {cand_path} ({len(all_candidates)} candidate(s)); STATE.md updated")
+    if prior_candidates:
+        print(f"merged {added} new candidate(s) into {cand_path.name} ({len(all_candidates)} total); STATE.md row updated")
+    else:
+        print(f"wrote {cand_path} ({len(all_candidates)} candidate(s)); STATE.md updated")
     if blocked_all:
         print(f"{len(blocked_all)} blocked URL(s) -> {blocked_path.name}; retry them session-side (Firecrawl), never from repository code")
     return cand_path
 
 
-def step_scout(args, repo_root: Path) -> list[WorkerResult]:
+def step_scout(args, repo_root: Path) -> tuple[list[WorkerResult], list[str]]:
+    """Runs one worker per `--slice` and records whatever finished.
+
+    Returns `(results, failed_workers)`. Two cycle-c14 lessons are built in:
+    every worktree is created (and removed) sequentially in this thread, since
+    parallel creation raced on `.git/config` and killed w1; and a worker that
+    raises is turned into an empty `WorkerResult` with a fault line instead of
+    propagating, so `record_scout` still runs and the workers that did finish
+    keep their candidates. The caller reports the failure and exits non-zero."""
     slices = [s.split() for s in args.slice]
     if not slices:
         raise RuntimeError("at least one --slice \"CODE CODE ...\" is required")
@@ -876,17 +1128,46 @@ def step_scout(args, repo_root: Path) -> list[WorkerResult]:
         tasks.append((worker, [c.upper() for c in codes], step_task(task_args, repo_root)))
     if args.dry_run:
         print("[dry-run] task files written; no worker launched")
-        return []
+        return [], []
+
+    run_cmd(["git", "-C", str(repo_root), "fetch", "origin", "--quiet"])
+    prepared: list[tuple[str, list[str], Path, str, Path]] = []
+    for worker, codes, path in tasks:
+        name, worktree = worker_worktree(repo_root, args.cycle, worker)
+        add_scout_worktree(repo_root, name, worktree)
+        prepared.append((worker, codes, path, name, worktree))
+
     results: list[WorkerResult] = []
-    with ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-        futures = [
-            pool.submit(run_worker, repo_root, args.cycle, worker, path, codes, args.route, args.keep_worktree)
-            for worker, codes, path in tasks
-        ]
-        for fut in futures:
-            results.append(fut.result())
+    failed: list[str] = []
+    try:
+        with ThreadPoolExecutor(max_workers=len(prepared)) as pool:
+            futures = [
+                (worker, codes, pool.submit(run_worker, repo_root, args.cycle, worker, path, codes, args.route, worktree))
+                for worker, codes, path, _name, worktree in prepared
+            ]
+            for worker, codes, fut in futures:
+                try:
+                    results.append(fut.result())
+                except Exception as e:  # noqa: BLE001 -- one worker's failure must not cost the others theirs
+                    print(f"[{worker}] FAILED: {type(e).__name__}: {e}", file=sys.stderr)
+                    failure = WorkerResult(args.cycle, worker, codes)
+                    failure.faults.append(f"worker failed before reporting: {type(e).__name__}: {e}")
+                    results.append(failure)
+                    failed.append(worker)
+    finally:
+        if not args.keep_worktree:
+            for _worker, _codes, _path, name, worktree in prepared:
+                remove_scout_worktree(repo_root, name, worktree)
+
     record_scout(repo_root, results)
-    return results
+    if failed:
+        print(f"\n{len(failed)} worker(s) failed: {' '.join(failed)}", file=sys.stderr)
+        print("Everything the other workers produced is recorded. Rerun just the failed slice(s):", file=sys.stderr)
+        for worker, codes, _path, _name, _worktree in prepared:
+            if worker in failed:
+                print(f'  python tools/scout_cycle.py scout --cycle {args.cycle} --slice "{" ".join(codes)}"', file=sys.stderr)
+        print("(a rerun merges into candidates-cNN.jsonl and the Cycles row, it does not overwrite them)", file=sys.stderr)
+    return results, failed
 
 
 def merge_candidates(existing: list[dict], incoming: list[dict], cycle: str, worker: str) -> tuple[list[dict], int]:
@@ -927,6 +1208,50 @@ def step_add_candidates(args, repo_root: Path) -> int:
     return 0
 
 
+def step_blocked(args, repo_root: Path) -> int:
+    """Prints `blocked-cNN.jsonl` grouped by cause, or (with --to-fetch) just
+    the page URLs, one per line, for the session to fetch and drop into
+    work/scouting/cNN/pages/. The retry is the session's, never this tool's
+    (H14) -- nothing here touches the network."""
+    cycle = args.cycle
+    blocked_path = repo_root / SCOUTING_DIR / cycle / f"blocked-{cycle}.jsonl"
+    rows = load_jsonl(blocked_path)
+    if not rows:
+        print(f"{cycle}: no blocked URLs recorded ({blocked_path.name} is absent or empty)")
+        return 0
+    if args.to_fetch:
+        seen: set[str] = set()
+        for row in rows:
+            url = row.get("url")
+            if url and url not in seen:
+                seen.add(url)
+                print(url)
+        print(
+            f"{len(seen)} URL(s). Fetch each one session-side, save it under "
+            f"work/scouting/{cycle}/pages/ named by screen_candidates.py's page_html_filename(page_url), "
+            "list them in that directory's pages.jsonl, then: "
+            f"python tools/scout_cycle.py screen --cycle {cycle}",
+            file=sys.stderr,
+        )
+        return 0
+    groups = group_blocked(rows)
+    print(f"{cycle}: {len(rows)} blocked URL(s) in {len(groups)} group(s)")
+    for bucket, items in groups.items():
+        print()
+        print(f"{bucket} ({len(items)}):")
+        for row in items:
+            code = row.get("code") or "?"
+            worker = row.get("worker") or "?"
+            print(f"  [{code} {worker}] {row.get('url')}")
+            print(f"      {row.get('reason', '')}")
+    print()
+    print(
+        "A 403/503/anti-bot page is worth a session-side refetch (H14): "
+        f"python tools/scout_cycle.py blocked --cycle {cycle} --to-fetch"
+    )
+    return 0
+
+
 def step_screen(args, repo_root: Path) -> int:
     cycle = args.cycle
     cycle_dir = repo_root / SCOUTING_DIR / cycle
@@ -958,6 +1283,17 @@ def step_screen(args, repo_root: Path) -> int:
         "--packet", str(rel / f"packet-{cycle}.md"),
         "--check-sample-bin", str(check_sample),
     ]
+    # Session-fetched page HTML: explicit --page-html-dir wins, otherwise the
+    # cycle's own pages/ directory when the session has put one there. The
+    # session does that retry, never this tool (H14).
+    explicit_page_html = getattr(args, "page_html_dir", None)
+    page_html_dir = Path(explicit_page_html) if explicit_page_html else rel / "pages"
+    page_html_abs = page_html_dir if page_html_dir.is_absolute() else repo_root / page_html_dir
+    if page_html_abs.is_dir():
+        cmd += ["--page-html-dir", str(page_html_dir)]
+        print(f"using session-fetched pages from {page_html_dir}")
+    elif explicit_page_html:
+        raise RuntimeError(f"--page-html-dir {page_html_dir} is not a directory")
     print("$ " + " ".join(cmd))
     proc = subprocess.run(cmd, cwd=repo_root, text=True, capture_output=True, encoding="utf-8", errors="replace")
     print(proc.stdout)
@@ -1060,15 +1396,25 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--keep-worktree", action="store_true")
         p.add_argument("--dry-run", action="store_true", help="write task files only")
         p.add_argument("--check-sample-bin", default=None)
+        p.add_argument("--page-html-dir", default=None, help="see `screen --page-html-dir`")
 
     p = sub.add_parser("add-candidates", help="append session-found candidates (e.g. a Firecrawl retry of BLOCKED pages) to a cycle")
     p.add_argument("--cycle", required=True)
     p.add_argument("--from", dest="source", required=True, help="JSONL of candidate records in the worker's shape")
     p.add_argument("--worker", default="session", help="tag for the rows, default 'session'")
 
+    p = sub.add_parser("blocked", help="list the cycle's BLOCKED URLs grouped by reason, for a session-side retry")
+    p.add_argument("--cycle", required=True)
+    p.add_argument("--to-fetch", action="store_true", help="print just the page URLs, one per line")
+
     p = sub.add_parser("screen", help="screen the cycle's candidates and write the packet JSON twin")
     p.add_argument("--cycle", required=True)
     p.add_argument("--check-sample-bin", default=None)
+    p.add_argument(
+        "--page-html-dir",
+        default=None,
+        help="session-fetched page HTML (default: work/scouting/cNN/pages/ when it exists)",
+    )
 
     p = sub.add_parser("review", help="build the HTML review artifact")
     p.add_argument("--cycle", required=True)
@@ -1086,23 +1432,28 @@ def main(argv: list[str] | None = None) -> int:
             step_task(args, repo_root)
             return 0
         if args.command == "scout":
-            step_scout(args, repo_root)
-            return 0
+            _results, failed = step_scout(args, repo_root)
+            return 1 if failed else 0
         if args.command == "add-candidates":
             return step_add_candidates(args, repo_root)
+        if args.command == "blocked":
+            return step_blocked(args, repo_root)
         if args.command == "screen":
             return step_screen(args, repo_root)
         if args.command == "review":
             return step_review(args, repo_root)
         if args.command == "run":
-            results = step_scout(args, repo_root)
+            results, failed = step_scout(args, repo_root)
             if args.dry_run:
                 return 0
             if not any(r.candidates for r in results):
                 print(f"{args.cycle}: every worker returned 0 candidates; nothing to screen")
                 edit_state(repo_root, lambda t: update_cycle_cells(t, args.cycle, {"screened": "—", "packet": "—"}))
-                return 0
-            return step_screen(args, repo_root)
+                return 1 if failed else 0
+            # A failed worker never blocks screening what the others found; the
+            # non-zero exit is what says a slice still needs a rerun.
+            screen_status = step_screen(args, repo_root)
+            return 1 if failed else screen_status
     except RuntimeError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

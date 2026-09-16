@@ -115,7 +115,7 @@ class PrefixTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             scy.load_prefix_text("ROLE: x\n")
 
-    def test_shipped_prefix_is_v3(self):
+    def test_shipped_prefix_is_current(self):
         prefix_path = Path(__file__).resolve().parent / scy.PREFIX_FILENAME
         raw = scy.load_prefix_text(prefix_path.read_text(encoding="utf-8"))
         self.assertTrue(raw.startswith("ROLE: You are a research scout."))
@@ -134,6 +134,19 @@ class PrefixTests(unittest.TestCase):
         self.assertIn("at most one per code: a cover is a fallback, never the goal", text)
         self.assertIn('"side":"unknown" rather than guessing "biodata"', text)
         self.assertIn('"side":"biodata|front|back|full|cover|unknown"', text)
+        # v3.2 (T13 D, cycles c13+c14 returned 28 covers and no data page): the worker
+        # self-excludes only on what the SOURCE says, flags a maybe-photograph row for the
+        # screener instead of dropping it, and knows a placeholder identity is not a person.
+        self.assertIn("Exclude an image yourself only when the source itself says it is a real", text)
+        self.assertIn("is reported, not dropped", text)
+        self.assertIn('"h5_check":true to that record', text)
+        self.assertIn("A specimen's own sample photograph is not a person", text)
+        self.assertIn('"h5_check":true|false}', text)
+        # ... and the ban it serves is unchanged.
+        self.assertIn("a private upload of a real person's document, redacted or not", text)
+        # v3.2 (T13 F): an intergovernmental host also covers a harmonised member-state document.
+        self.assertIn("about a harmonised document its member states issue", text)
+        self.assertIn("eac.int", text)
 
 
 class SuffixTests(unittest.TestCase):
@@ -385,6 +398,162 @@ class PlanSlicesTests(unittest.TestCase):
             scy.parse_plan("3")
         with self.assertRaises(RuntimeError):
             scy.parse_plan("0x6")
+
+
+class CoverOnlyCodesTests(unittest.TestCase):
+    """B3: a cover never moves CORPUS_COVERAGE.md's Status, so the only record
+    that a code was scouted at all is STATE.md's Codes section."""
+
+    STATE_WITH_COVERS = STATE_MD.replace(
+        "claimed this cycle:",
+        "cover only, data page still wanted (c13): BWA LAO\n"
+        "cover only, data page still wanted (c14): THA\n"
+        "claimed this cycle:",
+    )
+
+    def test_line_matches_the_wording_used_by_hand(self):
+        self.assertEqual(
+            scy.cover_only_codes_line("c14", ["TGO", "MOZ", "SLE"]),
+            "cover only, data page still wanted (c14): TGO MOZ SLE",
+        )
+
+    def test_codes_named_only_on_a_cover_line_are_collected(self):
+        known = {"BWA", "LAO", "THA", "DZA", "XPO"}
+        covers = scy.cover_only_codes(self.STATE_WITH_COVERS, known)
+        # Only LAO's whole history is the cover line. BWA is also in the c07
+        # narrative line and THA in "tried once, none found (c10)": that older
+        # history wins, and neither is treated as merely cover-only.
+        self.assertEqual(covers, {"LAO"})
+
+    def test_no_codes_section_or_no_cover_lines_is_empty(self):
+        self.assertEqual(scy.cover_only_codes("# nothing", {"BWA"}), set())
+        self.assertEqual(scy.cover_only_codes(STATE_MD, {"BWA", "THA"}), set())
+
+    def test_a_written_line_round_trips_into_the_reader(self):
+        state = scy.add_codes_line(STATE_MD, scy.cover_only_codes_line("c15", ["LAO"]))
+        self.assertEqual(scy.cover_only_codes(state, {"LAO", "THA"}), {"LAO"})
+
+    def test_suggest_keeps_cover_only_codes_but_ranks_them_after_fresh_ones(self):
+        picks = [
+            ("Africa", "BWA", "Botswana"),
+            ("Asia", "LAO", "Lao PDR"),
+            ("Asia", "MNG", "Mongolia"),
+            ("Americas", "ATG", "Antigua"),
+        ]
+        ordered = [c for _, c, _ in scy.prioritise_codes(picks, {"MNG": "portal.example"}, {"BWA", "LAO"})]
+        self.assertEqual(ordered, ["MNG", "BWA", "LAO", "ATG"])
+
+
+class CycleRowMergeTests(unittest.TestCase):
+    """B2: a rerun of one failed slice adds to the cycle's row and candidate
+    file, it never replaces what the workers that finished recorded."""
+
+    ROW = "| c11 | THA MAC | ~284 s (4m44s) | 205.1k / 2.36M / 21.1k | 4 | — | — | TBD | TBD | 1 |"
+
+    def test_read_cycle_cells(self):
+        text = scy.insert_cycle_row(STATE_MD, self.ROW)
+        cells = scy.read_cycle_cells(text, "c11")
+        self.assertEqual(cells["codes"], "THA MAC")
+        self.assertEqual(cells["scouted"], "4")
+        self.assertEqual(cells["tokens"], "205.1k / 2.36M / 21.1k")
+        self.assertIsNone(scy.read_cycle_cells(text, "c77"))
+
+    def test_merge_codes_cell_keeps_first_occurrence(self):
+        self.assertEqual(scy.merge_codes_cell("THA MAC", "MAC TWN"), "THA MAC TWN")
+        self.assertEqual(scy.merge_codes_cell("", "THA"), "THA")
+        self.assertEqual(scy.merge_codes_cell("THA", ""), "THA")
+
+    def test_merge_token_cells_states_both_runs(self):
+        self.assertEqual(
+            scy.merge_token_cells("205.1k / 2.36M / 21.1k", "1.0k / 2.0k / 3.0k"),
+            "205.1k / 2.36M / 21.1k + 1.0k / 2.0k / 3.0k",
+        )
+        self.assertEqual(scy.merge_token_cells("unrecorded", "1.0k / 2.0k / 3.0k"), "1.0k / 2.0k / 3.0k")
+        self.assertEqual(scy.merge_token_cells("205.1k / 2.36M / 21.1k", "unrecorded"), "205.1k / 2.36M / 21.1k")
+        self.assertEqual(scy.merge_token_cells("—", ""), "unrecorded")
+
+    def test_merge_worker_candidates_appends_without_retagging(self):
+        existing = [{"code": "THA", "image_url": "https://a/x.jpg", "page_url": "https://a/p", "worker": "w2"}]
+        incoming = [
+            {"code": "THA", "image_url": "https://a/x.jpg", "page_url": "https://a/p", "worker": "w1"},
+            {"code": "MAC", "image_url": "https://a/y.jpg", "page_url": "https://a/p", "worker": "w1"},
+        ]
+        merged, added = scy.merge_worker_candidates(existing, incoming)
+        self.assertEqual(added, 1)
+        self.assertEqual([c["worker"] for c in merged], ["w2", "w1"])
+        self.assertEqual(merged[1]["code"], "MAC")
+
+    def test_merged_cells_land_in_the_row(self):
+        text = scy.insert_cycle_row(STATE_MD, self.ROW)
+        prior = scy.read_cycle_cells(text, "c11")
+        text = scy.update_cycle_cells(
+            text,
+            "c11",
+            {
+                "codes": scy.merge_codes_cell(prior["codes"], "TWN"),
+                "scouted": str(scy._int_or_zero(prior["scouted"]) + 2),
+                "tokens": scy.merge_token_cells(prior["tokens"], "unrecorded"),
+            },
+        )
+        self.assertIn("| c11 | THA MAC TWN | ~284 s (4m44s) | 205.1k / 2.36M / 21.1k | 6 |", text)
+
+    def test_int_or_zero_never_raises_on_a_placeholder(self):
+        self.assertEqual(scy._int_or_zero("4"), 4)
+        self.assertEqual(scy._int_or_zero("—"), 0)
+        self.assertEqual(scy._int_or_zero(None), 0)
+
+
+class WorktreeSetupTests(unittest.TestCase):
+    """B1: worker worktrees are created in one place, and a config lock (the
+    c14 race that killed w1) is recognised for the one retry."""
+
+    def test_config_lock_error_is_recognised(self):
+        self.assertTrue(scy.is_git_config_lock_error("error: could not lock config file .git/config: File exists"))
+        self.assertTrue(scy.is_git_config_lock_error("fatal: .git/config.lock: File exists"))
+        self.assertFalse(scy.is_git_config_lock_error("fatal: invalid reference: origin/main"))
+        self.assertFalse(scy.is_git_config_lock_error(""))
+
+    def test_worktree_name_and_path(self):
+        name, path = scy.worker_worktree(Path("D:/Projects/SynthPass"), "c15", "w2")
+        self.assertEqual(name, "scout-c15-w2")
+        self.assertEqual(path, Path("D:/Projects/worktrees/SynthPass/scout-c15-w2"))
+
+
+class BlockedGroupingTests(unittest.TestCase):
+    def test_reason_buckets(self):
+        self.assertEqual(scy.blocked_reason_bucket("403 Cloudflare"), "403 forbidden")
+        self.assertEqual(scy.blocked_reason_bucket("Cloudflare challenge"), "anti-bot / Cloudflare")
+        self.assertEqual(scy.blocked_reason_bucket("HTTP 202 interstitial (EUR-Lex)"), "202 anti-bot interstitial")
+        self.assertEqual(scy.blocked_reason_bucket("timed out after 30s"), "timeout")
+        self.assertEqual(scy.blocked_reason_bucket("unsupported content type application/pdf"), "unreadable content type")
+        self.assertEqual(scy.blocked_reason_bucket("who knows"), "other")
+        self.assertEqual(scy.blocked_reason_bucket(""), "other")
+
+    def test_group_blocked_keeps_file_order_within_a_bucket(self):
+        rows = [
+            {"url": "https://a/1", "reason": "403 forbidden", "worker": "w1"},
+            {"url": "https://b/2", "reason": "timed out", "worker": "w2"},
+            {"url": "https://a/3", "reason": "403 again", "worker": "w1"},
+        ]
+        groups = scy.group_blocked(rows)
+        self.assertEqual(list(groups), ["403 forbidden", "timeout"])
+        self.assertEqual([r["url"] for r in groups["403 forbidden"]], ["https://a/1", "https://a/3"])
+
+
+class PacketNoteFlagTests(unittest.TestCase):
+    def test_h5_check_and_session_fetched_page_reach_the_note(self):
+        rows = scy.packet_rows_from_screened(
+            [
+                {
+                    "code": "LBR",
+                    "auto_reject": None,
+                    "staged_path": "work/scouting/c15/staging/abc123abc123.jpg",
+                    "h5_check": True,
+                    "page_source": "session-fetched",
+                }
+            ]
+        )
+        self.assertEqual(rows[0]["note"], "h5 check; page: session-fetched")
 
 
 if __name__ == "__main__":

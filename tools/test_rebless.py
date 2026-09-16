@@ -410,5 +410,17 @@ class VerifyWorktreeOnBranchTests(unittest.TestCase):
                 rb.verify_worktree_on_branch(worktree, "cohort-c14", current_branch_fn=lambda w: "")
 
 
+class WatchCommandTests(unittest.TestCase):
+    """C2: one cohort's wait wrote 33,000 lines into the log. The wait is still
+    one blocking call -- it just redraws once a minute and says two lines."""
+
+    def test_interval_and_exit_status(self):
+        cmd = rb.build_watch_command("34980671424")
+        self.assertEqual(cmd[:4], ["gh", "run", "watch", "34980671424"])
+        self.assertIn("--interval", cmd)
+        self.assertEqual(cmd[cmd.index("--interval") + 1], "60")
+        self.assertIn("--exit-status", cmd)
+
+
 if __name__ == "__main__":
     unittest.main()

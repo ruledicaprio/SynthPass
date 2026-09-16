@@ -341,6 +341,146 @@ class PacketWritingTests(unittest.TestCase):
         self.assertIn("| valid | | | [abcdef123456.jpg]", content)
 
 
+class SessionFetchedPageTests(unittest.TestCase):
+    """--page-html-dir: a page the session fetched because this tool cannot
+    (403/503/anti-bot/JS-only). Nothing here touches the network."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.orig_run_check_sample = sc.run_check_sample
+
+    def tearDown(self):
+        sc.run_check_sample = self.orig_run_check_sample
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _pages_dir(self, page_url, html, **extra):
+        pages = os.path.join(self.tmp, "pages")
+        os.makedirs(pages, exist_ok=True)
+        filename = sc.page_html_filename(page_url)
+        with open(os.path.join(pages, filename), "w", encoding="utf-8") as f:
+            f.write(html)
+        record = {"page_url": page_url, "file": filename, "fetched_at": "2026-09-16T10:00Z", "fetched_by": "session"}
+        record.update(extra)
+        with open(os.path.join(pages, "pages.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(record) + chr(10))
+        return pages
+
+    def test_filename_is_the_url_sha12_and_stable(self):
+        url = "https://example.gov/a/page.html?x=1#frag"
+        first = sc.page_html_filename(url)
+        self.assertEqual(first, sc.page_html_filename(url))
+        self.assertTrue(first.endswith(".html"))
+        self.assertEqual(len(first), len("123456789abc.html"))
+        self.assertNotEqual(first, sc.page_html_filename(url + "2"))
+
+    def test_missing_directory_or_index_is_not_an_error(self):
+        self.assertEqual(sc.load_page_html_dir(None), {})
+        self.assertEqual(sc.load_page_html_dir(os.path.join(self.tmp, "nope")), {})
+        empty = os.path.join(self.tmp, "empty")
+        os.makedirs(empty)
+        self.assertEqual(sc.load_page_html_dir(empty), {})
+
+    def test_index_naming_a_missing_file_raises(self):
+        pages = os.path.join(self.tmp, "pages")
+        os.makedirs(pages)
+        with open(os.path.join(pages, "pages.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({"page_url": "https://x.example/p", "file": "gone.html"}) + chr(10))
+        with self.assertRaises(FileNotFoundError):
+            sc.load_page_html_dir(pages)
+
+    def test_loaded_record_carries_the_path_and_metadata(self):
+        pages = self._pages_dir("https://x.example/p", "<html>hi</html>", note="403 to urllib")
+        loaded = sc.load_page_html_dir(pages)
+        record = loaded["https://x.example/p"]
+        self.assertTrue(os.path.isfile(record["path"]))
+        self.assertEqual(record["fetched_by"], "session")
+        self.assertEqual(record["note"], "403 to urllib")
+        self.assertEqual(sc.read_page_html(record), "<html>hi</html>")
+
+    def test_supplied_page_is_used_and_the_page_is_never_fetched(self):
+        candidate = {
+            "code": "LBR",
+            "doc": "passport, biodata",
+            "td": "TD3",
+            "image_url": "https://example.gov/specimen.jpg",
+            "page_url": "https://example.gov/blocked.html",
+        }
+        pages = self._pages_dir(
+            candidate["page_url"], '<html><body>SPECIMEN<img src="specimen.jpg"></body></html>'
+        )
+
+        def fake_fetch(url, opener=None):
+            del opener
+            if url == candidate["page_url"]:
+                raise AssertionError("the page must not be fetched when a session copy exists")
+            if url == candidate["image_url"]:
+                return url, 200, b"\xff\xd8\xff\xe0" + b"7" * 64
+            raise AssertionError(f"unexpected fetch {url}")
+
+        sc.run_check_sample = lambda binary_path, image_path, timeout=None: {
+            "mrz_status": "hit", "doc_number": None, "watermark": True, "vendor": "clear",
+        }
+        result = sc.screen_candidate(
+            candidate, self.tmp, [], [], "fake-binary", fetch=fake_fetch,
+            page_html=sc.load_page_html_dir(pages),
+        )
+        self.assertIsNone(result["auto_reject"])
+        self.assertEqual(result["page_source"], "session-fetched")
+        self.assertEqual(result["page_fetched_at"], "2026-09-16T10:00Z")
+        self.assertIsNone(result["page_status"])  # no HTTP status: this tool made no request
+        self.assertTrue(result["staged_path"])  # the image itself is still fetched by the tool
+
+    def test_a_supplied_page_that_does_not_link_the_image_still_rejects(self):
+        candidate = {
+            "code": "LBR",
+            "image_url": "https://example.gov/specimen.jpg",
+            "page_url": "https://example.gov/blocked.html",
+        }
+        pages = self._pages_dir(candidate["page_url"], "<html><body>no links here</body></html>")
+        result = sc.screen_candidate(
+            candidate, self.tmp, [], [], "fake-binary",
+            fetch=lambda u, opener=None: (_ for _ in ()).throw(AssertionError("no fetch expected")),
+            page_html=sc.load_page_html_dir(pages),
+        )
+        self.assertEqual(result["auto_reject"], "unresolvable")
+        self.assertEqual(result["note"], "not-linked-from-page")
+
+    def test_normal_path_records_page_source_tool(self):
+        candidate = {
+            "code": "XXX",
+            "image_url": "https://example.com/specimen.jpg",
+            "page_url": "https://example.com/page.html",
+        }
+
+        def fake_fetch(url, opener=None):
+            del opener
+            if url == candidate["page_url"]:
+                return url, 200, b"<html><body>no links</body></html>"
+            raise AssertionError("image must not be fetched")
+
+        result = sc.screen_candidate(candidate, self.tmp, [], [], "fake-binary", fetch=fake_fetch)
+        self.assertEqual(result["page_source"], "tool")
+
+    def test_packet_note_says_session_fetched_and_h5_check(self):
+        survivors = [
+            {
+                "code": "LBR",
+                "doc": "passport",
+                "td": "TD3",
+                "page_url": "https://example.gov/blocked.html",
+                "mrz_check": "valid",
+                "staged_path": "work/scouting/c15/staging/abcdef123456.jpg",
+                "page_source": "session-fetched",
+                "h5_check": True,
+            }
+        ]
+        path = os.path.join(self.tmp, "packet.md")
+        sc.write_packet(path, survivors)
+        text = open(path, encoding="utf-8").read()
+        self.assertIn("page: session-fetched", text)
+        self.assertIn("h5 check", text)
+
+
 class ScreenCandidatePipelineTests(unittest.TestCase):
     """End-to-end checks of screen_candidate() with a fake fetch function and
     a monkeypatched run_check_sample, still fully offline."""
@@ -506,6 +646,13 @@ class PdfLaneTests(unittest.TestCase):
         doc.close()
         return data
 
+    @staticmethod
+    def _leaflet_text(lines: int = 40) -> str:
+        """A specimen-word page of prose: more than PDF_TEXT_PAGE_MAX_WORDS
+        words, as many short lines, since `insert_text` clips one long line at
+        the page edge and only the visible part reaches `get_text()`."""
+        return "Muster" + chr(10) + chr(10).join("requirements for applicants who apply" for _ in range(lines))
+
     def test_detect_pdf(self):
         self.assertTrue(sc.detect_pdf(b"%PDF-1.7 ..."))
         self.assertFalse(sc.detect_pdf(b"\x89PNG\r\n\x1a\n"))
@@ -522,7 +669,7 @@ class PdfLaneTests(unittest.TestCase):
     @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
     def test_extract_embedded_image_from_specimen_page_only(self):
         pdf = self._pdf([("Verordnung. Anlage 1.", None), ("Anlage 2 Muster des Reisepasses", (320, 200))])
-        images, texts = sc.extract_pdf_images(pdf)
+        images, texts, skipped = sc.extract_pdf_images(pdf)
         self.assertEqual(len(images), 1)  # page 1 draws nothing and has no specimen word: not rendered
         img = images[0]
         self.assertEqual((img["page"], img["kind"], img["ext"]), (2, "embedded", "png"))
@@ -534,7 +681,7 @@ class PdfLaneTests(unittest.TestCase):
     @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
     def test_small_images_are_dropped_and_page_is_rasterised(self):
         pdf = self._pdf([("specimen page with only a seal", (40, 40))])
-        images, _ = sc.extract_pdf_images(pdf)
+        images, _, skipped = sc.extract_pdf_images(pdf)
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0]["kind"], "raster")
         self.assertEqual(sc.detect_image_type(images[0]["data"]), "png")
@@ -545,7 +692,7 @@ class PdfLaneTests(unittest.TestCase):
         # A table of contents that says "Muster" must not become a row when the annex pages
         # carry real embedded images (PassV.pdf produced 7 such renders before this rule).
         pdf = self._pdf([("Inhalt: Anlage 1 Muster des Reisepasses", None), ("", (320, 200))])
-        images, _ = sc.extract_pdf_images(pdf)
+        images, _, skipped = sc.extract_pdf_images(pdf)
         self.assertEqual([(img["page"], img["kind"]) for img in images], [(2, "embedded")])
 
     @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
@@ -553,7 +700,7 @@ class PdfLaneTests(unittest.TestCase):
         # Three pages, one drawn image each; the heading word only on page 1. Every image must
         # come out once, attributed to the page that draws it, specimen page first.
         pdf = self._pdf([("Anlage 1 Muster", (320, 200)), ("", (321, 200)), ("", (322, 200))])
-        images, _ = sc.extract_pdf_images(pdf)
+        images, _, skipped = sc.extract_pdf_images(pdf)
         self.assertEqual([img["page"] for img in images], [1, 2, 3])
         self.assertEqual(len({img["xref"] for img in images}), 3)
 
@@ -602,6 +749,46 @@ class PdfLaneTests(unittest.TestCase):
         out = sc.screened_record_for_output(child)
         self.assertNotIn("_pdf_bytes", out)
         self.assertNotIn("is_pdf", out)
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_raster_fallback_skips_a_text_page(self):
+        # A leaflet page: no drawn image, a specimen word, and far more than
+        # PDF_TEXT_PAGE_MAX_WORDS words of its own text (the Liberia PDF on c14).
+        pdf = self._pdf([(self._leaflet_text(), None)])
+        images, _texts, skipped = sc.extract_pdf_images(pdf)
+        self.assertEqual(images, [])
+        self.assertEqual(skipped, {sc.PDF_SKIP_TEXT_PAGE: 1})
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_a_long_text_page_that_draws_an_image_is_still_rasterised(self):
+        # Only a page drawing nothing is a leaflet; a plate whose caption runs
+        # long (or whose one image was filtered out by size) must still render.
+        pdf = self._pdf([(self._leaflet_text(), (40, 40))])
+        images, _texts, skipped = sc.extract_pdf_images(pdf)
+        self.assertEqual([img["kind"] for img in images], ["raster"])
+        self.assertEqual(skipped, {})
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_short_text_pages_are_unaffected(self):
+        images, _texts, skipped = sc.extract_pdf_images(self._pdf([("specimen page with only a seal", (40, 40))]))
+        self.assertEqual(skipped, {})
+        self.assertEqual(len(images), 1)
+
+    @unittest.skipUnless(sc.fitz is not None, "PyMuPDF not installed")
+    def test_expansion_counts_the_skip_and_names_it_in_the_reject_note(self):
+        parent = {
+            "auto_reject": None,
+            "is_pdf": True,
+            "_pdf_bytes": self._pdf([(self._leaflet_text(), None)]),
+            "sha256": "ef" * 32,
+            "image_url": "https://example.gov/leaflet.pdf",
+        }
+        counter: dict = {}
+        out = sc.expand_pdf_candidate(parent, self.tmp, [], [], "fake-binary", skipped_counter=counter)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["auto_reject"], "off-scope")
+        self.assertIn(sc.PDF_SKIP_TEXT_PAGE, out[0]["note"])
+        self.assertEqual(counter, {sc.PDF_SKIP_TEXT_PAGE: 1})
 
     def test_pdf_without_pymupdf_is_unresolvable_not_ledger_poison(self):
         parent = {

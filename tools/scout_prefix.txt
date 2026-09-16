@@ -6,11 +6,20 @@ to finish before you answer.
 
 ALLOWED HOSTS: the issuing authority's own site (foreign ministry, interior ministry, police,
 passport office, consulate/embassy), the state's official gazette or legal-acts portal, an
-intergovernmental organisation's own page about its own travel document, ICAO's own
-publications, Wikimedia Commons (report the file's licence).
+intergovernmental organisation's own page about its own travel document or about a harmonised
+document its member states issue (the EAC e-passport on eac.int, the ECOWAS passport on
+ecowas.int; host_kind "intergov" either way), ICAO's own publications, Wikimedia Commons
+(report the file's licence).
 NEVER: consilium.europa.eu/prado or any PRADO mirror; commercial document databases or
 aggregators; novelty/fake-ID sellers; forums, social media, blogs, news galleries, paste or leak
-sites; any image that might show a real person's actual document.
+sites; a private upload of a real person's document, redacted or not.
+
+REAL PERSON — WHO DECIDES: you cannot see the image, so never infer a real holder from a caption.
+Exclude an image yourself only when the source itself says it is a real individual's document —
+"my passport", a named holder the page treats as a real person, a news photo of someone's
+document. An image on an ALLOWED HOST that may carry a photograph is reported, not dropped: add
+"h5_check":true to that record and say in notes what made you unsure. The screener opens the
+image and makes that call; dropping it here means nobody ever looks.
 
 THE IMAGE ITSELF: it must show the document — a cover, a data page, a card face, a visa sticker.
 Not a flag, a coat of arms, a building, an official at a podium, people holding a document, a
@@ -28,7 +37,10 @@ checks the image itself. A bare cover or design rendering is still worth reporti
 code: a cover is a fallback, never the goal. Report "side" as what you actually saw in the image,
 not what a caption or page title claims — Commons titles often say "biometric passport" for a
 plain cover photo — and write "side":"unknown" rather than guessing "biodata" when you inferred
-it from text instead of the pixels.
+it from text instead of the pixels. A specimen's own sample photograph is not a person: a
+placeholder identity (Erika Mustermann, JOHN DOE, a SPECIMEN overprint across the portrait) is
+part of the specimen, and an image is not "safer" for showing a cover instead of a data page —
+the data page is what is wanted.
 
 PDF FILES: your fetch tool cannot open PDFs or images. A PDF linked from a page you opened (a
 gazette annex, a regulation, a guide) may still be reported without opening it: copy the link
@@ -47,7 +59,7 @@ Then one JSON object per line per candidate, nothing else on those lines:
  "td":"TD1|TD2|TD3|MRV-A|MRV-B|unknown","series":"year or regulation","format":"image|pdf","image_url":"","page_url":"",
  "host_kind":"mfa|interior|police|passport-office|consular|gazette|intergov|icao|commons|other-gov",
  "licence_evidence":"exact quote or none stated","specimen_signal":"watermark|placeholder-name|page-says-specimen|official-host-only",
- "notes":"one short line"}
+ "notes":"one short line","h5_check":true|false}
 Then, if any ALLOWED HOST page or file would not load (403, Cloudflare, timeout, unreadable
 content type), one line per URL, nothing else on the line: `BLOCKED: <url> — <reason>`.
 
