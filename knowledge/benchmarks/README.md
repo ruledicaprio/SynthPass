@@ -371,6 +371,16 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 # then: download the `real-specimen-mrz-baseline` artifact, commit the file
 ```
 
+`baseline.samples_data_sha` is the authoritative corpus pin. Before the gate or
+real-specimen chart tracks materialize images, CI resolves that exact commit,
+runs `tools/audit_benchmark_identity.py --check`, and refuses to fall back to a
+moving `origin/samples-data` tip. The identity report is uploaded with the run.
+A deliberate write-baseline against a newer corpus may pass an explicit
+`data_ref`; assert-mode runs cannot override the committed pin. Synthetic
+`bench-data` collection is independent of `samples-data`: its `(seed, profile)`
+identity guard remains the relevant check, while real-track history rows record
+the pinned DATA SHA.
+
 **What counts as a regression.** The gate fails if `tier1_hits` drops below
 `baseline.tier1_hits - tolerance`, **or** if any of `checksum_failed`, `no_mrz_found`,
 `ocr_error`, `document_number_mismatch` or `false_positive_mrz` exceeds its baseline value plus

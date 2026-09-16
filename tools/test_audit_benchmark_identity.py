@@ -13,6 +13,31 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class IdentityAuditTests(unittest.TestCase):
+    def test_validate_accepts_clean_reconciliation(self):
+        self.assertEqual(audit.validate({
+            "candidate_assets": 2,
+            "manifest_assets": 2,
+            "missing_assets": [],
+            "unlisted_assets": [],
+            "hash_mismatches": [],
+            "unsynced_data_assets": [],
+            "duplicate_sha256": {},
+        }), [])
+
+    def test_validate_reports_every_structural_finding(self):
+        failures = audit.validate({
+            "candidate_assets": 2,
+            "manifest_assets": 1,
+            "missing_assets": ["passports/missing.jpg"],
+            "unlisted_assets": ["passports/extra.jpg"],
+            "hash_mismatches": ["passports/wrong.jpg"],
+            "unsynced_data_assets": ["other/hidden.jpg"],
+            "duplicate_sha256": {"deadbeef": ["a.jpg", "b.jpg"]},
+        })
+        self.assertEqual(len(failures), 6)
+        self.assertTrue(any("count mismatch" in failure for failure in failures))
+        self.assertTrue(any("duplicate SHA" in failure for failure in failures))
+
     def test_equal_bytes_preserve_both_sources(self):
         assets = {}
         audit.merge_asset(assets, "ocr_fixtures/same.gif", "abc", "samples-data")
@@ -55,6 +80,12 @@ class IdentityAuditTests(unittest.TestCase):
         with patch.object(audit, "git", return_value=b"index manifest") as git:
             self.assertEqual(audit.metadata_blob("WORKTREE", "samples/corpus.jsonl"), b"index manifest")
             git.assert_called_once_with("show", ":samples/corpus.jsonl")
+
+    def test_sync_script_has_explicit_exact_ref_path(self):
+        script = (ROOT / "scripts/sync-samples.ps1").read_text(encoding="utf-8")
+        self.assertIn('[string]$DataRef', script)
+        self.assertIn('git worktree add --detach $worktree $resolvedDataRef', script)
+        self.assertIn('refusing to fall back to origin/samples-data', script)
 
     def test_sync_directories_match_script(self):
         script = (ROOT / "scripts/sync-samples.ps1").read_text(encoding="utf-8")

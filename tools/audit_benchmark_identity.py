@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import subprocess
+import sys
 
 BASELINE_PATH = "knowledge/benchmarks/real-specimen-mrz-baseline.json"
 # Equivalence to the actual Rust find_image_files function is tested by compiling
@@ -76,6 +77,32 @@ def merge_asset(assets, asset_id, digest, source):
                                 sha256=digest, sources=[source])
 
 
+def validate(result):
+    """Return structural failures for a completed audit result.
+
+    The walk and merge logic above remains the single implementation of corpus
+    identity. This validator only turns its reported findings into a CI
+    failure; it does not reimplement candidate discovery.
+    """
+    failures = []
+    if result["candidate_assets"] != result["manifest_assets"]:
+        failures.append(
+            f"candidate/manifest count mismatch: {result['candidate_assets']} candidates, "
+            f"{result['manifest_assets']} manifest assets"
+        )
+    for key, label in (
+        ("missing_assets", "missing assets"),
+        ("unlisted_assets", "unlisted assets"),
+        ("hash_mismatches", "manifest SHA mismatches"),
+        ("unsynced_data_assets", "unsynced DATA assets"),
+    ):
+        if result[key]:
+            failures.append(f"{label}: {result[key]}")
+    if result["duplicate_sha256"]:
+        failures.append(f"duplicate SHA groups: {result['duplicate_sha256']}")
+    return failures
+
+
 def resolve_data_ref(data_ref, baseline):
     selected = data_ref if data_ref is not None else baseline["samples_data_sha"]
     if data_ref is None and (len(selected) != 40 or any(c not in "0123456789abcdef" for c in selected)):
@@ -140,6 +167,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-ref", help="override committed baseline samples_data_sha")
     parser.add_argument("--working-tree", action="store_true", help="read staged MAIN samples/ assets and manifest")
+    parser.add_argument("--check", action="store_true", help="fail on structural identity findings")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     result = json.dumps(audit(args.data_ref, args.working_tree), indent=2) + "\n"
@@ -147,3 +175,9 @@ if __name__ == "__main__":
         args.output.write_text(result, encoding="utf-8")
     else:
         print(result, end="")
+    if args.check:
+        failures = validate(json.loads(result))
+        if failures:
+            for failure in failures:
+                print(f"identity audit: {failure}", file=sys.stderr)
+            raise SystemExit(1)
