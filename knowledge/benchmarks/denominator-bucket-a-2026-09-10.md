@@ -1,5 +1,7 @@
 # Denominator refinement — the Argentina 2026 specimen has a fake printed MRZ
 
+**Superseded by:** [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md).
+
 **2026-09-10.** A third pass over the Tier-1 denominator, in the lineage of
 [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md) (the 94-document
 correction) and the Malaysia specimen. Surfaced by the user's hand-read of the 25 in-denominator

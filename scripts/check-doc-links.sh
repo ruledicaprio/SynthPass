@@ -3,7 +3,7 @@
 #
 #   scripts/check-doc-links.sh
 #
-# Four checks, over git-tracked files only:
+# Five checks, over git-tracked files only:
 #
 #   1. Every relative Markdown link `[text](path)` resolves to something that
 #      exists.
@@ -15,6 +15,13 @@
 #      the file itself. Check 1 strips the fragment before checking existence,
 #      so a link to a real file with a stale or invented anchor previously
 #      passed silently.
+#   5. Every source-tree file path cited anywhere — `crates/...`, `scripts/...`,
+#      `tools/...`, `.github/...` with a file extension — exists, resolved from
+#      the repo root or, for a file inside `crates/<name>/`, from that crate's
+#      root. Check 2 only ever covered `knowledge/`, so a doc citing a file that
+#      had moved to another crate passed. History files (CHANGELOG.md,
+#      changelog.d/, knowledge/archive/) and data (samples/, work/, JSON) are
+#      skipped: an old path there is the historically accurate one.
 #
 # Check 3 is the one that matters most: the `docs/` -> `knowledge/` rename left
 # ~116 references behind, and nothing but this script would notice them rotting
@@ -61,6 +68,18 @@ self="scripts/check-doc-links.sh"
 #     `decisions/`, and `benchmarking/` shipped as `benchmarks/`. The doc is
 #     kept in the author's voice with an editor's note pointing at ADR-0001;
 #     rewriting the paths would misrepresent what was proposed.
+#
+#   crates/synthpass-llm/src/backend.rs
+#     ADR-0004's proposed GPU backend module, labelled "does not exist yet" in
+#     the ADR itself; an ADR's proposal is kept as written.
+#
+#   crates/mrz-wasm/pkg/mrz_wasm.js
+#     wasm-pack build output that scripts/build-site.sh consumes; generated at
+#     build time, never tracked.
+#
+#   tools/gh_helpers.py
+#     A hypothetical split named in tools/rebless.py's design comment ("if a
+#     tools/gh_helpers.py split was needed"), not a citation.
 allow_missing=(
   "docs/"
   "knowledge/architecture/vision-provider-interface.md"
@@ -70,6 +89,9 @@ allow_missing=(
   "docs/mlis_v2_0_0_preliminary_design.md"
   "docs/REBRAND_MIGRATION.md"
   "docs/rebranding_identra_synthpass.md"
+  "crates/synthpass-llm/src/backend.rs"
+  "crates/mrz-wasm/pkg/mrz_wasm.js"
+  "tools/gh_helpers.py"
 )
 
 is_allowed() {
@@ -206,6 +228,38 @@ for f in "${md_files[@]}"; do
       report "$f -> $target (no ## heading slugs to #$frag in $target_file)"
   done < <(grep -oE '\]\([^)]+\)' "$f" 2>/dev/null | sed -e 's/^](//' -e 's/)$//')
 done
+
+# ------------------------------------------------ 5. source-tree paths cited
+echo "==> crates/, scripts/, tools/, .github/ paths cited anywhere"
+# One `git grep` over the whole tree and one `awk` set lookup against
+# `git ls-files` (plus every tracked file's parent directories): a per-file
+# shell loop like checks 2-3 took minutes on Windows. The lookbehind keeps a
+# match from starting mid-path (`foo/crates/x.rs`); the extension list puts
+# `jsonl`/`json` before `js` so a `.json` path is not cut short.
+cited_paths() {
+  git grep -I -n -o -P \
+    '(?<![A-Za-z0-9_./-])(crates|scripts|tools|\.github)/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*\.(jsonl|json|rs|md|sh|py|yml|yaml|toml|ps1|ts|js|html|txt)\b' \
+    -- . ':!CHANGELOG.md' ':!crates/mrz/CHANGELOG.md' ':!changelog.d' \
+    ':!knowledge/archive' ':!samples' ':!work' ':!*.jsonl' ':!*.json' ":!$self" || true
+}
+# Input 1: tracked files (and their parent directories). Input 2: `file:line:path`
+# hits. Prints `file:line: path` for every path found in neither place.
+while IFS= read -r hit; do
+  p="${hit##*: }"
+  is_allowed "$p" || report "${hit%%: *} cites missing $p"
+done < <(
+  awk '
+    FNR == NR { have[$0] = 1; d = $0; while (sub(/\/[^\/]*$/, "", d)) have[d] = 1; next }
+    {
+      f = $0; sub(/:.*/, "", f)
+      rest = substr($0, length(f) + 2); ln = rest; sub(/:.*/, "", ln)
+      p = substr(rest, length(ln) + 2)
+      if (p in have) next
+      if (match(f, /^crates\/[^\/]+\//) && ((substr(f, 1, RLENGTH) p) in have)) next
+      print f ":" ln ": " p
+    }
+  ' <(git ls-files) <(cited_paths) | sort -u
+)
 
 if [ "$fail" -ne 0 ]; then
   echo

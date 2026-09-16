@@ -3,7 +3,7 @@
 //! Run from the repository root so the in-process model files resolve:
 //!
 //! ```powershell
-//! cargo run -p synthpass-cli -- samples/ocr_fixtures/Croatia_Passport_Specimen_2009_mrz.jpg
+//! cargo run -p synthpass-cli -- samples/passports/Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg
 //! ```
 
 use serde_json::json;

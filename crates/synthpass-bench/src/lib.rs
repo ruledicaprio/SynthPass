@@ -863,7 +863,7 @@ pub struct HitResult {
     /// matches the generator's ground truth. **Deliberately unchanged** by
     /// the addition of per-field reporting below — the M4 CI gate is defined
     /// on this number, so it has to keep meaning exactly what it meant when
-    /// the 55% baseline and the 30% floor were measured.
+    /// the M4-era 55% baseline and the 30% floor were measured.
     pub hit: bool,
     /// Why it missed. `None` on a hit.
     pub reason: Option<MissReason>,

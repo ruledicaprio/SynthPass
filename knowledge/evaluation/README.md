@@ -21,6 +21,7 @@ for where each is set.
 ## The honesty rule
 
 When a measured number falls short of an aspiration, the aspiration gets
-corrected — not the presentation. M4's original target was 95%; it measured ~55%,
-and the roadmap says so in the row where the target used to be. That record is the
-point of this folder.
+corrected — not the presentation. M4's original target was 95%; it measured an
+M4-era ~55%, and the roadmap says so in the row where the target used to be. The
+current per-format rate is in [`benchmarks/README.md`](../benchmarks/README.md#current-headline-numbers);
+that record is the point of this folder.

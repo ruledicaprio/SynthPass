@@ -1,4 +1,4 @@
-//! M7 multi-provider benchmark: runs every registered [`FieldReader`] in a
+//! M7 multi-provider benchmark: runs every registered [`FieldReader`](synthpass_die::FieldReader) in a
 //! [`ProviderCatalog`] against the same corpus and reports, per provider,
 //! accuracy, speed, JSON validity, an unsupported-assertion rate, and
 //! resident memory.

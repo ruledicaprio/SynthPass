@@ -1,7 +1,7 @@
 # 🏛️ Architectural Manifest: SynthPass — Air-Gapped Document Processing
 
 > **Scope:** this manifest describes the architecture as cut at **v1.2.0**, which is still the
-> shape of the system. Work past v1.2.0 moved to the M1–M7 platform roadmap —
+> shape of the system. Work past v1.2.0 moved to the M1–M8 platform roadmap —
 > [`ROADMAP.md`](ROADMAP.md), not this file, is the current source for milestone state, and
 > [`benchmarks/README.md`](benchmarks/README.md) for every measured number.
 
@@ -16,7 +16,7 @@ The system is a **Rust-first pipeline with a deliberately narrow, swappable boun
 * **Deterministic MRZ Core (`mrz` crate, zero deps):** ICAO 9303 TD1/TD2/TD3 parsing with full 7-3-1 check-digit validation and checksum-verified OCR repair. Zero runtime dependencies, so the identical code compiles natively for the pipeline and to WebAssembly for the public browser demo.
 * **Pipeline Core (`synthpass-pipeline` crate):** Owns the end-to-end sequence — OCR → Markdown persistence → Tier 1 MRZ validation → Tier 2 `InferBackend` fallback → JSON — behind a single `process_document()` entry point. Both binaries are thin wrappers around it. Concurrency control (a single-flight semaphore + an observable queue-depth counter) lives *here*, not in the backend, so the "one concurrent Tier-2 call" invariant holds. Deliberately license-agnostic — see [§6](#6-offline-cryptographic-licensing-v080) for where enforcement actually lives.
 * **OCR Engine (pluggable behind a trait — introduced in v0.7.0):** An `OcrEngine` trait ([`crates/synthpass-pipeline/src/ocr.rs`](../crates/synthpass-pipeline/src/ocr.rs)) abstracts text extraction. One implementation exists since v1.2.0:
-  * **`RustOcrEngine`** (feature `ocr-native-rust`, **default and only**) — the [`synthpass-ocr`](../crates/synthpass-ocr/) crate loads two `.rten` weight files (text detection + recognition) via [`ocrs`](https://crates.io/crates/ocrs)/[`rten`](https://crates.io/crates/rten), fetching and SHA-256-verifying them automatically on first use, and keeps the engine warm in-process. Zero C/C++ dependencies, works unchanged on Windows. The Tesseract-based `ocr-daemon` fallback (`NativeEngine`, Linux/WSL only) was retired in v1.2.0: its justification was accuracy parity doubt about the then-new `ocrs` engine, and v1.1.0's measured 100% Tier-1 corpus hit rate — achieved by absorbing `ocr-daemon`'s own preprocessing techniques into `synthpass-ocr` — closed that question.
+  * **`RustOcrEngine`** (feature `ocr-native-rust`, **default and only**) — the [`synthpass-ocr`](../crates/synthpass-ocr/) crate loads two `.rten` weight files (text detection + recognition) via [`ocrs`](https://crates.io/crates/ocrs)/[`rten`](https://crates.io/crates/rten), fetching and SHA-256-verifying them automatically on first use, and keeps the engine warm in-process. Zero C/C++ dependencies, works unchanged on Windows. The Tesseract-based `ocr-daemon` fallback (`NativeEngine`, Linux/WSL only) was retired in v1.2.0: its justification was accuracy parity doubt about the then-new `ocrs` engine, and v1.1.0's measured 6/6 (100%) Tier-1 hit rate on the v1.1.0 six-document corpus — achieved by absorbing `ocr-daemon`'s own preprocessing techniques into `synthpass-ocr` — closed that question.
 
   The engine is image-only. **Supported input formats:** JPEG, PNG, WebP, TIFF, BMP, GIF (whatever the `image` crate's default features decode) — covers Android's default camera formats and general use. **Not supported:** PDF (no OCR engine parses it as of v0.7.5 — see below) and HEIC/HEIF, Apple's default photo format since iOS 11 (no permissively-licensed pure-Rust decoder exists; the two that do are AGPL-3.0, which would force this MIT-licensed, commercially-offline-licensed binary to AGPL too — see [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like)). Both are rejected with a clear, actionable error rather than a silent or generic failure. In practice this is less limiting than it sounds: many iOS share/export flows already convert HEIC to JPEG automatically.
 * **Inference Engine (pluggable behind a trait — introduced in v0.6.0):** An `InferBackend` trait ([`crates/synthpass-pipeline/src/infer.rs`](../crates/synthpass-pipeline/src/infer.rs)) abstracts *how* Tier 2 turns OCR Markdown into a structured `Extraction`. One implementation exists today:
@@ -117,7 +117,7 @@ sequenceDiagram
 8. Configuration via environment: `BIND_ADDR`, `SYNTHPASS_OCR_ENGINE`, `SYNTHPASS_MODEL_PATH`, `SYNTHPASS_MAX_QUEUE_DEPTH`, `SYNTHPASS_TOKEN`, `SYNTHPASS_AUDIT_LOG`, `SYNTHPASS_KEY`, `SYNTHPASS_LICENSE_PATH`, `SYNTHPASS_LICENSE_SKIP`, `WORK_DIR`.
 
 ## 6. Offline Cryptographic Licensing (v0.8.0)
-As of v0.8.0, the shipped `synthpass`/`synthpass-serve` binaries require a signed license to run their extraction path — Ed25519-signed license files so the binary can be sold and metered for air-gapped enterprise distribution without ever phoning home. See [`crates/synthpass-license/`](../crates/synthpass-license/).
+As of v0.8.0, the shipped `synthpass`/`synthpass-serve` binaries require a signed license to run their extraction path — Ed25519-signed license files that record capacity and entitlement for an official air-gapped enterprise build, without ever phoning home. This is metering and entitlement, not a feature gate ([`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)); no production license can be issued yet — see [§6](#6-offline-cryptographic-licensing-v080)'s threat-model paragraph and [`technical_debt.md`](technical_debt.md#the-licensing-public-key-is-still-a-placeholder). See [`crates/synthpass-license/`](../crates/synthpass-license/).
 
 * **Format:** a license file (`license.mlis`, default path — override with `SYNTHPASS_LICENSE_PATH`) is a small JSON envelope: `payload` (base64 of the *exact* signed `LicensePayload` JSON bytes) + `signature` (base64 Ed25519 signature over those same bytes). The verifier checks the signature over the literal stored bytes and only deserializes afterward — unlike a design that re-serializes the payload before verifying (which can desync signer and verifier on field-order/whitespace drift), a valid license can never fail to verify this way. Verification uses `verify_strict` (not the plain `Verifier::verify`), rejecting non-canonical/cofactored signature malleability — the conservative default per RFC 8032.
 * **Embedded public key:** `crates/synthpass-license/pubkey.b64`, loaded via `include_str!` and parsed once. A public key isn't a secret, so a checked-in file is safe; rotation is a one-file swap. `SYNTHPASS_LICENSE_PUBKEY` overrides it at runtime for testing, mirroring the `SYNTHPASS_MODEL_SHA256`/`SYNTHPASS_OCR_*_SHA256` known-good-plus-override convention used elsewhere in this workspace. **The pinned key ships as a placeholder** generated during development — a real vendor deployment must run `synthpass-license-issuer keygen` and replace `pubkey.b64` before issuing real licenses.
@@ -143,7 +143,7 @@ Designed for environments with stringent regulatory requirements (e.g., GDPR), t
 
 ## 8. Known Limitations & What Tier-2 Accuracy Actually Looks Like
 
-**Image-only as of v0.7.5.** PDF input is no longer accepted — the only engine that ever parsed it, `docling-serve`, was deleted along with the rest of its Docker dependency. HEIC/HEIF (Apple's default photo format) is also rejected: no permissively-licensed pure-Rust decoder exists yet (the pure-Rust options that do exist are AGPL-3.0, which would force this project's MIT license — and the offline-licensing business model shipped in v0.8.0 — to AGPL too). Both cases fail with a clear, named error rather than a generic OCR failure. This is a deliberate scope cut, not an oversight; revisiting HEIC support (a commercial license, or an in-house permissive decoder) is an open follow-up, not a rejected idea.
+**Image-only as of v0.7.5.** PDF input is no longer accepted — the only engine that ever parsed it, `docling-serve`, was deleted along with the rest of its Docker dependency. HEIC/HEIF (Apple's default photo format) is also rejected: no permissively-licensed pure-Rust decoder exists yet (the pure-Rust options that do exist are AGPL-3.0, which would force this project's MIT license — and the offline licensing/metering mechanism shipped in v0.8.0 — to AGPL too). Both cases fail with a clear, named error rather than a generic OCR failure. This is a deliberate scope cut, not an oversight; revisiting HEIC support (a commercial license, or an in-house permissive decoder) is an open follow-up, not a rejected idea.
 
 **Licensing meters the binary, not the hardware or the source (v0.8.0).** See [§6](#6-offline-cryptographic-licensing-v080)'s threat-model paragraph in full — summarized, the fingerprint binds to an OS installation (spoofable by root, survives disk cloning), expiry trusts the system clock, and a from-source rebuild bypasses the check entirely, since the source is public. This is intentional scope, not a bug: it deters casual sharing and gives a compliance artifact for the pre-built binary, and isn't marketed as DRM.
 
@@ -175,7 +175,7 @@ The headline architectural facts worth stating in this doc specifically (build o
 
 One numbered milestone earned its way back onto the roadmap: **every dependency the project
 sheds is surface it no longer has to secure, license-audit, cross-compile, or explain to a
-procurement department** — for an air-gapped, commercially-licensed binary, a short dependency
+procurement department** — for an air-gapped binary carrying an offline licensing/metering mechanism, a short dependency
 list is a product feature, not housekeeping. Scope, in order — **all four items below shipped**:
 
 1. **Retire `ocr-daemon` (Tesseract/Leptonica) — done.** The
@@ -197,7 +197,10 @@ list is a product feature, not housekeeping. Scope, in order — **all four item
    browser path ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md), 2026-09-03) puts tesseract.js with
    the OCR-B-trained `mrz.traineddata` at **122/190 (64.2 %)** checksum-valid against the native
    `ocrs`/`rten` pipeline's **113/190 (59.5 %)** on the same specimens — so on this corpus,
-   "deleting tesseract.js entirely" would *cost* accuracy. The half of the end state that is
+   "deleting tesseract.js entirely" would *cost* accuracy. **Superseded by the 2026-09-09
+   re-measurement: 80.0% vs 74.4%** excluding redacted specimens, both arms measured the same day
+   ([`benchmarks/ocr-stack-gap-2026-09-09.md`](benchmarks/ocr-stack-gap-2026-09-09.md)) — the gap
+   still runs the same direction. The half of the end state that is
    unambiguously right is the other half: deleting the **JS port of the preprocessing**, which is a
    second implementation of pure, deterministic Rust that has no reason to exist twice.
 4. **Rust dependency audit — done.** `cargo tree` review of the remaining graph: trim `image` crate
@@ -207,7 +210,7 @@ list is a product feature, not housekeeping. Scope, in order — **all four item
    section rather than an untracked vibe.
 
 See CHANGELOG.md's `[1.2.0]` entry for the full account, including the SynthPass rebrand that
-shipped alongside the dependency diet. **Beyond v1.2.0, the project moved to the M1–M7 platform
+shipped alongside the dependency diet. **Beyond v1.2.0, the project moved to the M1–M8 platform
 roadmap** in [`knowledge/ROADMAP.md`](ROADMAP.md) (generation, benchmarking, and the
 Document Intelligence Engine) rather than a simple patch-release line — that file, not this
 section, is now the current source for in-flight and completed post-1.2.0 work. `docker/docker-compose.yml` and `docker/Dockerfile.serve` remain as an optional, glibc-based convenience packaging path alongside the musl artifact — neither is required for any functional code path.
@@ -242,6 +245,12 @@ bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale
 `cross-rs` or manual `musl-gcc`) is above in this section; known limitations are in
 [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like).
 `docker/Dockerfile.musl` packages the same binaries into a `FROM scratch` image.
+
+The `license.mlis` step above describes the mechanism, not a current offering: the verifying key
+compiled into the binary is still a placeholder
+([`technical_debt.md`](technical_debt.md#the-licensing-public-key-is-still-a-placeholder)), so no
+production license can be issued yet, and distribution stays source-build only until it is
+replaced ([`ROADMAP.md`](ROADMAP.md) M8).
 
 ## 11. Getting Started
 See the [README quickstart](../README.md#quickstart).
@@ -322,6 +331,7 @@ section records the cross-crate policies.
 | `synthpass-die` | Document Intelligence Engine: provider contract, capability model, catalog, `RoutingPolicy`. See 13.2. |
 | `synthpass-pipeline` | Orchestrates OCR → Tier 1 MRZ validation → Tier 2 fallback → structured JSON. A checksum-valid MRZ skips Tier 2 entirely. |
 | `synthpass-gen` | Deterministic synthetic document factory (TD1/TD2/TD3 + MRV-A/MRV-B) with per-field ground truth. |
+| `synthpass-export` | Turns a `synthpass-gen` corpus into a training dataset on disk (JSONL / Hugging Face, DeepSeek-OCR 0–1000 coordinate convention) — spec in [`EXPORTS.md`](EXPORTS.md), format decisions in [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md). |
 | `synthpass-bench` | Measures whether generated / real specimens survive the real Tier-1 pipeline. Not a `benches/` directory — a workspace member. |
 | `synthpass-cli` / `synthpass-serve` | Thin front-ends (arg parsing / HTTP handlers) over `synthpass-pipeline`; no business logic of their own. |
 | `synthpass-license` | Offline Ed25519-signed licensing for metered enterprise binaries; no phone-home. |

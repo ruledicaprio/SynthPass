@@ -88,7 +88,7 @@ at extraction time is out of scope by definition.
 A constant with no measurement behind it does not ship. Neither does a claim.
 
 **Enforced by:** the M4 CI gate (`synthpass-bench --min-hit-rate 0.30`);
-`MRZ_BAND_CONFIDENT_SCORE` in `crates/synthpass-ocr/src/geometry.rs`, whose doc
+`MRZ_BAND_CONFIDENT_SCORE` in `crates/synthpass-imageprep/src/geometry.rs`, whose doc
 comment carries the sweep that produced it; and — the harder half —
 `fusion.rs:25-39`, which records a candidate check that was **measured and
 rejected**, with the reason. Publishing what we discarded is part of the

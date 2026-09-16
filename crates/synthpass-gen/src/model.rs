@@ -37,8 +37,8 @@ pub struct Passport {
     pub issuing_country: String,
     /// Primary identifier as it goes into the MRZ and the printed romanized
     /// line — always Latin `[A-Z]`. For a Cyrillic-script issuing state this is
-    /// the ICAO 9303 Part 3 §6 B transliteration of [`surname_native`]
-    /// (`Passport::surname_native`), computed with that state's language; for a
+    /// the ICAO 9303 Part 3 §6 B transliteration of
+    /// [`surname_native`](Self::surname_native), computed with that state's language; for a
     /// Latin-script state it is the name itself.
     pub surname: String,
     /// Secondary identifier, Latin — see [`surname`](Self::surname).
@@ -88,7 +88,7 @@ impl DocumentType {
     /// **This is not a format separator.** TD1 and TD2 both correctly emit
     /// `"I"` per ICAO 9303 (an identity card and an official travel document
     /// share the same document-code letter) — only the MRZ *format*
-    /// (line count and width, [`mrz::Format`] via [`DocumentType::into`])
+    /// (line count and width, [`mrz::Format`] via `DocumentType::into`)
     /// distinguishes them. Any consumer that needs to tell a TD1 from a TD2
     /// must read the format, never this code; see [`Self::as_str`] and the
     /// `From<DocumentType> for mrz::Format` bridge below.

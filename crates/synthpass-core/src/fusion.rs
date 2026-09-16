@@ -144,7 +144,7 @@ pub enum Finding {
     /// `mrz::checksum::defiller`'s narrower K/L-run repair (a different
     /// repeated letter, or a run under its own ≥4-with-≥3-real-K/L
     /// threshold). Measured the same way as
-    /// [`SuspiciouslyShortNameComponent`]: 5 fires, zero false positives.
+    /// [`Finding::SuspiciouslyShortNameComponent`]: 5 fires, zero false positives.
     DegenerateRepeatedCharacterRun { field: String },
     /// A ASCII digit appears in `surname` or `given_names`. ICAO 9303 names
     /// are alphabetic by convention, but `parser::ensure_charset` accepts

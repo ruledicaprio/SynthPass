@@ -22,7 +22,7 @@
 //!   Cyrillic-script issuing states (`RUS`/`SRB`/`BGR`/`MKD`/`UKR`/`BLR`) draw
 //!   a native-script name and store its ICAO 9303 Part 3 §6 B transliteration
 //!   (`mrz::transliterate_cyrillic`) as the Latin `surname`/`given_names` the
-//!   MRZ carries; the native strings are on [`Labels`](labels::Labels) too.
+//!   MRZ carries; the native strings are on [`Labels`] too.
 //!
 //! ## MRZ correctness
 //!

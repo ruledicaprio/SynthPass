@@ -5,8 +5,8 @@
 //! POST /api/extract  → multipart file upload → shared `synthpass-pipeline` crate
 //!                      (OCR engine → Markdown → Tier 1 MRZ → Tier 2 LLM → JSON)
 //!
-//! Run from the repository root (`cargo run -p synthpass-serve`) so the inferer
-//! sidecar and OCR engine resolve.
+//! Run from the repository root (`cargo run -p synthpass-serve`) so the OCR model
+//! directory and the Tier-2 GGUF resolve.
 
 use axum::{
     extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, Request, State},
