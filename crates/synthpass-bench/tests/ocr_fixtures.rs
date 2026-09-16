@@ -66,6 +66,91 @@ fn every_fixture_mrz_line_reproduces_its_recorded_checksum_verdict() {
     );
 }
 
+/// Every fixture whose printed zone validates (`mrz_checksums_valid: true`)
+/// carries `surname`/`given_names` equal to what `mrz` itself parses from
+/// that same fixture's `mrz_line` — using `mrz::find_and_parse`, the same
+/// entry point every other consumer of a printed zone in this workspace
+/// uses, never a hand-rolled re-split of the name.
+///
+/// This is ADR-0013's guardrail
+/// (`knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md`):
+/// name accuracy is scored only against MRZ-form truth (`mrz`'s own split at
+/// `<<`, filler read as a space), never against the visual-zone (VIZ) form —
+/// mixed case, native punctuation, a human's own idea of where the name
+/// splits. A hand transcription is exactly where a VIZ-form split can creep
+/// back into an MRZ-form fixture unnoticed: Argentina 2026's printed zone
+/// has no `<<` at all, and its `surname`/`given_names` were transcribed the
+/// way the visual zone splits them — but that zone also fails its own check
+/// digits (`mrz_checksums_valid: false`), so it never reaches this test.
+/// Skipping a non-validating zone is deliberate, not a gap: `mrz` cannot be
+/// asked to split a name inside a zone it does not consider well-formed
+/// enough to validate, and ADR-0013's own guardrail is scoped to the
+/// fixtures the strict-name-hit-rate metric can actually score.
+///
+/// Model-free and fast: no OCR, no image, just the tracked `.json` files and
+/// `mrz::find_and_parse`.
+#[test]
+fn every_validating_fixtures_names_equal_mrzs_own_parse() {
+    let dir = fixtures_dir();
+    let mut checked = 0;
+    let mut mismatches = Vec::new();
+
+    for entry in fs::read_dir(&dir).expect("samples/ocr_fixtures must exist") {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let raw = fs::read_to_string(&path).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw)
+            .unwrap_or_else(|e| panic!("{}: not valid JSON ({e})", path.display()));
+
+        let stem = path.file_stem().unwrap().to_string_lossy().to_string();
+        let claimed_valid = v["mrz_checksums_valid"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("{stem}: fixture has no bool `mrz_checksums_valid`"));
+        // Only a validating zone is in scope — see this test's doc comment
+        // for why a non-conforming zone (Argentina 2026) is excluded by
+        // design rather than by exception-listing its filename.
+        if !claimed_valid {
+            continue;
+        }
+
+        let mrz_line = v["mrz_line"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{stem}: fixture has no string `mrz_line`"));
+        let fixture_surname = v["surname"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{stem}: fixture has no string `surname`"));
+        let fixture_given = v["given_names"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{stem}: fixture has no string `given_names`"));
+
+        let parsed = mrz::find_and_parse(mrz_line).unwrap_or_else(|e| {
+            panic!("{stem}: mrz_checksums_valid is true but find_and_parse(mrz_line) failed: {e:?}")
+        });
+
+        checked += 1;
+        if parsed.surname != fixture_surname || parsed.given_names != fixture_given {
+            mismatches.push(format!(
+                "{stem}: fixture surname={fixture_surname:?} given_names={fixture_given:?}, but \
+                 mrz::find_and_parse(mrz_line) split surname={:?} given_names={:?}",
+                parsed.surname, parsed.given_names
+            ));
+        }
+    }
+
+    assert!(
+        checked >= 40,
+        "expected at least 40 validating fixtures, found {checked}"
+    );
+    assert!(
+        mismatches.is_empty(),
+        "fixture(s) whose surname/given_names disagree with mrz's own parse of their mrz_line \
+         (a VIZ-form split may have crept into an MRZ-form fixture — see ADR-0013):\n  {}",
+        mismatches.join("\n  ")
+    );
+}
+
 #[test]
 fn every_fixture_json_has_a_paired_md() {
     let dir = fixtures_dir();
