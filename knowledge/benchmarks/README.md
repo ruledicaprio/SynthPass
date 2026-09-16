@@ -100,6 +100,30 @@ detection count is 17 after the Argentina 2026 pair was scored out; see the outc
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
+## Benchmark maintenance contract
+
+A benchmark change follows this lifecycle:
+
+`freeze → reconcile → measure → localize → change → regress → inspect → record`
+
+**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it.
+
+**Reconcile.** Run the identity auditor before reading accuracy numbers. The candidate asset set must reconcile with the manifest: missing assets, unlisted assets, SHA mismatches, same-path byte conflicts, and duplicate encoded-byte groups are structural findings, not OCR results. Preserve whether each asset came from `samples-data`, MAIN/fixtures, or both. Keep these identities distinct:
+
+- **Asset/capture identity:** the manifest path and encoded bytes that the run consumed. A filename, stem, or SHA alone is not a physical-document identifier.
+- **Logical specimen identity:** an explicitly documented specimen record when the repository provides one. Do not infer it from country, year, document number, filename similarity, or byte equality.
+- **Physical-document identity:** a human-reviewed grouping across captures or encodings. Do not deduplicate the benchmark by physical-document identity until that policy and its specimen IDs are explicit.
+
+**Measure.** Use the repository-supported CI workflow against the frozen revisions. Do not replace a run with local arithmetic. Record the full candidate population, scored denominator, hit count, outcome buckets, decode/preparation failures, skips, and provider configuration. `no_mrz_expected`, `redacted_mrz`, and `checksum_failed_specimen` are excluded from the Tier-1 denominator when the run classifies them that way; they are not OCR misses. Historical measurements remain historical, current measurements are observed from a real run, and arithmetic projections are hypotheses until measured.
+
+**Localize.** Diagnose each divergence at the earliest supported stage: decode, orientation/geometry, MRZ-band detection, preprocessing, OCR recognition, candidate detection, normalization/repair, deterministic parse, checksum validation, or classification. A failed hit is not automatically an OCR failure. The deterministic acceptance boundary remains a checksum-valid MRZ with the expected document number; do not weaken parsing or checksums to raise a count.
+
+**Change and regress.** Keep corpus maintenance separate from accuracy optimization. Change one measurable hypothesis at a time, then rerun the same frozen population with the same provider configuration. Provider comparisons are meaningful only when both providers consume the same assets, labels, exclusions, and invocation scope.
+
+**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens.
+
+**Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
+
 ## Record the rejections
 
 The most valuable entries are the signals that looked promising and did not
