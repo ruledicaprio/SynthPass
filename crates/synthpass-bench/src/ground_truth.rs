@@ -302,11 +302,14 @@ fn validate(entry: &Entry) -> Result<Extraction> {
             }
         }
     } else {
-        if exact.as_ref().is_ok_and(|d| d.valid()) || found.as_ref().is_ok_and(|d| d.valid()) {
+        if exact.as_ref().is_ok_and(|d| d.valid()) {
             return Err(
                 "mrz_line: non_conforming zone validates; use verified after checking all fields"
                     .into(),
             );
+        }
+        if found.as_ref().is_ok_and(|d| d.valid()) {
+            return Err("mrz_line: benchmark parser repairs this printed zone to a valid read; cannot record a false checksum verdict until that parser behavior is resolved".into());
         }
         for name in ["surname", "given_names"] {
             let value = entry.fields[name]
@@ -1178,5 +1181,17 @@ mod tests {
         assert!(output_path(Path::new("samples/review.html")).is_err());
         assert!(output_path(Path::new("artifacts/../review.html")).is_err());
         assert!(output_path(Path::new("artifacts/review.txt")).is_err());
+    }
+    #[test]
+    fn distinguishes_parser_repair_from_a_valid_printed_zone() {
+        let zone = TD3.replacen("740812", "74O812", 1);
+        assert!(!structural(&shape(&zone).unwrap()).unwrap().valid());
+        assert!(mrz::find_and_parse(&zone).unwrap().valid());
+        let mut entry = entry(TD3);
+        entry.status = Status::NonConforming;
+        entry.fields.insert("mrz_line".into(), Some(zone));
+        assert!(validate(&entry)
+            .unwrap_err()
+            .contains("benchmark parser repairs"));
     }
 }
