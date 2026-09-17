@@ -127,7 +127,7 @@ Target markets are those for whom data sovereignty is not optional:
 The business model is detailed in [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy): **the software is MIT, all of
 it, permanently**, and revenue comes from what recompiling cannot copy — labelled corpora
 generated to a customer's document mix, independent benchmarking and certification, air-gapped
-integration, custom-trained models, and support. A feature-gated paid tier was considered and
+integration, and support. A feature-gated paid tier was considered and
 rejected: the licence check is bypassable by rebuilding, which makes it worth less than the
 auditability it would cost. The value proposition is not "a passport generator" — it is
 **testing, validation, benchmarking, and AI infrastructure for identity documents**, and
