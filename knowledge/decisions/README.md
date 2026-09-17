@@ -44,3 +44,4 @@ the record.
 | [0011](ADR-0011-split-m6-packaging-into-m8.md) | Split M6: the deterministic core keeps the number, packaging becomes M8 | Accepted (amended 2026-09-16, 2026-09-17) |
 | [0012](ADR-0012-cover-only-specimens-are-a-labelled-class.md) | Cover-only specimens are a labelled class, not a drop | Accepted (amended 2026-09-15) |
 | [0013](ADR-0013-names-are-scored-against-mrz-form-truth.md) | Name accuracy is a separate axis, scored only against MRZ-form truth | Accepted |
+| [0014](ADR-0014-per-cell-ocrb-classification.md) | `mrz-cell`: per-cell OCR-B classification for the MRZ band, as a benchmark-first prototype | Proposed |
