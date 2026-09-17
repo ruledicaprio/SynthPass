@@ -661,6 +661,9 @@ class FindGitBashTests(unittest.TestCase):
 
 
 class ToMsysPathTests(unittest.TestCase):
+    # The conversion is Git-for-Windows specific: a POSIX `resolve()` has no
+    # drive letter to split on, so on Linux CI this test has nothing to check.
+    @unittest.skipUnless(sys.platform == "win32", "drive-letter paths exist only on Windows")
     def test_converts_drive_letter_form(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -682,9 +685,11 @@ class RunBashScriptTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as td:
             worktree = Path(td)
+            # `to_msys_path` is mocked so the wrapping logic is checked on every
+            # platform -- the real conversion needs a drive letter (see above).
             with mock.patch.object(ac.sys, "platform", "win32"), mock.patch.object(
                 ac, "run_cmd", side_effect=fake_run_cmd
-            ):
+            ), mock.patch.object(ac, "to_msys_path", return_value="/d/fake/worktree"):
                 ac.run_bash_script("bash.exe", "scripts/check-doc-links.sh", worktree, dry_run=False)
 
         self.assertEqual(len(calls), 1)

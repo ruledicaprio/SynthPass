@@ -713,15 +713,18 @@ def expand_pdf_candidate(
     pdf_url = parent.get("image_url_final") or parent.get("image_url") or ""
     pdf_sha = parent.get("sha256")
 
-    if fitz is None:
-        parent["auto_reject"] = "unresolvable"
-        parent["note"] = "pdf: PyMuPDF is not installed (pip install pymupdf); retry after installing"
-        return [parent]
-
+    # A byte-duplicate of a ledgered or corpus file needs no PDF parsing at
+    # all, so it is decided before the PyMuPDF check: the verdict is the
+    # same on a machine without pymupdf (Linux CI found this order inverted).
     dup = sha_duplicate(pdf_sha, corpus_records, ledger_records) if pdf_sha else None
     if dup:
         parent["auto_reject"] = "duplicate"
         parent["note"] = f"byte-duplicate-of:{dup}"
+        return [parent]
+
+    if fitz is None:
+        parent["auto_reject"] = "unresolvable"
+        parent["note"] = "pdf: PyMuPDF is not installed (pip install pymupdf); retry after installing"
         return [parent]
 
     try:

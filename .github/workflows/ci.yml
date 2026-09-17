@@ -239,6 +239,28 @@ jobs:
             bash scripts/check-changelog.sh
           fi
 
+  tools-tests:
+    name: tools/ Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The scouting, cohort and re-bless tooling under tools/ carries its own
+      # offline unit tests (test_*.py, stdlib unittest: no network, no git, no
+      # cargo). Until 2026-09-17 they ran only on a developer machine -- the
+      # repository assessment found 282 of them and none in CI, so a change
+      # to rebless.py or apply_cohort.py could merge with its tests red. One
+      # test compiles a Rust snippet with rustc to prove the audit tool walks
+      # the corpus exactly as the Rust bench does, hence the toolchain step;
+      # nothing is cargo-built, so no cache is needed.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          # The version the suite was verified under locally; the tools are
+          # stdlib-only, so this is a floor for determinism, not a dependency.
+          python-version: "3.11"
+      - name: tools/ unit tests (offline)
+        run: python -m unittest discover -s tools -p "test_*.py"
+
   cargo-deny:
     name: cargo-deny (advisories & licenses)
     runs-on: ubuntu-latest
