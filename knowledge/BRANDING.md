@@ -94,8 +94,13 @@ recompiling.**
 | **Labelled corpora** — generated to a customer's document mix, volume, degradation profile and edge cases, delivered with ground truth | AI/ML teams training or evaluating document models | The generator is free; a corpus that matches *their* distribution, with per-field labels and checksum-valid MRZs, is a service. No PII, so no data-sharing agreement to negotiate. |
 | **Benchmarking & certification** | Vendors and buyers of identity-verification systems | An independent, reproducible accuracy number against a corpus the vendor did not choose. The value is the *independence*, which is not a software feature. |
 | **Integration & air-gapped deployment** | Regulated, on-premises, border-control integrators | Getting it running inside an environment with no network, and being answerable for it. |
-| **Custom-trained document models** | Strategic customers | Trained on generated data for layouts the public corpus does not cover. |
 | **Support & priority roadmap** | Anyone depending on it in production | Someone to call, and influence over what ships next. |
+
+*Custom-trained document models* was a row here until 2026-09-17. It was dropped because
+[`VISION.md`](VISION.md) §2 lists "does not train OCR or LLM models" among the lines that do not
+move, and a revenue surface has to be something the tree can deliver — corpora, benchmarks,
+integration and support are. The contradiction stood for six weeks; it is recorded here rather
+than silently removed.
 
 ### Why not a paid tier gated on features
 
