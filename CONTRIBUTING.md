@@ -353,12 +353,21 @@ change lands via a pull request:
 git fetch origin && git merge --ff-only origin/main   # start from current main, every time
 git checkout -b <topic>-branch
 # make changes, commit
+git fetch origin && git rebase origin/main   # main requires an up-to-date branch
 git push -u origin <topic>-branch
 gh pr create
 ```
 
-The PR must show 2 green required checks before the merge button unlocks: `Rust (Linux)`
-and `Rust (macos-latest, default members)`. (Earlier releases also required a Python
+`main` is protected (since 2026-09-17): the merge button unlocks only when the branch is **up to
+date with `main`** and five required checks are green -- `Rust (Linux)`,
+`Rust (macos-latest, default members)`, `M4 Tier-1 hit-rate gate`, `Changelog fragments &
+version bump` and `cargo-deny (advisories & licenses)`. History is linear (squash or rebase
+merges; no merge commits), force-pushes to `main` are refused, and the rules bind the
+maintainer too. When `main` moves under an open PR, rebase locally and push with
+`--force-with-lease`, or run `gh pr update-branch --rebase <number>`; a conflict at a shared
+append point (the findings list in `knowledge/benchmarks/README.md`, the ADR index) is
+resolved by keeping both sides in date order. The real-specimen gate stays advisory because it
+is path-filtered and not yet skip-safe. (Earlier releases also required a Python
 gRPC smoke test and a cross-language bridge test; both were removed as required checks in v0.7.5
 along with the gRPC backend and its Python sidecar — see CHANGELOG.md.) No review approval is
 required (solo maintainer), but a PR and passing CI always are.
