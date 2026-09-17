@@ -419,6 +419,9 @@ impl NativeOcr {
                 portrait,
                 rotation,
                 text_sanity,
+                retry_variant_id: Some("general".to_string()),
+                retry_budget_hit: false,
+                retry_stop: Some("general_valid".to_string()),
             });
         }
         if verbose {
@@ -430,6 +433,9 @@ impl NativeOcr {
 
         let max_passes = max_passes();
         let max_duration = max_duration();
+        let mut retry_variant_id = None;
+        let mut retry_budget_hit = false;
+        let mut retry_stop = None;
 
         // `passes_run` counts total passes including the general one above
         // (seeded at 1) — a `zip` counter rather than a manually incremented
@@ -564,6 +570,7 @@ impl NativeOcr {
             .enumerate();
         for (passes_run, (i, (turn, variant))) in (1usize..).zip(variants) {
             if passes_run >= max_passes {
+                retry_stop = Some("pass_cap".to_string());
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] pass budget ({max_passes}) reached before variant {i}; stopping retries"
@@ -572,6 +579,8 @@ impl NativeOcr {
                 break;
             }
             if overall_started.elapsed() >= max_duration {
+                retry_budget_hit = true;
+                retry_stop = Some("budget".to_string());
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] time budget ({max_duration:?}) reached before variant {i}; stopping retries"
@@ -580,6 +589,7 @@ impl NativeOcr {
                 break;
             }
 
+            let pass_id = format!("pass-{i:02}");
             let variant_started = Instant::now();
             if let Some(dir) = &dump_dir {
                 dump_pass_image(
@@ -636,6 +646,8 @@ impl NativeOcr {
                         );
                     }
                 }
+                retry_variant_id = Some(pass_id);
+                retry_stop = Some("variant_valid".to_string());
                 break;
             } else if verbose {
                 eprintln!("[synthpass-ocr] variant {i}: MRZ-shaped but checksum-invalid lines:");
@@ -643,6 +655,9 @@ impl NativeOcr {
                     eprintln!("[synthpass-ocr]   {line}");
                 }
             }
+        }
+        if retry_stop.is_none() {
+            retry_stop = Some("exhausted".to_string());
         }
         let text_sanity = page_sanity(&text);
         Ok(OcrPage {
@@ -653,6 +668,9 @@ impl NativeOcr {
             portrait,
             rotation,
             text_sanity,
+            retry_variant_id,
+            retry_budget_hit,
+            retry_stop,
         })
     }
 }

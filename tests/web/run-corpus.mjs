@@ -42,6 +42,7 @@ function parseArgs(argv) {
     site: join(REPO, '_site'),
     samples: join(REPO, 'samples'),
     out: null,
+    nativeReport: null,
     limit: Infinity,
     floor: null,
     rotate: 0,
@@ -54,6 +55,7 @@ function parseArgs(argv) {
     else if (a === '--site') args.site = resolve(argv[++i]);
     else if (a === '--samples') args.samples = resolve(argv[++i]);
     else if (a === '--out') args.out = resolve(argv[++i]);
+    else if (a === '--native-report') args.nativeReport = resolve(argv[++i]);
     else if (a === '--limit') args.limit = Number(argv[++i]);
     else if (a === '--floor') args.floor = Number(argv[++i]);
     else if (a === '--rotate') args.rotate = Number(argv[++i]);
@@ -123,6 +125,17 @@ async function main() {
 
   const rows = (await readFile(manifestPath, 'utf8'))
     .split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  let nativeByAsset = new Map();
+  let nativeReport = null;
+  if (args.nativeReport) {
+    nativeReport = JSON.parse(await readFile(args.nativeReport, "utf8"));
+    const native = nativeReport.providers?.find((p) => p.provider_id === "mrz");
+    if (!native) throw new Error("native report has no mrz provider: " + args.nativeReport);
+    for (const detail of native.documents_detail ?? []) {
+      if (detail.asset_id) nativeByAsset.set(detail.asset_id, detail);
+    }
+  }
+
   const candidates = rows.filter((r) => r.mrz?.present).slice(0, args.limit);
 
   if (candidates.length === 0) {
@@ -149,6 +162,11 @@ async function main() {
     n++;
     const url = `/corpus/${row.dir}/${encodeURIComponent(row.filename)}`;
     const stem = row.filename.replace(/\.[^.]+$/, '');
+    const assetId = String(row.dir) + '/' + String(row.filename);
+    const nativeDetail = nativeByAsset.get(assetId);
+    if (args.nativeReport && !nativeDetail) {
+      throw new Error('native report has no row for asset ' + assetId);
+    }
 
     // page.evaluate takes no timeout option, so bound it here — one wedged
     // document must not stall a 190-image sweep.
@@ -182,12 +200,19 @@ async function main() {
       }
     }
 
-    const nativeValid = !!row.mrz?.observed?.checksums_valid;
+    const nativeValid = nativeDetail ? !!nativeDetail.mrz_checksums_valid : null;
     documents.push({
+      asset_id: assetId,
       filename: row.filename,
       dir: row.dir,
       web_checksum_valid: scan.valid,
       native_checksum_valid: nativeValid,
+      native_miss_reason: nativeDetail?.miss_reason ?? null,
+      native_retry_variant_id: nativeDetail?.retry_variant_id ?? null,
+      native_retry_budget_hit: nativeDetail?.retry_budget_hit ?? null,
+      native_retry_stop: nativeDetail?.retry_stop ?? null,
+      native_names_exact: nativeDetail?.names_exact ?? null,
+      native_name_error: nativeDetail?.name_error ?? null,
       // Strictest available check: the exact two/three MRZ lines, not just
       // the fields parsed out of them.
       mrz_line_matches_fixture:
@@ -217,10 +242,19 @@ async function main() {
 
   // ---- aggregate -----------------------------------------------------------
   const webHits = documents.filter((d) => d.web_checksum_valid).length;
-  const natHits = documents.filter((d) => d.native_checksum_valid).length;
-  const both = documents.filter((d) => d.web_checksum_valid && d.native_checksum_valid).length;
-  const webOnly = documents.filter((d) => d.web_checksum_valid && !d.native_checksum_valid).length;
-  const natOnly = documents.filter((d) => !d.web_checksum_valid && d.native_checksum_valid).length;
+  const hasNativeReport = nativeReport !== null;
+  const natHits = hasNativeReport
+    ? documents.filter((d) => d.native_checksum_valid === true).length
+    : null;
+  const both = hasNativeReport
+    ? documents.filter((d) => d.web_checksum_valid && d.native_checksum_valid).length
+    : null;
+  const webOnly = hasNativeReport
+    ? documents.filter((d) => d.web_checksum_valid && !d.native_checksum_valid).length
+    : null;
+  const natOnly = hasNativeReport
+    ? documents.filter((d) => !d.web_checksum_valid && d.native_checksum_valid).length
+    : null;
 
   const fieldTally = { reviewed: { ok: 0, total: 0 }, derived: { ok: 0, total: 0 } };
   for (const d of documents) {
@@ -242,6 +276,7 @@ async function main() {
   const times = documents.map((d) => d.ms).filter((m) => m !== null).sort((a, b) => a - b);
 
   const report = {
+    provenance: nativeReport?.provenance ?? null,
     generated: new Date().toISOString(),
     // Non-zero means every image was turned by this many degrees before
     // scanning — an orientation test, not a like-for-like corpus run.
@@ -259,13 +294,13 @@ async function main() {
       scanned: documents.length,
       rate: pct(webHits, documents.length),
     },
-    native_reference: {
+    native_reference: hasNativeReport ? {
       checksum_valid: natHits,
       scanned: documents.length,
       rate: pct(natHits, documents.length),
-      note: 'from samples/corpus.jsonl mrz.observed.checksums_valid — the native ocrs/rten pipeline on the same files, not measured in this run',
-    },
-    head_to_head: { both, web_only: webOnly, native_only: natOnly },
+      note: 'from the measured native provider report for the same assets',
+    } : null,
+    head_to_head: hasNativeReport ? { both, web_only: webOnly, native_only: natOnly } : null,
     fields: {
       reviewed: { ...fieldTally.reviewed, rate: pct(fieldTally.reviewed.ok, fieldTally.reviewed.total) },
       derived: { ...fieldTally.derived, rate: pct(fieldTally.derived.ok, fieldTally.derived.total) },
@@ -282,8 +317,12 @@ async function main() {
 
   console.log('\n' + '='.repeat(66));
   console.log(fmtRate(webHits, documents.length, 'web  checksum-valid'));
-  console.log(fmtRate(natHits, documents.length, 'native (recorded) '));
-  console.log(`head-to-head: both ${both}, web only ${webOnly}, native only ${natOnly}`);
+  if (hasNativeReport) {
+    console.log(fmtRate(natHits, documents.length, 'native (measured) '));
+    console.log('head-to-head: both ' + both + ', web only ' + webOnly + ', native only ' + natOnly);
+  } else {
+    console.log('native comparison unavailable: pass --native-report for a measured native join');
+  }
   console.log(
     `misses: ${report.web.near_miss} parsed but failed check digits, ` +
     `${report.web.no_mrz_found} found no MRZ at all`,

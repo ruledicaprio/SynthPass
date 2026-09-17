@@ -161,6 +161,8 @@ pub struct RealSpecimenDoc {
     /// `samples/` has already been reorganized once (see [`find_image_files`]'s
     /// doc), so nothing here should assume a subdirectory stays put.
     pub name: String,
+    /// Stable path identity relative to the samples root, using slash separators.
+    pub asset_id: String,
     pub image: DynamicImage,
     /// `None` when `samples/ocr_fixtures/<name>.json` does not exist, or
     /// exists but fails to parse. Both cases mean "no ground truth for this
@@ -634,11 +636,24 @@ pub fn load_specimen(
     // specimen vanishes from the benchmark without a word. Three corpus files
     // were in exactly that state.
     let image = synthpass_ocr::decode_image(image_path).ok()?;
+    let asset_id = image_path
+        .strip_prefix(samples_root)
+        .ok()
+        .and_then(|path| path.to_str())
+        .map(|path| path.replace(std::path::MAIN_SEPARATOR, "/"))
+        // This fallback cannot join a manifest/native report; callers rely on
+        // the relative identity above and fail closed if the roots differ.
+        .unwrap_or_else(|| {
+            image_path
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        });
     let labels = load_ground_truth(samples_root, &name);
     let class = classify_specimen(image_path, labels.as_ref());
     let mrz_expected = expectations.get(&name);
     Some(RealSpecimenDoc {
         name,
+        asset_id,
         image,
         labels,
         class,
