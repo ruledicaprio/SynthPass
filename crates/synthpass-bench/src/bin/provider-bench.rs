@@ -892,6 +892,35 @@ const BASELINE_NOTE: &str = "Real-specimen Tier-1 no-regression baseline for the
     (OCR-inference float variance), so never hand-edit the counts. See \
     knowledge/benchmarks/README.md.";
 
+/// The ADR-0013 strict-name counts for one real-specimen run: `strict_hits`
+/// Tier-1 hits that also read both name fields exactly, over
+/// `name_scorable_documents` (the denominator of `strict_tier1_hit_rate`) and
+/// `name_scorable_hits` (the denominator of `names_exact_among_hits`) — the
+/// same three counts [`synthpass_bench::provider_bench::StrictNameHitRate::Computed`]
+/// carries, kept as counts rather than the two derived rates, matching this
+/// file's own `tier1_hits`/`scored` convention (rates are recomputed by
+/// whoever reads the baseline, never stored pre-divided).
+///
+/// **Report-only per ADR-0013:** carried on [`RealSpecimenSnapshot`] and
+/// [`RealSpecimenBaseline`] so it reaches the committed baseline, the
+/// `rebless.py` diff tooling and `README.md`'s live block, but
+/// [`check_baseline`] never fails a comparison on it — "the headline table
+/// publishes the strict rate next to the Tier-1 rate only once a CI run has
+/// measured it ... Gating on it is a separate decision"
+/// (`knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct StrictNamesBaseline {
+    /// Tier-1 hits whose read also matched both name fields exactly.
+    strict_hits: usize,
+    /// Documents in the scored Tier-1 population whose ground truth carries
+    /// both `surname` and `given_names` — `strict_tier1_hit_rate`'s
+    /// denominator.
+    name_scorable_documents: usize,
+    /// Of `name_scorable_documents`, the ones that were also a Tier-1 hit —
+    /// `names_exact_among_hits`'s denominator.
+    name_scorable_hits: usize,
+}
+
 /// The measured Tier-1 facts for the deterministic `mrz` provider over one run —
 /// what [`--write-baseline`](Args::write_baseline) records (via
 /// [`RealSpecimenBaseline`]) and [`--assert-baseline`](Args::assert_baseline)
@@ -915,6 +944,12 @@ struct RealSpecimenSnapshot {
     tier1_hits: usize,
     /// Every miss kind that occurred, with its document count.
     by_miss_kind: BTreeMap<String, usize>,
+    /// ADR-0013 strict-name counts, when the `mrz` provider's
+    /// `strict_tier1_hit_rate` was [`StrictNameHitRate::Computed`] — `None`
+    /// when it was `NotApplicable` (no name-scorable document in this run's
+    /// scored population; see that variant's doc for why `0.0` would be a
+    /// fabrication here). Report-only — see [`StrictNamesBaseline`]'s doc.
+    strict_names: Option<StrictNamesBaseline>,
 }
 
 impl RealSpecimenSnapshot {
@@ -940,11 +975,29 @@ impl RealSpecimenSnapshot {
             .iter()
             .filter_map(|k| by_miss_kind.get(*k))
             .sum::<usize>();
+        // Reuses the aggregate the report already computed rather than
+        // re-deriving name-scorability from `documents_detail` a second time
+        // — `StrictNameHitRate::Computed`'s three counts are exactly
+        // `StrictNamesBaseline`'s fields.
+        let strict_names = match &mrz.strict_tier1_hit_rate {
+            StrictNameHitRate::Computed {
+                strict_hits,
+                name_scorable_documents,
+                name_scorable_hits,
+                ..
+            } => Some(StrictNamesBaseline {
+                strict_hits: *strict_hits,
+                name_scorable_documents: *name_scorable_documents,
+                name_scorable_hits: *name_scorable_hits,
+            }),
+            StrictNameHitRate::NotApplicable { .. } => None,
+        };
         Some(Self {
             documents,
             scored: documents - off_denominator,
             tier1_hits,
             by_miss_kind,
+            strict_names,
         })
     }
 
@@ -981,6 +1034,15 @@ struct RealSpecimenBaseline {
     /// runs prove flaky.
     tolerance: usize,
     by_miss_kind: BTreeMap<String, usize>,
+    /// ADR-0013 strict-name counts — report-only, see [`StrictNamesBaseline`].
+    /// Absent (rather than `null`) on an older baseline that never measured
+    /// names, and omitted on write for the same reason: `rebless.py`'s
+    /// `flatten_baseline` and `scripts/check-headline-numbers.sh` both need to
+    /// tell "not measured" apart from "measured as zero", which an
+    /// always-present `null` would not preserve as cleanly as a genuinely
+    /// missing key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    strict_names: Option<StrictNamesBaseline>,
 }
 
 fn baseline_from_snapshot(snap: &RealSpecimenSnapshot, ts_unix: u64) -> RealSpecimenBaseline {
@@ -994,6 +1056,7 @@ fn baseline_from_snapshot(snap: &RealSpecimenSnapshot, ts_unix: u64) -> RealSpec
         tier1_hits: snap.tier1_hits,
         tolerance: 0,
         by_miss_kind: snap.by_miss_kind.clone(),
+        strict_names: snap.strict_names.clone(),
     }
 }
 
@@ -1059,6 +1122,39 @@ fn check_baseline(
                  baseline if the corpus changed"
             ));
         }
+    }
+
+    // ADR-0013 strict-name counts: report-only, so a move here is never a
+    // failure, whatever direction it moves in — see `StrictNamesBaseline`'s
+    // doc for why gating on it is a separate, undecided question.
+    match (&baseline.strict_names, &actual.strict_names) {
+        (Some(was), Some(now)) if was != now => {
+            warnings.push(format!(
+                "strict-name counts changed: strict_hits {} -> {}, name_scorable_documents \
+                 {} -> {}, name_scorable_hits {} -> {} (report-only; ADR-0013)",
+                was.strict_hits,
+                now.strict_hits,
+                was.name_scorable_documents,
+                now.name_scorable_documents,
+                was.name_scorable_hits,
+                now.name_scorable_hits,
+            ));
+        }
+        (Some(_), None) => {
+            warnings.push(
+                "strict-name counts were in the baseline but this run has none (report-only; \
+                 ADR-0013)"
+                    .to_string(),
+            );
+        }
+        (None, Some(_)) => {
+            warnings.push(
+                "strict-name counts appeared in this run but are not in the baseline \
+                 (report-only; ADR-0013)"
+                    .to_string(),
+            );
+        }
+        _ => {}
     }
 
     if failures.is_empty() {
@@ -1165,6 +1261,37 @@ fn print_baseline_table(baseline: &RealSpecimenBaseline, actual: &RealSpecimenSn
             k,
             baseline.by_miss_kind.get(k).copied().unwrap_or(0),
             actual.by_miss_kind.get(k).copied().unwrap_or(0),
+        );
+    }
+    // ADR-0013 strict-name counts, report-only: printed whenever either side
+    // has them, with `—` standing in for a side that has none, so a reader
+    // can see "not measured" rather than a misleading `0`.
+    if baseline.strict_names.is_some() || actual.strict_names.is_some() {
+        let opt_row = |label: &str, was: Option<usize>, now: Option<usize>| {
+            let was_s = was.map_or_else(|| "—".to_string(), |v| v.to_string());
+            let now_s = now.map_or_else(|| "—".to_string(), |v| v.to_string());
+            println!("  {label:<26} {was_s:>5} -> {now_s:<5} (report-only; ADR-0013)");
+        };
+        opt_row(
+            "strict_hits",
+            baseline.strict_names.as_ref().map(|s| s.strict_hits),
+            actual.strict_names.as_ref().map(|s| s.strict_hits),
+        );
+        opt_row(
+            "name_scorable_documents",
+            baseline
+                .strict_names
+                .as_ref()
+                .map(|s| s.name_scorable_documents),
+            actual
+                .strict_names
+                .as_ref()
+                .map(|s| s.name_scorable_documents),
+        );
+        opt_row(
+            "name_scorable_hits",
+            baseline.strict_names.as_ref().map(|s| s.name_scorable_hits),
+            actual.strict_names.as_ref().map(|s| s.name_scorable_hits),
         );
     }
     println!(
@@ -1678,6 +1805,8 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
+    use synthpass_bench::provider_bench::{AccuracyStats, CapabilitySnapshot, SpeedStats};
 
     #[test]
     fn subsample_returns_everything_when_the_limit_is_not_binding() {
@@ -1961,6 +2090,7 @@ mod tests {
             scored: documents - off,
             tier1_hits: hits,
             by_miss_kind,
+            strict_names: None,
         }
     }
 
@@ -2177,5 +2307,160 @@ mod tests {
     fn iso_date_is_utc_civil_from_days() {
         assert_eq!(iso_date(0), "1970-01-01");
         assert_eq!(iso_date(1_757_030_400), "2025-09-05");
+    }
+
+    // ---------------------------------------------------------------------
+    // ADR-0013 strict-name counts: report-only, never gated. See
+    // `StrictNamesBaseline`'s doc.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn old_baseline_json_without_strict_names_round_trips_without_the_key() {
+        let json = r#"{
+            "note": "n",
+            "measured_on_ci_sha": "abc",
+            "measured_date": "2026-09-16",
+            "samples_data_sha": "def",
+            "documents": 10,
+            "scored": 8,
+            "tier1_hits": 7,
+            "tolerance": 0,
+            "by_miss_kind": {"checksum_failed": 1}
+        }"#;
+        let baseline: RealSpecimenBaseline =
+            serde_json::from_str(json).expect("an old baseline with no strict_names key");
+        assert_eq!(baseline.strict_names, None);
+        let text = serde_json::to_string_pretty(&baseline).expect("serialize");
+        assert!(
+            !text.contains("strict_names"),
+            "an absent field must not round-trip back in: {text}"
+        );
+    }
+
+    #[test]
+    fn baseline_with_strict_names_round_trips() {
+        let mut s = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        s.strict_names = Some(StrictNamesBaseline {
+            strict_hits: 40,
+            name_scorable_documents: 60,
+            name_scorable_hits: 50,
+        });
+        let b = baseline_from_snapshot(&s, 1_757_030_400);
+        let text = serde_json::to_string_pretty(&b).expect("serialize");
+        assert!(text.contains("strict_names"));
+        let back: RealSpecimenBaseline = serde_json::from_str(&text).expect("deserialize");
+        assert_eq!(back.strict_names, b.strict_names);
+    }
+
+    #[test]
+    fn check_baseline_warns_but_does_not_fail_when_strict_counts_move() {
+        let mut base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        base.strict_names = Some(StrictNamesBaseline {
+            strict_hits: 40,
+            name_scorable_documents: 60,
+            name_scorable_hits: 50,
+        });
+        let b = baseline_with_tolerance(&base, 0);
+
+        let mut moved = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        moved.strict_names = Some(StrictNamesBaseline {
+            strict_hits: 41,
+            name_scorable_documents: 60,
+            name_scorable_hits: 50,
+        });
+
+        let warnings =
+            check_baseline(&moved, &b).expect("a strict-name count moving is never a regression");
+        assert!(warnings
+            .iter()
+            .any(|w| w.contains("strict-name counts changed") && w.contains("ADR-0013")));
+    }
+
+    #[test]
+    fn check_baseline_warns_once_when_strict_names_appears_or_disappears() {
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 0);
+
+        let mut appeared = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        appeared.strict_names = Some(StrictNamesBaseline {
+            strict_hits: 1,
+            name_scorable_documents: 1,
+            name_scorable_hits: 1,
+        });
+        let warnings = check_baseline(&appeared, &b).expect("appearing is not a regression");
+        assert!(warnings.iter().any(|w| w.contains("appeared in this run")));
+
+        let mut with_strict = base;
+        with_strict.strict_names = Some(StrictNamesBaseline {
+            strict_hits: 1,
+            name_scorable_documents: 1,
+            name_scorable_hits: 1,
+        });
+        let b_with_strict = baseline_with_tolerance(&with_strict, 0);
+        let disappeared = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let warnings =
+            check_baseline(&disappeared, &b_with_strict).expect("disappearing is not a regression");
+        assert!(warnings.iter().any(|w| w.contains("has none")));
+    }
+
+    /// A minimal `mrz`-provider [`ProviderReport`] carrying only what
+    /// [`RealSpecimenSnapshot::from_reports`] reads for the strict-name
+    /// mapping — an empty `documents_detail` is fine, since that field feeds
+    /// `documents`/`scored`/`tier1_hits`/`by_miss_kind`, not `strict_names`.
+    fn mrz_report_with_strict(strict: StrictNameHitRate) -> ProviderReport {
+        ProviderReport {
+            provider_id: "mrz".to_string(),
+            documents: 0,
+            capability: CapabilitySnapshot {
+                deterministic: true,
+                vision: false,
+                cost: "free",
+            },
+            accuracy: AccuracyStats {
+                labelled_documents: 0,
+                field_match_rate: None,
+                mean_cer: None,
+                per_field_cer: Vec::new(),
+            },
+            speed: SpeedStats {
+                mean: Duration::ZERO,
+                p50: Duration::ZERO,
+                p95: Duration::ZERO,
+            },
+            json_validity: None,
+            unsupported_assertion: UnsupportedAssertion::NotApplicable {
+                reason: "test fixture",
+            },
+            declared_resident_bytes: None,
+            measured_rss_delta_bytes: None,
+            documents_detail: Vec::new(),
+            tier1_hit_rate: Tier1HitRate::Computed(0.0),
+            strict_tier1_hit_rate: strict,
+        }
+    }
+
+    #[test]
+    fn from_reports_maps_computed_strict_name_hit_rate_to_some() {
+        let report = mrz_report_with_strict(StrictNameHitRate::Computed {
+            strict_hits: 3,
+            name_scorable_documents: 5,
+            name_scorable_hits: 4,
+            strict_tier1_hit_rate: 3.0 / 5.0,
+            names_exact_among_hits: 3.0 / 4.0,
+        });
+        let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
+        let strict = snap.strict_names.expect("Computed must map to Some");
+        assert_eq!(strict.strict_hits, 3);
+        assert_eq!(strict.name_scorable_documents, 5);
+        assert_eq!(strict.name_scorable_hits, 4);
+    }
+
+    #[test]
+    fn from_reports_maps_not_applicable_strict_name_hit_rate_to_none() {
+        let report = mrz_report_with_strict(StrictNameHitRate::NotApplicable {
+            reason: "no name-scorable documents",
+        });
+        let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
+        assert_eq!(snap.strict_names, None);
     }
 }

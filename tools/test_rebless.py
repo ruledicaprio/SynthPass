@@ -71,6 +71,26 @@ class FlattenBaselineTests(unittest.TestCase):
         self.assertEqual(flat["ocr_error"], 0)
         self.assertEqual(flat["document_number_mismatch"], 0)
 
+    def test_strict_names_fold_into_top_level(self):
+        flat = rb.flatten_baseline(
+            make_baseline(strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50})
+        )
+        self.assertEqual(flat["strict_hits"], 40)
+        self.assertEqual(flat["name_scorable_documents"], 60)
+        self.assertEqual(flat["name_scorable_hits"], 50)
+        self.assertNotIn("strict_names", flat)
+
+    def test_absent_strict_names_is_not_defaulted_to_zero(self):
+        # Unlike a miss kind, "never measured" and "measured as zero" are
+        # different facts for strict_names -- the committed baseline has no
+        # such key today, and flatten_baseline must leave it absent, not
+        # invent a 0 the live-block rewrite would then mistake for a
+        # measurement.
+        flat = rb.flatten_baseline(make_baseline())
+        self.assertNotIn("strict_hits", flat)
+        self.assertNotIn("name_scorable_documents", flat)
+        self.assertNotIn("name_scorable_hits", flat)
+
 
 class ClassifyBaselineDiffTests(unittest.TestCase):
     def test_only_provenance_moved_is_identical(self):
@@ -133,6 +153,39 @@ class ClassifyBaselineDiffTests(unittest.TestCase):
         cls, _changed = rb.classify_baseline_diff(old, new)
         self.assertEqual(cls, rb.CLASS_SCORED)
 
+    def test_strict_names_move_alone_is_non_scored_delta(self):
+        # ADR-0013's report-only counts moving, with nothing scored touched,
+        # must classify the same way an off-denominator bucket does.
+        old = make_baseline()
+        new = make_baseline(
+            strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50}
+        )
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_NON_SCORED)
+        changed_keys = {c[0] for c in changed}
+        self.assertIn("strict_hits", changed_keys)
+        self.assertIn("name_scorable_documents", changed_keys)
+        self.assertIn("name_scorable_hits", changed_keys)
+
+    def test_strict_names_appearing_from_absent_is_non_scored_delta(self):
+        old = make_baseline()
+        new = make_baseline(
+            strict_names={"strict_hits": 1, "name_scorable_documents": 1, "name_scorable_hits": 1}
+        )
+        cls, _changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_NON_SCORED)
+
+    def test_strict_names_move_alongside_a_scored_move_is_still_scored_delta(self):
+        old = make_baseline()
+        new = make_baseline(
+            tier1_hits=146,
+            scored=160,
+            documents=266,
+            strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50},
+        )
+        cls, _changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_SCORED)
+
     def test_changed_list_reports_old_and_new_values(self):
         old = make_baseline()
         new = make_baseline(documents=266, by_miss_kind={**old["by_miss_kind"], "no_mrz_expected": 51})
@@ -166,6 +219,20 @@ class FormatDiffTableTests(unittest.TestCase):
         _cls, changed = rb.classify_baseline_diff(old, new)
         table = rb.format_diff_table(changed, rb.flatten_baseline(new))
         self.assertIn("no field moved beyond CI provenance", table)
+
+    def test_report_only_row_is_labelled(self):
+        old = make_baseline()
+        new = make_baseline(
+            documents=266,
+            strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50},
+        )
+        _cls, changed = rb.classify_baseline_diff(old, new)
+        table = rb.format_diff_table(changed, rb.flatten_baseline(new))
+        self.assertIn("(report-only)", table)
+        # A non-report-only row moving in the same diff must not carry the marker.
+        for line in table.splitlines():
+            if line.strip().startswith("documents"):
+                self.assertNotIn("(report-only)", line)
 
 
 class FormatRateTests(unittest.TestCase):
@@ -255,6 +322,15 @@ counting them as failures measures the corpus rather than the reader.
 | `checksum_failed_specimen` | 19 | no | Printed zone fails its own check digits |
 """
 
+# Same fixture, with the ADR-0013 Strict name hit rate row present as it ships
+# in the real file -- placeholder text until the first baseline carries
+# `strict_names`.
+BENCH_README_SNIPPET_WITH_STRICT_ROW = BENCH_README_SNIPPET.replace(
+    "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n",
+    "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n"
+    f"| Strict name hit rate, real specimens | {rb.STRICT_NAME_PLACEHOLDER_VALUE} | {rb.STRICT_NAME_PLACEHOLDER_SOURCE} |\n",
+)
+
 
 class RewriteReadmeGapAndCorpusRateTests(unittest.TestCase):
     def setUp(self):
@@ -329,6 +405,97 @@ class RewriteBenchmarksReadmeLiveBlockTests(unittest.TestCase):
     def test_missing_pattern_raises(self):
         with self.assertRaises(ValueError):
             rb.rewrite_benchmarks_readme_live_block("nothing to match here", 145, self.old_flat, self.new_flat)
+
+    def test_strict_row_untouched_when_no_strict_row_present_and_no_strict_names(self):
+        # The committed baseline has no strict_names key today, so the
+        # default-shaped snippet round-trips with no strict row at all --
+        # confirms the integration is a true no-op, not just "doesn't crash".
+        out = rb.rewrite_benchmarks_readme_live_block(BENCH_README_SNIPPET, 145, self.old_flat, self.new_flat)
+        self.assertNotIn("Strict name hit rate", out)
+
+    def test_leaves_strict_placeholder_row_untouched_when_new_baseline_has_no_strict_names(self):
+        out = rb.rewrite_benchmarks_readme_live_block(
+            BENCH_README_SNIPPET_WITH_STRICT_ROW, 145, self.old_flat, self.new_flat
+        )
+        self.assertIn(rb.STRICT_NAME_PLACEHOLDER_VALUE, out)
+
+    def test_rewrites_strict_placeholder_row_when_new_baseline_carries_strict_names(self):
+        new = make_baseline(
+            documents=266,
+            measured_date="2026-09-15",
+            measured_on_ci_sha="ccccccc",
+            by_miss_kind={**self.old["by_miss_kind"], "no_mrz_expected": 51},
+            strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50},
+        )
+        new_flat = rb.flatten_baseline(new)
+        out = rb.rewrite_benchmarks_readme_live_block(
+            BENCH_README_SNIPPET_WITH_STRICT_ROW, 145, self.old_flat, new_flat
+        )
+        self.assertIn("**40 / 60 = 66.7%**", out)
+        self.assertIn("(CI, 2026-09-15); ADR-0013", out)
+        self.assertNotIn(rb.STRICT_NAME_PLACEHOLDER_VALUE, out)
+
+
+class RewriteBenchmarksReadmeStrictNameRowTests(unittest.TestCase):
+    """Unit-level coverage of `rewrite_benchmarks_readme_strict_name_row`
+    itself, independent of the rest of the live-block rewrite -- the
+    end-to-end path is also covered above, via
+    `RewriteBenchmarksReadmeLiveBlockTests`."""
+
+    def test_rewrites_from_the_placeholder(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(
+            make_baseline(
+                strict_names={"strict_hits": 40, "name_scorable_documents": 60, "name_scorable_hits": 50},
+                measured_date="2026-09-15",
+            )
+        )
+        out = rb.rewrite_benchmarks_readme_strict_name_row(
+            BENCH_README_SNIPPET_WITH_STRICT_ROW, old_flat, new_flat
+        )
+        self.assertIn("**40 / 60 = 66.7%**", out)
+        self.assertIn("80.0% of name-scorable hits", out)  # 40 / 50
+        self.assertIn("same baseline (CI, 2026-09-15); ADR-0013", out)
+        self.assertNotIn("not yet measured in CI", out)
+
+    def test_rewrites_from_a_previous_number(self):
+        old_flat = rb.flatten_baseline(
+            make_baseline(
+                strict_names={"strict_hits": 30, "name_scorable_documents": 50, "name_scorable_hits": 45},
+                measured_date="2026-09-14",
+            )
+        )
+        old_value, old_source = rb._format_strict_name_row_cells(old_flat)
+        snippet = BENCH_README_SNIPPET.replace(
+            "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n",
+            "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n"
+            f"| Strict name hit rate, real specimens | {old_value} | {old_source} |\n",
+        )
+        new_flat = rb.flatten_baseline(
+            make_baseline(
+                strict_names={"strict_hits": 32, "name_scorable_documents": 52, "name_scorable_hits": 46},
+                measured_date="2026-09-16",
+            )
+        )
+        out = rb.rewrite_benchmarks_readme_strict_name_row(snippet, old_flat, new_flat)
+        self.assertIn("**32 / 52 = 61.5%**", out)
+        self.assertNotIn("30 / 50 = 60.0%", out)
+
+    def test_no_op_when_new_baseline_has_no_strict_names(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(make_baseline())
+        out = rb.rewrite_benchmarks_readme_strict_name_row(
+            BENCH_README_SNIPPET_WITH_STRICT_ROW, old_flat, new_flat
+        )
+        self.assertEqual(out, BENCH_README_SNIPPET_WITH_STRICT_ROW)
+
+    def test_missing_row_raises_rather_than_silently_skipping(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(
+            make_baseline(strict_names={"strict_hits": 1, "name_scorable_documents": 1, "name_scorable_hits": 1})
+        )
+        with self.assertRaises(ValueError):
+            rb.rewrite_benchmarks_readme_strict_name_row("no strict row in this text at all", old_flat, new_flat)
 
 
 # --------------------------------------------------------------------------

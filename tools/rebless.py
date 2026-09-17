@@ -133,6 +133,14 @@ BENCH_README_REL_PATH = "knowledge/benchmarks/README.md"
 
 PROVENANCE_KEYS = ("measured_on_ci_sha", "samples_data_sha", "measured_date")
 NON_SCORED_KEYS = ("documents", "no_mrz_expected", "redacted_mrz", "checksum_failed_specimen")
+# ADR-0013 strict-name counts -- report-only, never a scored delta. A move here
+# means the strict-name measurement changed, not that Tier-1 accuracy did; see
+# `StrictNamesBaseline` in provider-bench.rs, this file's own mirror of that
+# schema. Absent from an older baseline (see `flatten_baseline`'s docstring),
+# so these three keys are simply missing from `old_flat`/`new_flat` rather than
+# defaulted to 0 the way a miss-kind bucket is -- "not measured" and "measured
+# as zero" are different facts here and must stay distinguishable.
+REPORT_ONLY_KEYS = ("strict_hits", "name_scorable_documents", "name_scorable_hits")
 SCORED_KEYS = ("scored", "tier1_hits")
 # The full REGRESSION_BUCKETS set, not just the three the task narrative names
 # (the three that happen to be non-zero in the corpus today) -- an unnamed
@@ -159,11 +167,19 @@ def flatten_baseline(doc: dict) -> dict:
     """A baseline JSON's `by_miss_kind` sub-object folded into the same flat
     namespace `scripts/check-headline-numbers.sh` and this module both use,
     with every known miss-kind key defaulted to 0 when the bucket had zero
-    occurrences (see `ALL_MISS_KIND_KEYS`'s docstring above)."""
-    flat = {k: v for k, v in doc.items() if k not in ("note", "by_miss_kind")}
+    occurrences (see `ALL_MISS_KIND_KEYS`'s docstring above).
+
+    `strict_names` (ADR-0013's report-only counts, `REPORT_ONLY_KEYS`) folds
+    in the same way -- **but with no default when absent.** Unlike a miss
+    kind, absence here means "this baseline never measured names" rather than
+    "measured as zero", and the live-block rewrite below needs to tell the
+    two apart: a baseline with no `strict_names` key must leave the README
+    row untouched, not overwrite it with zeroes."""
+    flat = {k: v for k, v in doc.items() if k not in ("note", "by_miss_kind", "strict_names")}
     flat.update(doc.get("by_miss_kind") or {})
     for key in ALL_MISS_KIND_KEYS:
         flat.setdefault(key, 0)
+    flat.update(doc.get("strict_names") or {})
     return flat
 
 
@@ -177,9 +193,16 @@ def classify_baseline_diff(old: dict, new: dict) -> tuple[str, list[tuple[str, o
     measured even when nothing else moved.
 
     An unrecognized key moving (something in neither `NON_SCORED_KEYS` nor
-    `SCORED_KEYS`/`SCORED_MISS_KEYS`/`PROVENANCE_KEYS` -- `tolerance`
-    changing, or a future schema field) is classified `CLASS_SCORED`: never
-    guessed at, always the conservative direction that stops for a human."""
+    `SCORED_KEYS`/`SCORED_MISS_KEYS`/`PROVENANCE_KEYS`/`REPORT_ONLY_KEYS` --
+    `tolerance` changing, or a future schema field) is classified
+    `CLASS_SCORED`: never guessed at, always the conservative direction that
+    stops for a human.
+
+    `REPORT_ONLY_KEYS` (ADR-0013's strict-name counts) are classified exactly
+    like `NON_SCORED_KEYS`: a move there, alone, is never a scored delta --
+    the strict-name measurement changing (or a baseline gaining/losing it)
+    says nothing about Tier-1 accuracy, the axis `scored`/`tier1_hits` and
+    the miss buckets measure."""
     old_flat, new_flat = flatten_baseline(old), flatten_baseline(new)
     all_keys = sorted(set(old_flat) | set(new_flat))
     changed = [(k, old_flat.get(k), new_flat.get(k)) for k in all_keys if old_flat.get(k) != new_flat.get(k)]
@@ -192,7 +215,7 @@ def classify_baseline_diff(old: dict, new: dict) -> tuple[str, list[tuple[str, o
     scored_relevant = set(SCORED_KEYS) | set(SCORED_MISS_KEYS)
     if non_provenance & scored_relevant:
         return CLASS_SCORED, changed
-    if non_provenance <= set(NON_SCORED_KEYS):
+    if non_provenance <= set(NON_SCORED_KEYS) | set(REPORT_ONLY_KEYS):
         return CLASS_NON_SCORED, changed
     return CLASS_SCORED, changed
 
@@ -203,12 +226,17 @@ def format_diff_table(changed: list[tuple[str, object, object]], new_flat: dict)
     `  {label:<26} {was:>5} -> {now:<5} ({diff:+d})`, one row per non-provenance
     field that moved, plus the trailing `(baseline measured DATE on SHA)` line.
     Provenance fields are excluded from the row list -- `provider-bench` never
-    rows them either, they're the trailing line instead."""
+    rows them either, they're the trailing line instead.
+
+    A `REPORT_ONLY_KEYS` row (ADR-0013's strict-name counts) gets a trailing
+    `(report-only)` marker so a reader scanning the table does not mistake a
+    strict-name count moving for a scored Tier-1 delta."""
     rows = [c for c in changed if c[0] not in PROVENANCE_KEYS]
     lines = []
     for key, old, new in sorted(rows):
         old_i, new_i = int(old or 0), int(new or 0)
-        lines.append(f"  {key:<26} {old_i:>5} -> {new_i:<5} ({new_i - old_i:+d})")
+        suffix = "  (report-only)" if key in REPORT_ONLY_KEYS else ""
+        lines.append(f"  {key:<26} {old_i:>5} -> {new_i:<5} ({new_i - old_i:+d}){suffix}")
     if not lines:
         lines.append("  (no field moved beyond CI provenance)")
     lines.append(f"  (baseline measured {new_flat.get('measured_date')} on {new_flat.get('measured_on_ci_sha')})")
@@ -305,14 +333,70 @@ def _replace_or_raise(text: str, old: str, new: str, what: str) -> str:
     return text.replace(old, new, 1)
 
 
+# The exact placeholder cells `knowledge/benchmarks/README.md`'s "Current
+# headline numbers" table ships with before any baseline has ever carried
+# `strict_names` -- see that file's own row and ADR-0013.
+STRICT_NAME_PLACEHOLDER_VALUE = (
+    "not yet measured in CI — the row fills at the first re-bless whose baseline carries "
+    "`strict_names` (ADR-0013)"
+)
+STRICT_NAME_PLACEHOLDER_SOURCE = "`real-specimen-mrz-baseline.json`"
+
+
+def _format_strict_name_row_cells(flat: dict) -> tuple[str, str]:
+    """The Strict name hit rate row's value/source cells for a flattened
+    baseline that carries `strict_names` (`REPORT_ONLY_KEYS` all present).
+    `names_exact_among_hits` is stated as `0.0`, not computed through
+    `format_rate`, exactly when `name_scorable_hits` is `0` -- the same
+    non-fabricated-zero rule `StrictNameHitRate::Computed`'s own doc states
+    (`name_scorable_documents` being nonzero already proves this is a
+    measured, not absent, population)."""
+    strict_hits = int(flat["strict_hits"])
+    name_scorable_documents = int(flat["name_scorable_documents"])
+    name_scorable_hits = int(flat["name_scorable_hits"])
+    rate = format_rate(strict_hits, name_scorable_documents)
+    names_exact_among_hits = format_rate(strict_hits, name_scorable_hits) if name_scorable_hits else "0.0"
+    value = (
+        f"**{strict_hits} / {name_scorable_documents} = {rate}%** of name-scorable scored "
+        f"documents ({names_exact_among_hits}% of name-scorable hits)"
+    )
+    source = f"same baseline (CI, {flat.get('measured_date')}); ADR-0013"
+    return value, source
+
+
+def rewrite_benchmarks_readme_strict_name_row(text: str, old_flat: dict, new_flat: dict) -> str:
+    """`knowledge/benchmarks/README.md`'s "Current headline numbers" Strict
+    name hit rate row: rewritten from its "not yet measured in CI" placeholder
+    (or a previous re-bless's own figure) to the counts the freshly installed
+    baseline carries under `strict_names` (ADR-0013) -- report-only, never
+    the scored Tier-1 rate itself, which this function never touches.
+
+    A no-op, returning `text` unchanged, when the baseline just installed
+    does not carry `strict_names` at all (`name_scorable_documents` absent
+    from `new_flat`, i.e. this run's `StrictNameHitRate` was
+    `NotApplicable`) -- there is nothing measured yet to rewrite the row to."""
+    if not new_flat.get("name_scorable_documents"):
+        return text
+    new_value, new_source = _format_strict_name_row_cells(new_flat)
+    if old_flat.get("name_scorable_documents"):
+        old_value, old_source = _format_strict_name_row_cells(old_flat)
+    else:
+        old_value, old_source = STRICT_NAME_PLACEHOLDER_VALUE, STRICT_NAME_PLACEHOLDER_SOURCE
+    old_row = f"| Strict name hit rate, real specimens | {old_value} | {old_source} |"
+    new_row = f"| Strict name hit rate, real specimens | {new_value} | {new_source} |"
+    return _replace_or_raise(text, old_row, new_row, f"{BENCH_README_REL_PATH} strict name hit rate row")
+
+
 def rewrite_benchmarks_readme_live_block(text: str, hits: int, old_flat: dict, new_flat: dict) -> str:
     """`knowledge/benchmarks/README.md`'s "Current headline numbers" live
     block: the corpus-wide rate row, the outcomes heading's document count,
-    every outcome-table bucket count that moved, and the scored-rate row's
-    Source-cell measured date. The scored-rate row's own numbers
-    (`hits / scored = rate%`) are never touched here -- `scored` and `hits`
-    cannot move in a non-scored delta, the only class that reaches this
-    function."""
+    every outcome-table bucket count that moved, the scored-rate row's
+    Source-cell measured date, and (via
+    `rewrite_benchmarks_readme_strict_name_row`) the Strict name hit rate row
+    when the newly installed baseline carries `strict_names`. The scored-rate
+    row's own numbers (`hits / scored = rate%`) are never touched here --
+    `scored` and `hits` cannot move in a non-scored delta, the only class
+    that reaches this function."""
     old_documents, new_documents = int(old_flat["documents"]), int(new_flat["documents"])
     old_scored = int(old_flat["scored"])
 
@@ -344,6 +428,8 @@ def rewrite_benchmarks_readme_live_block(text: str, hits: int, old_flat: dict, n
     if not date_pattern.search(text):
         raise ValueError(f"{BENCH_README_REL_PATH}: expected the scored-rate row's '(CI, YYYY-MM-DD)' Source cell not found")
     text = date_pattern.sub(rf"\g<1>{new_flat.get('measured_date')}\g<2>", text, count=1)
+
+    text = rewrite_benchmarks_readme_strict_name_row(text, old_flat, new_flat)
 
     return text
 
