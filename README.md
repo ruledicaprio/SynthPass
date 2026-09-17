@@ -140,6 +140,11 @@ MRZ whose document number matches hand-verified ground truth.
   [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; a
   [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md) then found four of the seven remaining detection
   misses could never have yielded a hit.
+- **A hit proves the document number and the dates, not the name.** No ICAO 9303 check digit
+  covers `surname` or `given_names`, so name accuracy is measured as its own axis
+  ([ADR-0013](knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)) and is not
+  part of the headline. Today it lags the headline, and closing that gap is the next accuracy
+  chunk ([ROADMAP.md](knowledge/ROADMAP.md#current-state), "Assessment 2026-09-17").
 - Synthetic-corpus and Tier-2 parity numbers, per-format breakdowns, and the rejected candidates
   are all in [benchmarks/README.md](knowledge/benchmarks/README.md#current-headline-numbers).
 

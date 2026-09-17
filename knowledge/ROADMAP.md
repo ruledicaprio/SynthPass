@@ -171,6 +171,73 @@ candidate-selection guard was measured and rejected. The 7 checksum-valid anchor
 now attributable to native OCR on a low-resolution scan (line-1 filler collapse with no
 checksum oracle, unreadable line 2, diffuse noise), not to `mrz`.
 
+### Assessment 2026-09-17 — where the tree stands against its own claims
+
+A repository-wide review taken at v1.5.0 — code health, measurement, architecture, commercial
+readiness — recorded here so the next chunk is chosen against it. Numbers stay in
+[`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers) and
+[`ADR-0013`](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md); this section states
+what they mean.
+
+**What holds.** Production code carries no `unsafe` and no unguarded `unwrap`; the tests are
+contracts (ICAO 9303 worked-example vectors, the PII-sentinel log test, schema-key pins, property
+and fuzz targets); the crate boundaries hold under inspection (`mrz` zero-dependency,
+`synthpass-die` naming no engine, CI-asserted); and the measurement apparatus — two denominators
+always published, a CI-written baseline at zero tolerance, a false positive failing the build, the
+headline corrected downward when the corpus was wrong — is the part of the repository a skeptical
+buyer should trust first.
+
+**What does not, yet.**
+
+- **A hit does not prove the name.** No ICAO 9303 check digit covers `surname` or `given_names`
+  in any format, and [`ADR-0013`](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)
+  found a large fraction of *accepted* synthetic documents carry a wrong one; the recognizer does
+  not read the isolated OCR-B `<` at all. That is a correctness gap in the sold claim, it has no
+  real-specimen measurement yet, and the repair (grid alignment in `synthpass-ocr`, ADR-0013's
+  "next step") is designed, not built.
+- **Six weeks of headline movement were mostly denominator correction and corpus bookkeeping.**
+  One engineering change, the [orientation fix](benchmarks/orientation-fix-2026-09-12.md), moved
+  the reader. The residual is small and recognition-bound, and M6's Definition of Done — every
+  scored miss attributed — recedes with every cohort the specimen loop adds, so as written it may
+  never converge.
+- **Ground truth is thinner than the hit count.** A minority of corpus documents carry an
+  independently verified document number; the other hits are self-certified by check digit plus a
+  visual check. Transcribing fixtures for documents already in the corpus is cheaper than sourcing
+  new ones, and it is what makes a future delta attributable.
+- **The tree is an MRZ reader plus a benchmark operation, with a generator attached.**
+  `synthpass-gen` has one fixed pixel layout per format, small identity pools, and exports only the
+  `clean` profile; declarative layouts are M8 and not started. [`VISION.md`](VISION.md)'s claim
+  that the generator is the point is a statement of intent the code does not yet back.
+- **The maintenance surface is growing faster than accuracy** — fourteen crates, eight workflows,
+  a Python scouting toolchain whose tests CI never runs, weekly cohort PRs — on one maintainer,
+  with two required CI checks and the real-specimen gate still advisory.
+- **Drift found and fixed in the same change:** [`technical_debt.md`](technical_debt.md)'s High
+  entry on `unsafe` in `synthpass-ocr` was false (every block is test-only environment mutation)
+  and is retired to Low with the record kept; `synthpass-gen/src/fonts.rs` documented its font
+  feature as off by default when it is on. Still open: [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)
+  sells custom-trained models while [`VISION.md`](VISION.md) §2 lists "does not train models"
+  among the lines that do not move — one of them loses a line; and three ADRs (0005, 0009, 0010)
+  have sat at *Proposed* since August.
+
+**Sequencing this implies** — proposed, each item landing through its own tracked change:
+
+1. **Freeze M6's Definition of Done against the v1.5.0 corpus snapshot** so the milestone can
+   close: an [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) amendment, not an
+   edit to the table above.
+2. **Measure `strict_hit_rate` on real specimens in CI**, then build the grid repair against that
+   baseline — same-binary A/B, per the
+   [maintenance contract](benchmarks/README.md#benchmark-maintenance-contract).
+3. **Pause the specimen-acquisition loop in favour of transcribing ground truth** for the corpus
+   as it stands; resume once the strict-name metric and the recognizer decision are in.
+4. **Take the recognizer as its own benchmark-first ADR.** The candidate — a specialized MRZ-band
+   recognizer, deterministic and trained on nothing — is scoped under
+   "Beyond generic OCR" in *Future Work* below. `ocrs` keeps detection and the visual zone.
+5. **Ship one external deliverable**: a buyer-readable benchmarking report (the closest revenue
+   surface in [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy), needing no accuracy gain) or
+   declarative generator layouts (the thesis). One per quarter, not both.
+6. **Find a first user.** The `mrz` crate and the live demo are the wedge; no external feedback
+   exists because nothing has been announced.
+
 ## M7 — Document Intelligence Engine
 
 The shape of the change: Tier 2 stops meaning *"run the LLM"* and starts meaning *"ask a more
@@ -535,6 +602,35 @@ recognition, matching or liveness, at any point.
 second (the encoding rules bite), carriers third (generation precedes decoding), templates and
 security marks fourth (gated by ADR-0009), portraits last and narrow. Every axis ships with the
 oracle that scores it, or it does not ship.
+
+### Beyond generic OCR — a specialized MRZ-band recognizer
+
+*Candidate, not committed. Raised in the 2026-09-17 assessment; it enters only through its own
+benchmark-first ADR, per M6's rule that no OCR engine change lands under a milestone.*
+
+The MRZ is not scene text. It is monospaced OCR-B on a fixed grid whose cell count the format
+fixes (30, 36 or 44 per line), and its alphabet is closed *per position*: a TD3's first cell is
+always `P`, the sex cell is `M`/`F`/`<`, dates and check digits are digits, the country cells are
+codes from `countries.rs`. A generic recognizer decoding with CTC merges repeated glyphs and, as
+[`ADR-0013`](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md) records, does not
+read the isolated `<` at all — which is why accepted documents carry wrong names.
+
+The candidate turns "what text is this line" into "which of the allowed glyphs is in cell *i*":
+locate the band (`synthpass-imageprep` already does), fit the grid (pitch from the dense line,
+phase from a column ink profile), classify each cell against the OCR-B glyphs rendered from the
+font already vendored under `crates/synthpass-gen/fonts/`, and let the ICAO check digits choose
+among confusable candidates. Deterministic template classification plus checksum-guided search:
+nothing is trained, so [`VISION.md`](VISION.md)'s non-goal holds; no cloud; wasm-clean in
+principle; and the generator renders the calibration and test data — the first place the tree
+would make its own thesis literally true. It would also retire the "confidence is a proxy" entry
+in [`technical_debt.md`](technical_debt.md), because per-cell scores land in code we control.
+
+What it is not: a VIZ reader or a general recognizer. `ocrs` keeps text detection and the visual
+zone. Order: the grid repair first (cheapest; restores lost `<` cells without a new recognizer;
+judged by `strict_hit_rate`), then the per-cell classifier as a Tier-1.5 stage, bake-off against
+`ocrs` on both corpora before it takes over the band. Risks the ADR must state: grid phase on
+skewed or curved lines, glyph scale on low-resolution scans (today's recognition misses are
+low-resolution guilloché scans), and the TD1 synthetic watermark overprinting the zone.
 
 ### Beyond ICAO 9303
 

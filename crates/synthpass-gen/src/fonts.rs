@@ -1,9 +1,9 @@
-//! Glyph loading, gated behind the `embedded-fonts` Cargo feature (off by
-//! default). When off, [`load_fonts`] returns [`FontError::NotEmbedded`] and
-//! `render` degrades gracefully to placeholder bars — see `render.rs`.
-//!
-//! When the feature is on, the two OFL fonts are baked into the binary via
-//! `include_bytes!`; see `fonts/README.md` for how to supply them.
+//! Glyph loading, gated behind the `embedded-fonts` Cargo feature — **on by
+//! default**, because both OFL fonts are vendored under `fonts/` (see
+//! `fonts/README.md`). With the feature on, the two fonts are baked into the
+//! binary via `include_bytes!`. Under `--no-default-features` it is off:
+//! [`load_fonts`] returns [`FontError::NotEmbedded`] and `render` degrades
+//! gracefully to placeholder bars — see `render.rs`.
 
 use ab_glyph::FontArc;
 
@@ -40,8 +40,8 @@ impl core::fmt::Display for FontError {
 
 impl std::error::Error for FontError {}
 
-/// Attempt to load the MRZ + VIZ fonts. Only succeeds when built with
-/// `--features embedded-fonts` and the font files were supplied at build time.
+/// Attempt to load the MRZ + VIZ fonts. Fails only when the `embedded-fonts`
+/// feature is off (`--no-default-features`) or an embedded font fails to parse.
 pub fn load_fonts() -> Result<Fonts, FontError> {
     #[cfg(feature = "embedded-fonts")]
     {
@@ -61,9 +61,9 @@ mod tests {
 
     #[test]
     #[cfg(not(feature = "embedded-fonts"))]
-    fn not_embedded_by_default() {
-        // Default-feature build: no font files are vendored in the repo, so
-        // this must degrade gracefully rather than panic or fail to compile.
+    fn not_embedded_without_feature() {
+        // `--no-default-features` build: the fonts are vendored but not
+        // compiled in, so this must degrade gracefully rather than panic.
         assert!(matches!(load_fonts(), Err(FontError::NotEmbedded)));
     }
 
