@@ -96,6 +96,10 @@ input to `fuzz/corpus/<target>/` as a permanent regression seed, add a matching 
   them green and add one for any new format/repair path.
 - **Match the surrounding style.** Run `cargo fmt` and `cargo clippy --workspace`; keep comment
   density and naming consistent with the file you're editing.
+- **A new dated finding needs the index regenerated.** Adding a dated report file under
+  `knowledge/benchmarks/` or an entry to [`knowledge/benchmarks/FINDINGS.md`](knowledge/benchmarks/FINDINGS.md)'s
+  `## Weak-spot findings` section needs `python tools/index_findings.py --write` in the same PR;
+  CI's `python tools/index_findings.py --check` fails the build on a stale index.
 - **The `mrz` crate stays zero-dependency** (it compiles to `wasm32`); don't add runtime deps to it.
 - **No PII in logs or fixtures.** Use the public-domain specimens in `samples/` (organized into
   `passports/`, `id_cards/`, `driving_licenses/`, `ocr_fixtures/`, `misc/` — see

@@ -610,5 +610,63 @@ class WatchCommandTests(unittest.TestCase):
         self.assertIn("--exit-status", cmd)
 
 
+# --------------------------------------------------------------------------
+# FINDINGS.md is the append target for a non-scored re-bless entry (the F1
+# "one findings home" change moved `## Weak-spot findings` out of
+# knowledge/benchmarks/README.md). This exercises the same two calls
+# `main()`'s CLASS_NON_SCORED branch makes -- appending `build_weakspot_entry`'s
+# output to FINDINGS.md, then `ixf.write_index` -- against a fixture tree,
+# without going through `main()` itself (which needs a real worktree, git and
+# gh, out of scope for this offline suite; see the module docstring).
+# --------------------------------------------------------------------------
+
+
+class FindingsAppendTargetTests(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmpdir.name)
+        bench_dir = self.root / "knowledge" / "benchmarks"
+        bench_dir.mkdir(parents=True)
+        (self.root / "knowledge" / "WEB_OCR_BASELINE.md").write_text("# Web OCR baseline\n\nNo sections in this fixture.\n", encoding="utf-8")
+        (bench_dir / "FINDINGS.md").write_text(
+            "# Findings\n\nIntro.\n\n"
+            f"{rb.ixf.INDEX_START}\n{rb.ixf.INDEX_END}\n\n"
+            "## Weak-spot findings\n\n"
+            "Intro to the log.\n\n"
+            "### 2026-09-10 — a prior entry\n\nPrior prose.\n",
+            encoding="utf-8",
+        )
+        self.old = make_baseline()
+        self.new = make_baseline(
+            documents=266,
+            measured_date="2026-09-15",
+            by_miss_kind={**self.old["by_miss_kind"], "no_mrz_expected": 51},
+        )
+        self.old_flat, self.new_flat = rb.flatten_baseline(self.old), rb.flatten_baseline(self.new)
+        _cls, self.changed = rb.classify_baseline_diff(self.old, self.new)
+        self.addCleanup(self._tmpdir.cleanup)
+
+    def test_constant_points_at_findings_not_readme(self):
+        self.assertEqual(rb.FINDINGS_REL_PATH, "knowledge/benchmarks/FINDINGS.md")
+        self.assertNotEqual(rb.FINDINGS_REL_PATH, rb.BENCH_README_REL_PATH)
+
+    def test_entry_is_appended_to_findings_not_replacing_the_prior_log(self):
+        findings_path = self.root / rb.FINDINGS_REL_PATH
+        entry = rb.build_weakspot_entry("cohort-c14", 1, self.changed, "34980671424", self.old_flat, self.new_flat)
+        findings_path.write_text(findings_path.read_text(encoding="utf-8").rstrip("\n") + "\n" + entry, encoding="utf-8")
+        text = findings_path.read_text(encoding="utf-8")
+        self.assertIn("a prior entry", text)  # untouched, not overwritten
+        self.assertIn("cohort c14", text)  # the new entry landed
+
+    def test_index_regenerates_to_include_the_new_entry(self):
+        findings_path = self.root / rb.FINDINGS_REL_PATH
+        entry = rb.build_weakspot_entry("cohort-c14", 1, self.changed, "34980671424", self.old_flat, self.new_flat)
+        findings_path.write_text(findings_path.read_text(encoding="utf-8").rstrip("\n") + "\n" + entry, encoding="utf-8")
+        changed = rb.ixf.write_index(self.root)
+        self.assertTrue(changed)
+        indexed_text = findings_path.read_text(encoding="utf-8")
+        self.assertIn("cohort c14", indexed_text.split(rb.ixf.INDEX_START)[1].split(rb.ixf.INDEX_END)[0])
+
+
 if __name__ == "__main__":
     unittest.main()

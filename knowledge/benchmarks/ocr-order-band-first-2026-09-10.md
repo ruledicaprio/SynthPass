@@ -1,5 +1,7 @@
 # Cell (a): pass ordering — does the browser's untreated-band-first advantage transfer to native `ocrs`?
 
+**Date:** 2026-09-10 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **2026-09-10.** [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md) chunk 1C, first cell.
 [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) named the cheapest hypothesis for the
 browser-vs-native gap: the browser's first OCR attempt is an **untreated band crop**

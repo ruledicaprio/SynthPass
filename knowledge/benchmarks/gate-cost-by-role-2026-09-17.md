@@ -1,5 +1,7 @@
 # Where the real-specimen gate spends its time, by outcome class
 
+**Date:** 2026-09-17 · **MAIN:** `b2a0afd` · **DATA:** `469a4ee7723148917cf023f1a7ab2af80a0ef7d3` · **Evidence:** Observed · **Status:** current
+
 **2026-09-17.** [ADR-0010](../decisions/ADR-0010-benchmark-cost-split-by-role.md)'s step 5 —
 measure the gate's cost after ADR-0008 chunk 2 before building the role split. Read-only: no
 code, no corpus file and no baseline was touched; the numbers are read from a CI artifact.

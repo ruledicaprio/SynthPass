@@ -1,5 +1,7 @@
 # Country demonyms, and a replay harness that gates vocabulary, 2026-09-05
 
+**Date:** 2026-09-05 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **Six table entries recover 10 Tier-2 fields: 170/324 → 180/324, 52.5% → 55.6%,
 zero regressions.** No prompt change, no `PROMPT_VERSION` bump, no model run.
 

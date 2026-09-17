@@ -1,5 +1,7 @@
 # Denominator refinement — the Argentina 2026 specimen has a fake printed MRZ
 
+**Date:** 2026-09-10 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md)
+
 **Superseded by:** [`orientation-fix-2026-09-12.md`](orientation-fix-2026-09-12.md).
 
 **2026-09-10.** A third pass over the Tier-1 denominator, in the lineage of

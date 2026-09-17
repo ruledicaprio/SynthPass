@@ -1,5 +1,7 @@
 # Cell (c): the detection failures are a wrong-orientation failure
 
+**Date:** 2026-09-10 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **2026-09-10.** [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md) chunk 1C, cell (c).
 Cell (a) ([`ocr-order-band-first-2026-09-10.md`](ocr-order-band-first-2026-09-10.md)) ruled out
 pass ordering. Cell (b) ([`ocr-gap-is-detection-2026-09-10.md`](ocr-gap-is-detection-2026-09-10.md))

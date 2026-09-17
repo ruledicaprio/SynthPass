@@ -119,11 +119,15 @@ comparing against.
 A dated file `knowledge/benchmarks/<topic>-YYYY-MM-DD.md` in the house style — read
 `denominator-correction-2026-09-09.md` for the shape: the title states the finding; a date and
 context line; before/after table; both denominators; the named documents; the exact invocation;
-a **What this does not claim** section; the candidates rejected on the way. Add a dated entry under
-the README's "Weak-spot findings" that links it. Update the headline table only from the CI
+a **What this does not claim** section; the candidates rejected on the way. Directly under the
+title, add the additive header line `knowledge/benchmarks/FINDINGS.md` documents (`**Date:** ...
+**MAIN:** ... **DATA:** ... **Evidence:** ... **Status:** current`). Add a dated entry under
+`FINDINGS.md`'s "Weak-spot findings" section that links the new file, then regenerate the index
+with `python tools/index_findings.py --write`. Update the headline table only from the CI
 baseline, never from a local run. Wrap near 100 columns. Then run
-`bash scripts/check-doc-links.sh` and `bash scripts/check-headline-numbers.sh`. Leave the files
-for the calling session to review and commit.
+`bash scripts/check-doc-links.sh`, `bash scripts/check-headline-numbers.sh` and
+`python tools/index_findings.py --check`. Leave the files for the calling session to review and
+commit.
 
 ## Environment
 

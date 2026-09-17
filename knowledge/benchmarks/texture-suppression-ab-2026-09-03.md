@@ -1,5 +1,7 @@
 # Texture suppression: three-arm A/B, 2026-09-03
 
+**Date:** 2026-09-03 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 Measurement for `preprocess::texture_variants` (see
 [`../research/document-pipeline-stage-taxonomy.md`](../research/document-pipeline-stage-taxonomy.md)).
 

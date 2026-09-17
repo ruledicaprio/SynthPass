@@ -58,6 +58,13 @@ jobs:
       - name: Documentation links resolve
         run: bash scripts/check-doc-links.sh
 
+      # knowledge/benchmarks/FINDINGS.md's generated index (the dated report files,
+      # its own Weak-spot findings log and WEB_OCR_BASELINE.md's dated sections)
+      # must match what tools/index_findings.py --write would produce -- a finding
+      # added without regenerating the index is invisible to it.
+      - name: Findings index is current
+        run: python tools/index_findings.py --check
+
       # README.md's one headline accuracy figure must match the CI-written
       # baseline. The README spent the v1.4.0 cycle quoting ~42-46% against a
       # measured 52.0%, and naming the wrong dominant miss — a reader was given
