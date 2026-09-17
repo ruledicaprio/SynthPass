@@ -2941,6 +2941,7 @@ dependencies = [
  "plotters",
  "serde",
  "serde_json",
+ "sha2",
  "synthpass-core",
  "synthpass-die",
  "synthpass-gen",

@@ -80,6 +80,13 @@ self="scripts/check-doc-links.sh"
 #   tools/gh_helpers.py
 #     A hypothetical split named in tools/rebless.py's design comment ("if a
 #     tools/gh_helpers.py split was needed"), not a citation.
+#
+#   knowledge/benchmarks/real-specimen-outcomes.jsonl
+#     The outcome ledger `provider-bench --write-baseline` writes next to the
+#     real-specimen baseline and `tools/rebless.py` installs alongside it —
+#     CI-generated, like mrz_wasm.js above, and not committed until the first
+#     re-bless whose baseline carries `outcomes_sha256`. Cited (before it
+#     exists) in scripts/check-headline-numbers.sh and tools/rebless.py.
 allow_missing=(
   "docs/"
   "knowledge/architecture/vision-provider-interface.md"
@@ -92,6 +99,7 @@ allow_missing=(
   "crates/synthpass-llm/src/backend.rs"
   "crates/mrz-wasm/pkg/mrz_wasm.js"
   "tools/gh_helpers.py"
+  "knowledge/benchmarks/real-specimen-outcomes.jsonl"
 )
 
 is_allowed() {

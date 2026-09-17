@@ -25,6 +25,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | **Tier-1 hit rate, real specimens** | **140 / 153 = 91.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-17) |
 | Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
 | Strict name hit rate, real specimens | not yet measured in CI — the row fills at the first re-bless whose baseline carries `strict_names` (ADR-0013) | `real-specimen-mrz-baseline.json` |
+| False accepts (a checksum-valid MRZ returned for a document that carries none) | not yet in the baseline — the row fills at the first re-bless that records `refusal_population` | `real-specimen-mrz-baseline.json` |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
@@ -414,6 +415,20 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 # then: download the `real-specimen-mrz-baseline` artifact, commit the file
 ```
 
+**The outcome ledger.** `real-specimen-outcomes.jsonl`, written alongside the baseline in the
+same directory, holds one JSON row per document (`asset_id`, `name`, `outcome`, the full
+`miss_reason`, `mrz_format`, `mrz_found`/`mrz_checksums_valid`, `names_exact`/`name_error`,
+`ocr_ms`, and the native-retry fields) — the per-document evidence the aggregate counts above
+are built from. It exists because the `real-specimen-gate-report` CI artifact is uploaded with
+no `retention-days`, so a dated finding derived from `--verbose` output or the JSONL report
+becomes unverifiable once GitHub's default retention window passes; the ledger is committed, so
+it does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
+`--assert-baseline` fails the gate if the committed ledger no longer hashes to that value —
+an edited-by-hand or substituted ledger is caught the same way a hand-edited baseline count
+would be. When a committed ledger is present, an assert run also prints an informational
+(never gate-failing) per-document diff against the committed one, so a reviewer can see exactly
+which documents' outcomes moved without downloading and diffing two CI artifacts by hand.
+
 `baseline.samples_data_sha` is the authoritative corpus pin. Before the gate or
 real-specimen chart tracks materialize images, CI resolves that exact commit,
 runs `tools/audit_benchmark_identity.py --check`, and refuses to fall back to a
@@ -457,7 +472,9 @@ number honest.
 
 **One command (`tools/rebless.py`).** Every step above, plus the parts that used
 to be done by hand for every cohort PR — classifying the diff, installing the new
-baseline, rewriting README.md's gap sentence and this section's live block, and
+baseline (and the outcome ledger next to it, when the downloaded artifact carries
+one), rewriting README.md's gap sentence and this section's live block (including
+the False accepts row once a baseline records `refusal_population`), and
 appending a templated `## Weak-spot findings` entry to
 [`FINDINGS.md`](FINDINGS.md) with its generated index regenerated in the same
 step — is now

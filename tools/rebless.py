@@ -13,33 +13,35 @@ hand, in order; this tool automates the mechanical parts and stops for a human
 1. Dispatch `real-specimen-gate.yml` on the cohort branch with
    `mode=write-baseline` and wait for it (35-50 minutes in CI).
 2. Download the `real-specimen-mrz-baseline` and `real-specimen-gate-report`
-   artifacts.
+   artifacts -- the former carries the outcome ledger
+   (`real-specimen-outcomes.jsonl`) alongside the baseline JSON, on any CI run
+   after that feature shipped.
 3. Diff the new baseline against the one already committed on the branch, key
    by key, and classify the result:
    - **identical** -- only CI provenance (`measured_on_ci_sha`,
-     `samples_data_sha`, `measured_date`) moved;
+     `samples_data_sha`, `measured_date`, `outcomes_sha256`) moved;
    - **non-scored delta** -- an off-denominator bucket moved (`documents`,
-     `no_mrz_expected`, `redacted_mrz`, `checksum_failed_specimen`) while
-     `scored`, `tier1_hits` and every scored miss bucket
-     (`checksum_failed`, `no_mrz_found`, `ocr_error`,
+     `no_mrz_expected`, `redacted_mrz`, `checksum_failed_specimen`,
+     `refusal_population`) while `scored`, `tier1_hits` and every scored miss
+     bucket (`checksum_failed`, `no_mrz_found`, `ocr_error`,
      `document_number_mismatch`, `false_positive_mrz`) held still;
    - **scored delta** -- anything scored moved, or an unrecognized field
      moved (never guessed at: an unknown field is treated as a scored delta
      on purpose, the conservative direction).
-4. Install the new baseline. For an "identical" or "non-scored delta"
-   result, mechanically rewrite the numbers this loop has hand-edited every
-   time so far: `README.md`'s gap sentence and corpus-wide rate,
-   `knowledge/benchmarks/README.md`'s live block (both rates, the outcomes
-   heading's document count, the six outcome-table bucket counts, and the
-   measured-date Source cell), and a templated dated entry appended under
-   `knowledge/benchmarks/FINDINGS.md`'s `## Weak-spot findings` (moved there
-   from `knowledge/benchmarks/README.md` -- one findings home, one index).
-   `FINDINGS.md`'s generated index is regenerated in the same step, via
-   `tools/index_findings.py::write_index`. Then re-runs
-   `scripts/check-headline-numbers.sh` to confirm the rewrite actually
-   closed the gap. `knowledge/ROADMAP.md` states only the scored rate, which
-   by definition cannot move in either of these two classes, so it is never
-   touched here.
+4. Install the new baseline and outcome ledger. For an "identical" or
+   "non-scored delta" result, mechanically rewrite the numbers this loop has
+   hand-edited every time so far: `README.md`'s gap sentence and corpus-wide
+   rate, `knowledge/benchmarks/README.md`'s live block (both rates, the
+   outcomes heading's document count, the six outcome-table bucket counts,
+   the False accepts row, and the measured-date Source cell), and a
+   templated dated entry appended under `knowledge/benchmarks/FINDINGS.md`'s
+   `## Weak-spot findings` (moved there from `knowledge/benchmarks/README.md`
+   -- one findings home, one index). `FINDINGS.md`'s generated index is
+   regenerated in the same step, via `tools/index_findings.py::write_index`.
+   Then re-runs `scripts/check-headline-numbers.sh` to confirm the rewrite
+   actually closed the gap. `knowledge/ROADMAP.md` states only the scored
+   rate, which by definition cannot move in either of these two classes, so
+   it is never touched here.
 5. For a **scored delta**, this tool stops right after installing the new
    baseline and printing the diff table. It never writes prose for a result
    that moved the numbers accuracy work is scored on -- that entry is
@@ -127,6 +129,12 @@ WORKFLOW = "real-specimen-gate.yml"
 EXPECTED_RUNTIME = "35-50 minutes (measured 39m29s once; see real-specimen-gate.yml)"
 
 BASELINE_REL_PATH = "knowledge/benchmarks/real-specimen-mrz-baseline.json"
+# Always installed next to BASELINE_REL_PATH -- the two files are a pair (the
+# baseline's `outcomes_sha256` only means something next to the ledger it was
+# computed from; see `crates/synthpass-bench/src/bin/provider-bench.rs`'s
+# `outcomes_ledger_path`). Absent from a CI run predating this field: an older
+# `real-specimen-mrz-baseline` artifact carries the baseline alone.
+LEDGER_REL_PATH = "knowledge/benchmarks/real-specimen-outcomes.jsonl"
 README_REL_PATH = "README.md"
 BENCH_README_REL_PATH = "knowledge/benchmarks/README.md"
 # The dated `## Weak-spot findings` log lives here, not in BENCH_README_REL_PATH
@@ -141,8 +149,23 @@ FINDINGS_REL_PATH = "knowledge/benchmarks/FINDINGS.md"
 # either class this tool ever edits docs for (identical, non-scored delta) --
 # only a scored delta moves it, and a scored delta stops before any doc edit.
 
-PROVENANCE_KEYS = ("measured_on_ci_sha", "samples_data_sha", "measured_date")
-NON_SCORED_KEYS = ("documents", "no_mrz_expected", "redacted_mrz", "checksum_failed_specimen")
+PROVENANCE_KEYS = ("measured_on_ci_sha", "samples_data_sha", "measured_date", "outcomes_sha256")
+# `outcomes_sha256` joins PROVENANCE_KEYS, not NON_SCORED_KEYS: the ledger's
+# per-document `ocr_ms` is wall-clock, so the hash changes on almost every CI
+# run -- including a rerun that measured the exact same corpus and counts --
+# the same way `measured_on_ci_sha` always does. Classifying it any other way
+# would make "identical" impossible to ever observe again.
+NON_SCORED_KEYS = (
+    "documents",
+    "no_mrz_expected",
+    "redacted_mrz",
+    "checksum_failed_specimen",
+    "refusal_population",
+)
+# The two NON_SCORED_KEYS members that are headline-table facts, not
+# outcome-table bucket counts -- `rewrite_benchmarks_readme_live_block`'s
+# per-bucket loop below must skip both (see that function).
+NON_SCORED_HEADLINE_KEYS = ("documents", "refusal_population")
 # ADR-0013 strict-name counts -- report-only, never a scored delta. A move here
 # means the strict-name measurement changed, not that Tier-1 accuracy did; see
 # `StrictNamesBaseline` in provider-bench.rs, this file's own mirror of that
@@ -397,16 +420,61 @@ def rewrite_benchmarks_readme_strict_name_row(text: str, old_flat: dict, new_fla
     return _replace_or_raise(text, old_row, new_row, f"{BENCH_README_REL_PATH} strict name hit rate row")
 
 
+# The exact placeholder cells `knowledge/benchmarks/README.md`'s "Current
+# headline numbers" table ships with before any baseline has ever carried
+# `refusal_population` -- see that file's own row.
+FALSE_ACCEPTS_PLACEHOLDER_VALUE = (
+    "not yet in the baseline — the row fills at the first re-bless that records `refusal_population`"
+)
+FALSE_ACCEPTS_PLACEHOLDER_SOURCE = "`real-specimen-mrz-baseline.json`"
+
+
+def _format_false_accepts_row_cells(flat: dict) -> tuple[str, str]:
+    """The False accepts row's value/source cells for a flattened baseline
+    that carries `refusal_population`. `false_positive_mrz` always defaults
+    to `0` via `ALL_MISS_KIND_KEYS` (see `flatten_baseline`), so this never
+    KeyErrors on a baseline that has simply never seen one."""
+    false_positives = int(flat.get("false_positive_mrz", 0))
+    refusal_population = int(flat["refusal_population"])
+    value = f"**{false_positives} / {refusal_population}**"
+    source = f"same baseline (CI, {flat.get('measured_date')})"
+    return value, source
+
+
+def rewrite_benchmarks_readme_false_accepts_row(text: str, old_flat: dict, new_flat: dict) -> str:
+    """`knowledge/benchmarks/README.md`'s "Current headline numbers" False
+    accepts row: rewritten from its "not yet in the baseline" placeholder (or
+    a previous re-bless's own figure) to `false_positive_mrz / refusal_population`
+    from the freshly installed baseline.
+
+    A no-op, returning `text` unchanged, when the baseline just installed does
+    not carry `refusal_population` at all -- there is nothing measured yet to
+    rewrite the row to (mirrors `rewrite_benchmarks_readme_strict_name_row`'s
+    own no-op rule for `strict_names`)."""
+    if "refusal_population" not in new_flat:
+        return text
+    new_value, new_source = _format_false_accepts_row_cells(new_flat)
+    if "refusal_population" in old_flat:
+        old_value, old_source = _format_false_accepts_row_cells(old_flat)
+    else:
+        old_value, old_source = FALSE_ACCEPTS_PLACEHOLDER_VALUE, FALSE_ACCEPTS_PLACEHOLDER_SOURCE
+    old_row = f"| False accepts (a checksum-valid MRZ returned for a document that carries none) | {old_value} | {old_source} |"
+    new_row = f"| False accepts (a checksum-valid MRZ returned for a document that carries none) | {new_value} | {new_source} |"
+    return _replace_or_raise(text, old_row, new_row, f"{BENCH_README_REL_PATH} false accepts row")
+
+
 def rewrite_benchmarks_readme_live_block(text: str, hits: int, old_flat: dict, new_flat: dict) -> str:
     """`knowledge/benchmarks/README.md`'s "Current headline numbers" live
     block: the corpus-wide rate row, the outcomes heading's document count,
     every outcome-table bucket count that moved, the scored-rate row's
     Source-cell measured date, and (via
-    `rewrite_benchmarks_readme_strict_name_row`) the Strict name hit rate row
-    when the newly installed baseline carries `strict_names`. The scored-rate
-    row's own numbers (`hits / scored = rate%`) are never touched here --
-    `scored` and `hits` cannot move in a non-scored delta, the only class
-    that reaches this function."""
+    `rewrite_benchmarks_readme_strict_name_row` /
+    `rewrite_benchmarks_readme_false_accepts_row`) the Strict name hit rate
+    and False accepts rows when the newly installed baseline carries
+    `strict_names` / `refusal_population` respectively. The scored-rate row's
+    own numbers (`hits / scored = rate%`) are never touched here -- `scored`
+    and `hits` cannot move in a non-scored delta, the only class that reaches
+    this function."""
     old_documents, new_documents = int(old_flat["documents"]), int(new_flat["documents"])
     old_scored = int(old_flat["scored"])
 
@@ -419,7 +487,7 @@ def rewrite_benchmarks_readme_live_block(text: str, hits: int, old_flat: dict, n
     text = _replace_or_raise(text, old_heading, new_heading, f"{BENCH_README_REL_PATH} outcomes heading")
 
     for key in NON_SCORED_KEYS:
-        if key == "documents":
+        if key in NON_SCORED_HEADLINE_KEYS:
             continue
         old_v, new_v = int(old_flat.get(key, 0)), int(new_flat.get(key, 0))
         if old_v == new_v:
@@ -440,6 +508,7 @@ def rewrite_benchmarks_readme_live_block(text: str, hits: int, old_flat: dict, n
     text = date_pattern.sub(rf"\g<1>{new_flat.get('measured_date')}\g<2>", text, count=1)
 
     text = rewrite_benchmarks_readme_strict_name_row(text, old_flat, new_flat)
+    text = rewrite_benchmarks_readme_false_accepts_row(text, old_flat, new_flat)
 
     return text
 
@@ -609,12 +678,47 @@ def dispatch_and_wait(repo_root: Path, cohort_branch: str, mode: str, dry_run: b
     return run_id
 
 
-def download_baseline_artifacts(repo_root: Path, run_id: str) -> tuple[Path, Path]:
+def download_baseline_artifacts(repo_root: Path, run_id: str) -> tuple[Path, Path, Path]:
+    """Downloads the `real-specimen-mrz-baseline` and `real-specimen-gate-report`
+    artifacts for `run_id` and returns `(baseline_path, ledger_path, report_path)`.
+    `ledger_path` may not exist on disk -- the artifact carries it only from a
+    CI run after this feature shipped; `ledger_path.is_file()` is how a caller
+    tells the two cases apart (see `install_baseline_and_ledger`)."""
     tmpdir = Path(tempfile.mkdtemp(prefix="rebless-"))
     ac.run_cmd(["gh", "run", "download", run_id, "-D", str(tmpdir)], cwd=repo_root)
-    baseline_path = tmpdir / "real-specimen-mrz-baseline" / "real-specimen-mrz-baseline.json"
+    artifact_dir = tmpdir / "real-specimen-mrz-baseline"
+    baseline_path = artifact_dir / "real-specimen-mrz-baseline.json"
+    ledger_path = artifact_dir / "real-specimen-outcomes.jsonl"
     report_path = tmpdir / "real-specimen-gate-report" / "real-specimen-gate-report.json"
-    return baseline_path, report_path
+    return baseline_path, ledger_path, report_path
+
+
+def install_baseline_and_ledger(new_baseline: dict, ledger_artifact: Path, worktree: Path) -> set[str]:
+    """Writes the freshly downloaded baseline (already-parsed JSON) to
+    `worktree / BASELINE_REL_PATH`, and -- when `ledger_artifact` exists --
+    copies it to `worktree / LEDGER_REL_PATH` alongside it. Returns the set of
+    repo-relative paths written, for the caller's `git add`.
+
+    Split out from `main()` so the install step is unit-testable without a
+    network call or a real `gh run download`: `ledger_artifact` is any path,
+    present or not, and `worktree` is any directory."""
+    baseline_path = worktree / BASELINE_REL_PATH
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    baseline_path.write_text(json.dumps(new_baseline, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    touched = {BASELINE_REL_PATH}
+
+    if ledger_artifact.is_file():
+        ledger_path = worktree / LEDGER_REL_PATH
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        ledger_path.write_bytes(ledger_artifact.read_bytes())
+        touched.add(LEDGER_REL_PATH)
+    else:
+        print(
+            f"no outcome ledger in the downloaded artifact ({ledger_artifact.name} not found) -- "
+            "installing the baseline alone (a pre-ledger CI run)"
+        )
+
+    return touched
 
 
 # ==========================================================================
@@ -665,7 +769,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"resolved origin/samples-data for this cohort: {data_ref}")
         run_id = dispatch_and_wait(repo_root, args.cohort_branch, "write-baseline", dry_run=False, data_ref=data_ref)
 
-    baseline_artifact, _report_artifact = download_baseline_artifacts(repo_root, run_id)
+    baseline_artifact, ledger_artifact, _report_artifact = download_baseline_artifacts(repo_root, run_id)
     new_baseline = json.loads(baseline_artifact.read_text(encoding="utf-8"))
 
     baseline_path = worktree / BASELINE_REL_PATH
@@ -677,12 +781,12 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nbaseline diff classification: {cls}")
     print(format_diff_table(changed, new_flat))
 
-    # Install the new baseline unconditionally: CI's freshly measured numbers
-    # are always the new source of truth, whatever class the diff falls into
-    # -- an analyst finishing a scored-delta entry still needs this file
-    # updated to write prose against.
-    baseline_path.write_text(json.dumps(new_baseline, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    touched = {BASELINE_REL_PATH}
+    # Install the new baseline (and its outcome ledger, when the artifact
+    # carries one) unconditionally: CI's freshly measured numbers are always
+    # the new source of truth, whatever class the diff falls into -- an
+    # analyst finishing a scored-delta entry still needs these files updated
+    # to write prose against.
+    touched = install_baseline_and_ledger(new_baseline, ledger_artifact, worktree)
 
     if cls == CLASS_SCORED:
         print("\nSCORED delta: tier1_hits or a scored miss bucket moved (or an unrecognized field did).")
