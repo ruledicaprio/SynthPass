@@ -271,8 +271,9 @@ the user decided to freeze.
   - `id_cards/Italy_ID_Specimen_2022_back_mrz.jpg`
   - `passports/Moldova_Passport_Specimen_PA_MDA_2014_mrz.jpeg`
   - `id_cards/San_Marino_ID_Specimen_2017_back_mrz.jpg` — a blank filler template with nothing
-    printed in its zone; it closes by attribution (reclassified `checksum_failed_specimen` in the
-    data-only PR that follows this amendment).
+    printed in its zone; it closes by attribution — relabelled `_no_mrz` on `samples-data` and
+    scored as `no_mrz_expected`, the class the c01 entry of `knowledge/benchmarks/README.md`
+    modelled, in the data-only PR that follows this amendment.
 
   Recognition (`checksum_failed`, 10):
 
