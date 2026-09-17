@@ -1629,7 +1629,7 @@ dependencies = [
 
 [[package]]
 name = "mrz-wasm"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "image",
  "mrz",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-bench"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "async-trait",
  "image",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-cli"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-core"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -2984,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-die"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "async-trait",
  "mrz",
@@ -2995,7 +2995,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-export"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "image",
  "serde",
@@ -3007,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-gen"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "ab_glyph",
  "image",
@@ -3018,14 +3018,14 @@ dependencies = [
 
 [[package]]
 name = "synthpass-imageprep"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "image",
 ]
 
 [[package]]
 name = "synthpass-license"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "base64 0.23.1",
  "ed25519-dalek",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-llm"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "encoding_rs",
  "llama-cpp-2",
@@ -3048,7 +3048,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-ocr"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "image",
  "mrz",
@@ -3063,7 +3063,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-pipeline"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "async-trait",
  "image",
@@ -3081,7 +3081,7 @@ dependencies = [
 
 [[package]]
 name = "synthpass-serve"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "axum",
  "axum-server",
