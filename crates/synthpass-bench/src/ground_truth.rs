@@ -882,7 +882,7 @@ fn review(o: &Options) -> Result<()> {
                     crop = band_crop(&image, &page)
                         .map(|im| embedded(&im, true))
                         .transpose()?;
-                    if crop.is_none() {
+                    if crop.is_none() && !selected.already_reviewed {
                         note = "No MRZ band detected; showing full image.".into();
                     }
                     if fields.is_empty() {
@@ -896,7 +896,10 @@ fn review(o: &Options) -> Result<()> {
                         fields.insert("mrz_line".into(), Some(observed.clone()));
                     }
                 }
-                Err(_) => note = "OCR failed; showing full image.".into(),
+                Err(_) if !selected.already_reviewed => {
+                    note = "OCR failed; showing full image.".into()
+                }
+                Err(_) => {}
             }
         }
         let class = format!(
