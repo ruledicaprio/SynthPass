@@ -41,6 +41,59 @@ To promote a candidate, check its unproven fields against the image, then
 `.md` with it). Nothing in the generator ever writes a `.json` into the reviewed
 directory.
 
+## Validated ground-truth review
+
+The Rust `ground-truth` tool shares the benchmark's MRZ parser and fixture schema. Batch A is
+ADR-0011's 13 remaining frozen misses; Batch B is every JSON candidate in `ocr_fixtures/derived/`.
+The default `all` combines them, with one card per stem. Images can live in another checkout:
+
+```powershell
+cargo run --release -p synthpass-bench --bin ground-truth -- review --batch all --samples-root D:/Projects/SynthPass/samples --out artifacts/ground-truth-review.html
+```
+
+Open the HTML locally, compare each field and each printed line with the image, then select
+`verified`, `non_conforming` (faithfully transcribed, but printed check digits fail), or `skip`.
+Names must use the MRZ form, with filler read as spaces, rather than the visual-zone spelling.
+Every card starts at `skip`; **OCR read — unverified** and candidate fields are suggestions.
+Batch A pre-fills only an exact structural OCR parse, otherwise its fields stay empty alongside
+the OCR lines. `--no-ocr` leaves Batch A empty and omits crops. Missing local OCR models also
+fall back to full images; model lookup checks `SYNTHPASS_OCR_MODEL_DIR`, the current directory,
+and the parent of `--samples-root`. Nothing downloads models.
+
+Click **Export** and save `ground-truth-verified.json` under `artifacts/`, then validate:
+
+```powershell
+cargo run --release -p synthpass-bench --bin ground-truth -- apply artifacts/ground-truth-verified.json
+cargo run --release -p synthpass-bench --bin ground-truth -- apply artifacts/ground-truth-verified.json --write
+cargo run --release -p synthpass-ocr --example corpus_manifest
+cargo test -p synthpass-bench --test ocr_fixtures
+```
+
+`apply` defaults to dry run and exits nonzero if any entry is rejected. With `--write`, accepted
+entries are promoted individually; rejected entries remain untouched. Every verified field must
+match the exact printed MRZ parse; repairs, bad widths and name mismatches are rejected without
+correction. A non-conforming zone must fail validation, and structurally parseable names must
+still match its printed name field. If structural parsing fails, the tool reports that the names
+remain a human assertion. It reports the remaining classification requirements: matching fixture
+stem, `mrz_checksums_valid: false`, manifest `mrz.present: true` and `mrz.redacted: false`, followed
+by manifest regeneration, attribution review and a separate gate re-bless.
+
+New JSON uses the reviewed alphabetical key order and final newline. Existing reviewed content
+must be identical to be accepted. The `.md` preserves existing OCR input from the reviewed or
+candidate sidecar; a new Batch A sidecar contains only the transcribed MRZ, without invented VIZ
+text. Successful promotion removes the candidate pair from `derived/`.
+
+`--fixtures-dir` defaults to `samples/ocr_fixtures`. Review uses the manifest beside this
+fixture directory when present, otherwise the image root's manifest. `corpus_manifest` reads its
+own checkout's `samples/` and fixtures: when images and labels are in different worktrees, bring
+the reviewed fixture changes into the image checkout before running that command there. Apply
+never edits the manifest. For a write rehearsal, copy fixtures into a temporary directory and
+pass that directory with `--fixtures-dir`.
+
+Specimen images are PII-adjacent. Review HTML is allowed only under this worktree's gitignored
+`artifacts/`, including when `--out` is supplied. Keep exports there too; neither belongs in Git.
+The page embeds its images, styles and JavaScript, and makes no network requests.
+
 ## Layout
 
 ```
