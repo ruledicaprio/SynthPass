@@ -60,7 +60,8 @@ the OCR lines. MRZ crops preserve their original pixels as lossless color PNG an
 for display. Per-card zoom, invert, and high-contrast toggles reuse the same color PNG.
 High contrast applies `grayscale(1) contrast(1.6)` without changing the exported fields.
 Full images use JPEG quality 85 with a 1,000 px maximum long edge, without upscaling. `--no-ocr` leaves Batch A
-empty and omits crops. Missing local OCR models also
+empty and omits crops. If the page exceeds 15 MB, only the context images shrink further
+(down to a 320 px long edge); native crops are never reduced. Missing local OCR models also
 fall back to full images; model lookup checks `SYNTHPASS_OCR_MODEL_DIR`, the current directory,
 and the parent of `--samples-root`. Nothing downloads models.
 

@@ -869,7 +869,35 @@ fn review(o: &Options) -> Result<()> {
             fields,
         });
     }
-    let html = render(&cards);
+    let mut html = render(&cards);
+    let mut context_edge = 1000u32;
+    // The crop is review evidence: only context images yield to the page budget.
+    while html.len() > 15_000_000 && context_edge > 320 {
+        context_edge = (context_edge * 4 / 5).max(320);
+        for card in &mut cards {
+            let image = synthpass_ocr::decode_image(&o.samples.join(&card.asset))
+                .map_err(|_| format!("cannot decode specimen: {}", card.asset))?;
+            let context = if image.width().max(image.height()) > context_edge {
+                image.resize(
+                    context_edge,
+                    context_edge,
+                    image::imageops::FilterType::Lanczos3,
+                )
+            } else {
+                image
+            };
+            card.image = embedded(&context, false)?;
+        }
+        html = render(&cards);
+    }
+    if context_edge < 1000 {
+        println!(
+            "Context images capped at {context_edge}px to reserve space for native PNG crops."
+        );
+    }
+    if html.len() > 15_000_000 {
+        println!("Native crops keep this page above 15 MB; their pixels have been preserved.");
+    }
     fs::write(&out, &html).map_err(|e| format!("write review: {e}"))?;
     println!(
         "{} cards; {} bytes; {:.2}s; {} (gitignored)",
