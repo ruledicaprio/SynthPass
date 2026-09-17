@@ -631,23 +631,12 @@ pub fn load_specimen(
     expectations: &MrzExpectations,
 ) -> Option<RealSpecimenDoc> {
     let name = image_path.file_stem()?.to_str()?.to_string();
+    let asset_id = specimen_asset_id(samples_root, image_path)?;
     // Content-sniffing, not extension-trusting: `image::open` picks its decoder
     // from the file name, so a JPEG called `.png` returns `None` here and the
     // specimen vanishes from the benchmark without a word. Three corpus files
     // were in exactly that state.
     let image = synthpass_ocr::decode_image(image_path).ok()?;
-    let asset_id = image_path
-        .strip_prefix(samples_root)
-        .ok()
-        .and_then(|path| path.to_str())
-        .map(|path| path.replace(std::path::MAIN_SEPARATOR, "/"))
-        // This fallback cannot join a manifest/native report; callers rely on
-        // the relative identity above and fail closed if the roots differ.
-        .unwrap_or_else(|| {
-            image_path
-                .to_string_lossy()
-                .replace(std::path::MAIN_SEPARATOR, "/")
-        });
     let labels = load_ground_truth(samples_root, &name);
     let class = classify_specimen(image_path, labels.as_ref());
     let mrz_expected = expectations.get(&name);
@@ -659,6 +648,21 @@ pub fn load_specimen(
         class,
         mrz_expected,
     })
+}
+
+/// Lexical, revision-local identity; reject paths outside the root or containing
+/// parent traversal. This does not resolve filesystem symlinks.
+fn specimen_asset_id(samples_root: &Path, image_path: &Path) -> Option<String> {
+    let relative = image_path.strip_prefix(samples_root).ok()?;
+    let parts: Option<Vec<_>> = relative
+        .components()
+        .map(|component| match component {
+            std::path::Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect();
+    let parts = parts?;
+    (!parts.is_empty()).then(|| parts.join("/"))
 }
 
 /// The directory under `samples/` that holds the local-only track: specimens
@@ -1395,6 +1399,27 @@ fn fastrand_seed() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn specimen_asset_identity_rejects_invalid_paths() {
+        let root = std::path::Path::new("samples");
+        for invalid in [
+            "elsewhere/image.png",
+            "samples/../image.png",
+            "samples/passports/../../image.png",
+            "samples",
+        ] {
+            assert_eq!(
+                super::specimen_asset_id(root, std::path::Path::new(invalid)),
+                None,
+                "accepted {invalid}"
+            );
+        }
+        assert_eq!(
+            super::specimen_asset_id(root, &root.join("passports").join("image.png")),
+            Some("passports/image.png".to_string())
+        );
+    }
+
     use super::*;
     use synthpass_gen::{generate_from_seed, GeneratorConfig};
 
