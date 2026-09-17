@@ -217,16 +217,18 @@ buyer should trust first.
 - **Drift found and fixed in the same change:** [`technical_debt.md`](technical_debt.md)'s High
   entry on `unsafe` in `synthpass-ocr` was false (every block is test-only environment mutation)
   and is retired to Low with the record kept; `synthpass-gen/src/fonts.rs` documented its font
-  feature as off by default when it is on. Still open: [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)
-  sells custom-trained models while [`VISION.md`](VISION.md) §2 lists "does not train models"
-  among the lines that do not move — one of them loses a line; and three ADRs (0005, 0009, 0010)
-  have sat at *Proposed* since August.
+  feature as off by default when it is on. Two more were open when this was written and are now
+  closed: [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) sold custom-trained models while
+  [`VISION.md`](VISION.md) §2 lists "does not train models" among the lines that do not move —
+  the BRANDING row was dropped and VISION stands (#322); and three ADRs (0005, 0009, 0010) that
+  had sat at *Proposed* since August are resolved by dated amendments (#323).
 
 **Sequencing this implies** — proposed, each item landing through its own tracked change:
 
 1. **Freeze M6's Definition of Done against the v1.5.0 corpus snapshot** so the milestone can
    close: an [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) amendment, not an
-   edit to the table above.
+   edit to the table above. **Done** — the amendment of 2026-09-17 (#320) names the 14 misses;
+   the specimen loop is paused per `CONTRIBUTING.md` in the same change.
 2. **Measure `strict_hit_rate` on real specimens in CI**, then build the grid repair against that
    baseline — same-binary A/B, per the
    [maintenance contract](benchmarks/README.md#benchmark-maintenance-contract).
