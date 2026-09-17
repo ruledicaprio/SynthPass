@@ -1,5 +1,7 @@
 # Tier-2 date misses were mostly normalizer gaps, 2026-09-04
 
+**Date:** 2026-09-04 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **14 of the 70 date mismatches in the parity corpus were the model reading the
 printed date correctly while `synthpass-core::normalize` discarded the reading.**
 Fixing the two parsing gaps moves overall Tier-2 field accuracy from **48.1% to

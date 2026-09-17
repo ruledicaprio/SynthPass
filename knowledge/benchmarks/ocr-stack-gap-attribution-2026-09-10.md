@@ -1,5 +1,7 @@
 # ADR-0008 chunk 1 — the OCR-stack gap, attributed
 
+**Date:** 2026-09-10 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **2026-09-10.** The close-out of [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s first
 chunk: a controlled measurement of why the browser's tesseract.js path out-reads the native
 `ocrs`/`rten` path on the same documents. This document answers

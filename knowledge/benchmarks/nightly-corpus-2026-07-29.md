@@ -1,5 +1,7 @@
 # Nightly corpus, first read — 2026-07-29
 
+**Date:** 2026-07-29 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 First analysis of the `bench-data` corpus since collection started on 2026-07-21.
 Recorded because the dataset had been accumulating for eight days with nothing
 ever looking at it.

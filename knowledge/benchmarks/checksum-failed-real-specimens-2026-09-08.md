@@ -1,9 +1,11 @@
 # Real-specimen `checksum_failed` misses, categorised — 2026-09-08
 
+**Date:** 2026-09-08 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md)
+
 **Superseded by:** [`denominator-correction-2026-09-09.md`](denominator-correction-2026-09-09.md).
 
 `checksum_failed` is the largest real-specimen Tier-1 miss category, and the
-[2026-08-16 weak-spot finding](README.md#2026-08-16--first-genuine-real-specimen-tier-1-numbers)
+[2026-08-16 weak-spot finding](FINDINGS.md#2026-08-16--first-genuine-real-specimen-tier-1-numbers)
 framed it as the clean signal: *"OCR found MRZ-shaped text and got at least one
 character wrong inside it."* This note pulls the raw OCR text for every one of
 those misses — the follow-up that finding asked for — and the framing does not

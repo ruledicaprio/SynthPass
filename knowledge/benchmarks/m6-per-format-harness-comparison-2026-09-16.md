@@ -1,5 +1,7 @@
 # `provider-bench` and `synthpass-bench` agree on every synthetic document, all five formats
 
+**Date:** 2026-09-16 · **MAIN:** `9c8f03d` · **DATA:** not stated · **Evidence:** Observed · **Status:** current
+
 **2026-09-16.** M6 groundwork. The published per-format synthetic rates are to change source from
 `synthpass-bench` (which calls `mrz::find_and_parse` on the OCR text directly) to
 `provider-bench --mrz-only --document-type <fmt>` (which reads through `ProviderCatalog` +

@@ -32,7 +32,10 @@ hand, in order; this tool automates the mechanical parts and stops for a human
    `knowledge/benchmarks/README.md`'s live block (both rates, the outcomes
    heading's document count, the six outcome-table bucket counts, and the
    measured-date Source cell), and a templated dated entry appended under
-   `knowledge/benchmarks/README.md`'s `## Weak-spot findings`. Then re-runs
+   `knowledge/benchmarks/FINDINGS.md`'s `## Weak-spot findings` (moved there
+   from `knowledge/benchmarks/README.md` -- one findings home, one index).
+   `FINDINGS.md`'s generated index is regenerated in the same step, via
+   `tools/index_findings.py::write_index`. Then re-runs
    `scripts/check-headline-numbers.sh` to confirm the rewrite actually
    closed the gap. `knowledge/ROADMAP.md` states only the scored rate, which
    by definition cannot move in either of these two classes, so it is never
@@ -111,6 +114,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import apply_cohort as ac  # noqa: E402 -- see the module docstring for why a plain import is safe
+import index_findings as ixf  # noqa: E402 -- regenerates FINDINGS.md's generated index after the append below
 
 # --------------------------------------------------------------------------
 # Baseline schema constants, mirrored from
@@ -125,6 +129,12 @@ EXPECTED_RUNTIME = "35-50 minutes (measured 39m29s once; see real-specimen-gate.
 BASELINE_REL_PATH = "knowledge/benchmarks/real-specimen-mrz-baseline.json"
 README_REL_PATH = "README.md"
 BENCH_README_REL_PATH = "knowledge/benchmarks/README.md"
+# The dated `## Weak-spot findings` log lives here, not in BENCH_README_REL_PATH
+# any more (moved by the F1 "one findings home" change) -- BENCH_README_REL_PATH
+# still carries the live "Current headline numbers" block this module also
+# rewrites, so both constants stay in use, for different sections of different
+# files.
+FINDINGS_REL_PATH = "knowledge/benchmarks/FINDINGS.md"
 
 # knowledge/ROADMAP.md is deliberately absent here: its one live figure is the
 # scored rate (`tier1_hits`/`scored`), which by construction cannot move in
@@ -280,7 +290,7 @@ def build_rebless_result_paragraph(cls: str, changed: list[tuple[str, object, ob
 
 
 def build_weakspot_entry(cohort_branch: str, n_specimens: int, changed: list[tuple[str, object, object]], run_id: str, old_flat: dict, new_flat: dict) -> str:
-    """A dated entry in the house shape (`knowledge/benchmarks/README.md`'s
+    """A dated entry in the house shape (`knowledge/benchmarks/FINDINGS.md`'s
     `## Weak-spot findings`, e.g. the 2026-09-15 cohort c10/c12 entry): a
     heading naming the cohort and what moved, a paragraph naming the run and
     the delta table, and the sentence stating the scored rate held. Templated
@@ -676,7 +686,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if cls == CLASS_SCORED:
         print("\nSCORED delta: tier1_hits or a scored miss bucket moved (or an unrecognized field did).")
-        print("This needs prose from synthpass-analyst -- the benchmarks/README.md Weak-spot entry and")
+        print("This needs prose from synthpass-analyst -- the benchmarks/FINDINGS.md Weak-spot entry and")
         print("the README.md headline numbers -- before it can be committed. The new baseline has been")
         print(f"installed at {baseline_path} for the analyst to work from; nothing else was written.")
         return 2
@@ -691,11 +701,21 @@ def main(argv: list[str] | None = None) -> int:
 
         bench_readme_path = worktree / BENCH_README_REL_PATH
         bench_text = rewrite_benchmarks_readme_live_block(bench_readme_path.read_text(encoding="utf-8"), hits, old_flat, new_flat)
+        bench_readme_path.write_text(bench_text, encoding="utf-8")
+        touched.add(BENCH_README_REL_PATH)
+
+        # The dated entry itself goes to FINDINGS.md's `## Weak-spot findings`
+        # section, not knowledge/benchmarks/README.md (moved by the F1 "one
+        # findings home" change) -- and its generated index is regenerated in
+        # the same step, so the index is never one commit behind the log it
+        # summarizes.
         n_specimens = int(new_flat["documents"]) - int(old_flat["documents"])
         entry = build_weakspot_entry(args.cohort_branch, n_specimens, changed, run_id, old_flat, new_flat)
-        bench_readme_path.write_text(bench_text.rstrip("\n") + "\n" + entry, encoding="utf-8")
-        touched.add(BENCH_README_REL_PATH)
-        print(f"wrote mechanical doc edits: {README_REL_PATH}, {BENCH_README_REL_PATH}")
+        findings_path = worktree / FINDINGS_REL_PATH
+        findings_path.write_text(findings_path.read_text(encoding="utf-8").rstrip("\n") + "\n" + entry, encoding="utf-8")
+        ixf.write_index(worktree)
+        touched.add(FINDINGS_REL_PATH)
+        print(f"wrote mechanical doc edits: {README_REL_PATH}, {BENCH_README_REL_PATH}, {FINDINGS_REL_PATH}")
 
     bash_exe = ac.find_git_bash()
     headline_out = ac.run_bash_script(bash_exe, "scripts/check-headline-numbers.sh", worktree, dry_run=False)

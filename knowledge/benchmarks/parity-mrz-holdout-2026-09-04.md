@@ -1,5 +1,7 @@
 # Tier-2 parity under MRZ holdout, 2026-09-04
 
+**Date:** 2026-09-04 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 > **Superseded the same day — the numbers below were measured by a harness that
 > did not normalize the model's output, while both pipeline entry points do.
 > They understate the shipped product by roughly 20 percentage points.** The

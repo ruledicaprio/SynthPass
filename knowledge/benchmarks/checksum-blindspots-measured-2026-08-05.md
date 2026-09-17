@@ -1,5 +1,7 @@
 # Check-digit blind spots, measured — 2026-08-05
 
+**Date:** 2026-08-05 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 What actually gets past an ICAO 9303 check digit in practice, as opposed to what
 the closed-form law says can. `crates/mrz/src/blindspot.rs` proves the law; this
 note is the empirical distribution, and the two disagree about which substitutions

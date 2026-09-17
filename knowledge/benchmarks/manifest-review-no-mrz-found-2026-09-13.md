@@ -1,5 +1,7 @@
 # Two of the seven `no_mrz_found` documents have no ICAO zone to find
 
+**Date:** 2026-09-13 · **MAIN:** `715538a` · **DATA:** `f906d1f` · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [README.md#current-headline-numbers](README.md#current-headline-numbers)
+
 **Superseded by:** the live headline in
 [`README.md#current-headline-numbers`](README.md#current-headline-numbers).
 

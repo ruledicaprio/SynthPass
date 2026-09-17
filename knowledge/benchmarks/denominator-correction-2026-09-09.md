@@ -1,5 +1,7 @@
 # The Tier-1 denominator counted documents that could never be read
 
+**Date:** 2026-09-09 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [`denominator-bucket-a-2026-09-10.md`](denominator-bucket-a-2026-09-10.md)
+
 **Superseded by:** [`denominator-bucket-a-2026-09-10.md`](denominator-bucket-a-2026-09-10.md).
 
 **2026-09-09.** Reconnaissance for [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s

@@ -1,5 +1,7 @@
 # Browser vs native OCR, both arms measured the same day
 
+**Date:** 2026-09-09 · **MAIN:** not stated · **DATA:** `c31d048a` · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 **2026-09-09.** [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md) chunk 1, part 1: replace
 the stale "64.2% vs 59.5%" comparison with one where both numbers are current, then say what the
 gap is made of. No attribution experiment yet — that is part 2, and this narrows what it has to

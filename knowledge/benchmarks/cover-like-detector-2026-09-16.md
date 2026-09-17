@@ -1,5 +1,7 @@
 # No image in the default real-specimen walk is cover-like
 
+**Date:** 2026-09-16 · **MAIN:** `0b879ee` · **DATA:** `33001da4bbf7942d594695b3167fd47f41b0fdf0` · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [README.md#current-headline-numbers](README.md#current-headline-numbers)
+
 **Superseded by:** the live headline in
 [`README.md#current-headline-numbers`](README.md#current-headline-numbers).
 

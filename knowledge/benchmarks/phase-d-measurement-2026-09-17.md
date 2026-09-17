@@ -1,5 +1,7 @@
 # Phase D provider-gap measurement setup (2026-09-17)
 
+**Date:** 2026-09-17 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+
 Status: **Prepared; comparison measurement not run.**
 
 This branch prepares a same-population native/browser measurement for ADR-0008. The

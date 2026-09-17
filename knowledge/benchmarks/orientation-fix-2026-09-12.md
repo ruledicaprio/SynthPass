@@ -1,5 +1,7 @@
 # ADR-0008 chunk 2 — the orientation fix, measured (2026-09-12)
 
+**Date:** 2026-09-12 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md)
+
 **Superseded by:** [`manifest-review-no-mrz-found-2026-09-13.md`](manifest-review-no-mrz-found-2026-09-13.md).
 
 Chunk 2 of [ADR-0008](../decisions/ADR-0008-mrz-detection-track.md) set out to recover the
