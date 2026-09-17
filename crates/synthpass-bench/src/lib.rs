@@ -17,6 +17,7 @@ use synthpass_gen::degrade::{apply_profile, CaptureProfile};
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
+pub mod ground_truth;
 pub mod provider_bench;
 
 /// Which capture profile to generate a corpus under. Shared between
