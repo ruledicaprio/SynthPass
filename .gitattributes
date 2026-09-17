@@ -1,3 +1,8 @@
 # Shell scripts must keep LF endings even when checked out on Windows — a CRLF shebang line
 # makes them unrunnable inside the Linux builder container ("bad interpreter: /usr/bin/env\r").
 *.sh text eol=lf
+
+# The outcome ledger is pinned by sha256 inside the real-specimen baseline
+# (outcomes_sha256, checked by scripts/check-headline-numbers.sh). A CRLF checkout on
+# Windows changes the bytes and fails that check, so the ledger keeps LF everywhere.
+knowledge/benchmarks/real-specimen-outcomes.jsonl text eol=lf
