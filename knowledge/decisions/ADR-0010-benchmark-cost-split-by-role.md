@@ -1,6 +1,6 @@
 # ADR-0010 — Split the real-specimen benchmark by role, not by random sample
 
-**Status:** Proposed. Records where the benchmark's cost actually is, and why the obvious
+**Status:** Accepted (2026-09-17 — step 5 measured; see the amendment). Records where the benchmark's cost actually is, and why the obvious
 speed-up — sampling the corpus — cannot coexist with the gate's tolerance of zero.
 **Date:** 2026-09-11
 
@@ -148,3 +148,36 @@ at all — diversity is gained by ingest, not by sampling what is already there.
 **Explicitly not licensed by this decision:** no random sampling anywhere in the gate, no private
 specimens in CI or in the default walk, no change to `tolerance: 0`, and no implementation before
 the post-chunk-2 measurement in step 5.
+
+## Amendment (2026-09-17) — step 5 measured; accepted, implementation sequenced
+
+**Status moves to Accepted.** Step 5 asked for the cost to be measured after ADR-0008 chunk 2
+before anything was built. It now can be, because #315 records per-document OCR time
+(`DocumentDetail.ocr_ms`) in every gate report. Measured on CI run
+[35169452610](https://github.com/ruledicaprio/SynthPass/actions/runs/35169452610) (MAIN
+`b2a0afd`, `samples-data` `469a4ee`, 261 documents,
+`provider-bench --real-specimens --mrz-only`, Observed) — the full table and caveats are in
+[`gate-cost-by-role-2026-09-17.md`](../benchmarks/gate-cost-by-role-2026-09-17.md):
+
+| Population | documents | OCR time | share | mean per document |
+| --- | --: | --: | --: | --: |
+| Scored (hits + the two scored miss kinds) | 154 | 16.6 min | 36.7 % | 6.5 s |
+| Off-denominator (`redacted_mrz`, `no_mrz_expected`, `checksum_failed_specimen`) | 107 | 28.7 min | **63.3 %** | 16.1 s |
+
+A Tier-1 hit costs 5.2 s on average; a redacted page 19.9 s; a page with no zone 13.4 s. The
+Context's model said the off-denominator set pays the worst-case retry chain; the measurement
+agrees in direction and is smaller in magnitude — −63 % measured against the model's −74 % —
+because the scored misses pay the full chain too and stay in the per-PR gate. Cost still tracks
+failures, not document count: the decision's shape stands, and the model above is retired in
+favour of the measured table.
+
+**What is accepted:** steps 1–4 as written — a scored-only per-PR gate, the off-denominator
+refusal set on a schedule, no random sampling, private specimens never in CI.
+
+**Sequencing.** Implementation waits for the strict-name fields to land in the baseline first
+([`ADR-0013`](ADR-0013-names-are-scored-against-mrz-form-truth.md)'s publication condition),
+so the baseline's shape changes once in the quarter, not twice. Until then the per-PR gate keeps
+running the full corpus: at ~45 minutes it is tolerable while the gate is advisory, and the
+hallucination canary stays per-PR for free. The scored-only mode is `provider-bench` work with
+its own PR and fragment; the schedule for the refusal set can reuse `bench-charts.yml`'s weekly
+cadence.

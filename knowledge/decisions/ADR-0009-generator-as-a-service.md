@@ -1,6 +1,6 @@
 # ADR-0009 — Generator-as-a-service: what it would cost the non-goals
 
-**Status:** Proposed. **This ADR changes no code and commits to no product.** It prices three
+**Status:** Accepted (2026-09-17, as the pricing — see the amendment). **This ADR changes no code and commits to no product.** It prices three
 proposals against the non-goals each one touches, so the decision is taken against stated costs
 rather than enthusiasm.
 **Date:** 2026-09-11
@@ -159,3 +159,18 @@ canonical example of a decision to take in the morning instead.
 **Explicitly not licensed by this decision:** no hosted service, no template scraping, no
 licensing split, no VISION edit. Amending a non-goal requires its own accepted ADR naming the
 exact sentence that changes and the invariant that replaces it.
+
+## Amendment (2026-09-17) — accepted as the pricing
+
+**Status moves to Accepted.** What is accepted is the pricing, not a product: the three proposals
+stay priced separately, none is adopted, and option (a) — corpora generated to a customer's mix
+and delivered under contract while the public renderer stays generic — is the commercial path,
+which is what [`BRANDING.md` §5](../BRANDING.md#5-commercial-strategy) already documents. The
+user took that position on 2026-09-13 (the `mrz` and `synthpass-core` tiers stay pure
+recognition and validation; the harness around them is what is sold) and confirmed it in the
+2026-09-17 assessment, which chose a benchmark report as the quarter's external deliverable.
+
+Two things this acceptance leaves exactly as they were: #2 (country-accurate templates) remains
+a decision only the user can take, and the structural guard — *MIT + publicly distributed +
+country-accurate: pick two* — stands. Nothing under "Explicitly not licensed by this decision"
+changes.
