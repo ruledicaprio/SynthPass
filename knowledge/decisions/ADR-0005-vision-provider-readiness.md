@@ -1,6 +1,6 @@
 # ADR-0005 — Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF at all
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-17 — a recorded finding; see the amendment)
 **Date:** 2026-08-04
 
 ## Context
@@ -194,3 +194,18 @@ nothing to wait for.
   the test that keeps "zero vision implementations" true.
 - `crates/synthpass-pipeline/src/lib.rs` — `ocr_and_tier1`'s `DocumentContext` construction
   (the 5a fix) and its regression test.
+
+## Amendment (2026-09-17) — accepted as a recorded finding
+
+**Status moves to Accepted.** This ADR answered one question — *can `llama-cpp-2` drive a
+multimodal GGUF at all* — from the pinned crate's own source, and the answer (yes: the `mtmd`
+feature and its safe wrapper exist at the pinned version) has not been contradicted in the six
+weeks since. Accepting it commits to nothing: no weights, no dependency, no provider with
+`Capability::vision = true`. The Moondream spike it prepares stays unscheduled, and
+`ROADMAP.md`'s ordering — M6 closes before M8 opens — still applies to it.
+
+One fact has moved since the Decision was written and is stated here rather than edited above:
+`crates/synthpass-llm/Cargo.toml` still asks for `0.1.154`, but `Cargo.lock` resolves
+`llama-cpp-2` **0.1.156**. The inventory above was verified against 0.1.154's vendored source.
+Any spike re-verifies `src/mtmd.rs` against the resolved version first; the ADR's method — read
+the pinned crate, not the release notes — is the part that carries over unchanged.

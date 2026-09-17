@@ -1180,3 +1180,11 @@ unchanged from before the migration), `no_mrz_expected` 51 → **49**, `redacted
 (the `no_mrz_expected` → `redacted_mrz` rename from the 2026-09-16 cover-like-detector entry above,
 folded into the same re-bless), `checksum_failed`, `checksum_failed_specimen` and `no_mrz_found`
 unchanged. No code, threshold or model moved — this is corpus bookkeeping, not an accuracy result.
+
+### 2026-09-17 — where the gate's time goes, by outcome class (ADR-0010 step 5)
+
+Measured from CI run 35169452610's per-document `ocr_ms` (#315): the 107 off-denominator
+documents cost 63.3 % of the gate's OCR time, the 154 scored ones 36.7 %; a hit averages 5.2 s,
+a redacted page 19.9 s. [ADR-0010](../decisions/ADR-0010-benchmark-cost-split-by-role.md)'s
+role split is accepted on this evidence and sequenced after the strict-name baseline fields
+land. Full table and caveats: [`gate-cost-by-role-2026-09-17.md`](gate-cost-by-role-2026-09-17.md).

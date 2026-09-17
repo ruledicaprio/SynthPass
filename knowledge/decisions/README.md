@@ -35,12 +35,12 @@ the record.
 | [0002](ADR-0002-provider-model-before-layout-plugins.md) | Build the provider model (M7) ahead of M6 | Accepted |
 | [0003](ADR-0003-docs9303-source-of-truth.md) | Adopt `knowledge/docs9303/` as the ICAO spec source of truth | Accepted |
 | [0004](ADR-0004-gpu-acceleration.md) | GPU acceleration as an optional, feature-gated path | Accepted (`cuda` only) |
-| [0005](ADR-0005-vision-provider-readiness.md) | Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF | Proposed |
+| [0005](ADR-0005-vision-provider-readiness.md) | Vision-provider readiness: can `llama-cpp-2` drive a multimodal GGUF | Accepted (2026-09-17) |
 | [0006](ADR-0006-m6-accuracy-first.md) | Reframe M6 to lead with Tier-1 real-document accuracy | Accepted |
 | [0007](ADR-0007-dataset-export-format.md) | Dataset export format: adopt the DeepSeek-OCR 0–1000 convention, JSONL first | Accepted |
 | [0008](ADR-0008-mrz-detection-track.md) | MRZ detection succeeds sequence completeness as M6's accuracy track | Accepted |
-| [0009](ADR-0009-generator-as-a-service.md) | Generator-as-a-service: what it would cost the non-goals | Proposed |
-| [0010](ADR-0010-benchmark-cost-split-by-role.md) | Split the real-specimen benchmark by role, not by random sample | Proposed |
+| [0009](ADR-0009-generator-as-a-service.md) | Generator-as-a-service: what it would cost the non-goals | Accepted (2026-09-17, as the pricing) |
+| [0010](ADR-0010-benchmark-cost-split-by-role.md) | Split the real-specimen benchmark by role, not by random sample | Accepted (2026-09-17, measured) |
 | [0011](ADR-0011-split-m6-packaging-into-m8.md) | Split M6: the deterministic core keeps the number, packaging becomes M8 | Accepted (amended 2026-09-16, 2026-09-17) |
 | [0012](ADR-0012-cover-only-specimens-are-a-labelled-class.md) | Cover-only specimens are a labelled class, not a drop | Accepted (amended 2026-09-15) |
 | [0013](ADR-0013-names-are-scored-against-mrz-form-truth.md) | Name accuracy is a separate axis, scored only against MRZ-form truth | Accepted |
