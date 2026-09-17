@@ -85,7 +85,7 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 | **[prompts/](prompts/)** | Prompt philosophy and per-version evaluation results. The prompts themselves live in `crates/synthpass-llm/prompts/` — they are compiled in. |
 | **[ocr/](ocr/)** | Recognition, preprocessing, layout analysis, confidence scoring. |
 | **[vision/](vision/)** | Vision-language models and the multimodal track. |
-| **[benchmarks/](benchmarks/)** | Methodology, metric definitions, and dated sweep results — including rejected candidates. |
+| **[benchmarks/](benchmarks/)** | Methodology, metric definitions, and dated sweep results — including rejected candidates; the pipeline map is [`benchmarks/PIPELINE.md`](benchmarks/PIPELINE.md). |
 | **[evaluation/](evaluation/)** | How we decide something is good enough to ship. |
 | **[hardware/](hardware/)** | Memory budgets, CPU-only and consumer-GPU targets, deployment shapes. |
 | **[research/](research/)** | Distilled, actionable summaries drawn from `papers/`. |
