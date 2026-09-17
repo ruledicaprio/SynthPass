@@ -89,6 +89,10 @@ detection count is 17 after the Argentina 2026 pair was scored out; see the outc
 
 ## What belongs here
 
+The pipeline itself — every harness, gate, data branch, stored artifact and document, with its
+owner and cadence, what it can honestly claim, and the ordered rework plan — is mapped in
+[`PIPELINE.md`](PIPELINE.md). This file stays the home of the live numbers and the dated findings.
+
 - **Methodology** — how a run is configured so two runs are comparable. The
   corpus runner is deliberately single-threaded; a parallelised version measured
   38% where the honest sequential number was 55–56%, because oversubscribing
