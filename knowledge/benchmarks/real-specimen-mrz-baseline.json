@@ -1,6 +1,6 @@
 {
   "note": "Real-specimen Tier-1 no-regression baseline for the deterministic `mrz` provider. Regenerate ONLY via CI: `gh workflow run real-specimen-gate.yml -f mode=write-baseline`, download the artifact, commit it. Local numbers differ from CI (OCR-inference float variance), so never hand-edit the counts. See knowledge/benchmarks/README.md.",
-  "measured_on_ci_sha": "4ff877219ea2f08d5de407298932a9ee21b8454e",
+  "measured_on_ci_sha": "649cccc4a12c57e50b6feafa6d414f78c64672b1",
   "measured_date": "2026-09-17",
   "samples_data_sha": "5988c7bd878e58cf0279bbe078b0e6a679ac46af",
   "documents": 261,
@@ -10,8 +10,18 @@
   "by_miss_kind": {
     "checksum_failed": 10,
     "checksum_failed_specimen": 19,
+    "document_number_mismatch": 0,
+    "false_positive_mrz": 0,
     "no_mrz_expected": 50,
     "no_mrz_found": 3,
+    "ocr_error": 0,
     "redacted_mrz": 39
-  }
+  },
+  "strict_names": {
+    "strict_hits": 12,
+    "name_scorable_documents": 40,
+    "name_scorable_hits": 33
+  },
+  "outcomes_sha256": "1cef77bb2c5a905aa47ddf482015596be53b17ddb44b13c61776d44cb09ed7b7",
+  "refusal_population": 108
 }
