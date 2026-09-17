@@ -56,7 +56,11 @@ Open the HTML locally, compare each field and each printed line with the image, 
 Names must use the MRZ form, with filler read as spaces, rather than the visual-zone spelling.
 Every card starts at `skip`; **OCR read — unverified** and candidate fields are suggestions.
 Batch A pre-fills only an exact structural OCR parse, otherwise its fields stay empty alongside
-the OCR lines. `--no-ocr` leaves Batch A empty and omits crops. Missing local OCR models also
+the OCR lines. MRZ crops preserve their original pixels as lossless color PNG and enlarge
+for display. Per-card zoom, invert, and high-contrast toggles reuse the same color PNG.
+High contrast applies `grayscale(1) contrast(1.6)` without changing the exported fields.
+Full images use JPEG quality 85 with a 1,200 px maximum long edge. `--no-ocr` leaves Batch A
+empty and omits crops. Missing local OCR models also
 fall back to full images; model lookup checks `SYNTHPASS_OCR_MODEL_DIR`, the current directory,
 and the parent of `--samples-root`. Nothing downloads models.
 
@@ -76,7 +80,9 @@ correction. A non-conforming zone must fail validation, and structurally parseab
 still match its printed name field. If structural parsing fails, the tool reports that the names
 remain a human assertion. It reports the remaining classification requirements: matching fixture
 stem, `mrz_checksums_valid: false`, manifest `mrz.present: true` and `mrz.redacted: false`, followed
-by manifest regeneration, attribution review and a separate gate re-bless.
+by manifest regeneration, attribution review and a separate gate re-bless. The manifest records
+`expected_document_number: null`: null is the recorded answer for a non-conforming zone.
+A checksum-valid fixture instead requires its document number in the manifest.
 
 New JSON uses the reviewed alphabetical key order and final newline. Existing reviewed content
 must be identical to be accepted. The `.md` preserves existing OCR input from the reviewed or

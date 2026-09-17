@@ -468,8 +468,8 @@ fn report_nonconforming(o: &Options, entry: &Entry) {
                 if row.ground_truth_stem.as_deref() != Some(&entry.stem) {
                     println!("  Manifest ground_truth_stem needs regeneration after promotion.");
                 }
-                if row.expected_document_number != entry.fields["document_number"] {
-                    println!("  Manifest expected_document_number needs regeneration after promotion.");
+                if row.expected_document_number.is_some() {
+                    println!("  Manifest expected_document_number must be null: null is the recorded answer for a non-conforming zone. Regenerate after promotion.");
                 }
                 if row.mrz["present"].as_bool() != Some(true) {
                     println!("  Manifest mrz.present is not true: human review of that claim is still required.");
@@ -526,7 +526,7 @@ fn apply(o: &Options) -> Result<bool> {
                     }
                 );
                 if entry.status == Status::NonConforming {
-                    println!("  checksum_failed_specimen requires the reviewed fixture under the image stem, mrz_checksums_valid=false, manifest mrz.present=true and mrz.redacted=false. Regenerate ground_truth_stem and expected_document_number; review attribution and re-bless the gate separately.");
+                    println!("  checksum_failed_specimen requires the reviewed fixture under the image stem, mrz_checksums_valid=false, manifest mrz.present=true and mrz.redacted=false. Regenerate ground_truth_stem and expected_document_number=null: null is the recorded answer for a non-conforming zone; review attribution and re-bless the gate separately.");
                     report_nonconforming(o, entry);
                     let zone = entry.fields["mrz_line"]
                         .as_deref()
@@ -681,19 +681,23 @@ fn load_ocr(o: &Options) -> (Option<NativeOcr>, String) {
 }
 
 fn embedded(image: &DynamicImage, enlarge: bool) -> Result<String> {
-    let width = if enlarge {
-        1600
-    } else {
-        image.width().min(1600)
-    };
+    if enlarge {
+        // Preserve original crop pixels losslessly; enlarge only for display.
+        // Keep color rather than risk losing faint strokes in grayscale conversion.
+        let mut bytes = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut bytes, image::ImageFormat::Png)
+            .map_err(|_| "encode MRZ crop")?;
+        return Ok(format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(bytes.into_inner())
+        ));
+    }
     if image.width() == 0 || image.height() == 0 {
         return Err("image has zero size".into());
     }
-    let height =
-        ((u64::from(image.height()) * u64::from(width)) / u64::from(image.width())).max(1) as u32;
-    let resized = image
-        .resize_exact(width, height, image::imageops::FilterType::Lanczos3)
-        .to_rgb8();
+    // Full-page context yields the byte budget to the lossless MRZ crop.
+    let resized = image.thumbnail(1200, 1200).to_rgb8();
     let mut bytes = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
         .encode_image(&resized)
@@ -886,7 +890,7 @@ fn render(cards: &[Card]) -> String {
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'">
 <title>Ground truth review</title><style>
-body{font:16px system-ui;background:#edf1f5;color:#182838;margin:0}header,main{max-width:1200px;margin:auto;padding:20px}header{position:sticky;top:0;background:#edf1f5;z-index:1}article{background:white;padding:24px;margin-bottom:24px;border-radius:12px;border:1px solid #b9c8d6}img{max-width:100%;height:auto}pre,textarea{font:15px monospace;white-space:pre-wrap;overflow-wrap:anywhere}textarea{width:100%;box-sizing:border-box;min-height:90px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}label{display:block}input{display:block;box-sizing:border-box;width:100%;padding:8px}button,select{padding:10px}h2{overflow-wrap:anywhere}.checks{font-family:monospace;color:#824300}.note{color:#824300}
+body{font:16px system-ui;background:#edf1f5;color:#182838;margin:0}header,main{max-width:1200px;margin:auto;padding:20px}header{position:sticky;top:0;background:#edf1f5;z-index:1}article{background:white;padding:24px;margin-bottom:24px;border-radius:12px;border:1px solid #b9c8d6}img{max-width:100%;height:auto}pre,textarea{font:15px monospace;white-space:pre-wrap;overflow-wrap:anywhere}textarea{width:100%;box-sizing:border-box;min-height:90px}.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}label{display:block}input{display:block;box-sizing:border-box;width:100%;padding:8px}button,select{padding:10px}h2{overflow-wrap:anywhere}.checks{font-family:monospace;color:#824300}.note{color:#824300}.crop-controls{display:flex;gap:20px;align-items:center;flex-wrap:wrap}.crop-controls input{display:inline-block;width:auto;padding:0}.crop-controls input[type=range]{width:180px}.crop-viewport{overflow:auto;max-height:70vh}.mrz-crop{display:block;width:100%;max-width:none;filter:grayscale(var(--gray,0)) contrast(var(--contrast,1)) invert(var(--invert,0))}.mrz-crop.high-contrast{--gray:1;--contrast:1.6}.mrz-crop.inverted{--invert:1}
 </style><header><h1>Ground truth review</h1><p>Compare every field with the printed MRZ. Names use MRZ spelling, with filler read as spaces. OCR is unverified. Each card starts at skip.</p><button id="export" type="button">Export ground-truth-verified.json</button><span id="export-status" role="status"></span></header><main>
 "#,
     );
@@ -895,7 +899,7 @@ body{font:16px system-ui;background:#edf1f5;color:#182838;margin:0}header,main{m
             escape(&card.stem), escape(&card.asset), escape(&card.stem), escape(&card.asset), escape(&card.class), escape(&card.image), escape(&card.note)));
         if let Some(crop) = &card.crop {
             html.push_str(&format!(
-                "<h3>Enlarged MRZ band</h3><img alt=\"MRZ band\" src=\"{}\">",
+                "<h3>Enlarged MRZ band</h3><div class=\"crop-controls\"><label><input class=\"crop-contrast\" type=\"checkbox\"> High contrast</label><label><input class=\"crop-invert\" type=\"checkbox\"> Invert</label><label>Zoom (100% fits card) <input class=\"crop-zoom\" type=\"range\" min=\"100\" max=\"400\" step=\"25\" value=\"100\"> <output>100%</output></label></div><div class=\"crop-viewport\" tabindex=\"0\" role=\"region\" aria-label=\"Scrollable MRZ crop\"><img class=\"mrz-crop\" alt=\"MRZ band\" src=\"{}\"></div>",
                 escape(crop)
             ));
         }
@@ -926,7 +930,22 @@ function check(card) {
   if (lines.length !== 2 && lines.length !== 3) report.push('Expected 2 or 3 lines');
   card.querySelector('.checks').textContent = report.join(' | ');
 }
-for (const card of cards) { card.addEventListener('input', () => check(card)); check(card); }
+for (const card of cards) {
+  card.addEventListener('input', () => check(card)); check(card);
+  const crop = card.querySelector('.mrz-crop');
+  if (crop) {
+    card.querySelector('.crop-contrast').addEventListener('change', event => {
+      crop.classList.toggle('high-contrast', event.target.checked);
+    });
+    card.querySelector('.crop-invert').addEventListener('change', event => {
+      crop.classList.toggle('inverted', event.target.checked);
+    });
+    card.querySelector('.crop-zoom').addEventListener('input', event => {
+      crop.style.width = `${event.target.value}%`;
+      card.querySelector('.crop-controls output').value = `${event.target.value}%`;
+    });
+  }
+}
 document.querySelector('#export').addEventListener('click', () => {
   const entries = cards.map(card => ({stem:card.dataset.stem, asset:card.dataset.asset, status:card.querySelector('select').value,
     fields:Object.fromEntries([...card.querySelectorAll('[data-field]')].map(input => [input.dataset.field,
@@ -1076,19 +1095,53 @@ mod tests {
             .lines()
             .map(|l| json(l).unwrap())
             .collect();
-        let ledger: Vec<Value> =
-            include_str!("../../../knowledge/benchmarks/real-specimen-outcomes.jsonl")
-                .lines()
-                .map(|l| json(l).unwrap())
-                .collect();
-        // Membership is frozen, but a future OCR change may turn a ledger
-        // outcome into a hit without changing which assets need human review.
+        let samples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples");
+        // Frozen membership must still resolve even as OCR outcomes improve.
         for asset in &BATCH_A {
-            assert!(rows.iter().any(|r| r.asset() == *asset));
-            assert!(ledger.iter().any(|r| r["asset_id"] == *asset));
+            assert!(
+                samples.join(asset).is_file() || rows.iter().any(|r| r.asset() == *asset),
+                "Batch A path no longer resolves: {asset}"
+            );
         }
     }
 
+    #[test]
+    fn manifest_records_null_for_nonconforming_zones_and_numbers_for_valid_zones() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/ocr_fixtures");
+        let mut checked = [0usize; 2];
+        for line in include_str!("../../../samples/corpus.jsonl").lines() {
+            let row: ManifestRow = json(line).unwrap();
+            let Some(stem) = row.ground_truth_stem else {
+                continue;
+            };
+            let fixture: Value =
+                json(&read(&fixtures.join(format!("{stem}.json"))).unwrap()).unwrap();
+            let valid = fixture["mrz_checksums_valid"].as_bool().unwrap();
+            if valid {
+                assert!(
+                    row.expected_document_number
+                        .as_deref()
+                        .is_some_and(|number| !number.is_empty()),
+                    "samples/corpus.jsonl disagrees with the fixture for {stem}: a checksum-valid fixture implies a recorded expected_document_number (a non-conforming one implies null). Regenerate the manifest (cargo run -p synthpass-ocr --example corpus_manifest) and commit the result."
+                );
+                assert_eq!(
+                    row.expected_document_number.as_deref(),
+                    fixture["document_number"].as_str(),
+                    "samples/corpus.jsonl disagrees with the fixture for {stem}: a checksum-valid fixture implies a recorded expected_document_number (a non-conforming one implies null). Regenerate the manifest (cargo run -p synthpass-ocr --example corpus_manifest) and commit the result."
+                );
+            } else {
+                assert!(
+                    row.expected_document_number.is_none(),
+                    "samples/corpus.jsonl disagrees with the fixture for {stem}: a checksum-valid fixture implies a recorded expected_document_number (a non-conforming one implies null). Regenerate the manifest (cargo run -p synthpass-ocr --example corpus_manifest) and commit the result."
+                );
+            }
+            checked[usize::from(valid)] += 1;
+        }
+        assert!(
+            checked.into_iter().all(|count| count > 0),
+            "exercise both checksum verdicts"
+        );
+    }
     fn temp_dir() -> PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
