@@ -51,14 +51,16 @@
 //! cargo run -p synthpass-ocr --release --example corpus_manifest
 //! cargo run -p synthpass-ocr --release --example corpus_manifest -- --only Spain
 //! cargo run -p synthpass-ocr --release --example corpus_manifest -- --check
+//! cargo run -p synthpass-ocr --release --example corpus_manifest -- --force
 //! ```
 //!
-//! `--check` re-reads the corpus and reports disagreements without writing,
-//! which is the mode worth running after a rename. `--only <substr>` narrows
-//! to matching filenames; a full pass OCRs every image and takes tens of
-//! minutes. Rows whose image is byte-identical to the one already recorded
-//! (same `sha256`) are reused rather than re-read, so a rerun after adding a
-//! handful of specimens is cheap.
+//! `--check` reports disagreements without writing. `--only <substr>` narrows
+//! to matching filenames. Rows whose image is byte-identical to the one already
+//! recorded (same `sha256`) reuse their stored OCR observation, so a rerun after
+//! adding a handful of specimens is cheap. `--force` bypasses that cache and
+//! re-reads every selected image, for example after an OCR model or pipeline
+//! change. A full forced pass takes tens of minutes. Combine `--force --check`
+//! to refresh observations for the check without writing the manifest.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -91,6 +93,7 @@ const CORPUS_DIRS: [&str; 6] = [
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let check_only = args.iter().any(|a| a == "--check");
+    let force = args.iter().any(|a| a == "--force");
     let only = args
         .iter()
         .position(|a| a == "--only")
@@ -145,15 +148,7 @@ fn main() {
         // rebuilt from it, so changing the row schema costs a fast rerun
         // instead of another full pass over the corpus (tens of minutes).
         let prev_row = previous.get(&filename);
-        let unchanged = prev_row
-            .and_then(|p| p.get("sha256"))
-            .and_then(|v| v.as_str())
-            == Some(digest.as_str());
-
-        let observed = if unchanged {
-            reused += 1;
-            ObservedMrz::from_previous(prev_row.expect("checked above"))
-        } else {
+        let (observed, was_reused) = observe_or_reuse(prev_row, &digest, force, || {
             let seen = read_mrz(&ocr, path);
             eprintln!(
                 "[{}/{}] {filename} — {}",
@@ -162,7 +157,8 @@ fn main() {
                 seen.summary()
             );
             seen
-        };
+        });
+        reused += usize::from(was_reused);
 
         if let (Some(seen), Some(claimed)) = (&observed.document_code, &claims.document_code) {
             if seen != claimed {
@@ -305,7 +301,7 @@ impl ObservedMrz {
     }
 
     /// Recovers a stored observation from an existing manifest row, so an
-    /// unchanged image never needs re-reading.
+    /// unchanged image can skip re-reading unless forced.
     fn from_previous(row: &serde_json::Value) -> Self {
         let o = &row["mrz"]["observed"];
         let s = |k: &str| o[k].as_str().map(str::to_string);
@@ -330,6 +326,22 @@ impl ObservedMrz {
             self.checksums_valid,
         )
     }
+}
+
+/// Returns the observation and whether it came from the unchanged-image cache.
+/// The reader is lazy so cached rows never invoke OCR unless forced.
+fn observe_or_reuse(
+    previous: Option<&serde_json::Value>,
+    digest: &str,
+    force: bool,
+    read: impl FnOnce() -> ObservedMrz,
+) -> (ObservedMrz, bool) {
+    if !force {
+        if let Some(row) = previous.filter(|row| row["sha256"].as_str() == Some(digest)) {
+            return (ObservedMrz::from_previous(row), true);
+        }
+    }
+    (read(), false)
 }
 
 fn read_mrz(ocr: &NativeOcr, path: &Path) -> ObservedMrz {
@@ -752,4 +764,53 @@ fn repo_root() -> PathBuf {
         .nth(2)
         .expect("workspace root")
         .to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_observation_is_reused_unless_forced() {
+        let cached = serde_json::json!({
+            "sha256": "unchanged-image",
+            "mrz": { "observed": {
+                "read_by_ocr": true,
+                "document_code": "P<",
+                "issuing_state": "UTO",
+                "format": "Td3",
+                "checksums_valid": true
+            }}
+        });
+        for force in [false, true] {
+            let mut reads = 0;
+            let (observed, reused) =
+                observe_or_reuse(Some(&cached), "unchanged-image", force, || {
+                    reads += 1;
+                    ObservedMrz::none()
+                });
+            assert_eq!(reads, usize::from(force), "force={force}");
+            assert_eq!(reused, !force);
+            assert_eq!(observed.found, !force);
+            assert_eq!(observed.checksums_valid, !force);
+            assert_eq!(
+                observed.document_code.as_deref(),
+                if force { None } else { Some("P<") }
+            );
+        }
+    }
+
+    #[test]
+    fn changed_or_missing_images_are_read_without_force() {
+        let cached = serde_json::json!({"sha256": "old-image"});
+        for previous in [Some(&cached), None] {
+            let mut reads = 0;
+            let (_, reused) = observe_or_reuse(previous, "new-image", false, || {
+                reads += 1;
+                ObservedMrz::none()
+            });
+            assert_eq!(reads, 1);
+            assert!(!reused);
+        }
+    }
 }

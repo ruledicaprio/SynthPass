@@ -1,0 +1,1 @@
+- **Forced corpus observation refresh:** add `--force` to the corpus manifest generator to bypass cached OCR observations for selected images, including with `--only` and `--check`. Default runs continue reusing unchanged images.

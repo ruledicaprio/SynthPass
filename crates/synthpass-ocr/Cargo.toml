@@ -36,3 +36,8 @@ sha2 = "0.11"
 # musl release build turns this on for a true air-gapped single-file binary
 # (see knowledge/ARCHITECTURE.md §10).
 embedded-models = []
+
+# Keep the manifest cache regression tests in the default workspace test suite.
+[[example]]
+name = "corpus_manifest"
+test = true
