@@ -671,14 +671,21 @@ struct BenchPage {
     ocr_elapsed: Duration,
 }
 
+/// Process-wide sequence keeps duplicate display names and concurrent runs distinct.
+fn temporary_image_path() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "provider-bench-{}-{sequence}.png",
+        std::process::id()
+    ))
+}
+
 /// Writes `image` to a uniquely-named temp file and OCRs it via
 /// `recognize_detailed`, returning both the OCR result and the path — the
 /// caller owns cleanup (see [`BenchPage`]'s doc for why the path can't be
-/// removed here). `name` disambiguates the temp filename across documents in
-/// the same run (a corpus seed for synthetic documents, a file stem for real
-/// specimens); the process id further disambiguates across concurrent runs,
-/// the same pattern [`crate::check_document`] and the original single-corpus
-/// version of this function both already used.
+/// removed here). A process-wide sequence disambiguates documents and concurrent
+/// runs within one process; the process ID separates concurrently running processes.
 ///
 /// The returned [`Duration`] times `recognize_detailed` alone, not the temp
 /// file write, so it measures the OCR pipeline rather than the disk. It is
@@ -687,10 +694,8 @@ struct BenchPage {
 fn ocr_and_keep_path(
     ocr: &NativeOcr,
     image: &image::DynamicImage,
-    name: &str,
 ) -> Result<(OcrPage, PathBuf, Duration), String> {
-    let path =
-        std::env::temp_dir().join(format!("provider-bench-{}-{name}.png", std::process::id(),));
+    let path = temporary_image_path();
     image
         .save(&path)
         .map_err(|e| format!("failed to write temp image: {e}"))?;
@@ -722,8 +727,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.seed);
             }
-            let (page, image_path, ocr_elapsed) =
-                ocr_and_keep_path(ocr, &doc.image, &doc.seed.to_string()).ok()?;
+            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
             let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
             // Read from the OCR text, never from `labels`: the question is
             // what this run's OCR pass actually recovered, which is what a
@@ -767,8 +771,7 @@ fn prep_specimens(
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.name);
             }
-            let (page, image_path, ocr_elapsed) =
-                ocr_and_keep_path(ocr, &doc.image, &doc.name).ok()?;
+            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             // The hand-transcribed true printed MRZ zone, when this specimen
             // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
@@ -1674,6 +1677,30 @@ fn sample_rss() -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn temporary_images_are_unique_across_concurrent_runs() {
+        // Each run can contain identical display names: naming no longer uses them.
+        let runs: Vec<_> = (0..8)
+            .map(|_| {
+                std::thread::spawn(|| {
+                    (0..32)
+                        .map(|_| super::temporary_image_path())
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        let paths: Vec<_> = runs
+            .into_iter()
+            .flat_map(|run| run.join().unwrap())
+            .collect();
+        let unique: std::collections::HashSet<_> = paths.iter().collect();
+        assert_eq!(unique.len(), 8 * 32);
+        assert!(paths
+            .iter()
+            .all(|path| path.parent() == Some(std::env::temp_dir().as_path())
+                && path.extension().is_some_and(|ext| ext == "png")));
+    }
+
     use super::*;
     use synthpass_core::v2::ExtractionV2;
     use synthpass_die::{FieldReader, IntelligenceProvider, ProviderError, ProviderId, Reading};
