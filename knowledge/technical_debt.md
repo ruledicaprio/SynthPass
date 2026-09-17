@@ -39,20 +39,6 @@ Done against a source build for exactly this reason. Shipping a binary later is 
 and the Fix above is its first step. The entry stays High because it still blocks that path — what
 changed is that the blockage is now a recorded position rather than an unnoticed gap.
 
-### `synthpass-ocr`'s 18 `unsafe` blocks sit on the untrusted-image path
-
-`crates/synthpass-ocr` carries 18 `unsafe` blocks — the workspace's largest concentration by
-far (`synthpass-die`, `synthpass-llm` and `synthpass-pipeline` have 2 each; everything else has
-zero). That crate is also the first thing an attacker-supplied image reaches.
-
-**Consequence:** the ingest path the `fuzz/` targets exist to defend is the same path carrying
-the most unreviewed `unsafe`. That combination is worth a deliberate audit rather than an
-assumption; nobody has read all 18 in one sitting with memory-safety as the question.
-
-**Fix:** one focused pass — for each block, the invariant it relies on and whether a caller can
-violate it, written down next to the block. Then decide per-site whether it can be made safe.
-Not urgent, but it should not stay implicit.
-
 ### OCR confidence is a character-plausibility proxy, not a model score
 
 `geometry::text_sanity` computes "fraction of plausible characters" because
@@ -201,6 +187,24 @@ either.
 weight-provisioning story costs in CI.
 
 ## Low
+
+### `#![forbid(unsafe_code)]` is declared in one crate of fourteen
+
+Only `crates/mrz/src/lib.rs` forbids `unsafe`. The other thirteen crates merely happen to contain
+none in production: measured 2026-09-17, every `unsafe` in the workspace sits inside a
+`#[cfg(test)]` module — `std::env::set_var`/`remove_var` (unsafe since Rust 2024) in
+`synthpass-ocr` and `synthpass-llm`, and a hand-rolled executor in `synthpass-die`'s
+`mrz_reader` tests. The image ingest path carries zero.
+
+**History:** this replaces a High entry that claimed 18 `unsafe` blocks sat on `synthpass-ocr`'s
+untrusted-image path. The count was right and the location was wrong — all 18 are test-only — and
+the entry stood for weeks because nobody checked the blocks against the `#[cfg(test)]` boundary.
+Kept here as the record rather than deleted, so the claim is not rediscovered and re-filed.
+
+**Fix:** make the property compile-time instead of measured: plain `#![forbid(unsafe_code)]` in
+the crates with no `unsafe` at all, and `#![cfg_attr(not(test), forbid(unsafe_code))]` in the
+three whose tests mutate the environment or spin an executor (`forbid` cannot be re-allowed
+inside the crate, so the test-only sites need the `cfg_attr` form). An afternoon.
 
 ### `ProviderId` is `&'static str`
 

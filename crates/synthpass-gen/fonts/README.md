@@ -16,13 +16,15 @@ Both are static (non-variable) TrueType files, chosen deliberately over variable
 of the same families since `ab_glyph` (the rasterizer used in `src/fonts.rs`) targets classic
 outline fonts, not `fvar` variation axes.
 
-Build with the `embedded-fonts` feature to bake them into the binary via `include_bytes!`:
+The `embedded-fonts` feature bakes them into the binary via `include_bytes!`. It is **on by
+default** (both fonts are vendored, so there is nothing to supply); turn it off to build without
+them:
 
 ```sh
-cargo build -p synthpass-gen --features embedded-fonts
+cargo build -p synthpass-gen --no-default-features
 ```
 
-Without this feature (the default), `fonts::load_fonts` returns `FontError::NotEmbedded` and the
+Without the feature, `fonts::load_fonts` returns `FontError::NotEmbedded` and the
 renderer draws placeholder bars in the exact layout rectangles instead — bounding boxes in
 `Labels` stay meaningful either way. The unconditional "SYNTHETIC / SPECIMEN" watermark and the
 generic, non-country template render regardless of this feature; they do not depend on any TTF.
