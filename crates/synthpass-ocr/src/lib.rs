@@ -58,6 +58,11 @@
 //! engine to route PDF input to — PDF is rejected outright at the
 //! `synthpass-pipeline` layer (see `crates/synthpass-pipeline/src/ocr.rs`).
 
+/// Fixed-grid MRZ name-line repair — pure geometry, no `ocrs` types. See the
+/// module's own doc comment for what it does and does not do; wiring it
+/// into [`NativeOcr`] behind an opt-in env var is a follow-up, not this
+/// module.
+pub mod chargrid;
 pub mod download;
 #[cfg(feature = "embedded-models")]
 pub mod embedded;
