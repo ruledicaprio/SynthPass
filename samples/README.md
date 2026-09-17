@@ -55,7 +55,9 @@ Open the HTML locally, compare each field and each printed line with the image, 
 `verified`, `non_conforming` (faithfully transcribed, but printed check digits fail), or `skip`.
 Names must use the MRZ form, with filler read as spaces, rather than the visual-zone spelling.
 Every card starts at `skip`; **OCR read — unverified** and candidate fields are suggestions.
-Batch A pre-fills only an exact structural OCR parse, otherwise its fields stay empty alongside
+Batch A cards with an existing reviewed fixture pre-fill from that fixture, state that they are
+already reviewed, and remain at `skip`; correcting them is a separate deliberate pass. Unreviewed
+Batch A cards pre-fill only an exact structural OCR parse, otherwise their fields stay empty alongside
 the OCR lines. MRZ crops preserve their original pixels as lossless color PNG and enlarge
 for display. Per-card zoom, invert, and high-contrast toggles reuse the same color PNG.
 High contrast applies `grayscale(1) contrast(1.6)` without changing the exported fields.
