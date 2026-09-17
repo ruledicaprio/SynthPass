@@ -147,6 +147,20 @@ pub struct OcrPage {
     /// Why the native retry loop stopped: general_valid, variant_valid,
     /// budget, pass_cap, or exhausted.
     pub retry_stop: Option<String>,
+    /// Outcome of `synthpass_ocr`'s post-hit chargrid name-line repair
+    /// (`SYNTHPASS_OCR_CHARGRID`), if that measurement arm ran at all.
+    ///
+    /// `None` when the arm is off (including every default run today —
+    /// this field exists but is inert until the arm is measured and
+    /// promoted). Otherwise one of: `"repaired"` (a corrected MRZ block was
+    /// prepended to `text`), `"unchanged"` (the grid fit found nothing to
+    /// repair), `"rejected:<reason>"` (`chargrid::repair_name_line` or the
+    /// re-verification step declined the repair — see
+    /// `synthpass_ocr`'s `apply_chargrid`), `"skipped:<reason>"` (the repair
+    /// was never attempted — no source image, no valid MRZ, no line match,
+    /// etc.), or `"control"` (the placebo arm ran the identical pass and
+    /// appended its raw reading instead of repairing).
+    pub chargrid: Option<String>,
 }
 
 /// Heuristic confidence proxy in `[0, 1]` for a recognized line's text.
