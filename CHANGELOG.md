@@ -8,6 +8,740 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
+## [1.5.0] — 2026-09-17 — Real-specimen Tier-1 gated in CI, on a denominator that counts only readable documents
+
+Roadmap: knowledge/ROADMAP.md, knowledge/benchmarks/README.md. The cycle opened with the README
+advertising `~42–46%` on real specimens against a CI-measured 119/229 = 52.0%. The denominator
+behind that figure counted 94 documents that could never yield a hit — covers, redacted zones,
+specimens whose own check digits fail — so they now leave it as labelled miss kinds. Then the
+work went into what was really failing: native OCR turned readable pages sideways, deskew
+trusted one skew estimate, and a non-MRZ reading could surface as a checksum failure.
+Real-specimen Tier-1 is now **140 / 154 = 90.9%** on documents that can yield a hit (140 / 261
+across the whole corpus), measured by CI and checked on every extraction-path PR by a
+no-regression gate. The corpus grew through a scripted specimen-acquisition loop, with passport
+covers as their own opt-in class (ADR-0012) and the benchmark data pinned to an exact revision.
+`synthpass export` turns a synthetic corpus into a training dataset, and all five MRZ formats
+read and are measured through the one registered `mrz` provider (ADR-0011). Name accuracy is
+now measured apart from the hit (ADR-0013): 178 of 377 synthetic Tier-1 hits carry a wrong
+name, which is where the next cycle starts.
+
+### Added
+- **`tools/apply_cohort.py`.** Automates the mechanical parts of the specimen-acquisition loop's
+  "P-DATA-PR" procedure once a cohort packet has a Verdict on every row: worktree setup, a
+  cross-PR duplicate guard (excludes filenames still pending in another open `cohort-*` PR before
+  regenerating the manifest, so two open cohort branches can no longer silently fold each other's
+  not-yet-merged rows together), image placement, manifest regeneration and `origin` patching, the
+  `samples/local/` track, the mechanical checks, and a draft changelog fragment. Licence class,
+  `origin.notes` and the `CORPUS_COVERAGE.md` prose Note column always stay human-reviewed drafts,
+  never auto-committed. Before any real `sync-samples.ps1 -Push`, it always runs `-Push -DryRun`
+  first and refuses to proceed if it reports a deletion unless `--allow-deletions` and `--confirm`
+  are both given and the exact file list has been printed -- the guardrail that would have caught a
+  near-miss mirror-deletion of another PR's images by hand. Standard library only; see
+  `tools/test_apply_cohort.py` for its offline unit tests. Dispatching the real-specimen re-bless
+  workflow, waiting for it, and merging the PR stay manual steps, on purpose.
+- **Name accuracy is now a measured metric, in both bench harnesses.** No ICAO 9303 check digit
+  covers `surname`/`given_names`, so a Tier-1 hit proves nothing about them — 178 of 377
+  synthetic-corpus Tier-1 hits carry a wrong name (Derived, MAIN `c617254`; per-format counts in
+  `knowledge/benchmarks/README.md`). `synthpass-bench` adds `strict_hits`/`strict_hit_rate`/
+  `names_exact_among_hits`; `provider-bench` adds `strict_tier1_hit_rate`/
+  `names_exact_among_hits` (`NotApplicable` when nothing is name-scorable); both add
+  per-document `names_exact`/`name_error`. `hit`/`hit_rate`/`tier1_hit_rate` and both CI gates
+  are unchanged — see
+  [ADR-0013](knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md).
+- **`provider-bench` now records how long each document's OCR pass took.** Every row of the
+  JSON report's `documents_detail` carries `ocr_ms`, and the summary prints one `ocr:` line
+  (total, mean, p50, p95, max). The existing `speed` block times only the reader itself, which
+  for the deterministic `mrz` provider is microseconds. So a real-specimen run that took forty
+  minutes reported a mean of 3 ms, and nothing said which documents the time went to. That
+  question gates [ADR-0010](knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md)'s
+  benchmark split, whose step 5 requires measuring before building. The field is additive, so
+  older reports parse as before.
+- Fifteen passport specimens added to the real-specimen corpus (`samples/corpus.jsonl`
+  238 → 254 rows, counting one previously unmanifested Kenya no-MRZ front): Angola,
+  Azerbaijan, Bangladesh, Dominican Republic, India (×2), Indonesia, Nepal, Nigeria,
+  Pakistan, Somalia, Somaliland, Uzbekistan, and two Djibouti books. Each carries a
+  hand-transcribed, checksum-valid ground-truth MRZ under `samples/ocr_fixtures/`
+  (`.json` + `.md`). Three (Indonesia, Pakistan, Angola) are photographed 90° sideways —
+  deliberate test material for the ADR-0008 orientation track. Somaliland issues under
+  `RSL`, which is not an ISO 3166 code (`issuing_state_recognized: false`, explained in the
+  manifest `notes`).
+- Three specimens added to the real-specimen corpus (`samples/corpus.jsonl` 254 → 257 rows)
+  from the specimen-acquisition loop's first scout cycle (`c01`): a Lithuanian passport (TD3,
+  checksum-valid, CC BY-SA) and San Marino/Latvia ID-card sides (TD1). LTU moves *No specimen
+  yet* → HIT in `knowledge/CORPUS_COVERAGE.md`. LVA and SMR stay *No specimen yet* — both new
+  images carry no checksum-valid MRZ (an ID-card front and a blank-template back) — see that
+  file for the per-country notes and `work/scouting/c01/packet-c01.md` for full review
+  provenance.
+- Two specimens added to the real-specimen corpus (`samples/corpus.jsonl` 257 → 259 rows) from
+  the specimen-acquisition loop's third scout cycle (`c03`): a German passport biodata page and
+  ID-card front (`D`, the legacy single-letter code), both sourced from the official
+  Bundesgesetzblatt (`gesetze-im-internet.de`) and carrying the standard "Erika Mustermann"
+  placeholder identity with a MUSTER (SPECIMEN) watermark. `D` moves *No specimen yet* →
+  *MISS (checksum failed)* in `knowledge/CORPUS_COVERAGE.md` — not yet a HIT: the passport's MRZ
+  reads but fails checksum on this OCR pass (a likely single-character misread, same pattern as
+  the pre-existing `D<<` passport fixture), and the ID card is front-only, so it carries no MRZ
+  at all (`Personalausweis` MRZ is on the back). See that file for the per-country notes and
+  `work/scouting/c03/packet-c03.md` for full review provenance.
+- Two specimens added to the real-specimen corpus (`samples/corpus.jsonl` 259 → 261 rows) from
+  the specimen-acquisition loop's seventh scout cycle (`c07`), folded into the still-accumulating
+  cohort PR from `c03`: South Africa's Department of Home Affairs smart ID card, front and back
+  (Wikimedia Commons, public domain). It is an illustrative template card (alphabet-placeholder
+  name, sequential ID number, generic silhouette photo, no real person) and South Africa's first
+  corpus entry of any kind. `ZAF` stays *No specimen yet* -- the card carries no printed MRZ (chip
+  + 2D barcode instead), so it adds document-type depth without a coverage HIT, same as Kenya's
+  existing front-only passport row. See `work/scouting/c07/packet-c07.md` for full review
+  provenance.
+- Four specimens added to the real-specimen corpus (`samples/corpus.jsonl` 261 → 265 rows) from
+  the specimen-acquisition loop's ninth scout cycle (`c09`), folded into the accumulating cohort
+  PR from `c03`/`c07`: a Singapore passport design illustration (attributed to the Immigration &
+  Checkpoints Authority), a Philippine PhilSys national ID sample (public domain, attributed to
+  the Philippine Statistics Authority), and two Hong Kong passport design illustrations
+  (2019 + 2007, attributed to the Immigration Department). `SGP` moves *No specimen yet* → **HIT**
+  — a genuine checksum-valid TD3, confirmed by both `check_sample` and this manifest's OCR pass,
+  the first clean HIT this loop has produced outside Germany's partial case. `HKG` stays *No
+  specimen yet*: both passports fail checksum on this OCR pass (the project's known
+  single-character-misread pattern, see c03's German row). `PHL` stays *No specimen yet*: the
+  PhilSys card has no MRZ zone at all (a national ID, not a travel document). This crosses the
+  cohort batch-size floor (5 verified `public` specimens minimum): running total is now 8/5,
+  triggering the merge tail for the first time since the rule was adopted. See
+  `work/scouting/c09/packet-c09.md` for full review provenance, including the licence note: none
+  of the ICA/ImmD pages granted an explicit reuse licence, so `origin.licence` stays honestly
+  `none-stated` even though the user's verdict placed all four rows on the public track "with
+  attribution" — the attribution itself lives in each row's `origin.notes`.
+- One specimen added to the real-specimen corpus (`samples/corpus.jsonl` 265 → 266 rows) from the
+  specimen-acquisition loop's tenth scout cycle (`c10`): a Cambodian passport bio-page, attributed
+  to the Royal Embassy of Cambodia in Washington D.C. Unlike every other specimen in this corpus,
+  this is a real person's actual document rather than an official blank template -- admitted only
+  because every personally-identifying field, including the MRZ band itself, is fully redacted
+  (see `knowledge/SPECIMEN_SOURCES.md`-adjacent H5 revision in the specimen-loop plan, 2026-09-14).
+  Two related candidates from the same embassy page were *not* admitted: a K-Visa image whose
+  issue date, expiry date and visa number were left unredacted (still rejected), and an older
+  passport series that landed on the `samples/local/` track instead of this public one (user
+  verdict). `KHM` stays *No specimen yet* -- the redaction removes the MRZ entirely, so this adds
+  document-type depth without a coverage HIT. This cohort started its own branch rather than
+  reopening PR #286, which had already crossed the 5-specimen batch floor and had a re-bless in
+  flight. See `work/scouting/c10/packet-c10.md` for full review provenance.
+- **Cohort c12: six passport covers, the first rows of `samples/covers/`** -- Panama, Guatemala,
+  Honduras, Sri Lanka (2024 P series and the earlier N series) and Papua New Guinea, all from
+  Wikimedia Commons under CC-BY-SA, CC0 or public-domain terms quoted on the file pages
+  (`samples/corpus.jsonl` 266 -> 272 rows). The first cycle under scout prefix v3 and the first
+  judged by the `synthpass-screener` agent. Covers carry no MRZ and never enter the scored
+  denominator: they sit outside the default benchmark walk (ADR-0012 as amended), so no
+  `CORPUS_COVERAGE.md` status moves; the five codes' Docs column now reads `Passport (cover)`.
+- **Cohort c13: eighteen West and Central African passport covers in `samples/covers/`** --
+  Burundi, the Central African Republic, the Democratic Republic of the Congo, Eritrea, Gabon,
+  Benin (2018 and 2026 series), Cabo Verde (2012 and 2015), Chad, Côte d'Ivoire (2014 and 2018),
+  Eswatini, Burkina Faso (the 2018 ECOWAS-era book and the 2025 AES book), Cameroon, Ethiopia and
+  Guinea (`samples/corpus.jsonl` 272 -> 290 rows). Sixteen are Wikimedia Commons files under
+  CC-BY-SA, CC0 or public-domain terms quoted on the file pages; the Burkina Faso 2018 cover
+  (police.gov.bf) and the Cameroon cover (passcam.cm, the DGSN enrolment portal) carry no stated
+  licence and were kept public on the user's explicit call. The first three-worker scouting cycle
+  under pace v3. Covers carry no MRZ and never enter the scored denominator (ADR-0012 as amended),
+  so no `CORPUS_COVERAGE.md` status moves; the fourteen codes' Docs column now reads
+  `Passport (cover)`.
+- **Cohort c14: 10 passport covers in `samples/covers/`** -- Guinea-Bissau, Liberia, Libya, Mozambique, Rwanda, Sierra Leone, South Sudan, Togo, Tanzania and Uganda (`samples/corpus.jsonl` 290 -> 300 rows). 6 CC-BY-SA, 3 public-domain from Wikimedia Commons or an official host under their stated licence, 1 kept public on a none-stated licence. Covers carry no MRZ and never enter the scored denominator (ADR-0012 as amended), so no `CORPUS_COVERAGE.md` status moves; the 10 codes' Docs column now reads `Passport (cover)`.
+- Hand-transcribed ground-truth fixtures for the 23 real passport / ID specimens whose
+  printed MRZ lands in the real-corpus `checksum_failed` bucket (`samples/ocr_fixtures/`).
+  Each records the true printed MRZ zone read from the specimen scan, so an OCR misread can
+  be told apart from a specimen whose printed check digits are wrong by design. Seven of the
+  23 carry a checksum-valid MRZ (every `checksum_failed` on those is an OCR error); the other
+  16 are non-conforming `TEMPLATE` / `SPECIMEN` / `ÖRNEK` zones. `samples/corpus.jsonl` gains
+  `ground_truth_stem` and `expected_document_number` for all 23.
+- Two Nicaragua passport specimens (`P0_NIC_2001`, `P0_NIC_2015`) added to the real-specimen
+  corpus. Both read checksum-valid (`P<NIC` Td3), so NIC becomes a Tier-1 HIT in
+  `knowledge/CORPUS_COVERAGE.md` — one more of the previously-uncovered ISO/ICAO codes.
+  `samples/corpus.jsonl` grows 236 → 238 rows.
+- **Cover-only specimens are a labelled class** (ADR-0012). A cover or design rendering with no
+  data page -- the largest bucket of what the scout workers find -- is now collected instead of
+  dropped: filed in its document type's directory with the `cover` variant token next to
+  `no_mrz`, recorded as `Passport (cover)` in `CORPUS_COVERAGE.md`'s Docs column, never a
+  coverage claim, never a new verdict value. The screener agent and the packet note name it.
+- **Legal-acts portal hints for the scout** (`tools/legal_portals.json`, 70 codes). A code with a
+  known official gazette or consolidated-acts portal gets it in the worker's task next to the
+  country name; both gazette hits of the loop's first twelve cycles came from such portals.
+- **`synthpass export` — turn a synthetic corpus into a training dataset.** A new
+  `crates/synthpass-export` crate and CLI subcommand generate a deterministic `synthpass-gen`
+  corpus and write it as JSONL or a Hugging Face `datasets`-loadable directory, in the
+  DeepSeek-OCR / Unlimited-OCR convention fixed by
+  `knowledge/decisions/ADR-0007-dataset-export-format.md`: field boxes normalised to integer
+  0–1000 of the image, each block's box and content concatenated into an end-to-end
+  `ground_truth` string, `<page>` separating packed documents (`--pack-pages N`). Rows carry
+  the 100%-accurate-by-construction labels for all five MRZ formats plus the rendered PNGs and
+  a `manifest.json` that records the exact command to reproduce the export. `--format hf` also
+  writes `dataset_infos.json` and a dataset card — always to local disk, never a Hub push.
+  v1 is `--profile clean` only; COCO / YOLO are deferred (`knowledge/EXPORTS.md`).
+- **New license feature `export`.** `synthpass export` is gated on it — bulk dataset production
+  is a "higher-capacity generation" surface per `knowledge/BRANDING.md` §5, the same boundary
+  `batch` sits behind; a single `synthpass generate` stays free. `export` is in the Pro and
+  Enterprise tier presets. `SYNTHPASS_LICENSE_SKIP=1` bypasses it for local development.
+- **`synthpass-gen` renders Cyrillic-script identities.** Six issuing states (`RUS`, `SRB`,
+  `BGR`, `MKD`, `UKR`, `BLR`) now draw a native-script name and store its ICAO 9303 Part 3
+  §6 B transliteration — computed with that state's language via `mrz::transliterate_cyrillic`
+  — as the Latin `surname`/`given_names` the MRZ and the romanized VIZ line carry. The VIZ
+  paints the native Cyrillic name (PT Sans already covers the block); the MRZ stays clean
+  `[A-Z]` and round-trips checksum-valid. `Passport` and `Labels` gain
+  `surname_native`/`given_names_native` (`None` for Latin-script identities), the `generate`
+  sidecar JSON surfaces them, and `synthpass export` emits `surname_native`/`given_names_native`
+  blocks alongside the romanized ones. This is the round-trip that makes §6 B measurable.
+- **`mrz` transliterates Cyrillic national characters (Doc 9303 Part 3 §6 B).** `ИВАНОВ` now
+  emits into the MRZ name field as `IVANOV` rather than being silently dropped to fillers — the
+  same class of fix §6 A got for Latin (`MÜLLER`→`MUELLER`). New public
+  `mrz::transliterate_cyrillic(&str, CyrillicLanguage)` /
+  `transliterate_cyrillic_char(char, CyrillicLanguage, is_first)` and the `CyrillicLanguage`
+  enum (`Russian` default, `Belarusian`, `Bulgarian`, `Serbian`, `Ukrainian`, `Macedonian`).
+  Unlike §6 A's issuer-choice styles, §6 B has 12 language-conditional rows (`Ж` is `ZH` in
+  Russian but `Z` in Serbian; `Щ` is `SHCH` but `SHT` in Bulgarian) and five word-initial
+  Ukrainian rules, so it needs a language rather than a style. The emitters
+  (`format_td3`/`format_td2`/`format_td1`/`format_mrv_a`/`format_mrv_b` and
+  `encode_name_component`) apply §6 B's base (≈ Russian) column; a caller that knows the
+  language should run `transliterate_cyrillic` with the right `CyrillicLanguage` before
+  emitting. §6 B carries no worked example in Doc 9303, so its 48 rows are pinned by
+  table-integrity and conditional-set checks — see `knowledge/docs9303/CONFORMANCE_BASIS.md`.
+  Arabic (§6 C) is still not implemented.
+- **`mrz` docs: every public function now carries a runnable example.** The 15 that had none
+  — `parse_td3`, all five `parse_*_with` two-digit-year-pivot variants, `transliterate_char`,
+  `transliterate_cyrillic_char`, `transliterations`, `encode_name_component`,
+  `expand_date_with_pivot`, `class_of`, `substitution_candidates`, `solve_substitution`,
+  `width_candidates` — gained a compiled doctest, plus one on the `CyrillicLanguage` enum. No
+  API change; docs.rs "items with examples" goes 25/40 → 40/40.
+- **`SYNTHPASS_OCR_DUMP_VARIANTS=<dir>`** — a diagnostic env var (unset by default,
+  a no-op then) that writes every preprocessed image `synthpass-ocr` feeds the
+  recognizer — the general full-page pass and each retry variant — to `<dir>` as a
+  PNG. Added for ADR-0008 chunk 1C cell (c): it lets a different recognizer be run
+  offline over the exact bytes `ocrs` saw. New `cargo run -p synthpass-ocr --example
+  dump_variants` drives it over a chosen document list, and `tests/web/recognize-crops.{html,mjs}`
+  runs the vendored tesseract.js OCR-B model over the dumped crops. The measurement:
+  [`ocr-crop-recognizer-2026-09-10.md`](knowledge/benchmarks/ocr-crop-recognizer-2026-09-10.md).
+- **`SYNTHPASS_OCR_ORDER=default|band-first|control`** — a same-binary A/B knob for
+  where the untreated `plain_band` crop sits in the native retry chain, added for
+  ADR-0008 chunk 1C. `default` (the shipped value) is unchanged production
+  behaviour. The measurement it enabled:
+  [`ocr-order-band-first-2026-09-10.md`](knowledge/benchmarks/ocr-order-band-first-2026-09-10.md)
+  — `plain_band` tried first recovers nothing for `ocrs` on its own merit, confirming
+  the long-standing "`ocrs` gains nothing from an untreated pass" assertion and
+  redirecting the OCR-gap attribution at the recognizer.
+- **Visual, one-click packet review artifact.** `tools/build_review_artifact.py` turns a
+  structured `packet-cNN.json` (the JSON twin of a Markdown specimen packet) into a single
+  self-contained HTML file: one card per candidate with its staged image embedded inline
+  (base64, fully portable, no relative-path dependency) and Public/Local/Drop buttons. Saving
+  writes a `verdicts.json` (via the browser's native file-save where supported, falling back to a
+  download); reopening the page, or regenerating it against an updated packet, carries prior
+  verdicts forward so a review session can be amended without losing earlier decisions.
+  `tools/apply_verdicts.py` syncs a saved `verdicts.json` back into the packet's own Verdict
+  column, so the plan's existing `packet-cNN.md` stays the single record P-APPLY-VERDICTS reads —
+  this is a nicer front door onto it, not a new source of truth. Neither tool decides
+  public/local/drop or a licence class, and neither writes a holder value anywhere.
+- **`provider-bench --real-specimens --include-private`** opts the gitignored
+  `samples/private/` specimens back into a real-specimen run — they carry damage
+  classes (a covered MRZ line, kiosk glare, a missing character) the public corpus
+  doesn't have. Off by default, rejected without `--real-specimens`, and never set
+  by CI: a private-track report names real identity documents. Ground truth sits
+  beside each image as `private/<stem>.json` in a richer nested schema, projected
+  onto the flat `Extraction` the accuracy loop reads. Deliberately a
+  `provider-bench` flag only, not a `run-bench.ps1` track — that script commits and
+  pushes its results to the `bench-data` branch, which a private-derived run must
+  never do.
+- **CI gates every extraction-path PR against a real-specimen Tier-1 no-regression baseline.**
+  A new `real-specimen-gate.yml` workflow runs `provider-bench --real-specimens --mrz-only`
+  (the deterministic `mrz` provider only — the ~1-minute pass, no LLM, no GGUF) over the whole
+  `samples/` corpus and fails the build if the Tier-1 HIT count drops or any miss bucket
+  (`checksum_failed`, `no_mrz_found`, …) grows past the committed, CI-measured baseline in
+  `knowledge/benchmarks/real-specimen-mrz-baseline.json`. Path-filtered to extraction code and
+  the corpus; advisory at first. Extends the `m4-hit-rate` synthetic-TD3 gate to the real
+  corpus every recent Tier-1 change actually moved. See `knowledge/benchmarks/README.md` for
+  the design and the baseline re-bless flow.
+- **`provider-bench` gains `--mrz-only`, `--write-baseline PATH`, and `--assert-baseline PATH`.**
+  `--mrz-only` registers only the deterministic reader, skipping the Tier-2 LLM provider and
+  its model entirely — useful for any quick local Tier-1 measurement, not just CI.
+  `--write-baseline` emits the `mrz` provider's HIT count + miss-kind histogram as JSON;
+  `--assert-baseline` compares against one and exits non-zero on a regression (a missing path
+  is written and passes, for first-run bootstrap).
+- **`tools/rebless.py`** takes a cohort branch from "PR open, images pushed" to "ready for review"
+  in one command: dispatches `real-specimen-gate.yml -f mode=write-baseline`, waits for it,
+  downloads the artifacts, classifies the diff against the committed baseline (`identical` /
+  `non-scored delta` / `scored delta`), installs the new baseline, and for the first two classes
+  mechanically rewrites the numbers this loop has hand-edited every cohort PR so far -- README.md's
+  gap sentence and corpus-wide rate, `knowledge/benchmarks/README.md`'s live block, and a templated
+  dated `## Weak-spot findings` entry -- before committing, pushing, dispatching the `mode=assert`
+  run, and marking the PR ready. A `scored delta` (`tier1_hits` or a scored miss bucket moved)
+  always stops after installing the baseline and printing the diff table: that class needs prose
+  from `synthpass-analyst`, not a template. Two independent safety gates, same shape as
+  `tools/apply_cohort.py`: `--dry-run` performs only the worktree/branch check and prints the rest;
+  `--confirm` separately gates every dispatch, commit, push, `gh pr ready` and PR-body PATCH.
+  Reuses `apply_cohort.py`'s `gh`/git-bash helpers by import. Standard library only; see
+  `tools/test_rebless.py`.
+- **`scripts/check-headline-numbers.sh`** now also checks `knowledge/benchmarks/README.md`'s own
+  "Current headline numbers" live block against the committed baseline -- both rates, the outcomes
+  heading's document count, all six outcome-table bucket counts, and the "N of the `<documents>`
+  specimens cannot produce" sentence. That block is the document README.md and ROADMAP.md only
+  summarize, and it went stale on cohort c12 with nothing catching it until a hand check.
+- **Template-trait registry v0.** `samples/template_traits.jsonl` (55 rows) records, per
+  hand-verified specimen, the MRZ *shape* its code/document-type/series produces — issuing state,
+  document code, TD format, a positional document-number shape (`A9999999`), whether the
+  optional-data element is used, and whether the printed check digits validate — never a name,
+  number, or date. Generated by `cargo run -p synthpass-ocr --example template_traits` from
+  `samples/corpus.jsonl` joined with the hand-verified `samples/ocr_fixtures/*.json` labels, and
+  checked by an independent re-derivation in `crates/synthpass-bench/tests/template_traits.rs`.
+  Nothing reads this file yet — it is a fact base for the specimen acquisition loop's later work,
+  not a behaviour change; a first reader needs its own ADR. 4 of the 59 fixtures were left out
+  because their `mrz_line` carries a genuine hand-transcription defect (a shifted or inserted
+  character) rather than a plain trailing-filler miscount — see the generator's own module doc
+  comment for which, and why.
+- **The release process is enforced rather than remembered.** Cutting a release was entirely
+  manual — a hand-edited version, a hand-run assembler, a hand-made tag — and it had gone wrong
+  in every way it could. All fifteen release tags sit on a history sharing **no common ancestor
+  with `main`** (`git merge-base v1.4.0 HEAD` exits 1; `git describe` fails outright), so
+  `git log v1.3.0..v1.4.0` is fatal and GitHub's tag compare is meaningless. Fifteen of sixteen
+  tags have no GitHub Release, and `crates/mrz` shipped nine versions with no tag at all.
+
+  **`scripts/next-version.sh`** derives the next version from the pending changelog fragments
+  rather than asking a human to recall the semver rules at the moment they are least likely to:
+  breaking → major, `added` → minor, otherwise patch — except for `mrz`, where pre-1.0 makes the
+  *minor* slot the breaking slot, so a breaking change moves 0.7.1 → 0.8.0 rather than 0.7.2.
+  Fragments mark breaking with a trailing `!` (`api-rename.changed!.md`), which is the whole
+  discriminator.
+
+  **`scripts/check-changelog.sh`** is the new `changelog` CI job. It fails a PR that touches
+  `crates/` without a fragment (escape hatch: a `skip-changelog` label), one that touches
+  `crates/mrz/` without an `mrz`-scoped fragment, one whose fragment is malformed, and — the
+  point — one whose version bump disagrees with what its fragments imply. It found four
+  existing fragments that did not open with a `-` bullet and would have been spliced into
+  `CHANGELOG.md` as dangling paragraphs under someone else's heading; those are repaired here.
+
+  **`.github/workflows/release.yml`** watches for a version change on `main` and creates the
+  annotated tag on the commit that made it — which is on `main` by construction, so the
+  orphaned-tag failure cannot recur. It opens the GitHub Release with that version's CHANGELOG
+  section as the body. Publishing `mrz` to crates.io is a separate job behind a manually
+  approved `crates-io` environment, because a publish cannot be taken back.
+
+- **`crates/mrz` has its own changelog and fragment directory.** `changelog.d/mrz/` assembles
+  into `crates/mrz/CHANGELOG.md` via `scripts/assemble-changelog.sh --scope mrz`. A library
+  consumer reading docs.rs should not have to filter application changes out of a library's
+  changelog. Pre-0.7.1 history stays in the root `CHANGELOG.md`, where it was recorded, and the
+  new file says so rather than pretending to be complete.
+
+- **`RELEASING.md`** documents both release lines, why the version is derived rather than
+  chosen, and why nobody creates a tag by hand any more. `scripts/repair-tags.sh` is the
+  one-shot repair for the historical tags: it maps each to its **tree-identical** commit on
+  `main` (exact for 14 of 15; `v1.3.0` falls back to the commit that introduced
+  `version = "1.3.0"`, reported explicitly) and backfills the missing GitHub Releases. It is a
+  dry run unless given `--apply`.
+- **`tools/scout_cycle.py` and the `synthpass-screener` subagent.** One command now runs the
+  mechanical half of a specimen-scouting cycle end to end: `suggest` picks uncovered codes from
+  `CORPUS_COVERAGE.md` minus what `STATE.md` already records, `task` writes the worker task from
+  the byte-stable prefix (`tools/scout_prefix.txt`, v2) plus full country names and held series,
+  `scout` runs one `dsh` worker per `--slice` in its own worktree in parallel and records wall
+  time, tokens, faults and candidates, `screen` calls `screen_candidates.py` and writes the
+  packet's JSON twin, `review` renders the HTML review page. The judgement pass between `screen`
+  and `review` (host check, eyes on every image for a real person, the proposed destination and
+  licence class) is now a project subagent, `synthpass-screener`, whose write scope a hook limits
+  to `work/scouting/`; every verdict and every merge stays with the user, unchanged.
+- **`tools/scout_cycle.py suggest --plan 3x6`** prints ready `--slice` arguments for a cycle in
+  priority order: codes with a legal-acts portal first, everything else in `countries.rs` order,
+  Pacific and Caribbean micro-states with almost no web-published document material last, dealt
+  round-robin so every worker gets a mix. Pace v3 of the specimen loop: three workers per cycle.
+- **PDF lane in `tools/screen_candidates.py`.** A candidate whose download is a PDF (a gazette
+  annex, a regulation, a guide -- 12 of the loop's first 66 none-found reports were exactly
+  these) is no longer an off-scope reject: its pages are scanned for the specimen words the page
+  text is scanned for, the images on those pages are extracted at their original bytes (a page
+  render only when a page embeds none), and each image is screened as its own candidate with
+  `#page=N` on its URL and a `pdf_source` record. PyMuPDF is the one non-standard-library
+  dependency and is imported only by this lane. `tools/scout_cycle.py add-candidates` appends
+  candidates the maintainer's session found itself (a retry of a worker's blocked pages) to a
+  cycle before screening; the retry never runs from repository code.
+- **Automated screen for agent-found specimen candidates.** `tools/screen_candidates.py`
+  mechanically re-derives each candidate a scouting worker reports before any human review:
+  re-fetches the page and image itself, confirms the image is actually linked from the page,
+  checks host and byte-hash denylists/duplicates against the ledger and `samples/corpus.jsonl`,
+  runs `check_sample` (failing closed to `vendor` if its `VENDOR` line is missing), and writes a
+  survivors-only Markdown packet with the provenance/licence/verdict columns left blank for a
+  human. It never decides public/local/drop, never decides a licence, and never writes a holder
+  value to any output file. Implements the "Automated screen" step in
+  `knowledge/SPECIMEN_SOURCES.md`.
+- **`provider-bench --real-specimens --include-local`** opts `samples/local/` back into a
+  real-specimen run. That directory holds specimens usable locally whose source does not allow
+  redistribution: it is gitignored, never mirrored to `samples-data`, and left out of the default
+  walk, so the committed baseline keeps measuring the public corpus only. Off by default and
+  rejected without `--real-specimens`. `synthpass_bench::load_real_specimens` now takes an
+  `OptInTracks { private, local }` in place of its `include_private: bool`.
+- **`samples/corpus.jsonl` rows carry `origin`** — the fetched URL, the publishing page, a licence
+  class, the fetch date and what found the image. Rows that predate it read `unrecorded`, and the
+  manifest validator rejects an origin recorded only in part. The same validator now refuses an
+  image recorded twice under two names; the five such pairs already in the corpus are pinned as
+  known until a data PR removes the stale copies.
+
+### Changed
+- **`tools/apply_cohort.py` reaches a no-hand-edits cohort (T11).** The `--confirm` commit now
+  stages an explicit list of every path the run itself wrote -- images, `samples/corpus.jsonl`,
+  the local-track manifest, `knowledge/CORPUS_COVERAGE.md`, the changelog fragment -- instead of
+  `git add -A samples changelog.d`. The release examples (`corpus_manifest`, `check_sample`) are
+  always rebuilt rather than only a missing one, since cargo's incremental no-op is fast and a
+  stale binary silently produced zero cover rows on cohort c12. A cohort row whose target is
+  under `samples/covers/` now gets real `knowledge/CORPUS_COVERAGE.md` Docs/Note prose written
+  directly (never a Status move -- ADR-0012), and a covers-only cohort gets a real changelog
+  fragment instead of a `<<< fill in >>>` draft; both fragment names are unified on
+  `corpus-cohort-cNN.added.md`, the name already used on main (the tool previously wrote
+  `corpus-cNN.added.md`, which never matched). `--reuse-existing --confirm` now PATCHes the
+  existing PR's title and body via `gh api -X PATCH` (`gh pr edit` lacks the `read:org` scope on
+  this machine). `scripts/check-doc-links.sh` and `scripts/check-changelog.sh` now run under Git
+  for Windows' `bash.exe`, resolved from wherever `git` itself is found on PATH, instead of
+  silently resolving to WSL bash and failing on a `D:\` path.
+- **Scout prefix v3.1** (`tools/scout_prefix.txt`), after cycle c13 returned several non-document
+  photos and mislabelled cover claims: the candidate image must show the document itself (a
+  cover, a data page, a card face, a visa sticker), not a flag, building, official, application
+  form or screenshot; a cover is reported only as a fallback, when no data page was found for
+  that code, and at most one per code; and `"side"` must report what the worker actually saw in
+  the image rather than a page title's claim, with `"side":"unknown"` as the honest answer when
+  it was inferred from text. `knowledge/SPECIMEN_SOURCES.md`'s signal section and the
+  `synthpass-screener` agent carry the same rules.
+- **`tools/host_denylist.json`** (parallel in shape to `tools/legal_portals.json`): hosts that
+  are not an issuing authority and surfaced non-document images in a screening cycle.
+  `tools/screen_candidates.py` auto-rejects a candidate on one of these hosts with reason
+  `denylisted-host`, ledgered like any other auto-reject. Seeded with the two hosts cycle c13's
+  screener report named: `guineaecuatorialpress.com` (a press agency) and `digitalinvea.com` (a
+  third-party vendor).
+- `provider-bench --real-specimens` sub-classifies a `checksum_failed` miss. When the specimen
+  carries a hand-transcribed `mrz_line` ground-truth label and the run's OCR recovered that
+  exact zone, the miss is reported as `checksum_failed_specimen` — the printed document's own
+  check digits are non-conforming, not an OCR error. `MissReason::ChecksumFailed` gains a
+  `specimen_nonconforming` flag; `--dump-ocr` rows gain `ground_truth_mrz` and `zone_mismatch`
+  (the character-mismatch count against the transcription). Unlabelled specimens and the
+  synthetic corpus are unaffected.
+- `provider-bench --real-specimens` classifies a specimen whose MRZ is redacted in the image
+  (`*_redacted_mrz`) as its own miss kind, `redacted_mrz`, ahead of the checksum gate instead
+  of counting it as `checksum_failed` (or, in one case, a Tier-1 HIT over the redacted zone).
+  The redaction bar carries no recoverable zone, so these specimens are also excluded from the
+  Tier-1 hit-rate denominator — the same treatment an unlabelled document already gets for
+  field accuracy. Measured on the 238-specimen real corpus: 9 specimens move to `redacted_mrz`,
+  `checksum_failed` drops 32 → 24, Tier-1 hit rate 50.4 % → 52.0 %. `MissReason::Redacted` is
+  new (`synthpass_bench`).
+- **Real-specimen benchmark provenance is now enforced across branches.** CI audits the exact `samples_data_sha` pinned by the baseline before materializing images, while `tools/rebless.py` passes the exact DATA commit for a cohort write-baseline run. Synthetic bench-data collection remains independent when no real track is selected.
+- **`Argentina_Passport_Specimen_P0_ARG_2026_mrz` (and its `_mrz_blur` variant) are
+  now scored off the Tier-1 denominator** as `checksum_failed_specimen`. Their
+  printed MRZ is non-conforming by construction — sex `M` where the VIZ says `F`,
+  wrong dates, a document-number check digit that does not compute — so a
+  byte-perfect read still fails, the same as the 16 `TEMPLATE`/all-zeros specimens
+  already excluded. Each gained a reviewed `samples/ocr_fixtures/` fixture. The
+  headline hit rate becomes **118 / 142 = 83.1%**: the count drops by one because
+  `ocrs` had been misreading the fake printed zone into a *different*,
+  checksum-valid string, counted as a hit only because the document had no ground
+  truth to contradict it — the same failure the 2026-09-09 denominator correction
+  named for MRZ-less fronts.
+  [`denominator-bucket-a-2026-09-10.md`](knowledge/benchmarks/denominator-bucket-a-2026-09-10.md).
+- **The commercial model is MIT software plus paid services, not a feature-gated tier.**
+  `BRANDING.md` §5 described a Community/Professional/Enterprise split whose boundary was
+  "enforced through the existing offline Ed25519 licensing mechanism". That does not survive
+  contact with this repository: the licence check is bypassable by recompiling (its own threat
+  model in `ARCHITECTURE.md` §6 says it is metering, not DRM), the bypass is documented in the
+  README quickstart as `SYNTHPASS_LICENSE_SKIP=1` because local development needs it, and
+  `crates/synthpass-license/pubkey.b64` is still the placeholder its own comment says to replace
+  before issuing anything real — so no licence has ever been issuable against a shipped binary.
+
+  Gating a feature people can un-gate in an afternoon buys no revenue and costs the project its
+  central claim: that you can read every line that touches your documents. The rewrite names
+  what is actually sellable — labelled corpora generated to a customer's document mix,
+  independent benchmarking and certification, air-gapped integration, custom-trained models,
+  and support — and why none of it can be had by recompiling. `synthpass-license` stays, as
+  honest capacity metering and entitlement records rather than as a wall.
+
+  `VISION.md` §3, `knowledge/README.md`'s index entry and `ROADMAP.md`'s final M6 item follow.
+  The sequencing consequence is the point: the generation and benchmarking side is sellable
+  today at the current extraction accuracy, so it does not wait on the detection track.
+- **Four real specimens that can never yield a hit left the Tier-1 denominator.** A
+  [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md)
+  and the reclassification that followed found four of the seven `no_mrz_found`
+  documents unreadable by construction: `Sweden_ID_Specimen_2027` is a card *front*
+  (its `_mrz` tag was a human error) and the Netherlands driving licence prints a
+  line that is not ICAO 9303 — both renamed `_no_mrz`; Egypt 2012's zone is
+  pixel-masked by the publisher — renamed `_redacted_mrz`; and Argentina 2021
+  child's printed zone fails four of its five check digits — given a hand-verified
+  fixture, so it scores `checksum_failed_specimen`. The CI-written baseline moves
+  `scored` 157 → 153 and `no_mrz_found` 7 → 3 with the HIT count unchanged, so the
+  headline becomes **143 / 153 = 93.5%**, and `checksum_failed` (7) is now the
+  larger scored miss. The Sweden coverage row, which said "No specimen yet", now
+  records four specimens and two HITs.
+- **Two passport pages relabelled `_no_mrz` -> `_redacted_mrz`** -- the United Arab Emirates 2018
+  page (zone under a full-width black bar) and the Vietnam 2022 page (two printed MRZ lines, only
+  the data blurred), found by the T15 cover-like report. As labelled, a checksum-valid read on the
+  Vietnam page would have been a `false_positive_mrz` build failure; under `_redacted_mrz` it is
+  absorbed by the redacted rung. The pre-migration baseline measured 51 `no_mrz_expected` and 37 `redacted_mrz` specimens, both outside the scored denominator. The relabel is expected to produce 49 and 39 respectively; those post-relabel bucket counts remain unmeasured until an actual benchmark run and baseline re-bless. `samples/README.md` now spells out the
+  convention: `_redacted_mrz` for a zone that is present but blacked out or blurred,
+  `_redacted_no_mrz` for a redaction that removed the zone entirely, plain `_no_mrz` for a document
+  with no zone by design.
+- **Cover-only specimens move to their own `samples/covers/` directory**, outside the default
+  `provider-bench --real-specimens` walk — opt in with `--include-covers` (rejected without
+  `--real-specimens`, and refused together with `--write-baseline`/`--assert-baseline` the same
+  way `--include-local` is). A cover never carries an MRZ, so it never enters the scored
+  denominator; walking a growing covers track on every PR would cost the real-specimen gate real
+  OCR minutes for zero accuracy signal. The `cover` filename token is unchanged — it still says
+  what an image is — but it no longer decides where the file lives. `synthpass_bench` gains
+  `SpecimenClass::Cover` and `OptInTracks::covers`; `--format cover` selects the track when
+  `--include-covers` is also set. This amends [`ADR-0012`](knowledge/decisions/ADR-0012-cover-only-specimens-are-a-labelled-class.md),
+  which originally rejected a separate directory.
+- **Documentation brought in line with the code and the committed baseline before v1.5.0.**
+  README and ROADMAP now call the real-specimen gate advisory (it is not a required check), record
+  the M6 MRZ-formats criterion as done (#311, `ADR-0011`'s amendment), and name the roadmap
+  `M1–M8`. Licensing prose (`ARCHITECTURE.md` §6/§8, `LICENSING.md`, `VISION.md` §2, the
+  `synthpass-license` rustdoc) matches `BRANDING.md` §5 — entitlement and capacity metering, never a
+  feature gate — and states that no production license can be issued while the verifying key is a
+  placeholder. Stale figures are corrected or labelled: the coverage badge (75/238), the baseline
+  date, Tier-2 parity in `prompts/README.md`, the M4-era `~55%`/`~42%`, and "100% in v1.1.0" (6/6).
+  The 140 / 154 headline now cites the CI run that measured it (`35120396453`, commit `2f14e00`)
+  with a dated weak-spot entry, and six superseded dated reports point to their successor.
+  `CONTRIBUTING.md` links to `ARCHITECTURE.md` §13.1 instead of keeping its own crate list. Five
+  broken rustdoc intra-doc links, a dead `geometry.rs` path and three stale sample paths are fixed.
+- **Three new drift guards.** CI builds `cargo doc --workspace` with
+  `-D rustdoc::broken_intra_doc_links`. `scripts/check-doc-links.sh` gains check 5: every
+  `crates/`, `scripts/`, `tools/` or `.github/` file path cited anywhere must exist (one
+  `git grep` pass, crate-relative paths resolved). `scripts/check-headline-numbers.sh` gains
+  checks 11–13: the baseline's `measured_date` against the dates cited beside it, the README
+  coverage badge against `CORPUS_COVERAGE.md`, and a denylist of retired figures unless labelled
+  `M4-era`.
+- **`README.md` now states the measured Tier-1 hit rate, and CI keeps it that way.** The
+  Accuracy section advertised `~42–46%` on real specimens against a CI-measured **119/229 =
+  52.0%**, and named `checksum_failed` (66) as the largest miss when `no_mrz_found` (85) had
+  overtaken it 3.5:1 — a reader was handed both a stale number and the wrong bottleneck. The
+  cause was structural: the same figures were restated in four documents with nothing keeping
+  them in step.
+
+  `knowledge/benchmarks/README.md` gains a **Current headline numbers** section and is now the
+  single source for every measured figure; every other document states at most one and links
+  there. New `scripts/check-headline-numbers.sh` reads the CI-written
+  `real-specimen-mrz-baseline.json` and fails the build if `README.md` disagrees — including if
+  it names the wrong dominant miss, which is the specific way this went wrong. Wired into
+  `ci.yml` beside `check-doc-links.sh`.
+
+- **`ADR-0008` succeeds the closed sequence-completeness track with MRZ detection.** M6's stated
+  lead item finished, and closing it inverted the miss distribution: `mrz` 0.7.0 stopped
+  accepting structurally implausible readings, reclassifying ~38 phantom `checksum_failed` into
+  the `no_mrz_found` they had always been, with no Tier-1 HIT movement. Detection, not parsing,
+  is now the bottleneck at 85 of 229 scored documents. The ADR mandates a *measurement* as its
+  first chunk — explain why the browser demo's tesseract.js out-reads the native `ocrs`/`rten`
+  pipeline (64.2% vs 59.5% on the same corpus) before touching a detector. `ROADMAP.md`'s M6
+  table row, section body, suggested order and Measured-accuracy section all follow.
+
+- **Docs de-drifted against v1.4.0.** `SECURITY.md`'s supported-version table (1.3.x → 1.4.x);
+  `ARCHITECTURE.md`'s title no longer reads as a v1.2.0 document while citing 2026-09
+  measurements; stale `v1.3.0` citations in `ROADMAP.md`, `hardware/README.md` and
+  `vision/README.md`; `BRANDING.md`'s repository rename recorded as done rather than intended;
+  `EXPORTS.md`'s status corrected from "pending implementation" to JSONL/HF shipped; the corpus
+  badge 57 → 58 countries; `VIZ_TIER2_DESIGN.md`'s "no code has been written" banner, false
+  since its holdout mode shipped; and `V2-DESIGN.md`'s "v2.0.0" disambiguated as the schema
+  generation rather than a workspace release that is not planned.
+
+- **`DOCUMENT_INTELLIGENCE_ENGINE.md` archived; `MRZ_SEQUENCE_COMPLETENESS.md` deliberately not.**
+  The first is superseded design conversation whose duplicate was already archived and whose
+  argument M7 shipped. The second is *finished*, not superseded — seventeen source files across
+  `crates/mrz`, `crates/synthpass-bench` and `crates/synthpass-die` cite it by path as the
+  rationale of record, so it stays in `knowledge/` with its status and its now-historical
+  numbers marked as such. `knowledge/README.md` also indexes four root documents it had been
+  silently omitting.
+
+- **`technical_debt.md` records three debts the code carries and the docs did not.** The
+  licensing public key is still the documented placeholder, so no real license can be issued
+  against a shipped binary; the machine fingerprint is real only on Linux and binds nothing on
+  Windows; and `synthpass-ocr`'s 18 `unsafe` blocks — the workspace's largest concentration —
+  sit on the untrusted-image ingest path the fuzz targets exist to defend.
+- **`provider-bench --dump-ocr` now covers `no_mrz_found` misses too**, not only
+  `checksum_failed`. Since the 2026-09-09 denominator correction, `no_mrz_found`
+  means "an MRZ was expected and none was found" — a genuine detection failure —
+  because the MRZ-less documents that used to pollute it are scored out as
+  `no_mrz_expected` first. Those rows carry the MRZ band score and raw OCR text
+  (no recovered zone: nothing parsed), which is the localization-vs-recognition
+  evidence ADR-0008 chunk 1C needs. Each row gains a `miss_reason` field, and the
+  dump file is renamed `provider-bench-miss-ocr-dump.jsonl` (was
+  `provider-bench-checksum-failed-dump.jsonl`).
+- **Duplicate benchmark image assets removed from the default corpus walk** -- the Canada 2023, China 2012, Slovakia 2014, UAE 2011, and Serbia passport byte-duplicate paths were reconciled while preserving reviewed fixture evidence and historical provenance. The published `145/159` scored and `145/266` corpus-wide figures are historical measurements of the pre-migration 266-asset population and remain preserved as evidence. Accuracy for the migrated population remains unmeasured until an actual benchmark run and baseline re-bless; the asset count does not assert a unique physical-document count.
+- **The three ICAO field lists are pinned at compile time.** `CoreField::as_str` is now a
+  `const fn`, and `synthpass-bench` and `synthpass-llm` each carry a `const` assertion against
+  `CoreField::ALL`: the benchmark's `COMPARED_FIELDS` must match it name for name, and the Tier-2
+  prompt's field list may differ from it only through two documented exceptions (`mrz_line` is
+  prompt-only, `personal_number` is never prompted). Adding an ICAO field to one list and not the
+  others is a build error instead of a silent gap. No runtime behaviour changes.
+- **M6's MRZ-format-as-providers criterion clarified and tested.** `MrzReader`
+  (`synthpass-die`, provider id `mrz`) already read all five ICAO 9303 MRZ formats — TD1, TD2,
+  TD3, MRV-A and MRV-B — through `mrz::find_and_parse`; this was previously untested at the
+  catalog level and undocumented on the type. Added a test proving a `ProviderCatalog` holding
+  only `MrzReader`, looked up the same way `synthpass-pipeline`'s Tier-1 stage does
+  (`find_reader(CostClass::Free, |c| c.deterministic)`), reads all five formats correctly, plus
+  an OCR-free equivalence test in `synthpass-bench` confirming the catalog-routed read agrees
+  with a direct `mrz::find_and_parse` call on format, checksum validity and document number.
+  `MrzReader`'s rustdoc now states this explicitly. No behaviour change.
+- **Per-format synthetic rates re-measured through the provider.** `benchmarks/README.md`'s
+  synthetic row now reads 377 / 500 = 75.4% (TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87%),
+  sourced to `provider-bench --mrz-only --document-type <fmt>`; the previous row mixed stale and
+  30-document figures. `README.md`'s passport trend chart is now captioned as real specimens,
+  which is what that track scores.
+- **ADR-0008's mandated OCR-stack measurement is complete.** Its second amendment
+  records the result: the browser-vs-native MRZ gap is **native page-orientation
+  handling** (`choose_rotation` turns the page 90° before OCR on the 11
+  detection-failure documents), not the OCR-B recognizer, the band search, retry
+  ordering, or — as a first-order effect — scale. Full attribution answering
+  `Tesseract_OCR_studies.md`'s nine deliverables:
+  [`ocr-stack-gap-attribution-2026-09-10.md`](knowledge/benchmarks/ocr-stack-gap-attribution-2026-09-10.md).
+  The 1B writeup carries a correction note (`plain_band` *is* called natively; no
+  PSM is set on either side).
+- **`provider-bench --dump-ocr` dumps the full pre-parse OCR text for real-specimen
+  `checksum_failed` misses.** It already printed the recovered MRZ zone and the failing check
+  digit(s); it now also prints the complete OCR text the provider consumed and the MRZ band
+  score, and writes one JSON row per miss to
+  `artifacts/provider-bench-checksum-failed-dump.jsonl` so the population can be analysed from
+  a file. This is the real-specimen equivalent of `synthpass-bench --dump-ocr`, and the input
+  to the `checksum_failed` root-cause pass (`knowledge/benchmarks/README.md`, `ROADMAP.md`).
+- **M6's priority order corrected (`knowledge/decisions/ADR-0006-m6-accuracy-first.md`).** M6
+  now leads with Tier-1 real-document accuracy (MRZ sequence completeness) and format/provider
+  completeness; declarative layout plugins, dataset exports, the air-gapped guide and the Pro
+  beta are sequenced behind it. A reframe, not a split — M6 stays one milestone. The milestone
+  table, `## Current state`, `## Open backlog` and `knowledge/VISION.md`'s long arc are updated
+  to match.
+- **Scout prefix v3** (`tools/scout_prefix.txt`, plan §8). Three scope changes learned from
+  twelve cycles: an image the issuing authority publishes on an allowed host as an illustration
+  of its own document is now reported even when the page says nothing about specimens
+  (`specimen_signal: official-host-only`; the screen and the reviewer confirm the signal on the
+  image, the real-person check applies in full); a PDF linked from an opened page may be
+  reported unopened (`format: pdf`) for the screen to extract; and pages on allowed hosts that
+  would not load are listed as `BLOCKED:` lines, which `tools/scout_cycle.py` collects into
+  `blocked-cNN.jsonl` for a session-side retry. `knowledge/SPECIMEN_SOURCES.md`'s signal
+  section and the `synthpass-screener` agent carry the same rule.
+- **A page the tool cannot fetch can now be handed to it (`--page-html-dir`).** Official hosts
+  that answer `tools/screen_candidates.py`'s plain `urllib` request with 403/503, an anti-bot
+  interstitial or a JavaScript-only shell used to lose the candidate at the linked-from-page
+  check. `tools/scout_cycle.py blocked --cycle cNN` now lists those URLs grouped by cause
+  (`--to-fetch` prints just the page URLs); the maintainer's session fetches them by its own
+  means -- never repository code -- and drops the HTML into `work/scouting/cNN/pages/` as a
+  `pages.jsonl` index plus one file per page named by `page_html_filename(page_url)`. `screen`
+  picks that directory up automatically, the screened record then reads
+  `page_source: "session-fetched"` with its `page_fetched_at`, and the packet's Note column says
+  so. The image itself is still fetched by the tool, so a candidate whose image is also blocked
+  stays blocked.
+- **`tools/scout_cycle.py` no longer loses a parallel cycle's work.** Worker worktrees are
+  created and removed sequentially in the main thread (three parallel creations raced on
+  `.git/config` and killed w1 on cycle c14, with one retry after 2 s if the lock is held anyway),
+  and a worker that raises now becomes an empty result with a fault line instead of propagating:
+  the cycle is recorded with whatever finished, the command exits non-zero and prints the
+  `--slice` to rerun. A rerun merges -- candidates by `(image_url, page_url)`, blocked URLs by
+  url, and the Cycles row's codes/scouted/tokens cells additively -- rather than overwriting the
+  workers that did finish.
+- **A cover-only cohort is remembered, so its codes are not re-scouted at full priority.**
+  `tools/apply_cohort.py` now writes a `cover only, data page still wanted (cNN): <codes>` line
+  into `work/scouting/STATE.md` whenever it places a row under `covers/` (a cover never moves
+  `CORPUS_COVERAGE.md`'s Status -- ADR-0012 -- so nothing else recorded it, and `suggest`
+  re-proposed all fourteen cycle-c13 codes for c14). `suggest` keeps such a code in the list and
+  ranks it in its own tier: after every fresh code, before the low-web-presence micro-states.
+- **`tools/apply_cohort.py --confirm` commits again, and `tools/rebless.py` stops flooding the
+  log.** The commit stages only the tracked text a run wrote (`samples/corpus.jsonl`,
+  `knowledge/CORPUS_COVERAGE.md`, the changelog fragment); the placed images and everything under
+  `samples/local/` are not tracked on main -- they reach `samples-data` through
+  `scripts/sync-samples.ps1` -- and naming one of them failed the whole staging step. The CI wait
+  in `rebless.py` runs at `--interval 60` with its progress output discarded, printing one line
+  before and one after instead of the 33,000 a single cohort's wait left behind.
+- **Scout prefix v3.2** (`tools/scout_prefix.txt`), after cycles c13 and c14 returned 28 covers
+  and no data page: the worker self-excludes an image only when the source itself says it is a
+  real individual's document, reports an image that may carry a photograph with `"h5_check":true`
+  instead of dropping it (the screener, who opens the image, makes the H5 call -- such rows are
+  noted `h5 check` in the packet and get the field-by-field pass first), and treats a specimen's
+  placeholder identity as part of the specimen rather than a person. A private upload of a real
+  person's document still never enters, redacted or not. An intergovernmental organisation's own
+  page about a harmonised document its member states issue (the EAC e-passport on `eac.int`, the
+  ECOWAS passport on `ecowas.int`) is now an allowed host, destination public, `origin.licence`
+  `gov-published`, attributed to the organisation. `knowledge/SPECIMEN_SOURCES.md` and the
+  `synthpass-screener` agent carry the same rules.
+- **The PDF lane stops rendering leaflet pages.** A page that draws no image and carries more
+  than 120 words of its own text is skipped as `pdf-text-page` and counted in the run's summary,
+  instead of reaching the packet as a full-page raster of prose (a Liberia PDF did exactly that
+  on cycle c14). No OCR is involved: the page text is already in hand.
+
+### Fixed
+- **`tools/apply_cohort.py`** now finds a packet's `screened-cNN.jsonl` from the packet's own
+  name rather than the cohort branch's, so a later cycle folded into an accumulating branch
+  (packet c12 on `cohort-c10`) gets its `origin.url` / `origin.page` filled instead of null,
+  which the manifest test rejects. A missing sidecar is now warned about up front.
+- **The Tier-1 denominator counted 94 documents that could never be read, and the hit rate was
+  30 points low as a result.** `provider-bench --real-specimens` scored every image under
+  `samples/` against "did you produce a checksum-valid MRZ", including specimens where no
+  pipeline could: 42 carry no machine-readable zone at all (ID-card fronts, border passes,
+  driving-licence faces), 36 have the zone blacked out by whoever published the specimen, and 16
+  print a zone whose own ICAO check digits fail. Reading nothing off those is the *correct*
+  answer on a product whose whole positioning is that it refuses rather than guesses. Each is now
+  scored out under its own outcome — `no_mrz_expected`, `redacted_mrz`,
+  `checksum_failed_specimen` — and both rates are published: **119 / 144 = 82.6%** on documents
+  that can yield a hit, and **119 / 238 = 50.0%** across the whole corpus. The HIT count did not
+  move and no extraction code changed. Full analysis in
+  `knowledge/benchmarks/denominator-correction-2026-09-09.md`.
+- **Two of the three were decided by OCR noise rather than by the document.** The redaction gate
+  sat *after* the "was an MRZ found" check, so a blacked-out specimen was scored out only if its
+  redaction bar happened to OCR into parseable noise — 9 of 36 did, and the other 27 were counted
+  as detection failures. That ran backwards: the cleaner the blackout, the worse the document
+  scored. Non-conformance required OCR to recover the hand transcription byte for byte, which
+  recognised 1 of the 16 specimens the 2026-09-08 writeup had already concluded "belong outside
+  the denominator". Both are now derived from the document alone.
+- **A hallucinated MRZ was being counted as a Tier-1 hit.** A document with no MRZ has no
+  `ocr_fixtures/` label to contradict — that population is precisely the unlabelled one — so a
+  checksum-**valid** read off one passed the found gate, passed the checksum gate, found no ground
+  truth, and fell out of the classification as a success. It is now `false_positive_mrz`: inside
+  the denominator, in the regression buckets, and printed as a warning rather than a count. The
+  current corpus has zero. `Monaco_ID_Specimen_XXXX_front_no_mrz.png` really did produce one once.
+- **`ADR-0008`'s target metric shrank from 85 documents to 18**, and the 18 are now named. Its
+  decision is unchanged — detection still outnumbers character accuracy, 2.6:1 — but four fifths
+  of the number the track was aimed at could never have moved, and a detector that fixed every
+  genuine failure would have read as a failure against the old metric.
+- **`--assert-baseline` now reports the denominator moving**, and `check-headline-numbers.sh`
+  checks both published rates, the dominant-miss multiplier, and fails outright if a committed
+  baseline ever records a false positive. `scored` was previously recorded in the baseline and
+  compared against nothing, so a reclassification that left the HIT count intact and grew no
+  bucket passed every check in silence — which is exactly what this change is.
+- **`mrz` recovers two more OCR glyph confusions in a checksum-failed read.** The damaged-read
+  repair path (`mrz::find_and_parse` only, after nothing validated) now knows `M`↔`N` and
+  `2`↔`7` in addition to the round-letter and vertical-stroke pairs it already handled — both
+  measured on real specimen scans (`Ghana P0_GHA_2019` reads a printed `M` as `N`; `India
+  P0_IND_2013` reads a `2` as `7`). As before, a repair is only accepted when the field's own
+  check digit proves it and no other reading also verifies. `mrz` 0.7.1.
+- **`mrz::find_and_parse` no longer surfaces non-MRZ text as a checksum-failed record.** When
+  the best-scoring reading never validates *and* fails every structural signal at once — the
+  issuing state and the nationality are both unrecognized and the date of birth is not even
+  six digits — it is OCR that matched MRZ-shaped visual-inspection-zone text (card boilerplate,
+  a printed legend), not a real MRZ read too badly to verify, and `find_and_parse` now returns
+  `MrzError::NotFound`. A genuine non-conformant line 1 (a shifted issuing-state field, a
+  document with no state) still parses: it keeps a resolving nationality and a real date of
+  birth. Measured against a 210-document real-specimen corpus: 18 of 19 no-MRZ documents move
+  from `checksum_failed` to correctly not-found, with no regression on any hit. `mrz` 0.7.0.
+- **OCR no longer turns readable pages sideways.** The upfront orientation probe voted on a
+  ratio of detected-text shapes, which is as confident about scanner noise as about a full page
+  of MRZ — and on measured documents it committed to a wrong quarter-turn, leaving every
+  downstream crop vertical and unreadable. The vote is retired from the default path; both
+  quarter-turns are now tried late in the retry chain instead and an ICAO check digit decides
+  which one was right, so a genuinely sideways page is recovered by evidence rather than by a
+  guess. `SYNTHPASS_OCR_ROTATE=legacy` restores the old probe as a measurement baseline.
+  EXIF orientation is now applied when a file carries it, losslessly, before any of this.
+- **The MRZ deskew pass now tries both skew estimates instead of picking one**, taking the
+  real-specimen Tier-1 hit rate from **142/157 to 143/157** with no document lost. The new
+  projection estimator (`estimate_skew_deg`, ±10° at 0.5° steps, no per-angle resampling) is
+  faster and finer than the search it replaces, but measured on its own it is a wash — **+1/−1**
+  against the legacy search, recovering a tilted India passport and losing a Swiss ID card back
+  whose 232×57 MRZ band is so nearly information-free that the variance objective is flat and the
+  estimator correctly declines to rotate it at all. The legacy contrast score does rotate it, and
+  that rotation is what reads. Neither estimate is wrong, so `SkewMode::Default` now appends the
+  legacy angle as one further trailing variant whenever the two disagree — compared as *angles*
+  before any second rotation, so a clean upright band builds no duplicate, and reached only by
+  documents already running the whole retry chain. The retry budget grows accordingly
+  (`MAX_RETRY_VARIANTS` 12 → 13), which is what keeps the reordering non-regressive rather than
+  silently truncating the legacy angle on dense bilingual scans.
+- **`scripts/repair-tags.sh` no longer steals the "Latest release" badge when backfilling.**
+  `gh release create` marks the most recently *created* release as Latest unless told
+  otherwise, so backfilling twelve historical releases in chronological order left **v1.3.0**
+  badged Latest on the repository front page instead of v1.4.0. Observed on the real run and
+  undone with `gh release edit v1.4.0 --latest`; the script now passes `--latest=false` for
+  every backfilled release so a re-run cannot repeat it.
+
+### Security
+- **`provider-bench --real-specimens` walked `samples/private/` with no exclusion.** The moment a
+  user drops real-PII specimens under `samples/private/` for their own local benchmarking, the
+  default corpus silently grows to include them — no warning, no opt-in. `find_image_files` now
+  skips any path component containing `private` (case-insensitive), covering both the local
+  `samples/private/` directory and the corpus naming convention's `_Private_` filename token.
+  Nothing in the tracked repo or CI ever saw these files; this closes the same gap in the bench's
+  own walk.
+
 ## [1.4.0] — 2026-09-05 — Tier-2 measurement comes online + country/demonym normalization
 
 Roadmap: knowledge/ROADMAP.md, knowledge/benchmarks/README.md. Tier-2 accuracy had never been

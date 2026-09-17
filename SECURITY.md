@@ -6,13 +6,13 @@ issues.
 
 ## Supported versions
 
-Solo-maintained project, patch releases only — the latest `1.4.x` release is the only supported
-one. Pre-1.4 versions are unmaintained; upgrade to `1.4.x` for any security-relevant fix.
+Solo-maintained project, patch releases only — the latest `1.5.x` release is the only supported
+one. Pre-1.5 versions are unmaintained; upgrade to `1.5.x` for any security-relevant fix.
 
 | Version | Supported |
 | --- | --- |
-| 1.4.x | ✅ |
-| < 1.4 | ❌ |
+| 1.5.x | ✅ |
+| < 1.5 | ❌ |
 
 ## Reporting a vulnerability
 

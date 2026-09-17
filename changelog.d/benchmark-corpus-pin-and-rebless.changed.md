@@ -1,1 +1,0 @@
-- **Real-specimen benchmark provenance is now enforced across branches.** CI audits the exact `samples_data_sha` pinned by the baseline before materializing images, while `tools/rebless.py` passes the exact DATA commit for a cohort write-baseline run. Synthetic bench-data collection remains independent when no real track is selected.
