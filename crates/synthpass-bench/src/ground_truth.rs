@@ -1169,7 +1169,7 @@ mod tests {
     #[test]
     fn reviewed_fixture_fields_are_available_for_batch_a_cards() {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/ocr_fixtures");
-        let fields = reviewed_fields(&fixtures, "Germany_Passport_Specimen_P0_D00_2024_mrz")
+        let fields = reviewed_fields(&fixtures, "Afghanistan_Passport_Specimen_P0_AFG_2016_mrz")
             .unwrap()
             .unwrap();
         assert!(fields["mrz_line"].is_some());
