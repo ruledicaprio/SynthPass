@@ -79,7 +79,10 @@
 //!                      (first-run bootstrap). When a committed ledger is
 //!                      present, also prints an informational (non-failing)
 //!                      per-document outcome diff against this run. The per-PR
-//!                      no-regression gate.
+//!                      no-regression gate. Refuses to run (exit non-zero,
+//!                      writes nothing) unless every `SYNTHPASS_OCR_*`
+//!                      measurement arm is at its default — a baseline is only
+//!                      valid for the default provider configuration.
 //! ```
 
 use serde::{Deserialize, Serialize};
@@ -603,6 +606,11 @@ struct DocumentDetailReport {
     retry_variant_id: Option<String>,
     retry_budget_hit: bool,
     retry_stop: Option<String>,
+    /// `DocumentDetail::chargrid` passthrough — `null` whenever
+    /// `SYNTHPASS_OCR_CHARGRID` was `off` (every default run today),
+    /// matching every other unset-arm field on this struct.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chargrid: Option<String>,
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -700,6 +708,30 @@ impl From<StrictNameHitRate> for StrictNameHitRateReport {
     }
 }
 
+/// Mirrors `synthpass_ocr::OcrArms` for JSON — every `SYNTHPASS_OCR_*`
+/// measurement knob this run's OCR engine read, so a report is self-
+/// describing about which arm produced its numbers.
+#[derive(Serialize)]
+struct OcrArmsReport {
+    texture: &'static str,
+    order: &'static str,
+    rotate: &'static str,
+    skew: &'static str,
+    chargrid: &'static str,
+}
+
+impl From<synthpass_ocr::OcrArms> for OcrArmsReport {
+    fn from(a: synthpass_ocr::OcrArms) -> Self {
+        Self {
+            texture: a.texture,
+            order: a.order,
+            rotate: a.rotate,
+            skew: a.skew,
+            chargrid: a.chargrid,
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct SpeedReport {
     mean_ms: u128,
@@ -744,6 +776,9 @@ struct ProviderRow {
     /// `synthpass_bench::provider_bench::StrictNameHitRate`'s doc for
     /// `strict_tier1_hit_rate` vs `names_exact_among_hits`.
     strict_tier1_hit_rate: StrictNameHitRateReport,
+    /// `synthpass_bench::provider_bench::ProviderReport::ocr_arms`
+    /// passthrough — this run's `SYNTHPASS_OCR_*` configuration.
+    ocr_arms: OcrArmsReport,
 }
 
 impl From<ProviderReport> for ProviderRow {
@@ -808,10 +843,12 @@ impl From<ProviderReport> for ProviderRow {
                     retry_variant_id: d.retry_variant_id,
                     retry_budget_hit: d.retry_budget_hit,
                     retry_stop: d.retry_stop,
+                    chargrid: d.chargrid,
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),
             strict_tier1_hit_rate: r.strict_tier1_hit_rate.into(),
+            ocr_arms: r.ocr_arms.into(),
         }
     }
 }
@@ -1463,6 +1500,28 @@ fn write_baseline_and_ledger(
     baseline
 }
 
+/// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
+/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`], `Some(message)`
+/// otherwise. A pure function of `arms` alone (no env reads, no I/O) so it is
+/// directly unit-testable without setting process environment variables —
+/// see `knowledge/benchmarks/README.md`'s maintenance contract for why a
+/// baseline may only describe the default provider configuration: every
+/// other arm is a measurement in progress, and committing a baseline against
+/// one would make its own A/B look like a regression against itself the
+/// moment the env var is unset again.
+fn refuse_non_default_baseline(arms: &synthpass_ocr::OcrArms) -> Option<String> {
+    if arms.is_default() {
+        return None;
+    }
+    Some(format!(
+        "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
+         (texture=on, order=default, rotate=default, skew=default, chargrid=off) — a baseline is \
+         only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
+         This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}.",
+        arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
+    ))
+}
+
 /// `--write-baseline` / `--assert-baseline`, run after the report JSON is on
 /// disk. May [`std::process::exit`] non-zero on a regression.
 fn run_baseline_step(
@@ -1470,6 +1529,11 @@ fn run_baseline_step(
     snapshot: Option<(RealSpecimenSnapshot, Vec<OutcomeRow>)>,
     ts_unix: u64,
 ) {
+    if let Some(msg) = refuse_non_default_baseline(&synthpass_ocr::OcrArms::from_env()) {
+        eprintln!("{msg}");
+        std::process::exit(1);
+    }
+
     let Some((snapshot, rows)) = snapshot else {
         eprintln!(
             "❌ --write-baseline/--assert-baseline need the `mrz` provider in the run — it was \
@@ -2203,6 +2267,26 @@ mod tests {
     use synthpass_bench::provider_bench::{AccuracyStats, CapabilitySnapshot, SpeedStats};
 
     #[test]
+    fn refuse_non_default_baseline_allows_the_default_arms() {
+        assert_eq!(
+            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT),
+            None
+        );
+    }
+
+    #[test]
+    fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
+        let mut arms = synthpass_ocr::OcrArms::DEFAULT;
+        arms.chargrid = "on";
+        let msg = refuse_non_default_baseline(&arms).expect("must refuse");
+        assert!(msg.contains("chargrid=on"), "message: {msg}");
+
+        let mut arms = synthpass_ocr::OcrArms::DEFAULT;
+        arms.texture = "off";
+        assert!(refuse_non_default_baseline(&arms).is_some());
+    }
+
+    #[test]
     fn subsample_returns_everything_when_the_limit_is_not_binding() {
         let all: Vec<u32> = (0..10).collect();
         assert_eq!(subsample(all.clone(), 10), all);
@@ -2831,6 +2915,7 @@ mod tests {
             measured_rss_delta_bytes: None,
             documents_detail: Vec::new(),
             tier1_hit_rate: Tier1HitRate::Computed(0.0),
+            ocr_arms: synthpass_ocr::OcrArms::DEFAULT,
             strict_tier1_hit_rate: strict,
         }
     }
@@ -2890,6 +2975,7 @@ mod tests {
             retry_variant_id: None,
             retry_budget_hit: false,
             retry_stop: None,
+            chargrid: None,
         }
     }
 
@@ -2925,6 +3011,7 @@ mod tests {
             measured_rss_delta_bytes: None,
             documents_detail: details,
             tier1_hit_rate: Tier1HitRate::Computed(0.0),
+            ocr_arms: synthpass_ocr::OcrArms::DEFAULT,
             strict_tier1_hit_rate: StrictNameHitRate::NotApplicable {
                 reason: "test fixture",
             },

@@ -169,6 +169,13 @@ pub struct ProviderReport {
     /// `NotApplicable` for a non-`capability.deterministic` provider — see
     /// [`Tier1HitRate`]'s doc for why.
     pub tier1_hit_rate: Tier1HitRate,
+    /// This run's `SYNTHPASS_OCR_*` measurement-arm configuration
+    /// (`synthpass_ocr::OcrArms::from_env`), read once per provider loop —
+    /// the same for every provider in a run, since it is process-global env
+    /// state, not per-provider. Carried on the report so a baseline write
+    /// can refuse a non-default configuration (see
+    /// `knowledge/benchmarks/README.md`'s maintenance contract).
+    pub ocr_arms: synthpass_ocr::OcrArms,
     /// Of the *name-scorable* documents in `tier1_hit_rate`'s own scored
     /// denominator (ground truth carries both `surname` and `given_names`),
     /// what fraction were both a Tier-1 hit and read both names exactly —
@@ -271,6 +278,11 @@ pub struct DocumentDetail {
     pub retry_budget_hit: bool,
     /// Why the native retry loop stopped, when native OCR telemetry exists.
     pub retry_stop: Option<String>,
+    /// `OcrPage::chargrid` passthrough — the post-hit chargrid name-line
+    /// repair arm's outcome for this document, when native OCR telemetry
+    /// exists and `SYNTHPASS_OCR_CHARGRID` was not `off`. See that field's
+    /// doc for the possible values.
+    pub chargrid: Option<String>,
 }
 
 pub struct CapabilitySnapshot {
@@ -1105,6 +1117,7 @@ async fn run_prepped(
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
                         retry_budget_hit: bench_page.page.retry_budget_hit,
                         retry_stop: bench_page.page.retry_stop.clone(),
+                        chargrid: bench_page.page.chargrid.clone(),
                     });
                     if progress {
                         eprintln!(
@@ -1431,6 +1444,7 @@ async fn run_prepped(
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
                 retry_budget_hit: bench_page.page.retry_budget_hit,
                 retry_stop: bench_page.page.retry_stop.clone(),
+                chargrid: bench_page.page.chargrid.clone(),
             });
         }
 
@@ -1589,6 +1603,7 @@ async fn run_prepped(
             declared_resident_bytes: capability.estimated_resident_bytes,
             documents_detail,
             tier1_hit_rate,
+            ocr_arms: synthpass_ocr::OcrArms::from_env(),
             strict_tier1_hit_rate: strict_name_hit_rate,
             measured_rss_delta_bytes: match (rss_before, rss_after) {
                 (Some(before), Some(after)) => Some(after as i64 - before as i64),
