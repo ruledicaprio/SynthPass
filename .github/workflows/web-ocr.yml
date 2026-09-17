@@ -19,6 +19,11 @@ on:
         description: 'Fail if the hit rate drops below this fraction (e.g. 0.30)'
         required: false
         type: string
+      reference_tag:
+        description: 'Release tag that anchors the comparison (default: v1.5.0)'
+        required: false
+        default: v1.5.0
+        type: string
   schedule:
     # 04:20 UTC daily — after the bench jobs, well clear of the Pages deploy.
     - cron: '20 4 * * *'
@@ -45,12 +50,14 @@ jobs:
             exit 1
           fi
           git fetch --tags --unshallow origin 2>/dev/null || git fetch --tags origin
-          REFERENCE_TAG_SHA="$(git rev-parse refs/tags/v1.5.0^{commit} 2>/dev/null || true)"
+          REFERENCE_TAG="${{ inputs.reference_tag }}"
+          REFERENCE_TAG="${REFERENCE_TAG:-v1.5.0}"
+          REFERENCE_TAG_SHA="$(git rev-parse "refs/tags/$REFERENCE_TAG^{commit}" 2>/dev/null || true)"
           if [[ -z "$REFERENCE_TAG_SHA" ]] || ! git merge-base --is-ancestor "$REFERENCE_TAG_SHA" HEAD; then
-            echo "v1.5.0 must exist and be an ancestor before Phase D measurement" >&2
+            echo "$REFERENCE_TAG must exist and be an ancestor before Phase D measurement" >&2
             exit 1
           fi
-          echo "PHASE_D_REFERENCE_TAG=v1.5.0" >> "$GITHUB_ENV"
+          echo "PHASE_D_REFERENCE_TAG=$REFERENCE_TAG" >> "$GITHUB_ENV"
           echo "PHASE_D_REFERENCE_TAG_SHA=$REFERENCE_TAG_SHA" >> "$GITHUB_ENV"
           git fetch --no-tags origin samples-data
           git cat-file -e "$DATA_SHA^{commit}" 2>/dev/null || git fetch --no-tags origin "$DATA_SHA"
@@ -106,6 +113,13 @@ jobs:
           npx playwright install --with-deps chromium
 
       - name: Measure native MRZ provider
+        env:
+          SYNTHPASS_OCR_MAX_PASSES: "14"
+          SYNTHPASS_OCR_MAX_SECONDS: "52"
+          SYNTHPASS_OCR_ORDER: "default"
+          SYNTHPASS_OCR_TEXTURE: "on"
+          SYNTHPASS_OCR_SKEW: "default"
+          SYNTHPASS_OCR_ROTATE: "default"
         run: |
           cargo run -p synthpass-bench --release --bin provider-bench -- --real-specimens --mrz-only --progress --out artifacts/native-provider-bench-report.json
           python - <<'PY'
@@ -128,7 +142,12 @@ jobs:
               "baseline_measured_on_ci_sha": baseline.get("measured_on_ci_sha"),
               "reference_tag": os.environ["PHASE_D_REFERENCE_TAG"],
               "reference_tag_sha": os.environ["PHASE_D_REFERENCE_TAG_SHA"],
-              "native_retry_budget_seconds": int(os.environ.get("SYNTHPASS_OCR_MAX_SECONDS", "52")),
+              "native_retry_max_passes": int(os.environ["SYNTHPASS_OCR_MAX_PASSES"]),
+              "native_retry_budget_seconds": int(os.environ["SYNTHPASS_OCR_MAX_SECONDS"]),
+              "native_retry_order": os.environ["SYNTHPASS_OCR_ORDER"],
+              "native_retry_texture": os.environ["SYNTHPASS_OCR_TEXTURE"],
+              "native_retry_skew": os.environ["SYNTHPASS_OCR_SKEW"],
+              "native_retry_rotate": os.environ["SYNTHPASS_OCR_ROTATE"],
           }
           report_path.write_text(json.dumps(report, indent=2) + chr(10))
           PY

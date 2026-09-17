@@ -132,8 +132,7 @@ async function main() {
     const native = nativeReport.providers?.find((p) => p.provider_id === "mrz");
     if (!native) throw new Error("native report has no mrz provider: " + args.nativeReport);
     for (const detail of native.documents_detail ?? []) {
-      const key = detail.asset_id ?? detail.name;
-      nativeByAsset.set(key, detail);
+      if (detail.asset_id) nativeByAsset.set(detail.asset_id, detail);
     }
   }
 
@@ -211,6 +210,7 @@ async function main() {
       native_miss_reason: nativeDetail?.miss_reason ?? null,
       native_retry_variant_id: nativeDetail?.retry_variant_id ?? null,
       native_retry_budget_hit: nativeDetail?.retry_budget_hit ?? null,
+      native_retry_stop: nativeDetail?.retry_stop ?? null,
       native_names_exact: nativeDetail?.names_exact ?? null,
       native_name_error: nativeDetail?.name_error ?? null,
       // Strictest available check: the exact two/three MRZ lines, not just
@@ -242,10 +242,19 @@ async function main() {
 
   // ---- aggregate -----------------------------------------------------------
   const webHits = documents.filter((d) => d.web_checksum_valid).length;
-  const natHits = documents.filter((d) => d.native_checksum_valid === true).length;
-  const both = documents.filter((d) => d.web_checksum_valid && d.native_checksum_valid).length;
-  const webOnly = documents.filter((d) => d.web_checksum_valid && !d.native_checksum_valid).length;
-  const natOnly = documents.filter((d) => !d.web_checksum_valid && d.native_checksum_valid).length;
+  const hasNativeReport = nativeReport !== null;
+  const natHits = hasNativeReport
+    ? documents.filter((d) => d.native_checksum_valid === true).length
+    : null;
+  const both = hasNativeReport
+    ? documents.filter((d) => d.web_checksum_valid && d.native_checksum_valid).length
+    : null;
+  const webOnly = hasNativeReport
+    ? documents.filter((d) => d.web_checksum_valid && !d.native_checksum_valid).length
+    : null;
+  const natOnly = hasNativeReport
+    ? documents.filter((d) => !d.web_checksum_valid && d.native_checksum_valid).length
+    : null;
 
   const fieldTally = { reviewed: { ok: 0, total: 0 }, derived: { ok: 0, total: 0 } };
   for (const d of documents) {
@@ -285,13 +294,13 @@ async function main() {
       scanned: documents.length,
       rate: pct(webHits, documents.length),
     },
-    native_reference: {
+    native_reference: hasNativeReport ? {
       checksum_valid: natHits,
       scanned: documents.length,
       rate: pct(natHits, documents.length),
-      note: 'from samples/corpus.jsonl mrz.observed.checksums_valid — the native ocrs/rten pipeline on the same files, not measured in this run',
-    },
-    head_to_head: { both, web_only: webOnly, native_only: natOnly },
+      note: 'from the measured native provider report for the same assets',
+    } : null,
+    head_to_head: hasNativeReport ? { both, web_only: webOnly, native_only: natOnly } : null,
     fields: {
       reviewed: { ...fieldTally.reviewed, rate: pct(fieldTally.reviewed.ok, fieldTally.reviewed.total) },
       derived: { ...fieldTally.derived, rate: pct(fieldTally.derived.ok, fieldTally.derived.total) },
@@ -308,8 +317,12 @@ async function main() {
 
   console.log('\n' + '='.repeat(66));
   console.log(fmtRate(webHits, documents.length, 'web  checksum-valid'));
-  console.log(fmtRate(natHits, documents.length, 'native (recorded) '));
-  console.log(`head-to-head: both ${both}, web only ${webOnly}, native only ${natOnly}`);
+  if (hasNativeReport) {
+    console.log(fmtRate(natHits, documents.length, 'native (measured) '));
+    console.log('head-to-head: both ' + both + ', web only ' + webOnly + ', native only ' + natOnly);
+  } else {
+    console.log('native comparison unavailable: pass --native-report for a measured native join');
+  }
   console.log(
     `misses: ${report.web.near_miss} parsed but failed check digits, ` +
     `${report.web.no_mrz_found} found no MRZ at all`,

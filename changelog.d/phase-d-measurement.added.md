@@ -1,1 +1,1 @@
-- Add pinned native/browser corpus joins and retry telemetry for the deferred Phase D provider-gap measurement.
+**Prepare a reproducible Phase D provider-gap measurement.** The pinned native/browser join records each asset by `asset_id`, native `retry_*` telemetry, and exact MAIN/DATA/provider provenance; the browser comparison requires `--native-report` for measured native results.

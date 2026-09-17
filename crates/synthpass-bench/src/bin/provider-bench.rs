@@ -592,6 +592,7 @@ struct DocumentDetailReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_variant_id: Option<String>,
     retry_budget_hit: bool,
+    retry_stop: Option<String>,
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -796,6 +797,7 @@ impl From<ProviderReport> for ProviderRow {
                     ocr_ms: d.ocr_elapsed.as_millis(),
                     retry_variant_id: d.retry_variant_id,
                     retry_budget_hit: d.retry_budget_hit,
+                    retry_stop: d.retry_stop,
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),

@@ -641,6 +641,8 @@ pub fn load_specimen(
         .ok()
         .and_then(|path| path.to_str())
         .map(|path| path.replace(std::path::MAIN_SEPARATOR, "/"))
+        // This fallback cannot join a manifest/native report; callers rely on
+        // the relative identity above and fail closed if the roots differ.
         .unwrap_or_else(|| {
             image_path
                 .to_string_lossy()

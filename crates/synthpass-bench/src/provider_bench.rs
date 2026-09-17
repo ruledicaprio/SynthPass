@@ -265,10 +265,12 @@ pub struct DocumentDetail {
     /// run's total cannot say *which* documents cost it
     /// (`knowledge/decisions/ADR-0010-benchmark-cost-split-by-role.md`, step 5).
     pub ocr_elapsed: Duration,
-    /// Native OCR retry variant selected for this asset, when available.
+    /// Native OCR retry pass selected for this asset, when available (`pass-NN`; its number depends on retry configuration).
     pub retry_variant_id: Option<String>,
     /// Whether the native retry loop hit its wall-clock budget.
     pub retry_budget_hit: bool,
+    /// Why the native retry loop stopped, when native OCR telemetry exists.
+    pub retry_stop: Option<String>,
 }
 
 pub struct CapabilitySnapshot {
@@ -1099,6 +1101,7 @@ async fn run_prepped(
                         ocr_elapsed: bench_page.ocr_elapsed,
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
                         retry_budget_hit: bench_page.page.retry_budget_hit,
+                        retry_stop: bench_page.page.retry_stop.clone(),
                     });
                     if progress {
                         eprintln!(
@@ -1424,6 +1427,7 @@ async fn run_prepped(
                 ocr_elapsed: bench_page.ocr_elapsed,
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
                 retry_budget_hit: bench_page.page.retry_budget_hit,
+                retry_stop: bench_page.page.retry_stop.clone(),
             });
         }
 

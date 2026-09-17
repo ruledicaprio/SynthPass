@@ -8,9 +8,11 @@ baseline, verifies that pinned object, runs the identity auditor, and records MA
 DATA, and baseline provenance in the native report before the browser sweep.
 
 Each browser result joins to the native result by the samples-relative asset_id.
-The native report also records the stable retry variant identifier and whether the
-52-second retry budget was reached. Optional ADR-0013 name fields are carried when
-the name-accuracy change is present on the measured MAIN revision.
+The native report records the selected `pass-NN` retry identifier only when a pass
+validates, the retry stop reason, and whether the 52-second retry budget was reached.
+It also carries the ADR-0013 name fields on this branch. The report provenance records
+the resolved pass, seconds, order, texture, skew, and rotate configuration because
+pass numbers depend on those settings.
 
 No comparison numbers are reported here. The first authoritative run must use a
 MAIN revision based on the v1.5.0 tag and must cite that tag, the exact DATA commit,
