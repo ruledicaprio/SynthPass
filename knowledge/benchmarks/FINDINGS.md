@@ -20,6 +20,7 @@ regenerate.
 | --- | --- | --- | --- | --- |
 | 2026-09-17 | [where the gate's time goes, by outcome class (ADR-0010 step 5)](#2026-09-17--where-the-gates-time-goes-by-outcome-class-adr-0010-step-5) | — | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-17 | [San Marino's blank template leaves the denominator: `scored` 154 → 153, `no_mrz_found` 4 → 3](#2026-09-17--san-marinos-blank-template-leaves-the-denominator-scored-154--153-no_mrz_found-4--3) | — | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-17 | [first CI-measured strict names and refusals: `strict_hits` **12** / 40, **0** false accepts / 108](#2026-09-17--first-ci-measured-strict-names-and-refusals-strict_hits-12--40-0-false-accepts--108) | — | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-17 | [Where the real-specimen gate spends its time, by outcome class](gate-cost-by-role-2026-09-17.md) | Observed | current | gate-cost-by-role-2026-09-17.md |
 | 2026-09-17 | [Phase D provider-gap measurement setup](phase-d-measurement-2026-09-17.md) | unlabelled (pre-standard) | current | phase-d-measurement-2026-09-17.md |
 | 2026-09-16 | [No image in the default real-specimen walk is cover-like](cover-like-detector-2026-09-16.md) | unlabelled (pre-standard) | superseded by [README.md#current-headline-numbers](README.md#current-headline-numbers) | cover-like-detector-2026-09-16.md |
@@ -702,3 +703,27 @@ The relabel the c01 entry modelled three cohorts ago (`_back_mrz` → `_back_no_
 (140 / 154 → 140 / 153); ADR-0008's detection metric now reads the true 3 — France ID 2020
 back, Italy CIE 2022 back, Moldova `PA_MDA_2014`. First of the 14 frozen M6 misses closed by attribution
 ([ADR-0011](../decisions/ADR-0011-split-m6-packaging-into-m8.md), amendment of 2026-09-17).
+
+### 2026-09-17 — first CI-measured strict names and refusals: `strict_hits` **12** / 40, **0** false accepts / 108
+
+CI re-blessed on branch `bless-strict-names` (`real-specimen-gate.yml` run `35232307784`, mode=write-baseline): only non-scored bucket(s) moved.
+
+```
+  name_scorable_documents        0 -> 40    (+40)  (report-only)
+  name_scorable_hits             0 -> 33    (+33)  (report-only)
+  refusal_population             0 -> 108   (+108)
+  strict_hits                    0 -> 12    (+12)  (report-only)
+  (baseline measured 2026-09-17 on 649cccc4a12c57e50b6feafa6d414f78c64672b1)
+```
+
+The scored rate did not move: **140 / 153 = 91.5%**, unchanged.
+
+No specimen was added; this bless records the report-only fields PR-1.1 and PR-1.1b introduced
+([ADR-0013](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)). **12 / 40 = 30.0%** of name-scorable
+scored documents are a Tier-1 hit with both names exact; 21 of the 33 name-scorable hits carry a
+wrong name (ledger `name_error`: 18 `other`, 2 `split_shifted`, 1 `filler_read_as_letters`).
+Name-scorable means a reviewed fixture exists *and* the document is scored: the corpus has 59
+fixtures, of which 19 sit on `checksum_failed_specimen` documents (off the denominator), leaving
+33 hits + 7 `checksum_failed` misses = 40. The 108 refusal-class documents (`no_mrz_expected`,
+`redacted_mrz`, `checksum_failed_specimen`) produced no checksum-valid read that should not exist.
+Per-document evidence: [`real-specimen-outcomes.jsonl`](real-specimen-outcomes.jsonl).
