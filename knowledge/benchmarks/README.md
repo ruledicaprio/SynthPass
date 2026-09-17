@@ -22,13 +22,13 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **140 / 154 = 90.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-16) |
+| **Tier-1 hit rate, real specimens** | **140 / 153 = 91.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-17) |
 | Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
 
-**Why two rates.** 107 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 108 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -44,10 +44,10 @@ non-conforming one).
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
 | **Tier-1 HIT** | **140** | numerator | Checksum-valid MRZ, document number matches ground truth |
-| `no_mrz_found` | 4 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13 |
-| `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 2.5× the other since the c03/c07/c09 cohort |
+| `no_mrz_found` | 3 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13; the three real detection targets since the San Marino template left the bucket (2026-09-17) |
+| `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 3.3× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
-| `no_mrz_expected` | 49 | no | Document carries no MRZ at all; none was read. A correct refusal |
+| `no_mrz_expected` | 50 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
 | `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
@@ -70,7 +70,7 @@ is a blank San Marino template with nothing printed in its zone to find; see the
 
 The c03/c07/c09 cohort then took `checksum_failed` 7 → **10** later the same day, every one of the
 three from a newly ingested book (Germany `P0_D00_2024`, Hong Kong `P0_HKG_2019` and `P0_HKG_2007`)
-and none from a document already in the corpus. Fourteen scored misses now stand, **10 recognition
+and none from a document already in the corpus. Fourteen scored misses stood until the San Marino relabel; thirteen do now, **10 recognition
 against 4 detection**, of which 3 are real detection targets — and none of the three new
 recognition misses has a hand-transcribed fixture, so whether their printed zones conform is
 unmeasured. See the second 2026-09-14 entry.
@@ -1188,3 +1188,12 @@ documents cost 63.3 % of the gate's OCR time, the 154 scored ones 36.7 %; a hit 
 a redacted page 19.9 s. [ADR-0010](../decisions/ADR-0010-benchmark-cost-split-by-role.md)'s
 role split is accepted on this evidence and sequenced after the strict-name baseline fields
 land. Full table and caveats: [`gate-cost-by-role-2026-09-17.md`](gate-cost-by-role-2026-09-17.md).
+### 2026-09-17 — San Marino's blank template leaves the denominator: `scored` 154 → 153, `no_mrz_found` 4 → 3
+
+The relabel the c01 entry modelled three cohorts ago (`_back_mrz` → `_back_no_mrz` on `samples-data`
+`5988c7b`, one manifest row) is in. Re-blessed on CI (MAIN `4ff8772`, `samples-data` `5988c7b`,
+`write-baseline`): `tier1_hits` unchanged at 140, `documents` unchanged at 261, `scored` 154 → 153,
+`no_mrz_found` 4 → 3, `no_mrz_expected` 49 → 50. The scored rate moves for a denominator reason only
+(140 / 154 → 140 / 153); ADR-0008's detection metric now reads the true 3 — France ID 2020
+back, Italy CIE 2022 back, Moldova `PA_MDA_2014`. First of the 14 frozen M6 misses closed by attribution
+([ADR-0011](../decisions/ADR-0011-split-m6-packaging-into-m8.md), amendment of 2026-09-17).
