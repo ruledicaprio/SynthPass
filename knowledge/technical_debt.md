@@ -76,6 +76,31 @@ framing — see `long-horizon-parsing.md` for the actual cost breakdown.
 
 ## Medium
 
+### A valid line 2 still leaves four ambiguities no checksum resolves
+
+Recorded 2026-09-17 when the strict-name work (ADR-0013) scoped itself to names. A checksum-valid
+MRZ proves the document number and the dates; it does not prove everything on line 2.
+
+- **Nationality and sex are unchecked on every format.** Neither sits inside a check digit or
+  the composite, so a misread there passes as a Tier-1 hit. The strict metric scores names only;
+  it should grow into a `strict_fields` list (nationality, sex) once name repair has a baseline.
+- **Compound substitutions are invisible to the check digits.** `mrz::blindspot` and
+  `blind_positions` (`crates/synthpass-die/src/mrz_reader.rs`) see single-character collisions;
+  most observed `document_number` mismatches were compound (ROADMAP, "Check-digit blind spot").
+  Checksum-guided repair over `mrz::CONFUSABLES` can likewise stop on a wrong-but-valid read.
+  Only labelled fixtures catch either, which is why W2's ground truth matters.
+- **The century pivot is a guess near its boundary.** A `YYMMDD` date close to the pivot can
+  resolve to the wrong century with valid check digits; `scripts/check-century-pivot.sh` keeps
+  the pivot current but cannot remove the ambiguity.
+- **A dropped `<` in the sex position** is lost by the recognizer like any isolated filler. It
+  is the one line-2 case the fixed-grid repair (`synthpass_ocr::chargrid`) could fix provably,
+  because the surrounding check-digit-covered cells pin its position — deliberately out of
+  scope for the name-line wiring.
+
+**Why deferred:** names are the larger, measured gap, and each item above needs ground truth
+before its fix can be judged. **Severity:** Medium — a silent wrong field on a hit. **Estimate:**
+`strict_fields` ~1 d after W2; the rest per item.
+
 ### Three parallel lists of ICAO field names
 
 - `synthpass_core::v2::ExtractionFields` — the schema: the 10 ICAO fields plus
