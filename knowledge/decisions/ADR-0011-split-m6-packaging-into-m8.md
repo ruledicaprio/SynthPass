@@ -1,6 +1,6 @@
 # ADR-0011 — Split M6: the deterministic core keeps the number, packaging becomes M8
 
-**Status:** Accepted (amended 2026-09-16)
+**Status:** Accepted (amended 2026-09-16, 2026-09-17)
 **Date:** 2026-09-13
 
 ## Context
@@ -245,3 +245,73 @@ all key on. `ADR-0002`'s concern was formats arriving as branches in the pipelin
 **Rejected for now: a `formats` field on `Capability`.** Nothing would read it — the router
 cannot select by format before a read, and the benchmark does not snapshot it. It becomes
 worth adding when a second MRZ-capable provider exists and routing must choose between them.
+
+## Amendment (2026-09-17)
+
+**M6's Definition of Done is frozen against the v1.5.0 baseline snapshot.** As written, the
+criterion — *every scored miss on the committed baseline is either a Tier-1 HIT or carries a dated
+attribution* — is evaluated against a baseline the specimen-acquisition loop re-blesses with every
+cohort. Each cohort can add scored misses, so the target recedes as fast as the loop runs, and the
+milestone may never converge by construction. The 2026-09-17 repository assessment named this and
+the user decided to freeze.
+
+**The snapshot**, pinned per the benchmark maintenance contract's Freeze rule (MAIN revision,
+`samples-data` revision, provider configuration, invocation, population):
+
+- MAIN `a3951b3` (tag `v1.5.0`); its committed baseline was measured on CI sha `2f14e00`,
+  2026-09-16, `samples_data_sha 469a4ee7723148917cf023f1a7ab2af80a0ef7d3`.
+- Provider and configuration: the registered `mrz` provider via
+  `provider-bench --real-specimens --mrz-only`, every `SYNTHPASS_OCR_*` arm at its default.
+- Population: 261 documents, 154 scored, 140 Tier-1 hits.
+- **The residual — the 14 scored misses, by asset:**
+
+  Detection (`no_mrz_found`, 4):
+
+  - `id_cards/France_ID_Specimen_2020_back_mrz.png`
+  - `id_cards/Italy_ID_Specimen_2022_back_mrz.jpg`
+  - `passports/Moldova_Passport_Specimen_PA_MDA_2014_mrz.jpeg`
+  - `id_cards/San_Marino_ID_Specimen_2017_back_mrz.jpg` — a blank filler template with nothing
+    printed in its zone; it closes by attribution (reclassified `checksum_failed_specimen` in the
+    data-only PR that follows this amendment).
+
+  Recognition (`checksum_failed`, 10):
+
+  - `passports/Afghanistan_Passport_Specimen_P0_AFG_2016_mrz.webp`
+  - `id_cards/Belgium_ID_Specimen_2021_back_mrz.png`
+  - `id_cards/Croatia_ID_Specimen_2021_back_mrz.jpg`
+  - `passports/Czechia_Passport_Specimen_P0_CZE_2005_mrz.jpg`
+  - `passports/Germany_Passport_Specimen_P0_D00_2024_mrz.jpg`
+  - `passports/Hong_Kong_Passport_Specimen_P0_HKG_2007_mrz.png`
+  - `passports/Hong_Kong_Passport_Specimen_P0_HKG_2019_mrz.png`
+  - `passports/Romania_Passport_Specimen_PE_ROU_2024_mrz.jpg`
+  - `passports/Russian_Federation_Passport_Specimen_P0_RUS_2019_mrz.jpg`
+  - `id_cards/Sweden_ID_Specimen_2022_back_mrz.jpg`
+
+**The criterion now reads:** *each of these 14 documents is either a Tier-1 HIT on the current
+committed baseline or carries a dated attribution in `knowledge/benchmarks/` naming the mechanism
+that defeats it.* Nothing else in the Decision changes: no Tier-1 HIT regression, every chunk that
+moves an outcome count re-blesses the baseline in the same PR, and no OCR engine replacement,
+vision provider or new dependency enters under M6.
+
+**What the freeze does not do.** The gate and the baseline keep moving as they do today — every
+cohort or fixture PR still re-blesses `real-specimen-mrz-baseline.json`, and the gate still fails
+on any HIT loss or bucket growth. A scored miss that a post-freeze cohort adds is recorded in a
+dated "post-M6 residual" entry in `knowledge/benchmarks/README.md` and worked after M6 closes; it
+does not reopen M6. Name accuracy ([`ADR-0013`](ADR-0013-names-are-scored-against-mrz-form-truth.md))
+is not part of this criterion either: it is measured separately and its repair is judged on its
+own metric.
+
+**Sequencing around the freeze.** Specimen acquisition pauses at this amendment (recorded in
+`CONTRIBUTING.md`) so the denominator stops moving while the residual is worked, and ground-truth
+transcription for documents already in the corpus takes its place. Each of the ten recognition
+misses gets a hand-transcribed fixture first, because the transcription is what decides whether
+the printed zone conforms (a recognition target) or does not (`checksum_failed_specimen`, closed
+by attribution).
+
+**Rejected: leaving the criterion open-ended.** Honest, and the loop's cohorts are worth having,
+but a milestone whose target recedes is not a milestone; M8's commercial deliverables wait on
+"M6 closes", so an unclosable M6 blocks them indefinitely.
+
+**Rejected: freezing the corpus itself.** Freezing the Definition of Done costs nothing the
+project wants; freezing the corpus would stop the ground-truth work and the fixture PRs that make
+every future delta attributable.

@@ -120,6 +120,15 @@ pushed. Each image's source goes into the manifest's `origin` at fetch time. Whi
 allowed, and what is kept when a candidate is dropped, are in
 [`knowledge/SPECIMEN_SOURCES.md`](knowledge/SPECIMEN_SOURCES.md).
 
+**Agent and scraper sourcing is paused (since 2026-09-17).** M6's Definition of Done is frozen
+against the v1.5.0 baseline snapshot
+([`ADR-0011`](knowledge/decisions/ADR-0011-split-m6-packaging-into-m8.md), amendment of
+2026-09-17), and every new cohort would move the denominator that residual is measured on. Until
+it resumes, the effort goes to ground-truth transcription for specimens already in the corpus —
+`samples/ocr_fixtures/` — one data-only PR per batch, re-blessed by CI. The loop resumes once the
+strict-name rate ([`ADR-0013`](knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md))
+is measured in CI and that transcription batch is complete.
+
 The script screens candidates on one **blocking** rule and reports two **advisory** signals.
 
 **Blocking — a known-vendor signature rejects outright.** See point 2 below.
