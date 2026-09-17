@@ -96,8 +96,10 @@ Concretely, the long arc is:
    per-format render fidelity, and evidence-driven escalation. This is what the product is
    sold on, and it leads M6 ([`decisions/ADR-0006-m6-accuracy-first.md`](decisions/ADR-0006-m6-accuracy-first.md)).
 5. **Expand the surface.** Declarative document layouts, dataset exports
-   (COCO / YOLO / JSONL / Hugging Face), an air-gapped deployment guide, and the commercial
-   tiers — sequenced after the core is hardened.
+   (COCO / YOLO / JSONL / Hugging Face), an air-gapped deployment guide, and a first
+   commercial engagement on the terms of [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)
+   — a labelled corpus, an independent benchmark or an integration, never a feature-gated
+   tier — sequenced after the core is hardened (M8, [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)).
 
 > **Non-goals, permanently.** SynthPass crops a portrait region; it never *identifies* a
 > person — no face recognition, no biometric matching, no liveness. It proves a faithful

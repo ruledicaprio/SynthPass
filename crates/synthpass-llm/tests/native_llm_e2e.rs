@@ -50,8 +50,9 @@ fn native_llm_extracts_via_unary_and_streaming_calls() {
 
     let llm = NativeLlm::load(&model_path, 2048).expect("model loads");
 
-    let markdown = std::fs::read_to_string(find_sample("Croatia_Passport_Specimen_2009_mrz.md"))
-        .expect("sample markdown exists");
+    let markdown =
+        std::fs::read_to_string(find_sample("Croatia_Passport_Specimen_P0_HRV_2009_mrz.md"))
+            .expect("sample markdown exists");
 
     let extraction = llm
         .extract(&markdown, None)

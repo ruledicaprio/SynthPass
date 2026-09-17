@@ -4,7 +4,7 @@
 > SynthPass v2. It reconciles the two roadmaps that preceded it — the *Atlas* extraction
 > redesign (the now-removed `mlis_v2_0_0_preliminary_design.md` scratch notes) and the
 > synthetic-generation roadmap ([`archive/synthpass_v2_0.md`](archive/synthpass_v2_0.md)) — into
-> one M1→M7 spine. Where those two disagree, **this file wins**; `synthpass_v2_0.md` remains as
+> one M1→M8 spine. Where those two disagree, **this file wins**; `synthpass_v2_0.md` remains as
 > a design record, archived (see [`archive/README.md`](archive/README.md)).
 >
 > Read [`VISION.md`](VISION.md) first for the *why*, and [`BRANDING.md`](BRANDING.md) for
@@ -64,10 +64,10 @@ exception above. The numbering follows dependency, not schedule.)*
 | **M1 — Synthetic MRZ core** | ✅ Done | TD3 MRZ emitter in the standalone `mrz` crate (`format_td3`); parse↔emit round-trip proptest; zero new runtime deps | Emitter is byte-for-byte correct vs an ICAO 9303 Part 4 specimen; `cargo test -p mrz` green incl. a 512-case round-trip proptest; `mrz` stays zero-dependency |
 | **M2 — Synthetic Document Factory** | ✅ Done | `synthpass-gen` crate: deterministic fictional identities, layout/render/labels, reproducible seeds, **mandatory synthetic watermark + generic non-country template** | `generate(&Passport, &GeneratorConfig) -> (image, Labels)` produces a checksum-valid MRZ that round-trips back through `mrz` from the rendered image; labels are 100% accurate by construction; watermark renders unconditionally; no runtime leak into the extraction pipeline |
 | **M3 — Degradation & Capture profiles + CLI** | ✅ Done | Modular degradation pipeline (mobile / scanner / worn / border-control profiles); `synthpass generate` CLI subcommand; JSON sidecar metadata per document | Each profile is reproducible from a seed; CLI emits image + label JSON for a named profile; degradations are composable and individually toggleable; license gate bypassed for generation (it produces no real PII) |
-| **M4 — Regression & Benchmarking** | ✅ Done | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented. Floor is `--min-hit-rate 0.30` on the synthetic clean TD3 corpus; measured ~55% synthetic clean / ~42% real corpus (the original 95% aspiration was dropped once measured — see [`benchmarks/README.md`](benchmarks/README.md)) |
+| **M4 — Regression & Benchmarking** | ✅ Done | `synthpass-bench`; golden datasets; adversarial red-team generation; CI accuracy gate; `knowledge/SYNTHPASS.md`, `knowledge/ADVERSARIAL.md` | A Tier-1 hit-rate guard over a generated corpus runs in CI and **blocks merges on regression**; benchmark reports are generated, not hand-edited; adversarial cases documented. Floor is `--min-hit-rate 0.30` on the synthetic clean TD3 corpus; M4-era measurement was ~55% synthetic clean / ~42% real corpus (the original 95% aspiration was dropped once measured; current rates are in [`benchmarks/README.md`](benchmarks/README.md)) |
 | **M5 — Extraction platform (Atlas absorbed)** | ✅ Done | Extraction schema v2 (per-field confidence + provenance), OCR region detection by geometry + orientation, bounded job queue / parallel OCR / configurable LLM contexts / batch API, `tracing` + `/health` + `/metrics`, enforced licensing tiers, GBNF-constrained Tier-2 decoding | The Atlas DoDs in the now-removed `mlis_v2_0_0_preliminary_design.md` §3–§8 are met; corpus hit-rate does not regress; batch load test passes; no PII appears in any log line |
 | **M7 — Document Intelligence Engine** *(built ahead of M6 — see the ordering note above)* | ✅ Done | `IntelligenceProvider` / `Recognizer` / `FieldReader` contract in a new `synthpass-die` crate; provider catalog with capability profiles; evidence-driven escalation replacing the hardcoded two-tier fallback; versioned prompts; multi-provider benchmark harness. Registered providers: MRZ (deterministic), OCR, and the existing text-only Qwen | A third-party provider builds against the published contract in a doc-test without depending on `synthpass-ocr`, `synthpass-llm` or a runtime; `cargo tree -p synthpass-die` contains no engine or runtime crate; the default routing policy reproduces v1.2.0 behaviour bit-identically, proven by an unchanged corpus hit count; escalation reasons are enumerated and PII-free; a prompt edit without a version bump fails CI; the benchmark report is a strict superset of the v1.2.0 shape |
-| **M6 — Deterministic core: Tier-1 accuracy and MRZ formats** | 🚧 In progress — the deterministic half of the former M6, kept under its number; expansion and enterprise readiness moved to M8 by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md). Sequence completeness is **done**; the **MRZ detection** track's premise ran out on 2026-09-12 ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s amendment) and the residual is now a named list of scored misses, split between finding the zone and reading it. All five MRZ formats generate, render and benchmark, and the registered `mrz` provider already reads all five; measuring each format's rate through that provider is the open item | Tier-1 real-document accuracy against the **named** residual ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md); sequence completeness closed in [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **read through the registered MRZ provider against the M7 contract** | Every scored miss on the committed baseline is either a Tier-1 HIT or carries a dated attribution in `knowledge/benchmarks/` naming the mechanism that defeats it; no Tier-1 HIT regression, and every chunk that moves an outcome count re-blesses [`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json) in the same PR — the gate fails only on an increase, so it will not ask; each of TD1/TD2/MRVA/MRVB reads through the registered deterministic MRZ provider (`synthpass-die`'s `MrzReader`, one provider for all five ICAO 9303 formats — [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)'s amendment), with its per-format synthetic rate measured through that provider and published in [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers); no OCR engine replacement, vision provider or new dependency enters under this milestone — each would be its own ADR, benchmark-first |
+| **M6 — Deterministic core: Tier-1 accuracy and MRZ formats** | 🚧 In progress — the deterministic half of the former M6, kept under its number; expansion and enterprise readiness moved to M8 by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md). Sequence completeness is **done**; the **MRZ detection** track's premise ran out on 2026-09-12 ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md)'s amendment) and the residual is now a named list of scored misses, split between finding the zone and reading it. The MRZ-formats criterion is **done**: the registered `mrz` provider reads all five formats and each format's synthetic rate is measured through it ([`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)'s amendment, [harness comparison](benchmarks/m6-per-format-harness-comparison-2026-09-16.md)). M6 now closes on the named Tier-1 residual alone | Tier-1 real-document accuracy against the **named** residual ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md); sequence completeness closed in [`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)); TD1 / TD2 / MRVA / MRVB **read through the registered MRZ provider against the M7 contract** | Every scored miss on the committed baseline is either a Tier-1 HIT or carries a dated attribution in `knowledge/benchmarks/` naming the mechanism that defeats it; no Tier-1 HIT regression, and every chunk that moves an outcome count re-blesses [`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json) in the same PR — the gate fails only on an increase, so it will not ask; each of TD1/TD2/MRVA/MRVB reads through the registered deterministic MRZ provider (`synthpass-die`'s `MrzReader`, one provider for all five ICAO 9303 formats — [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)'s amendment), with its per-format synthetic rate measured through that provider and published in [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers); no OCR engine replacement, vision provider or new dependency enters under this milestone — each would be its own ADR, benchmark-first |
 | **M8 — Expansion & Enterprise readiness** | ⏳ Not started — the packaging half of the former M6, split out by [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md) after two ADRs deferred it. One deliverable already shipped ahead of the split: JSONL / Hugging Face exports ([`EXPORTS.md`](EXPORTS.md)). COCO/YOLO, layout plugins, the air-gapped guide and the first commercial engagement are open. Opens when M6 closes — still one milestone at a time | Declarative document *layout* plugins; remaining dataset exports (COCO / YOLO); air-gapped deployment guide; first commercial engagement per [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy) — a labelled corpus, an independent benchmark or an air-gapped integration, **not** a feature-gated tier | A third-party *layout* definition drives generation without a code change; at least one export format consumed by an external trainer end-to-end; an air-gapped install performed from a source build on a machine with no network, and written up — distribution is source-build only until the placeholder licensing key is replaced ([`technical_debt.md`](technical_debt.md)); one commercial engagement delivered with feedback collected. *(The "third-party plugin builds against a stable interface" criterion moved to M7, which owns the interface.)* |
 
 ## Architecture evolution
@@ -139,7 +139,7 @@ more specific belongs there, because restating numbers in a second document is p
 
 **Tier-1 on real specimens: 140 / 154 = 90.9%** over the documents that can yield a hit — from
 the CI-written baseline
-([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-14)
+([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-16)
 that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every
 PR. The rest of the corpus carries no MRZ, has it blacked out, or prints a zone whose own check
 digits fail; [the denominator correction](benchmarks/denominator-correction-2026-09-09.md)
@@ -257,11 +257,12 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   registered against the M7 contract (`IntelligenceProvider`/`FieldReader`) — already reads all
   five formats: format selection happens inside `mrz::find_and_parse` in the fixed order
   [`ARCHITECTURE.md` §13.3](ARCHITECTURE.md#133-mrz-handling-policy) records, not in a branch in
-  the pipeline, which is what `ADR-0002` set out to prevent. What remains is measurement: each
-  format's synthetic rate is taken through the catalog (`provider-bench --mrz-only
-  --document-type <format>`) rather than through `synthpass-bench`'s direct parser call, and
-  published in [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers). Five
-  per-format providers were considered and rejected — see
+  the pipeline, which is what `ADR-0002` set out to prevent. Each format's synthetic rate is now
+  measured through the catalog (`provider-bench --mrz-only --document-type <format>`) and
+  published in [`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers); the two
+  harnesses agree per seed
+  ([comparison](benchmarks/m6-per-format-harness-comparison-2026-09-16.md)). Five per-format
+  providers were considered and rejected — see
   [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)'s amendment.
 
 **Scoped separately — not folded into this milestone**
@@ -276,9 +277,8 @@ execution log ([`archive/roadmap-execution-log.md`](archive/roadmap-execution-lo
   anything above.
 
 **Suggested order:** the named Tier-1 residual ([`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md),
-chosen per document) → per-format rates measured through the registered MRZ provider → **M6 closes**, and
-M8 opens. The deterministic-core steps come first because they are what the product is sold on and
-where the real-specimen miss rate is.
+chosen per document) → **M6 closes**, and M8 opens. (Per-format rates through the registered MRZ
+provider: done, #311.)
 
 ## M8 — Expansion & Enterprise readiness
 
@@ -322,8 +322,10 @@ and where recent effort has actually gone. The *sequence-completeness* half of i
 [`ADR-0008`](decisions/ADR-0008-mrz-detection-track.md) succeeds it with **MRZ detection**, on
 the evidence that `no_mrz_found` then outnumbered `checksum_failed`. Its chunk 1 traced the
 browser/native gap ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) to page orientation and chunk 2
-fixed it, which left the two level; what the accuracy track does next is open (ADR-0008's
-2026-09-12 amendment).
+fixed it, which left the two level; [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)
+decided what the accuracy track does next — the named residual, one document at a time.
+`checksum_failed` now leads the residual (10 of 154, against 4 `no_mrz_found`) — see
+[`benchmarks/README.md`](benchmarks/README.md#current-headline-numbers).
 
 - MRZ sequence completeness — **done** ([`MRZ_SEQUENCE_COMPLETENESS.md`](MRZ_SEQUENCE_COMPLETENESS.md)).
   All of its chunks shipped: typed `ChecksumFailed` sub-reasons (#163), the personal-number
@@ -411,7 +413,7 @@ exercises the real inference engine.
 
 ## Future Work
 
-Beyond M6 and M7, and deliberately not committed:
+Beyond M8, and deliberately not committed:
 
 - **A larger Tier-2 model — target [Qwen3-4B](https://hf.co/Qwen/Qwen3-4B-GGUF), not the 3B/7B
   the design record names.** The now-removed `mlis_v2_0_0_preliminary_design.md` §8's "bring a
@@ -561,7 +563,7 @@ somewhere to point once it's time to scope the work, rather than staying a bare 
   it isn't rediscovered from scratch later, and so it doesn't get assumed away as "just another
   barcode format" the way AAMVA licences are, when it is not.
 
-Neither item changes `knowledge/VISION.md`'s mission or the M1–M7 milestones above;
+Neither item changes `knowledge/VISION.md`'s mission or the M1–M8 milestones above;
 VISION's "non-ICAO documents" non-goal is scoped to the currently committed milestones for
 exactly this reason — this "Beyond ICAO 9303" section is where that longer horizon lives.
 

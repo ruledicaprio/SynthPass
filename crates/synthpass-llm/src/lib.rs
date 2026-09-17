@@ -1,6 +1,5 @@
-//! In-process llama.cpp inference for Tier 2 — replaces the Python gRPC
-//! sidecar (`python/inferer/`) with a native Rust implementation running the
-//! same Qwen2.5-1.5B-Instruct GGUF via `llama-cpp-2`.
+//! In-process llama.cpp inference for Tier 2: the Qwen2.5-1.5B-Instruct GGUF via
+//! `llama-cpp-2`.
 //!
 //! [`NativeLlm`] loads the model once (~1 GB mmap) and is kept warm for the
 //! process lifetime; each [`NativeLlm::extract`] / [`NativeLlm::extract_stream`]

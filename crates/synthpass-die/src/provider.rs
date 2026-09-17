@@ -152,7 +152,7 @@ pub struct DocumentContext<'a> {
     /// A short, pre-rendered `k=v` hint string of checksum-verified MRZ
     /// line-1 fields, for a [`FieldReader`] to fold into its own prompt.
     ///
-    /// Deliberately not sourced from [`Self::prior`]: a Tier-1 [`MrzReader`]
+    /// Deliberately not sourced from [`Self::prior`]: a Tier-1 [`MrzReader`](crate::MrzReader)
     /// reading reports fields only when the *whole* record validates
     /// ([`MrzData::valid`](mrz::MrzData::valid)), so a checksum-partial read
     /// (some individual check digits pass, the composite or another does

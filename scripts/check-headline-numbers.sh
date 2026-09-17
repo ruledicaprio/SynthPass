@@ -26,6 +26,12 @@
 #   gh workflow run real-specimen-gate.yml -f mode=write-baseline
 # Local runs differ (OCR-inference float variance), so never hand-edit the counts.
 #
+# Checks 11-13 (added for the v1.5.0 docs cleanup) catch three more ways the
+# numbers drift apart even when the counts above agree: the baseline's own
+# `measured_date` left behind in prose after a re-bless; README.md's coverage
+# badge diverging from CORPUS_COVERAGE.md's own count (73 vs 75, caught by hand);
+# and a retired M4-era figure ("~55%", "~42%") re-surfacing as if it were current.
+#
 # Pure bash + a JSON field grep. Nothing to install.
 set -euo pipefail
 
@@ -63,6 +69,15 @@ documents="$(json_int documents)"
 hits="$(json_int tier1_hits)"
 no_mrz="$(json_int no_mrz_found)"
 checksum="$(json_int checksum_failed)"
+
+json_str() {
+    local key="$1"
+    local v
+    v="$(grep -oE "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$baseline" | grep -oE '"[^"]*"$' | tr -d '"' | head -1)"
+    [ -n "$v" ] || { echo "FAIL: could not read \"$key\" from $baseline" >&2; exit 1; }
+    printf '%s' "$v"
+}
+measured_date="$(json_str measured_date)"
 
 # Optional buckets: absent from an older baseline, so default to 0 rather than
 # aborting the way `json_int` does for the required ones.
@@ -201,6 +216,61 @@ unattackable=$((documents - scored))
 if ! grep -qE "${unattackable}[[:space:]]+of[[:space:]]+the[[:space:]]+${documents}[[:space:]]+specimens[[:space:]]+cannot[[:space:]]+produce" "$bench_readme"; then
     fail "$bench_readme does not state '${unattackable} of the ${documents} specimens cannot produce a Tier-1 hit'."
 fi
+
+# 11. The baseline's own `measured_date` must match the date each document cites
+#     alongside its `real-specimen-mrz-baseline.json` reference -- a re-bless
+#     that regenerates the baseline JSON but leaves the prose date behind is
+#     exactly the kind of drift this whole script exists to catch.
+baseline_date_in() { # <file> <label>
+    local f="$1" label="$2" found
+    found="$(grep -oE 'real-specimen-mrz-baseline\.json[^0-9]*[0-9]{4}-[0-9]{2}-[0-9]{2}' "$f" 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1)"
+    if [ -z "$found" ]; then
+        fail "$label does not cite a dated real-specimen-mrz-baseline.json reference (expected ${measured_date})."
+    elif [ "$found" != "$measured_date" ]; then
+        fail "$label cites baseline date $found; the committed baseline's measured_date is $measured_date."
+    fi
+}
+baseline_date_in "$roadmap" "$roadmap"
+baseline_date_in "$bench_readme" "$bench_readme"
+
+# 12. The README's "world coverage N/238 countries" badge must equal
+#     CORPUS_COVERAGE.md's own Summary HIT count -- the badge is a restatement,
+#     not an independent count, and the two drifted apart before (73 vs 75).
+coverage_doc="knowledge/CORPUS_COVERAGE.md"
+if [ -f "$coverage_doc" ]; then
+    coverage_hit="$(grep -E '^\| HIT \(checksum-valid real specimen' "$coverage_doc" | grep -oE '[0-9]+[[:space:]]*\|[[:space:]]*$' | grep -oE '[0-9]+' | head -1)"
+    badge_n="$(grep -oE 'world%20coverage-[0-9]+%2F238' "$readme" | sed -E 's/^world%20coverage-([0-9]+)%2F238$/\1/' | head -1)"
+    if [ -z "$coverage_hit" ]; then
+        fail "$coverage_doc: could not find the Summary table's HIT row."
+    elif [ -z "$badge_n" ]; then
+        fail "$readme: could not find the 'world coverage N/238 countries' badge."
+    elif [ "$badge_n" != "$coverage_hit" ]; then
+        fail "$readme's coverage badge says ${badge_n}/238; ${coverage_doc}'s Summary HIT row says ${coverage_hit}."
+    fi
+else
+    fail "$coverage_doc is missing."
+fi
+
+# 13. Retired M4-era synthetic-corpus figures ("~55%", "~42%") must not appear
+#     as if they were current. A dated benchmark report, an ADR, the archive,
+#     or a changelog may cite one as history; anywhere else, the line must
+#     also say "M4-era" -- otherwise it reads as today's number, which is how
+#     README.md spent a whole cycle advertising a stale rate (see the header
+#     comment above).
+while IFS= read -r f; do
+    case "$f" in
+        scripts/check-headline-numbers.sh) continue ;;
+        knowledge/benchmarks/*-20[0-9][0-9]-[0-9][0-9]-[0-9][0-9].md) continue ;;
+        knowledge/decisions/*) continue ;;
+        knowledge/archive/*) continue ;;
+        CHANGELOG.md|crates/mrz/CHANGELOG.md) continue ;;
+        changelog.d/*) continue ;;
+    esac
+    while IFS= read -r line; do
+        case "$line" in *M4-era*) continue ;; esac
+        fail "$f states a retired figure without an 'M4-era' label: ${line}"
+    done < <(grep -nE '~55%|~42%' "$f" 2>/dev/null | sed -E 's/^[0-9]+://')
+done < <(git grep -lE '~55%|~42%' -- . 2>/dev/null || true)
 
 if [ "$status" -eq 0 ]; then
     echo "OK: README.md, ROADMAP.md and $bench_readme's live block match $baseline"

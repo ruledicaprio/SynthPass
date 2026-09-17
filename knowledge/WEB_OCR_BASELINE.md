@@ -211,6 +211,9 @@ first pass, before any of the added work runs.
 
 ## 2026-09-03 (a) — first measurement
 
+**Superseded by the 2026-09-09 re-measurement** (80.0% vs 74.4%, both arms measured the same day —
+[`benchmarks/ocr-stack-gap-2026-09-09.md`](benchmarks/ocr-stack-gap-2026-09-09.md)).
+
 Real headless Chromium (Playwright 1.62.1, Chromium 151), the assembled
 `_site/` build, tesseract.js 5.1.1 with the vendored OCR-B `mrz.traineddata`.
 All 190 corpus rows with `mrz.present == true`.
