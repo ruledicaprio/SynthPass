@@ -24,6 +24,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | --- | --- | --- |
 | **Tier-1 hit rate, real specimens** | **140 / 153 = 91.5%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-17) |
 | Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
+| Strict name hit rate, real specimens | not yet measured in CI — the row fills at the first re-bless whose baseline carries `strict_names` (ADR-0013) | `real-specimen-mrz-baseline.json` |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
@@ -135,6 +136,10 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   by checking each Tier-1 hit's per-field CER for `surname`/`given_names` > 0: of 377 Tier-1
   hits across the five synthetic formats, **178 carry a wrong name** — TD3 39/78, TD2 37/73,
   TD1 39/54, MRV-A 35/85, MRV-B 28/87.
+
+  The real-specimen strict rate becomes Observed, not Derived, once a CI-written
+  `real-specimen-mrz-baseline.json` carries the `strict_names` counts (report-only — see
+  ADR-0013); the row above states no real-specimen figure until then.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 

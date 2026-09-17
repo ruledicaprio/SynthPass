@@ -32,6 +32,13 @@
 # badge diverging from CORPUS_COVERAGE.md's own count (73 vs 75, caught by hand);
 # and a retired M4-era figure ("~55%", "~42%") re-surfacing as if it were current.
 #
+# Check 14 (ADR-0013) is report-only, not a gate: when the baseline carries
+# `strict_names`, knowledge/benchmarks/README.md's Strict name hit rate row
+# must state the matching counts; when it does not (the case today), the
+# check is skipped rather than demanding a figure nothing measured yet.
+# README.md and ROADMAP.md carry no strict figure -- the one-figure rule
+# above is about the *Tier-1* rate and is unaffected.
+#
 # Pure bash + a JSON field grep. Nothing to install.
 set -euo pipefail
 
@@ -271,6 +278,27 @@ while IFS= read -r f; do
         fail "$f states a retired figure without an 'M4-era' label: ${line}"
     done < <(grep -nE '~55%|~42%' "$f" 2>/dev/null | sed -E 's/^[0-9]+://')
 done < <(git grep -lE '~55%|~42%' -- . 2>/dev/null || true)
+
+# 14. ADR-0013 strict-name counts (report-only): a baseline whose
+#     `strict_names` field has ever been written (i.e. `name_scorable_documents`
+#     is nonzero) must have that measurement reflected in $bench_readme's
+#     Strict name hit rate row, as "<strict_hits> / <name_scorable_documents> =
+#     <rate>%". An older baseline that never measured names has
+#     `name_scorable_documents` absent -- `json_int_or_zero` reads that as 0,
+#     and the check is skipped rather than demanding a figure nothing
+#     measured. This never gates on the rate moving, only on the row matching
+#     whatever the committed baseline currently says -- see ADR-0013's
+#     "gating on it is a separate decision."
+strict_hits="$(json_int_or_zero strict_hits)"
+name_scorable_documents="$(json_int_or_zero name_scorable_documents)"
+if [ "$name_scorable_documents" -gt 0 ]; then
+    strict_rate="$(awk -v h="$strict_hits" -v s="$name_scorable_documents" 'BEGIN { printf "%.1f", (h * 100.0) / s }')"
+    if ! grep -qE "${strict_hits}[[:space:]]*/[[:space:]]*${name_scorable_documents}[[:space:]]*=[[:space:]]*${strict_rate}%" "$bench_readme"; then
+        fail "$bench_readme's Strict name hit rate row does not state '${strict_hits} / ${name_scorable_documents} = ${strict_rate}%'."
+    fi
+else
+    echo "strict-name counts not yet in the baseline (name_scorable_documents=0) -- check 14 skipped"
+fi
 
 if [ "$status" -eq 0 ]; then
     echo "OK: README.md, ROADMAP.md and $bench_readme's live block match $baseline"
