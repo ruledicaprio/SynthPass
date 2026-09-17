@@ -2936,6 +2936,7 @@ name = "synthpass-bench"
 version = "1.5.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "image",
  "mrz",
  "plotters",
