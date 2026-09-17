@@ -62,6 +62,18 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/work" \
 the result actually links static: `file target/x86_64-unknown-linux-musl/release/synthpass` should say
 "statically linked".
 
+### Python tooling tests (`tools/`)
+
+The scouting, cohort and re-bless scripts under `tools/` carry offline unit tests (stdlib
+`unittest`; no network, no git, no cargo -- one test compiles a Rust snippet with `rustc`):
+
+```bash
+python -m unittest discover -s tools -p "test_*.py"
+```
+
+CI runs the same command (the `tools-tests` job in `ci.yml`), so a change to `rebless.py` or
+`apply_cohort.py` cannot merge with its tests red.
+
 ### Fuzzing (`mrz`)
 
 `cargo test --workspace` already runs an always-on `proptest` "never panics" suite over `mrz`
