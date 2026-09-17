@@ -233,7 +233,7 @@ fn least_squares(points: impl Iterator<Item = (f64, f64)>) -> Option<(f64, f64)>
 /// ambiguous glyph (fixed here — see this module's test
 /// `fit_grid_seed_uses_left_edge_not_cell_centre` for a worked example of
 /// the corruption). [`align`] then runs, followed by up to
-/// [`REFIT_ROUNDS`] rounds of least-squares refit over the DP's own
+/// `REFIT_ROUNDS` rounds of least-squares refit over the DP's own
 /// assignment, each round re-running [`align`] against the refit grid.
 pub fn fit_grid(glyphs: &[Glyph], line_left: f32, line_right: f32, cells: usize) -> Option<Grid> {
     let n = glyphs.len();
@@ -314,7 +314,7 @@ const ORIGIN_SEARCH_STEP: f32 = 0.5;
 /// independent of any recognized glyph. Scans rows `top..bottom` of `dark`
 /// for a per-column dark-pixel count (the "ink profile"), finds the first
 /// column carrying any ink, then searches origins in
-/// `[first_dark - pitch, first_dark]` in [`ORIGIN_SEARCH_STEP`] steps for
+/// `[first_dark - pitch, first_dark]` in `ORIGIN_SEARCH_STEP` steps for
 /// the one whose `cells + 1` cell boundaries cross the least ink — a
 /// well-placed grid's boundaries fall between characters, on background.
 /// `None` when the row range is empty, `pitch` is non-positive, or no
@@ -486,11 +486,11 @@ pub struct Repair {
 /// image doesn't support. The ink gate is mandatory: glyph positions alone
 /// never justify a filler.
 ///
-/// **Arbitration.** The repaired line's first [`PREFIX_LEN`] characters
-/// must equal `raw_line`'s first [`PREFIX_LEN`] characters, or the result
+/// **Arbitration.** The repaired line's first `PREFIX_LEN` characters
+/// must equal `raw_line`'s first `PREFIX_LEN` characters, or the result
 /// is [`Rejected::PrefixChanged`] — the DP must not be allowed to shift a
 /// glyph the recognizer actually read out of its position. For a 2-line
-/// format (`width != `[`TD1_NAME_LINE_WIDTH`]) those five characters are
+/// format (`width != TD1_NAME_LINE_WIDTH`) those five characters are
 /// the document code and issuing country (`P<UTO...`), so this function
 /// additionally requires `mrz::country_name` to resolve the repaired
 /// issuing-country slice (characters 2..5) — a repair that leaves that
@@ -498,7 +498,7 @@ pub struct Repair {
 /// `shift_or_unshift_line1`'s gate. TD1's name line (line index 2, see
 /// [`name_line_index`]) has no such prefix at all — it is name text from
 /// position 0 — so both checks are skipped for it; `width ==
-/// `[`TD1_NAME_LINE_WIDTH`]` alone identifies that case, since TD1 is the
+/// TD1_NAME_LINE_WIDTH` alone identifies that case, since TD1 is the
 /// only format whose name line has this width.
 pub fn repair_name_line(
     raw_line: &str,
