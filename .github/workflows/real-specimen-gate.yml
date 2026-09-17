@@ -212,7 +212,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: real-specimen-mrz-baseline
-          path: knowledge/benchmarks/real-specimen-mrz-baseline.json
+          path: |
+            knowledge/benchmarks/real-specimen-mrz-baseline.json
+            knowledge/benchmarks/real-specimen-outcomes.jsonl
 
       # Preserve the identity report even when the benchmark itself fails.
       - name: Preserve the identity audit
@@ -230,3 +232,4 @@ jobs:
           name: real-specimen-gate-report
           path: artifacts/real-specimen-gate-report.json
           if-no-files-found: ignore
+          retention-days: 90

@@ -39,6 +39,15 @@
 # README.md and ROADMAP.md carry no strict figure -- the one-figure rule
 # above is about the *Tier-1* rate and is unaffected.
 #
+# Checks 15-16 (the outcome ledger) are also report-only skips on a baseline
+# that predates them: check 15 verifies knowledge/benchmarks/real-specimen-outcomes.jsonl
+# (present only when the baseline carries `outcomes_sha256`) actually hashes
+# to that field and carries one line per `documents`; check 16 verifies
+# `refusal_population` (present only once a baseline records it) equals
+# `documents - scored` and that the False accepts row states it. Both are
+# skipped, with a message, on the baseline committed today, which has
+# neither field yet.
+#
 # Pure bash + a JSON field grep. Nothing to install.
 set -euo pipefail
 
@@ -97,6 +106,24 @@ false_positives="$(json_int_or_zero false_positive_mrz)"
 no_mrz_expected="$(json_int_or_zero no_mrz_expected)"
 redacted_mrz="$(json_int_or_zero redacted_mrz)"
 checksum_failed_specimen="$(json_int_or_zero checksum_failed_specimen)"
+
+# Absent-vs-zero variants for the two new outcome-ledger fields (checks 15-16):
+# unlike a miss-kind bucket, `0` is a real, legitimately-measured value for
+# `refusal_population`, so it must not collapse into the same "0" a genuinely
+# absent field would print -- these return an empty string when the key is
+# missing instead. `local v` (not a bare top-level assignment) is what keeps a
+# missing key's failed `grep` from tripping `set -e` under `pipefail`: the
+# function's own exit status is `printf`'s, not the pipeline's.
+json_str_or_empty() {
+    local v
+    v="$(grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$baseline" | grep -oE '"[^"]*"$' | tr -d '"' | head -1)"
+    printf '%s' "$v"
+}
+json_int_or_absent() {
+    local v
+    v="$(grep -oE "\"$1\"[[:space:]]*:[[:space:]]*[0-9]+" "$baseline" | grep -oE '[0-9]+$' | head -1)"
+    printf '%s' "$v"
+}
 
 # One decimal place, rounded half-up, matching how the README states it.
 rate="$(awk -v h="$hits" -v s="$scored" 'BEGIN { printf "%.1f", (h * 100.0) / s }')"
@@ -298,6 +325,49 @@ if [ "$name_scorable_documents" -gt 0 ]; then
     fi
 else
     echo "strict-name counts not yet in the baseline (name_scorable_documents=0) -- check 14 skipped"
+fi
+
+# 15. The outcome ledger. When the baseline carries `outcomes_sha256`,
+#     knowledge/benchmarks/real-specimen-outcomes.jsonl must exist, hash to
+#     that value, and carry exactly `documents` lines -- one row per document
+#     the baseline's own counts were built from. Absent from an older
+#     baseline that never wrote a ledger, in which case this check is
+#     skipped rather than demanding a file nothing measured yet.
+outcomes_sha256="$(json_str_or_empty outcomes_sha256)"
+ledger="knowledge/benchmarks/real-specimen-outcomes.jsonl"
+if [ -n "$outcomes_sha256" ]; then
+    if [ ! -f "$ledger" ]; then
+        fail "the baseline carries outcomes_sha256 but $ledger is missing."
+    else
+        actual_sha="$(sha256sum "$ledger" | awk '{print $1}')"
+        if [ "$actual_sha" != "$outcomes_sha256" ]; then
+            fail "$ledger hashes to ${actual_sha}; the baseline's outcomes_sha256 says ${outcomes_sha256}."
+        fi
+        ledger_lines="$(wc -l < "$ledger" | tr -d ' ')"
+        if [ "$ledger_lines" != "$documents" ]; then
+            fail "$ledger has ${ledger_lines} line(s); the baseline's documents count is ${documents}."
+        fi
+    fi
+else
+    echo "outcome ledger not yet in the baseline (no outcomes_sha256) -- check 15 skipped"
+fi
+
+# 16. `refusal_population` (documents - scored -- the population a false
+#     accept could come from) must equal that arithmetic, and $bench_readme's
+#     False accepts row must state "<false_positive_mrz> / <refusal_population>"
+#     once the baseline carries it. Skipped, with a message, on an older
+#     baseline that has never recorded refusal_population.
+refusal_population="$(json_int_or_absent refusal_population)"
+if [ -n "$refusal_population" ]; then
+    expected_refusal=$((documents - scored))
+    if [ "$refusal_population" != "$expected_refusal" ]; then
+        fail "the baseline's refusal_population (${refusal_population}) does not equal documents - scored (${expected_refusal})."
+    fi
+    if ! grep -qE "${false_positives}[[:space:]]*/[[:space:]]*${refusal_population}" "$bench_readme"; then
+        fail "$bench_readme's False accepts row does not state '${false_positives} / ${refusal_population}'."
+    fi
+else
+    echo "refusal_population not yet in the baseline -- check 16 skipped"
 fi
 
 if [ "$status" -eq 0 ]; then

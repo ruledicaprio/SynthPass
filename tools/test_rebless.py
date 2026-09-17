@@ -11,6 +11,7 @@ Run with:
 from __future__ import annotations
 
 import copy
+import json
 import os
 import sys
 import tempfile
@@ -194,6 +195,29 @@ class ClassifyBaselineDiffTests(unittest.TestCase):
         self.assertEqual(by_key["documents"], (265, 266))
         self.assertEqual(by_key["no_mrz_expected"], (50, 51))
 
+    def test_outcomes_sha256_alone_moving_is_identical(self):
+        # The ledger's per-document `ocr_ms` is wall-clock, so the hash moves
+        # on almost every CI run -- it must classify exactly like the other
+        # provenance fields, never as a scored or non-scored delta on its own.
+        old = make_baseline(outcomes_sha256="a" * 64)
+        new = make_baseline(outcomes_sha256="b" * 64)
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_IDENTICAL)
+        self.assertIn("outcomes_sha256", {c[0] for c in changed})
+
+    def test_refusal_population_alone_moving_is_non_scored_delta(self):
+        old = make_baseline(documents=265, refusal_population=106)
+        new = make_baseline(documents=266, refusal_population=107, measured_date="2026-09-15")
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_NON_SCORED)
+        self.assertIn("refusal_population", {c[0] for c in changed})
+
+    def test_refusal_population_move_alongside_a_scored_move_is_still_scored_delta(self):
+        old = make_baseline(refusal_population=106)
+        new = make_baseline(tier1_hits=146, scored=160, documents=266, refusal_population=106)
+        cls, _changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_SCORED)
+
 
 class FormatDiffTableTests(unittest.TestCase):
     def test_excludes_provenance_rows_but_states_measured_line(self):
@@ -329,6 +353,15 @@ BENCH_README_SNIPPET_WITH_STRICT_ROW = BENCH_README_SNIPPET.replace(
     "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n",
     "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n"
     f"| Strict name hit rate, real specimens | {rb.STRICT_NAME_PLACEHOLDER_VALUE} | {rb.STRICT_NAME_PLACEHOLDER_SOURCE} |\n",
+)
+
+# Same fixture, with the False accepts row present as it ships in the real
+# file -- placeholder text until the first baseline carries
+# `refusal_population`.
+BENCH_README_SNIPPET_WITH_FALSE_ACCEPTS_ROW = BENCH_README_SNIPPET.replace(
+    "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n",
+    "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n"
+    f"| False accepts (a checksum-valid MRZ returned for a document that carries none) | {rb.FALSE_ACCEPTS_PLACEHOLDER_VALUE} | {rb.FALSE_ACCEPTS_PLACEHOLDER_SOURCE} |\n",
 )
 
 
@@ -496,6 +529,53 @@ class RewriteBenchmarksReadmeStrictNameRowTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             rb.rewrite_benchmarks_readme_strict_name_row("no strict row in this text at all", old_flat, new_flat)
+
+
+class RewriteBenchmarksReadmeFalseAcceptsRowTests(unittest.TestCase):
+    """Unit-level coverage of `rewrite_benchmarks_readme_false_accepts_row`,
+    mirroring `RewriteBenchmarksReadmeStrictNameRowTests` for the other
+    report-only row this PR adds."""
+
+    def test_rewrites_from_the_placeholder(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(
+            make_baseline(refusal_population=106, measured_date="2026-09-15")
+        )
+        out = rb.rewrite_benchmarks_readme_false_accepts_row(
+            BENCH_README_SNIPPET_WITH_FALSE_ACCEPTS_ROW, old_flat, new_flat
+        )
+        self.assertIn("**0 / 106**", out)
+        self.assertIn("same baseline (CI, 2026-09-15)", out)
+        self.assertNotIn("not yet in the baseline", out)
+
+    def test_rewrites_from_a_previous_number(self):
+        old_flat = rb.flatten_baseline(make_baseline(refusal_population=100, measured_date="2026-09-14"))
+        old_value, old_source = rb._format_false_accepts_row_cells(old_flat)
+        snippet = BENCH_README_SNIPPET.replace(
+            "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n",
+            "| Tier-1 hit rate, whole specimen corpus | 145 / 265 = 54.7% | same baseline; the gap is explained below |\n"
+            f"| False accepts (a checksum-valid MRZ returned for a document that carries none) | {old_value} | {old_source} |\n",
+        )
+        new_flat = rb.flatten_baseline(make_baseline(refusal_population=106, measured_date="2026-09-16"))
+        out = rb.rewrite_benchmarks_readme_false_accepts_row(snippet, old_flat, new_flat)
+        self.assertIn("**0 / 106**", out)
+        self.assertNotIn("**0 / 100**", out)
+
+    def test_no_op_when_new_baseline_has_no_refusal_population(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(make_baseline())
+        out = rb.rewrite_benchmarks_readme_false_accepts_row(
+            BENCH_README_SNIPPET_WITH_FALSE_ACCEPTS_ROW, old_flat, new_flat
+        )
+        self.assertEqual(out, BENCH_README_SNIPPET_WITH_FALSE_ACCEPTS_ROW)
+
+    def test_missing_row_raises_rather_than_silently_skipping(self):
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(make_baseline(refusal_population=1))
+        with self.assertRaises(ValueError):
+            rb.rewrite_benchmarks_readme_false_accepts_row(
+                "no false accepts row in this text at all", old_flat, new_flat
+            )
 
 
 # --------------------------------------------------------------------------
@@ -666,6 +746,58 @@ class FindingsAppendTargetTests(unittest.TestCase):
         self.assertTrue(changed)
         indexed_text = findings_path.read_text(encoding="utf-8")
         self.assertIn("cohort c14", indexed_text.split(rb.ixf.INDEX_START)[1].split(rb.ixf.INDEX_END)[0])
+
+
+# --------------------------------------------------------------------------
+# download_baseline_artifacts / install_baseline_and_ledger -- the outcome
+# ledger's install path, offline (no `gh run download`, just tempdirs).
+# --------------------------------------------------------------------------
+
+
+class DownloadBaselineArtifactsTests(unittest.TestCase):
+    def test_returns_baseline_ledger_and_report_paths_under_the_same_artifact_dir(self):
+        with mock.patch.object(rb.ac, "run_cmd", return_value="") as run:
+            baseline_path, ledger_path, report_path = rb.download_baseline_artifacts(Path("."), "12345")
+        run.assert_called_once()
+        self.assertEqual(baseline_path.name, "real-specimen-mrz-baseline.json")
+        self.assertEqual(ledger_path.name, "real-specimen-outcomes.jsonl")
+        self.assertEqual(baseline_path.parent, ledger_path.parent)
+        self.assertEqual(report_path.name, "real-specimen-gate-report.json")
+
+
+class InstallBaselineAndLedgerTests(unittest.TestCase):
+    def test_installs_the_ledger_when_the_artifact_has_one(self):
+        with tempfile.TemporaryDirectory() as td:
+            worktree = Path(td) / "worktree"
+            worktree.mkdir()
+            artifact_dir = Path(td) / "artifact"
+            artifact_dir.mkdir()
+            ledger_artifact = artifact_dir / "real-specimen-outcomes.jsonl"
+            ledger_artifact.write_text('{"asset_id": "a"}\n', encoding="utf-8")
+
+            touched = rb.install_baseline_and_ledger(make_baseline(), ledger_artifact, worktree)
+
+            self.assertEqual(touched, {rb.BASELINE_REL_PATH, rb.LEDGER_REL_PATH})
+            installed_ledger = worktree / rb.LEDGER_REL_PATH
+            self.assertTrue(installed_ledger.is_file())
+            self.assertEqual(installed_ledger.read_text(encoding="utf-8"), '{"asset_id": "a"}\n')
+            installed_baseline = worktree / rb.BASELINE_REL_PATH
+            self.assertTrue(installed_baseline.is_file())
+            self.assertEqual(json.loads(installed_baseline.read_text(encoding="utf-8")), make_baseline())
+
+    def test_installs_the_baseline_alone_when_the_artifact_has_no_ledger(self):
+        # A `real-specimen-mrz-baseline` artifact from a CI run that predates
+        # the outcome ledger -- `ledger_artifact` simply does not exist.
+        with tempfile.TemporaryDirectory() as td:
+            worktree = Path(td) / "worktree"
+            worktree.mkdir()
+            missing_ledger = Path(td) / "artifact" / "real-specimen-outcomes.jsonl"
+
+            touched = rb.install_baseline_and_ledger(make_baseline(), missing_ledger, worktree)
+
+            self.assertEqual(touched, {rb.BASELINE_REL_PATH})
+            self.assertFalse((worktree / rb.LEDGER_REL_PATH).exists())
+            self.assertTrue((worktree / rb.BASELINE_REL_PATH).is_file())
 
 
 if __name__ == "__main__":

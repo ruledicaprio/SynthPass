@@ -65,22 +65,32 @@
 //!                      as JSON to PATH and exit 0. How
 //!                      `knowledge/benchmarks/real-specimen-mrz-baseline.json`
 //!                      is (re)generated — always on CI, never hand-edited.
+//!                      Also writes `real-specimen-outcomes.jsonl` next to PATH:
+//!                      one JSON object per document (the outcome ledger), whose
+//!                      SHA-256 is pinned in the baseline's `outcomes_sha256` —
+//!                      see this file's `OutcomeRow` doc.
 //!   --assert-baseline PATH
 //!                      compare the `mrz` provider's Tier-1 snapshot against the
 //!                      committed baseline at PATH and exit non-zero on a
-//!                      regression: HIT count dropped, or any miss bucket
-//!                      (`checksum_failed`, `no_mrz_found`, …) grew. A missing
-//!                      PATH is written and passes (first-run bootstrap). The
-//!                      per-PR no-regression gate.
+//!                      regression: HIT count dropped, any miss bucket
+//!                      (`checksum_failed`, `no_mrz_found`, …) grew, or the
+//!                      outcome ledger next to PATH no longer hashes to
+//!                      `outcomes_sha256`. A missing PATH is written and passes
+//!                      (first-run bootstrap). When a committed ledger is
+//!                      present, also prints an informational (non-failing)
+//!                      per-document outcome diff against this run. The per-PR
+//!                      no-regression gate.
 //! ```
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
+    run_provider_bench, run_provider_bench_real, AssertionBucket, DocumentDetail, ProviderReport,
     StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::{
@@ -272,12 +282,12 @@ fn usage() {
     );
     eprintln!(
         "  --write-baseline PATH  write the mrz provider's Tier-1 snapshot (HIT count + \
-         miss-kind histogram) to PATH as JSON and exit"
+         miss-kind histogram) to PATH as JSON, plus the outcome ledger next to it, and exit"
     );
     eprintln!(
         "  --assert-baseline PATH  compare the mrz provider's Tier-1 snapshot against the \
-         committed baseline at PATH; exit non-zero on a regression (missing PATH is written \
-         and passes)"
+         committed baseline at PATH; exit non-zero on a regression or an outcome-ledger sha \
+         mismatch (missing PATH is written and passes)"
     );
 }
 
@@ -886,6 +896,216 @@ const REGRESSION_BUCKETS: &[&str] = &[
     "false_positive_mrz",
 ];
 
+/// The fixed name `--write-baseline`/`--assert-baseline` write the outcome
+/// ledger under, always in the same directory as the baseline JSON itself
+/// (`outcomes_ledger_path`) — never a name the caller chooses, so a reader who
+/// knows the baseline's path always knows the ledger's.
+const OUTCOMES_LEDGER_FILENAME: &str = "real-specimen-outcomes.jsonl";
+
+/// One line of the outcome ledger (`real-specimen-outcomes.jsonl`): the
+/// per-document evidence behind one CI run's `RealSpecimenSnapshot`, kept
+/// alongside the aggregate baseline so a finding derived from it stays
+/// re-derivable after the `real-specimen-gate-report` CI artifact expires
+/// (the workflow uploads it with no `retention-days`, so GitHub's default
+/// window is all a dated claim gets today).
+///
+/// Field order is the JSON key order — `#[derive(Serialize)]` on a struct
+/// serializes fields in declaration order, so this order **is** the schema;
+/// do not reorder the fields without treating that as a format change.
+/// `miss_reason` is the full [`MissReason`] [`Display`](std::fmt::Display)
+/// string (may carry a parse/provider error message); `outcome` is the
+/// stable machine-readable class ([`miss_kind`] or `"hit"`) — the same
+/// hit-vs-noise split [`DocumentDetailReport::miss_reason`] draws for the
+/// report JSON, deliberately not applied here since this file exists
+/// specifically to keep the detail an aggregate report drops.
+///
+/// Every field is always present (an absent optional serializes as `null`,
+/// never an omitted key): the ledger is meant to be diffed line-by-line and
+/// joined key-by-key across runs, and an omitted-vs-`null` distinction would
+/// only make that harder for no benefit — unlike the report JSON's
+/// `DocumentDetailReport`, nothing here is trying to keep an old report
+/// backward-compatible.
+///
+/// `mrz_format`/`name_error` are owned `String`, unlike
+/// [`DocumentDetail`]'s `&'static str` they are copied from: a derived
+/// `Deserialize` for a `&'static str` field can only borrow from genuinely
+/// `'static` input, which the bytes `parse_ledger` reads back off disk never
+/// are.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct OutcomeRow {
+    asset_id: Option<String>,
+    name: String,
+    outcome: String,
+    miss_reason: Option<String>,
+    mrz_format: Option<String>,
+    mrz_found: bool,
+    mrz_checksums_valid: bool,
+    names_exact: Option<bool>,
+    name_error: Option<String>,
+    ocr_ms: u128,
+    retry_variant_id: Option<String>,
+    retry_budget_hit: bool,
+    retry_stop: Option<String>,
+}
+
+impl OutcomeRow {
+    /// The sort/join key: `asset_id` when present (every real specimen has
+    /// one), falling back to `name` (the synthetic corpus's seed-derived
+    /// identity, which never sets `asset_id`) — the same fallback the ledger
+    /// is sorted by and `diff_outcomes` joins on.
+    fn sort_key(&self) -> &str {
+        self.asset_id.as_deref().unwrap_or(&self.name)
+    }
+}
+
+impl From<&DocumentDetail> for OutcomeRow {
+    fn from(d: &DocumentDetail) -> Self {
+        Self {
+            asset_id: d.asset_id.clone(),
+            name: d.name.clone(),
+            outcome: d
+                .miss_reason
+                .as_ref()
+                .map(miss_kind)
+                .unwrap_or("hit")
+                .to_string(),
+            miss_reason: d.miss_reason.as_ref().map(ToString::to_string),
+            mrz_format: d.mrz_format.map(str::to_string),
+            mrz_found: d.mrz_found,
+            mrz_checksums_valid: d.mrz_checksums_valid,
+            names_exact: d.names_exact,
+            name_error: d.name_error.map(str::to_string),
+            ocr_ms: d.ocr_elapsed.as_millis(),
+            retry_variant_id: d.retry_variant_id.clone(),
+            retry_budget_hit: d.retry_budget_hit,
+            retry_stop: d.retry_stop.clone(),
+        }
+    }
+}
+
+/// The `mrz` provider's `documents_detail`, one [`OutcomeRow`] each, sorted by
+/// [`OutcomeRow::sort_key`] — byte-deterministic for a given run, so the
+/// ledger diffs cleanly across CI runs that measured the same corpus.
+fn build_outcome_rows(mrz: &ProviderReport) -> Vec<OutcomeRow> {
+    let mut rows: Vec<OutcomeRow> = mrz.documents_detail.iter().map(OutcomeRow::from).collect();
+    rows.sort_by(|a, b| a.sort_key().cmp(b.sort_key()));
+    rows
+}
+
+/// One compact JSON line per row, each terminated by `\n` (including the
+/// last) — the exact bytes [`sha256_hex`] hashes for
+/// `RealSpecimenBaseline::outcomes_sha256`, so any change to this function is
+/// a ledger-format change.
+fn ledger_bytes(rows: &[OutcomeRow]) -> Vec<u8> {
+    let mut buf = String::new();
+    for row in rows {
+        buf.push_str(&serde_json::to_string(row).expect("serialize outcome row"));
+        buf.push('\n');
+    }
+    buf.into_bytes()
+}
+
+/// Lowercase hex SHA-256, byte-by-byte the same way `synthpass-export`'s
+/// `writer.rs` and `synthpass-ocr`'s `build.rs` already do: sha2 0.11's
+/// `finalize()` returns a `hybrid_array::Array` with no `LowerHex` impl.
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let mut out = String::new();
+    for b in hasher.finalize() {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// Where `--write-baseline PATH` / `--assert-baseline PATH` read or write the
+/// outcome ledger: [`OUTCOMES_LEDGER_FILENAME`] in the same directory as the
+/// baseline itself, never a path the caller chooses independently — the two
+/// files are a pair (`outcomes_sha256` only means something next to the
+/// ledger it was computed from).
+fn outcomes_ledger_path(baseline_path: &str) -> std::path::PathBuf {
+    let dir = std::path::Path::new(baseline_path)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    dir.join(OUTCOMES_LEDGER_FILENAME)
+}
+
+/// Verifies `ledger_bytes` hashes to `expected` (`RealSpecimenBaseline::outcomes_sha256`,
+/// lowercase hex). `Err` is the one way the outcome ledger turns into a gate
+/// **failure**: a committed ledger that no longer matches its baseline was
+/// edited by hand, or belongs to a different run entirely — either way the
+/// per-document evidence beneath the aggregate counts can no longer be
+/// trusted.
+fn verify_ledger_sha(ledger_bytes: &[u8], expected: &str) -> Result<(), String> {
+    let actual = sha256_hex(ledger_bytes);
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "outcome ledger sha256 mismatch: baseline says {expected}, the committed ledger \
+             hashes to {actual} — the committed ledger was edited by hand or does not belong to \
+             this baseline"
+        ))
+    }
+}
+
+/// Parses a ledger file's exact bytes back into rows, one per non-empty line
+/// — the inverse of [`ledger_bytes`], so a round trip through disk is
+/// lossless and a malformed committed ledger is reported rather than panicking.
+fn parse_ledger(bytes: &[u8]) -> Result<Vec<OutcomeRow>, String> {
+    let text = std::str::from_utf8(bytes).map_err(|e| format!("ledger is not valid UTF-8: {e}"))?;
+    text.lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_str(line).map_err(|e| format!("malformed ledger row: {e}")))
+        .collect()
+}
+
+/// Informational per-document diff between the ledger committed alongside the
+/// baseline and this run's own outcome rows, joined on [`OutcomeRow::sort_key`].
+/// **Never a gate failure** — `check_baseline`'s bucket checks already decide
+/// regressions from the aggregate counts; this exists so a reviewer can see
+/// *which* documents moved without downloading two CI artifacts and diffing
+/// them by hand. Returns ready-to-print lines: a one-line summary, then up to
+/// 20 `key: old -> new` rows for documents whose outcome changed, sorted by
+/// key.
+fn diff_outcomes(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<String> {
+    let committed_by_key: BTreeMap<&str, &OutcomeRow> =
+        committed.iter().map(|r| (r.sort_key(), r)).collect();
+    let actual_by_key: BTreeMap<&str, &OutcomeRow> =
+        actual.iter().map(|r| (r.sort_key(), r)).collect();
+
+    let mut moved: Vec<(&str, &str, &str)> = Vec::new();
+    let mut only_committed = 0usize;
+    for (key, row) in &committed_by_key {
+        match actual_by_key.get(key) {
+            Some(now) if now.outcome != row.outcome => {
+                moved.push((key, row.outcome.as_str(), now.outcome.as_str()))
+            }
+            Some(_) => {}
+            None => only_committed += 1,
+        }
+    }
+    let only_actual = actual_by_key
+        .keys()
+        .filter(|k| !committed_by_key.contains_key(*k))
+        .count();
+    moved.sort_unstable();
+
+    let mut lines = vec![format!(
+        "outcome ledger diff vs committed: {} document(s) changed outcome, {only_committed} only \
+         in the committed ledger, {only_actual} only in this run",
+        moved.len(),
+    )];
+    for (key, old, new) in moved.iter().take(20) {
+        lines.push(format!("  {key}: {old} -> {new}"));
+    }
+    if moved.len() > 20 {
+        lines.push(format!("  ... and {} more", moved.len() - 20));
+    }
+    lines
+}
+
 const BASELINE_NOTE: &str = "Real-specimen Tier-1 no-regression baseline for the deterministic \
     `mrz` provider. Regenerate ONLY via CI: `gh workflow run real-specimen-gate.yml -f \
     mode=write-baseline`, download the artifact, commit it. Local numbers differ from CI \
@@ -950,6 +1170,21 @@ struct RealSpecimenSnapshot {
     /// scored population; see that variant's doc for why `0.0` would be a
     /// fabrication here). Report-only — see [`StrictNamesBaseline`]'s doc.
     strict_names: Option<StrictNamesBaseline>,
+    /// `documents - scored`, restated as a stored count rather than left to
+    /// `off_denominator()` arithmetic: the population a false accept could
+    /// come from — every document whose zone is absent, redacted, or
+    /// non-conforming, where any checksum-valid MRZ returned is by
+    /// construction a hallucination, not a correct read. Always computable
+    /// from `by_miss_kind`, so `from_reports` always sets it (never `None`);
+    /// it is `RealSpecimenBaseline::refusal_population` that stays optional,
+    /// for a committed baseline written before this field existed.
+    refusal_population: usize,
+    /// [`RealSpecimenBaseline::outcomes_sha256`]'s value for *this* run —
+    /// always `None` straight out of [`Self::from_reports`], since the
+    /// ledger bytes it would hash do not exist until
+    /// [`write_baseline_and_ledger`] writes them. Set by that function just
+    /// before it writes the baseline JSON.
+    outcomes_sha256: Option<String>,
 }
 
 impl RealSpecimenSnapshot {
@@ -958,7 +1193,18 @@ impl RealSpecimenSnapshot {
     /// `--mrz-only`, and normally the full catalog has both).
     fn from_reports(reports: &[ProviderReport]) -> Option<Self> {
         let mrz = reports.iter().find(|r| r.provider_id == "mrz")?;
-        let mut by_miss_kind: BTreeMap<String, usize> = BTreeMap::new();
+        // Every known bucket starts at `0`, not absent: a fresh `by_miss_kind`
+        // built purely from `.entry(kind).or_default()` (as below) would never
+        // record a zero, and the committed baseline JSON would then have no way
+        // to say "measured zero false positives" versus "never checked" — see
+        // `false_positive_mrz`'s doc on `REGRESSION_BUCKETS`. `check_baseline`'s
+        // own reads stay `unwrap_or(0)` regardless, so an older baseline that
+        // predates this pre-fill still compares correctly.
+        let mut by_miss_kind: BTreeMap<String, usize> = REGRESSION_BUCKETS
+            .iter()
+            .chain(OFF_DENOMINATOR_KINDS)
+            .map(|k| (k.to_string(), 0))
+            .collect();
         let mut tier1_hits = 0usize;
         for d in &mrz.documents_detail {
             match &d.miss_reason {
@@ -998,11 +1244,17 @@ impl RealSpecimenSnapshot {
             tier1_hits,
             by_miss_kind,
             strict_names,
+            refusal_population: off_denominator,
+            outcomes_sha256: None,
         })
     }
 
     /// Documents scored out because no pipeline could have produced a hit —
-    /// the total across [`OFF_DENOMINATOR_KINDS`].
+    /// the total across [`OFF_DENOMINATOR_KINDS`]. Always equal to
+    /// `self.refusal_population`; kept as a method (rather than reusing the
+    /// field directly everywhere) because most call sites want "the
+    /// off-denominator total" as a derived fact, not the specific
+    /// baseline-schema field it also happens to back.
     fn off_denominator(&self) -> usize {
         OFF_DENOMINATOR_KINDS
             .iter()
@@ -1043,6 +1295,23 @@ struct RealSpecimenBaseline {
     /// missing key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     strict_names: Option<StrictNamesBaseline>,
+    /// Lowercase hex SHA-256 of the outcome ledger
+    /// (`real-specimen-outcomes.jsonl`, [`ledger_bytes`]) committed alongside
+    /// this baseline — `--assert-baseline` fails the gate if the ledger next
+    /// to the baseline no longer hashes to this (see [`verify_ledger_sha`]).
+    /// Absent on a baseline written before this field existed, in which case
+    /// no ledger is expected and none of the ledger checks run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    outcomes_sha256: Option<String>,
+    /// The population a false accept could come from: documents whose zone is
+    /// absent, redacted, or non-conforming, where any checksum-valid MRZ
+    /// returned is a hallucination — `documents - scored`. Report-only, same
+    /// discipline as `strict_names`: absent (not `0`) on an older baseline
+    /// that never recorded it, so `rebless.py` and
+    /// `scripts/check-headline-numbers.sh` can tell "not measured" apart from
+    /// "measured as zero".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refusal_population: Option<usize>,
 }
 
 fn baseline_from_snapshot(snap: &RealSpecimenSnapshot, ts_unix: u64) -> RealSpecimenBaseline {
@@ -1057,6 +1326,8 @@ fn baseline_from_snapshot(snap: &RealSpecimenSnapshot, ts_unix: u64) -> RealSpec
         tolerance: 0,
         by_miss_kind: snap.by_miss_kind.clone(),
         strict_names: snap.strict_names.clone(),
+        outcomes_sha256: snap.outcomes_sha256.clone(),
+        refusal_population: Some(snap.refusal_population),
     }
 }
 
@@ -1165,10 +1436,41 @@ fn check_baseline(
     }
 }
 
+/// Writes the outcome ledger at [`outcomes_ledger_path`]`(path)`, then the
+/// baseline JSON at `path` with `outcomes_sha256` set to that ledger's hash —
+/// the two files are written as a pair specifically so `outcomes_sha256`
+/// always describes the ledger actually sitting next to it. Used by both
+/// `--write-baseline` and the `--assert-baseline` first-run bootstrap.
+/// Returns the written baseline, for the caller's summary line.
+fn write_baseline_and_ledger(
+    path: &str,
+    snap: &RealSpecimenSnapshot,
+    rows: &[OutcomeRow],
+    ts_unix: u64,
+) -> RealSpecimenBaseline {
+    let bytes = ledger_bytes(rows);
+    let ledger_path = outcomes_ledger_path(path);
+    if let Some(parent) = ledger_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).expect("create outcome ledger directory");
+        }
+    }
+    std::fs::write(&ledger_path, &bytes)
+        .unwrap_or_else(|e| panic!("write {}: {e}", ledger_path.display()));
+    let mut baseline = baseline_from_snapshot(snap, ts_unix);
+    baseline.outcomes_sha256 = Some(sha256_hex(&bytes));
+    write_json_pretty(path, &baseline);
+    baseline
+}
+
 /// `--write-baseline` / `--assert-baseline`, run after the report JSON is on
 /// disk. May [`std::process::exit`] non-zero on a regression.
-fn run_baseline_step(parsed: &Args, snapshot: Option<RealSpecimenSnapshot>, ts_unix: u64) {
-    let Some(snapshot) = snapshot else {
+fn run_baseline_step(
+    parsed: &Args,
+    snapshot: Option<(RealSpecimenSnapshot, Vec<OutcomeRow>)>,
+    ts_unix: u64,
+) {
+    let Some((snapshot, rows)) = snapshot else {
         eprintln!(
             "❌ --write-baseline/--assert-baseline need the `mrz` provider in the run — it was \
              not registered (check the catalog wiring)"
@@ -1177,13 +1479,14 @@ fn run_baseline_step(parsed: &Args, snapshot: Option<RealSpecimenSnapshot>, ts_u
     };
 
     if let Some(path) = parsed.write_baseline.as_deref() {
-        let baseline = baseline_from_snapshot(&snapshot, ts_unix);
-        write_json_pretty(path, &baseline);
+        let baseline = write_baseline_and_ledger(path, &snapshot, &rows, ts_unix);
         println!(
-            "baseline written to {path} (tier1_hits={}, scored={}, {} miss kind(s))",
+            "baseline written to {path} (tier1_hits={}, scored={}, {} miss kind(s)); outcome \
+             ledger written to {}",
             baseline.tier1_hits,
             baseline.scored,
             baseline.by_miss_kind.len(),
+            outcomes_ledger_path(path).display(),
         );
         return;
     }
@@ -1194,11 +1497,10 @@ fn run_baseline_step(parsed: &Args, snapshot: Option<RealSpecimenSnapshot>, ts_u
         .expect("run_baseline_step is only reached with one of the two flags set");
 
     if !std::path::Path::new(path).exists() {
-        let baseline = baseline_from_snapshot(&snapshot, ts_unix);
-        write_json_pretty(path, &baseline);
+        write_baseline_and_ledger(path, &snapshot, &rows, ts_unix);
         println!(
-            "ℹ no baseline at {path} yet — wrote the current snapshot and passing. Review and \
-             commit it (CI owns the committed value)."
+            "ℹ no baseline at {path} yet — wrote the current snapshot (and its outcome ledger) \
+             and passing. Review and commit it (CI owns the committed value)."
         );
         return;
     }
@@ -1210,23 +1512,69 @@ fn run_baseline_step(parsed: &Args, snapshot: Option<RealSpecimenSnapshot>, ts_u
 
     print_baseline_table(&baseline, &snapshot);
 
-    match check_baseline(&snapshot, &baseline) {
-        Ok(warnings) => {
-            for w in &warnings {
-                eprintln!("⚠ {w}");
+    // Outcome-ledger integrity + an informational per-document diff, only
+    // when a committed ledger actually sits next to the baseline (absent for
+    // one written before this change). A sha mismatch is a gate failure in
+    // its own right — see `verify_ledger_sha`'s doc — independent of whatever
+    // `check_baseline` below finds; the diff itself never fails anything.
+    let mut ledger_failures: Vec<String> = Vec::new();
+    let ledger_path = outcomes_ledger_path(path);
+    if ledger_path.exists() {
+        let committed_bytes = std::fs::read(&ledger_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", ledger_path.display()));
+        if let Some(expected) = &baseline.outcomes_sha256 {
+            if let Err(msg) = verify_ledger_sha(&committed_bytes, expected) {
+                ledger_failures.push(msg);
             }
-            println!("✅ real-specimen Tier-1 (mrz): no regression vs baseline");
         }
-        Err(problems) => {
-            for p in &problems {
+        match parse_ledger(&committed_bytes) {
+            Ok(committed_rows) => {
+                for line in diff_outcomes(&committed_rows, &rows) {
+                    println!("{line}");
+                }
+            }
+            Err(e) => eprintln!(
+                "⚠ could not parse the committed outcome ledger at {}: {e} — skipping the \
+                 per-document diff",
+                ledger_path.display()
+            ),
+        }
+    }
+
+    let check_result = check_baseline(&snapshot, &baseline);
+    if ledger_failures.is_empty() {
+        match check_result {
+            Ok(warnings) => {
+                for w in &warnings {
+                    eprintln!("⚠ {w}");
+                }
+                println!("✅ real-specimen Tier-1 (mrz): no regression vs baseline");
+            }
+            Err(problems) => {
+                for p in &problems {
+                    eprintln!("❌ {p}");
+                }
+                eprintln!(
+                    "\nIf this change is intentional (parser improvement, corpus edit), \
+                     regenerate the baseline in this PR — see knowledge/benchmarks/README.md."
+                );
+                std::process::exit(1);
+            }
+        }
+    } else {
+        if let Err(problems) = &check_result {
+            for p in problems {
                 eprintln!("❌ {p}");
             }
-            eprintln!(
-                "\nIf this change is intentional (parser improvement, corpus edit), regenerate \
-                 the baseline in this PR — see knowledge/benchmarks/README.md."
-            );
-            std::process::exit(1);
         }
+        for p in &ledger_failures {
+            eprintln!("❌ {p}");
+        }
+        eprintln!(
+            "\nThe committed outcome ledger no longer matches the baseline it was written with — \
+             regenerate both together (`--write-baseline`), never edit either by hand."
+        );
+        std::process::exit(1);
     }
 }
 
@@ -1248,11 +1596,43 @@ fn print_baseline_table(baseline: &RealSpecimenBaseline, actual: &RealSpecimenSn
         baseline.documents - baseline.scored,
         actual.off_denominator(),
     );
+    // `refusal_population` restates the row above as the named baseline
+    // field it backs (`documents - scored`) — printed only when the
+    // committed baseline actually carries it, since an older one never
+    // recorded it and printing a fabricated `0` would misstate "not
+    // measured" as "measured zero".
+    if let Some(baseline_refusal) = baseline.refusal_population {
+        row(
+            "refusal_population",
+            baseline_refusal,
+            actual.refusal_population,
+        );
+    }
+    // Printed explicitly, even when both sides are exactly `0` — the row
+    // `false_positive_mrz` exists specifically so a reader can see "zero
+    // false accepts across N documents that could have produced one" stated,
+    // not merely absent because nothing happened to trip the general loop
+    // below. Excluded from that loop's `kinds` list so it is never printed
+    // twice.
+    row(
+        "false_positive_mrz",
+        baseline
+            .by_miss_kind
+            .get("false_positive_mrz")
+            .copied()
+            .unwrap_or(0),
+        actual
+            .by_miss_kind
+            .get("false_positive_mrz")
+            .copied()
+            .unwrap_or(0),
+    );
     let mut kinds: Vec<&str> = baseline
         .by_miss_kind
         .keys()
         .chain(actual.by_miss_kind.keys())
         .map(String::as_str)
+        .filter(|k| *k != "false_positive_mrz")
         .collect();
     kinds.sort_unstable();
     kinds.dedup();
@@ -1298,6 +1678,9 @@ fn print_baseline_table(baseline: &RealSpecimenBaseline, actual: &RealSpecimenSn
         "  (baseline measured {} on {})",
         baseline.measured_date, baseline.measured_on_ci_sha
     );
+    if let Some(sha) = &baseline.outcomes_sha256 {
+        println!("  (outcome ledger sha256 {}…)", &sha[..sha.len().min(12)]);
+    }
 }
 
 fn write_json_pretty<T: Serialize>(path: &str, value: &T) {
@@ -1761,8 +2144,19 @@ async fn main() {
     // Captured before `reports` is consumed into the report below. `None` when
     // no baseline flag was passed, or `Some(None)` when one was but the `mrz`
     // provider is somehow absent from the run (handled in `run_baseline_step`).
+    // The outcome rows are built from the same `mrz` report the snapshot
+    // reads, borrowed here rather than taken so `reports` is still whole for
+    // the `Report` JSON below.
     let baseline_snapshot = (parsed.write_baseline.is_some() || parsed.assert_baseline.is_some())
-        .then(|| RealSpecimenSnapshot::from_reports(&reports));
+        .then(|| {
+            reports
+                .iter()
+                .find(|r| r.provider_id == "mrz")
+                .and_then(|mrz| {
+                    RealSpecimenSnapshot::from_reports(&reports)
+                        .map(|s| (s, build_outcome_rows(mrz)))
+                })
+        });
 
     let timestamp_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2091,6 +2485,8 @@ mod tests {
             tier1_hits: hits,
             by_miss_kind,
             strict_names: None,
+            refusal_population: off,
+            outcomes_sha256: None,
         }
     }
 
@@ -2462,5 +2858,351 @@ mod tests {
         });
         let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
         assert_eq!(snap.strict_names, None);
+    }
+
+    // ---------------------------------------------------------------------
+    // Outcome ledger: `OutcomeRow`, `build_outcome_rows`, `ledger_bytes`,
+    // `sha256_hex`, `refusal_population`, the every-bucket-present pre-fill,
+    // and the assert-mode ledger integrity check + per-document diff.
+    // ---------------------------------------------------------------------
+
+    /// A minimal [`DocumentDetail`] with only the fields a test needs varied
+    /// set explicitly — everything else is a fixed, inert default.
+    fn detail(
+        name: &str,
+        asset_id: Option<&str>,
+        miss_reason: Option<MissReason>,
+    ) -> DocumentDetail {
+        DocumentDetail {
+            name: name.to_string(),
+            asset_id: asset_id.map(str::to_string),
+            mrz_found: miss_reason.is_none(),
+            mrz_format: Some("TD3"),
+            read_ok: true,
+            mrz_checksums_valid: miss_reason.is_none(),
+            miss_reason,
+            assertions_total: 0,
+            assertions_unsupported: 0,
+            unsupported_fields: Vec::new(),
+            names_exact: None,
+            name_error: None,
+            ocr_elapsed: Duration::from_millis(7),
+            retry_variant_id: None,
+            retry_budget_hit: false,
+            retry_stop: None,
+        }
+    }
+
+    /// A minimal `mrz`-provider [`ProviderReport`] carrying real
+    /// `documents_detail` rows — the outcome-ledger equivalent of
+    /// `mrz_report_with_strict` above, which deliberately leaves
+    /// `documents_detail` empty.
+    fn mrz_report_with_details(details: Vec<DocumentDetail>) -> ProviderReport {
+        ProviderReport {
+            provider_id: "mrz".to_string(),
+            documents: details.len(),
+            capability: CapabilitySnapshot {
+                deterministic: true,
+                vision: false,
+                cost: "free",
+            },
+            accuracy: AccuracyStats {
+                labelled_documents: 0,
+                field_match_rate: None,
+                mean_cer: None,
+                per_field_cer: Vec::new(),
+            },
+            speed: SpeedStats {
+                mean: Duration::ZERO,
+                p50: Duration::ZERO,
+                p95: Duration::ZERO,
+            },
+            json_validity: None,
+            unsupported_assertion: UnsupportedAssertion::NotApplicable {
+                reason: "test fixture",
+            },
+            declared_resident_bytes: None,
+            measured_rss_delta_bytes: None,
+            documents_detail: details,
+            tier1_hit_rate: Tier1HitRate::Computed(0.0),
+            strict_tier1_hit_rate: StrictNameHitRate::NotApplicable {
+                reason: "test fixture",
+            },
+        }
+    }
+
+    /// A tiny, fully-specified [`OutcomeRow`] for tests that only care about
+    /// `asset_id`/`outcome` (the join key and the field [`diff_outcomes`]
+    /// compares).
+    fn outcome_row(asset_id: &str, outcome: &str) -> OutcomeRow {
+        OutcomeRow {
+            asset_id: Some(asset_id.to_string()),
+            name: asset_id.to_string(),
+            outcome: outcome.to_string(),
+            miss_reason: None,
+            mrz_format: None,
+            mrz_found: outcome == "hit",
+            mrz_checksums_valid: outcome == "hit",
+            names_exact: None,
+            name_error: None,
+            ocr_ms: 1,
+            retry_variant_id: None,
+            retry_budget_hit: false,
+            retry_stop: None,
+        }
+    }
+
+    #[test]
+    fn outcome_row_serializes_as_one_line_with_fixed_key_order_and_null_for_absent_fields() {
+        let row = OutcomeRow {
+            asset_id: Some("passports/foo.png".to_string()),
+            name: "foo".to_string(),
+            outcome: "hit".to_string(),
+            miss_reason: None,
+            mrz_format: Some("TD3".to_string()),
+            mrz_found: true,
+            mrz_checksums_valid: true,
+            names_exact: Some(true),
+            name_error: None,
+            ocr_ms: 42,
+            retry_variant_id: None,
+            retry_budget_hit: false,
+            retry_stop: None,
+        };
+        let json = serde_json::to_string(&row).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"asset_id":"passports/foo.png","name":"foo","outcome":"hit","miss_reason":null,"mrz_format":"TD3","mrz_found":true,"mrz_checksums_valid":true,"names_exact":true,"name_error":null,"ocr_ms":42,"retry_variant_id":null,"retry_budget_hit":false,"retry_stop":null}"#
+        );
+    }
+
+    #[test]
+    fn build_outcome_rows_sorts_by_asset_id_falling_back_to_name() {
+        let report = mrz_report_with_details(vec![
+            detail("zzz-no-asset", None, None),
+            detail("b-doc", Some("passports/b.png"), None),
+            detail(
+                "a-doc",
+                Some("passports/a.png"),
+                Some(MissReason::NoMrzFound("no MRZ-shaped text".to_string())),
+            ),
+        ]);
+        let rows = build_outcome_rows(&report);
+        let keys: Vec<&str> = rows.iter().map(OutcomeRow::sort_key).collect();
+        assert_eq!(
+            keys,
+            vec!["passports/a.png", "passports/b.png", "zzz-no-asset"],
+            "asset_id sorts first; a row with no asset_id falls back to its name"
+        );
+    }
+
+    #[test]
+    fn build_outcome_rows_is_deterministic_across_calls() {
+        let report = mrz_report_with_details(vec![
+            detail("c", Some("c"), None),
+            detail("a", Some("a"), None),
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+        ]);
+        assert_eq!(build_outcome_rows(&report), build_outcome_rows(&report));
+    }
+
+    #[test]
+    fn ledger_bytes_are_one_compact_line_per_row_with_a_trailing_newline() {
+        let report = mrz_report_with_details(vec![
+            detail("a", Some("passports/a.png"), None),
+            detail("b", Some("passports/b.png"), Some(MissReason::Redacted)),
+        ]);
+        let rows = build_outcome_rows(&report);
+        let bytes = ledger_bytes(&rows);
+        let text = String::from_utf8(bytes).expect("valid UTF-8");
+        assert!(text.ends_with('\n'), "must end with a trailing newline");
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            assert!(!line.contains('\n'), "each line is exactly one JSON object");
+            serde_json::from_str::<OutcomeRow>(line).expect("each line parses as one OutcomeRow");
+        }
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_test_vectors() {
+        // NIST's two smallest published SHA-256 test vectors — proof this
+        // hashes the exact bytes given, not some other digest.
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn from_reports_prefills_every_known_bucket_with_zero() {
+        // A single hit and nothing else: every `REGRESSION_BUCKETS` and
+        // `OFF_DENOMINATOR_KINDS` key must still be present in `by_miss_kind`,
+        // as an explicit `0`, not absent — see `from_reports`'s doc.
+        let report = mrz_report_with_details(vec![detail("a", Some("a"), None)]);
+        let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
+        for &bucket in REGRESSION_BUCKETS.iter().chain(OFF_DENOMINATOR_KINDS) {
+            assert_eq!(
+                snap.by_miss_kind.get(bucket).copied(),
+                Some(0),
+                "`{bucket}` must be present and zero, not absent"
+            );
+        }
+    }
+
+    #[test]
+    fn refusal_population_equals_documents_minus_scored() {
+        let report = mrz_report_with_details(vec![
+            detail("a", Some("a"), None),
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+            detail("c", Some("c"), Some(MissReason::NoMrzExpected)),
+            detail(
+                "d",
+                Some("d"),
+                Some(MissReason::NoMrzFound("nothing MRZ-shaped".to_string())),
+            ),
+        ]);
+        let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
+        assert_eq!(snap.refusal_population, snap.documents - snap.scored);
+        assert_eq!(
+            snap.refusal_population, 2,
+            "Redacted + NoMrzExpected are off-denominator; NoMrzFound is scored"
+        );
+    }
+
+    #[test]
+    fn outcomes_ledger_path_sits_next_to_the_baseline() {
+        let p = outcomes_ledger_path("knowledge/benchmarks/real-specimen-mrz-baseline.json");
+        assert_eq!(p.file_name().unwrap(), OUTCOMES_LEDGER_FILENAME);
+        assert_eq!(
+            p.parent().unwrap(),
+            std::path::Path::new("knowledge/benchmarks")
+        );
+    }
+
+    #[test]
+    fn old_baseline_json_without_ledger_fields_round_trips_without_them() {
+        let json = r#"{
+            "note": "n",
+            "measured_on_ci_sha": "abc",
+            "measured_date": "2026-09-16",
+            "samples_data_sha": "def",
+            "documents": 10,
+            "scored": 8,
+            "tier1_hits": 7,
+            "tolerance": 0,
+            "by_miss_kind": {"checksum_failed": 1}
+        }"#;
+        let baseline: RealSpecimenBaseline =
+            serde_json::from_str(json).expect("an old baseline with no ledger keys");
+        assert_eq!(baseline.outcomes_sha256, None);
+        assert_eq!(baseline.refusal_population, None);
+        let text = serde_json::to_string_pretty(&baseline).expect("serialize");
+        assert!(
+            !text.contains("outcomes_sha256"),
+            "an absent field must not round-trip back in: {text}"
+        );
+        assert!(
+            !text.contains("refusal_population"),
+            "an absent field must not round-trip back in: {text}"
+        );
+    }
+
+    #[test]
+    fn write_baseline_and_ledger_writes_a_ledger_whose_sha_matches_the_baseline_field() {
+        let reports = [mrz_report_with_details(vec![
+            detail("a", Some("a"), None),
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+        ])];
+        let snap = RealSpecimenSnapshot::from_reports(&reports).expect("mrz provider present");
+        let rows = build_outcome_rows(&reports[0]);
+
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass-outcome-ledger-test-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        let baseline_path = dir.join("baseline.json");
+        let baseline_path_str = baseline_path.to_str().expect("utf8 temp path").to_string();
+
+        let baseline = write_baseline_and_ledger(&baseline_path_str, &snap, &rows, 1_757_030_400);
+
+        let ledger_path = outcomes_ledger_path(&baseline_path_str);
+        let ledger_bytes_on_disk = std::fs::read(&ledger_path).expect("ledger was written");
+        let expected_sha = sha256_hex(&ledger_bytes_on_disk);
+        assert_eq!(baseline.outcomes_sha256, Some(expected_sha));
+        assert_eq!(baseline.refusal_population, Some(1));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn verify_ledger_sha_passes_when_the_hash_matches() {
+        let bytes: &[u8] = b"{\"a\":1}\n";
+        let sha = sha256_hex(bytes);
+        assert_eq!(verify_ledger_sha(bytes, &sha), Ok(()));
+    }
+
+    #[test]
+    fn verify_ledger_sha_fails_on_a_mismatch() {
+        // The exact check `--assert-baseline` uses to fail the gate when the
+        // committed ledger no longer matches the baseline it shipped with.
+        let bytes: &[u8] = b"{\"a\":1}\n";
+        let wrong_sha = "0".repeat(64);
+        let err = verify_ledger_sha(bytes, &wrong_sha).expect_err("hashes must not match");
+        assert!(err.contains("sha256 mismatch"));
+        assert!(err.contains(&wrong_sha));
+    }
+
+    #[test]
+    fn diff_outcomes_reports_changed_and_one_sided_rows_without_a_failure_signal() {
+        // `diff_outcomes` has no `Result`/failure variant at all — its return
+        // type is the proof that an outcome-ledger diff is purely
+        // informational, whatever it finds.
+        let committed = vec![
+            outcome_row("a", "hit"),
+            outcome_row("b", "no_mrz_found"),
+            outcome_row("only-committed", "hit"),
+        ];
+        let actual = vec![
+            outcome_row("a", "hit"),
+            outcome_row("b", "hit"),
+            outcome_row("only-actual", "hit"),
+        ];
+        let lines = diff_outcomes(&committed, &actual);
+        assert!(lines[0].contains("1 document(s) changed outcome"));
+        assert!(lines[0].contains("1 only in the committed ledger"));
+        assert!(lines[0].contains("1 only in this run"));
+        assert!(
+            lines.iter().any(|l| l.contains("b: no_mrz_found -> hit")),
+            "the changed row must be named: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn diff_outcomes_is_empty_summary_when_nothing_moved() {
+        let rows = vec![outcome_row("a", "hit"), outcome_row("b", "checksum_failed")];
+        let lines = diff_outcomes(&rows, &rows);
+        assert!(lines[0].contains("0 document(s) changed outcome"));
+        assert!(lines[0].contains("0 only in the committed ledger"));
+        assert!(lines[0].contains("0 only in this run"));
+        assert_eq!(lines.len(), 1, "no per-document rows when nothing moved");
+    }
+
+    #[test]
+    fn parse_ledger_round_trips_what_ledger_bytes_writes() {
+        let report = mrz_report_with_details(vec![
+            detail("a", Some("a"), None),
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+        ]);
+        let rows = build_outcome_rows(&report);
+        let bytes = ledger_bytes(&rows);
+        let parsed = parse_ledger(&bytes).expect("well-formed ledger bytes parse");
+        assert_eq!(parsed, rows);
     }
 }
