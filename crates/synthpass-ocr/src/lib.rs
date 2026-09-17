@@ -57,6 +57,14 @@
 //! Image-only: `ocrs` has no PDF parsing, and as of v0.7.5 there is no other
 //! engine to route PDF input to — PDF is rejected outright at the
 //! `synthpass-pipeline` layer (see `crates/synthpass-pipeline/src/ocr.rs`).
+//!
+//! # Post-hit name-line repair (measurement arm, not yet promoted)
+//!
+//! `SYNTHPASS_OCR_CHARGRID` (`off`/`on`/`control`, default `off`) runs the
+//! [`chargrid`] module's fixed-grid MRZ name-line repair after a Tier-1 hit —
+//! see that module's doc for the mechanism (`ocrs` never emits an isolated
+//! `<`) and [`OcrPage::chargrid`] for what a run records. Unset, the OCR path
+//! is byte-identical to before this arm existed.
 
 // Fixed-grid MRZ name-line repair: pure geometry, no `ocrs` types; not yet
 // wired into `NativeOcr`. Its docs live in the module's own `//!` comment --
@@ -308,6 +316,10 @@ impl NativeOcr {
         // `None` on every normal run; `Some` only under the
         // `SYNTHPASS_OCR_DUMP_VARIANTS` cell-(c) diagnostic (see its doc).
         let dump_dir = dump_variants_dir();
+        // PR-1.4: off by default (see `chargrid_mode`'s doc) -- read once so
+        // both return points below (the general-pass hit and the end of the
+        // retry loop) apply the same run's arm.
+        let chargrid_mode = chargrid_mode();
         let image = decode_image(image_path)?.into_rgb8();
 
         // A3: auto-rotate before the main pass (detection-only, cheap; see
@@ -415,6 +427,13 @@ impl NativeOcr {
             );
         }
         if has_valid_mrz(&text) {
+            // PR-1.4: the general pass's own image is unambiguously the one
+            // the valid MRZ was read from -- no retry variant to disambiguate.
+            let chargrid_arm = if chargrid_mode == ChargridMode::Off {
+                None
+            } else {
+                apply_chargrid(chargrid_mode, &self.mrz_engine, &image, &mut text, verbose)
+            };
             let text_sanity = page_sanity(&text);
             return Ok(OcrPage {
                 text,
@@ -427,6 +446,7 @@ impl NativeOcr {
                 retry_variant_id: Some("general".to_string()),
                 retry_budget_hit: false,
                 retry_stop: Some("general_valid".to_string()),
+                chargrid: chargrid_arm,
             });
         }
         if verbose {
@@ -441,6 +461,13 @@ impl NativeOcr {
         let mut retry_variant_id = None;
         let mut retry_budget_hit = false;
         let mut retry_stop = None;
+        // PR-1.4: the image the winning retry variant actually read, moved
+        // out of the loop the moment a variant validates so chargrid repair
+        // (below) knows exactly which pixels the MRZ came off. `None` unless
+        // `retry_variant_id` is also `Some` -- see the final `OcrPage`
+        // assembly's doc comment for what an exhausted/budget-capped loop
+        // does instead.
+        let mut winning_variant_image: Option<RgbImage> = None;
 
         // `passes_run` counts total passes including the general one above
         // (seeded at 1) — a `zip` counter rather than a manually incremented
@@ -653,6 +680,9 @@ impl NativeOcr {
                 }
                 retry_variant_id = Some(pass_id);
                 retry_stop = Some("variant_valid".to_string());
+                // Move, not clone: `variant` is not read again after this
+                // point in the loop, and this branch always `break`s.
+                winning_variant_image = Some(variant);
                 break;
             } else if verbose {
                 eprintln!("[synthpass-ocr] variant {i}: MRZ-shaped but checksum-invalid lines:");
@@ -664,6 +694,22 @@ impl NativeOcr {
         if retry_stop.is_none() {
             retry_stop = Some("exhausted".to_string());
         }
+        // PR-1.4: `retry_variant_id.is_some()` here means the loop broke on
+        // `has_valid_mrz(&candidates)` for that specific variant, which is
+        // exactly when `winning_variant_image` was captured -- the two are
+        // set together, only in that branch. Every other way the loop can
+        // end (pass cap, time budget, exhausted the variant list) leaves both
+        // `None`, even if `text`'s accumulated lines happen to combine into a
+        // valid MRZ across two different variants -- that combination has no
+        // single source image, so repair is skipped rather than guessed at.
+        let chargrid_arm = match (chargrid_mode, &winning_variant_image) {
+            (ChargridMode::Off, _) => None,
+            (_, Some(image)) => {
+                apply_chargrid(chargrid_mode, &self.mrz_engine, image, &mut text, verbose)
+            }
+            (_, None) if has_valid_mrz(&text) => Some("skipped:no_source_image".to_string()),
+            (_, None) => Some("skipped:no_valid_mrz".to_string()),
+        };
         let text_sanity = page_sanity(&text);
         Ok(OcrPage {
             text,
@@ -676,6 +722,7 @@ impl NativeOcr {
             retry_variant_id,
             retry_budget_hit,
             retry_stop,
+            chargrid: chargrid_arm,
         })
     }
 }
@@ -1373,6 +1420,444 @@ fn skew_mode() -> preprocess::SkewMode {
     }
 }
 
+/// Which post-hit chargrid name-line repair, if any, to run after a Tier-1
+/// hit. See `crate::chargrid`'s module doc for the mechanism this wires in
+/// (`ocrs` never emits an isolated `<`, so the MRZ name line comes back
+/// missing fillers a fixed-pitch grid can recover) and [`chargrid_mode`] for
+/// the env var.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChargridMode {
+    /// No post-hit repair pass at all — behaviour byte-for-byte unchanged
+    /// from before this wiring existed. The default, and the only arm the
+    /// committed real-specimen baseline may describe (see
+    /// `OcrArms::is_default`).
+    Off,
+    /// The real treatment: re-recognize the matched name line's characters
+    /// on the image the valid MRZ was actually read from, fit them to the
+    /// format's fixed-pitch grid ([`chargrid::fit_grid`]), and — only when
+    /// [`chargrid::repair_name_line`]'s two gates both pass and the repaired
+    /// block re-verifies with every non-name field unchanged — prepend the
+    /// corrected MRZ block ahead of the original `text`, so
+    /// `mrz::find_and_parse` (which returns the *first* valid MRZ in a text
+    /// blob) prefers it over the original reading. See [`apply_chargrid`].
+    On,
+    /// A **placebo** for [`On`](Self::On): runs the identical
+    /// recognize+fit+ink pass on the identical image, paying the identical
+    /// cost, but appends the raw recognized name-line text to the *end* of
+    /// `text` instead of prepending a repair — `find_and_parse` still
+    /// returns the original (unrepaired) reading first. Isolates whatever
+    /// `On` measures from the mere cost of one more OCR pass and more
+    /// accumulated text, the same reasoning `TextureMode::Control` already
+    /// applies to the texture stage.
+    Control,
+}
+
+/// `SYNTHPASS_OCR_CHARGRID` — `off`, `on` or `control`, defaulting to
+/// [`ChargridMode::Off`]: this is an unmeasured arm as of PR-1.4 (which only
+/// wires the module in — nothing has promoted it), so the default must be
+/// the behaviour every existing baseline was measured against, not the new
+/// one. See [`ChargridMode`] for what each arm does.
+///
+/// Unrecognised values fall back to the default, matching every other knob
+/// in this module ([`trailing_texture_mode`], [`ocr_order`],
+/// [`rotate_mode`], [`skew_mode`]): this is a measurement knob, and a typo
+/// should not take down a production read.
+fn chargrid_mode() -> ChargridMode {
+    match std::env::var("SYNTHPASS_OCR_CHARGRID")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "on" => ChargridMode::On,
+        "control" => ChargridMode::Control,
+        _ => ChargridMode::Off,
+    }
+}
+
+/// This run's OCR measurement-arm configuration — every `SYNTHPASS_OCR_*`
+/// knob this crate defines, at once, for a bench report to record alongside
+/// its hit rate. Lowercase mode names, matching each knob's own env-var
+/// vocabulary (`OcrOrder::BandFirst`'s env value is `band-first`, so this
+/// carries `"band-first"`, not a Rust-identifier-shaped rendering of the
+/// variant).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OcrArms {
+    pub texture: &'static str,
+    pub order: &'static str,
+    pub rotate: &'static str,
+    pub skew: &'static str,
+    pub chargrid: &'static str,
+}
+
+impl OcrArms {
+    /// Every knob at the value it takes when its env var is unset — the only
+    /// configuration a committed real-specimen baseline may describe (see
+    /// [`is_default`](Self::is_default) and
+    /// `knowledge/benchmarks/README.md`'s maintenance contract).
+    ///
+    /// `texture` is `"on"`, not `"off"`: `trailing_texture_mode`'s default
+    /// is the measured-best arm, not the pre-measurement baseline — see its
+    /// own doc comment for why unset does not mean "no treatment" for that
+    /// one knob.
+    pub const DEFAULT: OcrArms = OcrArms {
+        texture: "on",
+        order: "default",
+        rotate: "default",
+        skew: "default",
+        chargrid: "off",
+    };
+
+    /// Read every `SYNTHPASS_OCR_*` measurement knob this crate defines from
+    /// the process environment.
+    pub fn from_env() -> Self {
+        Self {
+            texture: match trailing_texture_mode() {
+                TextureMode::Off => "off",
+                TextureMode::On => "on",
+                TextureMode::Control => "control",
+            },
+            order: match ocr_order() {
+                OcrOrder::Default => "default",
+                OcrOrder::BandFirst => "band-first",
+                OcrOrder::Control => "control",
+            },
+            rotate: match rotate_mode() {
+                RotateMode::Default => "default",
+                RotateMode::Legacy => "legacy",
+                RotateMode::Off => "off",
+            },
+            skew: match skew_mode() {
+                preprocess::SkewMode::Default => "default",
+                preprocess::SkewMode::Legacy => "legacy",
+            },
+            chargrid: match chargrid_mode() {
+                ChargridMode::Off => "off",
+                ChargridMode::On => "on",
+                ChargridMode::Control => "control",
+            },
+        }
+    }
+
+    /// Is every knob at its default ([`DEFAULT`](Self::DEFAULT))? A
+    /// real-specimen baseline is only valid for this configuration — see
+    /// `synthpass_bench`'s `--write-baseline`/`--assert-baseline` refusal.
+    pub fn is_default(&self) -> bool {
+        *self == Self::DEFAULT
+    }
+}
+
+/// A recognized line's text, its bounding box (in the coordinate space of
+/// the `image` [`recognize_chars`] was given), and its per-character
+/// [`chargrid::Glyph`]s. [`chargrid`]'s own doc explains why a caller has to
+/// build these from `ocrs`'s `TextChar`s rather than the module doing any
+/// OCR itself.
+#[derive(Debug)]
+struct CharLine {
+    text: String,
+    top: u32,
+    bottom: u32,
+    left: u32,
+    right: u32,
+    glyphs: Vec<chargrid::Glyph>,
+}
+
+/// One character-level detect+recognize pass over `image`, used by the
+/// chargrid wiring ([`ChargridMode::On`]/[`ChargridMode::Control`]) to
+/// recover per-glyph positions for [`chargrid::fit_grid`]. Always run with
+/// the caller's MRZ-constrained engine: the name line is itself MRZ-charset
+/// text, and the beam-search decoder is the same one the retry loop already
+/// trusts for this zone.
+///
+/// Modelled on [`geometry_pass`] (`prepare_input` → `detect_words` →
+/// `find_text_lines` → `recognize_text`), but keeps each line's
+/// [`chargrid::Glyph`]s instead of discarding per-character detail into a
+/// single string. `ocrs` 0.12.2's `TextChar::rect` is documented as "in
+/// input image" coordinates, and reading
+/// `text_lines_from_recognition_results` in that crate's own source
+/// confirms it: every recognition-space x coordinate is scaled by
+/// `line_rect.width() / resized_width` before being returned, so a
+/// character's position is correct in `image`'s coordinate space regardless
+/// of whatever internal resize the recognition model applied (including its
+/// 2400px input-width cap) — no downscaling is needed for *correctness*
+/// here. [`fit_chargrid_name_line`] still downscales an unusually wide
+/// matched line before re-running this, but that is a recognition-quality
+/// safeguard (mirroring the 2026-09-16 probes' own choice of ≤1600px), not
+/// a coordinate fix.
+fn recognize_chars(engine: &OcrsEngine, image: &RgbImage) -> Result<Vec<CharLine>, String> {
+    let source = ImageSource::from_bytes(image.as_raw(), image.dimensions())
+        .map_err(|e| format!("failed to prepare image source: {e}"))?;
+    let input = engine
+        .prepare_input(source)
+        .map_err(|e| format!("failed to prepare ocr input: {e}"))?;
+    let words = engine
+        .detect_words(&input)
+        .map_err(|e| format!("ocr word detection failed: {e}"))?;
+    let line_groups = engine.find_text_lines(&input, &words);
+    let recognized = engine
+        .recognize_text(&input, &line_groups)
+        .map_err(|e| format!("ocr text extraction failed: {e}"))?;
+    Ok(recognized
+        .into_iter()
+        .flatten()
+        .map(|line| {
+            let r = line.bounding_rect();
+            let glyphs = line
+                .chars()
+                .iter()
+                .map(|c| chargrid::Glyph {
+                    ch: c.char,
+                    left: c.rect.left() as f32,
+                    right: c.rect.right() as f32,
+                })
+                .collect();
+            CharLine {
+                text: line.to_string(),
+                top: r.top().max(0) as u32,
+                bottom: r.bottom().max(0) as u32,
+                left: r.left().max(0) as u32,
+                right: r.right().max(0) as u32,
+                glyphs,
+            }
+        })
+        .collect())
+}
+
+/// Number of characters [`match_chargrid_line`] compares, and what
+/// [`fit_chargrid_name_line`] strips every `<` out of first — see
+/// [`match_chargrid_line`]'s doc for the rule this implements.
+const CHARGRID_MATCH_PREFIX_LEN: usize = 5;
+
+/// `line` with every `<` removed, truncated to [`CHARGRID_MATCH_PREFIX_LEN`]
+/// characters — the comparison key [`match_chargrid_line`] matches a
+/// recognized line against the parsed name line's own prefix.
+///
+/// `ocrs` never emits `<` at all (see `crate::chargrid`'s module doc), so a
+/// recognized line's text is already filler-free; stripping `<` from the
+/// *parsed* line before comparing is what makes the two sides comparable —
+/// comparing raw prefixes would compare `"P<UTO"` against `"PUTOE"` and never
+/// match.
+fn chargrid_match_prefix(line: &str) -> String {
+    line.chars()
+        .filter(|&c| c != '<')
+        .take(CHARGRID_MATCH_PREFIX_LEN)
+        .collect()
+}
+
+/// Find the one line in `lines` whose [`chargrid_match_prefix`] equals
+/// `target`. `Err` with a short reason — no match, or more than one
+/// (ambiguous) — rather than guessing: a wrong line match would fit the grid
+/// to text that isn't the name line at all.
+fn match_chargrid_line<'a>(
+    lines: &'a [CharLine],
+    target: &str,
+) -> Result<&'a CharLine, &'static str> {
+    if target.is_empty() {
+        return Err("empty_prefix");
+    }
+    let mut hits = lines
+        .iter()
+        .filter(|l| chargrid_match_prefix(&l.text) == target);
+    let first = hits.next().ok_or("no_line_match")?;
+    if hits.next().is_some() {
+        return Err("line_match_ambiguous");
+    }
+    Ok(first)
+}
+
+/// Width, in pixels, above which [`fit_chargrid_name_line`] downscales
+/// `source_image` before re-running [`recognize_chars`] — a recognition-
+/// quality safeguard, not a coordinate-correctness one (see
+/// [`recognize_chars`]'s doc comment). Matches the 2026-09-16 probes'
+/// (`probe_chargrid.rs`, `probe_spaced.rs`, neither committed) own band-width
+/// choice.
+const CHARGRID_LINE_WIDTH_CAP: f32 = 1600.0;
+
+/// Everything [`apply_chargrid`] needs once a candidate name line has been
+/// matched and fitted to the grid: the raw recognized text (mode
+/// [`ChargridMode::Control`]'s payload) and the repair outcome the grid fit
+/// produced (mode [`ChargridMode::On`]'s payload). Computed once so both
+/// modes pay the identical recognize+fit+ink cost — see
+/// [`ChargridMode::Control`]'s doc comment for why that matters.
+struct ChargridAttempt {
+    /// The matched line's recognized text, with no positional repair applied
+    /// — exactly what `ocrs` read.
+    raw_recognized_text: String,
+    /// The grid-fit repair outcome for the matched line.
+    repair: Result<chargrid::Repair, chargrid::Rejected>,
+}
+
+/// Recognize `source_image`'s characters, find the line matching
+/// `raw_name_line` (via [`match_chargrid_line`]), and fit it to `format`'s
+/// grid. `Err(reason)` is a short, snake_case skip reason —
+/// `OcrPage::chargrid`'s `"skipped:<reason>"` arm.
+fn fit_chargrid_name_line(
+    mrz_engine: &OcrsEngine,
+    source_image: &RgbImage,
+    format: mrz::Format,
+    raw_name_line: &str,
+) -> Result<ChargridAttempt, String> {
+    let Some((_, width)) = chargrid::format_geometry(format) else {
+        return Err("unsupported_format".to_string());
+    };
+    let target = chargrid_match_prefix(raw_name_line);
+
+    let recognized =
+        recognize_chars(mrz_engine, source_image).map_err(|_| "recognize_failed".to_string())?;
+
+    // Downscale-and-retry only when the first pass's matched line is wider
+    // than the cap — the common case (an already-cropped MRZ band) never
+    // pays this second pass. See `CHARGRID_LINE_WIDTH_CAP`'s doc comment.
+    let needs_downscale = match match_chargrid_line(&recognized, &target) {
+        Ok(line) => (line.right - line.left) as f32 > CHARGRID_LINE_WIDTH_CAP,
+        Err(_) => false,
+    };
+    let (recognized, working_image) = if needs_downscale {
+        // Safe: `needs_downscale` is only `true` when the match above was
+        // `Ok`, so this second lookup cannot fail differently.
+        let line = match_chargrid_line(&recognized, &target)
+            .expect("needs_downscale implies a match was found");
+        let line_width_px = (line.right - line.left) as f32;
+        let scale = CHARGRID_LINE_WIDTH_CAP / line_width_px;
+        let new_w = ((source_image.width() as f32) * scale).round().max(1.0) as u32;
+        let new_h = ((source_image.height() as f32) * scale).round().max(1.0) as u32;
+        let resized = image::imageops::resize(
+            source_image,
+            new_w,
+            new_h,
+            image::imageops::FilterType::Lanczos3,
+        );
+        let recognized2 =
+            recognize_chars(mrz_engine, &resized).map_err(|_| "recognize_failed".to_string())?;
+        (recognized2, resized)
+    } else {
+        (recognized, source_image.clone())
+    };
+
+    let matched = match_chargrid_line(&recognized, &target).map_err(|e| e.to_string())?;
+    let glyphs = matched.glyphs.clone();
+    let grid = chargrid::fit_grid(&glyphs, matched.left as f32, matched.right as f32, width)
+        .ok_or_else(|| "grid_fit_failed".to_string())?;
+    let gray = image::imageops::grayscale(&working_image);
+    let ink = chargrid::cell_ink(&gray, matched.top, matched.bottom, &grid);
+    let repair = chargrid::repair_name_line(
+        raw_name_line,
+        &glyphs,
+        width,
+        &ink,
+        chargrid::DEFAULT_INK_FLOOR,
+        &grid,
+    );
+    Ok(ChargridAttempt {
+        raw_recognized_text: matched.text.clone(),
+        repair,
+    })
+}
+
+/// Short, snake_case label for a [`chargrid::Rejected`] — the
+/// `OcrPage::chargrid`'s `"rejected:<reason>"` arm's `<reason>`.
+fn chargrid_rejected_label(rejected: chargrid::Rejected) -> &'static str {
+    match rejected {
+        chargrid::Rejected::NoDeficit => "no_deficit",
+        chargrid::Rejected::TooManyGlyphs => "too_many_glyphs",
+        chargrid::Rejected::GridFit => "grid_fit",
+        chargrid::Rejected::InkMismatch { .. } => "ink_mismatch",
+        chargrid::Rejected::PrefixChanged => "prefix_changed",
+    }
+}
+
+/// Do `a` and `b`'s non-name fields agree? The re-verification gate
+/// [`apply_chargrid`] applies before trusting a repair: a corrected name
+/// line must not have changed anything else `mrz::find_and_parse` read from
+/// the same lines.
+fn chargrid_fields_match(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
+    a.document_number == b.document_number
+        && a.document_number_full == b.document_number_full
+        && a.date_of_birth == b.date_of_birth
+        && a.date_of_expiry == b.date_of_expiry
+        && a.nationality == b.nationality
+        && a.sex == b.sex
+        && a.issuing_country == b.issuing_country
+}
+
+/// Run chargrid name-line repair (mode [`ChargridMode::On`]) or its placebo
+/// ([`ChargridMode::Control`]) against `source_image` — the image the
+/// just-validated MRZ was actually read from — and fold the result into
+/// `text` in place. `text` must already contain a checksum-valid MRZ (both
+/// call sites in [`NativeOcr::recognize_detailed`] only reach this after
+/// `has_valid_mrz` holds).
+///
+/// Returns the value [`OcrPage::chargrid`] should carry — see that field's
+/// doc comment for what each string means. Never called with
+/// [`ChargridMode::Off`] (both call sites branch on that before calling).
+fn apply_chargrid(
+    mode: ChargridMode,
+    mrz_engine: &OcrsEngine,
+    source_image: &RgbImage,
+    text: &mut String,
+    verbose: bool,
+) -> Option<String> {
+    let parsed = match mrz::find_and_parse(text) {
+        Ok(data) if data.valid() => data,
+        Ok(_) => return Some("skipped:parse_invalid".to_string()),
+        Err(_) => return Some("skipped:parse_failed".to_string()),
+    };
+    let Some((line_count, width)) = chargrid::format_geometry(parsed.format) else {
+        return Some("skipped:unsupported_format".to_string());
+    };
+    let Some(name_idx) = chargrid::name_line_index(parsed.format) else {
+        return Some("skipped:unsupported_format".to_string());
+    };
+    let lines: Vec<&str> = parsed.mrz_lines.lines().collect();
+    if lines.len() != line_count || name_idx >= lines.len() {
+        return Some("skipped:line_count_mismatch".to_string());
+    }
+    let raw_name_line = lines[name_idx];
+    if raw_name_line.chars().count() != width {
+        return Some("skipped:name_line_width_mismatch".to_string());
+    }
+
+    let attempt =
+        match fit_chargrid_name_line(mrz_engine, source_image, parsed.format, raw_name_line) {
+            Ok(a) => a,
+            Err(reason) => return Some(format!("skipped:{reason}")),
+        };
+
+    match mode {
+        ChargridMode::Off => None,
+        ChargridMode::Control => {
+            text.push('\n');
+            text.push_str(&attempt.raw_recognized_text);
+            Some("control".to_string())
+        }
+        ChargridMode::On => match attempt.repair {
+            Err(rejected) => Some(format!("rejected:{}", chargrid_rejected_label(rejected))),
+            Ok(repair) if repair.line == raw_name_line => Some("unchanged".to_string()),
+            Ok(repair) => {
+                let mut repaired_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+                repaired_lines[name_idx] = repair.line;
+                let block = repaired_lines.join("\n");
+                match mrz::find_and_parse(&block) {
+                    Ok(reparsed)
+                        if reparsed.valid() && chargrid_fields_match(&parsed, &reparsed) =>
+                    {
+                        if verbose {
+                            eprintln!(
+                                "[synthpass-ocr] chargrid: repaired name line ({} -> {})",
+                                raw_name_line,
+                                reparsed.mrz_lines.lines().nth(name_idx).unwrap_or("")
+                            );
+                        }
+                        text.insert_str(0, &format!("{block}\n"));
+                        Some("repaired".to_string())
+                    }
+                    _ => Some("rejected:reverify_failed".to_string()),
+                }
+            }
+        },
+    }
+}
+
 /// `SYNTHPASS_OCR_DUMP_VARIANTS` — when set to a non-empty path, every
 /// preprocessed image [`NativeOcr::recognize_detailed`] hands the recognizer
 /// (the general full-page pass and each retry variant that actually runs) is
@@ -1657,6 +2142,117 @@ mod tests {
                      L898902C36UTO7408122F1204159ZE184226B<<<<<10";
         assert!(has_valid_mrz(valid));
         assert!(!has_valid_mrz("just some regular text\nwith two lines"));
+    }
+
+    // ---- chargrid wiring: pure helpers (no OCR engine needed) -------------
+
+    #[test]
+    fn chargrid_match_prefix_strips_fillers_and_truncates() {
+        assert_eq!(chargrid_match_prefix("P<UTOERIKSSON<<ANNA"), "PUTOE");
+        assert_eq!(chargrid_match_prefix("PUTOERIKSSONANNA"), "PUTOE");
+        assert_eq!(chargrid_match_prefix("<<<AB"), "AB");
+        assert_eq!(chargrid_match_prefix(""), "");
+    }
+
+    fn char_line(text: &str) -> CharLine {
+        CharLine {
+            text: text.to_string(),
+            top: 0,
+            bottom: 10,
+            left: 0,
+            right: text.len() as u32 * 10,
+            glyphs: text
+                .chars()
+                .enumerate()
+                .map(|(i, ch)| chargrid::Glyph {
+                    ch,
+                    left: i as f32 * 10.0,
+                    right: i as f32 * 10.0 + 8.0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn match_chargrid_line_finds_the_unique_prefix_match() {
+        let lines = vec![
+            char_line("SOME OTHER LINE HERE"),
+            char_line("PUTOERIKSSONANNAMARIA"),
+        ];
+        let target = chargrid_match_prefix("P<UTOERIKSSON<<ANNA<MARIA");
+        let matched = match_chargrid_line(&lines, &target).expect("must match");
+        assert_eq!(matched.text, "PUTOERIKSSONANNAMARIA");
+    }
+
+    #[test]
+    fn match_chargrid_line_rejects_no_match_and_ambiguous_match() {
+        let target = chargrid_match_prefix("P<UTOERIKSSON<<ANNA");
+        assert_eq!(
+            match_chargrid_line(&[char_line("UNRELATED TEXT")], &target).unwrap_err(),
+            "no_line_match"
+        );
+        let lines = vec![
+            char_line("PUTOERIKSSONANNA"),
+            char_line("PUTOEDIFFERENTANNA"),
+        ];
+        assert_eq!(
+            match_chargrid_line(&lines, &target).unwrap_err(),
+            "line_match_ambiguous"
+        );
+        assert_eq!(match_chargrid_line(&lines, "").unwrap_err(), "empty_prefix");
+    }
+
+    #[test]
+    fn chargrid_rejected_label_is_stable_and_snake_case() {
+        assert_eq!(
+            chargrid_rejected_label(chargrid::Rejected::NoDeficit),
+            "no_deficit"
+        );
+        assert_eq!(
+            chargrid_rejected_label(chargrid::Rejected::TooManyGlyphs),
+            "too_many_glyphs"
+        );
+        assert_eq!(
+            chargrid_rejected_label(chargrid::Rejected::GridFit),
+            "grid_fit"
+        );
+        assert_eq!(
+            chargrid_rejected_label(chargrid::Rejected::InkMismatch {
+                expected: 1,
+                found: 0
+            }),
+            "ink_mismatch"
+        );
+        assert_eq!(
+            chargrid_rejected_label(chargrid::Rejected::PrefixChanged),
+            "prefix_changed"
+        );
+    }
+
+    #[test]
+    fn chargrid_fields_match_true_for_identical_non_name_fields_false_otherwise() {
+        let a = mrz::find_and_parse(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+             L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("parses");
+        // Same non-name fields, different name -- must still match.
+        let b = mrz::find_and_parse(
+            "P<UTOSMITH<<JOHN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
+             L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("parses");
+        assert!(chargrid_fields_match(&a, &b));
+
+        // Different nationality (no check digit of its own, so this stays a
+        // valid TD3 read) -- must not match.
+        let c = mrz::find_and_parse(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+             L898902C36USA7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("parses");
+        assert!(c.valid(), "fixture c must itself be checksum-valid");
+        assert!(!chargrid_fields_match(&a, &c));
     }
 
     // Env-var tests mutate process-global state (unavoidable for `std::env`
@@ -2001,6 +2597,61 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
+    }
+
+    #[test]
+    fn chargrid_mode_defaults_to_off_and_parses_all_three_arms() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
+        assert_eq!(
+            chargrid_mode(),
+            ChargridMode::Off,
+            "unset must be byte-for-byte unchanged behaviour — this is an unmeasured arm"
+        );
+
+        for (raw, expected) in [
+            ("on", ChargridMode::On),
+            ("ON", ChargridMode::On),
+            ("  control  ", ChargridMode::Control),
+            ("off", ChargridMode::Off),
+            ("OFF", ChargridMode::Off),
+            // A typo is a measurement mistake, not a production outage: it
+            // falls back to the default, same as every other knob in this
+            // module.
+            ("onn", ChargridMode::Off),
+            ("", ChargridMode::Off),
+        ] {
+            unsafe { std::env::set_var("SYNTHPASS_OCR_CHARGRID", raw) };
+            assert_eq!(chargrid_mode(), expected, "parsing {raw:?}");
+        }
+
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
+    }
+
+    #[test]
+    fn ocr_arms_from_env_is_default_when_every_knob_is_unset() {
+        for var in [
+            "SYNTHPASS_OCR_TEXTURE",
+            "SYNTHPASS_OCR_ORDER",
+            "SYNTHPASS_OCR_ROTATE",
+            "SYNTHPASS_OCR_SKEW",
+            "SYNTHPASS_OCR_CHARGRID",
+        ] {
+            unsafe { std::env::remove_var(var) };
+        }
+        let arms = OcrArms::from_env();
+        assert_eq!(arms, OcrArms::DEFAULT);
+        assert!(arms.is_default());
+    }
+
+    #[test]
+    fn ocr_arms_is_default_false_when_any_single_knob_moves() {
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
+        unsafe { std::env::set_var("SYNTHPASS_OCR_CHARGRID", "on") };
+        assert!(!OcrArms::from_env().is_default());
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
     }
 
     #[test]
