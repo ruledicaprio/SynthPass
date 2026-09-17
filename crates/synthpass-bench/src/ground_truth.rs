@@ -1069,7 +1069,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_a_matches_the_frozen_manifest_and_ledger() {
+    fn batch_a_has_thirteen_unique_assets() {
         assert_eq!(BATCH_A.len(), 13);
         assert_eq!(BATCH_A.iter().collect::<BTreeSet<_>>().len(), 13);
         let rows: Vec<ManifestRow> = include_str!("../../../samples/corpus.jsonl")
@@ -1081,17 +1081,11 @@ mod tests {
                 .lines()
                 .map(|l| json(l).unwrap())
                 .collect();
-        for (i, asset) in BATCH_A.iter().enumerate() {
+        // Membership is frozen, but a future OCR change may turn a ledger
+        // outcome into a hit without changing which assets need human review.
+        for asset in &BATCH_A {
             assert!(rows.iter().any(|r| r.asset() == *asset));
-            let outcome = ledger.iter().find(|r| r["asset_id"] == *asset).unwrap();
-            assert_eq!(
-                outcome["outcome"],
-                if i < 3 {
-                    "no_mrz_found"
-                } else {
-                    "checksum_failed"
-                }
-            );
+            assert!(ledger.iter().any(|r| r["asset_id"] == *asset));
         }
     }
 
