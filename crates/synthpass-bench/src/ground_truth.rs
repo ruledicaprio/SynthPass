@@ -697,7 +697,13 @@ fn embedded(image: &DynamicImage, enlarge: bool) -> Result<String> {
         return Err("image has zero size".into());
     }
     // Full-page context yields the byte budget to the lossless MRZ crop.
-    let resized = image.thumbnail(1200, 1200).to_rgb8();
+    let resized = if image.width().max(image.height()) > 1000 {
+        image
+            .resize(1000, 1000, image::imageops::FilterType::Lanczos3)
+            .to_rgb8()
+    } else {
+        image.to_rgb8()
+    };
     let mut bytes = Vec::new();
     image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 85)
         .encode_image(&resized)

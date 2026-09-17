@@ -59,7 +59,7 @@ Batch A pre-fills only an exact structural OCR parse, otherwise its fields stay 
 the OCR lines. MRZ crops preserve their original pixels as lossless color PNG and enlarge
 for display. Per-card zoom, invert, and high-contrast toggles reuse the same color PNG.
 High contrast applies `grayscale(1) contrast(1.6)` without changing the exported fields.
-Full images use JPEG quality 85 with a 1,200 px maximum long edge. `--no-ocr` leaves Batch A
+Full images use JPEG quality 85 with a 1,000 px maximum long edge, without upscaling. `--no-ocr` leaves Batch A
 empty and omits crops. Missing local OCR models also
 fall back to full images; model lookup checks `SYNTHPASS_OCR_MODEL_DIR`, the current directory,
 and the parent of `--samples-root`. Nothing downloads models.
