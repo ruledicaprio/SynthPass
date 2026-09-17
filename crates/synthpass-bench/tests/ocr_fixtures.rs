@@ -12,6 +12,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
+
 fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
@@ -169,4 +171,77 @@ fn every_fixture_json_has_a_paired_md() {
         "fixture .json with no paired .md (parity.rs skips these):\n  {}",
         missing.join("\n  ")
     );
+}
+
+#[derive(Deserialize)]
+struct ManifestFixtureRow {
+    dir: String,
+    filename: String,
+    #[serde(default)]
+    ground_truth_stem: Option<String>,
+    #[serde(default)]
+    expected_document_number: Option<String>,
+}
+
+fn manifest_fixture_agreement() -> Result<(), String> {
+    let fixtures = fixtures_dir();
+    let corpus = fixtures
+        .parent()
+        .ok_or("samples directory unavailable")?
+        .join("corpus.jsonl");
+    let source = fs::read_to_string(&corpus)
+        .map_err(|error| format!("read {}: {error}", corpus.display()))?;
+    let mut verdicts = [0usize; 2];
+    for (line_number, line) in source.lines().enumerate() {
+        let row: ManifestFixtureRow = serde_json::from_str(line).map_err(|error| {
+            format!(
+                "parse {} line {}: {error}",
+                corpus.display(),
+                line_number + 1
+            )
+        })?;
+        let Some(stem) = row.ground_truth_stem else {
+            continue;
+        };
+        let fixture_path = fixtures.join(format!("{stem}.json"));
+        let fixture_source = fs::read_to_string(&fixture_path).map_err(|error| {
+            format!(
+                "samples/corpus.jsonl disagrees with the fixture for {stem}: {error}. Regenerate the manifest (cargo run -p synthpass-ocr --example corpus_manifest) and commit the result."
+            )
+        })?;
+        let fixture: serde_json::Value = serde_json::from_str(&fixture_source)
+            .map_err(|error| format!("parse {}: {error}", fixture_path.display()))?;
+        let valid = fixture["mrz_checksums_valid"].as_bool().ok_or_else(|| {
+            format!(
+                "{}: fixture has no boolean mrz_checksums_valid",
+                fixture_path.display()
+            )
+        })?;
+        let consistent = if valid {
+            row.expected_document_number.as_deref()
+                == fixture["document_number"]
+                    .as_str()
+                    .filter(|number| !number.is_empty())
+        } else {
+            row.expected_document_number.is_none()
+        };
+        if !consistent {
+            return Err(format!(
+                "samples/corpus.jsonl disagrees with the fixture for {stem}: a checksum-valid fixture implies a recorded expected_document_number (a non-conforming one implies null). Regenerate the manifest (cargo run -p synthpass-ocr --example corpus_manifest) and commit the result."
+            ));
+        }
+        verdicts[usize::from(valid)] += 1;
+    }
+    if verdicts.into_iter().any(|count| count == 0) {
+        return Err("expected both checksum-valid and non-conforming reviewed fixtures".into());
+    }
+    Ok(())
+}
+
+#[test]
+fn manifest_records_fixture_document_number_contract() {
+    match manifest_fixture_agreement() {
+        Ok(()) => {}
+        Err(error) => panic!("{error}"),
+    }
 }
