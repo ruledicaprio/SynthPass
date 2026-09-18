@@ -21,12 +21,17 @@ number `X4RTBPFW4` → `6`; date of birth `900713` → `8`; expiry `300211` → 
 The document number is also printed vertically on the card's right edge, and the expiry agrees
 with `11 02 2030` in the ghost portrait.
 
-The mechanism is **background clutter**. Dense micro-text from the Declaration of the Rights of
-Man, stars, and other graphics run through the band. The committed
-[outcome ledger](real-specimen-outcomes.jsonl) records `ocr_ms: 66705` and
-`retry_budget_hit: true` for this document: the retry loop spent 66 seconds and exhausted its
-budget. That is measured evidence that the surrounding print defeats detection, rather than only
-a visual impression.
+The mechanism is a **preprocessing variant gap**, not background clutter alone. Dense micro-text
+from the Declaration of the Rights of Man, stars, and other graphics run through the band, but the
+band is detectable. The Phase D native-versus-browser report
+(`phase-d-native-vs-browser-2026-09-18.md`), from `web-ocr.yml` run `35169813105` on the same
+bytes and population, records native OCR stopping on its retry budget with no MRZ at `72,227 ms`;
+the browser (`tesseract.js`) produced a checksum-valid read on pass 3, a contrast stretch, in
+`1,305 ms`. The native variant chain never tries the transform that resolves the band.
+
+The committed [outcome ledger](real-specimen-outcomes.jsonl) records a separate native run at
+`ocr_ms: 66705` with `retry_budget_hit: true`. Its 66-second budget exhaustion remains measured
+evidence, while the Phase D timing belongs to its own run and is not reconciled into this value.
 
 ## Italy CIE 2022 back
 
@@ -72,6 +77,8 @@ is changed here.
 
 ## M6 consequence
 
-None of these three is a recognition defect. France and Italy have conforming zones defeated by
-print around the band, while Moldova has no band. A better recogniser closes none of them; the
-remaining M6 effort should follow those mechanisms instead.
+None of these three is a recognition defect. Italy and Moldova close by explanation: the former
+has a watermark across its band and the latter has no band. France remains an open, actionable
+preprocessing target: a contrast-stretch pass is a named candidate, but it has not been tried in
+the native pipeline. The browser result makes that candidate worth testing; it does not establish
+that the fix works here.
