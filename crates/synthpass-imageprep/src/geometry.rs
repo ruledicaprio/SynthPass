@@ -302,6 +302,24 @@ pub fn detect_mrz_band(lines: &[OcrLine], mrz_charset: &str) -> Option<BBox> {
 /// two orientations is large and directional; see
 /// [`MRZ_BAND_CONFIDENT_SCORE`].
 pub fn detect_mrz_band_scored(lines: &[OcrLine], mrz_charset: &str) -> Option<(BBox, f64)> {
+    let (start, end, avg) = detect_mrz_band_range(lines, mrz_charset)?;
+    let boxes: Vec<BBox> = lines[start..end].iter().map(|l| l.bbox).collect();
+    BBox::union(&boxes).map(|bbox| (bbox, avg))
+}
+
+/// [`detect_mrz_band_scored`], but returning the winning group's `(start,
+/// end_exclusive, avg_score)` index range into `lines` instead of the union
+/// bounding box.
+///
+/// The bbox alone cannot tell a caller *which* of `lines` composed the
+/// winning band — needed by a caller that re-derives `lines` itself from
+/// `ocrs::find_text_lines`'s own line groups (dropping any group that
+/// recognized no text) and has to recover the original `RotatedRect` groups
+/// for the band's lines to run recognition on them a second time (PR-3.0's
+/// `probe_matrix` example, in `synthpass-ocr`'s `examples/`). `detect_mrz_band_scored`
+/// is now a thin wrapper around this function so the two can never disagree
+/// about which group won.
+pub fn detect_mrz_band_range(lines: &[OcrLine], mrz_charset: &str) -> Option<(usize, usize, f64)> {
     let scores: Vec<f64> = lines
         .iter()
         .map(|l| mrz_line_score(l, mrz_charset))
@@ -325,8 +343,7 @@ pub fn detect_mrz_band_scored(lines: &[OcrLine], mrz_charset: &str) -> Option<(B
     if avg < MRZ_BAND_MIN_AVG_SCORE {
         return None;
     }
-    let boxes: Vec<BBox> = lines[start..end].iter().map(|l| l.bbox).collect();
-    BBox::union(&boxes).map(|bbox| (bbox, avg))
+    Some((start, end, avg))
 }
 
 /// Grid resolution (cells per axis) [`detect_portrait`] uses for its coarse
@@ -564,6 +581,35 @@ mod tests {
         let band = detect_mrz_band(&lines, MRZ_CHARSET).expect("should find a band");
         let expected = BBox::union(&[mrz1.bbox, mrz2.bbox]).unwrap();
         assert_eq!(band, expected);
+    }
+
+    #[test]
+    fn detect_mrz_band_range_matches_the_bbox_the_scored_function_returns() {
+        let header = line("REPUBLIC OF UTOPIA PASSPORT", 0.0, 0.0, 300.0, 20.0);
+        let mrz1 = line(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            0.0,
+            100.0,
+            44.0 * 20.0,
+            30.0,
+        );
+        let mrz2 = line(
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+            0.0,
+            135.0,
+            44.0 * 20.0,
+            30.0,
+        );
+        let lines = vec![header, mrz1, mrz2];
+        let (start, end, avg) =
+            detect_mrz_band_range(&lines, MRZ_CHARSET).expect("should find a band");
+        assert_eq!((start, end), (1, 3));
+        let (bbox, scored_avg) = detect_mrz_band_scored(&lines, MRZ_CHARSET).unwrap();
+        assert_eq!(scored_avg, avg);
+        assert_eq!(
+            bbox,
+            BBox::union(&lines[start..end].iter().map(|l| l.bbox).collect::<Vec<_>>()).unwrap()
+        );
     }
 
     #[test]

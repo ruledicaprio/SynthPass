@@ -28,6 +28,27 @@ serde_json = "1"
 # corpus row by content, which is what lets a rerun skip re-OCRing an image
 # that has not changed — a full pass over the corpus is tens of minutes.
 sha2 = "0.11"
+# examples/probe_matrix.rs's synthetic grid-origin measurement (PR-3.0) needs
+# documents whose true MRZ pixel geometry is known exactly, which only a
+# generator can provide — no real specimen's true origin/pitch is recorded
+# anywhere. Dev-only; `crates/synthpass-bench/tests/chargrid_repair_synthetic.rs`
+# already depends on this crate the same way, for the same reason.
+synthpass-gen = { path = "../synthpass-gen" }
+# `ocrs::OcrEngine::detect_words`/`find_text_lines`/`prepare_recognition_input`
+# all name `rten_imageproc::RotatedRect` in their public signatures, but `ocrs`
+# does not re-export it (see `crates/synthpass-imageprep/src/geometry.rs`'s
+# module doc for the same fact, and why that crate invented `BBox` instead of
+# depending on this one). examples/probe_matrix.rs needs to *construct*
+# `RotatedRect`s itself (synthetic per-cell/context-window crop regions), which
+# `BBox` cannot express, so it names the type directly. Already present in the
+# lockfile at this exact version via `ocrs`/`rten`'s own dependency graph —
+# dev-only, so this adds nothing to the shipped crate.
+rten-imageproc = "0.24.0"
+# Same rationale as `rten-imageproc` above: `rten::Model::run_one` and the
+# tensor reshape/permute/slice calls examples/probe_matrix.rs needs to drive
+# it directly are all `rten_tensor` types already in the lockfile via `rten`
+# itself. Dev-only.
+rten-tensor = "0.24.0"
 
 [features]
 # Bakes both .rten weight files into the binary via `include_bytes!` instead

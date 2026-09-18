@@ -3057,9 +3057,12 @@ dependencies = [
  "ocrs",
  "reqwest",
  "rten",
+ "rten-imageproc",
+ "rten-tensor",
  "serde_json",
  "sha2",
  "synthpass-core",
+ "synthpass-gen",
  "synthpass-imageprep",
 ]
 
