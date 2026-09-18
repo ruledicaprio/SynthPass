@@ -36,7 +36,8 @@ route by which this pipeline can conclude that a band exists.
 **3. Recognition improvements cannot close the remaining detection misses.** The three detection
 failures frozen in [ADR-0011](ADR-0011-split-m6-packaging-into-m8.md)'s 2026-09-17 amendment were
 attributed on 2026-09-18 ([`detection-misses-2026-09-18.md`](../benchmarks/detection-misses-2026-09-18.md)):
-France (conforming zone; a preprocessing gap because the native variant chain lacks the contrast-stretch transform), Italy (conforming zone, FACSIMILE watermark crossing
+France (conforming zone; a preprocessing gap because the native variant chain lacks the
+contrast-stretch transform), Italy (conforming zone, FACSIMILE watermark crossing
 the band), Moldova (no machine-readable zone exists at all — the printed lines are 57 characters,
 longer than any ICAO format). A perfect classifier closes none of them. This is the complement to
 [ADR-0014](ADR-0014-per-cell-ocrb-classification.md), which addresses the documents where the band
