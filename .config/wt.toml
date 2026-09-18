@@ -1,0 +1,16 @@
+# git-wt (Worktrunk) project configuration.
+#
+# Worktrees are this project's isolation layer: agents, A/B arms and parallel
+# sessions all run in one. A worktree without the specimen images is not merely
+# inconvenient -- it fails silently. On 2026-09-18 the MRZ matrix probe ran in a
+# fresh worktree, found 5 of 232 fixtures had a locatable image, and reported a
+# per-cell accuracy gap of 3.8 pp. Re-run with the full corpus the gap was
+# 0.96 pp. The small run was not wrong about its own 395 cells; it was wrong
+# about what they meant, and nothing in the output said so.
+#
+# So the corpus is copied automatically. What gets copied is an allowlist in
+# .worktreeinclude -- notably NOT target/ (129 GB on this machine) and NOT
+# samples/private/ (real PII, opt-in via --include-private only).
+
+[hooks]
+post-switch = ["git-wt step copy-ignored --require-include"]
