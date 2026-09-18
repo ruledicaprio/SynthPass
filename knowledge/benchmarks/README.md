@@ -28,7 +28,8 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 108** | same baseline (CI, 2026-09-17) |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
-| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **80.0% vs 74.4%** on 160 non-redacted MRZ-bearing specimens, both arms measured 2026-09-09 — **before** ADR-0008 chunk 2 moved the native arm; not re-cut since | [`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md) |
+| Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
+| Names, browser vs native, on documents both read validly | **28 / 31 vs 11 / 31** exact on both name fields (reviewed fixtures only) — 17 browser-right/native-wrong, 0 the other way | same run — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md) |
 
 **Why two rates.** 108 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
@@ -88,6 +89,17 @@ recomputed on 2026-09-03 — unchanged through `mrz` 0.7.0, 0.7.1, `geometry_ban
 +5.6 pp and, more usefully, **is concentrated in a named handful**: as first measured on 2026-09-09
 the browser read 11 of native's 18 detection failures and 6 of its 7 `checksum_failed` (the
 detection count is 17 after the Argentina 2026 pair was scored out; see the outcomes table above).
+
+**Amended 2026-09-18 (Phase D, `web-ocr.yml` run 35169813105).** The +5.6 pp gap above is the
+2026-09-09 cut and is no longer current: re-measured on one population at `v1.5.0`, the two arms
+tie at 140 over the 154 scored documents, and the disagreement is 8 documents each way rather than
+a one-sided advantage. What survives, and sharpens, is "concentrated in a named handful" — plus a
+new axis the 2026-09-09 cut did not measure: on the 31 documents both stacks read checksum-valid
+with a reviewed fixture, the browser gets both names exact on 28 against native's 11, with zero
+documents going the other way. Both are in
+[`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md), which also
+records that four of the browser's extra checksum-valid reads land on documents outside every
+scored population.
 
 ## What belongs here
 

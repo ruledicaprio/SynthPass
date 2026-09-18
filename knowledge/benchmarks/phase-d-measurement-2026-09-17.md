@@ -1,8 +1,14 @@
 # Phase D provider-gap measurement setup (2026-09-17)
 
-**Date:** 2026-09-17 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** current
+**Date:** 2026-09-17 · **MAIN:** not stated · **DATA:** not stated · **Evidence:** unlabelled (pre-standard) · **Status:** superseded by [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md)
 
-Status: **Prepared; comparison measurement not run.**
+**Amended 2026-09-18 — the measurement ran.** `web-ocr.yml` run **35169813105** (dispatched
+2026-09-17T01:14:59Z with `reference_tag=v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee`) completed
+successfully and produced all three artifacts. The status line immediately below was accurate
+when this file was written and is kept, unedited, as the record of that moment; the result is in
+[`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md).
+
+Status (as of 2026-09-17, superseded): **Prepared; comparison measurement not run.**
 
 This branch prepares a same-population native/browser measurement for ADR-0008. The
 workflow resolves the samples_data_sha recorded in the committed real-specimen
