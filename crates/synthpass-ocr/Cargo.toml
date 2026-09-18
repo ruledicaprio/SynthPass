@@ -62,3 +62,13 @@ embedded-models = []
 [[example]]
 name = "corpus_manifest"
 test = true
+
+# Same reason as `corpus_manifest` above. probe_matrix carries a test pinning
+# CTC labels 29/44/49 against `ocrs` 0.12.2's private `DEFAULT_ALPHABET`, which
+# it has to duplicate because `ocrs` never exposes it. Every figure the probe
+# reports is an index into that table, so if upstream reorders it the numbers
+# silently become a different question's answer. Without `test = true` the
+# guard is built but never run, which is the same as not having it.
+[[example]]
+name = "probe_matrix"
+test = true
