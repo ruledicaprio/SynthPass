@@ -54,10 +54,10 @@ place that would act on it, and it is deliberately `None` in
 `v1_2_0_compatible()` — the routing policy's own doc comment cites this exact
 gap as the reason no threshold has been set.
 
-**Fix:** not "upstream a patch to `ocrs`, or fork the recognition loop" —
-`ocrs`/`rten` are plain, unmodified crates.io dependencies with no
-`[patch]` or vendor infrastructure in place today, so either option means
-standing up and maintaining a fork before writing a line of the actual fix.
+**Fix:** `ocrs::OcrEngine::prepare_recognition_input` is public and returns the exact
+preprocessed line tensor the model consumes, so run the already-pinned `.rten` model through
+`rten` directly to obtain its CTC log-probability matrix: no fork, vendored patch, or new
+dependency is needed.
 `knowledge/research/long-horizon-parsing.md` §2 works out a better path that
 avoids upstream negotiation entirely: swap the recognizer to PaddleOCR
 PP-OCRv5 converted to `.rten` (already a direct dependency) and write our
@@ -67,6 +67,10 @@ vs. `ocrs` is unverified, the MRZ-charset beam-search retry pass would need
 reimplementing against the new engine, and it's a second model to
 download/hash-pin — so the recommended sequencing is a `synthpass-bench`
 bake-off first, not a blind swap.
+A raw CTC log-probability is a model score and strictly better than the current plausibility
+proxy, but it is uncalibrated. Under [`project_principles.md` §2](project_principles.md#2-every-claim-exposes-the-strength-of-its-evidence), it may route work but cannot be published as
+confidence without a reliability diagram. Obtaining that score is necessary but not sufficient to
+retire this debt; neither this entry nor ADR-0014 §5 previously said so.
 
 **Estimated effort:** the bake-off is the next concrete step; the 3–5 day
 figure for the full swap (patch/fork framing) is retired along with that
