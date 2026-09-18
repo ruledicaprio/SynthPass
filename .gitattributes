@@ -6,3 +6,8 @@
 # (outcomes_sha256, checked by scripts/check-headline-numbers.sh). A CRLF checkout on
 # Windows changes the bytes and fails that check, so the ledger keeps LF everywhere.
 knowledge/benchmarks/real-specimen-outcomes.jsonl text eol=lf
+
+# The probe summary is committed as evidence: ADR-0014 quotes figures from it, so a reader
+# should be able to compare two checkouts and get the same bytes. Nothing pins its sha256
+# today -- this is so that a Windows and a Linux checkout never disagree if something ever does.
+knowledge/benchmarks/mrz-matrix-probe-2026-09-18.json text eol=lf
