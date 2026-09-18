@@ -1,0 +1,22 @@
+# Gitignored paths that `git-wt step copy-ignored` may copy into a new worktree.
+#
+# This is an ALLOWLIST: with --require-include, nothing is copied unless listed
+# here. That is deliberate. A blanket copy of ignored files would take target/
+# (which reached 129 GB on this machine) and samples/private/ (real PII, which
+# the benchmark walk excludes unless --include-private is passed).
+#
+# What a worktree needs to run the OCR tests and benchmarks:
+text-detection.rten
+text-recognition.rten
+samples/passports/*
+samples/id_cards/
+samples/driving_licenses/
+samples/misc/
+
+# Deliberately NOT listed, and why:
+#   target/                 build cache, regenerable, was 129 GB
+#   samples/private/        real PII; opt-in via --include-private only
+#   samples/local/          local-only track, not part of the default walk
+#   *.gguf                  Tier-2 LLM weights, only needed for the LLM path
+#   intent/                 local strategic intent, deliberately not shared
+#   artifacts/ out/ _site/  run output and scratch
