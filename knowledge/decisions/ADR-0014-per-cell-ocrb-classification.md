@@ -39,10 +39,36 @@ Two further facts bound what any change here can assume:
   the fact (recorded as High debt in [`technical_debt.md`](../technical_debt.md), "OCR confidence
   is a character-plausibility proxy, not a model score"). Nothing downstream can currently rank
   two candidate readings of the same cell.
-- **The CTC recognizer never emits an isolated `<`.** Three probes on 2026-09-16 (stretching the
-  crop, re-spacing the cells, re-recognizing) failed to make it produce one; the model has no
-  representation to emit. This is why `chargrid` reconstructs filler *positions* geometrically
-  instead of asking for a better read.
+- **The CTC recognizer represents an isolated `<`, but its context suppresses it.** **Observed:**
+  the 2026-09-16 probes (stretching the crop, re-spacing cells, and re-recognizing) saw the real
+  suppression effect but named its cause incorrectly. The 2026-09-18 raw-matrix probe run over
+  `samples/ocr_fixtures` read raw CTC label-29 (`<`) mass over 44 scored documents / 3,123
+  cells from 62 fixtures / 255 images; 18 documents were skipped (7 `band_line_count_mismatch`, 5
+  `no_line_fit_at_all`, 6 `no_mrz_band`). It separates 59 isolated truth-fillers from 980
+  truth-fillers inside a run:
+
+  | context window | isolated (n=59) mean / median | in-run (n=980) mean / median |
+  | --- | --- | --- |
+  | `cell_n0` (the cell alone) | **0.0573** / 0.0667 | 0.0636 / 0.0768 |
+  | `cell_n1` | 0.0498 / 0.0270 | 0.0731 / 0.0845 |
+  | `cell_n2` | 0.0486 / 0.0186 | 0.0686 / 0.0814 |
+  | `cell_n4` | 0.0443 / 0.0099 | 0.0665 / 0.0775 |
+  | full line | **0.0513** / 0.0382 | 0.0818 / 0.0824 |
+
+  At `cell_n0`, isolated fillers carry 90% of the in-run `<` mass: the representation is
+  nearly context-free. Any context drops the isolated-to-in-run ratio to 0.63–0.71 on means and
+  0.13–0.46 on medians. The separation is not strictly monotone in window width: the mean ratio
+  rises at `cell_n2` (0.682 → 0.709), and the median ratio recovers at full line (0.128 → 0.463).
+  This zero-to-context step suggests a narrow-window read may capture most of the benefit. `<` is
+  not the argmax in either population — absolute mass remains about 5–8% — so this
+  establishes parity of representation at zero context, not that the beam should have emitted it.
+  A per-cell or narrow-window read and fill-only geometric reconstruction are therefore distinct
+  remedies.
+
+  **Observed prototype floor:** over the same 3,123 cells, the `ocrs` beam reads 81.81% (2,555)
+  and the best raw matrix mode, `cell_n2`, reads 80.85% (2,525). This is parity from a raw read
+  with none of the masks, ink priors, or checksum search proposed below; it is a floor for the
+  prototype, not a result for it.
 
 Meanwhile 10 of the 13 still-open frozen M6 misses are `checksum_failed`
 ([ADR-0011](ADR-0011-split-m6-packaging-into-m8.md) amendment) — documents where an MRZ was
