@@ -23,8 +23,8 @@ with `11 02 2030` in the ghost portrait.
 
 The mechanism is a **preprocessing variant gap**, not background clutter alone. Dense micro-text
 from the Declaration of the Rights of Man, stars, and other graphics run through the band, but the
-band is detectable. The Phase D native-versus-browser report
-(`phase-d-native-vs-browser-2026-09-18.md`), from `web-ocr.yml` run `35169813105` on the same
+band is detectable. The [Phase D native-versus-browser
+report](phase-d-native-vs-browser-2026-09-18.md), from `web-ocr.yml` run `35169813105` on the same
 bytes and population, records native OCR stopping on its retry budget with no MRZ at `72,227 ms`;
 the browser (`tesseract.js`) produced a checksum-valid read on pass 3, a contrast stretch, in
 `1,305 ms`. The native variant chain never tries the transform that resolves the band.
