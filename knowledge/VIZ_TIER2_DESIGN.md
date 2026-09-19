@@ -244,7 +244,10 @@ produced:
 > support the recovery the holdout scores it on.
 >
 > The claim did not go stale. **Eight of the 72 fixtures it was measured over were already card
-> backs**, so it was contradicted by 11% of its own population from the start. The holdout's
+> backs** — Serbia 2008 and Slovenia 2022 in the reviewed set, and all six in `derived/` — so it
+> was contradicted by 11% of its own population from the start. **Those eight are not the ten
+> opened above:** the ten are today's set, and seven of them plus Austria were not in the corpus
+> on 2026-09-04. The holdout's
 > *method* is unaffected — the strip, the predicate and the ground truth are all unchanged. What
 > changes is which fields a given side may be scored on, which is ADR-0016's subject.
 
