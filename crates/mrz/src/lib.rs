@@ -135,8 +135,8 @@ pub use parser::{
     parse_td3_with,
 };
 pub use repair::{
-    solve_field, solve_substitution, substitution_candidates, width_candidates, FieldKind,
-    Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
+    solve_class_sweep, solve_field, solve_substitution, substitution_candidates, width_candidates,
+    FieldKind, Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
 };
 pub use translit::{
     transliterate, transliterate_char, transliterate_cyrillic, transliterate_cyrillic_char,
