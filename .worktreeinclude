@@ -12,6 +12,10 @@ samples/passports/*
 samples/id_cards/
 samples/driving_licenses/
 samples/misc/
+# covers/ carries no MRZ and the benchmark never walks it, but
+# `corpus_manifest` does: regenerating the manifest in a worktree without it
+# silently drops 34 rows. Measured 2026-09-19.
+samples/covers/
 
 # Deliberately NOT listed, and why:
 #   target/                 build cache, regenerable, was 129 GB
