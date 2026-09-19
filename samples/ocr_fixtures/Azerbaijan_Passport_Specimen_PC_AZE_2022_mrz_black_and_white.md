@@ -24,5 +24,5 @@ Etibarlilik muddeti / Date of expiry
 23.08.2027
 Veren orqan / Authority
 DAXILI ISLER NAZIRLIYI / MINISTRY OF INTERNAL AFFAIRS
-PCAZEABIYEV<<FARHAD<<<<<<<<<<<<<<<<<<<<<<<<<<
+PCAZEABIYEV<<FARHAD<<<<<<<<<<<<<<<<<<<<<<<<<
 C032022203AZE0507107M27082307VA3P3Q<<<<<<<30

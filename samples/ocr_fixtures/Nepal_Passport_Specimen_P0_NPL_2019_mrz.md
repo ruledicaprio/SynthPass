@@ -26,5 +26,5 @@ Date of Expiry
 10 FEB 2029
 Issuing Authority
 MOFA, DEPARTMENT OF PASSPORT
-P<NPLCHAND<<SANDIP<<<<<<<<<<<<<<<<<<<<<<<<<<<
+P<NPLCHAND<<SANDIP<<<<<<<<<<<<<<<<<<<<<<<<<<
 11309984<7NPL9908176M290210873017501410<<<56

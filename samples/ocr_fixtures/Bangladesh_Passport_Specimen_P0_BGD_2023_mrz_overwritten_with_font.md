@@ -27,5 +27,5 @@ Date of Expiry
 Issuing Authority
 DIP/DHAKA
 [visual zone overwritten with a font layer reading MD SALAUDDIN AHMED over the original MD ABDUS SALAM]
-P<BGDSALAM<<MD<ABDUS<<<<<<<<<<<<<<<<<<<<<<<<<
+P<BGDSALAM<<MD<ABDUS<<<<<<<<<<<<<<<<<<<<<<<<
 A119335037BGD0202273M33082686908672915<<<<70

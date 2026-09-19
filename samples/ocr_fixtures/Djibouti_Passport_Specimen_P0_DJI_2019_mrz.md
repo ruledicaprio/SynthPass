@@ -27,5 +27,5 @@ Date d expiration / Date of expiry
 Autorite / Authority
 D.G.P.N Police Nationale
 MINISTERE DE L INTERIEUR
-P<DJIHASSAN<FARID<RAGUE<<<<<<<<<<<<<<<<<<<<<<
+P<DJIHASSAN<FARID<RAGUE<<<<<<<<<<<<<<<<<<<<<
 18RF153208DJI9107267M2408046<<<<<<<<<<<<<<04
