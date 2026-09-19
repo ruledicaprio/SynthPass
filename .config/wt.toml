@@ -12,5 +12,21 @@
 # .worktreeinclude -- notably NOT target/ (129 GB on this machine) and NOT
 # samples/private/ (real PII, opt-in via --include-private only).
 
-[hooks]
-post-switch = ["git-wt step copy-ignored --require-include"]
+# Schema note: hooks are TOP-LEVEL keys, not a [hooks] table, and the value is a
+# string. A [hooks] table parses as an unknown key, is silently ignored, and the
+# corpus then does not arrive -- reintroducing the exact silent failure above.
+# Verify with `git-wt hook show`, which must list post-switch.
+#
+# A project hook also needs a one-shot approval per machine before it will run
+# (`git-wt config approvals add`). Until that is granted the hook is listed but
+# skipped, so a fresh worktree still arrives empty. Check with
+# `git-wt config approvals list`.
+#
+# And the hook's subprocess inherits the invoking shell's PATH. From Git Bash,
+# whose MSYS PATH lacks the Git-for-Windows cmd directory, the spawned copy dies
+# with "Git for Windows is required but not found" -- while git-wt still reports
+# the switch as successful. Create worktrees from PowerShell.
+#
+# All three failures are silent. After creating a worktree, count the files:
+# it should carry the full samples/ tree, not just the tracked part.
+post-switch = "git-wt step copy-ignored --require-include"
