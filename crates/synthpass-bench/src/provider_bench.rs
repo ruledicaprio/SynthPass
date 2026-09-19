@@ -25,7 +25,7 @@
 //! silently diverge in what "correct" means.
 
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use synthpass_core::v2::{CoreField, MrzFormat};
@@ -67,6 +67,651 @@ fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
             .count()
         })
         .sum()
+}
+
+/// Checksum-coverage state of one MRZ field: whether an error inside it
+/// would be caught by a check digit, and by which one.
+///
+/// Two things false about a document that reads as a clean Tier-1 hit
+/// motivate this: nationality and sex sit inside *no* ICAO composite on any
+/// format, and a field like TD1's optional data has no check digit of its
+/// own — the composite is the only thing standing over it. Whether a
+/// differing field is checksum-covered is as important as the fact that it
+/// differs; see this module's top-of-file note and the 2026-09-18
+/// hand-analysis this instrumentation replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CheckCoverage {
+    /// A dedicated ICAO check digit protects this field on its own —
+    /// document number, date of birth, date of expiry, or (TD3 only)
+    /// personal number — or this field *is* that check digit's own
+    /// character position (`<field>_cd`).
+    OwnCheckDigit,
+    /// No dedicated check digit exists for this field, but it lies inside
+    /// the composite check's protected span, or it *is* the composite check
+    /// digit's own position (`composite_cd`). An error here fails the
+    /// composite check and nothing else — the "composite check failed and
+    /// nothing else did" signature localises the error to one of these
+    /// fields before a single character is examined.
+    CompositeOnly,
+    /// No check digit — dedicated or composite — covers this field at all.
+    /// A document can validate every check digit it prints while a field in
+    /// this state is silently wrong.
+    #[serde(rename = "none")]
+    Uncovered,
+}
+
+/// One named, positionally-bounded field inside an MRZ zone.
+///
+/// `line` is 1-based and matches `mrz::parser`'s own `line1`/`line2`/`line3`
+/// naming (TD1 has three physical lines; every other format has two), so a
+/// field-layout table reads the same way as the parser code it must not
+/// drift from.
+#[derive(Debug, Clone, Copy)]
+struct MrzFieldSpan {
+    line: usize,
+    /// Used verbatim as a JSON object key in the dump's per-field mismatch
+    /// maps — deliberately `snake_case` and stable. `<field>_cd` names a
+    /// field's own ICAO check-digit character as a field distinct from the
+    /// data it protects, so a check-digit-only or composite-only error is
+    /// distinguishable from a data error in the same field.
+    name: &'static str,
+    /// Start column, 0-based, inclusive.
+    start: usize,
+    /// End column, 0-based, exclusive.
+    end: usize,
+    coverage: CheckCoverage,
+}
+
+use CheckCoverage::{CompositeOnly, OwnCheckDigit, Uncovered};
+
+/// TD1 (ICAO 9303 part 5): three 30-character lines. Composite spans
+/// `line1[5..30] + line2[0..7] + line2[8..15] + line2[18..29]`
+/// (`crates/mrz/src/parser.rs`'s `parse_td1_with`, composite `verify` call) —
+/// pinned against that function's actual behaviour by
+/// `field_layout_matches_the_parsers_own_check_digit_spans` below, one
+/// mutated character at a time, rather than duplicated here as a second copy
+/// of the offsets that could silently drift from it.
+const TD1_FIELDS: &[MrzFieldSpan] = &[
+    MrzFieldSpan {
+        line: 1,
+        name: "document_code",
+        start: 0,
+        end: 2,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "issuing_country",
+        start: 2,
+        end: 5,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "document_number",
+        start: 5,
+        end: 14,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "document_number_cd",
+        start: 14,
+        end: 15,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "optional_data_1",
+        start: 15,
+        end: 30,
+        coverage: CompositeOnly,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth",
+        start: 0,
+        end: 6,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth_cd",
+        start: 6,
+        end: 7,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "sex",
+        start: 7,
+        end: 8,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry",
+        start: 8,
+        end: 14,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry_cd",
+        start: 14,
+        end: 15,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "nationality",
+        start: 15,
+        end: 18,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "optional_data_2",
+        start: 18,
+        end: 29,
+        coverage: CompositeOnly,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "composite_cd",
+        start: 29,
+        end: 30,
+        coverage: CompositeOnly,
+    },
+    MrzFieldSpan {
+        line: 3,
+        name: "name",
+        start: 0,
+        end: 30,
+        coverage: Uncovered,
+    },
+];
+
+/// TD2 (ICAO 9303 part 6): two 36-character lines. Composite spans
+/// `line2[0..10] + line2[13..20] + line2[21..35]` (`parse_td2_with`) — see
+/// [`TD1_FIELDS`]'s doc for the pinning approach.
+const TD2_FIELDS: &[MrzFieldSpan] = &[
+    MrzFieldSpan {
+        line: 1,
+        name: "document_code",
+        start: 0,
+        end: 2,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "issuing_country",
+        start: 2,
+        end: 5,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "name",
+        start: 5,
+        end: 36,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number",
+        start: 0,
+        end: 9,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number_cd",
+        start: 9,
+        end: 10,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "nationality",
+        start: 10,
+        end: 13,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth",
+        start: 13,
+        end: 19,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth_cd",
+        start: 19,
+        end: 20,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "sex",
+        start: 20,
+        end: 21,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry",
+        start: 21,
+        end: 27,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry_cd",
+        start: 27,
+        end: 28,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "optional_data",
+        start: 28,
+        end: 35,
+        coverage: CompositeOnly,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "composite_cd",
+        start: 35,
+        end: 36,
+        coverage: CompositeOnly,
+    },
+];
+
+/// TD3 (ICAO 9303 part 4): two 44-character lines. Composite spans
+/// `line2[0..10] + line2[13..20] + line2[21..43]` (`parse_td3_with`) — see
+/// [`TD1_FIELDS`]'s doc for the pinning approach. TD3 is the one format where
+/// `personal_number` carries its own check digit (`personal_number_cd`), so
+/// unlike TD1/TD2's optional-data field, its content is `OwnCheckDigit`
+/// rather than `CompositeOnly` even though the composite also spans it.
+const TD3_FIELDS: &[MrzFieldSpan] = &[
+    MrzFieldSpan {
+        line: 1,
+        name: "document_code",
+        start: 0,
+        end: 2,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "issuing_country",
+        start: 2,
+        end: 5,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "name",
+        start: 5,
+        end: 44,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number",
+        start: 0,
+        end: 9,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number_cd",
+        start: 9,
+        end: 10,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "nationality",
+        start: 10,
+        end: 13,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth",
+        start: 13,
+        end: 19,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth_cd",
+        start: 19,
+        end: 20,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "sex",
+        start: 20,
+        end: 21,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry",
+        start: 21,
+        end: 27,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry_cd",
+        start: 27,
+        end: 28,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "personal_number",
+        start: 28,
+        end: 42,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "personal_number_cd",
+        start: 42,
+        end: 43,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "composite_cd",
+        start: 43,
+        end: 44,
+        coverage: CompositeOnly,
+    },
+];
+
+/// MRV-A (ICAO 9303 part 7): two 44-character lines, geometry mirroring TD3
+/// through the expiry check digit but with **no personal-number check digit
+/// and no composite at all** (`parse_mrv_a_with` hardwires both
+/// `Checks::personal_number` and `Checks::composite` to `true`) — so the
+/// optional-data field is `Uncovered`, not `CompositeOnly`: there is no
+/// composite here for anything to be covered by.
+const MRVA_FIELDS: &[MrzFieldSpan] = &[
+    MrzFieldSpan {
+        line: 1,
+        name: "document_code",
+        start: 0,
+        end: 2,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "issuing_country",
+        start: 2,
+        end: 5,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "name",
+        start: 5,
+        end: 44,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number",
+        start: 0,
+        end: 9,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number_cd",
+        start: 9,
+        end: 10,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "nationality",
+        start: 10,
+        end: 13,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth",
+        start: 13,
+        end: 19,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth_cd",
+        start: 19,
+        end: 20,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "sex",
+        start: 20,
+        end: 21,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry",
+        start: 21,
+        end: 27,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry_cd",
+        start: 27,
+        end: 28,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "optional_data",
+        start: 28,
+        end: 44,
+        coverage: Uncovered,
+    },
+];
+
+/// MRV-B (ICAO 9303 part 7): two 36-character lines, geometry mirroring TD2
+/// through the expiry check digit but with no personal-number check digit
+/// and no composite — see [`MRVA_FIELDS`]'s doc.
+const MRVB_FIELDS: &[MrzFieldSpan] = &[
+    MrzFieldSpan {
+        line: 1,
+        name: "document_code",
+        start: 0,
+        end: 2,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "issuing_country",
+        start: 2,
+        end: 5,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 1,
+        name: "name",
+        start: 5,
+        end: 36,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number",
+        start: 0,
+        end: 9,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "document_number_cd",
+        start: 9,
+        end: 10,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "nationality",
+        start: 10,
+        end: 13,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth",
+        start: 13,
+        end: 19,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_birth_cd",
+        start: 19,
+        end: 20,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "sex",
+        start: 20,
+        end: 21,
+        coverage: Uncovered,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry",
+        start: 21,
+        end: 27,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "date_of_expiry_cd",
+        start: 27,
+        end: 28,
+        coverage: OwnCheckDigit,
+    },
+    MrzFieldSpan {
+        line: 2,
+        name: "optional_data",
+        start: 28,
+        end: 36,
+        coverage: Uncovered,
+    },
+];
+
+/// The field layout for a resolved MRZ format string, in the same
+/// `"TD1"`/`"TD2"`/`"TD3"`/`"MRVA"`/`"MRVB"` vocabulary [`mrz_format_str`]
+/// produces and [`MissOcrDump::mrz_format`] carries. `None` for anything
+/// else (there is no sixth format).
+fn mrz_field_layout(format: &str) -> Option<&'static [MrzFieldSpan]> {
+    match format {
+        "TD1" => Some(TD1_FIELDS),
+        "TD2" => Some(TD2_FIELDS),
+        "TD3" => Some(TD3_FIELDS),
+        "MRVA" => Some(MRVA_FIELDS),
+        "MRVB" => Some(MRVB_FIELDS),
+        _ => None,
+    }
+}
+
+/// Per-field breakdown of an MRZ zone mismatch, for a resolved format: how
+/// many characters differ inside each ICAO field, exactly which raw
+/// positions those are, and — for every field that differed at all —
+/// whether any check digit would have caught an error there.
+///
+/// Every field here is a name (from the static [`mrz_field_layout`] table)
+/// or a position (`usize`); nothing on this type or [`mrz_field_mismatch`],
+/// which builds it, ever reads a character out of the zones it is given.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+struct FieldMismatch {
+    /// Differing character count per field name, e.g. `{"optional_data_2":
+    /// 7, "composite_cd": 1}`.
+    by_field: BTreeMap<String, usize>,
+    /// Differing 0-based column positions per 1-based line number, e.g.
+    /// `{2: [20, 21, 24, 25, 26, 27, 28, 29]}` — same line numbering as
+    /// [`MrzFieldSpan::line`].
+    by_line: BTreeMap<usize, Vec<usize>>,
+    /// Checksum-coverage state of every field named in `by_field`.
+    coverage: BTreeMap<String, CheckCoverage>,
+}
+
+/// Position-level sibling of [`mrz_zone_mismatch`]: same longer-of-the-two,
+/// missing-character-counts-as-mismatch alignment, but returns *where* the
+/// differences are instead of only how many there are.
+/// [`mrz_zone_mismatch`]'s own return value and behaviour are unchanged by
+/// this function's existence — see its doc.
+///
+/// Keys are 1-based line numbers (matching [`MrzFieldSpan::line`]); a line
+/// with no differences is absent, not an empty vector.
+fn mrz_zone_mismatch_positions(recovered: &str, truth: &str) -> BTreeMap<usize, Vec<usize>> {
+    let rec: Vec<&str> = recovered.lines().collect();
+    let tru: Vec<&str> = truth.lines().collect();
+    (0..rec.len().max(tru.len()))
+        .filter_map(|i| {
+            let mut a = rec.get(i).copied().unwrap_or("").chars();
+            let mut b = tru.get(i).copied().unwrap_or("").chars();
+            let differing: Vec<usize> = std::iter::from_fn(|| match (a.next(), b.next()) {
+                (None, None) => None,
+                (x, y) => Some(x != y),
+            })
+            .enumerate()
+            .filter_map(|(col, differs)| differs.then_some(col))
+            .collect();
+            (!differing.is_empty()).then_some((i + 1, differing))
+        })
+        .collect()
+}
+
+/// Attribute an MRZ zone mismatch to ICAO fields, for a resolved format.
+/// `None` when `format` isn't one [`mrz_field_layout`] recognises; a
+/// position that falls outside every declared field span (should not happen
+/// for a well-formed zone of the declared format) is attributed to the
+/// literal field name `"unmapped"` rather than dropped silently.
+///
+/// **Structurally cannot serialize a character**: it is built entirely from
+/// [`mrz_zone_mismatch_positions`]'s positions and the static field table —
+/// `recovered`/`truth`'s characters are compared (`!=`) and never stored.
+fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<FieldMismatch> {
+    let layout = mrz_field_layout(format)?;
+    let by_line = mrz_zone_mismatch_positions(recovered, truth);
+    let mut result = FieldMismatch {
+        by_line: by_line.clone(),
+        ..Default::default()
+    };
+    for (line, cols) in &by_line {
+        for &col in cols {
+            let field = layout
+                .iter()
+                .find(|f| f.line == *line && col >= f.start && col < f.end);
+            let name = field.map_or("unmapped", |f| f.name);
+            *result.by_field.entry(name.to_string()).or_insert(0) += 1;
+            if let Some(f) = field {
+                result.coverage.insert(name.to_string(), f.coverage);
+            }
+        }
+    }
+    Some(result)
 }
 
 /// One in-denominator real-specimen miss (`checksum_failed` or
@@ -113,6 +758,23 @@ struct MissOcrDump {
     /// (`checksum_failed_specimen`); `Some(n > 0)` → OCR introduced the error
     /// and this is the Phase-3d character-fix material; `None` → no label.
     zone_mismatch: Option<usize>,
+    /// [`FieldMismatch::by_field`]: differing character count per ICAO field
+    /// name, e.g. `{"optional_data_2": 7, "composite_cd": 1}`. `None` under
+    /// the same conditions as `zone_mismatch` (no ground truth, or nothing
+    /// parsed), plus when the resolved format is itself unknown — there is
+    /// no field table to attribute against without one. Positions and
+    /// counts only; see [`mrz_field_mismatch`]'s doc for why no character
+    /// value can reach this field.
+    field_mismatch_counts: Option<BTreeMap<String, usize>>,
+    /// [`FieldMismatch::by_line`]: differing 0-based column positions per
+    /// 1-based line number, e.g. `{"2": [20, 21, 24, 25, 26, 27, 28, 29]}`.
+    /// Same availability as `field_mismatch_counts`.
+    field_mismatch_positions: Option<BTreeMap<usize, Vec<usize>>>,
+    /// [`FieldMismatch::coverage`]: checksum-coverage state of every field
+    /// named in `field_mismatch_counts` — whether a check digit (dedicated
+    /// or composite, or none at all) would have caught an error there. Same
+    /// availability as `field_mismatch_counts`.
+    field_mismatch_coverage: Option<BTreeMap<String, CheckCoverage>>,
 }
 
 /// Everything measured for one provider over one corpus run.
@@ -1346,6 +2008,16 @@ async fn run_prepped(
                     (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
                     _ => None,
                 };
+                // Field-level attribution needs a resolved format (to know
+                // which table to look positions up against) on top of
+                // `zone_mismatch`'s own two preconditions — see
+                // `MissOcrDump::field_mismatch_counts`'s doc.
+                let field_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz, mrz_format) {
+                    (Some(data), Some(truth), Some(format)) => {
+                        mrz_field_mismatch(format, &data.mrz_lines, truth)
+                    }
+                    _ => None,
+                };
                 // Printed alongside the zone above so a run stopped before the
                 // final JSONL flush (the usual `llm`-pass kill) still carries the
                 // ground-truth comparison for every labelled specimen.
@@ -1365,6 +2037,10 @@ async fn run_prepped(
                         ),
                         None => {}
                     }
+                    if let Some(fm) = &field_mismatch {
+                        println!("  per-field mismatch: {:?}", fm.by_field);
+                        println!("  per-field coverage: {:?}", fm.coverage);
+                    }
                 }
                 dump_rows.push(MissOcrDump {
                     name: bench_page.name.clone(),
@@ -1377,6 +2053,9 @@ async fn run_prepped(
                     failing_checks: failing,
                     ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
                     zone_mismatch,
+                    field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
+                    field_mismatch_positions: field_mismatch.as_ref().map(|f| f.by_line.clone()),
+                    field_mismatch_coverage: field_mismatch.as_ref().map(|f| f.coverage.clone()),
                 });
             }
 
@@ -2731,6 +3410,392 @@ mod tests {
         assert_eq!(mrz_zone_mismatch("ABC\nDE", "ABC\nDEF"), 1);
         // a whole extra line counts every character
         assert_eq!(mrz_zone_mismatch("ABC", "ABC\nDEF"), 3);
+    }
+
+    /// A different character than `c`, with a different ICAO check-digit
+    /// numeric value, staying inside the MRZ charset. `<` and `0` collide
+    /// (both have check-digit value `0`), so a naive "next letter/digit"
+    /// mapping through that pair would silently pick a no-op mutation —
+    /// going through the numeric value directly, mod 36, avoids it and
+    /// guarantees the mutation changes what every `verify(...)` call
+    /// computes (the weighted-sum delta can never land back on a multiple
+    /// of 10 for a `+1 mod 36` step, since the three ICAO weights 7/3/1 are
+    /// all coprime with 10).
+    fn mrz_test_char_value(c: char) -> u32 {
+        match c {
+            '0'..='9' => c as u32 - '0' as u32,
+            'A'..='Z' => c as u32 - 'A' as u32 + 10,
+            '<' => 0,
+            other => panic!("test fixture char {other:?} is outside the MRZ charset"),
+        }
+    }
+
+    fn mrz_test_char_from_value(v: u32) -> char {
+        match v {
+            0..=9 => char::from(b'0' + v as u8),
+            10..=35 => char::from(b'A' + (v - 10) as u8),
+            other => unreachable!("value {other} out of MRZ charset range"),
+        }
+    }
+
+    fn bump(c: char) -> char {
+        mrz_test_char_from_value((mrz_test_char_value(c) + 1) % 36)
+    }
+
+    /// TD1's textbook composite-only signature (this module's top-of-file
+    /// note, point 1): a single wrong character inside an optional-data
+    /// field — which carries no check digit of its own — fails the
+    /// composite check and *only* the composite check, before any character
+    /// is examined.
+    #[test]
+    fn composite_only_error_fails_only_the_composite_check() {
+        let l1 = "I<UTOD231458907<<<<<<<<<<<<<<<";
+        let l2 = "7408122F1204159UTO<<<<<<<<<<<6";
+        let l3 = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+        let baseline = mrz::parse_td1(l1, l2, l3).expect("fixture parses");
+        assert!(
+            baseline.checks.all_valid(),
+            "fixture must start out checksum-clean"
+        );
+
+        // Column 20 of line 2 (1-based) sits inside optional_data_2 (18..29).
+        let mut chars: Vec<char> = l2.chars().collect();
+        chars[20] = bump(chars[20]);
+        let mutated_l2: String = chars.into_iter().collect();
+        let mutated = mrz::parse_td1(l1, &mutated_l2, l3).expect("still parses");
+        assert_eq!(
+            mutated.checks.failed(),
+            [mrz::Field::Composite],
+            "an error inside a composite-only field must fail composite alone"
+        );
+
+        let recovered = format!("{l1}\n{mutated_l2}\n{l3}");
+        let truth = format!("{l1}\n{l2}\n{l3}");
+        let fm = mrz_field_mismatch("TD1", &recovered, &truth).expect("TD1 has a layout");
+        assert_eq!(fm.by_field.get("optional_data_2"), Some(&1));
+        assert_eq!(
+            fm.coverage.get("optional_data_2"),
+            Some(&CheckCoverage::CompositeOnly)
+        );
+    }
+
+    /// The case that motivates this whole instrumentation (this module's
+    /// top-of-file note, point 2): nationality and sex sit inside no ICAO
+    /// composite on any format, so an error there fails *no* check digit at
+    /// all — the document can still read as a clean Tier-1 hit — yet
+    /// `mrz_field_mismatch` still reports the field as differing, with
+    /// coverage `Uncovered`.
+    #[test]
+    fn an_uncovered_field_error_fails_no_check_but_is_still_reported() {
+        let l1 = "I<UTOD231458907<<<<<<<<<<<<<<<";
+        let l2 = "7408122F1204159UTO<<<<<<<<<<<6";
+        let l3 = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+
+        // Column 16 of line 2 (1-based) sits inside nationality (15..18).
+        let mut chars: Vec<char> = l2.chars().collect();
+        chars[16] = bump(chars[16]);
+        let mutated_l2: String = chars.into_iter().collect();
+        let mutated = mrz::parse_td1(l1, &mutated_l2, l3).expect("still parses");
+        assert!(
+            mutated.checks.all_valid(),
+            "a wrong nationality must not fail any check digit"
+        );
+
+        let recovered = format!("{l1}\n{mutated_l2}\n{l3}");
+        let truth = format!("{l1}\n{l2}\n{l3}");
+        let fm = mrz_field_mismatch("TD1", &recovered, &truth).expect("TD1 has a layout");
+        assert_eq!(fm.by_field.get("nationality"), Some(&1));
+        assert_eq!(
+            fm.coverage.get("nationality"),
+            Some(&CheckCoverage::Uncovered)
+        );
+    }
+
+    /// Per-format sanity: a known single-position error in a known field
+    /// attributes to exactly that field, with count 1, and the coverage this
+    /// module's own table declares for it.
+    #[test]
+    fn per_format_single_position_error_attributes_to_the_expected_field() {
+        // (format, truth lines joined with \n, 0-based line index, 0-based
+        // column, expected field name, expected coverage)
+        let cases: &[(&str, &str, usize, usize, &str, CheckCoverage)] = &[
+            (
+                "TD1",
+                "I<UTOD231458907<<<<<<<<<<<<<<<\n\
+                 7408122F1204159UTO<<<<<<<<<<<6\n\
+                 ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+                1,
+                20,
+                "optional_data_2",
+                CheckCoverage::CompositeOnly,
+            ),
+            (
+                "TD2",
+                "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\n\
+                 D231458907UTO7408122F1204159<<<<<<<6",
+                1,
+                30,
+                "optional_data",
+                CheckCoverage::CompositeOnly,
+            ),
+            (
+                "TD3",
+                "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+                 L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+                1,
+                30,
+                "personal_number",
+                CheckCoverage::OwnCheckDigit,
+            ),
+            (
+                "MRVA",
+                "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+                 L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
+                1,
+                30,
+                "optional_data",
+                CheckCoverage::Uncovered,
+            ),
+            (
+                "MRVB",
+                "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\n\
+                 L898902C<3UTO6908061F9406236ZE184226",
+                1,
+                30,
+                "optional_data",
+                CheckCoverage::Uncovered,
+            ),
+        ];
+        for &(format, truth, line_idx, col, expected_field, expected_coverage) in cases {
+            let lines: Vec<&str> = truth.lines().collect();
+            let mut chars: Vec<char> = lines[line_idx].chars().collect();
+            chars[col] = bump(chars[col]);
+            let mut mutated_lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
+            mutated_lines[line_idx] = chars.into_iter().collect();
+            let recovered = mutated_lines.join("\n");
+
+            let fm = mrz_field_mismatch(format, &recovered, truth)
+                .unwrap_or_else(|| panic!("{format} must have a field layout"));
+            assert_eq!(
+                fm.by_field.get(expected_field),
+                Some(&1),
+                "{format}: expected exactly one differing character in {expected_field}"
+            );
+            assert_eq!(
+                fm.coverage.get(expected_field),
+                Some(&expected_coverage),
+                "{format}: unexpected coverage for {expected_field}"
+            );
+            assert_eq!(fm.by_line.get(&(line_idx + 1)), Some(&vec![col]));
+        }
+    }
+
+    /// No function on the field-mismatch path may ever serialize a printed
+    /// character: `FieldMismatch` is built entirely from positions, field
+    /// names, and coverage states, never from the zone text itself. This
+    /// plants a distinctive watermark string in each of two differing
+    /// fields and confirms neither watermark — nor the value that replaced
+    /// it — reaches the serialized output.
+    #[test]
+    fn field_mismatch_never_serializes_a_character_value_from_the_input_zone() {
+        let truth = "I<UTOZZZZZZZZZ7<<<<<<<<<<<<<<<\n\
+                     7408122F1204159UTO<<<<<<<<<<<6\n\
+                     ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+        let recovered = "I<UTOYYYYYYYYY7<<<<<<<<<<<<<<<\n\
+                          7408122F1204159UTOQQQQQQQQQQQ6\n\
+                          ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+
+        let fm = mrz_field_mismatch("TD1", recovered, truth).expect("TD1 has a layout");
+        assert_eq!(fm.by_field.get("document_number"), Some(&9));
+        assert_eq!(fm.by_field.get("optional_data_2"), Some(&11));
+
+        let serialized = serde_json::to_string(&fm).expect("FieldMismatch serializes");
+        for watermark in ["ZZZZZZZZZ", "YYYYYYYYY", "QQQQQQQQQQQ"] {
+            assert!(
+                !serialized.contains(watermark),
+                "serialized field-mismatch output must never contain a character value \
+                 from the input zone, but found {watermark:?} in {serialized}"
+            );
+        }
+    }
+
+    /// Pins every field-layout table (`TD1_FIELDS`, `TD2_FIELDS`,
+    /// `TD3_FIELDS`, `MRVA_FIELDS`, `MRVB_FIELDS`) against `mrz::parse_*`'s
+    /// *actual* check-digit behaviour, rather than duplicating the parser's
+    /// literal slice offsets as a second, driftable copy of them: for every
+    /// position of a valid specimen, mutate that one character, reparse
+    /// with the real `mrz` parser, and confirm which check(s) broke matches
+    /// what the field's declared `CheckCoverage` predicts. A future change
+    /// to any `verify(...)` span in `crates/mrz/src/parser.rs` that isn't
+    /// mirrored in this module's field-layout tables fails this test, not
+    /// silently.
+    #[test]
+    fn field_layout_matches_the_parsers_own_check_digit_spans() {
+        fn checks_failed_names(checks: &mrz::Checks) -> std::collections::BTreeSet<&'static str> {
+            checks.failed().iter().map(|f| f.as_str()).collect()
+        }
+
+        struct Case {
+            format: &'static str,
+            lines: Vec<&'static str>,
+            parse: fn(&[String]) -> Option<mrz::Checks>,
+        }
+
+        let cases = [
+            Case {
+                format: "TD1",
+                lines: vec![
+                    "I<UTOD231458907<<<<<<<<<<<<<<<",
+                    "7408122F1204159UTO<<<<<<<<<<<6",
+                    "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+                ],
+                parse: |l| {
+                    mrz::parse_td1(&l[0], &l[1], &l[2])
+                        .ok()
+                        .map(|d| d.checks.clone())
+                },
+            },
+            Case {
+                format: "TD2",
+                lines: vec![
+                    "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+                    "D231458907UTO7408122F1204159<<<<<<<6",
+                ],
+                parse: |l| mrz::parse_td2(&l[0], &l[1]).ok().map(|d| d.checks.clone()),
+            },
+            Case {
+                format: "TD3",
+                lines: vec![
+                    "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+                    "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+                ],
+                parse: |l| mrz::parse_td3(&l[0], &l[1]).ok().map(|d| d.checks.clone()),
+            },
+            Case {
+                format: "MRVA",
+                lines: vec![
+                    "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+                    "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
+                ],
+                parse: |l| {
+                    mrz::parse_mrv_a(&l[0], &l[1])
+                        .ok()
+                        .map(|d| d.checks.clone())
+                },
+            },
+            Case {
+                format: "MRVB",
+                lines: vec![
+                    "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+                    "L898902C<3UTO6908061F9406236ZE184226",
+                ],
+                parse: |l| {
+                    mrz::parse_mrv_b(&l[0], &l[1])
+                        .ok()
+                        .map(|d| d.checks.clone())
+                },
+            },
+        ];
+
+        for case in cases {
+            let original: Vec<String> = case.lines.iter().map(|s| s.to_string()).collect();
+            let baseline = (case.parse)(&original)
+                .unwrap_or_else(|| panic!("{}: fixture must parse", case.format));
+            assert!(
+                baseline.all_valid(),
+                "{}: fixture must be checksum-clean before mutation",
+                case.format
+            );
+
+            let layout = mrz_field_layout(case.format)
+                .unwrap_or_else(|| panic!("{}: must have a field layout", case.format));
+
+            // Full coverage: every position in every line maps to exactly
+            // one declared field, with no gaps and no overlaps.
+            for (li, line) in case.lines.iter().enumerate() {
+                for col in 0..line.chars().count() {
+                    let matches: Vec<_> = layout
+                        .iter()
+                        .filter(|f| f.line == li + 1 && col >= f.start && col < f.end)
+                        .collect();
+                    assert_eq!(
+                        matches.len(),
+                        1,
+                        "{} line {} col {col} must map to exactly one field, got {matches:?}",
+                        case.format,
+                        li + 1
+                    );
+                }
+            }
+
+            for field in layout {
+                // Position 0 of `document_code` gates the parser's own
+                // document-code validation (`starts_with('P'/'V')` or
+                // `matches!(.., I|A|C)`); mutating it changes which document
+                // this is, not a checksum, so it is excluded here — every
+                // other position of every other field is exercised.
+                let start = if field.name == "document_code" {
+                    field.start.max(1)
+                } else {
+                    field.start
+                };
+                for col in start..field.end {
+                    let mut mutated = original.clone();
+                    let mut chars: Vec<char> = mutated[field.line - 1].chars().collect();
+                    chars[col] = bump(chars[col]);
+                    mutated[field.line - 1] = chars.into_iter().collect();
+
+                    let checks = (case.parse)(&mutated).unwrap_or_else(|| {
+                        panic!(
+                            "{} field {} col {col}: mutation broke parsing entirely",
+                            case.format, field.name
+                        )
+                    });
+                    let failed = checks_failed_names(&checks);
+
+                    match field.coverage {
+                        CheckCoverage::OwnCheckDigit => {
+                            let expected = match field.name.trim_end_matches("_cd") {
+                                "document_number" => "document_number",
+                                "date_of_birth" => "date_of_birth",
+                                "date_of_expiry" => "date_of_expiry",
+                                "personal_number" => "personal_number",
+                                other => panic!(
+                                    "{}: unexpected own-check field name {other}",
+                                    case.format
+                                ),
+                            };
+                            assert!(
+                                failed.contains(expected),
+                                "{} field {} col {col}: expected {expected} to fail, got \
+                                 {failed:?}",
+                                case.format,
+                                field.name
+                            );
+                        }
+                        CheckCoverage::CompositeOnly => {
+                            let expected: std::collections::BTreeSet<&'static str> =
+                                std::collections::BTreeSet::from(["composite"]);
+                            assert_eq!(
+                                failed, expected,
+                                "{} field {} col {col}: expected ONLY composite to fail, got \
+                                 {failed:?}",
+                                case.format, field.name
+                            );
+                        }
+                        CheckCoverage::Uncovered => {
+                            assert!(
+                                failed.is_empty(),
+                                "{} field {} col {col}: expected no check to fail, got \
+                                 {failed:?}",
+                                case.format,
+                                field.name
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// The other half of 1.3: a `vision` provider gets `NotApplicable`
