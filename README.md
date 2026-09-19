@@ -122,7 +122,7 @@ one headline below is checked against the committed baseline by CI.
 Two rates, because one number cannot answer both questions honestly. A hit means a checksum-valid
 MRZ whose document number matches hand-verified ground truth.
 
-- **140 / 153 = 91.5% on documents that can yield a hit** — how often extraction succeeds when
+- **140 / 152 = 92.1% on documents that can yield a hit** — how often extraction succeeds when
   success is possible. This is the number accuracy work moves, and any PR touching the extraction
   path is checked against it by
   [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml), which reports a
@@ -134,8 +134,8 @@ MRZ whose document number matches hand-verified ground truth.
   all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
   whose own check digits are wrong by design. Returning nothing for them is the correct answer, and
   [until 2026-09-09 they were counted as failures](knowledge/benchmarks/denominator-correction-2026-09-09.md).
-- **The larger scored miss is now reading, not finding: `checksum_failed` (10 of 153)**, where a
-  zone is found but fails a check digit, against `no_mrz_found` (3), where none is located at
+- **The larger scored miss is now reading, not finding: `checksum_failed` (10 of 152)**, where a
+  zone is found but fails a check digit, against `no_mrz_found` (2), where none is located at
   all. Detection was the bottleneck until the orientation fix in
   [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; a
   [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md) then found four of the seven remaining detection

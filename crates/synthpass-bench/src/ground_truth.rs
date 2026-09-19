@@ -27,7 +27,7 @@ type Fields = BTreeMap<String, Option<String>>;
 const BATCH_A: [&str; 13] = [
     "id_cards/France_ID_Specimen_2020_back_mrz.png",
     "id_cards/Italy_ID_Specimen_2022_back_mrz.jpg",
-    "passports/Moldova_Passport_Specimen_PA_MDA_2014_mrz.jpeg",
+    "passports/Moldova_Passport_Specimen_PA_MDA_2014_no_mrz.jpeg",
     "passports/Afghanistan_Passport_Specimen_P0_AFG_2016_mrz.webp",
     "id_cards/Belgium_ID_Specimen_2021_back_mrz.png",
     "id_cards/Croatia_ID_Specimen_2021_back_mrz.jpg",
