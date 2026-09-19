@@ -79,10 +79,21 @@ Pre-1.0 is the cheap time to break, and the plan is to break **once**: collect e
 below into a single release rather than spreading them across several minors. Each is a
 proposal to be decided on its merits, in an issue or an ADR of its own. None is a commitment.
 
-1. **`ParseOptions` becomes `#[non_exhaustive]`, with a builder.** It is an exhaustive struct
-   with one public field, so adding a second tunable — a repair budget, a strictness switch —
-   would be a breaking change in itself. Every output type in the crate is already
-   non-exhaustive, and this is the one input type with an obvious need to grow.
+1. **`ParseOptions` becomes `#[non_exhaustive]`, with a builder. — DONE, and it is what opens
+   this window.** Built with `ParseOptions::default().with_pivot_yy(..)`; adding a second
+   tunable — a repair budget, a strictness switch — is now additive.
+
+   Two corrections this change established, both worth keeping. **"Every output type in the
+   crate is already non-exhaustive" was not true** — an audit of all 21 public types found
+   `Date` and `DateValidity` exhaustive as well, and both are now fixed in the same release,
+   free, because `Date::new`/`Date::from_epoch_days` already reach every field and
+   `DateValidity` is never built by callers. And **functional update syntax is not an escape
+   hatch**: `T { field: x, ..Default::default() }` is rejected with `E0639` exactly as the bare
+   literal is, so a `with_*` builder is the only ergonomic path. Policy recorded in
+   `knowledge/ARCHITECTURE.md` §13.4.
+
+   The five emitter inputs stay **deliberately exhaustive**: they mirror layouts ICAO 9303
+   fixes, so future tunables belong in a separate non-exhaustive companion instead.
 2. **Say what "not applicable" means in `Checks`.** `personal_number` and `composite` report
    `true` on formats that print no such check digit. The docs say so, but the type does not,
    and a caller can read "absent" as "verified". A tri-state would make the difference visible.

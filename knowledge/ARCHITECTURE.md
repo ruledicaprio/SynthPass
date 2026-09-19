@@ -361,3 +361,39 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
 - The five MRZ formats are tried in a fixed priority order (TD3 → MRV-B → MRV-A →
   TD1 → TD2) to avoid cross-format cannibalization; every candidate is
   check-digit-verified before it is accepted.
+
+### 13.4 `#[non_exhaustive]` policy for the published `mrz` crate
+
+`mrz` is published to crates.io and consumed outside this workspace, so its
+public surface carries a compatibility cost the rest of the workspace does not.
+Cargo's breaking slot is the **leftmost non-zero component**: pre-1.0 that is the
+minor version, and from 1.0 onward it is the major. A major bump splits the
+ecosystem -- two incompatible versions coexist in one dependency graph and types
+stop unifying across the boundary -- which is why `serde` has stayed on 1.0.x
+since 2017 rather than ever shipping a 2.0. **The window to get this right is
+before 1.0.**
+
+The rule is decided by who constructs the type, not by what it is:
+
+- **Types the crate returns** (`MrzData`, `Checks`, `Date`, `DateValidity`, and
+  every public enum) are `#[non_exhaustive]`. Callers only read them, so the
+  attribute costs nothing and buys the ability to add a field or variant without
+  a breaking release. A new enum variant breaking a downstream exhaustive `match`
+  is the classic post-1.0 trap.
+- **Tunables the caller builds** (`ParseOptions`) are `#[non_exhaustive]` with a
+  `with_*` builder, so each future option is an additive change. Note that
+  functional update syntax is **not** an escape hatch: `T { field: x,
+  ..Default::default() }` is rejected with `E0639` just as the bare literal is.
+- **Structs that mirror a layout ICAO 9303 fixes** (`Td1Fields`, `Td2Fields`,
+  `Td3Fields`, `MrvAFields`, `MrvBFields`) stay **exhaustive, deliberately**.
+  The standard defines their fields and is not going to add one, they are built
+  by callers with struct expressions, and making them non-exhaustive would cost
+  a builder method per field across the whole emit API for a risk that is not
+  real. **Put any future tunable in a separate `#[non_exhaustive]` companion
+  rather than adding a field to one of these** -- the same separation
+  `ParseOptions` already has from the data it parses. Each of the five carries
+  this note in its own rustdoc so it is not "fixed" by a later reader.
+
+`cargo-semver-checks` (CI's `semver` job) is the independent check that a change's
+categorisation was honest; it diffs the branch's public API against the latest
+crates.io release.

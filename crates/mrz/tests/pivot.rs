@@ -55,7 +55,7 @@ fn birth_date_lands_in_the_intended_century_at_and_around_each_pivot() {
         let dob = format!("{yy:02}0615"); // mid-year, always a valid calendar date
         let mrz = td3_with_dates(&dob, "300101");
         let (l1, l2) = mrz.split_once('\n').unwrap();
-        let opts = ParseOptions { pivot_yy: pivot };
+        let opts = ParseOptions::default().with_pivot_yy(pivot);
         let d = parse_td3_with(l1, l2, &opts).unwrap();
 
         let expected = format!("{expected_century}{yy:02}-06-15");
@@ -76,7 +76,7 @@ fn expiry_date_is_always_20xx_regardless_of_pivot() {
             let expiry = format!("{yy:02}0615");
             let mrz = td3_with_dates("740812", &expiry);
             let (l1, l2) = mrz.split_once('\n').unwrap();
-            let opts = ParseOptions { pivot_yy: pivot };
+            let opts = ParseOptions::default().with_pivot_yy(pivot);
             let d = parse_td3_with(l1, l2, &opts).unwrap();
             let expected = format!("20{yy:02}-06-15");
             assert_eq!(
@@ -95,7 +95,7 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
     for &(pivot, expected_century) in &[(0u32, "19"), (99, "20")] {
         let mrz = td3_with_dates("290229", "300101");
         let (l1, l2) = mrz.split_once('\n').unwrap();
-        let opts = ParseOptions { pivot_yy: pivot };
+        let opts = ParseOptions::default().with_pivot_yy(pivot);
         let d = parse_td3_with(l1, l2, &opts).unwrap();
         assert_eq!(d.date_of_birth, format!("{expected_century}29-02-29"));
     }
@@ -110,7 +110,7 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
     let mrz_00 = td3_with_dates("000229", "300101");
     let (l1, l2) = mrz_00.split_once('\n').unwrap();
 
-    let d_2000s = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: 0 }).unwrap();
+    let d_2000s = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(0)).unwrap();
     assert_eq!(d_2000s.date_of_birth, "2000-02-29");
     assert!(
         d_2000s
@@ -124,7 +124,7 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
     // headline leap-specific proof is the 2000-vs-1900 contrast above.
     let mrz_01 = td3_with_dates("010229", "300101");
     let (l1, l2) = mrz_01.split_once('\n').unwrap();
-    let d_1901 = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: 0 }).unwrap();
+    let d_1901 = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(0)).unwrap();
     assert_eq!(d_1901.date_of_birth, "1901-02-29");
     assert!(
         !d_1901
@@ -141,13 +141,13 @@ fn changing_the_pivot_never_changes_any_check_digit() {
     let mrz = td3_with_dates("290229", "300101");
     let (l1, l2) = mrz.split_once('\n').unwrap();
 
-    let baseline = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: 26 })
+    let baseline = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(26))
         .unwrap()
         .checks
         .clone();
 
     for pivot in [0, 1, 25, 26, 27, 28, 50, 98, 99] {
-        let d = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: pivot }).unwrap();
+        let d = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(pivot)).unwrap();
         assert_eq!(
             d.checks, baseline,
             "pivot {pivot} changed checks: {:?}",

@@ -241,6 +241,7 @@ fn days_in_month(year: i32, month: u32) -> u32 {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub struct Date {
     /// Full (not two-digit) calendar year, e.g. `2026`.
     pub year: i32,
@@ -384,6 +385,7 @@ pub(crate) fn parse_iso(date: &str) -> Option<Date> {
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub struct DateValidity {
     /// Both `date_of_birth` and `date_of_expiry` parse as real calendar dates.
     pub dates_well_formed: bool,
