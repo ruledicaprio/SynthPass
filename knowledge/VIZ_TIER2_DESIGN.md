@@ -231,8 +231,25 @@ produced:
 
 - the input is a document whose MRZ is unavailable — the escalation case;
 - the truth is still checksum-proven, because it was derived before the holdout;
-- and the four proven fields are all recoverable from the VIZ, which prints the
-  document number and both dates in human-readable form.
+- and the four proven fields are recoverable from the VIZ **on a passport data
+  page**, which prints the document number and both dates in human-readable
+  form.
+
+> **Corrected 2026-09-19 by [ADR-0016](decisions/ADR-0016-card-backs-declare-recoverable-fields.md).**
+> The third bullet originally read "the four proven fields are **all** recoverable from the VIZ",
+> without the passport qualifier. That is false for an identity-card back, and it was false when
+> written — not merely stale. Ten card backs were opened and counted: **date of birth 0/10, date of
+> expiry 0/10, document number 2/10, personal number 1/10.** None prints the holder's name. A card
+> puts the biographic fields on the front and the zone on the back, so the imaged side cannot
+> support the recovery the holdout scores it on.
+>
+> The claim did not go stale. **Eight of the 72 fixtures it was measured over were already card
+> backs** — Serbia 2008 and Slovenia 2022 in the reviewed set, and all six in `derived/` — so it
+> was contradicted by 11% of its own population from the start. **Those eight are not the ten
+> opened above:** the ten are today's set, and seven of them plus Austria were not in the corpus
+> on 2026-09-04. The holdout's
+> *method* is unaffected — the strip, the predicate and the ground truth are all unchanged. What
+> changes is which fields a given side may be scored on, which is ADR-0016's subject.
 
 That is a direct measurement of *"can Tier 2 recover verified fields from the
 visual zone alone"* — the exact question §2.1 through §2.3 exist to improve, on

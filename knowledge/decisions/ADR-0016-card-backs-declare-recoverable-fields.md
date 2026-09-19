@@ -1,7 +1,7 @@
 # ADR-0016 — Which fields a document side may be scored on
 
-**Status:** Proposed
-**Date:** 2026-09-19
+**Status:** Accepted
+**Date:** 2026-09-19 (proposed), 2026-09-19 (accepted)
 
 ## Context
 
@@ -187,16 +187,45 @@ argument for a per-field declaration over a per-document boolean holds either wa
   [ADR-0011](ADR-0011-split-m6-packaging-into-m8.md)'s deliberate freeze. A maintainer decision,
   recorded separately.
 
-## Open sub-questions
+## Sub-questions, as resolved on acceptance
 
-1. **Which side tokens count?** `back` is the case at hand. `face` (Serbia) means the same thing and
-   is spelled differently, and `front_back` images carry both sides — so the token set has to be
-   explicit, not pattern-matched.
-2. **Does the pre-flight grow a matching guard?** Today it catches an empty strip with no flag. It
-   cannot catch "declared a field the side does not print" without the audit this avoids.
-3. **Does the four-proven-fields defect get fixed in the same change?** It is older and wider than
-   the name defect and already affects the derived six. G covers it if the rule is per field rather
-   than name-only; say so explicitly rather than leaving it to be inferred.
+1. **Which side tokens count — resolved by enumeration, not by pattern.** The corpus was counted
+   rather than guessed. Excluding `samples/private/`, the tokens in use are `_front_` (40), `_back_`
+   (25), `_inner_` (1), `_front_back_` (1) and `_face_` (1). The rule keys on an **explicit closed
+   set**, and a filename carrying no recognised token gets **no class rule at all** — it falls
+   through to today's behaviour rather than to a guessed default. Silence is the safe direction: an
+   unrecognised name must not silently acquire a scoring policy.
+
+   Two facts are why a pattern match would have been wrong, and the first corrects an earlier draft
+   of this section that had it backwards. **`face` is not a synonym for `back`.**
+   `samples/corpus.jsonl` records `Serbia_ID_Specimen_2008_face_no_mrz.png` as `mrz.present:
+   false` with no ground-truth link, while the Serbia fixture is
+   `Serbia_ID_Specimen_2008_back_with_mrz`; and `samples/driving_licenses/` holds a `face` image
+   beside a `front` image of the same specimen, both MRZ-less. `face` names the **MRZ-less side**,
+   so a rule reading it as a back would subtract fields from the wrong side of the document
+   (**Observed**, 2026-09-19). Second, `_inner_` belongs to a passport inner page — a data page,
+   not a card side — so it must **not** inherit the card-back rule, though it matches no
+   `front`/`back` pattern either way.
+
+   **The census above is over `samples/`; the rule runs over fixture stems.** `parity.rs` reads
+   `samples/ocr_fixtures/` and `derived/`, never `samples/`. Across those stems the only tokens
+   present today are `back` and `inner`. The closed set is enumerated over the wider corpus so a
+   future promotion cannot introduce an unglossed token.
+2. **The pre-flight does not grow a matching guard.** It still catches an empty strip with no flag.
+   It cannot catch "declared a field the side does not print" without the per-fixture audit this
+   decision exists to avoid, and a guard that only appeared to check that would be worse than none.
+   The negative list is the mechanism; the audit is not reintroduced by the back door.
+3. **The rule is per field, not name-only.** Stated explicitly, as the sub-question asked. The
+   proven-fields defect is older and wider than the name defect and already affects the six
+   `derived/` fixtures, so a name-only rule would leave the larger half unfixed while looking
+   complete. `absent_from_visual_zone` is a per-field negative list for that reason.
+
+   **Precisely: three fields, not four.** `SCORED` (`crates/synthpass-llm/tests/parity.rs`) holds
+   nine fields and does **not** include `personal_number`, so an unreviewed fixture is scored on
+   the proven fields `document_number`, `date_of_birth` and `date_of_expiry` — of which the ten
+   opened backs print 2/10, 0/10 and 0/10 (**Observed**). The one proven field a card back
+   sometimes prints in the clear is the personal number, and it is not scored at all. The
+   conclusion is unchanged and slightly stronger than the four-field framing suggested.
 
 ## Consequences
 
