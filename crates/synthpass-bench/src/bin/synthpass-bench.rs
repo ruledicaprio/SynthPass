@@ -244,6 +244,42 @@ struct FieldReport {
     got: Option<String>,
 }
 
+/// One row of the "mean character error rate by field" table, annotated
+/// with the physical MRZ line the field lives on for this run's format —
+/// the JSON counterpart of the stdout table, so the line split can be
+/// tracked across runs rather than only read once from a terminal. `line`
+/// comes from `synthpass_bench::provider_bench::mrz_field_line`, never a
+/// second copy of the ICAO field-layout tables that function already reads.
+#[derive(Debug, Clone, Serialize)]
+struct FieldLineCer {
+    field: &'static str,
+    mean_cer: f64,
+    /// `None` for `mrz_lines` (a whole-zone aggregate, never a field with a
+    /// span) and for any field with no span in this format's layout — never
+    /// a fabricated line for either case.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+}
+
+/// Mean of the per-field mean CERs assigned to each physical MRZ line,
+/// unweighted across fields (every field counts equally regardless of how
+/// many characters it spans, matching the per-field table's own units).
+/// Rows with no resolved `line` are excluded rather than folded into a
+/// bucket they were never measured against.
+fn mean_cer_by_line(rows: &[FieldLineCer]) -> BTreeMap<usize, f64> {
+    let mut sums: BTreeMap<usize, (f64, usize)> = BTreeMap::new();
+    for row in rows {
+        if let Some(line) = row.line {
+            let entry = sums.entry(line).or_insert((0.0, 0));
+            entry.0 += row.mean_cer;
+            entry.1 += 1;
+        }
+    }
+    sums.into_iter()
+        .map(|(line, (sum, n))| (line, sum / n as f64))
+        .collect()
+}
+
 #[derive(Serialize)]
 struct Report {
     timestamp_unix: u64,
@@ -284,6 +320,19 @@ struct Report {
     /// accuracy. `0.0` when `hits` is `0` — there is no hit population to
     /// divide by, not a measured "every hit had a wrong name".
     names_exact_among_hits: f64,
+    /// Mean CER per field (worst first), each annotated with the physical
+    /// MRZ line it lives on for `document_type` — the JSON form of the
+    /// stdout "mean character error rate by field" table. Empty when no
+    /// document produced any field outcome at all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    mean_cer_by_field: Vec<FieldLineCer>,
+    /// [`mean_cer_by_line`] over `mean_cer_by_field` — the headline this
+    /// table exists to surface: e.g. on a TD3 run every line-1 field's mean
+    /// CER can dwarf every line-2 field's, and that split is invisible in a
+    /// table sorted by magnitude alone. Keyed by 1-based physical MRZ line;
+    /// excludes `mean_cer_by_field` rows with no resolved line.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    mean_cer_by_line: BTreeMap<usize, f64>,
     results: Vec<SeedResult>,
 }
 
@@ -480,21 +529,69 @@ fn main() {
     // Mean CER per field, over every document — including those that never
     // produced an MRZ, which count as a total loss. This is the number that
     // says *where* the accuracy goes, rather than only how much of it.
+    //
+    // Each row is also annotated with the physical MRZ line the field lives
+    // on for this run's format: on a TD3 run every line-1 field's mean CER
+    // has been observed to dwarf every line-2 field's, with no overlap at
+    // all, and that split is invisible in a table sorted by magnitude alone
+    // unless the reader already knows the format's layout by heart.
+    // `mrz_field_line` is format-aware (TD1 assigns different fields to line
+    // 1 than TD2/TD3 do), and shares `provider_bench`'s own ICAO field-layout
+    // tables rather than restating them.
     let mut totals: BTreeMap<&'static str, (f64, usize)> = BTreeMap::new();
     for f in results.iter().flat_map(|r| &r.fields) {
         let entry = totals.entry(f.field).or_insert((0.0, 0));
         entry.0 += f.cer;
         entry.1 += 1;
     }
-    if !totals.is_empty() {
-        let mut rows: Vec<(&str, f64)> = totals
-            .iter()
-            .map(|(field, (sum, n))| (*field, sum / *n as f64))
-            .collect();
-        rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let format = parsed.document_type.as_str();
+    let mut mean_cer_by_field: Vec<FieldLineCer> = totals
+        .iter()
+        .map(|(field, (sum, n))| FieldLineCer {
+            field,
+            mean_cer: sum / *n as f64,
+            line: synthpass_bench::provider_bench::mrz_field_line(format, field),
+        })
+        .collect();
+    mean_cer_by_field.sort_by(|a, b| {
+        b.mean_cer
+            .partial_cmp(&a.mean_cer)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let mean_cer_by_line_map = mean_cer_by_line(&mean_cer_by_field);
+    if !mean_cer_by_field.is_empty() {
         println!("\nmean character error rate by field (worst first):");
-        for (field, mean) in &rows {
-            println!("  {:>7.2}%  {field}", mean * 100.0);
+        for row in &mean_cer_by_field {
+            let line_label = row.line.map_or_else(
+                || "no single line".to_string(),
+                |line| format!("line {line}"),
+            );
+            println!(
+                "  {:>7.2}%  {:<20}{line_label}",
+                row.mean_cer * 100.0,
+                row.field
+            );
+        }
+
+        if !mean_cer_by_line_map.is_empty() {
+            let mut parts: Vec<String> = mean_cer_by_line_map
+                .iter()
+                .map(|(line, mean)| format!("line {line} mean {:.2}%", mean * 100.0))
+                .collect();
+            if mean_cer_by_line_map.len() >= 2 {
+                let max = mean_cer_by_line_map
+                    .values()
+                    .cloned()
+                    .fold(f64::MIN, f64::max);
+                let min = mean_cer_by_line_map
+                    .values()
+                    .cloned()
+                    .fold(f64::MAX, f64::min);
+                if min > 0.0 {
+                    parts.push(format!("ratio {:.1}x", max / min));
+                }
+            }
+            println!("  {}", parts.join("   "));
         }
     }
 
@@ -516,6 +613,8 @@ fn main() {
         strict_hits,
         strict_hit_rate,
         names_exact_among_hits,
+        mean_cer_by_field,
+        mean_cer_by_line: mean_cer_by_line_map,
         results,
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
@@ -844,5 +943,62 @@ mod tests {
         assert_eq!(s.newly_accepted, 0);
         assert_eq!(s.escalate_on, s.escalate_off);
         assert_eq!(s.wrong_docs, 0);
+    }
+
+    fn field_line_cer(field: &'static str, mean_cer: f64, line: Option<usize>) -> FieldLineCer {
+        FieldLineCer {
+            field,
+            mean_cer,
+            line,
+        }
+    }
+
+    /// The core arithmetic behind the "line 1 mean / line 2 mean / ratio"
+    /// footer: an unweighted average of the per-field means assigned to each
+    /// line, and a row with no resolved line contributes to no line's mean —
+    /// it must neither vanish silently nor pull a bucket it was never placed
+    /// in.
+    #[test]
+    fn mean_cer_by_line_averages_only_fields_that_resolve_a_line() {
+        let rows = vec![
+            field_line_cer("a", 0.40, Some(1)),
+            field_line_cer("b", 0.20, Some(1)),
+            field_line_cer("c", 0.10, Some(2)),
+            field_line_cer("d", 1.00, None),
+        ];
+        let by_line = mean_cer_by_line(&rows);
+        assert_eq!(
+            by_line.len(),
+            2,
+            "the unresolved row must not open a third bucket"
+        );
+        assert!((by_line[&1] - 0.30).abs() < 1e-9);
+        assert!((by_line[&2] - 0.10).abs() < 1e-9);
+    }
+
+    /// A run where every field resolves to the same line reports one bucket,
+    /// not a phantom second one — the ratio and the per-line footer both
+    /// depend on `by_line`'s length matching the lines actually observed.
+    #[test]
+    fn mean_cer_by_line_is_empty_when_no_row_resolves_a_line() {
+        let rows = vec![field_line_cer("mrz_lines", 0.5, None)];
+        assert!(mean_cer_by_line(&rows).is_empty());
+    }
+
+    /// TD3 puts `document_type`/`issuing_country`/`surname`/`given_names` on
+    /// line 1 and the rest on line 2; TD1 puts the combined name field on
+    /// line 3 instead. `mrz_field_line` (shared with `provider_bench`, not
+    /// duplicated here) must reflect that per-format difference rather than
+    /// a single fixed mapping.
+    #[test]
+    fn td1_and_td3_place_the_name_fields_on_different_lines() {
+        assert_eq!(
+            synthpass_bench::provider_bench::mrz_field_line("TD3", "surname"),
+            Some(1)
+        );
+        assert_eq!(
+            synthpass_bench::provider_bench::mrz_field_line("TD1", "surname"),
+            Some(3)
+        );
     }
 }

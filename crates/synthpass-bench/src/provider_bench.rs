@@ -635,6 +635,49 @@ fn mrz_field_layout(format: &str) -> Option<&'static [MrzFieldSpan]> {
     }
 }
 
+/// Maps a `synthpass-bench` field name — `CoreField::as_str`'s vocabulary,
+/// which is also `bin/synthpass-bench.rs`'s `COMPARED_FIELDS`/
+/// `FieldOutcome::field` — to the physical MRZ line that field lives on for
+/// a resolved format.
+///
+/// Looks the name up in the very same [`mrz_field_layout`] table
+/// [`mrz_field_mismatch`] already uses for checksum-coverage attribution,
+/// rather than restating the offsets as a second table: a change to one of
+/// the `*_FIELDS` arrays' `line` values cannot silently leave this reporting
+/// path out of step, which is exactly the drift
+/// `every_layout_declares_the_line_geometry_its_format_actually_has` guards
+/// against for the layout itself.
+///
+/// The two vocabularies mostly agree, but not always — an MRZ line does not
+/// itself separate a name into surname and given names (that split happens
+/// in `mrz::parser`, downstream of the physical zone this table describes),
+/// so both bench fields alias the layout's single `"name"` span; likewise
+/// `"document_type"` aliases the layout's `"document_code"`. Every other
+/// bench field name matches its span verbatim.
+///
+/// `None` covers two different reasons a field cannot be placed on a line,
+/// deliberately left undistinguished here so a caller reports both under one
+/// clearly-labelled group instead of inventing a line for either:
+/// - `field` has no span in `format`'s layout at all — TD1 has no
+///   `"personal_number"`, for instance; its equivalent content lives in
+///   `optional_data_1`/`optional_data_2`, which are not the same field —
+///   or `format` itself is not one [`mrz_field_layout`] resolves;
+/// - `field` is `"mrz_lines"`, the whole-MRZ-zone CER `synthpass-bench`
+///   reports alongside the per-field ones — never a field with a span, on
+///   any format.
+pub fn mrz_field_line(format: &str, field: &str) -> Option<usize> {
+    let layout = mrz_field_layout(format)?;
+    let span_name = match field {
+        "document_type" => "document_code",
+        "surname" | "given_names" => "name",
+        other => other,
+    };
+    layout
+        .iter()
+        .find(|span| span.name == span_name)
+        .map(|span| span.line)
+}
+
 /// Per-field breakdown of an MRZ zone mismatch, for a resolved format: how
 /// many characters differ inside each ICAO field, exactly which raw
 /// positions those are, and — for every field that differed at all —
@@ -3665,6 +3708,83 @@ mod tests {
                 "{format}: a zone one character short per line must not pass"
             );
         }
+    }
+
+    /// The drift guard for [`mrz_field_line`] itself: expected lines are
+    /// derived from [`mrz_field_layout`]'s own spans, never hand-restated, so
+    /// this fails the moment `mrz_field_line` stops delegating to the shared
+    /// table — e.g. if a future edit copied the offsets into a second,
+    /// hand-maintained map instead of looking them up here. Runs over every
+    /// span in every format's layout, not only the bench-field aliases, so it
+    /// catches drift on any name.
+    #[test]
+    fn mrz_field_line_never_drifts_from_the_shared_layout_table() {
+        for format in ["TD1", "TD2", "TD3", "MRVA", "MRVB"] {
+            let layout = mrz_field_layout(format).expect("format has a layout");
+            for span in layout {
+                assert_eq!(
+                    mrz_field_line(format, span.name),
+                    Some(span.line),
+                    "{format} field {:?}: mrz_field_line disagrees with mrz_field_layout's own line",
+                    span.name
+                );
+            }
+        }
+    }
+
+    /// `mrz_field_line` is format-aware in the way that actually matters: TD1
+    /// puts the combined name field on physical line 3, while TD2/TD3/MRV-A/
+    /// MRV-B put it on line 1 — so a bench field's line cannot be a fixed
+    /// lookup independent of the format.
+    #[test]
+    fn mrz_field_line_resolves_bench_field_aliases_per_format() {
+        // (format, name-field line, document-code-field line)
+        for (format, name_line, code_line) in [
+            ("TD1", 3, 1),
+            ("TD2", 1, 1),
+            ("TD3", 1, 1),
+            ("MRVA", 1, 1),
+            ("MRVB", 1, 1),
+        ] {
+            assert_eq!(
+                mrz_field_line(format, "surname"),
+                Some(name_line),
+                "{format}: surname aliases the combined name span"
+            );
+            assert_eq!(
+                mrz_field_line(format, "given_names"),
+                Some(name_line),
+                "{format}: given_names aliases the combined name span"
+            );
+            assert_eq!(
+                mrz_field_line(format, "document_type"),
+                Some(code_line),
+                "{format}: document_type aliases document_code"
+            );
+        }
+    }
+
+    /// A field with no span in a format's layout must not silently land in a
+    /// line bucket — TD1 has no `personal_number` span at all (its optional
+    /// data fields are not the same field), and `mrz_lines` is a whole-zone
+    /// aggregate on every format, never a field with a span.
+    #[test]
+    fn mrz_field_line_is_none_when_nothing_resolves() {
+        assert_eq!(
+            mrz_field_line("TD1", "personal_number"),
+            None,
+            "TD1 has no personal_number span"
+        );
+        assert_eq!(
+            mrz_field_line("TD3", "mrz_lines"),
+            None,
+            "mrz_lines is a whole-zone aggregate, never a field with a span"
+        );
+        assert_eq!(
+            mrz_field_line("BOGUS", "document_type"),
+            None,
+            "an unresolved format has no layout at all"
+        );
     }
 
     /// `"unmapped"` survives the guard, for the one case it is right for: the
