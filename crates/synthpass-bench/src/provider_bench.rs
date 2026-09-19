@@ -683,17 +683,66 @@ fn mrz_zone_mismatch_positions(recovered: &str, truth: &str) -> BTreeMap<usize, 
         .collect()
 }
 
+/// The width each 1-based line of a layout declares, derived from the spans
+/// themselves rather than restated as constants, so it cannot drift from the
+/// table it guards.
+fn mrz_layout_line_widths(layout: &[MrzFieldSpan]) -> BTreeMap<usize, usize> {
+    let mut widths: BTreeMap<usize, usize> = BTreeMap::new();
+    for span in layout {
+        let width = widths.entry(span.line).or_insert(0);
+        *width = (*width).max(span.end);
+    }
+    widths
+}
+
+/// Does `zone` have the shape `layout` describes — the same number of lines,
+/// each exactly the declared width?
+///
+/// Applied to the **ground truth** only. The truth is hand-transcribed and is
+/// the authority on what the document actually prints, whereas a recovered
+/// zone is OCR output that may legitimately be short or long; requiring the
+/// read to match would suppress exactly the attributions this exists to make.
+fn mrz_zone_matches_layout(zone: &str, layout: &[MrzFieldSpan]) -> bool {
+    let widths = mrz_layout_line_widths(layout);
+    let lines: Vec<&str> = zone.lines().collect();
+    lines.len() == widths.len()
+        && widths.iter().all(|(line, width)| {
+            lines
+                .get(line - 1)
+                .is_some_and(|l| l.chars().count() == *width)
+        })
+}
+
 /// Attribute an MRZ zone mismatch to ICAO fields, for a resolved format.
-/// `None` when `format` isn't one [`mrz_field_layout`] recognises; a
-/// position that falls outside every declared field span (should not happen
-/// for a well-formed zone of the declared format) is attributed to the
-/// literal field name `"unmapped"` rather than dropped silently.
+///
+/// `None` when `format` isn't one [`mrz_field_layout`] recognises, **and also
+/// when `truth` does not have the shape that format declares.** The second
+/// case is not hypothetical: `resolve_format` prefers the provider's own
+/// `Evidence::mrz_format`, so a reader that misdetects the format hands this
+/// function a layout that does not describe the document at all. Measured
+/// 2026-09-19 on a TD3 specimen read as TD1 — without the guard it reported
+/// differing characters on *line 3 of a two-line zone* and populated TD1-only
+/// fields (`issuing_country`, `optional_data_1`/`_2`) that the printed format
+/// does not have, alongside `"unmapped": 28`.
+///
+/// That output is worse than none: it is well-formed, confident and wrong, and
+/// nothing in the JSONL schema distinguishes it from a real attribution. So a
+/// format the truth's own shape does not corroborate yields the same absent
+/// result as an unresolved one, and **`Some` now carries a guarantee** — the
+/// zone really is the declared format.
+///
+/// `"unmapped"` survives for a narrower case it is actually right for: a
+/// recovered zone *longer* than the truth contributes positions past the last
+/// declared span, and those are still counted rather than dropped silently.
 ///
 /// **Structurally cannot serialize a character**: it is built entirely from
 /// [`mrz_zone_mismatch_positions`]'s positions and the static field table —
 /// `recovered`/`truth`'s characters are compared (`!=`) and never stored.
 fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<FieldMismatch> {
     let layout = mrz_field_layout(format)?;
+    if !mrz_zone_matches_layout(truth, layout) {
+        return None;
+    }
     let by_line = mrz_zone_mismatch_positions(recovered, truth);
     let mut result = FieldMismatch {
         by_line: by_line.clone(),
@@ -3508,6 +3557,139 @@ mod tests {
         assert_eq!(
             fm.coverage.get("nationality"),
             Some(&CheckCoverage::Uncovered)
+        );
+    }
+
+    /// A format the truth's own shape contradicts yields **no attribution**,
+    /// not a confident wrong one.
+    ///
+    /// This is the measured 2026-09-19 case, not a hypothetical: a TD3
+    /// specimen whose reader misdetected the format as TD1. `resolve_format`
+    /// prefers the provider's own evidence, so the wrong layout reached
+    /// `mrz_field_mismatch`, which happily attributed a two-line 44-column
+    /// zone against TD1's three-line 30-column table — reporting differing
+    /// characters on a line the document does not have, and populating
+    /// `issuing_country` and `optional_data_1`/`_2`, which TD3 has no such
+    /// fields for.
+    #[test]
+    fn a_format_the_truth_shape_contradicts_yields_no_attribution() {
+        // Built from line arrays, never a multi-line literal: a trailing-
+        // backslash continuation bakes the source indentation into the
+        // continuation bakes the source indentation into the string and makes
+        // a 44-column line 69 columns wide, which the guard then correctly
+        // rejects for the wrong reason.
+        let td3_truth = [
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        ]
+        .join("\n");
+        let td3_read = [
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<11",
+        ]
+        .join("\n");
+        for line in td3_truth.lines() {
+            assert_eq!(line.chars().count(), 44, "test fixture must be TD3-shaped");
+        }
+
+        // Declared correctly: attribution still happens.
+        assert!(
+            mrz_field_mismatch("TD3", &td3_read, &td3_truth).is_some(),
+            "a TD3 zone declared TD3 must still attribute normally"
+        );
+
+        // Declared TD1 (three lines of 30) - the shape cannot be TD3's.
+        assert_eq!(
+            mrz_field_mismatch("TD1", &td3_read, &td3_truth),
+            None,
+            "a TD3-shaped zone declared TD1 must attribute nothing: the layout              does not describe this document, so every field name it would              produce is meaningless"
+        );
+
+        // Mirror direction, so the guard is not accidentally one-sided.
+        let td1_truth = [
+            "I<UTOD231458907<<<<<<<<<<<<<<<",
+            "7408122F1204159UTO<<<<<<<<<<<6",
+            "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+        ]
+        .join("\n");
+        assert_eq!(
+            mrz_field_mismatch("TD3", &td1_truth, &td1_truth),
+            None,
+            "a TD1-shaped zone declared TD3 must attribute nothing either"
+        );
+    }
+
+    /// The guard reads the layout's own spans, so it cannot drift from the
+    /// table: every format's declared widths must match the ICAO line
+    /// geometry, and a zone of that shape must pass its own check.
+    #[test]
+    fn every_layout_declares_the_line_geometry_its_format_actually_has() {
+        // (format, expected line count, expected width of every line)
+        for (format, lines, width) in [
+            ("TD1", 3usize, 30usize),
+            ("TD2", 2, 36),
+            ("TD3", 2, 44),
+            ("MRVA", 2, 44),
+            ("MRVB", 2, 36),
+        ] {
+            let layout = mrz_field_layout(format).expect("format has a layout");
+            let widths = mrz_layout_line_widths(layout);
+            assert_eq!(
+                widths.len(),
+                lines,
+                "{format}: layout declares {} line(s), ICAO says {lines}",
+                widths.len()
+            );
+            for (line, declared) in &widths {
+                assert_eq!(
+                    *declared, width,
+                    "{format} line {line}: layout declares width {declared},                      ICAO says {width}"
+                );
+            }
+            // A zone of exactly that shape must satisfy the guard, and one a
+            // single character short must not.
+            let good = vec!["<".repeat(width); lines].join(
+                "
+",
+            );
+            assert!(
+                mrz_zone_matches_layout(&good, layout),
+                "{format}: a correctly shaped zone must pass the guard"
+            );
+            let short = vec!["<".repeat(width - 1); lines].join(
+                "
+",
+            );
+            assert!(
+                !mrz_zone_matches_layout(&short, layout),
+                "{format}: a zone one character short per line must not pass"
+            );
+        }
+    }
+
+    /// `"unmapped"` survives the guard, for the one case it is right for: the
+    /// guard constrains the *truth*, so a recovered zone longer than the truth
+    /// still contributes positions past the last declared span, and those are
+    /// counted rather than dropped silently.
+    #[test]
+    fn a_longer_recovered_zone_still_reports_unmapped_positions() {
+        let truth = [
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        ]
+        .join("\n");
+        // Same zone with one extra trailing character on line 2: position 44
+        // falls past TD3's last declared span.
+        let longer = [
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10X",
+        ]
+        .join("\n");
+        let m = mrz_field_mismatch("TD3", &longer, &truth).expect("truth is well-formed TD3");
+        assert_eq!(
+            m.by_field.get("unmapped"),
+            Some(&1),
+            "a position past the declared spans must still be counted"
         );
     }
 
