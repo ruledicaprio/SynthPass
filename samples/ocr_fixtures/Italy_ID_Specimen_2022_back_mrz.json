@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1964-12-30",
+  "date_of_expiry": "2022-12-30",
+  "document_number": "CA00000AA",
+  "document_type": "C",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "BIANCA",
+  "issuing_country": "ITA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "C<ITACA00000AA4<<<<<<<<<<<<<<<\n6412308F2212304ITA<<<<<<<<<<<0\nROSSI<<BIANCA<<<<<<<<<<<<<<<<<",
+  "nationality": "ITA",
+  "personal_number": "",
+  "sex": "F",
+  "surname": "ROSSI"
+}
