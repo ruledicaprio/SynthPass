@@ -118,11 +118,15 @@ these documents misses at all:
 **The majority of these misses are one or two cells.** Afghanistan's is 1 of 88 — the narrowest
 recognition miss the format permits.
 
-**Croatia is the opposite and does not belong with them.** `L1:5-14` is the *entire* document number
-plus its check digit, ten contiguous cells, on the **lowest band score in the set (0.315)** — while
-line 2 is character-for-character correct. A whole field wrong and the neighbouring line perfect is
-not a recogniser misreading glyphs; it is a line recovered at the wrong offset or from a poorly
-located band.
+**Croatia is a single glyph confusion applied ten times, and run length hides that.** `L1:5-14` is
+the *entire* document number plus its check digit, ten contiguous cells, on the lowest band score in
+the set (0.315) — while line 2 is character-for-character correct. Ten contiguous wrong cells looks
+like a line recovered at the wrong offset. It is not: see [§3a](#3a-croatia-one-confusion-class-ten-cells-and-a-repair-that-is-capped-at-one).
+
+**So run shape is descriptive, not diagnostic.** The table above groups the damage; it does not name
+the mechanism. Croatia and Sweden are both "one contiguous run" and have nothing else in common.
+Naming a mechanism takes the glyphs, and three of the nine are now named — Croatia here, the two
+Hong Kong passports in [§3](#3-a-named-failure-mode-filler-read-as-glyphs).
 
 ### Repairing the check digit does not repair the document
 
@@ -173,6 +177,50 @@ length on a name line is confounded by filler and should not be read as evidence
 0/19), but a naive contiguity reading of Germany's `L1:1-21` would call positions 22–41 "correct"
 when both sides are filler there — matching vacuously. Germany's name content is **21 of 22 cells
 wrong**. Only the content/filler split separates the two cases.
+
+## 3a. Croatia: one confusion class, ten cells, and a repair that is capped at one
+
+The document number on `Croatia_ID_Specimen_2021_back_mrz` is ten cells of a single character. The
+read is ten cells of a single *different* character — the digit/letter pair that heads
+[`CONFUSABLES`](../../crates/mrz/src/repair.rs) (`('0', "ODQ")`). Not ten errors: **one confusion
+class, applied uniformly, including the check-digit cell.**
+
+Three facts make this the best-characterised miss in the set.
+
+**The same glyph reads correctly sixteen times on the line below.** Line 2 of this specimen contains
+16 cells of the digit and every one is read correctly; line 1's ten are all read as the letter. Same
+card, same band, same pass. So this is not a legibility failure — it is a **field-alphabet** effect.
+TD1 line 2's positions there are numeric-only, while the line 1 document number is alphanumeric, so
+the letter is *legal* where it was emitted and nothing downstream rejects it.
+
+**The check digit is the only thing that could have rejected it, and it was misread too.** The two
+characters are not check-digit equivalent — ICAO values 0 and 24, giving check digits 0 and 2 over
+this field — so the arithmetic does catch the substitution. But the printed check-digit cell is
+inside the same ten-cell run and was misread identically, so the comparison runs against a cell that
+is not a digit at all.
+
+**The existing repair cannot fix it, by design.** `MAX_SUBSTITUTIONS = 1`
+(`crates/mrz/src/repair.rs:343`) is fixed at one deliberately: letting positions vary independently
+multiplies the candidate count and re-admits the coincidental agreement `CONFUSABLES` exists to keep
+out. That rationale is sound and this case does not contradict it — **a uniform sweep of one class
+across one field is a single decision, not ten independent ones**, so it does not widen the search
+the cap guards against. Sweeping this field's ten cells and its check digit together yields a zone
+whose check digit validates.
+
+### A controlled pair is already in the corpus
+
+| document | outcome |
+| :--- | :--- |
+| `Croatia_ID_Specimen_2002_back_mrz` | **hit** |
+| `Croatia_ID_Specimen_2021_back_mrz` | `checksum_failed` (document_number) |
+
+Same issuer, same document class, both TD1 card backs, one read cleanly and one not. The 2021 card
+carries a dense guilloche and wave pattern through the MRZ band where the 2002 card's band sits on a
+plainer ground — consistent with its 0.315 band score, the lowest in the twelve. No new data is
+needed to use this pair.
+
+**This is the first reproducible fixture-level case in the set**, which is the precondition [§8](#8-what-this-record-does-not-do)
+sets before any repair is proposed. It is one document, so it sizes nothing on its own.
 
 ## 4. The one in the wrong bucket
 
@@ -232,11 +280,11 @@ fail it do so by opposite mechanisms:
 
 - **Afghanistan, Germany, Hong Kong 2019 — one cell each.**
 - **Hong Kong 2007 — 4 cells plus its check digit,** scattered, with filler misread elsewhere.
-- **Croatia — the entire ten-cell field,** contiguous, on the lowest band score in the set.
+- **Croatia — the entire ten-cell field,** one confusion class applied uniformly ([§3a](#3a-croatia-one-confusion-class-ten-cells-and-a-repair-that-is-capped-at-one)).
 
-A repair aimed at "the document number" would be aimed at five different problems. **The grouping
-that survives contact with the data is by damage shape, not by which digit failed** — the table in
-§2 and the filler split in §3.
+A repair aimed at "the document number" would be aimed at five different problems. **What the field
+name predicts is nothing; what the glyphs predict is the mechanism** — §3a and the filler split in
+§3 name three of the nine, and the damage-shape table in §2 only sorts the rest for inspection.
 
 ## 6. An independent axis that partitions the twelve exactly 8 / 4
 
@@ -270,11 +318,17 @@ checked against ground truth rather than taken on their own checksums.
 
 ## 8. What this record does not do
 
-It proposes no fix, and no group here yet has a reproducible fixture-level case. Under the standing
-rule, **no broad OCR change is justified until one does.**
+It proposes no fix. **Croatia is the first document here with a reproducible fixture-level case**
+([§3a](#3a-croatia-one-confusion-class-ten-cells-and-a-repair-that-is-capped-at-one)), and it is one
+document — enough to justify a measurement, not a default-on change. The standing rule holds: **no
+broad OCR change until each group has such a case.**
 
-The three measurements the data now points at, each one run and no new tooling:
+The four measurements the data now points at, each one run and no new tooling:
 
+- **A uniform single-class confusable sweep over one field and its check digit**, measured against
+  the whole corpus rather than Croatia alone. The question is not whether it fixes Croatia — it does
+  — but how many documents it silently *breaks*, which is exactly what the chargrid A/B caught when
+  a net `+33` on synthetic hid 13 real regressions. Three-arm, same-binary, real arm required.
 - **A contrast-stretch preprocessing variant on France** — the one document where a named, untested
   transform is known to work on the same bytes in another stack.
 - **Why the band is not located on Germany and Russia**, which is
