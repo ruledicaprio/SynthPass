@@ -1165,7 +1165,7 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse(&text) {
+    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
         Ok(decoded) => decoded,
         Err(e) => {
             return (
