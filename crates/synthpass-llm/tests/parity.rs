@@ -152,6 +152,28 @@ struct Fixture {
     truth: PathBuf,
     /// A person compared this fixture's unproven fields against the image.
     reviewed: bool,
+    /// Whether this document prints its biographic fields in human-readable
+    /// form anywhere the OCR text captures — read from the label's optional
+    /// `visual_zone_present` key, **defaulting to `true` when absent**.
+    ///
+    /// Only the MRZ holdout cares. The holdout removes the MRZ and scores what
+    /// the model recovers from the visual zone, so a document that has no
+    /// visual zone is not a holdout case at all: it would score zero for a
+    /// reason that has nothing to do with recovery, which is the exact failure
+    /// `holdout_strips_every_fixture_on_disk` exists to catch.
+    ///
+    /// The flag lives in the label rather than in a list here on purpose. A
+    /// list of stems inside this file would be a second source of truth about
+    /// the data, and it would drift — the same argument that keeps the MRZ
+    /// field spans pinned to the parser by behaviour instead of copied.
+    /// Defaulting to `true` keeps every fixture written before this existed
+    /// exactly as strict as it was.
+    ///
+    /// First use case: ID-card *backs*. A French or Italian national identity
+    /// card prints its MRZ on the back and its biographic fields on the front,
+    /// so a back-side fixture is MRZ-and-decoration by the nature of the
+    /// document, not by a thin transcription.
+    visual_zone_present: bool,
 }
 
 impl Fixture {
@@ -161,6 +183,24 @@ impl Fixture {
             .filter(|f| self.reviewed || is_checksum_proven(*f))
             .collect()
     }
+}
+
+/// Reads a label's optional `visual_zone_present` key.
+///
+/// **Absent means `true`.** A label that says nothing about its visual zone is
+/// treated as having one, so this key can never quietly excuse a fixture whose
+/// transcription is merely incomplete — only a deliberate, reviewable `false`
+/// takes a document out of the holdout. Unparseable JSON also yields `true`,
+/// which keeps the strict path as the failure mode: a broken label fails the
+/// preflight loudly rather than disappearing from it.
+fn visual_zone_present_in_label(raw: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(raw)
+        .ok()
+        .and_then(|v| {
+            v.get("visual_zone_present")
+                .and_then(serde_json::Value::as_bool)
+        })
+        .unwrap_or(true)
 }
 
 /// Collects every fixture pair under `samples/ocr_fixtures/`.
@@ -195,11 +235,15 @@ fn fixtures() -> Vec<Fixture> {
                 eprintln!("skipping {stem}: no {stem}.md beside the label");
                 continue;
             }
+            let visual_zone_present = std::fs::read_to_string(&path)
+                .map(|raw| visual_zone_present_in_label(&raw))
+                .unwrap_or(true);
             out.push(Fixture {
                 stem: stem.to_string(),
                 markdown,
                 truth: path.clone(),
                 reviewed,
+                visual_zone_present,
             });
         }
     }
@@ -487,6 +531,39 @@ fn holdout_catches_short_fragments_the_shape_test_misses() {
 }
 
 #[test]
+fn a_label_without_the_key_is_treated_as_having_a_visual_zone() {
+    // The default is the strict direction on purpose: every fixture written
+    // before this key existed stays exactly as strict as it was, and a new one
+    // has to opt out deliberately.
+    assert!(visual_zone_present_in_label(r#"{"document_type":"P"}"#));
+    assert!(visual_zone_present_in_label("{}"));
+}
+
+#[test]
+fn an_unparseable_label_defaults_to_strict_rather_than_vanishing() {
+    // A broken label must fail the preflight loudly, not slip out of it.
+    assert!(visual_zone_present_in_label("not json at all"));
+    assert!(visual_zone_present_in_label(""));
+}
+
+#[test]
+fn only_an_explicit_false_opts_a_document_out_of_the_holdout() {
+    assert!(!visual_zone_present_in_label(
+        r#"{"document_type":"I","visual_zone_present":false}"#
+    ));
+    assert!(visual_zone_present_in_label(
+        r#"{"visual_zone_present":true}"#
+    ));
+    // Not a bool: ignored, so a typo cannot silently exclude a document.
+    assert!(visual_zone_present_in_label(
+        r#"{"visual_zone_present":"false"}"#
+    ));
+    assert!(visual_zone_present_in_label(
+        r#"{"visual_zone_present":null}"#
+    ));
+}
+
+#[test]
 fn holdout_does_not_strip_lowercase_prose() {
     // Uppercasing before the charset test would let this score as MRZ.
     let line = "Passaport/Passport/Passeport";
@@ -514,9 +591,18 @@ fn holdout_strips_every_fixture_on_disk() {
 
     let mut leaks = Vec::new();
     let mut emptied = Vec::new();
+    let mut no_visual_zone = Vec::new();
     let (mut total_removed, mut total_kept) = (0usize, 0usize);
 
     for fixture in &fixtures {
+        // A document with no visual zone cannot be a holdout case: strip
+        // its MRZ and nothing recoverable is left, by the nature of the
+        // document rather than by a defect in its transcription. Skipped
+        // here and in the run itself, so it is never scored as a zero.
+        if !fixture.visual_zone_present {
+            no_visual_zone.push(fixture.stem.clone());
+            continue;
+        }
         let Ok(markdown) = std::fs::read_to_string(&fixture.markdown) else {
             continue;
         };
@@ -538,10 +624,17 @@ fn holdout_strips_every_fixture_on_disk() {
     }
 
     println!(
-        "holdout pre-flight: {} fixtures, {total_removed} line(s) stripped, \
+        "holdout pre-flight: {} fixtures ({} skipped: no visual zone), {total_removed} line(s) stripped, \
          {total_kept} line(s) kept for the model",
-        fixtures.len()
-    );
+        fixtures.len(),
+        no_visual_zone.len()
+);
+    if !no_visual_zone.is_empty() {
+        // Reported, never silent: an exclusion is a claim about a
+        // document, and a claim nobody can see is one nobody can
+        // challenge.
+        println!("  excluded from the holdout (no visual zone): {no_visual_zone:?}");
+    }
 
     assert!(
         leaks.is_empty(),
@@ -615,6 +708,7 @@ fn native_llm_field_accuracy_over_sample_set() {
     let holdout = holdout_enabled();
     let mut holdout_removed = 0usize;
     let mut holdout_leaks = 0usize;
+    let mut holdout_no_visual_zone = 0usize;
     if holdout {
         println!(
             "\nMRZ HOLDOUT MODE (SYNTHPASS_PARITY_HOLDOUT=1): MRZ-derived lines \
@@ -638,6 +732,21 @@ fn native_llm_field_accuracy_over_sample_set() {
     let total_fixtures = fixtures.len();
 
     for (index, fixture) in fixtures.iter().enumerate() {
+        // In holdout mode a document with no visual zone has nothing for
+        // the model to recover once its MRZ is removed, so scoring it
+        // would add a zero that says nothing about recovery and drags the
+        // reported rate down. Skipped only in holdout mode: with the MRZ
+        // present it is an ordinary, perfectly scoreable parity case.
+        if holdout && !fixture.visual_zone_present {
+            println!(
+                "  SKIP {} ({}/{}): no visual zone to recover from",
+                fixture.stem,
+                index + 1,
+                total_fixtures
+            );
+            holdout_no_visual_zone += 1;
+            continue;
+        }
         let fixture_started = Instant::now();
         let markdown = std::fs::read_to_string(&fixture.markdown).expect("markdown reads");
         // Ground-truth fixtures predate `extraction_method` being required;
@@ -786,8 +895,9 @@ fn native_llm_field_accuracy_over_sample_set() {
     if holdout {
         println!(
             "\nholdout: {holdout_removed} MRZ-derived line(s) stripped across \
-             {} fixture(s); {holdout_leaks} fixture(s) had none removed",
-            fixtures.len()
+             {} fixture(s); {holdout_leaks} fixture(s) had none removed; \
+             {holdout_no_visual_zone} skipped as having no visual zone",
+            fixtures.len() - holdout_no_visual_zone
         );
         assert_eq!(
             holdout_leaks, 0,
