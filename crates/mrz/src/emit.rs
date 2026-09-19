@@ -94,6 +94,13 @@ use serde::{Deserialize, Serialize};
 /// let zone = mrz::format_td3(&fields);
 /// assert!(zone.starts_with("P<UTOERIKSSON<<ANNA<MARIA<<"));
 /// ```
+/// **Deliberately not `#[non_exhaustive]`.** This struct mirrors a field
+/// layout ICAO 9303 fixes, so it does not grow the way [`crate::Checks`] or
+/// [`crate::MrzData`] do, and callers build it with a struct expression as
+/// the examples above show. **Put any future tunable in a separate
+/// `#[non_exhaustive]` companion rather than adding a field here** -- the
+/// same separation [`crate::ParseOptions`] already has from the data it
+/// parses. Adding a field here is a breaking change and should stay one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td3Fields {
@@ -758,6 +765,13 @@ pub fn format_td3(fields: &Td3Fields) -> String {
 ///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<\nD231458907UTO7408122F1204159<<<<<<<6",
 /// );
 /// ```
+/// **Deliberately not `#[non_exhaustive]`.** This struct mirrors a field
+/// layout ICAO 9303 fixes, so it does not grow the way [`crate::Checks`] or
+/// [`crate::MrzData`] do, and callers build it with a struct expression as
+/// the examples above show. **Put any future tunable in a separate
+/// `#[non_exhaustive]` companion rather than adding a field here** -- the
+/// same separation [`crate::ParseOptions`] already has from the data it
+/// parses. Adding a field here is a breaking change and should stay one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td2Fields {
@@ -912,6 +926,13 @@ pub fn format_td2(fields: &Td2Fields) -> String {
 ///      ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
 /// );
 /// ```
+/// **Deliberately not `#[non_exhaustive]`.** This struct mirrors a field
+/// layout ICAO 9303 fixes, so it does not grow the way [`crate::Checks`] or
+/// [`crate::MrzData`] do, and callers build it with a struct expression as
+/// the examples above show. **Put any future tunable in a separate
+/// `#[non_exhaustive]` companion rather than adding a field here** -- the
+/// same separation [`crate::ParseOptions`] already has from the data it
+/// parses. Adding a field here is a breaking change and should stay one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Td1Fields {
@@ -1077,6 +1098,13 @@ pub fn format_td1(fields: &Td1Fields) -> String {
 ///      L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
 /// );
 /// ```
+/// **Deliberately not `#[non_exhaustive]`.** This struct mirrors a field
+/// layout ICAO 9303 fixes, so it does not grow the way [`crate::Checks`] or
+/// [`crate::MrzData`] do, and callers build it with a struct expression as
+/// the examples above show. **Put any future tunable in a separate
+/// `#[non_exhaustive]` companion rather than adding a field here** -- the
+/// same separation [`crate::ParseOptions`] already has from the data it
+/// parses. Adding a field here is a breaking change and should stay one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvAFields {
@@ -1207,6 +1235,13 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
 ///      L898902C<3UTO6908061F9406236ZE184226",
 /// );
 /// ```
+/// **Deliberately not `#[non_exhaustive]`.** This struct mirrors a field
+/// layout ICAO 9303 fixes, so it does not grow the way [`crate::Checks`] or
+/// [`crate::MrzData`] do, and callers build it with a struct expression as
+/// the examples above show. **Put any future tunable in a separate
+/// `#[non_exhaustive]` companion rather than adding a field here** -- the
+/// same separation [`crate::ParseOptions`] already has from the data it
+/// parses. Adding a field here is a breaking change and should stay one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvBFields {

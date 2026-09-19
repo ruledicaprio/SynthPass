@@ -218,7 +218,7 @@ pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 ///
 /// // Raise the pivot past 74 and the same digits read as this century —
 /// // the check digits are unaffected, so the document still validates.
-/// let d = parse_td3_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// let d = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
 /// assert_eq!(d.date_of_birth, "2074-08-12");
 /// assert!(d.valid());
 /// ```
@@ -310,7 +310,7 @@ pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 ///     "1974-08-12",
 /// );
 /// assert_eq!(
-///     parse_td2_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap().date_of_birth,
+///     parse_td2_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth,
 ///     "2074-08-12",
 /// );
 /// ```
@@ -404,7 +404,7 @@ pub fn parse_td1(line1: &str, line2: &str, line3: &str) -> Result<MrzData, MrzEr
 ///     "1974-08-12",
 /// );
 /// assert_eq!(
-///     parse_td1_with(l1, l2, l3, &ParseOptions { pivot_yy: 80 }).unwrap().date_of_birth,
+///     parse_td1_with(l1, l2, l3, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth,
 ///     "2074-08-12",
 /// );
 /// ```
@@ -508,7 +508,7 @@ pub fn parse_mrv_a(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// let l1 = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
 /// let l2 = "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<";
 ///
-/// let d = parse_mrv_a_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// let d = parse_mrv_a_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
 /// assert_eq!(d.date_of_birth, "2069-08-06"); // `69` reads as this century past the pivot
 /// assert!(d.valid());
 /// ```
@@ -591,7 +591,7 @@ pub fn parse_mrv_b(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// let l1 = "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
 /// let l2 = "L898902C<3UTO6908061F9406236ZE184226";
 ///
-/// let d = parse_mrv_b_with(l1, l2, &ParseOptions { pivot_yy: 80 }).unwrap();
+/// let d = parse_mrv_b_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
 /// assert_eq!(d.date_of_birth, "2069-08-06");
 /// assert!(d.valid());
 /// ```

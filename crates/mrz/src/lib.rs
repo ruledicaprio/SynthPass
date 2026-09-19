@@ -155,7 +155,7 @@ pub use translit::{
 ///
 /// // Pin the pivot so that replaying archived reads gives the same dates no
 /// // matter which crate version (and so which `CURRENT_YY`) runs the replay.
-/// let opts = ParseOptions { pivot_yy: 30 };
+/// let opts = ParseOptions::default().with_pivot_yy(30);
 /// let text = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
 ///             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 /// let doc = find_and_parse_with(text, &opts).unwrap();
@@ -163,6 +163,7 @@ pub use translit::{
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[non_exhaustive]
 pub struct ParseOptions {
     /// Two-digit century pivot for [`expand_date_with_pivot`]. Defaults to
     /// [`CURRENT_YY`]; set it explicitly to pin behaviour instead of inheriting
@@ -175,6 +176,30 @@ impl Default for ParseOptions {
         Self {
             pivot_yy: CURRENT_YY,
         }
+    }
+}
+
+impl ParseOptions {
+    /// Pin the two-digit-year century pivot, starting from [`Default`].
+    ///
+    /// This is how callers outside the crate build a `ParseOptions`: the
+    /// struct is `#[non_exhaustive]`, so a struct expression cannot name its
+    /// fields from another crate — **and functional update syntax does not
+    /// lift that restriction**, which is the part worth knowing. `ParseOptions
+    /// { pivot_yy: 30, ..Default::default() }` is rejected with `E0639` just
+    /// as the bare literal is. Every option this struct grows gets a `with_*`
+    /// method beside this one, and each is a non-breaking addition.
+    ///
+    /// ```
+    /// use mrz::{ParseOptions, CURRENT_YY};
+    ///
+    /// assert_eq!(ParseOptions::default().pivot_yy, CURRENT_YY);
+    /// assert_eq!(ParseOptions::default().with_pivot_yy(30).pivot_yy, 30);
+    /// ```
+    #[must_use]
+    pub const fn with_pivot_yy(mut self, pivot_yy: u32) -> Self {
+        self.pivot_yy = pivot_yy;
+        self
     }
 }
 
@@ -1474,7 +1499,7 @@ mod tests {
         assert_eq!(d.date_of_birth, "1974-08-12");
 
         // With a pivot of 80, YY=74 reads as 2074 rather than 1974.
-        let opts = ParseOptions { pivot_yy: 80 };
+        let opts = ParseOptions::default().with_pivot_yy(80);
         let d = parse_td3_with(TD3_L1, TD3_L2, &opts).unwrap();
         assert_eq!(d.date_of_birth, "2074-08-12");
         // Check digits are untouched by the pivot — it only affects display.

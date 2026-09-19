@@ -40,7 +40,7 @@ read and which one failed.
 
 ```toml
 [dependencies]
-mrz = "0.7"
+mrz = "0.8"
 ```
 
 ## Supported formats
@@ -235,10 +235,21 @@ Both are off by default, keeping the base crate zero-dependency and wasm-clean:
 
 ## Versioning and MSRV
 
-`mrz` is pre-1.0, so **the minor version is the breaking slot**: `mrz = "0.7"` picks up every
-`0.7.x` fix and addition, and never a breaking `0.8.0`. Output types are `#[non_exhaustive]`, so
-they grow without breaking you. CI diffs every change against the published API with
-`cargo-semver-checks`, so a break cannot ship as a patch.
+`mrz` is pre-1.0, so **the minor version is the breaking slot**: `mrz = "0.8"` picks up every
+`0.8.x` fix and addition, and never a breaking `0.9.0`. CI diffs every change against the
+published API with `cargo-semver-checks`, so a break cannot ship as a patch.
+
+**Types this crate returns, and its one options struct, are `#[non_exhaustive]`** — `MrzData`,
+`Checks`, `Date`, `DateValidity`, `ParseOptions` and every public enum — so they grow without
+breaking you. Build `ParseOptions` with `ParseOptions::default().with_pivot_yy(..)`; note that
+functional update syntax is *not* an escape hatch on a non-exhaustive struct, so
+`ParseOptions { pivot_yy: 30, ..Default::default() }` is rejected with `E0639` just as the bare
+literal is.
+
+The five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`, `MrvBFields`) are
+**deliberately exhaustive**: they mirror field layouts ICAO 9303 fixes, and you build them with
+struct expressions. Future tunables go in a separate non-exhaustive companion rather than as a
+new field on one of them.
 
 The minimum supported Rust version is **1.82**, set by `std::iter::repeat_n` and
 `Option::is_none_or`, and enforced by CI for the zero-dependency default build. The optional
