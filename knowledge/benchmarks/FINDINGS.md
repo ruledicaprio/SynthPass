@@ -19,6 +19,8 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-19 | [Local corpus drift against `samples-data`](corpus-drift-local-vs-samples-data-2026-09-19.md) | Observed (file-level comparison + sha256) | current | corpus-drift-local-vs-samples-data-2026-09-19.md |
+| 2026-09-19 | [Neither headline moved for a reading reason: the 2026-09-19 re-bless is two denominator changes](denominator-rebless-2026-09-19.md) | Observed (CI `real-specimen-gate.yml` run 35441419567, `mode=write-baseline`, head `185e530`) | current | denominator-rebless-2026-09-19.md |
+| 2026-09-19 | [the re-bless: Tier-1 91.5% → 92.1% and strict names 30.0% → 26.7%, neither a reading change](#2026-09-19--the-re-bless-tier-1-915--921-and-strict-names-300--267-neither-a-reading-change) | — | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-18 | [M6 checksum-failed miss mechanisms](checksum-failed-miss-mechanisms-2026-09-18.md) | Observed (native runner, `--dump-ocr`) | current | checksum-failed-miss-mechanisms-2026-09-18.md |
 | 2026-09-18 | [Three detection misses attributed: two obscured TD1 bands and one decorative zone](detection-misses-2026-09-18.md) | Observed | current | detection-misses-2026-09-18.md |
 | 2026-09-18 | [Phase D ran: the stacks tie at 140, split on 16 documents, and the browser reads names 28/31 to native's 11/31](#2026-09-18--phase-d-ran-the-stacks-tie-at-140-split-on-16-documents-and-the-browser-reads-names-2831-to-natives-1131) | — | current | FINDINGS.md (Weak-spot findings) |
@@ -768,3 +770,35 @@ population, one of them provably wrong against its fixture, and the browser arm 
 refusal population at all — it has no counterpart to the baseline's 0 false accepts / 108. Full
 report, provenance and rejected framings:
 [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md).
+
+### 2026-09-19 — the re-bless: Tier-1 91.5% → 92.1% and strict names 30.0% → 26.7%, neither a reading change
+
+CI re-blessed on the #349 cohort branch (`real-specimen-gate.yml` run `35441419567`,
+`mode=write-baseline`, head `185e530`, DATA `396b22f`; landed as `9783d16`). `tier1_hits` is
+**140** at both pins and no document changed read outcome.
+
+```
+  documents                    261 -> 261   (0)
+  scored                       153 -> 152   (-1)
+  refusal_population           108 -> 109   (+1)
+  no_mrz_found                   3 -> 2     (-1)
+  no_mrz_expected               50 -> 51    (+1)
+  name_scorable_documents       40 -> 45    (+5)  (report-only)
+  strict_hits                   12 -> 12    (0)   (report-only)
+  name_scorable_hits            33 -> 33    (0)   (report-only)
+```
+
+Tier-1 rose because a correct refusal left the denominator: Moldova PA 2014's narrow crop was
+renamed `_mrz` → `_no_mrz` on `samples-data`, its bottom strip being decoration rather than an ICAO
+zone. Held at the previous classification, this same run reads `140 / 153 = 91.5%`. Strict names
+fell because five documents entered that denominator while the numerator stayed pinned at 12 — all
+five are scored *misses*, and a miss cannot be a strict hit. They are the France 2020 and Italy 2022
+card backs (fixtures added in #348, both `no_mrz_found`) and the Germany 2024 and Hong Kong
+2007/2019 books (fixtures added in #336, all `checksum_failed`); the flat fixture directory went
+59 → 64 `.json` files and the scored subset of those is exactly 45. `names_exact_among_hits`, the
+metric invariant to miss-side fixture coverage, is **12 / 33 = 36.4% at both pins**, with an
+identical `name_error` histogram. Also found: every scored miss now carries ground truth (7 of 13 →
+12 of 12), and the rejected attribution — that the manifest's `ground_truth_stem` drove it — is
+refuted by France/Italy, whose rows are `null` at both pins. Full derivation, counterfactuals and
+the stale README prose this leaves:
+[`denominator-rebless-2026-09-19.md`](denominator-rebless-2026-09-19.md).
