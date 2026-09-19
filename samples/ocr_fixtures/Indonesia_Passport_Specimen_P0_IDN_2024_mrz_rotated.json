@@ -7,7 +7,7 @@
   "given_names": "RICE",
   "issuing_country": "IDN",
   "mrz_checksums_valid": true,
-  "mrz_line": "P<IDNADISTA<<RICE<<<<<<<<<<<<<<<<<<<<<<<<<<<<\nX4829720<3IDN9112296F34122481601086912000172",
+  "mrz_line": "P<IDNADISTA<<RICE<<<<<<<<<<<<<<<<<<<<<<<<<<<\nX4829720<3IDN9112296F34122481601086912000172",
   "nationality": "IDN",
   "personal_number": "16010869120001",
   "sex": "F",

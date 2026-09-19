@@ -7,7 +7,7 @@
   "given_names": "SARAH",
   "issuing_country": "CAN",
   "mrz_checksums_valid": true,
-  "mrz_line": "PPCANMARTIN<<SARAH<<<<<<<<<<<<<<<<<<<<<<<<<\nP001756ZA5CAN9505047F3303034<<<<<<<<<<<<<<06",
+  "mrz_line": "PPCANMARTIN<<SARAH<<<<<<<<<<<<<<<<<<<<<<<<<<\nP001756ZA5CAN9505047F3303034<<<<<<<<<<<<<<06",
   "nationality": "CAN",
   "personal_number": null,
   "sex": "F",

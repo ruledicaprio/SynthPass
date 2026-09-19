@@ -27,5 +27,5 @@ Local de nascimento / Place of birth
 LUANDA
 Autoridade emissora / Issuing Authority
 SME LUANDA
-PNAGOFRANCISCO<<ANGELINO<MANUEL<<<<<<<<<<<<<<
+PNAGOFRANCISCO<<ANGELINO<MANUEL<<<<<<<<<<<<<
 N3758616<7AGO0108272M36020250795243<N72<2532

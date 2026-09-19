@@ -23,5 +23,5 @@ Date d expiration / Date of expiry
 Autorite / Authority
 D.G.P.N Police Nationale
 MINISTERE DE L INTERIEUR
-P<DJIHAMZA<GOUMANEH<AWALEH<<<<<<<<<<<<<<<<<<<
+P<DJIHAMZA<GOUMANEH<AWALEH<<<<<<<<<<<<<<<<<<
 16RE991586DJI9808232M2204112<<<<<<<<<<<<<<08

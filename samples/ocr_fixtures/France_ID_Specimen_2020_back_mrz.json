@@ -1,0 +1,16 @@
+{
+  "date_of_birth": "1990-07-13",
+  "date_of_expiry": "2030-02-11",
+  "document_number": "X4RTBPFW4",
+  "document_type": "ID",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "MAELYS GAELLE MARIE",
+  "issuing_country": "FRA",
+  "mrz_checksums_valid": true,
+  "mrz_line": "IDFRAX4RTBPFW46<<<<<<<<<<<<<<<\n9007138F3002119FRA<<<<<<<<<<<6\nMARTIN<<MAELYS<GAELLE<MARIE<<<",
+  "nationality": "FRA",
+  "personal_number": "",
+  "sex": "F",
+  "surname": "MARTIN",
+  "visual_zone_present": false
+}

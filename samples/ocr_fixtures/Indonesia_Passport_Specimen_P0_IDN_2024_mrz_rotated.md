@@ -22,5 +22,5 @@ Kantor / Issuing Office
 GUNUNG LIWAT
 No. Reg
 1A51HE0633AAPX
-P<IDNADISTA<<RICE<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+P<IDNADISTA<<RICE<<<<<<<<<<<<<<<<<<<<<<<<<<<
 X4829720<3IDN9112296F34122481601086912000172
