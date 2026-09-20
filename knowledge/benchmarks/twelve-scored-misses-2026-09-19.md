@@ -163,11 +163,33 @@ one* of its 26 filler cells; Hong Kong 2007 in 15 of 24. They are also the only 
 twelve that **neither** the native nor the browser stack has ever read
 ([Phase D](phase-d-native-vs-browser-2026-09-18.md)), and they share an issuer twelve years apart.
 
-This is a real-document instance of what [ADR-0014](../decisions/ADR-0014-per-cell-ocrb-classification.md)'s
-premise-2 correction measured synthetically: the isolated OCR-B `<` is not missing from the model's
-representation, but **context suppresses it** — at full line the isolated filler carries 0.0513 of
-the `<` mass against 0.0818 in-run, and on medians collapses 0.067 → 0.0099 at ±4 cells. Until now
-that measurement had no named document behind it. It has two.
+### CORRECTED 2026-09-20 — this is **not** the ADR-0014 effect
+
+This entry originally read that the fabrication is *"a real-document instance of what
+[ADR-0014](../decisions/ADR-0014-per-cell-ocrb-classification.md)'s premise-2 correction measured
+synthetically"* — that the isolated OCR-B `<` is present in the model but suppressed by context.
+**That claim was wrong, and it was mine.** The measurement above stands; the mechanism attached to
+it does not.
+
+ADR-0014 predicts that an **isolated** filler is suppressed while an **in-run** filler is
+comparatively unaffected. The fabricated cells are the opposite distribution
+([hong-kong-filler-context-2026-09-19](hong-kong-filler-context-2026-09-19.md)):
+
+| specimen | trailing filler run | fabricated | isolated | boundary | interior (run ≥ 3) |
+| :--- | ---: | ---: | ---: | ---: | ---: |
+| Hong Kong 2007 | 24 | 15 | **0** | 1 | 14 |
+| Hong Kong 2019 | 26 | 26 | **0** | 2 | 24 |
+
+**Zero fabricated isolated fillers in either document**, and both are dominated by interior in-run
+cells — including a complete 26-cell tail. That is the case ADR-0014 says is *not* suppressed, so
+these documents cannot be evidence for the mechanism. The one-character-short `restored()` path is
+ruled out too: both recovered name lines already arrive at the target width, so nothing in that
+path could have manufactured a tail.
+
+**So the twelve give ADR-0014 no real-document support.** That does not weaken the ADR — its
+synthetic measurement is unaffected — but it removes a prop this entry wrongly attached to it, and
+the track still has no named document behind its premise. The fabrication itself remains unexplained
+and is worth its own mechanism.
 
 **This also explains Hong Kong 2019's 33-cell "contiguous run".** `L1:11-43` is not one long misread
 of the name; it is the name's short content region plus an entirely fabricated filler tail. Run
