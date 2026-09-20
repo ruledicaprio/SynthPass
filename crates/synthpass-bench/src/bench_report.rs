@@ -15,7 +15,7 @@
 //! str` field can only borrow from genuinely `'static` input, which bytes
 //! read back off disk never are — the same reason [`crate::report::OutcomeRow`]
 //! copies those fields into owned `String`s instead of reusing
-//! [`crate::report::DocumentDetail`]'s borrowed ones.
+//! [`crate::report::DocumentDetailReport`]'s borrowed ones.
 //!
 //! Rather than widen the writer's schema for a reader that needs only a
 //! handful of its fields, this module defines its own minimal, owned-`String`
