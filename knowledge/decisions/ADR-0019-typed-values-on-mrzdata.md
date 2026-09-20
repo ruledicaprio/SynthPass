@@ -161,6 +161,19 @@ fixes a real defect — but that is a fourth variant with its own downstream con
 arguably [ADR-0017](ADR-0017-checks-distinguish-absent-from-verified.md)'s argument applied to a
 different field rather than part of this one.
 
+### Corpus evidence for the choice
+
+The acceptance test was run over the 64 ground-truth zones, counting from each raw `mrz_line` rather
+than only the curated fixture fields. Four of 64 `date_of_birth` values are not real calendar dates,
+four of 64 `date_of_expiry` values are not real calendar dates, and three of 64 sex cells are outside
+`M`/`F`/`<`. These are lower bounds: ground truth records the printed zone, and OCR can only add
+malformed reads beyond them.
+
+Neither branch of the original test holds. The evidence therefore points to Option C, with the
+serde shape permitted to change in 0.8.0, a hard zeroize guarantee for date-of-birth data, and the
+`date_of_expiry_completeness` asymmetry fixed in the same change. The A/B/C implementation details
+remain open for the maintainer; this ADR stays Proposed.
+
 ## Timing — this is a deadline, not background
 
 `crates/mrz/Cargo.toml` already reads **0.8.0**, but `CHANGELOG.md`'s `[Unreleased]` section is empty

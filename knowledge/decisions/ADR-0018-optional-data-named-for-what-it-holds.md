@@ -1,6 +1,6 @@
 # ADR-0018 — Name the optional-data field for what it holds
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-20
 
 ## Context
@@ -123,6 +123,17 @@ workspace?
 before this lands, D's cost roughly triples — it stops being one `!` fragment inside an already-open
 window and becomes a 0.9.0 of its own. At that point the additive path is the better trade.
 
+## Decision
+
+Option D is accepted. `mrz` will expose `optional_data_1` and `optional_data_2` for TD1, while
+retaining `personal_number` as the TD3-only accessor. The single optional-data field on TD2 and the
+MRV formats occupies the format-specific slot described by the parser and emitter layouts.
+
+The rename propagates past `mrz`: `synthpass-core`'s published schema gains the corresponding two
+`CoreField` variants, and the names are updated in `EXPORTS.md` dataset keys. This is an arity change,
+not a spelling-only migration; the bridge and schema tests must fail loudly until every projection is
+updated. The `mrz-wasm` payload follows the crate's new fields in the same release.
+
 ## What this ADR deliberately does not decide
 
 **Whether the rename propagates past `mrz` — and this is the load-bearing open question, not a
@@ -139,18 +150,8 @@ detail.** `personal_number` is also:
 - a key in the `mrz-wasm` demo payload, which serialises `MrzData` whole and is read directly by
   `web/index.html`.
 
-The defensible position is that **the rename stops at `mrz`**: `mrz` names what the *document
-prints*, while the v2 schema names what the *extraction produced*, and those vocabularies are
-allowed to differ across a bridge that already translates. The bridging assignments would fail to
-compile until updated — loudly, which is the desired behaviour.
-
-But that leaves `mrz` and the schema disagreeing on a name, and someone will eventually try to
-"fix" it. **Whichever way it goes, it must be written down rather than left implicit**, because the
-next reader will otherwise assume the divergence is an oversight.
-
-Also not decided here: whether the `mrz-wasm` payload key follows the crate or is pinned
-independently, and whether `EXPORTS.md`'s dataset keys move at all — a published dataset schema has
-consumers that no compiler will warn.
+The schema and export keys therefore move with the crate fields, while the bridge remains the explicit
+translation boundary. The wasm payload follows the crate fields in the same release.
 
 **One collision to record before review finds it.** `Checks::personal_number` and
 `MrzData::personal_number` currently share a name. Under D the data field moves and the check-digit
