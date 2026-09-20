@@ -7,12 +7,12 @@
 use crate::MrzError;
 
 /// ICAO 9303 character value: `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`.
-pub(crate) fn char_value(c: char) -> Result<u32, MrzError> {
+pub(crate) fn char_value(c: char) -> Option<u32> {
     match c {
-        '0'..='9' => Ok(c as u32 - '0' as u32),
-        'A'..='Z' => Ok(c as u32 - 'A' as u32 + 10),
-        '<' => Ok(0),
-        other => Err(MrzError::BadCharacter(other)),
+        '0'..='9' => Some(c as u32 - '0' as u32),
+        'A'..='Z' => Some(c as u32 - 'A' as u32 + 10),
+        '<' => Some(0),
+        _ => None,
     }
 }
 
@@ -30,7 +30,11 @@ pub fn check_digit(field: &str) -> Result<u32, MrzError> {
     const WEIGHTS: [u32; 3] = [7, 3, 1];
     let mut sum = 0u32;
     for (i, c) in field.chars().enumerate() {
-        sum += char_value(c)? * WEIGHTS[i % 3];
+        sum += char_value(c).ok_or(MrzError::BadCharacter {
+            character: c,
+            line: None,
+            position: i,
+        })? * WEIGHTS[i % 3];
     }
     Ok(sum % 10)
 }
@@ -44,7 +48,7 @@ pub fn check_digit(field: &str) -> Result<u32, MrzError> {
 /// ```
 pub fn verify(field: &str, digit: char) -> bool {
     match (check_digit(field), char_value(digit)) {
-        (Ok(expected), Ok(got)) => expected == got && (digit.is_ascii_digit() || digit == '<'),
+        (Ok(expected), Some(got)) => expected == got && (digit.is_ascii_digit() || digit == '<'),
         _ => false,
     }
 }

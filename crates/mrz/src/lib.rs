@@ -860,7 +860,28 @@ pub enum MrzError {
         got: usize,
     },
     /// Character outside `[A-Z0-9<]`.
-    BadCharacter(char),
+    ///
+    /// Both indices are zero-based and counted in `char`s, not bytes.
+    ///
+    /// `line` is `None` when there was no zone to count lines in: the
+    /// standalone [`check_digit`] helper is handed a
+    /// single field, so its `position` is field-relative. It is deliberately
+    /// **not** `Some(0)` -- line 0 is a real line of a real zone, and a caller
+    /// must be able to tell "the first line" from "no line at all". See
+    /// [ADR-0017] for why this crate does not spell absence as a legitimate
+    /// value.
+    ///
+    /// [ADR-0017]: https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/decisions/ADR-0017-checks-distinguish-absent-from-verified.md
+    BadCharacter {
+        /// The character that is not in the MRZ alphabet.
+        character: char,
+        /// Zero-based line within the MRZ zone, or `None` when the error did
+        /// not come from parsing one -- see the variant documentation.
+        line: Option<usize>,
+        /// Zero-based `char` column within the line, or within the field when
+        /// `line` is `None`.
+        position: usize,
+    },
     /// Document code not recognized for the format.
     BadDocumentCode(String),
     /// A check digit did not validate against its field.
@@ -903,7 +924,22 @@ impl core::fmt::Display for MrzError {
             Self::BadLength { expected, got } => {
                 write!(f, "bad MRZ line length: expected {expected}, got {got}")
             }
-            Self::BadCharacter(c) => write!(f, "invalid MRZ character: {c:?}"),
+            Self::BadCharacter {
+                character,
+                line: Some(line),
+                position,
+            } => write!(
+                f,
+                "invalid MRZ character: {character:?} at line {line}, column {position}"
+            ),
+            Self::BadCharacter {
+                character,
+                line: None,
+                position,
+            } => write!(
+                f,
+                "invalid MRZ character: {character:?} at position {position}"
+            ),
             Self::BadDocumentCode(c) => write!(f, "unrecognized document code: {c:?}"),
             Self::BadChecksum { field, position } => {
                 write!(f, "check digit failed for {field} at position {position}")
@@ -1024,6 +1060,70 @@ mod tests {
     const TD1_L1: &str = "I<UTOD231458907<<<<<<<<<<<<<<<";
     const TD1_L2: &str = "7408122F1204159UTO<<<<<<<<<<<6";
     const TD1_L3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
+
+    #[test]
+    fn bad_character_reports_zero_based_td1_line_and_column() {
+        for (line, expected_position) in [(0, 3), (1, 7), (2, 11)] {
+            let mut lines = [TD1_L1.to_string(), TD1_L2.to_string(), TD1_L3.to_string()];
+            lines[line].replace_range(expected_position..expected_position + 1, "?");
+
+            let error = parse_td1(&lines[0], &lines[1], &lines[2]).unwrap_err();
+            assert_eq!(
+                error,
+                MrzError::BadCharacter {
+                    character: '?',
+                    line: Some(line),
+                    position: expected_position,
+                }
+            );
+            assert_eq!(
+                error.to_string(),
+                format!("invalid MRZ character: '?' at line {line}, column {expected_position}")
+            );
+        }
+    }
+
+    #[test]
+    fn bad_character_from_the_standalone_helper_reports_no_line() {
+        // `check_digit` is handed a field, not a zone, so there is no line to
+        // count. `None` says that; `Some(0)` would be indistinguishable from
+        // the genuine first line of a genuine zone.
+        let error = crate::check_digit("L8?8902C3").unwrap_err();
+        assert_eq!(
+            error,
+            MrzError::BadCharacter {
+                character: '?',
+                line: None,
+                position: 2,
+            }
+        );
+        assert_eq!(
+            error.to_string(),
+            "invalid MRZ character: '?' at position 2"
+        );
+    }
+
+    #[test]
+    fn bad_character_position_counts_chars_not_bytes() {
+        // The length gate counts bytes, so a line carrying a two-byte
+        // character reaches the charset check only when it is one `char`
+        // short of the format width. `position` stays a `char` index -- the
+        // column someone counting glyphs would name, not a byte offset.
+        let e_acute = char::from_u32(0xC9).expect("U+00C9 is a valid scalar value");
+        let line1 = format!("P<UTO{e_acute}{}", "<".repeat(37));
+        assert_eq!(line1.len(), 44, "byte length must satisfy the TD3 gate");
+        assert_eq!(line1.chars().count(), 43);
+
+        let error = parse_td3(&line1, &"<".repeat(44)).unwrap_err();
+        assert_eq!(
+            error,
+            MrzError::BadCharacter {
+                character: e_acute,
+                line: Some(0),
+                position: 5,
+            }
+        );
+    }
 
     #[test]
     fn td1_specimen_fully_valid() {

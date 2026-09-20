@@ -119,7 +119,7 @@ impl Blindspot {
 /// ```
 pub fn blindspot(a: char, b: char) -> Blindspot {
     let (va, vb) = match (char_value(a), char_value(b)) {
-        (Ok(va), Ok(vb)) => (va, vb),
+        (Some(va), Some(vb)) => (va, vb),
         _ => return Blindspot::NotMrzCharset,
     };
     if a == b {
@@ -177,7 +177,7 @@ pub const CLASSES: [&[char]; 10] = [
 /// assert_eq!(mrz::class_of('@'), None);
 /// ```
 pub fn class_of(c: char) -> Option<&'static [char]> {
-    char_value(c).ok().map(|v| CLASSES[(v % 10) as usize])
+    char_value(c).map(|v| CLASSES[(v % 10) as usize])
 }
 
 /// Every MRZ character a check digit cannot distinguish from `c`, excluding
