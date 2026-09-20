@@ -102,7 +102,8 @@ impl FieldReader for MrzReader {
             ..Evidence::default()
         };
 
-        let Some(data) = mrz::find_and_parse(ctx.text).ok() else {
+        let Some(data) = mrz::find_and_parse_with(ctx.text, &crate::mrz_parse_options()).ok()
+        else {
             evidence.missing = synthpass_core::v2::CoreField::ALL.to_vec();
             return Ok(Reading {
                 extraction: ExtractionV2::default(),

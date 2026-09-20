@@ -63,6 +63,42 @@ pub mod mrz_reader;
 pub mod provider;
 pub mod routing;
 
+/// The `mrz` parse arm this process measures, from `SYNTHPASS_MRZ_CLASS_SWEEP`.
+///
+/// Three arms, the shape this repo uses for every same-binary A/B: `on`
+/// enables the uniform confusable-class sweep in `mrz`, `off` (the default)
+/// does not, and `control` is a **placebo** -- behaviourally identical to
+/// `off`, present so a run can tell a real effect from the noise between two
+/// nominally identical arms. The decision rule is `on > control >= off`.
+///
+/// **An unrecognised value falls back to `off` silently**, which is why the
+/// arm is returned by name: quote what the binary says it measured, never the
+/// variable you believe you set.
+///
+/// It lives here, beside the MRZ provider, because this is the parse the
+/// real-specimen benchmark actually exercises -- the synthetic path in
+/// `synthpass-bench` reuses it rather than reading the variable a second time,
+/// so the two cannot drift into measuring different arms.
+#[must_use]
+pub fn class_sweep_arm() -> (&'static str, bool) {
+    match std::env::var("SYNTHPASS_MRZ_CLASS_SWEEP")
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "on" => ("on", true),
+        "control" => ("control", false),
+        _ => ("off", false),
+    }
+}
+
+/// [`mrz::ParseOptions`] for the arm this process measures.
+#[must_use]
+pub fn mrz_parse_options() -> mrz::ParseOptions {
+    mrz::ParseOptions::default().with_class_sweep(class_sweep_arm().1)
+}
+
 pub use catalog::{CatalogError, ProviderCatalog, ProviderCatalogBuilder};
 pub use evidence::Evidence;
 pub use mrz_reader::{MrzReader, MRZ_PROVIDER_ID};

@@ -1499,7 +1499,8 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             // what this run's OCR pass actually recovered, which is what a
             // provider had to work with. A generated document always *has*
             // an MRZ, but a degraded capture can leave none of it legible.
-            let mrz_found = mrz::find_and_parse(&page.text).is_ok();
+            let mrz_found =
+                mrz::find_and_parse_with(&page.text, &synthpass_die::mrz_parse_options()).is_ok();
             Some(BenchPage {
                 name: doc.seed.to_string(),
                 asset_id: None,
@@ -1550,9 +1551,10 @@ fn prep_specimens(
             // document and stays the same whatever the run reads off it.
             // `None` (unlabelled) is not evidence of non-conformance — see
             // `BenchPage::printed_zone_nonconforming`.
-            let printed_zone_nonconforming = ground_truth_mrz
-                .as_deref()
-                .is_some_and(|zone| !mrz::find_and_parse(zone).is_ok_and(|d| d.valid()));
+            let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
+                !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
+                    .is_ok_and(|d| d.valid())
+            });
             let mrz_found = mrz::find_and_parse(&page.text).is_ok();
             // Derived from the filename, the same way the corpus manifest
             // generator records `mrz.redacted` (`corpus_manifest.rs`). The

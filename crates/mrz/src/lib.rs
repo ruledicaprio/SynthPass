@@ -169,12 +169,23 @@ pub struct ParseOptions {
     /// [`CURRENT_YY`]; set it explicitly to pin behaviour instead of inheriting
     /// the constant this crate was compiled with.
     pub pivot_yy: u32,
+    /// Try [`solve_class_sweep`] during the damaged-capture pass: one OCR
+    /// confusable class applied uniformly across a field and its own check
+    /// digit, for the run-of-one-character-read-as-its-lookalike case.
+    ///
+    /// **Off by default, and unmeasured.** It repairs a shape observed on a
+    /// real document, but how many documents it *breaks* is exactly what has
+    /// not been established — so this exists to be A/B'd against a control,
+    /// not to be switched on. Only the damaged pass consults it, which runs
+    /// only after an ordinary read has already failed to validate.
+    pub class_sweep: bool,
 }
 
 impl Default for ParseOptions {
     fn default() -> Self {
         Self {
             pivot_yy: CURRENT_YY,
+            class_sweep: false,
         }
     }
 }
@@ -199,6 +210,21 @@ impl ParseOptions {
     #[must_use]
     pub const fn with_pivot_yy(mut self, pivot_yy: u32) -> Self {
         self.pivot_yy = pivot_yy;
+        self
+    }
+
+    /// Enable the uniform confusable-class sweep in the damaged pass — see
+    /// [`ParseOptions::class_sweep`], which is off by default and unmeasured.
+    ///
+    /// ```
+    /// use mrz::ParseOptions;
+    ///
+    /// assert!(!ParseOptions::default().class_sweep);
+    /// assert!(ParseOptions::default().with_class_sweep(true).class_sweep);
+    /// ```
+    #[must_use]
+    pub const fn with_class_sweep(mut self, class_sweep: bool) -> Self {
+        self.class_sweep = class_sweep;
         self
     }
 }
