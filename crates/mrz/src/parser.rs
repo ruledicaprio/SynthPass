@@ -177,9 +177,15 @@ fn clean_sex(c: char) -> String {
     }
 }
 
-fn ensure_charset(line: &str) -> Result<(), MrzError> {
-    for c in line.chars() {
-        char_value(c)?;
+fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
+    for (position, c) in line.chars().enumerate() {
+        if char_value(c).is_none() {
+            return Err(MrzError::BadCharacter {
+                character: c,
+                line: Some(line_number),
+                position,
+            });
+        }
     }
     Ok(())
 }
@@ -224,14 +230,14 @@ pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// assert!(d.valid());
 /// ```
 pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
-    for line in [line1, line2] {
+    for (line_number, line) in [line1, line2].into_iter().enumerate() {
         if line.len() != 44 {
             return Err(MrzError::BadLength {
                 expected: 44,
                 got: line.len(),
             });
         }
-        ensure_charset(line)?;
+        ensure_charset(line, line_number)?;
     }
     if !line1.starts_with('P') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
@@ -316,14 +322,14 @@ pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// );
 /// ```
 pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
-    for line in [line1, line2] {
+    for (line_number, line) in [line1, line2].into_iter().enumerate() {
         if line.len() != 36 {
             return Err(MrzError::BadLength {
                 expected: 36,
                 got: line.len(),
             });
         }
-        ensure_charset(line)?;
+        ensure_charset(line, line_number)?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
@@ -415,14 +421,14 @@ pub fn parse_td1_with(
     line3: &str,
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
-    for line in [line1, line2, line3] {
+    for (line_number, line) in [line1, line2, line3].into_iter().enumerate() {
         if line.len() != 30 {
             return Err(MrzError::BadLength {
                 expected: 30,
                 got: line.len(),
             });
         }
-        ensure_charset(line)?;
+        ensure_charset(line, line_number)?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
@@ -518,14 +524,14 @@ pub fn parse_mrv_a_with(
     line2: &str,
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
-    for line in [line1, line2] {
+    for (line_number, line) in [line1, line2].into_iter().enumerate() {
         if line.len() != 44 {
             return Err(MrzError::BadLength {
                 expected: 44,
                 got: line.len(),
             });
         }
-        ensure_charset(line)?;
+        ensure_charset(line, line_number)?;
     }
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
@@ -601,14 +607,14 @@ pub fn parse_mrv_b_with(
     line2: &str,
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
-    for line in [line1, line2] {
+    for (line_number, line) in [line1, line2].into_iter().enumerate() {
         if line.len() != 36 {
             return Err(MrzError::BadLength {
                 expected: 36,
                 got: line.len(),
             });
         }
-        ensure_charset(line)?;
+        ensure_charset(line, line_number)?;
     }
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
