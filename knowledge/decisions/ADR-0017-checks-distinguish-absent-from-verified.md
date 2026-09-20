@@ -1,6 +1,6 @@
 # ADR-0017 — `Checks` must distinguish "absent" from "verified"
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-09-20
 
 ## Context
@@ -102,6 +102,29 @@ same class of gap for nationality and sex, which no check digit covers on any fo
 The benchmark vocabulary already models absence properly — in a hand-maintained span table, because
 `Checks` cannot supply it.
 
+### Measured format-selection consequence
+
+`find_and_parse_with` selects a format by matching line 1 position 0, the document code. That cell
+has no ICAO check digit. On the published UTOPIA/ERIKSSON specimen, changing only that cell produced
+the following results:
+
+| first cell | result |
+| :--- | :--- |
+| truth-format code | TD3, valid, 0 failed |
+| identity-card code | TD1, invalid |
+| visa code | MRV-A, valid, 0 failed |
+| other tested codes | no MRZ found |
+
+MRV-A shares TD3's two-line geometry and its document-number and date checks, but has no personal
+number or composite check digit. A wrong MRV-A hypothesis can therefore satisfy every check it is
+asked to satisfy while the two checks that would reject it no longer exist.
+
+Across the 64 ground-truth fixtures, 55 genuine TD3 zones were tested: 41 became fully valid MRV-A
+reads after that one-cell change. In three of those, the true TD3 read failed one or two checks while
+the MRV-A read reported valid. The corpus contains one such resolution, and it is excluded from the
+scored denominator as `checksum_failed_specimen`; the baseline's `false_positive_mrz` metric does not
+cover a valid parse of the wrong format.
+
 ## The question
 
 Should `Checks` be able to express "this format prints no such check digit", or should that remain a
@@ -138,29 +161,32 @@ documented convention that each caller re-implements?
 
 ## Recommendation
 
-**Option C.**
+**Option B.**
 
-D and E are the tempting answers — they are additive, they need no window, and they cost nobody an
-upgrade. The argument against both is empirical rather than aesthetic: this codebase already
-contains the additive fix in spirit (`synthpass-pipeline`'s `&& format == Td3` guard), and it is
-applied in one crate out of three. An opt-in correction to a wrong default gets applied where
-someone remembers.
+`Checks` now uses `Option<bool>`: `Some(true)` is verified, `Some(false)` failed, and `None` means
+the format does not print that check digit. `None` serialises as JSON `null`, never as an omitted key.
+`all_valid` and `score()` must inspect applicability explicitly; neither may use `unwrap_or(true)`.
 
-The one thing that justifies spending a break here is that **C removes the wrong answer rather than
-providing an alternative to it.** A caller matching on three states cannot accidentally read
-"absent" as "proof"; a caller reading a `bool` can, and has.
+Cross-format ranking compares the fraction of applicable check digits verified using integer
+cross-multiplication, with ties retaining the incumbent. Because this can change which best-effort
+reading is reported on degraded input, it can move the baseline and must be measured with the
+real-specimen gate and a per-document 2×2; it is not assumed neutral.
 
-B deserves more sympathy than a one-line rejection, because `Option<bool>` is genuinely the smaller
-change. It fails on the collapse: the ergonomic path is `unwrap_or(true)`, and the library would be
-handing callers a footgun shaped like an idiom.
+This accepts the smaller breaking shape in the 0.8.0 window while making absence explicit at every
+consumer. A three-state enum remains a possible later refinement if the option shape proves too easy
+to collapse incorrectly.
 
 ## What this ADR deliberately does not decide
 
 - **The spelling of the variants.** `NotPresent` / `NotApplicable` / `NotPrinted` all read
   acceptably; this ADR argues the arity, not the names.
 - **Whether `score()` is re-derived from the new state, or simply stops counting absent digits.**
-  Both fix the MRV bias. `score()` is `pub(crate)` with one call site, so it is free either way and
-  can be settled in review.
+  The accepted rule is applicable-check fraction compared by integer cross-multiplication; details of
+  its helper implementation remain an implementation concern.
+- **The ranking tie-breaker.** A fully valid TD3 is 5/5 and a fully valid MRV-A is 3/3. A further
+  tie-breaker is needed; one candidate is descending count of applicable check digits, because a wrong
+  hypothesis satisfying five constraints is roughly 100× less likely by chance than one satisfying
+  three. This is a proposal, not part of this decision.
 - **Whether `synthpass-core`'s `CheckDigits` mirror follows.** That type is a separate, deliberately
   independent schema with its own published contract; changing it is a decision about the v2 wire
   format, not about `mrz`.
