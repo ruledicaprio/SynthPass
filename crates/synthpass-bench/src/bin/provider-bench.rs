@@ -870,6 +870,16 @@ struct Report {
     count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     seed_start: Option<u64>,
+    /// The `mrz` parse arm this run actually measured, as the binary
+    /// resolved it -- `off`, `on` or `control`, from
+    /// `SYNTHPASS_MRZ_CLASS_SWEEP`.
+    ///
+    /// Recorded because an unrecognised value falls back to `off`
+    /// **silently**: without this, a three-arm A/B whose variable was
+    /// misspelled in one arm produces two identical populations and reads as
+    /// a clean null. Quote this field, never the variable you believe you
+    /// set.
+    mrz_class_sweep_arm: &'static str,
     providers: Vec<ProviderRow>,
 }
 
@@ -2233,6 +2243,7 @@ async fn main() {
         format: parsed.format.map(SpecimenClass::as_str),
         count,
         seed_start,
+        mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         providers: reports.into_iter().map(ProviderRow::from).collect(),
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
@@ -2242,6 +2253,10 @@ async fn main() {
         }
     }
     std::fs::write(&parsed.out, json).expect("write report");
+    println!(
+        "mrz class-sweep arm measured: {}",
+        synthpass_die::class_sweep_arm().0
+    );
     println!("report written to {}", parsed.out);
 
     // Baseline write / assert — the per-PR real-specimen no-regression gate.
