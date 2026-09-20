@@ -8,7 +8,7 @@
 audited against [`real-specimen-outcomes.jsonl`](real-specimen-outcomes.jsonl) at the same commit
 (`outcomes_sha256` ties it to `samples_data_sha` `396b22f…`, per
 [`real-specimen-mrz-baseline.json`](real-specimen-mrz-baseline.json)). 261 asset rows, one per
-document. [`coverage-ledger-rollup-2026-09-20.md`](coverage-ledger-rollup-2026-09-20.md) — the
+document. [`coverage-ledger-rollup-2026-09-21.md`](coverage-ledger-rollup-2026-09-21.md) — the
 per-country rollup handed to this audit — was used as a starting point and independently
 re-derived from the same ledger with a fresh script (below); the two agree on every count except
 the three `misc/` rows the rollup left un-attributed by construction (see "The three `misc/`

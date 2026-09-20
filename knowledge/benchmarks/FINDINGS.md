@@ -19,6 +19,7 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-21 | [`CORPUS_COVERAGE.md` drift audit: 34 rows contradicted the committed ledger](corpus-coverage-drift-2026-09-21.md) | Derived (script aggregation of `real-specimen-outcomes.jsonl` against `knowledge/CORPUS_COVERAGE.md`) | current | corpus-coverage-drift-2026-09-21.md |
+| 2026-09-21 | [Per-country rollup of the real-specimen outcome ledger](coverage-ledger-rollup-2026-09-21.md) | Derived (aggregation of `real-specimen-outcomes.jsonl`) | current | coverage-ledger-rollup-2026-09-21.md |
 | 2026-09-20 | [MRZ class-sweep A/B on real specimens](mrz-class-sweep-ab-2026-09-20.md) | Observed (three-arm release `provider-bench --real-specimens --mrz-only` run) | current | mrz-class-sweep-ab-2026-09-20.md |
 | 2026-09-20 | [MRZ class-sweep ceiling and date-veto analysis](mrz-class-sweep-ceiling-2026-09-20.md) | Static analysis of the 2026-09-19 attribution dump and the three C37 release reports | current | mrz-class-sweep-ceiling-2026-09-20.md |
 | 2026-09-19 | [Local corpus drift against `samples-data`](corpus-drift-local-vs-samples-data-2026-09-19.md) | Observed (file-level comparison + sha256) | current | corpus-drift-local-vs-samples-data-2026-09-19.md |
