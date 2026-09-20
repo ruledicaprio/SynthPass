@@ -1691,7 +1691,7 @@ fn has_name_ground_truth(ground_truth: Option<&HashMap<CoreField, String>>) -> b
 /// so the two computations cannot silently diverge on what "scored" means —
 /// see `run_prepped`'s `tier1_hit_rate` computation, and this list's own
 /// "must stay identical to `RealSpecimenSnapshot`'s off-denominator set in
-/// `bin/provider-bench.rs`" note there.
+/// `report.rs`" note there.
 fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
     !matches!(
         miss_reason,
@@ -2282,7 +2282,7 @@ async fn run_prepped(
             // left is the population where a miss is genuinely ours.
             //
             // This list must stay identical to `RealSpecimenSnapshot`'s
-            // off-denominator set in `bin/provider-bench.rs` — they are two
+            // off-denominator set in `report.rs` — they are two
             // computations of the same number, and a divergence would put the
             // reported hit rate and the committed baseline quietly at odds.
             // `in_scored_tier1_population` is also `StrictNameHitRate`'s own

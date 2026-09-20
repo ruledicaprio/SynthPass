@@ -19,6 +19,7 @@ use synthpass_ocr::NativeOcr;
 
 pub mod ground_truth;
 pub mod provider_bench;
+pub mod report;
 
 /// Which capture profile to generate a corpus under. Shared between
 /// `synthpass-bench`'s Tier-1 hit-rate CLI and `provider-bench`'s
