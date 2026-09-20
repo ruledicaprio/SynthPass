@@ -1,0 +1,8 @@
+{"dir":"passports","filename":"afghanistan.jpg","provenance":"specimen","year":{"kind":"issue","value":2016},"origin":{"licence":"public-domain"},"mrz":{"issuing_state":"AFG"}}
+{"dir":"passports","filename":"albania.jpg","provenance":"specimen","year":{"kind":"issue","value":null},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"ALB"}}
+{"dir":"passports","filename":"germany.jpg","provenance":"template","year":{"kind":"issue","value":2020},"origin":{"licence":"cc-by-sa"},"mrz":{"issuing_state":"DEU"}}
+{"dir":"passports","filename":"redacted-doc.jpg","provenance":"specimen","year":{"kind":"issue","value":2012},"origin":{"licence":"none-stated"},"mrz":{"issuing_state":"EGY"}}
+{"dir":"id_cards","filename":"bosnia.jpg","provenance":"specimen","year":{"kind":"issue","value":2019},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"BIH"}}
+{"dir":"id_cards","filename":"croatia.jpg","provenance":"specimen","year":{"kind":"issue","value":null},"origin":{"licence":"none-stated"},"mrz":{"issuing_state":"HRV"}}
+{"dir":"id_cards","filename":"front-only.jpg","provenance":"specimen","year":{"kind":"issue","value":2021},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"SWE"}}
+{"dir":"misc","filename":"template.jpg","provenance":"template","year":{"kind":"issue","value":2021},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"XXX"}}

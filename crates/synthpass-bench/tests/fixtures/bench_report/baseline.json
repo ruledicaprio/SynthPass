@@ -1,0 +1,27 @@
+{
+  "note": "Fixture baseline for bench-report's golden test — synthesized counts, not a real measurement.",
+  "measured_on_ci_sha": "abcdef0123456789abcdef0123456789abcdef01",
+  "measured_date": "2026-01-01",
+  "samples_data_sha": "1111111111111111111111111111111111111a",
+  "documents": 10,
+  "scored": 7,
+  "tier1_hits": 5,
+  "tolerance": 0,
+  "by_miss_kind": {
+    "checksum_failed": 1,
+    "no_mrz_found": 1,
+    "ocr_error": 0,
+    "document_number_mismatch": 0,
+    "false_positive_mrz": 0,
+    "redacted_mrz": 1,
+    "no_mrz_expected": 1,
+    "checksum_failed_specimen": 1
+  },
+  "strict_names": {
+    "strict_hits": 2,
+    "name_scorable_documents": 4,
+    "name_scorable_hits": 3
+  },
+  "outcomes_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "refusal_population": 3
+}

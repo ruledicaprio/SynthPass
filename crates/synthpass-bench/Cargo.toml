@@ -20,6 +20,10 @@ path = "src/bin/bench-chart.rs"
 name = "ground-truth"
 path = "src/bin/ground-truth.rs"
 
+[[bin]]
+name = "bench-report"
+path = "src/bin/bench-report.rs"
+
 [dependencies]
 # Self-contained review pages embed specimen images without external assets.
 base64 = "0.22"
