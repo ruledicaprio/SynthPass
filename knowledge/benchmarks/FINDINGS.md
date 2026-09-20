@@ -19,9 +19,12 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-19 | [Local corpus drift against `samples-data`](corpus-drift-local-vs-samples-data-2026-09-19.md) | Observed (file-level comparison + sha256) | current | corpus-drift-local-vs-samples-data-2026-09-19.md |
+| 2026-09-19 | [Corpus MRZ-band line-length distribution](corpus-mrz-line-lengths-2026-09-19.md) | Observed (release native line-extractor sweep over 295 corpus images) | current | corpus-mrz-line-lengths-2026-09-19.md |
 | 2026-09-19 | [Neither headline moved for a reading reason: the 2026-09-19 re-bless is two denominator changes](denominator-rebless-2026-09-19.md) | Observed (CI `real-specimen-gate.yml` run 35441419567, `mode=write-baseline`, head `185e530`) | current | denominator-rebless-2026-09-19.md |
 | 2026-09-19 | [the re-bless: Tier-1 91.5% → 92.1% and strict names 30.0% → 26.7%, neither a reading change](#2026-09-19--the-re-bless-tier-1-915--921-and-strict-names-300--267-neither-a-reading-change) | — | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-19 | [Hong Kong filler fabrication and ADR-0014](hong-kong-filler-context-2026-09-19.md) | Observed (recorded native OCR dump and hand-transcribed fixtures) | current | hong-kong-filler-context-2026-09-19.md |
 | 2026-09-19 | [MRZ-band null measurement: Germany 2024 and Russia 2019](mrz-band-null-measurement-2026-09-19.md) | Observed (temporary native geometry probe; synthetic benchmark run) | current | mrz-band-null-measurement-2026-09-19.md |
+| 2026-09-19 | [Russia 2019 MRZ segmentation follow-up](russia-mrz-segmentation-2026-09-19.md) | Observed (release native line-extractor probe) | current | russia-mrz-segmentation-2026-09-19.md |
 | 2026-09-19 | [The twelve scored misses, attributed: the check digits see a sixth of the damage](twelve-scored-misses-2026-09-19.md) | Observed (`provider-bench --real-specimens --mrz-only --dump-ocr`, all `SYNTHPASS_OCR_*` arms cleared; 261 documents, 31 dumped misses) | current | twelve-scored-misses-2026-09-19.md |
 | 2026-09-18 | [M6 checksum-failed miss mechanisms](checksum-failed-miss-mechanisms-2026-09-18.md) | Observed (native runner, `--dump-ocr`) | current | checksum-failed-miss-mechanisms-2026-09-18.md |
 | 2026-09-18 | [Three detection misses attributed: two obscured TD1 bands and one decorative zone](detection-misses-2026-09-18.md) | Observed | current | detection-misses-2026-09-18.md |
