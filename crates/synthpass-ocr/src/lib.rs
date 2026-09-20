@@ -1945,6 +1945,33 @@ fn mrz_shaped_lines(text: &str) -> String {
         .join("\n")
 }
 
+/// Serialises the tests that mutate process-global environment variables.
+///
+/// `std::env` is one variable per **process**, and `cargo test` runs this
+/// binary’s tests on parallel threads, so two tests touching the same variable
+/// interleave: one writes `band-first`, another clears the same name, and the
+/// first reads back the second’s value. Nothing is wrong with either test in
+/// isolation — they are only wrong together, which is why this failed at
+/// random rather than consistently.
+///
+/// The previous arrangement was a convention: give each variable exactly one
+/// test. It could not hold, because `ocr_arms_from_env_is_default_when_every_knob_is_unset`
+/// and its sibling must clear **every** knob to assert their default — so they
+/// necessarily collide with each per-knob test. A rule that the tests cannot
+/// obey is replaced here by a lock that enforces itself.
+///
+/// **Poisoning is recovered, deliberately.** If a test panics while holding
+/// this lock, every later env test would otherwise fail on the poisoned mutex
+/// rather than on its own assertion, turning one real failure into a dozen
+/// misleading ones and hiding which test actually broke.
+#[cfg(test)]
+pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 #[cfg(test)]
 mod decode_tests {
     use super::*;
@@ -2263,6 +2290,7 @@ mod tests {
     // across multiple tests, which would race on the shared process env.
     #[test]
     fn max_passes_reads_env_with_fallback() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES") };
         assert_eq!(max_passes(), DEFAULT_MAX_PASSES, "unset falls back");
 
@@ -2450,6 +2478,7 @@ mod tests {
 
     #[test]
     fn max_duration_reads_env_with_fallback() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_MAX_SECONDS") };
         assert_eq!(
             max_duration(),
@@ -2476,6 +2505,7 @@ mod tests {
 
     #[test]
     fn verbose_enabled_only_on_exact_flag() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_VERBOSE") };
         assert!(!verbose_enabled());
         unsafe { std::env::set_var("SYNTHPASS_OCR_VERBOSE", "true") };
@@ -2490,6 +2520,7 @@ mod tests {
 
     #[test]
     fn texture_mode_defaults_on_and_parses_all_three_arms() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
         assert_eq!(
             trailing_texture_mode(),
@@ -2520,6 +2551,7 @@ mod tests {
 
     #[test]
     fn ocr_order_defaults_to_default_and_parses_all_three_arms() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
         assert_eq!(
             ocr_order(),
@@ -2548,6 +2580,7 @@ mod tests {
 
     #[test]
     fn rotate_mode_defaults_to_default_and_parses_all_three_arms() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
         assert_eq!(
             rotate_mode(),
@@ -2578,6 +2611,7 @@ mod tests {
 
     #[test]
     fn skew_mode_defaults_to_default_and_parses_both_arms() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
         assert_eq!(
             skew_mode(),
@@ -2601,6 +2635,7 @@ mod tests {
 
     #[test]
     fn chargrid_mode_defaults_to_off_and_parses_all_three_arms() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
         assert_eq!(
             chargrid_mode(),
@@ -2629,6 +2664,7 @@ mod tests {
 
     #[test]
     fn ocr_arms_from_env_is_default_when_every_knob_is_unset() {
+        let _env = crate::env_lock();
         for var in [
             "SYNTHPASS_OCR_TEXTURE",
             "SYNTHPASS_OCR_ORDER",
@@ -2645,6 +2681,7 @@ mod tests {
 
     #[test]
     fn ocr_arms_is_default_false_when_any_single_knob_moves() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_TEXTURE") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
@@ -2656,6 +2693,7 @@ mod tests {
 
     #[test]
     fn dump_variants_dir_is_none_unless_set_to_a_non_empty_path() {
+        let _env = crate::env_lock();
         unsafe { std::env::remove_var("SYNTHPASS_OCR_DUMP_VARIANTS") };
         assert_eq!(
             dump_variants_dir(),
