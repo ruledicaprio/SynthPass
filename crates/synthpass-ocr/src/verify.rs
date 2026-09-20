@@ -59,6 +59,7 @@ mod tests {
 
     #[test]
     fn respects_env_override() {
+        let _env = crate::env_lock();
         let path =
             std::env::temp_dir().join(format!("synthpass-ocr-verify-test2-{}", std::process::id()));
         std::fs::write(&path, b"hello").unwrap();
