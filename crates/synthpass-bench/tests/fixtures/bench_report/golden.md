@@ -73,13 +73,13 @@ Joined via `documents_detail[].asset_id` against `samples/corpus.jsonl`'s `"<dir
 | `DEU` | 1 | 1 | 0 | 0 / 1 = 0.0% |
 | `EGY` | 1 | 0 | 0 | n/a (denominator is zero) |
 | `HRV` | 1 | 1 | 1 | 1 / 1 = 100.0% |
-| `SWE` | 1 | 0 | 0 | n/a (denominator is zero) |
 | `XXX` | 1 | 1 | 1 | 1 / 1 = 100.0% |
+| *(issuer not recorded in manifest)* | 1 | 0 | 0 | n/a (denominator is zero) |
 | *(no manifest match)* | 1 | 1 | 0 | 0 / 1 = 0.0% |
 | *(no asset id)* | 1 | 0 | 0 | n/a (denominator is zero) |
 | **Total** | **10** | **7** | **5** | 5 / 7 = 71.4% |
 
-The Total row reconciles exactly to the By ICAO format table above and to this report's Headline: same documents, partitioned by issuer instead of by format. `(no manifest match)` is a join failure, not a corpus fact — a non-zero count there means this gate report and this `samples/corpus.jsonl` were not generated from the same corpus revision, and the issuer figures above should not be trusted until that is resolved.
+The Total row reconciles exactly to the By ICAO format table above and to this report's Headline: same documents, partitioned by issuer instead of by format. `(issuer not recorded in manifest)` is an expected manifest gap (the row exists but its own `mrz.issuing_state` is null) — not a problem, and not evidence against the figures above. `(no manifest match)` is different in kind: a join failure, not a corpus fact — a non-zero count there means this gate report and this `samples/corpus.jsonl` were not generated from the same corpus revision, and the issuer figures above should not be trusted until that is resolved.
 
 ## Corpus composition (Derived)
 

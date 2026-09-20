@@ -216,7 +216,19 @@ pub struct CorpusMrz {
     /// placeholder such as `"XXX"` for a template with no real issuer) —
     /// never the manifest's `observed.*` block, which is a dated OCR
     /// snapshot, not this run's own read.
-    pub issuing_state: String,
+    ///
+    /// **`null` on 69 of the 295 rows in the real committed manifest** (23%
+    /// — every row `corpus_manifest.rs` could not resolve an issuing state
+    /// for, overwhelmingly the `no_mrz_expected` population that never had
+    /// an MRZ to read a state off of). Measured directly against
+    /// `samples/corpus.jsonl`, not assumed — the field was originally typed
+    /// as a required `String` from the fixtures alone, which never happened
+    /// to exercise a null and so never caught that the real file cannot be
+    /// parsed. `write_by_issuing_state` reports this `None` case as its own
+    /// `*(issuer not recorded in manifest)*` row, distinct from a join
+    /// failure (see that function's doc).
+    #[serde(default)]
+    pub issuing_state: Option<String>,
 }
 
 /// Parses `samples/corpus.jsonl`'s one-JSON-object-per-line format. A
@@ -647,13 +659,25 @@ fn write_by_icao_format(out: &mut String, details: &[DocumentDetailRow], totals:
 }
 
 /// One row per distinct `mrz.issuing_state` value the manifest join
-/// resolves, plus two explicit accounting rows so the join's own gaps are
-/// counted rather than silently dropped: `(no asset id)` for a document with
-/// no `asset_id` at all (the synthetic corpus has none), and `(no manifest
-/// match)` for an `asset_id` present in `documents_detail` but absent from
-/// `samples/corpus.jsonl` — a real possibility this join must surface, not
-/// paper over. Rows sum to `totals` exactly, the same guarantee
-/// [`write_by_icao_format`] gives.
+/// resolves, plus three explicit accounting rows so the join's own gaps —
+/// and the manifest's own gaps — are counted rather than silently dropped:
+///
+/// - `(no asset id)` — the document has no `asset_id` at all (the synthetic
+///   corpus has none).
+/// - `(issuer not recorded in manifest)` — the `asset_id` **is** in
+///   `samples/corpus.jsonl`, but that row's own `mrz.issuing_state` is
+///   `null`. An expected manifest gap (69 of 295 rows in the real
+///   committed manifest, overwhelmingly documents with no MRZ to read a
+///   state off of in the first place) — **not** a join problem, and not
+///   grounds for the trust warning below.
+/// - `(no manifest match)` — the `asset_id` is not in
+///   `samples/corpus.jsonl` at all. A genuine join failure: this gate
+///   report and this manifest do not appear to describe the same corpus
+///   revision. Conflating this with the row above would cry wolf on every
+///   real run, since the manifest gap is large and completely routine.
+///
+/// Rows sum to `totals` exactly, the same guarantee [`write_by_icao_format`]
+/// gives.
 fn write_by_issuing_state(
     out: &mut String,
     details: &[DocumentDetailRow],
@@ -676,15 +700,16 @@ fn write_by_issuing_state(
     let index: BTreeMap<String, &CorpusRow> = corpus.iter().map(|r| (r.asset_id(), r)).collect();
     let mut by_issuer: BTreeMap<&str, GroupStats> = BTreeMap::new();
     let mut no_asset_id = GroupStats::default();
+    let mut not_recorded_in_manifest = GroupStats::default();
     let mut no_manifest_match = GroupStats::default();
     for d in details {
         match &d.asset_id {
             None => no_asset_id.add(&d.miss_reason),
             Some(id) => match index.get(id.as_str()) {
-                Some(row) => by_issuer
-                    .entry(row.mrz.issuing_state.as_str())
-                    .or_default()
-                    .add(&d.miss_reason),
+                Some(row) => match row.mrz.issuing_state.as_deref() {
+                    Some(state) => by_issuer.entry(state).or_default().add(&d.miss_reason),
+                    None => not_recorded_in_manifest.add(&d.miss_reason),
+                },
                 None => no_manifest_match.add(&d.miss_reason),
             },
         }
@@ -710,6 +735,14 @@ fn write_by_issuing_state(
             stats.rate()
         );
     }
+    let _ = writeln!(
+        out,
+        "| *(issuer not recorded in manifest)* | {} | {} | {} | {} |",
+        not_recorded_in_manifest.documents,
+        not_recorded_in_manifest.scored,
+        not_recorded_in_manifest.hits,
+        not_recorded_in_manifest.rate()
+    );
     let _ = writeln!(
         out,
         "| *(no manifest match)* | {} | {} | {} | {} |",
@@ -738,10 +771,13 @@ fn write_by_issuing_state(
     let _ = writeln!(
         out,
         "The Total row reconciles exactly to the By ICAO format table above and to this report's \
-         Headline: same documents, partitioned by issuer instead of by format. `(no manifest \
-         match)` is a join failure, not a corpus fact — a non-zero count there means this gate \
-         report and this `samples/corpus.jsonl` were not generated from the same corpus revision, \
-         and the issuer figures above should not be trusted until that is resolved."
+         Headline: same documents, partitioned by issuer instead of by format. \
+         `(issuer not recorded in manifest)` is an expected manifest gap (the row exists but its \
+         own `mrz.issuing_state` is null) — not a problem, and not evidence against the figures \
+         above. `(no manifest match)` is different in kind: a join failure, not a corpus fact — a \
+         non-zero count there means this gate report and this `samples/corpus.jsonl` were not \
+         generated from the same corpus revision, and the issuer figures above should not be \
+         trusted until that is resolved."
     );
 }
 
@@ -1104,6 +1140,25 @@ mod tests {
         let text = format!("{ONE_CORPUS_ROW}\n\n");
         let rows = parse_corpus(&text).expect("a trailing blank line is not a malformed row");
         assert_eq!(rows.len(), 1);
+    }
+
+    /// Regression test for a real failure: `bench-report` run against the
+    /// committed `samples/corpus.jsonl` errored on line 13 with `invalid
+    /// type: null, expected a string` because `mrz.issuing_state` was typed
+    /// as a required `String` — a shape none of the hand-written fixtures
+    /// ever exercised, even though 69 of 295 rows in the real manifest carry
+    /// a null there (overwhelmingly documents with no MRZ to read a state
+    /// off of). If `issuing_state` regresses back to a required `String`,
+    /// this test fails to compile-and-pass on its own, independent of the
+    /// golden fixture (which also now carries a null row, so the golden test
+    /// would fail too — see `crates/synthpass-bench/tests/
+    /// bench_report_golden.rs`'s doc comment).
+    #[test]
+    fn parse_corpus_accepts_a_null_issuing_state() {
+        let text = "{\"dir\":\"id_cards\",\"filename\":\"front.jpg\",\"provenance\":\"specimen\",\
+             \"origin\":{\"licence\":\"unrecorded\"},\"mrz\":{\"issuing_state\":null}}\n";
+        let rows = parse_corpus(text).expect("a null mrz.issuing_state must not fail to parse");
+        assert_eq!(rows[0].mrz.issuing_state, None);
     }
 
     #[test]

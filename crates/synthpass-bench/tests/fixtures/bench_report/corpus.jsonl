@@ -4,5 +4,5 @@
 {"dir":"passports","filename":"redacted-doc.jpg","provenance":"specimen","year":{"kind":"issue","value":2012},"origin":{"licence":"none-stated"},"mrz":{"issuing_state":"EGY"}}
 {"dir":"id_cards","filename":"bosnia.jpg","provenance":"specimen","year":{"kind":"issue","value":2019},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"BIH"}}
 {"dir":"id_cards","filename":"croatia.jpg","provenance":"specimen","year":{"kind":"issue","value":null},"origin":{"licence":"none-stated"},"mrz":{"issuing_state":"HRV"}}
-{"dir":"id_cards","filename":"front-only.jpg","provenance":"specimen","year":{"kind":"issue","value":2021},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"SWE"}}
+{"dir":"id_cards","expected_document_number":null,"filename":"front-only.jpg","ground_truth_stem":null,"provenance":"specimen","year":{"kind":"issue","value":2021},"notes":null,"origin":{"fetched":null,"found_by":"unrecorded","licence":"unrecorded","page":null,"url":null},"mrz":{"document_code":null,"issuing_state":null}}
 {"dir":"misc","filename":"template.jpg","provenance":"template","year":{"kind":"issue","value":2021},"origin":{"licence":"unrecorded"},"mrz":{"issuing_state":"XXX"}}

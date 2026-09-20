@@ -17,6 +17,16 @@
 //! out by hand in the branch's handoff report and confirmed against this
 //! file's own generated output before being frozen as the golden file.
 //!
+//! `corpus.jsonl`'s `id_cards/front-only.jpg` row deliberately has a `null`
+//! `mrz.issuing_state` (plus several other nullable manifest fields present
+//! as `null` rather than omitted) — the exact shape that broke
+//! `bench-report` against the real committed manifest, where 69 of 295 rows
+//! carry a null there. If `CorpusMrz::issuing_state` regresses from
+//! `Option<String>` back to a required `String`, `parse_corpus` fails on
+//! this fixture and every test below fails with it, not just a silent
+//! Markdown drift — the fixture cannot pass without the fix, which is the
+//! point: a fixture that cannot represent the real input is not a test.
+//!
 //! This test proves [`synthpass_bench::bench_report::render_markdown`] is a
 //! pure, deterministic function of its three inputs: same bytes in, same
 //! bytes out, byte for byte, every run. It does **not** prove the binary's
@@ -159,6 +169,59 @@ fn the_issuer_cut_states_not_applicable_when_no_document_carries_an_asset_id() {
         issuer_section.contains("Not applicable"),
         "a run with no asset_id anywhere must say the issuer cut is not applicable, not print an \
          empty or fabricated table:\n{markdown}"
+    );
+}
+
+/// A manifest gap (`mrz.issuing_state: null` on a row the join *does* find)
+/// and a join failure (an `asset_id` the manifest does not have at all) must
+/// stay two separate rows — conflating them would either bury a real
+/// corpus-revision mismatch inside an expected, routine gap, or attach the
+/// "do not trust these figures" warning to 69 of 295 real rows that are
+/// nothing of the kind.
+#[test]
+fn a_null_issuing_state_and_an_unmatched_asset_id_are_two_distinct_rows() {
+    let report = parse_gate_report(REPORT_JSON).expect("parse fixture gate report");
+    let baseline = parse_baseline(BASELINE_JSON).expect("parse fixture baseline");
+    let corpus = parse_corpus(CORPUS_JSONL).expect("parse fixture corpus");
+
+    let markdown = render_markdown(&report, &baseline, &corpus).expect("render fixture inputs");
+    let issuer_section = markdown
+        .split("### By issuing state")
+        .nth(1)
+        .expect("the By issuing state heading is always present")
+        .split("\n## ")
+        .next()
+        .expect("split always yields at least one piece");
+
+    // The fixture's `id_cards/front-only.jpg` row: found in the manifest,
+    // `mrz.issuing_state` is null — one document, off-denominator (0 scored,
+    // 0 hits).
+    assert!(
+        issuer_section.contains("*(issuer not recorded in manifest)* | 1 | 0 | 0 |"),
+        "expected exactly one document in the manifest-gap row:\n{markdown}"
+    );
+    // The fixture's `passports/mystery.jpg` row: an asset_id documents_detail
+    // carries but corpus.jsonl does not — one document, in-denominator
+    // (no_mrz_found), 0 hits.
+    assert!(
+        issuer_section.contains("*(no manifest match)* | 1 | 1 | 0 |"),
+        "expected exactly one document in the join-failure row:\n{markdown}"
+    );
+    // The trust warning names the join failure specifically and must not
+    // read as if it also covers the manifest gap.
+    let warning_start = issuer_section
+        .find("`(issuer not recorded in manifest)` is an expected manifest gap")
+        .expect("the manifest-gap sentence is present");
+    let join_failure_start = issuer_section
+        .find("`(no manifest match)` is different in kind: a join failure")
+        .expect("the join-failure sentence is present");
+    let trust_warning = issuer_section
+        .find("should not be trusted")
+        .expect("the trust-warning phrase is present");
+    assert!(
+        trust_warning > join_failure_start && trust_warning > warning_start,
+        "the 'should not be trusted' warning must read as attached to the join-failure \
+         sentence, not the manifest-gap one:\n{markdown}"
     );
 }
 
