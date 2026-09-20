@@ -10,6 +10,7 @@ use crate::checksum::{
     is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
 };
 use crate::dates::{date_completeness, expand_date_with_pivot, DateCompleteness};
+use crate::repair::{solve_class_sweep, FieldKind, Resolution};
 use crate::{country_name, Checks, Format, MrzData, MrzError, ParseOptions};
 
 /// A document number that overflowed its 9-character field.
@@ -1612,6 +1613,236 @@ fn substituted(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<Stri
     out
 }
 
+/// The fields on one line that carry a check digit of their own, as
+/// `(field start, field end, check-digit column, kind)` in 0-based columns.
+///
+/// Only these can be class-swept, because the sweep is arbitrated by the
+/// field's *own* check digit. A field covered only by the composite — TD1's
+/// optional data, TD2/MRV optional data — has no local arbiter, and sweeping
+/// it would be a guess the format cannot check.
+type CdFields = &'static [(usize, usize, usize, FieldKind)];
+
+const TD1_LINE1_CD_FIELDS: CdFields = &[(5, 14, 14, FieldKind::DocumentNumber)];
+const TD1_LINE2_CD_FIELDS: CdFields = &[(0, 6, 6, FieldKind::Date), (8, 14, 14, FieldKind::Date)];
+const TD2_LINE2_CD_FIELDS: CdFields = &[
+    (0, 9, 9, FieldKind::DocumentNumber),
+    (13, 19, 19, FieldKind::Date),
+    (21, 27, 27, FieldKind::Date),
+];
+const TD3_LINE2_CD_FIELDS: CdFields = &[
+    (0, 9, 9, FieldKind::DocumentNumber),
+    (13, 19, 19, FieldKind::Date),
+    (21, 27, 27, FieldKind::Date),
+    (28, 42, 42, FieldKind::PersonalNumber),
+];
+const MRV_LINE2_CD_FIELDS: CdFields = &[
+    (0, 9, 9, FieldKind::DocumentNumber),
+    (13, 19, 19, FieldKind::Date),
+    (21, 27, 27, FieldKind::Date),
+];
+
+/// A two-line format plus the line-2 fields the class sweep may touch —
+/// [`TwoLineFormat`] with the sweep's own table appended.
+type TwoLineSweep = (
+    usize,
+    &'static [u8],
+    fn(&str) -> String,
+    fn(&str) -> String,
+    TwoLineParse,
+    CdFields,
+);
+
+/// Candidate readings for a line of the right width in which one OCR
+/// confusable class was applied uniformly across a whole field — the repair
+/// [`crate::solve_class_sweep`] performs, spliced back into the line it came
+/// from.
+///
+/// **Field-scoped, never line-scoped**, and that is the safety property. A
+/// line sweep would rewrite correct occurrences of the same character
+/// elsewhere on the line — a document code legitimately containing it, say —
+/// and those positions carry no check digit, so the result would validate
+/// while being wrong. Every sweep here is arbitrated by the swept field's own
+/// check digit.
+fn class_swept(
+    raw: &str,
+    target: usize,
+    repair: fn(&str) -> String,
+    fields: CdFields,
+) -> Vec<String> {
+    let n = normalize_line(raw);
+    if n.len() != target || !is_mrz_charset(&n) {
+        return Vec::new();
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for base in [repair(&n), n.clone()] {
+        let mut cells: Vec<char> = base.chars().collect();
+        if cells.len() != target {
+            continue;
+        }
+        let mut changed = false;
+        for &(start, end, cd_col, kind) in fields {
+            if end > cells.len() || cd_col >= cells.len() {
+                continue;
+            }
+            let field: String = cells[start..end].iter().collect();
+            if let Resolution::Unique(fixed) = solve_class_sweep(&field, cells[cd_col], kind) {
+                // `solve_class_sweep` returns the swept field only. Its gate
+                // was `verify(swept_field, swept_check)`, so the digit this
+                // field must now carry is exactly the one the repaired field
+                // computes — take it from the arithmetic rather than from the
+                // sweep, which never hands it back.
+                let (Ok(cd), true) = (
+                    crate::check_digit(&fixed),
+                    fixed.chars().count() == end - start,
+                ) else {
+                    continue;
+                };
+                let Some(cd_char) = char::from_digit(cd, 10) else {
+                    continue;
+                };
+                for (i, c) in fixed.chars().enumerate() {
+                    cells[start + i] = c;
+                }
+                cells[cd_col] = cd_char;
+                changed = true;
+            }
+        }
+        if changed {
+            let line: String = cells.into_iter().collect();
+            if seen.insert(line.clone()) {
+                out.push(line);
+            }
+        }
+    }
+    out
+}
+
+/// Readings recovered by the uniform class sweep, tried **before** the
+/// ordinary damaged-capture search and preferred over it.
+///
+/// **Why a separate pass rather than more shapes in [`damaged_pass`], which
+/// is where this began.** Pooled into that search, the sweep is outvoted by
+/// the machinery it exists to complement. Measured on the motivating shape —
+/// a nine-cell document number of one character, read as its lookalike, check
+/// digit included — the single-substitution search
+/// ([`crate::repair::substitution_candidates`]) finds **three** further
+/// readings that also validate, because swapping one cell of that run shifts
+/// the checksum by exactly the amount needed at any weight-3 position. Four
+/// disagreeing readings then reach [`single`], which correctly refuses to
+/// choose among them, and nothing is recovered at all. The sweep worked and
+/// still lost.
+///
+/// So the tie-break is explicit, and it is a **prior, not arithmetic**: on the
+/// checksum evidence alone all four readings are equal. The sweep's reading
+/// explains every differing cell with one decision about one glyph class. Each
+/// substitution rival instead requires the recogniser to have read eight of
+/// nine identical glyphs correctly and exactly one of them differently — which
+/// contradicts the uniformity actually observed in the capture. Preferring the
+/// uniform explanation is a judgement about how OCR fails, and it is stated
+/// here rather than buried in an ordering.
+///
+/// Returns `None` unless [`ParseOptions::class_sweep`] is on, so the whole
+/// pass — and this judgement — costs nothing until the arm is measured.
+fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+    if !opts.class_sweep {
+        return None;
+    }
+    let mut hits: Vec<MrzData> = Vec::new();
+
+    // TD1: sweep line 1's document number, or line 2's two dates.
+    for i in 0..lines.len().saturating_sub(2) {
+        let (a, b, c) = (lines[i], lines[i + 1], lines[i + 2]);
+        let v3 = variants(c, 30, repair_td1_line3);
+        for (v1, v2) in [
+            (
+                class_swept(a, 30, repair_td1_line1, TD1_LINE1_CD_FIELDS),
+                variants(b, 30, repair_td1_line2),
+            ),
+            (
+                variants(a, 30, repair_td1_line1),
+                class_swept(b, 30, repair_td1_line2, TD1_LINE2_CD_FIELDS),
+            ),
+        ] {
+            for l1 in &v1 {
+                if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
+                    continue;
+                }
+                for l2 in &v2 {
+                    for l3 in &v3 {
+                        if let Ok(data) = parse_td1_with(l1, l2, l3, opts) {
+                            if accept_damaged(&data)
+                                && !hits.iter().any(|h| h.mrz_lines == data.mrz_lines)
+                            {
+                                hits.push(data);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Two-line formats: every sweepable field lives on line 2.
+    let two_line: [TwoLineSweep; 4] = [
+        (
+            44,
+            b"P",
+            repair_td3_line1,
+            repair_td3_line2,
+            parse_td3_with,
+            TD3_LINE2_CD_FIELDS,
+        ),
+        (
+            44,
+            b"V",
+            repair_mrv_a_line1,
+            repair_mrv_a_line2,
+            parse_mrv_a_with,
+            MRV_LINE2_CD_FIELDS,
+        ),
+        (
+            36,
+            b"IAC",
+            repair_td2_line1,
+            repair_td2_line2,
+            parse_td2_with,
+            TD2_LINE2_CD_FIELDS,
+        ),
+        (
+            36,
+            b"V",
+            repair_mrv_b_line1,
+            repair_mrv_b_line2,
+            parse_mrv_b_with,
+            MRV_LINE2_CD_FIELDS,
+        ),
+    ];
+    for i in 0..lines.len().saturating_sub(1) {
+        let (a, b) = (lines[i], lines[i + 1]);
+        for (width, prefixes, rep1, rep2, parse, cd_fields) in two_line {
+            let v1 = variants(a, width, rep1);
+            let v2 = class_swept(b, width, rep2, cd_fields);
+            for l1 in &v1 {
+                if !l1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {
+                    continue;
+                }
+                for l2 in &v2 {
+                    if let Ok(data) = parse(l1, l2, opts) {
+                        if accept_damaged(&data)
+                            && !hits.iter().any(|h| h.mrz_lines == data.mrz_lines)
+                        {
+                            hits.push(data);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    single(hits)
+}
+
 /// A reading recovered from damage has to clear a higher bar than one read
 /// cleanly: every check digit valid **and** both dates real calendar dates.
 ///
@@ -1640,6 +1871,12 @@ fn accept_damaged(data: &MrzData) -> bool {
 /// distinguish them, and the honest answer is the ordinary checksum-failed
 /// fallback, not the first candidate off the list.
 fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+    // Preferred over the search below when it lands -- see `class_sweep_pass`
+    // for why pooling the two makes the sweep lose to the machinery it
+    // complements. No-op unless the arm is on.
+    if let Some(data) = class_sweep_pass(lines, opts) {
+        return Some(data);
+    }
     let mut budget = MAX_DAMAGED_ATTEMPTS;
     let mut hits: Vec<MrzData> = Vec::new();
 
