@@ -32,6 +32,14 @@ remaining 16 need a character to be read *correctly*, which filling cannot do. S
 perfect fill-only repair moves the strict rate from 12/40 to about 17/40, and the residue is
 character-level.
 
+> **Denominators, as of the 2026-09-19 re-bless.** The figures above are what CI run
+> `35232307784` measured and are left as it measured them. The committed baseline now reads
+> **140 of 152** scored and **12 of 45** name-scorable, because that re-bless moved two
+> denominators and no reading — see
+> [`denominator-rebless-2026-09-19.md`](../benchmarks/denominator-rebless-2026-09-19.md). The
+> argument below is unaffected: it turns on the residue being character-level, which neither
+> denominator change touches.
+
 Two further facts bound what any change here can assume:
 
 - **`ocrs` exposes no per-character score.** Its `TextChar` carries a rect and a character, no
@@ -73,6 +81,50 @@ Two further facts bound what any change here can assume:
 Meanwhile 10 of the 13 still-open frozen M6 misses are `checksum_failed`
 ([ADR-0011](ADR-0011-split-m6-packaging-into-m8.md) amendment) — documents where an MRZ was
 found and read, but at least one check digit disagrees. Those are recognition failures too.
+
+### Threshold 1 is already below parity
+
+The committed matrix probe measured 44 documents and 3,123 aligned cells. On that same population,
+the ordinary `ocrs` beam read **2,555/3,123 (81.81%)** correctly. The best raw per-cell matrix mode,
+`cell_n2`, read **2,525/3,123 (80.85%)**. The proposed raw cell read therefore misses threshold 1
+(`per-cell accuracy ≥ ocrs`) by 30 cells, or 0.96 percentage points.
+
+This is a measured result for the raw read, not a rejection of the constrained prototype. It does
+mean that a per-cell read by itself buys nothing: any value in `mrz-cell` must come from the
+constraints around it, and those constraints remain unmeasured.
+
+The remaining work has three separately testable obligations:
+
+- **Masks and position classes** must raise the same-cell accuracy to at least the `ocrs` reference
+  (2,555/3,123) without silently dropping cells; this is threshold 1 on the fixed real-fixture
+  population.
+- **Ink priors and filler handling** must improve the strict name rate by at least 10 percentage
+  points over the best `chargrid` arm on the 45 name-scorable real documents (the
+  current baseline's count), while preserving the
+  document-for-document Tier-1 count; these are thresholds 2 and 3.
+- **Checksum-guided search** must recover only readings that satisfy the relevant checks, stay within
+  the 200 ms p50 latency budget on the recorded machine, and produce byte-identical repeated reports;
+  these are thresholds 3–5, with the latency and determinism measurements required on both the real
+  and fixed-seed synthetic populations.
+
+### Options after the parity result
+
+- **A — Reject now.** Treat the raw read's 80.85% as the measured ceiling, keep the matrix numbers,
+  and stop the prototype. This costs no implementation time and closes the question, but leaves the
+  unmeasured constraints unexplored.
+- **B — Narrow the proposal to a constraints-only prototype.** Keep this ADR Proposed, explicitly
+  require masks, ink priors and checksum search to clear the five existing thresholds, and measure
+  those pieces before funding a full classifier. This costs one controlled prototype and its A/B
+  runs, but preserves a falsifiable route to the gains the raw read cannot provide.
+- **C — Continue the full design as written.** Build every component and defer the parity failure
+  until the end. This spends the most engineering time while leaving the first gate already known
+  to fail, and risks treating an unmeasured constraint as an assumed improvement.
+
+**Recommendation: B.** The raw result rules out the simplest interpretation of the ADR, while the
+closed alphabet, grid geometry and checksum oracle still make a constrained experiment testable.
+Narrowing the proposal records that distinction and makes the next spend answer the thresholds
+directly. The maintainer may instead choose A and reject the ADR; this amendment does not change its
+`Proposed` status.
 
 ### Why the MRZ band is unusually favourable to a non-learned classifier
 
