@@ -1,0 +1,39 @@
+{
+  "timestamp_unix": 1735689600,
+  "source": "real-specimens",
+  "profile": null,
+  "format": null,
+  "count": 10,
+  "seed_start": null,
+  "mrz_class_sweep_arm": "off",
+  "providers": [
+    {
+      "provider_id": "mrz",
+      "documents": 10,
+      "capability": {
+        "deterministic": true,
+        "vision": false,
+        "cost": "free"
+      },
+      "ocr_arms": {
+        "texture": "on",
+        "order": "default",
+        "rotate": "default",
+        "skew": "default",
+        "chargrid": "off"
+      },
+      "documents_detail": [
+        { "name": "fixture-01", "asset_id": "passports/afghanistan.jpg", "mrz_found": true, "mrz_format": "TD3", "read_ok": true, "mrz_checksums_valid": true, "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-02", "asset_id": "passports/albania.jpg", "mrz_found": true, "mrz_format": "TD3", "read_ok": true, "mrz_checksums_valid": true, "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-03", "asset_id": "id_cards/bosnia.jpg", "mrz_found": true, "mrz_format": "TD1", "read_ok": true, "mrz_checksums_valid": true, "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-04", "asset_id": "id_cards/croatia.jpg", "mrz_found": true, "mrz_format": "TD1", "read_ok": true, "mrz_checksums_valid": true, "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-05", "asset_id": "misc/template.jpg", "mrz_found": true, "mrz_format": "TD2", "read_ok": true, "mrz_checksums_valid": true, "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-06", "asset_id": "passports/germany.jpg", "mrz_found": true, "mrz_format": "TD3", "read_ok": true, "mrz_checksums_valid": false, "miss_reason": "checksum_failed", "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-07", "asset_id": "passports/mystery.jpg", "mrz_found": false, "read_ok": true, "mrz_checksums_valid": false, "miss_reason": "no_mrz_found", "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-08", "asset_id": "passports/redacted-doc.jpg", "mrz_found": false, "read_ok": true, "mrz_checksums_valid": false, "miss_reason": "redacted_mrz", "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-09", "asset_id": "id_cards/front-only.jpg", "mrz_found": false, "read_ok": true, "mrz_checksums_valid": false, "miss_reason": "no_mrz_expected", "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null },
+        { "name": "fixture-10", "mrz_found": true, "mrz_format": "TD3", "read_ok": true, "mrz_checksums_valid": false, "miss_reason": "checksum_failed_specimen", "assertions_total": 0, "assertions_unsupported": 0, "unsupported_fields": [], "ocr_ms": 5, "retry_budget_hit": false, "retry_stop": null }
+      ]
+    }
+  ]
+}

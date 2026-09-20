@@ -17,6 +17,7 @@ use synthpass_gen::degrade::{apply_profile, CaptureProfile};
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
+pub mod bench_report;
 pub mod ground_truth;
 pub mod provider_bench;
 pub mod report;
