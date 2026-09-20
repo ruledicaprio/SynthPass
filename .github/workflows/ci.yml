@@ -3,7 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+  # `labeled`/`unlabeled` are on top of the three default activity types, so the
+  # `skip-changelog` escape hatch works the way check-changelog.sh advertises it.
+  # PR_LABELS below reads `github.event.pull_request.labels`, which is the event
+  # payload frozen when the event fired: adding the label produced no event at
+  # all, and re-running the job replayed the old payload, so the documented
+  # remedy could not take effect without an unrelated push.
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 concurrency:
