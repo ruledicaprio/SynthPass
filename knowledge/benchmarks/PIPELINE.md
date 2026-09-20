@@ -97,7 +97,7 @@ differs from CI's by float rounding.
 | `hit` | `crates/synthpass-bench/src/lib.rs` (`SeedResult.hit`, `check_document`) | checksum-valid MRZ **and** document number equals the label |
 | `miss_kind` | `crates/synthpass-bench/src/lib.rs` (`miss_kind` over `MissReason`) | the bucket names every downstream file keys on |
 | `tier1_hit_rate` | `crates/synthpass-bench/src/provider_bench.rs` (`Tier1HitRate`) | hits / **scored** documents; `NotApplicable` for non-deterministic providers |
-| `OFF_DENOMINATOR_KINDS` | `crates/synthpass-bench/src/bin/provider-bench.rs` | `redacted_mrz`, `no_mrz_expected`, `checksum_failed_specimen` — documents that cannot yield a hit; must stay identical to `run_prepped`'s filter |
+| `OFF_DENOMINATOR_KINDS` | `crates/synthpass-bench/src/report.rs` | `redacted_mrz`, `no_mrz_expected`, `checksum_failed_specimen` — documents that cannot yield a hit; must stay identical to `run_prepped`'s filter |
 | `REGRESSION_BUCKETS` | same file | `checksum_failed`, `no_mrz_found`, `ocr_error`, `document_number_mismatch`, `false_positive_mrz` — growth fails the gate |
 | `strict_tier1_hit_rate`, `names_exact_among_hits` | `provider_bench.rs` (`StrictNameHitRate`); synthetic twin in `synthpass-bench.rs` | strict hits / name-scorable scored documents; strict hits / name-scorable hits ([`ADR-0013`](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)) |
 | per-field CER, `field_match_rate` | `provider_bench.rs` (`AccuracyStats`) | `None` when no labelled document — never a fabricated `0.0` |

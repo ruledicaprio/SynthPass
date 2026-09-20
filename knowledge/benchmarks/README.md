@@ -454,7 +454,7 @@ the pinned DATA SHA.
 **What counts as a regression.** The gate fails if `tier1_hits` drops below
 `baseline.tier1_hits - tolerance`, **or** if any of `checksum_failed`, `no_mrz_found`,
 `ocr_error`, `document_number_mismatch` or `false_positive_mrz` exceeds its baseline value plus
-`tolerance` (`REGRESSION_BUCKETS`, `crates/synthpass-bench/src/bin/provider-bench.rs`). Checking
+`tolerance` (`REGRESSION_BUCKETS`, `crates/synthpass-bench/src/report.rs`). Checking
 the whole histogram, not just the headline HIT count, catches a change that
 moves documents `checksum_failed → no_mrz_found` (or the reverse) while the net
 HIT count stays flat — a real behaviour change worth a human looking at. The three
