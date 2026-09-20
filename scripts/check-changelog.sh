@@ -74,9 +74,21 @@ for f in changelog.d/*.md changelog.d/mrz/*.md; do
 done
 [ "$status" -eq 0 ] && echo "    all fragments well-formed"
 
-# The remaining checks need something to diff against.
+# The remaining checks need something to diff against. Exiting silently here
+# reported green for three checks that never ran: a bare local run -- which is
+# what CONTRIBUTING and CLAUDE.md tell you to do before a PR -- validated only
+# fragment grammar, and a PR that CI then failed on the missing-fragment rule
+# passed locally. A local pre-PR run means "compare me against main", so say so
+# and do it; when there is genuinely nothing to diff, skip loudly.
 if [ -z "$base" ]; then
-    exit "$status"
+    if git rev-parse --verify --quiet origin/main >/dev/null; then
+        base=origin/main
+        echo "    (no --base given; diffing against origin/main)"
+    else
+        echo "  no --base and no origin/main: PR-scoped checks SKIPPED" >&2
+        echo "  this run validated fragment grammar ONLY" >&2
+        exit "$status"
+    fi
 fi
 
 if ! git rev-parse --verify --quiet "$base" >/dev/null; then
