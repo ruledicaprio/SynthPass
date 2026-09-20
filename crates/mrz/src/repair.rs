@@ -518,6 +518,133 @@ pub fn solve_substitution(field: &str, check: char, kind: FieldKind) -> Resoluti
     }
 }
 
+/// Every way one confusable class could be swept uniformly across `field`
+/// *and* its own check-digit cell.
+///
+/// [`solve_substitution`] varies exactly one position at a time
+/// (`MAX_SUBSTITUTIONS` stays fixed at one — see its doc comment for why).
+/// This function instead varies *every* occurrence of exactly one character
+/// at once, including the check-digit cell if it happens to carry the same
+/// character. The two are additive by construction, never in competition: a
+/// character occurring only once is [`solve_substitution`]'s case, so this
+/// function requires **at least two** occurrences of a character across
+/// `field` and `check_digit` combined before it will consider sweeping it.
+/// A uniform sweep of one class is a single decision, not the independent
+/// multi-position search `MAX_SUBSTITUTIONS` exists to forbid, which is why
+/// it sits beside that cap rather than raising it.
+///
+/// Measured motivation: a TD1 card back whose document number is nine cells
+/// of one digit plus a check-digit cell of the same digit, all read as one
+/// *letter* from that digit's [`CONFUSABLES`] row. Line 2 of the same card
+/// reads the identical glyph correctly 16 times elsewhere, so this is not
+/// legibility — it is field alphabet: the misread letter is legal wherever
+/// OCR emitted it, and nothing downstream rejects it until the check digit is
+/// swept along with the rest of the run.
+///
+/// # Why this is field-scoped, never line-scoped
+///
+/// A TD1 line 1 carries both a document code and a document number, but the
+/// document code carries **no check digit of its own**. Sweeping a whole
+/// *line* would rewrite a letter that is correct there, and the result would
+/// validate while being wrong — precisely what [`CONFUSABLES`]'s own doc
+/// comment warns a residue-class sweep can do. This function only ever sees
+/// one already-check-digited field, so it can never reach past it; do not
+/// build a line-scoped version of this by extending
+/// [`substitution_candidates`].
+///
+/// # What it refuses
+///
+/// - Non-ASCII input, or a `field` still carrying [`UNKNOWN`]: not this
+///   module's problem to guess around.
+/// - `check_digit == `[`UNKNOWN`]: an unread check digit proves nothing.
+/// - A `field` whose printed check digit already verifies under `kind`: this
+///   never "repairs" a reading the arithmetic has already proven, so it can
+///   never be tempted by a class that would *coincidentally* also validate.
+/// - A character occurring only once across `field` and `check_digit`: that
+///   is [`solve_substitution`]'s job, and the two must never both propose an
+///   answer for the same position.
+/// - A swept reading whose own checksum fails to verify.
+/// - A swept reading that fails `kind`'s structural check even though its
+///   checksum verifies — a filler in the interior of a
+///   [`FieldKind::DocumentNumber`]/[`FieldKind::PersonalNumber`], or six
+///   digits naming no real calendar date under [`FieldKind::Date`].
+/// - More than one surviving class: returns [`Resolution::Ambiguous`] rather
+///   than choosing, exactly as [`solve_substitution`] does. A guess that
+///   happens to be wrong is indistinguishable from a proof.
+///
+/// Bounded by `MAX_SUBSTITUTION_CANDIDATES`, the same ceiling
+/// [`substitution_candidates`] uses.
+///
+/// ```
+/// use mrz::{solve_class_sweep, FieldKind, Resolution};
+///
+/// // Synthetic TD1-style document number, built from shape rather than
+/// // copied from any real document: nine identical digits plus a
+/// // check-digit cell of the same digit, all misread by OCR as one
+/// // confusable letter -- the failure measured on a real TD1 card back,
+/// // where a field-alphabet gap let the letter through until the check
+/// // digit was swept along with the rest of the run.
+/// let misread = "OOOOOOOOO"; // nine letters where nine digits were printed
+/// assert_eq!(
+///     solve_class_sweep(misread, 'O', FieldKind::DocumentNumber),
+///     Resolution::Unique("000000000".to_string()),
+/// );
+///
+/// // A single occurrence is out of scope -- that is `solve_substitution`'s
+/// // case, and the two never compete for the same position.
+/// assert_eq!(
+///     solve_class_sweep("A0B", '1', FieldKind::Other),
+///     Resolution::Unresolvable,
+/// );
+/// ```
+pub fn solve_class_sweep(field: &str, check_digit: char, kind: FieldKind) -> Resolution {
+    if !field.is_ascii() || field.contains(UNKNOWN) || check_digit == UNKNOWN {
+        return Resolution::Unresolvable;
+    }
+    if verify(field, check_digit) && satisfies(field, kind) {
+        // Already a faithful read. Never sweep a field the check digit has
+        // already proven correct, even if some class would coincidentally
+        // also validate -- see the "field-scoped" section above.
+        return Resolution::Unresolvable;
+    }
+
+    let chars: Vec<char> = field.chars().collect();
+    let mut classes: Vec<char> = Vec::new();
+    for &c in chars.iter().chain(std::iter::once(&check_digit)) {
+        if !classes.contains(&c) {
+            classes.push(c);
+        }
+    }
+
+    let mut hits: Vec<String> = Vec::new();
+    'classes: for x in classes {
+        let occurrences = chars.iter().filter(|&&c| c == x).count() + usize::from(check_digit == x);
+        if occurrences < 2 {
+            continue;
+        }
+        for y in confusable_alternatives(x) {
+            let swept_field: String = chars.iter().map(|&c| if c == x { y } else { c }).collect();
+            let swept_check = if check_digit == x { y } else { check_digit };
+            if verify(&swept_field, swept_check)
+                && satisfies(&swept_field, kind)
+                && !hits.contains(&swept_field)
+            {
+                hits.push(swept_field);
+                if hits.len() >= MAX_SUBSTITUTION_CANDIDATES {
+                    break 'classes;
+                }
+            }
+        }
+    }
+
+    hits.sort();
+    match hits.len() {
+        0 => Resolution::Unresolvable,
+        1 => Resolution::Unique(hits.remove(0)),
+        _ => Resolution::Ambiguous { candidates: hits },
+    }
+}
+
 /// Every concrete reading of a line still carrying [`UNKNOWN`]s, for callers
 /// that would rather let a whole-record parse be the oracle than resolve field
 /// by field.
@@ -742,6 +869,182 @@ mod tests {
             solve_substitution(corrupted, check, FieldKind::Other),
             Resolution::Unique(field.to_string())
         );
+    }
+
+    #[test]
+    fn solve_class_sweep_resolves_a_uniform_class_across_field_and_check_digit() {
+        // Shape of the motivating TD1 document number: nine cells of one
+        // digit plus a check-digit cell of the same digit, all misread as
+        // one confusable letter. Constructed from shape, not copied from any
+        // real document.
+        let misread = "OOOOOOOOO"; // 9 letters, all-zero field printed
+        assert_eq!(
+            check_digit("000000000").unwrap(),
+            0,
+            "sanity: 9 zeros checksum to 0"
+        );
+        assert_eq!(
+            solve_class_sweep(misread, 'O', FieldKind::DocumentNumber),
+            Resolution::Unique("000000000".to_string()),
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_refuses_an_already_valid_field_even_when_a_class_would_also_validate() {
+        // Mirrors the reason this repair must stay field-scoped: a field
+        // that already checksums must never be swept, even when sweeping its
+        // repeated class would *coincidentally* also validate. Two letters
+        // sitting at the weight-7 and weight-3 positions of a two-character
+        // field sum to a multiple of ten, so swapping the whole class leaves
+        // the checksum completely unchanged -- both readings verify by
+        // construction, not by luck, which is exactly what makes this a real
+        // test of the guard rather than an accident of the fixture.
+        let field = "OO";
+        assert!(
+            verify(field, '0'),
+            "fixture must already validate as printed"
+        );
+        assert!(
+            verify("00", '0'),
+            "the swept reading would *also* validate -- the trap this guards against"
+        );
+        assert_eq!(
+            solve_class_sweep(field, '0', FieldKind::Other),
+            Resolution::Unresolvable,
+            "a field that already checksums must never be swept, however tempting the class"
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_ignores_a_single_occurrence() {
+        // 'A', '0' and 'B' each occur exactly once across the field and the
+        // check digit, so none qualifies for a class sweep -- that is
+        // `solve_substitution`'s case, and the two must never compete for
+        // the same position.
+        assert!(
+            !confusable_alternatives('A').is_empty(),
+            "the table does cover 'A'"
+        );
+        assert!(!verify("A0B", '9'), "fixture must not already validate");
+        assert_eq!(
+            solve_class_sweep("A0B", '9', FieldKind::Other),
+            Resolution::Unresolvable,
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_reports_ambiguity_instead_of_guessing() {
+        // Two independent classes ('O' -> '0' and 'M' -> 'N') each occur
+        // twice, at positions engineered so *both* single-class sweeps
+        // checksum to the same digit while the unswept field does not.
+        // Neither the checksum nor `FieldKind::Other` can separate them, so
+        // the honest answer is ambiguity, not a pick.
+        let field = "<<O<<O<<M<<M";
+        assert!(!verify(field, '4'), "fixture must not already validate");
+        assert!(verify("<<0<<0<<M<<M", '4'), "the O-class sweep validates");
+        assert!(
+            verify("<<O<<O<<N<<N", '4'),
+            "the M-class sweep validates too"
+        );
+        assert_eq!(
+            solve_class_sweep(field, '4', FieldKind::Other),
+            Resolution::Ambiguous {
+                candidates: vec!["<<0<<0<<M<<M".to_string(), "<<O<<O<<N<<N".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_rejects_an_interior_filler_in_a_document_number() {
+        // Sweeping the repeated 'O' to '0' produces "0<0B", whose checksum
+        // verifies against '7' -- but the untouched '<' sits before a
+        // non-filler character, which `FieldKind::DocumentNumber` must
+        // reject however well the arithmetic checks out.
+        let field = "O<OB";
+        assert!(!verify(field, '7'), "fixture must not already validate");
+        assert!(
+            verify("0<0B", '7'),
+            "the swept reading's checksum does verify"
+        );
+        assert!(
+            "0<0B".trim_end_matches('<').contains('<'),
+            "fixture sanity: the swept reading really does carry an interior filler"
+        );
+        assert_eq!(
+            solve_class_sweep(field, '7', FieldKind::DocumentNumber),
+            Resolution::Unresolvable,
+            "an interior filler must be rejected even though the checksum verifies",
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_rejects_a_swept_reading_that_names_no_calendar_date() {
+        // Sweeping the repeated 'O' to '0' produces "001340" -- checksum
+        // verifies against '4', but month 13 is not a real calendar month,
+        // so `FieldKind::Date` must reject it even though the arithmetic
+        // checks out.
+        let field = "OO1340";
+        // The letters make the printed field itself already fail
+        // `FieldKind::Date` (not six digits), so the short-circuit guard
+        // must not fire even though its checksum happens to verify.
+        assert!(
+            !(verify(field, '4') && is_plausible_yymmdd(field)),
+            "the already-valid guard must not fire for this fixture"
+        );
+        assert!(
+            verify("001340", '4'),
+            "the swept reading's checksum does verify"
+        );
+        assert!(
+            !is_plausible_yymmdd("001340"),
+            "fixture sanity: month 13 is not real"
+        );
+        assert_eq!(
+            solve_class_sweep(field, '4', FieldKind::Date),
+            Resolution::Unresolvable,
+            "an impossible calendar date must be rejected even though the checksum verifies",
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_leaves_cross_residue_rejection_untouched() {
+        // '2'/'7' crosses residue classes (unlike most `CONFUSABLES` rows),
+        // so the check digit itself -- not the table -- must reject the
+        // wrong reading rather than the table doing it. Two '2's (at the
+        // weight-7 and weight-1 positions) plus a check-digit cell that is
+        // also '2', all misread uniformly as '7': the sweep must resolve
+        // back to the digit reading and never to the letter 'T' also listed
+        // for '7' -- 'T' is not an ASCII digit or filler, so it can never be
+        // a valid check-digit cell.
+        let true_field = "2C2";
+        assert_eq!(
+            check_digit(true_field).unwrap(),
+            2,
+            "sanity: fixture's own check digit"
+        );
+        assert!(verify(true_field, '2'), "sanity: the true reading verifies");
+        let misread = "7C7"; // every '2', including the check digit, read as '7'
+        assert!(!verify(misread, '7'), "fixture must not already validate");
+        assert_eq!(
+            solve_class_sweep(misread, '7', FieldKind::Other),
+            Resolution::Unique(true_field.to_string()),
+        );
+    }
+
+    #[test]
+    fn solve_class_sweep_never_touches_an_already_valid_field() {
+        for field in ["0000000", "OOOOOOO", "TTTTTT", "OK<<<<"] {
+            let check = char::from_digit(check_digit(field).unwrap(), 10).unwrap();
+            assert!(
+                verify(field, check),
+                "{field:?} fixture must already validate"
+            );
+            assert_eq!(
+                solve_class_sweep(field, check, FieldKind::Other),
+                Resolution::Unresolvable,
+                "{field:?} already validates; the sweep must not touch it"
+            );
+        }
     }
 
     #[test]
