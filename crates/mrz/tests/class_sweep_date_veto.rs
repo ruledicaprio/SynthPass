@@ -8,10 +8,20 @@
 //! correctly it is read.
 //!
 //! Two fixtures, identical in every respect except the dates, isolate the
-//! variable with no instrumentation:
+//! variable with no instrumentation. The composite check digit differs too,
+//! necessarily -- it covers the date fields -- so it is a consequence of the
+//! change rather than a second variable.
 //!
 //! - **Case A** -- placeholder dates (`000000` / `000000`).
 //! - **Case B** -- the same zone with genuine calendar dates.
+//!
+//! **What carries the proof is the pair, and only under mutation.** Case A
+//! asserts a negative, which passes for any reason at all; Case B is what
+//! rules the alternatives out. Deleting the date clause from `accept_damaged`
+//! turns Case A into a recovery, and neutralising `class_sweep_pass` turns
+//! Case B into a failure -- so each test is sensitive to exactly the thing it
+//! names. Neither fact is an assertion in this file, and no test below should
+//! be read as establishing it on its own.
 //!
 //! In both, the same nine-digit document number is corrupted identically: the
 //! whole field plus its check-digit cell rewritten from `0` to the confusable
@@ -117,6 +127,9 @@ fn case_a_placeholder_dates_do_not_recover_even_with_sweep_on() {
     assert_ne!(broken, zone, "sanity: corruption changed the zone");
 
     let off = ParseOptions::default();
+    // Without this, a flipped default would silently turn this control arm
+    // into a second treatment arm and the assertion below would still pass.
+    assert!(!off.class_sweep, "sanity: the arm is off by default");
     let recovered_off = find_and_parse_with(&broken, &off)
         .ok()
         .is_some_and(|d| d.valid());
@@ -134,19 +147,29 @@ fn case_a_placeholder_dates_do_not_recover_even_with_sweep_on() {
     );
 }
 
-/// The mechanism, not just the outcome: reconstruct exactly what
-/// `class_sweep_pass` computes for Case A's corrupted document number, and
-/// show the result is checksum-valid on its own terms while failing the date
-/// constraint -- the two facts `accept_damaged` combines to refuse it.
+/// Pins the two `MrzData` flags a placeholder-date zone produces: `valid()`
+/// true, `dates_well_formed` false. Those are the two facts `accept_damaged`
+/// combines, so this records the raw material of the veto.
 ///
-/// This does not call the private `accept_damaged`/`class_sweep_pass`
-/// functions; it uses the same public primitive they are built from
-/// (`solve_class_sweep`) to repair the field, splices the repair back in by
-/// hand, and parses the result directly with [`parse_td1_with`] -- a plain,
-/// non-repairing parse, so nothing here can be mistaken for the search
-/// pass succeeding on its own.
+/// **This test is documentary, not evidential, and the distinction matters.**
+/// It survives deleting the date clause *and* neutralising the sweep, so it
+/// detects neither. Two reasons, both worth stating so nobody mistakes it for
+/// proof later:
+///
+/// - The sweep is an exact inverse of the corruption here, so the spliced line
+///   is byte-identical to the emitted one. `valid()` is therefore guaranteed by
+///   fixture construction, and re-asserts what Case A's own sanity check
+///   already covers. It cannot distinguish "the sweep found the right answer"
+///   from "the sweep found an answer that validates" -- in this fixture those
+///   are the same string.
+/// - `dates_well_formed` being false is a property of [`Date`] and `validity`,
+///   not of the sweep or of `accept_damaged`.
+///
+/// It also does not reproduce what `class_sweep_pass` computes. That pass
+/// sweeps over two bases, the first with the check-digit cell already
+/// digitized by `repair_td1_line1`; this reconstructs only the second.
 #[test]
-fn the_swept_reading_is_checksum_valid_but_fails_the_date_constraint() {
+fn placeholder_dates_leave_the_reading_valid_but_not_well_formed() {
     let zone = td1_zone("000000", "000000");
     let broken = sweep_document_number_to_letters(&zone);
     let lines: Vec<&str> = broken.lines().collect();
@@ -164,10 +187,10 @@ fn the_swept_reading_is_checksum_valid_but_fails_the_date_constraint() {
              class -- this is `class_sweep_wiring.rs`'s own precondition"
         );
     };
-    assert_eq!(
-        fixed_field, DOCUMENT_NUMBER,
-        "the sweep must recover the printed digits, not merely some reading"
-    );
+    // Near-tautological -- nine of one confusable glyph have a single
+    // resolution -- but it fails loudly if `solve_class_sweep` ever returns a
+    // different residue class for this shape.
+    assert_eq!(fixed_field, DOCUMENT_NUMBER);
 
     let fixed_check_digit =
         check_digit(&fixed_field).expect("nine digits always yield a check digit");
@@ -186,12 +209,12 @@ fn the_swept_reading_is_checksum_valid_but_fails_the_date_constraint() {
 
     assert!(
         data.valid(),
-        "the swept reading is a proof, not a guess: every check digit -- \
-         including the composite -- validates"
+        "every check digit validates -- guaranteed by construction here, since \
+         the spliced line is the emitted one"
     );
     assert!(
         !data.validity(Date::new(2000, 1, 1)).dates_well_formed,
-        "yet the printed dates are the placeholder `000000`, so it is this \
-         flag -- not a check-digit failure -- that `accept_damaged` is acting on"
+        "while the placeholder dates are not calendar dates: the second half of \
+         the conjunction `accept_damaged` applies, recorded but not measured here"
     );
 }
