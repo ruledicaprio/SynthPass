@@ -10,6 +10,9 @@ hits, and the expected miss buckets (10 `checksum_failed`, 19 `checksum_failed_s
 names were also unchanged at 12 strict hits and 33 name-scorable hits of 45. The prior 31-record
 miss-only dump matched the new run on all six legacy keys for all 31 records.
 
+The key stratified result is that **78% of substitutions on damaged-name hits were the filler
+glyph**. The blended rate must be read with the clean-hit and damaged-hit strata below.
+
 ## Method
 
 Only records with a ground-truth fixture contribute character cells. A cell is counted when both
@@ -78,13 +81,79 @@ separate shift events. Under that alignment, the three rates are:
 
 The aligned denominators include only truth cells paired by the backtrace; cells represented by an
 insertion or deletion are reported as shifts, not substitutions. The dump contains 64 fixture
-documents. The backtrace found 458 insertion/deletion operations across 36 documents; 28 documents
-had no shift operation. Shift runs ranged from one cell to 90 cells, so the shift population is not
-a single-cell nuisance.
+documents. Shift runs ranged from one cell to 90 cells, so the shift population is not a
+single-cell nuisance.
 
 The 15% split is diagnostic context for the bimodal positional result, not a threshold used to
 produce these rates. The substitution-only figures come from the alignment, not from discarding a
 bucket.
+
+The blended substitution rate is not representative of either population. Split by outcome, the
+hit-side rate is 6.05% and the miss-side rate is 22.37%. The per-glyph strata are:
+
+| glyph | hits | misses |
+| :---: | ---: | ---: |
+| 0 | 1.1% | 35.0% |
+| 1 | 0.0% | 31.5% |
+| 2 | 0.0% | 35.2% |
+| 3 | 2.8% | 34.5% |
+| 4 | 0.0% | 40.4% |
+| 5 | 0.0% | 42.6% |
+| 6 | 0.0% | 44.1% |
+| 7 | 0.0% | 50.0% |
+| 8 | 0.0% | 22.9% |
+| 9 | 0.0% | 32.6% |
+| A | 2.4% | 8.7% |
+| B | 3.7% | 12.5% |
+| C | 6.5% | 6.9% |
+| D | 2.9% | 13.6% |
+| E | 0.0% | 8.8% |
+| F | 0.0% | 15.0% |
+| G | 0.0% | 8.7% |
+| H | 0.0% | 3.3% |
+| I | 3.4% | 12.5% |
+| J | 7.7% | 33.3% |
+| K | 11.8% | 17.4% |
+| L | 0.0% | 10.7% |
+| M | 9.8% | 28.3% |
+| N | 4.1% | 16.3% |
+| O | 5.7% | 10.3% |
+| P | 1.4% | 12.2% |
+| Q | 0.0% | 0.0% |
+| R | 5.1% | 17.3% |
+| S | 3.4% | 16.1% |
+| T | 0.0% | 24.0% |
+| U | 0.0% | 18.8% |
+| V | 15.4% | 37.5% |
+| W | 50.0% | 33.3% |
+| X | 0.0% | 50.0% |
+| Y | 0.0% | 0.0% |
+| Z | 5.3% | 15.4% |
+| `<` | 13.0% | 18.8% |
+
+Within hits, 24 clean documents contributed 2,114 cells at 2.08% substitutions; the other nine
+contributed 794 cells at 16.62%. In the damaged-hit stratum, 103 of 132 substitutions (78%) were
+the filler glyph. Digits stayed at 0.0–1.3% in the clean-hit stratum, while `<` was 3.9% there and
+33.1% in the damaged-hit stratum. This is the strongest evidence that the remaining problem is
+filler-run segmentation in the name region, not general image quality.
+
+The shift-count discrepancy is **unresolved**, and the explanation previously given here was
+withdrawn as unsupported. Two independent runs report **458 operations across 36 documents** and
+**92 operations across 26 documents** for what both describe as the same quantity: individual
+inserted or deleted cells produced by a per-line Levenshtein backtrace. A definitional difference
+was proposed -- that one figure groups operations into events and the other does not -- but neither
+implementation performs such grouping, so that explanation does not hold.
+
+The obvious structural cause was tested and refuted. Of the 171 dumped records, 107 carry no ground
+truth, 3 carry no recovered lines, **2** differ in line count (both misses, two truth lines read as
+three, +2 cells each) and **none** differ in per-line length; the remaining 59 are fully comparable.
+Including or excluding those two documents moves the operation count by at most 4, not by a factor
+of five.
+
+Until one implementation is committed and re-run against the other, the per-glyph substitution rates
+in this report should be read as the load-bearing result and the shift-operation count as
+provisional. The two do not depend on each other: substitutions are counted from diagonal
+backtrace steps and are unaffected by how insert/delete steps are tallied.
 
 ## Checksum-valid hits with surviving mismatches
 
