@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 132.06777954101562,
+      "grid_pitch_px": 8.711515426635742,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 24.710216522216797,
+      "grid_pitch_px": 11.079501152038574,
+      "line_index": 1
+    }
+  ],
+  "stem": "Poland_Passport_Specimen_P0_POL_2023_mrz"
+}

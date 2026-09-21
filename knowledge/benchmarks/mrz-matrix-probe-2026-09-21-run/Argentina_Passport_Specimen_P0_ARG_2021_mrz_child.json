@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 448.9686584472656,
+      "grid_pitch_px": 2.180562973022461,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 20.81212043762207,
+      "grid_pitch_px": 14.683156967163086,
+      "line_index": 1
+    }
+  ],
+  "stem": "Argentina_Passport_Specimen_P0_ARG_2021_mrz_child"
+}

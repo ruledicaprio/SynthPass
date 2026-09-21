@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 395.00909423828125,
+      "grid_pitch_px": 14.980549812316895,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 375.948486328125,
+      "grid_pitch_px": 16.593305587768555,
+      "line_index": 1
+    }
+  ],
+  "stem": "China_Passport_Specimen_2012_mrz"
+}

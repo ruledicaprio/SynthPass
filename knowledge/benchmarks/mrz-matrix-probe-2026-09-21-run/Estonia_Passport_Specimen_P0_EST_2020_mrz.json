@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 23.652278900146484,
+      "grid_pitch_px": 12.329751968383789,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 22.899999618530273,
+      "grid_pitch_px": 12.272092819213867,
+      "line_index": 1
+    }
+  ],
+  "stem": "Estonia_Passport_Specimen_P0_EST_2020_mrz"
+}

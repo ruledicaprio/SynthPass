@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 249.3712158203125,
+      "grid_pitch_px": 34.009910583496094,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 239.7982635498047,
+      "grid_pitch_px": 34.64289093017578,
+      "line_index": 1
+    }
+  ],
+  "stem": "Cetis_Sample_Passport_Specimen_P0_TRC_2022_mrz_inner_page"
+}

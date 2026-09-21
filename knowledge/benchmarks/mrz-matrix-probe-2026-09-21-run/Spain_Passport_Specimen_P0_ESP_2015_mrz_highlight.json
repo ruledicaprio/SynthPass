@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 33.65856170654297,
+      "grid_pitch_px": 12.166868209838867,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 34.23030471801758,
+      "grid_pitch_px": 11.95651912689209,
+      "line_index": 1
+    }
+  ],
+  "stem": "Spain_Passport_Specimen_P0_ESP_2015_mrz_highlight"
+}

@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 122.57878875732422,
+      "grid_pitch_px": 16.404369354248047,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 118.95454406738281,
+      "grid_pitch_px": 17.099365234375,
+      "line_index": 1
+    }
+  ],
+  "stem": "Turkiye_Passport_Specimen_P0_TUR_2025_mrz"
+}
