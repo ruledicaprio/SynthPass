@@ -76,8 +76,8 @@ separate shift events. Under that alignment, the three rates are:
 
 | glyph | miss-only | naive-positional | substitution-only after alignment |
 | :---: | ---: | ---: | ---: |
-| 0 | 17.9% | 17.7% (97/549) | **16.1% (88/546)** |
-| `<` | 12.3% | 19.4% (365/1,880) | **17.0% (316/1,856)** |
+| 0 | 17.9% | 17.7% (97/549) | **17.0% (93/548)** |
+| `<` | 12.3% | 19.4% (365/1,880) | **18.3% (343/1,876)** |
 
 The aligned denominators include only truth cells paired by the backtrace; cells represented by an
 insertion or deletion are reported as shifts, not substitutions. The dump contains 64 fixture
@@ -88,8 +88,11 @@ The 15% split is diagnostic context for the bimodal positional result, not a thr
 produce these rates. The substitution-only figures come from the alignment, not from discarding a
 bucket.
 
-The blended substitution rate is not representative of either population. Split by outcome, the
-hit-side rate is 6.05% and the miss-side rate is 22.37%. The per-glyph strata are:
+The committed backtrace run split by outcome at **6.10% for hits** (176 substitutions in 2,886
+paired cells) and **25.02% for misses** (599 in 2,394). The blended substitution rate is not
+representative of either population. The per-glyph strata below are retained from the earlier
+stratification; committed tie-breaking moves a few cells, so those percentages are diagnostic
+context rather than a replacement for the committed totals above.
 
 | glyph | hits | misses |
 | :---: | ---: | ---: |
@@ -137,7 +140,7 @@ the filler glyph. Digits stayed at 0.0–1.3% in the clean-hit stratum, while `<
 33.1% in the damaged-hit stratum. This is the strongest evidence that the remaining problem is
 filler-run segmentation in the name region, not general image quality.
 
-The shift-count discrepancy is **unresolved**, and the explanation previously given here was
+The committed backtrace reports **416 indel moves across 31 documents**. The shift-count discrepancy is **unresolved**, and the explanation previously given here was
 withdrawn as unsupported. Two independent runs report **458 operations across 36 documents** and
 **92 operations across 26 documents** for what both describe as the same quantity: individual
 inserted or deleted cells produced by a per-line Levenshtein backtrace. A definitional difference
@@ -150,10 +153,12 @@ three, +2 cells each) and **none** differ in per-line length; the remaining 59 a
 Including or excluding those two documents moves the operation count by at most 4, not by a factor
 of five.
 
-Until one implementation is committed and re-run against the other, the per-glyph substitution rates
-in this report should be read as the load-bearing result and the shift-operation count as
-provisional. The two do not depend on each other: substitutions are counted from diagonal
-backtrace steps and are unaffected by how insert/delete steps are tallied.
+The substitution totals and the 0/`<` rates above were regenerated through the C49
+`levenshtein_backtrace` implementation in this worktree. The earlier 78% damaged-name-hit figure
+and detailed clean/damaged percentages remain the prior stratification; committed tie-breaking
+moves individual cells, so that split should be regenerated from the helper before being treated as
+a final constant. Substitutions are counted from diagonal backtrace steps and are unaffected by
+how insert/delete steps are tallied.
 
 ## Checksum-valid hits with surviving mismatches
 
