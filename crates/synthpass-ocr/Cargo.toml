@@ -48,7 +48,7 @@ rten-imageproc = "0.24.0"
 # tensor reshape/permute/slice calls examples/probe_matrix.rs needs to drive
 # it directly are all `rten_tensor` types already in the lockfile via `rten`
 # itself. Dev-only.
-rten-tensor = "0.24.0"
+rten-tensor = "0.26.0"
 
 [features]
 # Bakes both .rten weight files into the binary via `include_bytes!` instead
