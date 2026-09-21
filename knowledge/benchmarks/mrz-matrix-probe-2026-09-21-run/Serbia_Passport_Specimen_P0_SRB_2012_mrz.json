@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 304.7984313964844,
+      "grid_pitch_px": 3.137298107147217,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 298.3663330078125,
+      "grid_pitch_px": 10.375762939453125,
+      "line_index": 1
+    }
+  ],
+  "stem": "Serbia_Passport_Specimen_P0_SRB_2012_mrz"
+}

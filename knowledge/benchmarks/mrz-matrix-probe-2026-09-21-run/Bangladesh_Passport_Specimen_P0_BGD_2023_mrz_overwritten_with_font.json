@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 41.46743392944336,
+      "grid_pitch_px": 17.7907772064209,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 52.40303039550781,
+      "grid_pitch_px": 17.669414520263672,
+      "line_index": 1
+    }
+  ],
+  "stem": "Bangladesh_Passport_Specimen_P0_BGD_2023_mrz_overwritten_with_font"
+}

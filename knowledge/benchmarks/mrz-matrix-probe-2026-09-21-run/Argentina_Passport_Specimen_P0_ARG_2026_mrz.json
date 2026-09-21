@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 29.316980361938477,
+      "grid_pitch_px": 11.738109588623047,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 31.403030395507812,
+      "grid_pitch_px": 11.494996070861816,
+      "line_index": 1
+    }
+  ],
+  "stem": "Argentina_Passport_Specimen_P0_ARG_2026_mrz"
+}

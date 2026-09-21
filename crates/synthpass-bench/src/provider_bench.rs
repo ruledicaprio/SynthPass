@@ -52,6 +52,14 @@ fn mrz_format_str(format: MrzFormat) -> &'static str {
 /// pipeline recovered the printed zone faithfully — a checksum failure on such
 /// a zone is the *specimen's* printed check digits, not an OCR error. See the
 /// 2026-09-08 checksum_failed writeup.
+fn compared_cells(recovered: &str, truth: &str) -> usize {
+    recovered
+        .lines()
+        .zip(truth.lines())
+        .map(|(a, b)| a.chars().zip(b.chars()).count())
+        .sum()
+}
+
 fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
     let rec: Vec<&str> = recovered.lines().collect();
     let tru: Vec<&str> = truth.lines().collect();
@@ -825,7 +833,7 @@ struct MissOcrDump {
     /// `"checksum_failed"` or `"no_mrz_found"` — which gate this row is
     /// under, so a consumer can filter without re-deriving it from the
     /// other fields.
-    miss_reason: &'static str,
+    miss_reason: Option<&'static str>,
     /// Which reader produced the miss (`"mrz"`, `"llm"`, …).
     provider: String,
     /// Resolved ICAO format for the row, when one is known.
@@ -867,6 +875,8 @@ struct MissOcrDump {
     /// or composite, or none at all) would have caught an error there. Same
     /// availability as `field_mismatch_counts`.
     field_mismatch_coverage: Option<BTreeMap<String, CheckCoverage>>,
+    /// Number of recovered/ground-truth character cells actually compared.
+    compared_cells: Option<usize>,
 }
 
 /// Everything measured for one provider over one corpus run.
@@ -1624,8 +1634,37 @@ pub async fn run_provider_bench_real(
     dump_ocr_dir: Option<&Path>,
     progress: bool,
 ) -> Vec<ProviderReport> {
+    run_provider_bench_real_with_dump_options(
+        catalog,
+        ocr,
+        specimens,
+        measure_memory,
+        dump_ocr_dir,
+        false,
+        progress,
+    )
+    .await
+}
+
+pub async fn run_provider_bench_real_with_dump_options(
+    catalog: &ProviderCatalog,
+    ocr: &NativeOcr,
+    specimens: &[RealSpecimenDoc],
+    measure_memory: bool,
+    dump_ocr_dir: Option<&Path>,
+    dump_ocr_hits: bool,
+    progress: bool,
+) -> Vec<ProviderReport> {
     let prepped = prep_specimens(ocr, specimens, progress);
-    run_prepped(catalog, &prepped, measure_memory, dump_ocr_dir, progress).await
+    run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        dump_ocr_dir,
+        dump_ocr_hits,
+        progress,
+    )
+    .await
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
@@ -1743,6 +1782,25 @@ async fn run_prepped(
     prepped: &[Option<BenchPage>],
     measure_memory: bool,
     dump_ocr_dir: Option<&Path>,
+    progress: bool,
+) -> Vec<ProviderReport> {
+    run_prepped_with_dump_options(
+        catalog,
+        prepped,
+        measure_memory,
+        dump_ocr_dir,
+        false,
+        progress,
+    )
+    .await
+}
+
+async fn run_prepped_with_dump_options(
+    catalog: &ProviderCatalog,
+    prepped: &[Option<BenchPage>],
+    measure_memory: bool,
+    dump_ocr_dir: Option<&Path>,
+    dump_ocr_hits: bool,
     progress: bool,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
@@ -2051,7 +2109,8 @@ async fn run_prepped(
                 }
                 _ => None,
             };
-            if let (Some(_), Some(dump_miss_kind)) = (dump_ocr_dir, dump_miss_kind) {
+            let dump_hit = dump_ocr_hits && miss_reason.is_none();
+            if dump_ocr_dir.is_some() && (dump_miss_kind.is_some() || dump_hit) {
                 let provider = reader.id().as_str();
 
                 // The full OCR text the provider actually consumed — this is
@@ -2098,6 +2157,10 @@ async fn run_prepped(
                     }
                 };
 
+                let compared_cells = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                    (Some(data), Some(truth)) => Some(compared_cells(&data.mrz_lines, truth)),
+                    _ => None,
+                };
                 let zone_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz) {
                     (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
                     _ => None,
@@ -2150,6 +2213,7 @@ async fn run_prepped(
                     field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
                     field_mismatch_positions: field_mismatch.as_ref().map(|f| f.by_line.clone()),
                     field_mismatch_coverage: field_mismatch.as_ref().map(|f| f.coverage.clone()),
+                    compared_cells,
                 });
             }
 
@@ -2413,7 +2477,7 @@ async fn run_prepped(
                         .filter(|r| r.zone_mismatch.is_some_and(|n| n > 0))
                         .count();
                     println!(
-                        "checksum_failed OCR dump written to {} ({} rows; \
+                        "OCR dump written to {} ({} rows; \
                          {specimen} labelled specimen-non-conforming, \
                          {ocr_misread} labelled OCR-misread)",
                         path.display(),

@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 22.860605239868164,
+      "grid_pitch_px": 11.938830375671387,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 24.660606384277344,
+      "grid_pitch_px": 11.632064819335938,
+      "line_index": 1
+    }
+  ],
+  "stem": "Afghanistan_Passport_Specimen_P0_AFG_2016_mrz"
+}

@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 35.318260192871094,
+      "grid_pitch_px": 12.303979873657227,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 33.121212005615234,
+      "grid_pitch_px": 12.240662574768066,
+      "line_index": 1
+    }
+  ],
+  "stem": "Czechia_Passport_Specimen_P0_CZE_2005_mrz"
+}

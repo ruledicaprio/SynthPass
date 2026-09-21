@@ -386,6 +386,7 @@ fn load_raw_recognition_model(root: &Path) -> Result<Model, String> {
 struct Document {
     stem: String,
     image_path: PathBuf,
+    asset_id: String,
     /// Ground-truth MRZ lines (2 for TD2/TD3/MRV-A/MRV-B, 3 for TD1).
     truth_lines: Vec<String>,
 }
@@ -468,9 +469,16 @@ fn collect_documents(root: &Path, only_image: Option<&Path>) -> Vec<Document> {
         let Some(image_path) = image_path else {
             continue;
         };
+        let asset_id = image_path
+            .strip_prefix(root.join("samples"))
+            .ok()
+            .and_then(|p| p.to_str())
+            .map(|p| p.replace('\\', "/"))
+            .unwrap_or_else(|| image_path.to_string_lossy().replace('\\', "/"));
         docs.push(Document {
             stem: stem.to_string(),
             image_path,
+            asset_id,
             truth_lines,
         });
     }
@@ -1122,17 +1130,23 @@ struct Aggregates {
     /// skip reason -> count
     documents_skipped: HashMap<String, u64>,
     lines_skipped: HashMap<String, u64>,
+    documents_skipped_detail: Vec<(String, String)>,
+    lines_skipped_detail: Vec<(String, String, usize)>,
 }
 
 impl Aggregates {
-    fn record_skip_doc(&mut self, reason: &str) {
+    fn record_skip_doc(&mut self, asset_id: &str, reason: &str) {
         *self
             .documents_skipped
             .entry(reason.to_string())
             .or_insert(0) += 1;
+        self.documents_skipped_detail
+            .push((asset_id.to_string(), reason.to_string()));
     }
-    fn record_skip_line(&mut self, reason: &str) {
+    fn record_skip_line(&mut self, asset_id: &str, reason: &str, line_index: usize) {
         *self.lines_skipped.entry(reason.to_string()).or_insert(0) += 1;
+        self.lines_skipped_detail
+            .push((asset_id.to_string(), reason.to_string(), line_index));
     }
     fn record_accuracy(&mut self, mode: &str, correct: bool) {
         let entry = self.accuracy.entry(mode.to_string()).or_insert((0, 0));
@@ -1186,6 +1200,20 @@ impl Aggregates {
             .iter()
             .map(|(k, v)| (k.clone(), stats_summary(v)))
             .collect();
+        let mut skipped_docs = self.documents_skipped_detail.clone();
+        skipped_docs.sort();
+        let documents_skipped_detail: Vec<_> = skipped_docs
+            .into_iter()
+            .map(|(asset_id, reason)| serde_json::json!({"asset_id": asset_id, "reason": reason}))
+            .collect();
+        let mut skipped_lines = self.lines_skipped_detail.clone();
+        skipped_lines.sort();
+        let lines_skipped_detail: Vec<_> = skipped_lines
+            .into_iter()
+            .map(|(asset_id, reason, line_index)| {
+                serde_json::json!({"asset_id": asset_id, "reason": reason, "line_index": line_index})
+            })
+            .collect();
         let top_edge_digit = top_edge_summary(&self.top_edge_digit);
         let top_edge_letter = top_edge_summary(&self.top_edge_letter);
         let ink_profile_filler =
@@ -1196,7 +1224,9 @@ impl Aggregates {
             "mode": format!("{mode:?}"),
             "documents_processed": self.documents_processed,
             "documents_skipped": self.documents_skipped,
+            "documents_skipped_detail": documents_skipped_detail,
             "lines_skipped": self.lines_skipped,
+            "lines_skipped_detail": lines_skipped_detail,
             "item_1_accuracy_by_mode": accuracy,
             "item_1b_top_edge_fraction": {
                 "ink_fraction_threshold": TOP_EDGE_INK_FRACTION,
@@ -1320,7 +1350,7 @@ fn process_document(
     let image = match synthpass_ocr::decode_image(&doc.image_path) {
         Ok(img) => img.into_rgb8(),
         Err(_) => {
-            agg.record_skip_doc("decode_failed");
+            agg.record_skip_doc(&doc.asset_id, "decode_failed");
             return;
         }
     };
@@ -1329,23 +1359,23 @@ fn process_document(
     let band = match locate_mrz_band(general_engine, &image) {
         Ok(Some(b)) => b,
         Ok(None) => {
-            agg.record_skip_doc("no_mrz_band");
+            agg.record_skip_doc(&doc.asset_id, "no_mrz_band");
             return;
         }
         Err(_) => {
-            agg.record_skip_doc("band_detection_failed");
+            agg.record_skip_doc(&doc.asset_id, "band_detection_failed");
             return;
         }
     };
     if band.len() != doc.truth_lines.len() {
-        agg.record_skip_doc("band_line_count_mismatch");
+        agg.record_skip_doc(&doc.asset_id, "band_line_count_mismatch");
         return;
     }
 
     let (mrz_input, char_lines) = match recognize_char_lines_for_groups(mrz_engine, &image, &band) {
         Ok(v) => v,
         Err(_) => {
-            agg.record_skip_doc("mrz_recognition_failed");
+            agg.record_skip_doc(&doc.asset_id, "mrz_recognition_failed");
             return;
         }
     };
@@ -1360,20 +1390,20 @@ fn process_document(
 
     for (li, maybe_char_line) in char_lines.iter().enumerate() {
         let Some(char_line) = maybe_char_line else {
-            agg.record_skip_line("no_glyphs_recognized");
+            agg.record_skip_line(&doc.asset_id, "no_glyphs_recognized", li);
             continue;
         };
         let truth_line = &doc.truth_lines[li];
         let truth: Vec<char> = truth_line.chars().collect();
         let cells = truth.len();
         if !(20..=44).contains(&cells) {
-            agg.record_skip_line("implausible_line_width");
+            agg.record_skip_line(&doc.asset_id, "implausible_line_width", li);
             continue;
         }
         let Some(grid) =
             chargrid::fit_grid(&char_line.glyphs, char_line.left, char_line.right, cells)
         else {
-            agg.record_skip_line("grid_fit_failed");
+            agg.record_skip_line(&doc.asset_id, "grid_fit_failed", li);
             continue;
         };
 
@@ -1459,7 +1489,7 @@ fn process_document(
                         .collect();
                     score_matrix_cells(agg, "line", &truth, &dists);
                 }
-                Err(_) => agg.record_skip_line("line_matrix_failed"),
+                Err(_) => agg.record_skip_line(&doc.asset_id, "line_matrix_failed", li),
             }
             agg.record_timing("line", started.elapsed().as_secs_f64() * 1000.0);
         }
@@ -1498,9 +1528,9 @@ fn process_document(
                                 .collect();
                             score_matrix_cells(agg, &mode_key, &truth, &dists);
                         }
-                        Err(_) => agg.record_skip_line("cell_matrix_run_failed"),
+                        Err(_) => agg.record_skip_line(&doc.asset_id, "cell_matrix_run_failed", li),
                     },
-                    Err(_) => agg.record_skip_line("cell_crop_failed"),
+                    Err(_) => agg.record_skip_line(&doc.asset_id, "cell_crop_failed", li),
                 }
                 agg.record_timing(&mode_key, started.elapsed().as_secs_f64() * 1000.0);
             }
@@ -1518,7 +1548,7 @@ fn process_document(
     if any_line_ok {
         agg.documents_processed += 1;
     } else {
-        agg.record_skip_doc("no_line_fit_at_all");
+        agg.record_skip_doc(&doc.asset_id, "no_line_fit_at_all");
     }
 
     doc_report.insert("lines".to_string(), serde_json::Value::Array(lines_report));

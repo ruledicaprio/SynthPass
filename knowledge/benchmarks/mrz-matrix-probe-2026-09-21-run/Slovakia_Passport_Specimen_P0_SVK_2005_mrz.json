@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 31.170230865478516,
+      "grid_pitch_px": 11.794827461242676,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 34.930301666259766,
+      "grid_pitch_px": 11.300281524658203,
+      "line_index": 1
+    }
+  ],
+  "stem": "Slovakia_Passport_Specimen_P0_SVK_2005_mrz"
+}

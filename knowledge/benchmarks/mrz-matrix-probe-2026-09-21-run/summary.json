@@ -1,0 +1,619 @@
+{
+  "documents_processed": 47,
+  "documents_skipped": {
+    "band_line_count_mismatch": 8,
+    "no_line_fit_at_all": 3,
+    "no_mrz_band": 6
+  },
+  "documents_skipped_detail": [
+    {
+      "asset_id": "id_cards/Belgium_ID_Specimen_2021_back_mrz.png",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Croatia_ID_Specimen_2021_back_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Italy_ID_Specimen_2022_back_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Serbia_ID_Specimen_2008_back_with_mrz.png",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Slovenia_ID_Specimen_2022_back_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Sweden_ID_Specimen_2022_back_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "id_cards/Switzerland_ID_Specimen_2023_back_mrz.jpg",
+      "reason": "no_mrz_band"
+    },
+    {
+      "asset_id": "id_cards/Turkiye_ID_Specimen_2020_back_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "passports/Angola_Passport_Specimen_PN_AGO_2026_mrz_rotated_counterclockwise_90_deg.png",
+      "reason": "no_mrz_band"
+    },
+    {
+      "asset_id": "passports/Canada_Passport_Specimen_P0_CAN_2013_mrz.jpg",
+      "reason": "no_line_fit_at_all"
+    },
+    {
+      "asset_id": "passports/Germany_Passport_Specimen_P0_D00_2024_mrz.jpg",
+      "reason": "no_mrz_band"
+    },
+    {
+      "asset_id": "passports/Ghana_Passport_Specimen_P0_GHA_2019_mrz.jpg",
+      "reason": "band_line_count_mismatch"
+    },
+    {
+      "asset_id": "passports/Indonesia_Passport_Specimen_P0_IDN_2024_mrz_rotated.png",
+      "reason": "no_mrz_band"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2020_mrz.jpg",
+      "reason": "no_line_fit_at_all"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2022_mrz.png",
+      "reason": "no_line_fit_at_all"
+    },
+    {
+      "asset_id": "passports/Pakistan_Passport_Specimen_P0_PAK_2024_mrz_rotated.png",
+      "reason": "no_mrz_band"
+    },
+    {
+      "asset_id": "passports/Russian_Federation_Passport_Specimen_P0_RUS_2019_mrz.jpg",
+      "reason": "no_mrz_band"
+    }
+  ],
+  "item_1_accuracy_by_mode": {
+    "cell_n0": {
+      "correct": 2446,
+      "rate": 0.6386422976501306,
+      "total": 3830
+    },
+    "cell_n1": {
+      "correct": 2999,
+      "rate": 0.7830287206266319,
+      "total": 3830
+    },
+    "cell_n2": {
+      "correct": 2993,
+      "rate": 0.7814621409921672,
+      "total": 3830
+    },
+    "cell_n4": {
+      "correct": 2971,
+      "rate": 0.7757180156657963,
+      "total": 3830
+    },
+    "line": {
+      "correct": 2934,
+      "rate": 0.7660574412532637,
+      "total": 3830
+    },
+    "ocrs": {
+      "correct": 2993,
+      "rate": 0.7814621409921672,
+      "total": 3830
+    }
+  },
+  "item_1b_top_edge_fraction": {
+    "digit": {
+      "height_20_35px": {
+        "count": 505,
+        "max": 0.7619047619047619,
+        "mean": 0.519146916591896,
+        "median": 0.5238095238095238,
+        "min": 0.15,
+        "p25": 0.4583333333333333,
+        "p75": 0.5833333333333334,
+        "p90": 0.625,
+        "stdev": 0.09725523264632699
+      },
+      "height_gte_35px": {
+        "count": 149,
+        "max": 0.8043478260869565,
+        "mean": 0.4974657933039094,
+        "median": 0.5,
+        "min": 0.2608695652173913,
+        "p25": 0.4444444444444444,
+        "p75": 0.5510204081632653,
+        "p90": 0.6,
+        "stdev": 0.09235250359118069
+      },
+      "height_lt_20px": {
+        "count": 592,
+        "max": 0.9090909090909091,
+        "mean": 0.5247615128371697,
+        "median": 0.5294117647058824,
+        "min": 0.2631578947368421,
+        "p25": 0.4666666666666667,
+        "p75": 0.5789473684210527,
+        "p90": 0.6428571428571429,
+        "stdev": 0.09290608858227205
+      },
+      "overall": {
+        "count": 1246,
+        "max": 0.9090909090909091,
+        "mean": 0.5192218392301705,
+        "median": 0.5238095238095238,
+        "min": 0.15,
+        "p25": 0.46153846153846156,
+        "p75": 0.5833333333333334,
+        "p90": 0.6363636363636364,
+        "stdev": 0.09500346308503148
+      }
+    },
+    "ink_fraction_threshold": 0.5,
+    "letter": {
+      "height_20_35px": {
+        "count": 330,
+        "max": 0.8636363636363636,
+        "mean": 0.565099482569702,
+        "median": 0.5714285714285714,
+        "min": 0.20833333333333334,
+        "p25": 0.5151515151515151,
+        "p75": 0.625,
+        "p90": 0.6818181818181818,
+        "stdev": 0.0982786152739357
+      },
+      "height_gte_35px": {
+        "count": 218,
+        "max": 0.823943661971831,
+        "mean": 0.5444756498909554,
+        "median": 0.5476190476190477,
+        "min": 0.1388888888888889,
+        "p25": 0.49019607843137253,
+        "p75": 0.6097560975609756,
+        "p90": 0.6666666666666666,
+        "stdev": 0.10412037555064156
+      },
+      "height_lt_20px": {
+        "count": 582,
+        "max": 0.9090909090909091,
+        "mean": 0.5514140696926929,
+        "median": 0.5625,
+        "min": 0.14285714285714285,
+        "p25": 0.5,
+        "p75": 0.625,
+        "p90": 0.6666666666666666,
+        "stdev": 0.10234267682269033
+      },
+      "overall": {
+        "count": 1130,
+        "max": 0.9090909090909091,
+        "mean": 0.5540721322879392,
+        "median": 0.5625,
+        "min": 0.1388888888888889,
+        "p25": 0.5,
+        "p75": 0.6190476190476191,
+        "p90": 0.6666666666666666,
+        "stdev": 0.10180197056825929
+      }
+    }
+  },
+  "item_2_label29_at_filler": {
+    "in_run": {
+      "cell_n0": {
+        "count": 1230,
+        "max": 0.2093055183731849,
+        "mean": 0.06190838911224267,
+        "median": 0.07561185690558503,
+        "min": 3.764693964525693e-10,
+        "p25": 0.00980559506868417,
+        "p75": 0.09073909727286589,
+        "p90": 0.10985354107552836,
+        "stdev": 0.044025495218267985
+      },
+      "cell_n1": {
+        "count": 1230,
+        "max": 0.3001183011860121,
+        "mean": 0.07298297481837834,
+        "median": 0.08414735157547663,
+        "min": 8.341938618324881e-15,
+        "p25": 0.011104196655715997,
+        "p75": 0.10348199879105273,
+        "p90": 0.13665016289470394,
+        "stdev": 0.05267169149599074
+      },
+      "cell_n2": {
+        "count": 1230,
+        "max": 0.36938659702136645,
+        "mean": 0.07018714813990247,
+        "median": 0.08199341165226016,
+        "min": 3.943221242077204e-15,
+        "p25": 0.00917934172321111,
+        "p75": 0.10204533165159546,
+        "p90": 0.12791167134491843,
+        "stdev": 0.05323586516597666
+      },
+      "cell_n4": {
+        "count": 1230,
+        "max": 0.3779659411040484,
+        "mean": 0.06684484123985457,
+        "median": 0.07660433791611378,
+        "min": 8.074000109544756e-16,
+        "p25": 0.008218414317929678,
+        "p75": 0.09923938525867015,
+        "p90": 0.12289358224226271,
+        "stdev": 0.05298023543935425
+      },
+      "line": {
+        "count": 1230,
+        "max": 0.49970082021609413,
+        "mean": 0.0807640674048427,
+        "median": 0.08028026803871861,
+        "min": 5.072255386153221e-18,
+        "p25": 0.007053743800654952,
+        "p75": 0.115814219513292,
+        "p90": 0.17586356829615396,
+        "stdev": 0.07241109489117335
+      }
+    },
+    "isolated": {
+      "cell_n0": {
+        "count": 87,
+        "max": 0.16014237161703318,
+        "mean": 0.05659535896962271,
+        "median": 0.0668057589282061,
+        "min": 1.0504629226095862e-9,
+        "p25": 0.0004386333797073276,
+        "p75": 0.09129248755239174,
+        "p90": 0.11241128091582156,
+        "stdev": 0.045968692230244565
+      },
+      "cell_n1": {
+        "count": 87,
+        "max": 0.41186049932148305,
+        "mean": 0.052566542068482845,
+        "median": 0.026983398623440635,
+        "min": 1.9697449870986146e-14,
+        "p25": 0.000019064181301231253,
+        "p75": 0.08749916784745326,
+        "p90": 0.13388493993305522,
+        "stdev": 0.06680173184603161
+      },
+      "cell_n2": {
+        "count": 87,
+        "max": 0.2673663796572424,
+        "mean": 0.04357514099830138,
+        "median": 0.011244797311730776,
+        "min": 6.396136829294545e-14,
+        "p25": 8.04125017734633e-6,
+        "p75": 0.0820495354554815,
+        "p90": 0.10239001613465894,
+        "stdev": 0.05457490791596407
+      },
+      "cell_n4": {
+        "count": 87,
+        "max": 0.19779423344786368,
+        "mean": 0.040539308380530444,
+        "median": 0.007216801355119609,
+        "min": 1.2911610829740279e-13,
+        "p25": 0.000014737219634890426,
+        "p75": 0.08266227434972001,
+        "p90": 0.13275287236410155,
+        "stdev": 0.054353386717704295
+      },
+      "line": {
+        "count": 87,
+        "max": 0.2465020641927881,
+        "mean": 0.04676066911061565,
+        "median": 0.01617047270017496,
+        "min": 1.367380133828461e-13,
+        "p25": 0.00008599590894573864,
+        "p75": 0.08787918677286267,
+        "p90": 0.11706191130259753,
+        "stdev": 0.05590873955548915
+      }
+    }
+  },
+  "item_3_label44_vs_label49_at_truth_e": {
+    "label44_eur_symbol_class": {
+      "cell_n0": {
+        "count": 90,
+        "max": 0.09377195322274663,
+        "mean": 0.0019740673560889083,
+        "median": 3.3848516363222845e-6,
+        "min": 1.9244131522515825e-12,
+        "p25": 2.396401800985698e-7,
+        "p75": 0.000052025258927151236,
+        "p90": 0.0008256582019466515,
+        "stdev": 0.011019545457546147
+      },
+      "cell_n1": {
+        "count": 90,
+        "max": 0.000016105108443298377,
+        "mean": 4.5003529569564254e-7,
+        "median": 3.3008631064861667e-10,
+        "min": 1.910229954463558e-17,
+        "p25": 1.4353373274994018e-11,
+        "p75": 9.909640283020654e-9,
+        "p90": 1.8079592701484838e-7,
+        "stdev": 2.15466405290753e-6
+      },
+      "cell_n2": {
+        "count": 90,
+        "max": 7.714437817785402e-6,
+        "mean": 1.1570039925245791e-7,
+        "median": 1.8223445691540267e-11,
+        "min": 5.160887236482566e-18,
+        "p25": 2.406428803890202e-12,
+        "p75": 3.2393660841435093e-10,
+        "p90": 1.490909364245219e-8,
+        "stdev": 8.167103765399242e-7
+      },
+      "cell_n4": {
+        "count": 90,
+        "max": 0.00004130117144489986,
+        "mean": 7.895332701301978e-7,
+        "median": 2.9914264774952835e-12,
+        "min": 1.040780430578255e-16,
+        "p25": 1.6852642793202955e-13,
+        "p75": 6.058646742816126e-11,
+        "p90": 8.636586009739774e-9,
+        "stdev": 4.987504317371657e-6
+      },
+      "line": {
+        "count": 90,
+        "max": 6.4850217066476316e-6,
+        "mean": 1.2901407771510538e-7,
+        "median": 5.832192387231833e-13,
+        "min": 2.19291748707732e-18,
+        "p25": 6.396324294331897e-14,
+        "p75": 2.1775196678001963e-11,
+        "p90": 2.7532057921410106e-8,
+        "stdev": 7.649881691404336e-7
+      }
+    },
+    "label49_alphabetic_e": {
+      "cell_n0": {
+        "count": 90,
+        "max": 0.20335379626036834,
+        "mean": 0.0854675947023824,
+        "median": 0.08507002293486228,
+        "min": 7.262653137897324e-7,
+        "p25": 0.06789593575819121,
+        "p75": 0.108227200990702,
+        "p90": 0.1565462961623325,
+        "stdev": 0.049516274180353245
+      },
+      "cell_n1": {
+        "count": 90,
+        "max": 0.19871317780314895,
+        "mean": 0.07470139549927445,
+        "median": 0.0831592412481464,
+        "min": 9.171234401546731e-8,
+        "p25": 0.07140935047365374,
+        "p75": 0.09953837435948248,
+        "p90": 0.1104812734846746,
+        "stdev": 0.04191138683071123
+      },
+      "cell_n2": {
+        "count": 90,
+        "max": 0.202722615502762,
+        "mean": 0.07760498099084155,
+        "median": 0.08344493489971579,
+        "min": 7.008139402131519e-9,
+        "p25": 0.07151583724394488,
+        "p75": 0.09986626549397784,
+        "p90": 0.11127019083999537,
+        "stdev": 0.041776622155627385
+      },
+      "cell_n4": {
+        "count": 90,
+        "max": 0.20722972463580794,
+        "mean": 0.07925325593943576,
+        "median": 0.08452219616189087,
+        "min": 1.6836136040865313e-8,
+        "p25": 0.07172031915123636,
+        "p75": 0.10020214676068359,
+        "p90": 0.12367733232514436,
+        "stdev": 0.04417468644699418
+      },
+      "line": {
+        "count": 90,
+        "max": 0.2807668889384137,
+        "mean": 0.08090876144209767,
+        "median": 0.08936354472202225,
+        "min": 7.068407803512144e-10,
+        "p25": 0.07145130107269544,
+        "p75": 0.11109987153686636,
+        "p90": 0.12508932158866604,
+        "stdev": 0.05228474460611749
+      }
+    }
+  },
+  "item_4_grid_self_check_mean_ink": {
+    "filler_truth_cells": {
+      "count": 1317,
+      "max": 0.4617598056793213,
+      "mean": 0.11986891343664935,
+      "median": 0.11931817978620529,
+      "min": 0.0,
+      "p25": 0.07918552309274673,
+      "p75": 0.1587301641702652,
+      "p90": 0.2023809552192688,
+      "stdev": 0.07379256927593325
+    },
+    "nonfiller_truth_cells": {
+      "count": 2513,
+      "max": 0.5740740895271301,
+      "mean": 0.17420018054693628,
+      "median": 0.170634925365448,
+      "min": 0.0,
+      "p25": 0.10897435992956161,
+      "p75": 0.2344180941581726,
+      "p90": 0.3053402304649353,
+      "stdev": 0.1025805738856136
+    }
+  },
+  "item_5_ink_profile_filler_vs_k": {
+    "buckets": 5,
+    "filler": [
+      0.13561731923611967,
+      0.1577227915802405,
+      0.1313131604294309,
+      0.07207749023204271,
+      0.06652889151916781
+    ],
+    "filler_n": 1317,
+    "k": [
+      0.22194670104367684,
+      0.32578209390456614,
+      0.2515968835691958,
+      0.15424809331159495,
+      0.049906429808390586
+    ],
+    "k_n": 26
+  },
+  "item_6_timing_ms": {
+    "cell_n0": {
+      "count": 88,
+      "max": 215.7115,
+      "mean": 96.06560227272729,
+      "median": 93.1845,
+      "min": 22.4799,
+      "p25": 76.5022,
+      "p75": 109.707,
+      "p90": 130.3905,
+      "stdev": 31.02995196883817
+    },
+    "cell_n1": {
+      "count": 88,
+      "max": 530.4847,
+      "mean": 253.14203863636374,
+      "median": 246.71370000000002,
+      "min": 59.267100000000006,
+      "p25": 212.7473,
+      "p75": 298.6777,
+      "p90": 330.02029999999996,
+      "stdev": 77.87548880760708
+    },
+    "cell_n2": {
+      "count": 88,
+      "max": 757.8378,
+      "mean": 412.40247045454566,
+      "median": 410.8219,
+      "min": 72.8504,
+      "p25": 338.3526,
+      "p75": 468.2585,
+      "p90": 567.7053,
+      "stdev": 123.82847866535458
+    },
+    "cell_n4": {
+      "count": 88,
+      "max": 1259.7037,
+      "mean": 730.8022840909092,
+      "median": 719.0257,
+      "min": 104.5687,
+      "p25": 620.6871000000001,
+      "p75": 848.1946,
+      "p90": 1005.2777,
+      "stdev": 212.33991493089454
+    },
+    "line": {
+      "count": 88,
+      "max": 272.6755,
+      "mean": 125.17985795454541,
+      "median": 124.8415,
+      "min": 16.5428,
+      "p25": 102.1381,
+      "p75": 150.7085,
+      "p90": 161.8886,
+      "stdev": 39.63345005282132
+    },
+    "ocrs": {
+      "count": 88,
+      "max": 0.1026,
+      "mean": 0.03919431818181818,
+      "median": 0.039799999999999995,
+      "min": 0.0062,
+      "p25": 0.034999999999999996,
+      "p75": 0.0441,
+      "p90": 0.048900000000000006,
+      "stdev": 0.010952826098095595
+    }
+  },
+  "lines_skipped": {
+    "grid_fit_failed": 13
+  },
+  "lines_skipped_detail": [
+    {
+      "asset_id": "passports/Canada_Passport_Specimen_P0_CAN_2013_mrz.jpg",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Canada_Passport_Specimen_P0_CAN_2013_mrz.jpg",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Cyprus_Passport_Specimen_P0_CYP_2020_mrz.jpg",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Cyprus_Passport_Specimen_PP_CYP_2026_mrz.png",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2020_mrz.jpg",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2020_mrz.jpg",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2022_mrz.png",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Korea_Republic_of_Korea_Passport_Specimen_PM_KOR_2022_mrz.png",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Mauritania_Passport_Specimen_P0_MRT_2010_mrz.png",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Nepal_Passport_Specimen_P0_NPL_2019_mrz.png",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Somalia_Passport_Specimen_P0_SOM_2023_mrz.png",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/Turkiye_Passport_Specimen_P0_TUR_2024_mrz.webp",
+      "line_index": 0,
+      "reason": "grid_fit_failed"
+    },
+    {
+      "asset_id": "passports/United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg",
+      "line_index": 1,
+      "reason": "grid_fit_failed"
+    }
+  ],
+  "mode": "All"
+}

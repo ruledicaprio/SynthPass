@@ -1,0 +1,23 @@
+{
+  "lines": [
+    {
+      "cells": 30,
+      "grid_origin_px": -56.72983932495117,
+      "grid_pitch_px": 92.70230102539062,
+      "line_index": 0
+    },
+    {
+      "cells": 30,
+      "grid_origin_px": 71.76546478271484,
+      "grid_pitch_px": 54.158790588378906,
+      "line_index": 1
+    },
+    {
+      "cells": 30,
+      "grid_origin_px": 73.79362487792969,
+      "grid_pitch_px": 104.8913345336914,
+      "line_index": 2
+    }
+  ],
+  "stem": "France_ID_Specimen_2020_back_mrz"
+}

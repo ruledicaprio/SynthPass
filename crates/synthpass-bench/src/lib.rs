@@ -1391,6 +1391,69 @@ fn levenshtein(a: &[char], b: &[char]) -> usize {
     prev[b.len()]
 }
 
+/// One step in a Levenshtein alignment from `expected` to `got`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LevenshteinEdit {
+    Match(char),
+    Substitution { expected: char, got: char },
+    Insertion(char),
+    Deletion(char),
+}
+
+/// Returns a deterministic Levenshtein backtrace from `expected` to `got`.
+///
+/// Ties prefer a diagonal step, then deletion, then insertion. This keeps a
+/// wrong glyph in place as one substitution, while a one-cell shift remains a
+/// single insertion or deletion. The returned edits contain character values
+/// for callers doing measurement; reports must aggregate them before writing.
+pub fn levenshtein_backtrace(expected: &str, got: &str) -> Vec<LevenshteinEdit> {
+    let a: Vec<char> = expected.chars().collect();
+    let b: Vec<char> = got.chars().collect();
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate().take(a.len() + 1) {
+        row[0] = i;
+    }
+    for (j, cell) in d[0].iter_mut().enumerate().take(b.len() + 1) {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            d[i][j] = if a[i - 1] == b[j - 1] {
+                d[i - 1][j - 1]
+            } else {
+                (d[i - 1][j - 1] + 1)
+                    .min(d[i - 1][j] + 1)
+                    .min(d[i][j - 1] + 1)
+            };
+        }
+    }
+    let mut edits = Vec::with_capacity(d[a.len()][b.len()]);
+    let (mut i, mut j) = (a.len(), b.len());
+    while i > 0 || j > 0 {
+        if i > 0 && j > 0 && a[i - 1] == b[j - 1] && d[i][j] == d[i - 1][j - 1] {
+            edits.push(LevenshteinEdit::Match(a[i - 1]));
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && j > 0 && d[i][j] == d[i - 1][j - 1] + 1 {
+            edits.push(LevenshteinEdit::Substitution {
+                expected: a[i - 1],
+                got: b[j - 1],
+            });
+            i -= 1;
+            j -= 1;
+        } else if i > 0 && d[i][j] == d[i - 1][j] + 1 {
+            edits.push(LevenshteinEdit::Deletion(a[i - 1]));
+            i -= 1;
+        } else {
+            debug_assert!(j > 0 && d[i][j] == d[i][j - 1] + 1);
+            edits.push(LevenshteinEdit::Insertion(b[j - 1]));
+            j -= 1;
+        }
+    }
+    edits.reverse();
+    edits
+}
+
 /// A cheap, non-cryptographic per-call disambiguator for temp file names —
 /// avoids collisions when `check_document` is called many times in the same
 /// process within the same millisecond (the process ID alone isn't enough).
@@ -1446,6 +1509,34 @@ mod tests {
         assert_eq!(d("L898902C3", "L898902C8"), 1);
         // Six of the ten characters are zeros read as the letter O.
         assert_eq!(d("0070070071", "OO7OO7OO71"), 6, "O/0 across the field");
+    }
+
+    #[test]
+    fn backtrace_pins_a_pure_one_cell_shift_as_one_indel() {
+        assert_eq!(
+            levenshtein_backtrace("ABC", "XABC"),
+            vec![
+                LevenshteinEdit::Insertion('X'),
+                LevenshteinEdit::Match('A'),
+                LevenshteinEdit::Match('B'),
+                LevenshteinEdit::Match('C'),
+            ]
+        );
+    }
+
+    #[test]
+    fn backtrace_pins_a_wrong_glyph_as_one_substitution() {
+        assert_eq!(
+            levenshtein_backtrace("ABC", "AXC"),
+            vec![
+                LevenshteinEdit::Match('A'),
+                LevenshteinEdit::Substitution {
+                    expected: 'B',
+                    got: 'X',
+                },
+                LevenshteinEdit::Match('C'),
+            ]
+        );
     }
 
     #[test]

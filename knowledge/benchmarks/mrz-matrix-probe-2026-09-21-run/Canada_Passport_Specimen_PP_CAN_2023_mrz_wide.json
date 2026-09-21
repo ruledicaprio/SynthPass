@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 21.563274383544922,
+      "grid_pitch_px": 9.553481101989746,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 24.85454559326172,
+      "grid_pitch_px": 9.102959632873535,
+      "line_index": 1
+    }
+  ],
+  "stem": "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide"
+}

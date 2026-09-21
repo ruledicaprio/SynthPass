@@ -93,7 +93,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real, AssertionBucket, ProviderReport,
+    run_provider_bench, run_provider_bench_real_with_dump_options, AssertionBucket, ProviderReport,
     StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::report::{
@@ -138,6 +138,7 @@ struct Args {
     /// scoped to those two in-denominator miss kinds rather than every
     /// document the way `synthpass-bench --dump-ocr` is.
     dump_ocr: bool,
+    dump_ocr_hits: bool,
     /// Force the per-document progress log on even when stderr is not a
     /// terminal. Progress is *already* on by default for an interactive run
     /// (see `show_progress` in `main`) — a full real-specimen pass takes over
@@ -212,6 +213,7 @@ impl Default for Args {
             limit: None,
             verbose: false,
             dump_ocr: false,
+            dump_ocr_hits: false,
             progress: false,
             format: None,
             document_type: None,
@@ -262,6 +264,10 @@ fn usage() {
          miss, print the full pre-parse OCR text + MRZ band score (+ recovered MRZ zone + failing \
          check digit(s) for checksum_failed), and append a row per miss to \
          <out-dir>/provider-bench-miss-ocr-dump.jsonl"
+    );
+    eprintln!(
+        "  --dump-ocr-hits    with --real-specimens: add Tier-1 hits to the same OCR dump; \
+         without this flag --dump-ocr remains miss-only"
     );
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \
@@ -353,6 +359,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.dump_ocr = true;
                 i += 1;
             }
+            "--dump-ocr-hits" => {
+                parsed.dump_ocr_hits = true;
+                i += 1;
+            }
             // Deliberately not gated on --real-specimens the way --dump-ocr
             // is: the synthetic corpus is slow enough to want progress too,
             // and a flag that only forces on an already-default behaviour has
@@ -424,8 +434,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.format.is_some() && !parsed.real_specimens {
         return Err("--format is only valid together with --real-specimens".to_string());
     }
-    if parsed.dump_ocr && !parsed.real_specimens {
-        return Err("--dump-ocr is only valid together with --real-specimens".to_string());
+    if (parsed.dump_ocr || parsed.dump_ocr_hits) && !parsed.real_specimens {
+        return Err(
+            "--dump-ocr and --dump-ocr-hits are only valid together with --real-specimens"
+                .to_string(),
+        );
     }
     if parsed.include_private && !parsed.real_specimens {
         return Err("--include-private is only valid together with --real-specimens".to_string());
@@ -1195,19 +1208,20 @@ async fn main() {
         );
         // `--dump-ocr` writes its JSONL next to the `--out` report; an --out
         // with no directory part means the current directory.
-        let dump_dir = parsed.dump_ocr.then(|| {
+        let dump_dir = (parsed.dump_ocr || parsed.dump_ocr_hits).then(|| {
             std::path::Path::new(&parsed.out)
                 .parent()
                 .filter(|p| !p.as_os_str().is_empty())
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
         });
-        let reports = run_provider_bench_real(
+        let reports = run_provider_bench_real_with_dump_options(
             catalog,
             &ocr,
             &specimens,
             parsed.measure_memory,
             dump_dir.as_deref(),
+            parsed.dump_ocr_hits,
             show_progress,
         )
         .await;
@@ -1675,6 +1689,19 @@ mod tests {
             .collect();
         let parsed = parse_args(&args).expect("valid combination");
         assert!(parsed.dump_ocr);
+    }
+
+    #[test]
+    fn dump_ocr_hits_is_opt_in_and_requires_real_specimens() {
+        let args: Vec<String> = ["--real-specimens", "--dump-ocr-hits"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let parsed = parse_args(&args).expect("valid combination");
+        assert!(parsed.dump_ocr_hits);
+
+        let bad: Vec<String> = ["--dump-ocr-hits"].iter().map(|s| s.to_string()).collect();
+        assert!(parse_args(&bad).is_err());
     }
 
     #[test]

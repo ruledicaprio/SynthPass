@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 27.826589584350586,
+      "grid_pitch_px": 12.398324012756348,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 23.624242782592773,
+      "grid_pitch_px": 12.485764503479004,
+      "line_index": 1
+    }
+  ],
+  "stem": "Spain_Passport_Specimen_P0_ESP_2013_mrz"
+}

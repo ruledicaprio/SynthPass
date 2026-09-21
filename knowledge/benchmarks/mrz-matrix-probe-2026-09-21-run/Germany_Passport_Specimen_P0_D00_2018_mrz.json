@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 38.090660095214844,
+      "grid_pitch_px": 15.923569679260254,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 37.42727279663086,
+      "grid_pitch_px": 15.862791061401367,
+      "line_index": 1
+    }
+  ],
+  "stem": "Germany_Passport_Specimen_P0_D00_2018_mrz"
+}

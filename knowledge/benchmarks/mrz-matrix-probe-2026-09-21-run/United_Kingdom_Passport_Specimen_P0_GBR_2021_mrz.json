@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "cells": 44,
+      "grid_origin_px": 23.213701248168945,
+      "grid_pitch_px": 9.629738807678223,
+      "line_index": 0
+    },
+    {
+      "cells": 44,
+      "grid_origin_px": 28.060606002807617,
+      "grid_pitch_px": 8.889358520507812,
+      "line_index": 1
+    }
+  ],
+  "stem": "United_Kingdom_Passport_Specimen_P0_GBR_2021_mrz"
+}
