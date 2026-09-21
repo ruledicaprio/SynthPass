@@ -2211,16 +2211,7 @@ async fn run_prepped_with_dump_options(
                     ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
                     zone_mismatch,
                     field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
-                    field_mismatch_positions: if dump_hit {
-                        Some(
-                            field_mismatch
-                                .as_ref()
-                                .map(|f| f.by_line.clone())
-                                .unwrap_or_default(),
-                        )
-                    } else {
-                        field_mismatch.as_ref().map(|f| f.by_line.clone())
-                    },
+                    field_mismatch_positions: field_mismatch.as_ref().map(|f| f.by_line.clone()),
                     field_mismatch_coverage: field_mismatch.as_ref().map(|f| f.coverage.clone()),
                     compared_cells,
                 });

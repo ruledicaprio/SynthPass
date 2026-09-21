@@ -61,9 +61,30 @@ following counts are printed glyphs and correctly recovered glyphs.
 | Z | 33 | 24 |
 | `<` | 1,880 | 1,515 |
 
-The corrected whole-fixture rates are **0: 97/549 = 17.7% wrong** (miss-only: 17.9%) and
-**`<`: 365/1,880 = 19.4% wrong** (miss-only: 12.3%). These are rates over all compared fixture
-cells, rather than only the 31 miss records.
+The first-pass whole-fixture rates were **0: 97/549 = 17.7% wrong** and **`<`: 365/1,880 = 19.4%
+wrong**. Those are naive positional rates: they count a shifted line as a character error. They
+are retained here because the conditioning and alignment traps must remain visible.
+
+## C47 alignment correction
+
+The first pass compared equal columns directly. A Levenshtein backtrace was then applied per line,
+with diagonal substitutions counted as recognition errors and insertions/deletions counted as
+separate shift events. Under that alignment, the three rates are:
+
+| glyph | miss-only | naive-positional | substitution-only after alignment |
+| :---: | ---: | ---: | ---: |
+| 0 | 17.9% | 17.7% (97/549) | **16.1% (88/546)** |
+| `<` | 12.3% | 19.4% (365/1,880) | **17.0% (316/1,856)** |
+
+The aligned denominators include only truth cells paired by the backtrace; cells represented by an
+insertion or deletion are reported as shifts, not substitutions. The dump contains 64 fixture
+documents. The backtrace found 458 insertion/deletion operations across 36 documents; 28 documents
+had no shift operation. Shift runs ranged from one cell to 90 cells, so the shift population is not
+a single-cell nuisance.
+
+The 15% split is diagnostic context for the bimodal positional result, not a threshold used to
+produce these rates. The substitution-only figures come from the alignment, not from discarding a
+bucket.
 
 ## Checksum-valid hits with surviving mismatches
 
@@ -103,3 +124,9 @@ that the local ledger hash matches `6b84366ba64b58351688b992d480881cbf400daca052
 All baseline counts and strict-name counts matched exactly. The worktree remains 20 commits behind
 `main`; the run demonstrates behavioral equivalence on the gate dimensions and does not remove that
 provenance caveat.
+
+The hit-side checksum-covered mismatches remain unresolved in meaning: five cells are in
+OwnCheckDigit fields and one is in a CompositeOnly field even though the documents passed their
+checks. They may be compensating errors or a layout/transcription edge case and are retained as
+counts, not explained away. Eight hits have a wrong `document_code` cell (the format-gate field),
+which independently corroborates the format-gate finding.
