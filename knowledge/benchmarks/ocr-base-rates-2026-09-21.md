@@ -81,15 +81,17 @@ separate shift events. Under that alignment, the three rates are:
 
 The aligned denominators include only truth cells paired by the backtrace; cells represented by an
 insertion or deletion are reported as shifts, not substitutions. The dump contains 64 fixture
-documents. Shift runs ranged from one cell to 90 cells, so the shift population is not a
-single-cell nuisance.
+documents: 59 fully comparable, 3 with no recovered zone, and 2 with a differing line count.
+Shift runs ranged from one cell to 90 cells, so the shift population is not a single-cell nuisance.
 
 The 15% split is diagnostic context for the bimodal positional result, not a threshold used to
 produce these rates. The substitution-only figures come from the alignment, not from discarding a
 bucket.
 
 The committed backtrace run split by outcome at **6.10% for hits** (176 substitutions in 2,886
-paired cells) and **25.02% for misses** (599 in 2,394). The blended substitution rate is not
+paired cells) and **25.02% for misses** (599 in 2,394 paired cells). Those denominators exclude
+truth cells that had no recovered counterpart; the population itself is still the 64 fixture
+documents above. The blended substitution rate is not
 representative of either population. The per-glyph strata below are retained from the earlier
 stratification; committed tie-breaking moves a few cells, so those percentages are diagnostic
 context rather than a replacement for the committed totals above.
@@ -140,18 +142,35 @@ the filler glyph. Digits stayed at 0.0–1.3% in the clean-hit stratum, while `<
 33.1% in the damaged-hit stratum. This is the strongest evidence that the remaining problem is
 filler-run segmentation in the name region, not general image quality.
 
-The committed backtrace reports **416 indel moves across 31 documents**. The shift-count discrepancy is **unresolved**, and the explanation previously given here was
-withdrawn as unsupported. Two independent runs report **458 operations across 36 documents** and
-**92 operations across 26 documents** for what both describe as the same quantity: individual
-inserted or deleted cells produced by a per-line Levenshtein backtrace. A definitional difference
-was proposed -- that one figure groups operations into events and the other does not -- but neither
-implementation performs such grouping, so that explanation does not hold.
+The committed backtrace reports 416 indel moves across 31 documents in total, but that total spans
+three sub-populations that fail differently and it should not be read as one statistic. The
+population also reconciles the earlier counts. The committed helper and an independent backtrace agree on substitutions;
+varying only which records enter the shift tally gives:
 
-The obvious structural cause was tested and refuted. Of the 171 dumped records, 107 carry no ground
-truth, 3 carry no recovered lines, **2** differ in line count (both misses, two truth lines read as
-three, +2 cells each) and **none** differ in per-line length; the remaining 59 are fully comparable.
-Including or excluding those two documents moves the operation count by at most 4, not by a factor
-of five.
+| no-recovery docs | line-count-differs docs | hits | misses | indels | docs with shift |
+| --- | --- | ---: | ---: | ---: | ---: |
+| excluded | excluded | 176/2,908 | 514/2,298 | 92 | 26 |
+| excluded | included | 176/2,908 | 599/2,474 | 208 | 28 |
+| included | excluded | 176/2,908 | 514/2,566 | 360 | 29 |
+| included | included | 176/2,908 | 599/2,742 | 476 | 31 |
+| committed helper output | — | 176/2,886 | 599/2,394 | 416 | 31 |
+
+The earlier 458 and 92 figures were population variants, not competing definitions. The remaining
+476-versus-416 indel difference is secondary accounting and tie-breaking.
+
+Broken out, the 416 is:
+
+| sub-population | docs | indel ops | what it means |
+| --- | ---: | ---: | --- |
+| **same line count** | **26** | **92** | **filler-run shift inside a line — the segmentation signal** |
+| no recovered zone (`no_mrz_found`) | 3 | ~268 | detection failure: nothing was read, so nothing was shifted |
+| differing line count | 2 | ~116 | structural damage of a different kind — two truth lines read as three |
+
+**The segmentation figure is 92 operations across 26 documents, not 416.** Roughly 64% of the gross
+total comes from three documents in which the detector found no MRZ at all; aligning an empty read
+against an 88-cell truth zone scores 88 deletions, and that is a detection failure being counted in
+a statistic built to measure segmentation. The three buckets are reported separately for that
+reason and should not be summed into a headline.
 
 The substitution totals and the 0/`<` rates above were regenerated through the C49
 `levenshtein_backtrace` implementation in this worktree. The earlier 78% damaged-name-hit figure
