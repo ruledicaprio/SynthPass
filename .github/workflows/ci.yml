@@ -21,6 +21,11 @@ jobs:
   rust:
     name: Rust (Linux)
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
 
@@ -33,6 +38,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config clang libclang-dev
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -169,6 +178,11 @@ jobs:
   m4-hit-rate:
     name: M4 Tier-1 hit-rate gate
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
 
@@ -179,6 +193,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config clang libclang-dev
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
 
       - uses: Swatinem/rust-cache@v2
 
@@ -437,6 +455,11 @@ jobs:
     name: Native LLM (real model, opt-in)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -444,6 +467,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake clang libclang-dev
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
       - uses: Swatinem/rust-cache@v2
 
       - name: Download + checksum-verify the GGUF model
