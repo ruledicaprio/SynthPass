@@ -33,6 +33,22 @@ fn check_states_serialize_true_false_and_absent_as_null() {
     )
     .unwrap();
     let td2_checks = serde_json::to_value(&td2.checks).expect("serialize TD2 checks");
+
+    // Assert the key is *present* before asserting its value. `Value`'s `Index`
+    // impl returns `Value::Null` for a key that is absent from the object, so
+    // `checks["personal_number"] == Null` alone passes whether the field
+    // serializes as null or is skipped entirely — and skipping it is the one
+    // regression this test exists to catch. ADR-0017 calls the explicit null a
+    // breaking wire change; `synthpass-core`'s mirror pins it the same way.
+    let td2_object = td2_checks
+        .as_object()
+        .expect("checks serialize as a JSON object");
+    assert_eq!(
+        td2_object.len(),
+        5,
+        "no check-state key may be omitted: {td2_checks}"
+    );
+
     assert_eq!(td2_checks["document_number"], true);
     assert_eq!(td2_checks["personal_number"], serde_json::Value::Null);
 
