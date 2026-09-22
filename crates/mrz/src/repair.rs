@@ -474,15 +474,15 @@ pub fn substitution_candidates(field: &str) -> Vec<String> {
 /// Resolve a field that is the *right width* but may carry one misread glyph.
 ///
 /// A field that already verifies is returned unchanged — this never
-/// "repairs" a field the check digit has already proven, only one it has
+/// "repairs" a field the check digit has already accepted, only one it has
 /// rejected. Otherwise sweeps [`substitution_candidates`], keeping readings
 /// whose check digit verifies *and* which satisfy `kind`'s structural
 /// constraint, exactly as [`solve_field`] does for [`UNKNOWN`] positions.
 ///
 /// Returns [`Resolution::Unresolvable`] for non-ASCII input or an unreadable
 /// check digit, for the same reason [`solve_field`] does: a check digit that
-/// was not itself read faithfully cannot prove anything about the field next
-/// to it.
+/// was not itself read correctly cannot constrain the field next to it at
+/// all.
 ///
 /// ```
 /// use mrz::{solve_substitution, FieldKind, Resolution};
@@ -562,7 +562,7 @@ pub fn solve_substitution(field: &str, check: char, kind: FieldKind) -> Resoluti
 ///   module's problem to guess around.
 /// - `check_digit == `[`UNKNOWN`]: an unread check digit proves nothing.
 /// - A `field` whose printed check digit already verifies under `kind`: this
-///   never "repairs" a reading the arithmetic has already proven, so it can
+///   never "repairs" a reading the arithmetic has already accepted, so it can
 ///   never be tempted by a class that would *coincidentally* also validate.
 /// - A character occurring only once across `field` and `check_digit`: that
 ///   is [`solve_substitution`]'s job, and the two must never both propose an
@@ -606,9 +606,9 @@ pub fn solve_class_sweep(field: &str, check_digit: char, kind: FieldKind) -> Res
         return Resolution::Unresolvable;
     }
     if verify(field, check_digit) && satisfies(field, kind) {
-        // Already a faithful read. Never sweep a field the check digit has
-        // already proven correct, even if some class would coincidentally
-        // also validate -- see the "field-scoped" section above.
+        // Already consistent with its check digit. Never sweep a field the
+        // arithmetic has already accepted, even if some class would
+        // coincidentally also validate -- see the "field-scoped" section above.
         return Resolution::Unresolvable;
     }
 

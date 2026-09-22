@@ -599,8 +599,8 @@ impl Pipeline {
         tokio::fs::write(&md_path, &markdown).await?;
 
         // Tier 1: deterministic ICAO 9303 MRZ validation via the M7 provider
-        // catalog. A valid composite checksum mathematically proves the read
-        // — no LLM needed. `mrz_data` is parsed directly (not read back off
+        // catalog. A valid composite checksum is deterministic evidence the
+        // read is consistent with the printed zone — no LLM needed. `mrz_data` is parsed directly (not read back off
         // `reading`, which carries no raw `mrz::MrzData`) because it's still
         // needed for `PipelineResult.mrz` and the v1 `Extraction` shape below.
         let mrz_data = mrz::find_and_parse(&markdown).ok();

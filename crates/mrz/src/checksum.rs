@@ -280,8 +280,8 @@ pub(crate) fn variants(raw: &str, target: usize, repair: fn(&str) -> String) -> 
     // OCR drops trailing fillers wholesale — ocrs truncates a TD3 name line's
     // filler run by 9+ characters on low-resolution scans — so tolerate short
     // lines generously (they get padded back); hallucinated extra characters
-    // are rarer. Every padded candidate still has to prove itself against the
-    // check digits, so a wider net costs candidates, not correctness.
+    // are rarer. Every padded candidate still has to satisfy the check digits,
+    // so a wider net costs candidates, not correctness.
     if n.len() + 14 < target || n.len() > target + 4 || !is_mrz_charset(&n) {
         return Vec::new();
     }

@@ -270,8 +270,10 @@ pub struct ExtractionFields {
 ///
 /// Scale: `1.0` = proven by an ICAO 9303 check digit (Tier 1); anything below
 /// is a heuristic model score (Tier 2). These scores describe *extraction
-/// certainty*, not document authenticity — a checksum proves a faithful read,
-/// not a genuine document (`knowledge/V2-DESIGN.md` §11). Non-PII; `#[zeroize(skip)]`
+/// certainty*, not document authenticity — a checksum establishes that a read is
+/// consistent with the printed check digit, not that the document is genuine
+/// (`knowledge/V2-DESIGN.md` §11), and not that the read is byte-identical to
+/// the zone (`mrz::Blindspot`). Non-PII; `#[zeroize(skip)]`
 /// at the parent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

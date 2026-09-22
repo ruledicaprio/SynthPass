@@ -358,7 +358,7 @@ impl Checks {
 ///     ..Default::default()
 /// });
 ///
-/// // Both lines found: a complete sequence, carrying its per-field proof.
+/// // Both lines found: a complete sequence, carrying its per-field evidence.
 /// assert!(matches!(
 ///     SequenceCompleteness::from_parse_result(&find_and_parse(&zone)),
 ///     Some(SequenceCompleteness::Complete { .. }),
@@ -1338,7 +1338,7 @@ mod tests {
         // Verbatim tesseract.js output for the Croatian specimen at low
         // resolution: trailing fillers read as K/L runs, a hallucinated
         // leading '1' on line 2 (45 chars), and 'B' where '8' is printed.
-        // The check digits prove which repaired variant is the true read.
+        // The check digits accept exactly one of the repaired variants.
         let text = "I 01072009 PUJZAGREB 0\n\nBIDFD WH5SS A 2\n\n01072014\nP<HRVSPECIMEN<<SPECIMEN<KLLLLLLLLLLLLLLLLLKLKL\n10070070071HRVB212258F1407019<<<<<<<<<<<<<<06\n";
         let d = find_and_parse(text).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
@@ -1389,7 +1389,7 @@ mod tests {
         // read perfectly, but line 1 loses NINE trailing fillers (35/44 chars)
         // and its `<` document-code filler is misread as `K`. The name line
         // carries no check digit of its own, so padding the filler run back is
-        // safe — line 2's check digits still prove the read.
+        // safe -- it cannot change any check digit, and line 2's still verify.
         let text = "PUTOVNICA\nPKHRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06\n";
         let d = find_and_parse(text).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
