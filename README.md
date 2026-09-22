@@ -140,7 +140,7 @@ MRZ whose document number matches hand-verified ground truth.
   [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; a
   [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md) then found four of the seven remaining detection
   misses could never have yielded a hit.
-- **A hit proves the document number and the dates covered by its format's printed checks, not the name.** No ICAO 9303 check digit
+- **A hit is checksum-consistent on the document number and the dates its format's printed checks cover — never the name, and never byte-for-byte proof.** No ICAO 9303 check digit
   covers `surname` or `given_names`, so name accuracy is measured as its own axis
   ([ADR-0013](knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)) and is not
   part of the headline. Today it lags the headline, and closing that gap is the next accuracy

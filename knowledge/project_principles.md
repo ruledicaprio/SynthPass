@@ -11,8 +11,18 @@ Proposed in [archive/KNOWLEDGE.md](archive/KNOWLEDGE.md); grounded here against 
 ## 1. Deterministic whenever possible. AI only fills uncertainty.
 
 Tier 1 is ICAO 9303 check-digit arithmetic, not a model. A checksum-valid MRZ
-read is *mathematically proven* and the LLM is never consulted for it. The model
-exists to recover what deterministic code cannot.
+read is *deterministic* — the arithmetic agrees or it does not, with no score in
+between — and the LLM is never consulted for it. The model exists to recover
+what deterministic code cannot.
+
+Determinism is not the same as proof, and this principle does not claim the
+stronger thing. What the arithmetic establishes is that the read is *consistent
+with the printed check digits*. It is not byte-identity with the printed zone:
+`crates/synthpass-core/src/fusion.rs` exists precisely because line 1 — document
+code, issuing state, surname, given names — carries no check digit at all, and
+`mrz::Blindspot` bounds what the arithmetic misses inside the fields it does
+cover. Preferring deterministic evidence over a model score is the principle;
+overstating what that evidence proves is not part of it.
 
 **Enforced by:** `crates/synthpass-pipeline/src/lib.rs`'s `ocr_and_tier1` — the
 Tier-1 gate consults `synthpass_die`'s `ProviderCatalog`/`MrzReader` for the

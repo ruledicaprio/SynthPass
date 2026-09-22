@@ -83,7 +83,8 @@ framing — see `long-horizon-parsing.md` for the actual cost breakdown.
 ### A valid line 2 still leaves four ambiguities no checksum resolves
 
 Recorded 2026-09-17 when the strict-name work (ADR-0013) scoped itself to names. A checksum-valid
-MRZ proves the document number and the dates; it does not prove everything on line 2.
+MRZ is consistent with the check digits on the document number and the dates; it does not cover
+everything on line 2.
 
 - **Nationality and sex are unchecked on every format.** Neither sits inside a check digit or
   the composite, so a misread there passes as a Tier-1 hit. The strict metric scores names only;

@@ -40,7 +40,14 @@ fn default_schema_version() -> u32 {
 /// construction: an LLM-extracted field is *plausible*, not proven.
 pub const LLM_HEURISTIC_CONFIDENCE: f32 = 0.5;
 
-/// Extraction-confidence vocabulary: Tier-1 checksum-proven fields.
+/// Extraction-confidence vocabulary: the Tier-1 level, which this crate and
+/// the design notes spell "checksum-proven". The term is defined here and
+/// means exactly one thing: the field is *consistent with its printed ICAO
+/// 9303 check digit*. That is not byte-identity with the printed zone —
+/// substitutions the arithmetic cannot see verify clean, and no check digit
+/// covers the name fields at all, which is why [`crate::fusion`] exists. The
+/// word stays because renaming it would touch every design document for no
+/// behaviour change; the stronger claim it used to carry does not.
 const PROVEN: f32 = 1.0;
 
 /// Present and structurally plausible (Tier-2 heuristic, upgraded from
@@ -92,10 +99,11 @@ pub struct ExtractionV2 {
     /// when absent), matching v1's contract; `*_name` metadata is omitted
     /// until populated.
     pub fields: ExtractionFields,
-    /// Per-field certainty. `1.0` means checksum-proven (Tier 1); anything
-    /// below is a heuristic model score (Tier 2). Describes extraction
-    /// certainty, never document genuineness — forgery detection is an
-    /// explicit non-goal (`knowledge/V2-DESIGN.md` §11).
+    /// Per-field certainty. `1.0` means checksum-proven (Tier 1) — consistent
+    /// with its check digit, as `PROVEN` defines the term; anything below is a
+    /// heuristic model score (Tier 2). Describes extraction certainty, never
+    /// document genuineness — forgery detection is an explicit non-goal
+    /// (`knowledge/V2-DESIGN.md` §11).
     #[zeroize(skip)]
     pub confidence: FieldConfidence,
     /// Which producer created this record — the property that lets downstream
@@ -270,8 +278,10 @@ pub struct ExtractionFields {
 ///
 /// Scale: `1.0` = proven by an ICAO 9303 check digit (Tier 1); anything below
 /// is a heuristic model score (Tier 2). These scores describe *extraction
-/// certainty*, not document authenticity — a checksum proves a faithful read,
-/// not a genuine document (`knowledge/V2-DESIGN.md` §11). Non-PII; `#[zeroize(skip)]`
+/// certainty*, not document authenticity — a checksum establishes that a read is
+/// consistent with the printed check digit, not that the document is genuine
+/// (`knowledge/V2-DESIGN.md` §11), and not that the read is byte-identical to
+/// the zone (`mrz::Blindspot`). Non-PII; `#[zeroize(skip)]`
 /// at the parent.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -392,8 +402,8 @@ impl FieldConfidence {
     /// which fields the ICAO check digits actually cover (same shape across
     /// TD1/TD2/TD3 — see [`MRZ_STRUCTURAL`]'s doc comment for how this was
     /// verified). Only `document_number`, `date_of_birth`, `date_of_expiry`,
-    /// and `personal_number` are mathematically proven; the rest are
-    /// structural parses.
+    /// and `personal_number` carry a check digit to be consistent with; the
+    /// rest are structural parses.
     pub fn mrz_checksum_scope() -> Self {
         Self {
             document_type: MRZ_STRUCTURAL,

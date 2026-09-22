@@ -23,8 +23,9 @@
 //! # MRZ retry passes
 //!
 //! A general full-page pass runs first. If its output does not contain a
-//! checksum-valid MRZ (the `mrz` crate's ICAO 9303 check digits are a perfect
-//! oracle for a faithful read — see knowledge/ARCHITECTURE.md §8), a second engine
+//! checksum-valid MRZ (the `mrz` crate's ICAO 9303 check digits are a strong
+//! filter, though not a perfect oracle -- `mrz::Blindspot` bounds what they
+//! miss; see knowledge/ARCHITECTURE.md §8), a second engine
 //! constrained to the MRZ charset (`A–Z 0–9 <`, beam-search decoding) re-reads
 //! preprocessed variants of the image ([`preprocess::mrz_variants`]: a
 //! row-density-isolated MRZ-band crop, contrast-stretched/binarized/locally-
