@@ -10,6 +10,7 @@
 //! a reusable library instead of example-local logic.
 
 use image::DynamicImage;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use synthpass_core::v2::CoreField;
@@ -21,6 +22,21 @@ pub mod bench_report;
 pub mod ground_truth;
 pub mod provider_bench;
 pub mod report;
+
+/// Per-check-digit state for a parsed MRZ, keyed by the stable wire field
+/// names. `None` means the format does not print that digit; it is not a
+/// failed or unobserved verification.
+pub fn check_states(checks: &mrz::Checks) -> BTreeMap<&'static str, Option<bool>> {
+    [
+        ("document_number", checks.document_number),
+        ("date_of_birth", checks.date_of_birth),
+        ("date_of_expiry", checks.date_of_expiry),
+        ("personal_number", checks.personal_number),
+        ("composite", checks.composite),
+    ]
+    .into_iter()
+    .collect()
+}
 
 /// Which capture profile to generate a corpus under. Shared between
 /// `synthpass-bench`'s Tier-1 hit-rate CLI and `provider-bench`'s
@@ -440,15 +456,15 @@ struct PrivateSidecarMrz {
 #[derive(serde::Deserialize)]
 struct PrivateSidecarChecks {
     #[serde(default)]
-    document_number: bool,
+    document_number: Option<bool>,
     #[serde(default)]
-    date_of_birth: bool,
+    date_of_birth: Option<bool>,
     #[serde(default)]
-    date_of_expiry: bool,
+    date_of_expiry: Option<bool>,
     #[serde(default)]
-    personal_number: bool,
+    personal_number: Option<bool>,
     #[serde(default)]
-    composite: bool,
+    composite: Option<bool>,
 }
 
 impl PrivateSidecar {
@@ -467,16 +483,19 @@ impl PrivateSidecar {
         e.personal_number = f.personal_number;
         if let Some(mrz) = self.mrz {
             e.mrz_line = mrz.lines;
-            // Checksums are "valid" only if every ICAO check digit the
-            // sidecar recorded passed — the same all-or-nothing predicate
-            // `mrz::MrzData::valid()` applies, so a private specimen and a
-            // generated one reach `provider_bench`'s classifier identically.
+            // `null` is a check digit this layout does not print. Existing
+            // private sidecars may still carry legacy booleans, but an updated
+            // sidecar must use null for structural absence rather than true.
             e.mrz_checksums_valid = mrz.checks.map(|c| {
-                c.document_number
-                    && c.date_of_birth
-                    && c.date_of_expiry
-                    && c.personal_number
-                    && c.composite
+                let states = [
+                    c.document_number,
+                    c.date_of_birth,
+                    c.date_of_expiry,
+                    c.personal_number,
+                    c.composite,
+                ];
+                states.iter().any(Option::is_some)
+                    && states.iter().all(|state| *state != Some(false))
             });
         }
         e.extraction_method = self.extraction_method;
@@ -757,7 +776,7 @@ pub enum MissReason {
     /// transcription — see the 2026-09-08 checksum_failed writeup. `miss_kind`
     /// reports the two as `checksum_failed_specimen` vs `checksum_failed`.
     ChecksumFailed {
-        failing: Vec<&'static str>,
+        check_states: BTreeMap<&'static str, Option<bool>>,
         specimen_nonconforming: bool,
     },
     /// A checksum-valid MRZ that disagrees with the ground truth. Rare and
@@ -809,10 +828,20 @@ impl std::fmt::Display for MissReason {
             Self::OcrError(e) => write!(f, "OCR error: {e}"),
             Self::NoMrzFound(e) => write!(f, "no MRZ found: {e}"),
             Self::ChecksumFailed {
-                failing,
+                check_states,
                 specimen_nonconforming,
             } => {
-                write!(f, "checksum invalid: {}", failing.join(", "))?;
+                let failed: Vec<_> = [
+                    "document_number",
+                    "date_of_birth",
+                    "date_of_expiry",
+                    "personal_number",
+                    "composite",
+                ]
+                .into_iter()
+                .filter(|field| check_states.get(field) == Some(&Some(false)))
+                .collect();
+                write!(f, "checksum invalid: {}", failed.join(", "))?;
                 if *specimen_nonconforming {
                     write!(f, " (printed zone is non-conforming, read faithfully)")?;
                 }
@@ -1000,6 +1029,10 @@ pub struct HitResult {
     pub hit: bool,
     /// Why it missed. `None` on a hit.
     pub reason: Option<MissReason>,
+    /// Per-check-digit state from the parsed MRZ. Absent only when no MRZ
+    /// parsed; otherwise every check field is present, including explicit
+    /// `None` for a digit the layout does not print.
+    pub check_states: Option<BTreeMap<&'static str, Option<bool>>>,
     /// Wall-clock time spent in this check (OCR + parse), for reporting.
     pub elapsed: Duration,
     /// Per-field read quality — populated whenever an MRZ parsed at all,
@@ -1054,13 +1087,14 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         fastrand_seed()
     ));
     let write_result = image.save(&path);
-    let (reason, fields, line1_integrity, raw_text, names_exact, name_error) =
+    let (reason, fields, line1_integrity, raw_text, names_exact, name_error, check_states) =
         run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
         hit: reason.is_none(),
         reason,
+        check_states,
         elapsed: start.elapsed(),
         fields,
         line1_integrity,
@@ -1084,6 +1118,7 @@ type CheckOutcome = (
     Option<String>,
     bool,
     Option<NameError>,
+    Option<BTreeMap<&'static str, Option<bool>>>,
 );
 
 /// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
@@ -1126,6 +1161,7 @@ fn run_check(
             None,
             false,
             None,
+            None,
         );
     }
 
@@ -1138,6 +1174,7 @@ fn run_check(
                 None,
                 None,
                 false,
+                None,
                 None,
             )
         }
@@ -1163,6 +1200,7 @@ fn run_check(
                 Some(text),
                 false,
                 None,
+                None,
             )
         }
     };
@@ -1176,6 +1214,7 @@ fn run_check(
                 None,
                 Some(text),
                 false,
+                None,
                 None,
             )
         }
@@ -1194,11 +1233,12 @@ fn run_check(
         &decoded.given_names,
     );
     let names_exact = name_error.is_none();
+    let parsed_check_states = check_states(&decoded.checks);
 
     if !decoded.valid() {
         return (
             Some(MissReason::ChecksumFailed {
-                failing: decoded.checks.failed().iter().map(|f| f.as_str()).collect(),
+                check_states: parsed_check_states.clone(),
                 // Synthetic corpus: every document is generated from a
                 // conformant zone, so a checksum failure here is always the
                 // OCR/parse pipeline, never a non-conforming source.
@@ -1209,6 +1249,7 @@ fn run_check(
             Some(text),
             names_exact,
             name_error,
+            Some(parsed_check_states),
         );
     }
     if decoded.document_number != truth.document_number {
@@ -1222,6 +1263,7 @@ fn run_check(
             Some(text),
             names_exact,
             name_error,
+            Some(parsed_check_states),
         );
     }
     (
@@ -1231,6 +1273,7 @@ fn run_check(
         Some(text),
         names_exact,
         name_error,
+        Some(parsed_check_states),
     )
 }
 
@@ -1678,7 +1721,7 @@ mod tests {
         }
     }
 
-    /// `MissReason::ChecksumFailed`'s `failing` payload, `miss_kind`, and
+    /// `MissReason::ChecksumFailed`'s `check_states` payload, `miss_kind`, and
     /// `Display` — the diagnostic chunk 1 of
     /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` adds. No OCR needed: an ICAO
     /// specimen with one date tampered (same fixture shape `crates/mrz`'s own
@@ -1692,12 +1735,13 @@ mod tests {
         let decoded = mrz::parse_td3(l1, &tampered).expect("shape is still valid TD3");
         assert!(!decoded.valid());
 
-        let failing: Vec<&'static str> =
-            decoded.checks.failed().iter().map(|f| f.as_str()).collect();
-        assert_eq!(failing, vec!["date_of_birth", "composite"]);
+        let check_states = check_states(&decoded.checks);
+        assert_eq!(check_states["date_of_birth"], Some(false));
+        assert_eq!(check_states["composite"], Some(false));
+        assert_eq!(check_states["personal_number"], Some(true));
 
         let reason = MissReason::ChecksumFailed {
-            failing: failing.clone(),
+            check_states: check_states.clone(),
             specimen_nonconforming: false,
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
@@ -1707,7 +1751,7 @@ mod tests {
         );
 
         let specimen = MissReason::ChecksumFailed {
-            failing,
+            check_states,
             specimen_nonconforming: true,
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
@@ -1918,7 +1962,8 @@ mod tests {
     /// `load_ground_truth` falls through to `samples/private/<stem>.json` and
     /// projects the nested `PrivateSidecar` schema onto the flat
     /// `Extraction` the accuracy loop reads — field values map 1:1, and
-    /// `mrz_checksums_valid` is `true` only when every recorded check passed.
+    /// `mrz_checksums_valid` is `true` only when every printed check passed;
+    /// `null` records a check digit that this layout does not print.
     /// Uses a fabricated all-`X` document so no real PII enters the test.
     #[test]
     fn a_private_sidecar_projects_onto_extraction_via_load_ground_truth() {
@@ -1948,7 +1993,7 @@ mod tests {
                 "format": "TD1",
                 "checks": {
                   "document_number": true, "date_of_birth": true,
-                  "date_of_expiry": true, "personal_number": true,
+                  "date_of_expiry": true, "personal_number": null,
                   "composite": false
                 }
               },

@@ -99,9 +99,10 @@ of this pipeline:**
   `document_number` *and* `composite`, because the composite's input includes the document number.
   So "five documents fail the document-number check" is not "five documents have five
   document-number defects".
-- **`failing_checks == ["composite"]` alone is a positional fingerprint.** TD1's optional data
-  carries no check digit of its own, so only the composite can observe an error there. Belgium's
-  signature localised its defect before a character was examined.
+- **A `check_states` map whose only `false` entry is `composite` is a positional fingerprint.**
+  TD1's optional data carries no check digit of its own, so only the composite can observe an
+  error there. Belgium's historical failed-only signature localised its defect before a character
+  was examined.
 
 ### What causes each checksum failure
 

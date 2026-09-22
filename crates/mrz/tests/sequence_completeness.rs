@@ -29,8 +29,8 @@ fn a_checksum_invalid_read_is_still_complete_not_partial() {
     assert!(!data.valid());
     match data.sequence_completeness() {
         SequenceCompleteness::Complete { checks, .. } => {
-            assert!(!checks.date_of_birth);
-            assert!(!checks.composite);
+            assert_eq!(checks.date_of_birth, Some(false));
+            assert_eq!(checks.composite, Some(false));
         }
         other => panic!("expected Complete, got {other:?}"),
     }

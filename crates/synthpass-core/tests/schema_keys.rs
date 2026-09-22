@@ -51,11 +51,11 @@ fn tier1() -> ExtractionV2 {
         lines: "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<".into(),
         format: MrzFormat::Td3,
         checks: CheckDigits {
-            document_number: true,
-            date_of_birth: true,
-            date_of_expiry: true,
-            personal_number: true,
-            composite: true,
+            document_number: Some(true),
+            date_of_birth: Some(true),
+            date_of_expiry: Some(true),
+            personal_number: Some(true),
+            composite: Some(true),
         },
     });
     e.extraction_method = "mrz-deterministic".into();
@@ -109,6 +109,35 @@ fn tier2_top_level_keys_are_pinned() {
         keys(&to_json(&tier2())),
         expected,
         "the Tier-2 JSON key set changed. This is the published wire contract."
+    );
+}
+
+#[test]
+fn absent_check_digits_serialize_as_explicit_nulls() {
+    let checks = CheckDigits {
+        document_number: Some(true),
+        date_of_birth: Some(true),
+        date_of_expiry: Some(true),
+        personal_number: None,
+        composite: Some(true),
+    };
+    let json = serde_json::to_value(checks).expect("checks serialize");
+    let object = json.as_object().expect("checks serialize as an object");
+    assert_eq!(object.len(), 5, "no check-state key may be omitted");
+    assert_eq!(json["personal_number"], serde_json::Value::Null);
+    assert_eq!(json["composite"], true);
+    assert!(checks.all_valid(), "all printed TD1 digits verified");
+
+    assert!(
+        !CheckDigits {
+            document_number: None,
+            date_of_birth: None,
+            date_of_expiry: None,
+            personal_number: None,
+            composite: None,
+        }
+        .all_valid(),
+        "zero observed check digits are not mathematical proof"
     );
 }
 

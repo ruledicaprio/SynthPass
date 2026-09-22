@@ -1124,7 +1124,7 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
     // Tier 1's own construction (`synthpass_die::mrz_reader::extraction_from_mrz`),
     // which likewise uses the raw 9-character field, not the reassembled
     // overflow form.
-    if m.checks.document_number {
+    if m.checks.document_number == Some(true) {
         v2.fields
             .set(CoreField::DocumentNumber, Some(m.document_number.clone()));
         v2.confidence.prove(CoreField::DocumentNumber);
@@ -1134,25 +1134,25 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
     // is not fully known (see `MrzData::date_of_birth_completeness`'s doc
     // comment) — promoting in that case would leak a non-ISO value into an
     // ISO-typed slot.
-    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+    if m.checks.date_of_birth == Some(true)
+        && m.date_of_birth_completeness == mrz::DateCompleteness::Complete
+    {
         v2.fields
             .set(CoreField::DateOfBirth, Some(m.date_of_birth.clone()));
         v2.confidence.prove(CoreField::DateOfBirth);
     }
 
-    if m.checks.date_of_expiry {
+    if m.checks.date_of_expiry == Some(true) {
         v2.fields
             .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.clone()));
         v2.confidence.prove(CoreField::DateOfExpiry);
     }
 
-    // TD1/TD2/MRV formats report `checks.personal_number == true` vacuously —
-    // there is no such check digit outside TD3 — so promoting an unverified
-    // value there would misrepresent a structural parse as a mathematical
-    // proof. When `personal_number` is `None` despite the check bit being
-    // true (an all-filler-but-valid field), leave the LLM's existing value
-    // untouched rather than nulling it out.
-    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+    // Only TD3 prints a personal-number check digit. The other formats record
+    // that absence as `None`, so they cannot promote an unverified value as
+    // mathematical proof. An all-filler-but-valid TD3 field also leaves an
+    // existing LLM value untouched rather than nulling it out.
+    if m.checks.personal_number == Some(true) {
         if let Some(pn) = &m.personal_number {
             v2.fields.set(CoreField::PersonalNumber, Some(pn.clone()));
             v2.confidence.prove(CoreField::PersonalNumber);
@@ -1188,11 +1188,10 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
 ///    outside every one of those ranges. `synthpass_core::fusion`'s module doc
 ///    already stated this — "the composite excludes `nationality` and `sex`
 ///    too, matching the published standard".
-/// 2. **MRV-A and MRV-B have no composite check digit at all** and set
-///    `checks.composite = true` vacuously (`mrz::parser`, both branches). So on
-///    any visa the gate was not weak evidence — it was no evidence, read as
-///    proof. This is the identical vacuous-true trap the `personal_number`
-///    line below guards against with its `format == Td3` clause.
+/// 2. **MRV-A and MRV-B have no composite check digit at all** and record
+///    `checks.composite = None` (`mrz::parser`, both branches). That absence
+///    is not evidence and cannot satisfy this module's `== Some(true)` gates;
+///    the same rule applies to the non-TD3 personal-number slot.
 ///
 /// Nothing in an MRZ verifies `nationality` or `sex`. A hint can only carry
 /// what a check digit proves.
@@ -1210,16 +1209,18 @@ pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
     let m = mrz_data?;
 
     let mut parts = Vec::new();
-    if m.checks.document_number {
+    if m.checks.document_number == Some(true) {
         parts.push(format!("document_number={}", m.document_number));
     }
-    if m.checks.date_of_birth && m.date_of_birth_completeness == mrz::DateCompleteness::Complete {
+    if m.checks.date_of_birth == Some(true)
+        && m.date_of_birth_completeness == mrz::DateCompleteness::Complete
+    {
         parts.push(format!("date_of_birth={}", m.date_of_birth));
     }
-    if m.checks.date_of_expiry {
+    if m.checks.date_of_expiry == Some(true) {
         parts.push(format!("date_of_expiry={}", m.date_of_expiry));
     }
-    if m.checks.personal_number && m.format == mrz::Format::Td3 {
+    if m.checks.personal_number == Some(true) {
         if let Some(pn) = &m.personal_number {
             parts.push(format!("personal_number={pn}"));
         }
@@ -2113,11 +2114,11 @@ mod tests {
         assert_eq!(
             mrz.checks,
             CheckDigits {
-                document_number: false,
-                date_of_birth: true,
-                date_of_expiry: true,
-                personal_number: true,
-                composite: false,
+                document_number: Some(false),
+                date_of_birth: Some(true),
+                date_of_expiry: Some(true),
+                personal_number: Some(true),
+                composite: Some(false),
             },
             "the real, honest partial verdict — not all-false as a lifted \
              LLM guess with no checksum bit would produce"
@@ -2317,7 +2318,7 @@ mod tests {
 
         let m = mrz::parse_td3(l1, &corrupted_l2).expect("still parses structurally");
         assert!(
-            !m.checks.document_number,
+            m.checks.document_number == Some(false),
             "sanity: the corruption must actually break this check digit"
         );
         m
@@ -2328,12 +2329,16 @@ mod tests {
         let m = td3_corrupted_document_number();
         // `mrz::Checks` is `#[non_exhaustive]`, so it can't be built by
         // literal for an equality assert — check each bit instead.
-        assert!(!m.checks.document_number, "sanity: this bit must fail");
-        assert!(m.checks.date_of_birth, "sanity");
-        assert!(m.checks.date_of_expiry, "sanity");
-        assert!(m.checks.personal_number, "sanity");
+        assert_eq!(
+            m.checks.document_number,
+            Some(false),
+            "sanity: this bit must fail"
+        );
+        assert_eq!(m.checks.date_of_birth, Some(true), "sanity");
+        assert_eq!(m.checks.date_of_expiry, Some(true), "sanity");
+        assert_eq!(m.checks.personal_number, Some(true), "sanity");
         assert!(
-            !m.checks.composite,
+            m.checks.composite == Some(false),
             "sanity: composite fails alongside document_number"
         );
 
@@ -2427,9 +2432,8 @@ mod tests {
             "sanity: this is the format under test"
         );
         assert!(
-            m.checks.personal_number,
-            "TD1 reports the personal-number check bit true vacuously — no such \
-             check digit exists on this format"
+            m.checks.personal_number.is_none(),
+            "TD1 does not print a personal-number check digit"
         );
 
         let mut v2 = llm_shaped_v2();
@@ -2438,7 +2442,7 @@ mod tests {
         assert_eq!(
             v2.fields.personal_number.as_deref(),
             Some("LLM-PERSONAL"),
-            "the vacuous TD1 check bit must not promote an unverified value"
+            "an absent TD1 check digit must not promote an unverified value"
         );
         assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
     }
@@ -2460,7 +2464,10 @@ mod tests {
         let (l1, l2) = mrz_text.split_once('\n').unwrap();
         let m = mrz::parse_td2(l1, l2).expect("TD2 fixture parses");
         assert_eq!(m.format, mrz::Format::Td2, "sanity");
-        assert!(m.checks.personal_number, "vacuous on TD2 too");
+        assert_eq!(
+            m.checks.personal_number, None,
+            "TD2 has no such check digit"
+        );
 
         let mut v2 = llm_shaped_v2();
         promote_verified_mrz_fields(&mut v2, &m);
@@ -2494,7 +2501,7 @@ mod tests {
             m.valid(),
             "sanity: an all-filler personal number still verifies"
         );
-        assert!(m.checks.personal_number);
+        assert_eq!(m.checks.personal_number, Some(true));
         assert_eq!(
             m.personal_number, None,
             "sanity: all-filler-but-valid reads back as None, not an empty string"
@@ -2541,7 +2548,7 @@ mod tests {
             "sanity: an all-filler date of birth is entirely unknown, not malformed"
         );
         assert!(
-            m.checks.date_of_birth,
+            m.checks.date_of_birth == Some(true),
             "an all-filler field checks out (filler counts as zero)"
         );
 
@@ -2592,8 +2599,7 @@ mod tests {
     }
 
     /// A valid MRV-A visa. Its `checks.composite` and `checks.personal_number`
-    /// are both `true` *vacuously* — the format defines neither check digit —
-    /// which is exactly what makes it the fixture for the gating bug.
+    /// are both `None` because the format prints neither check digit.
     fn valid_mrv_a() -> mrz::MrzData {
         let mrz_text = mrz::format_mrv_a(&mrz::MrvAFields {
             document_code: "V".to_string(),
@@ -2667,7 +2673,11 @@ mod tests {
         let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
         std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
         let m = valid_td3();
-        assert!(m.checks.composite, "sanity: this fixture is fully valid");
+        assert_eq!(
+            m.checks.composite,
+            Some(true),
+            "sanity: this fixture is fully valid"
+        );
         let result = mrz_hint(Some(&m));
         std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
 
@@ -2683,23 +2693,19 @@ mod tests {
     }
 
     #[test]
-    fn hint_reports_nothing_unverified_on_a_visa_whose_composite_bit_is_vacuous() {
-        // MRV-A and MRV-B carry no composite check digit at all; `mrz::parser`
-        // sets `checks.composite = true` vacuously for both. Gating anything
-        // on that bit therefore treated *no evidence* as proof on every visa —
-        // the same trap `personal_number` is guarded against with its
-        // `format == Td3` clause.
+    fn hint_reports_only_individually_verified_fields_on_a_visa() {
+        // MRV-A and MRV-B carry no composite check digit. Parser absence is
+        // `None`, so it cannot satisfy a `== Some(true)` proof gate.
         let _guard = MRZ_HINT_ENV_LOCK.lock().unwrap();
         std::env::set_var("SYNTHPASS_LLM_MRZ_HINT", "1");
         let m = valid_mrv_a();
         assert!(
-            m.checks.composite,
-            "sanity: the vacuous bit is what makes this case dangerous"
+            m.checks.composite.is_none(),
+            "sanity: MRV has no composite check digit"
         );
         assert!(
-            m.checks.personal_number,
-            "sanity: vacuously true here too — the existing Td3 guard is why \
-             it is already handled correctly"
+            m.checks.personal_number.is_none(),
+            "sanity: MRV has no personal-number check digit"
         );
         let result = mrz_hint(Some(&m));
         std::env::remove_var("SYNTHPASS_LLM_MRZ_HINT");
@@ -2793,7 +2799,7 @@ mod tests {
             );
             assert_eq!(v2.confidence.date_of_expiry, 1.0);
             // This fixture's personal-number field is all filler (`m.checks
-            // .personal_number` is vacuously true but `m.personal_number` is
+            // .personal_number` is `Some(true)` but `m.personal_number` is
             // `None`), so it must not be promoted — the mock backend's own
             // (absent) value survives untouched.
             assert_eq!(m.personal_number, None, "sanity: all-filler field");

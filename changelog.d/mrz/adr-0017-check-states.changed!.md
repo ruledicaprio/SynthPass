@@ -1,0 +1,1 @@
+- **Make check-digit absence explicit.** `mrz::Checks` now reports each digit as `Some(true)`, `Some(false)`, or `None` when the layout does not print it; consumers must handle the breaking optional check-state API and JSON `null` values.

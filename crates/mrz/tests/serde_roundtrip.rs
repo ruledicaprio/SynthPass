@@ -5,7 +5,7 @@
 
 #![cfg(feature = "serde")]
 
-use mrz::{parse_td3, MrzData};
+use mrz::{parse_td2, parse_td3, MrzData};
 
 // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson) — see
 // `src/lib.rs`'s test module for the full provenance note (Part 4's own copy
@@ -23,4 +23,20 @@ fn mrzdata_json_round_trip_is_identity() {
 
     assert_eq!(original, restored);
     assert!(restored.valid(), "checks should survive the round-trip");
+}
+
+#[test]
+fn check_states_serialize_true_false_and_absent_as_null() {
+    let td2 = parse_td2(
+        "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+        "D231458907UTO7408122F1204159<<<<<<<6",
+    )
+    .unwrap();
+    let td2_checks = serde_json::to_value(&td2.checks).expect("serialize TD2 checks");
+    assert_eq!(td2_checks["document_number"], true);
+    assert_eq!(td2_checks["personal_number"], serde_json::Value::Null);
+
+    let tampered = parse_td3(TD3_L1, "L898902C36UTO7508122F1204159ZE184226B<<<<<10").unwrap();
+    let tampered_checks = serde_json::to_value(&tampered.checks).expect("serialize TD3 checks");
+    assert_eq!(tampered_checks["date_of_birth"], false);
 }

@@ -24,12 +24,10 @@
 //! while the MRV-A misread reports valid. There is one real instance of this
 //! in the sample corpus.
 //!
-//! **Fixing this needs a ranking rule that hasn't been decided yet.**
-//! ADR-0017 ("What this ADR deliberately does not decide") leaves open
-//! whether `Checks::score()` is re-derived from its new three-state check
-//! representation or simply stops counting absent digits -- either fixes the
-//! MRV ranking bias `find_and_parse_with` currently has, and the choice is
-//! explicitly left for review. This module does not choose; it measures.
+//! Fallback ranking distinguishes the amount of evidence an invalid candidate
+//! carries, but `find_and_parse_with` still returns the first fully-valid
+//! candidate. This module measures that separate document-code blind spot; it
+//! does not claim the ranking rule resolves it.
 //!
 //! ICAO 9303's own published specimen only, never a real document.
 
@@ -106,16 +104,12 @@ fn document_code_gate_produces_three_measured_outcomes() {
 /// MRV-A, because the two check digits that would have exposed the misread
 /// (personal number, composite) don't exist on that format.
 ///
-/// **This assertion fails today, and that failure is the defect, not a
-/// broken test.** `find_and_parse_with` tries MRV-A before TD1/TD2 in its
-/// scan order (see ADR-0017, "The same bias one level down"), and nothing
-/// currently penalizes a reading for proving fewer check digits than the
-/// format it started as would have. Un-ignoring this test and watching it
-/// pass is the acceptance criterion for that fix -- which needs the ranking
-/// decision ADR-0017 leaves open (whether `Checks::score()` is re-derived or
-/// simply stops counting absent digits), not a change here.
+/// This assertion remains ignored: `find_and_parse_with` returns its first
+/// fully-valid candidate in fixed priority order (TD3, MRV-B, MRV-A, TD1,
+/// TD2). The fallback-ranking change governs only invalid candidates and does
+/// not, and must not claim to, resolve this document-code blind spot.
 #[test]
-#[ignore = "known defect: see this test's doc comment and ADR-0017 -- un-ignoring it is the fix's acceptance criterion"]
+#[ignore = "known limitation: first-valid parsing has no cross-format arbiter"]
 fn a_genuine_td3_never_parses_as_mrva() {
     let mrva = parse_with_document_code('V').expect("document code 'V' parses");
     assert_ne!(

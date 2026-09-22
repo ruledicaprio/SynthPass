@@ -773,27 +773,31 @@ pub struct MrzBlock {
 }
 
 /// Per-check-digit verification results — the v2, serde-round-trippable
-/// mirror of `mrz::Checks` (which is `Serialize`-only, WASM-bound).
+/// mirror of `mrz::Checks`. `None` means this format does not print that
+/// digit; serialization preserves it as an explicit JSON `null`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CheckDigits {
-    pub document_number: bool,
-    pub date_of_birth: bool,
-    pub date_of_expiry: bool,
-    /// TD3 only; `true` for TD1/TD2 (no such check digit exists there).
-    pub personal_number: bool,
-    /// The composite check digit over the whole zone.
-    pub composite: bool,
+    pub document_number: Option<bool>,
+    pub date_of_birth: Option<bool>,
+    pub date_of_expiry: Option<bool>,
+    /// TD3 only; absent when the format prints no such check digit.
+    pub personal_number: Option<bool>,
+    /// The composite check digit over the whole zone, if the format prints it.
+    pub composite: Option<bool>,
 }
 
 impl CheckDigits {
     /// All check digits valid — the MRZ read is mathematically verified.
     pub fn all_valid(&self) -> bool {
-        self.document_number
-            && self.date_of_birth
-            && self.date_of_expiry
-            && self.personal_number
-            && self.composite
+        let states = [
+            self.document_number,
+            self.date_of_birth,
+            self.date_of_expiry,
+            self.personal_number,
+            self.composite,
+        ];
+        states.iter().any(Option::is_some) && states.iter().all(|state| *state != Some(false))
     }
 }
 
@@ -957,11 +961,12 @@ impl From<&Extraction> for ExtractionV2 {
             checks: {
                 let ok = v1.mrz_checksums_valid.unwrap_or(false);
                 CheckDigits {
-                    document_number: ok,
-                    date_of_birth: ok,
-                    date_of_expiry: ok,
-                    personal_number: ok,
-                    composite: ok,
+                    document_number: Some(ok),
+                    date_of_birth: Some(ok),
+                    date_of_expiry: Some(ok),
+                    personal_number: (mrz_format == Some(MrzFormat::Td3)).then_some(ok),
+                    composite: (!matches!(mrz_format, Some(MrzFormat::MrvA | MrzFormat::MrvB)))
+                        .then_some(ok),
                 }
             },
         });

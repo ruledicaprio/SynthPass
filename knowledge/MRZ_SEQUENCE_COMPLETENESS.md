@@ -5,6 +5,11 @@
 > now carries typed `ChecksumFailed` sub-reasons, `MrzError::IncompleteSequence`, and the
 > unified `SequenceCompleteness` type. There is nothing left to implement here.
 >
+> **ADR-0017 follow-up (2026-09-22):** `Checks` now represents each printed
+> check as `Option<bool>` and benchmark output records parsed rows as a
+> five-key `check_states` map. This keeps the historical chunk record below
+> intact while correcting its former boolean convention.
+>
 > **It stays in `knowledge/` rather than moving to `archive/` deliberately.** It is not
 > *superseded* — it is *finished*, and seventeen source files across `crates/mrz`,
 > `crates/synthpass-bench` and `crates/synthpass-die` cite it by path as the rationale of
@@ -45,7 +50,8 @@ which is exactly the gap below.
 
 Four separate, uncoordinated "is this record complete" vocabularies exist today:
 
-- `Checks` (`crates/mrz/src/lib.rs:123-134`) — 5 booleans, check-digit pass/fail only.
+- `Checks` (`crates/mrz/src/lib.rs`) — 5 optional check states: verified,
+  failed, or structurally not printed.
 - `DateCompleteness` (`crates/mrz/src/dates.rs`) — `Complete`/`PartiallyUnknown`/
   `Unknown`/`Malformed`, scoped to date-of-birth only.
 - `repair::Resolution` (`crates/mrz/src/repair.rs`) — `Unique`/`Ambiguous{candidates}`/
@@ -117,13 +123,13 @@ and its construction site right after `mrz::find_and_parse` succeeds but
 
 **Design.**
 ```rust
-ChecksumFailed { failing: Vec<&'static str> } // was: ChecksumFailed (unit)
+ChecksumFailed { check_states: BTreeMap<&'static str, Option<bool>> } // was: ChecksumFailed (unit)
 ```
-populated from `decoded.checks: Checks` (`document_number`/`date_of_birth`/
-`date_of_expiry`/`personal_number`/`composite`, whichever are `false`).
+populated from `decoded.checks: Checks` with all five fields recorded as `true`,
+`false`, or `null` when the parsed layout does not print that digit.
 `miss_kind()` keeps returning the string `"checksum_failed"` as the top-level
-bucket (report shape stays additive/backward-compatible) — the JSON just gains a
-`failing_checks` array alongside it.
+bucket. The JSON's `check_states` map is a breaking replacement for the old
+failed-only list, present only when an MRZ parsed.
 
 Optional follow-up (do as a separate 1b chunk only if this data justifies it):
 distinguish "repair.rs/checksum.rs attempted candidates and none validated" from
@@ -132,7 +138,7 @@ distinguish "repair.rs/checksum.rs attempted candidates and none validated" from
 keep it separate.
 
 **Measurement.** `cargo test -p synthpass-bench`, then `synthpass-bench --profile
-all` to confirm `failing_checks` populates and the top-level `checksum_failed`
+all` to confirm `check_states` populates for parsed rows and the top-level `checksum_failed`
 count is **unchanged** (a regression here means the refactor accidentally changed
 which records count as a miss — instrumentation must not alter behavior). Then
 re-run the real-specimen survey and report the new breakdown.
@@ -324,10 +330,10 @@ pub struct SequenceCompleteness {
 }
 ```
 Name is a placeholder — check for collisions with `DateCompleteness` before
-finalizing. **Wraps** `Checks`/`DateCompleteness` rather than replacing them: both
-stay public with unchanged shapes, because `mrz-wasm`, `synthpass-core`, and
-`synthpass-die` consume them directly today, and changing either shape would be a
-breaking 0.x bump every downstream crate has to absorb at once. Lives beside
+finalizing. **Wraps** `Checks`/`DateCompleteness` rather than replacing them. At
+the time, both stayed public with unchanged shapes because `mrz-wasm`,
+`synthpass-core`, and `synthpass-die` consumed them directly; ADR-0017 later
+spent the 0.8.0 breaking window to make `Checks`'s absence state explicit. Lives beside
 `Checks` as a new field on `MrzData`, which is already `#[non_exhaustive]`
 precisely so additions like this aren't breaking (see `Format`'s own doc comment:
 "Adding MRV-A/MRV-B in 0.3.0 was breaking precisely because this attribute was
@@ -516,14 +522,13 @@ format, `--profile all --seed 0`):
 | TD2 | 21.7% | 17.0% | −4.67pp | 14 | **13/14** |
 | TD3 | 30.0% | 29.7% | −0.33pp | 1 | **1/1** |
 
-**Why the premise is wrong.** The chunk assumed that when the composite is the
-only failing digit, every individually check-digited field "independently
-verified", so surfacing them is safe. On **four of the five formats that is
-vacuous**: `Checks::personal_number` is hardcoded `true` for
-TD1/TD2/MRV-A/MRV-B (`parser.rs:386`, `:299`, `:467`, `:538`) because no such
-check digit exists there. `Checks::failed()` lists only fields whose bool is
-`false`, so a corrupted optional-data field can never appear in it — while the
-TD1/TD2 composite digit *does* cover that field.
+**Why the premise was wrong.** The rejected chunk assumed that when the
+composite was the only failing digit, every individually check-digited field
+"independently verified", so surfacing them was safe. Under the former boolean
+convention, four of the five formats hardcoded a personal-number `true` despite
+printing no such digit. ADR-0017 replaces that absence with `None`; `failed()`
+now selects only `Some(false)`, while the TD1/TD2 composite digit still covers
+optional data.
 
 So `only_composite_failed()` on those formats is largely the signature of *"the
 one field with no independent check is wrong, and the composite — the only digit

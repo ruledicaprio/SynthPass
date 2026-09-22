@@ -6,12 +6,22 @@ This note closes the six previously unattributed frozen M6 `checksum_failed` doc
 
 Each entry below is derived by aligning the read zone against the reviewed fixture **position by position** and reporting which ICAO field each differing position falls in. Positions are 0-based within a line. **No MRZ content, name or character value is reproduced here** — only field names, positions and counts.
 
-## Why the failing-check set is itself evidence
+## Why check states are themselves evidence
+
+### Historical notation and current wire shape
+
+The bracketed `failing_checks = [...]` signatures below are literal observations
+from the 2026-09-18 failed-only report format. They deliberately remain quoted
+as historical evidence: that format recorded failures but omitted the passing
+and not-printed states, so its exact rows cannot be reconstructed as today's
+five-key `check_states` map without inventing observations. Current parsed rows
+record `check_states` as `true` (verified), `false` (failed), or `null` (the
+identified layout does not print that digit); no-MRZ rows omit the map entirely.
 
 Two facts about ICAO 9303 do most of the work in the entries below, and both are load-bearing:
 
 - **The composite check digit covers some fields and not others.** For TD3 it spans line 2 positions 0–9, 13–19 and 21–42; for TD1, line 1 positions 5–29 plus line 2 positions 0–6, 8–14 and 18–28. **Nationality and sex are excluded from both.** A character error there moves no check digit at all.
-- **Some covered fields have no check digit of their own.** TD1's optional data has none; TD3's personal number has one. So a field that is inside the composite but has no field digit produces the signature `failing_checks == ["composite"]` and nothing else — which localises the error before a single character is examined.
+- **Some covered fields have no check digit of their own.** TD1's optional data has none; TD3's personal number has one. In the legacy failed-only notation, a field inside the composite but without its own digit produces `failing_checks == ["composite"]`; current rows record the same fact as a `check_states` map whose only `false` entry is `composite`.
 
 ## Afghanistan passport specimen
 

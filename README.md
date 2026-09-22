@@ -29,9 +29,9 @@ enforced in code — SynthPass produces *unmistakably synthetic* documents for t
 evaluation, never imitations of genuine credentials
 ([BRANDING.md §4](knowledge/BRANDING.md#4-messaging)).
 
-<img src="knowledge/img/screenshot-web-mrz-validator.png" alt="The live MRZ Validator demo confirming every ICAO 9303 check digit is valid for a pasted MRZ" width="420">
+<img src="knowledge/img/screenshot-web-mrz-validator.png" alt="The live MRZ Validator demo confirming every printed ICAO 9303 check digit is valid for a pasted MRZ" width="420">
 
-*The [live demo](https://ruledicaprio.github.io/SynthPass/) validates every ICAO 9303 check digit
+*The [live demo](https://ruledicaprio.github.io/SynthPass/) validates every **printed** ICAO 9303 check digit
 in a pasted MRZ — WebAssembly, entirely in your browser, nothing uploaded. It runs its own
 in-browser OCR stack (tesseract.js + an OCR-B model), benchmarked separately in
 [WEB_OCR_BASELINE.md](knowledge/WEB_OCR_BASELINE.md).*
@@ -105,7 +105,7 @@ flowchart LR
     TIER2 --> JSON
 ```
 
-Tier 1 is deterministic: OCR feeds the MRZ and ICAO 9303 check digits either prove the read or
+Tier 1 is deterministic: OCR feeds the MRZ and its printed ICAO 9303 check digits either prove the read or
 reject it. Tier 2 — the local LLM — runs only on what Tier 1 could not recover. Every field then
 passes `synthpass-core`'s deterministic normalizers (dates, sex, document type, country/demonym
 resolution), each added only once a real specimen proved it moved the measured parity rate. See
@@ -140,7 +140,7 @@ MRZ whose document number matches hand-verified ground truth.
   [ADR-0008](knowledge/decisions/ADR-0008-mrz-detection-track.md) landed on 2026-09-11; a
   [manifest review](knowledge/benchmarks/manifest-review-no-mrz-found-2026-09-13.md) then found four of the seven remaining detection
   misses could never have yielded a hit.
-- **A hit proves the document number and the dates, not the name.** No ICAO 9303 check digit
+- **A hit proves the document number and the dates covered by its format's printed checks, not the name.** No ICAO 9303 check digit
   covers `surname` or `given_names`, so name accuracy is measured as its own axis
   ([ADR-0013](knowledge/decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)) and is not
   part of the headline. Today it lags the headline, and closing that gap is the next accuracy

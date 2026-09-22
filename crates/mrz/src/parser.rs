@@ -250,21 +250,24 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
     let overflow = read_overflow(&line2[0..9], line2.as_bytes()[9] as char, personal_raw);
     let personal = optional_tail(personal_raw, &overflow);
 
-    let checks = Checks {
-        document_number: match &overflow {
-            Some(o) => o.check_ok,
-            None => verify(&line2[0..9], line2.as_bytes()[9] as char),
-        },
-        date_of_birth: verify(&line2[13..19], line2.as_bytes()[19] as char),
-        date_of_expiry: verify(&line2[21..27], line2.as_bytes()[27] as char),
-        personal_number: verify(personal_raw, line2.as_bytes()[42] as char),
-        // Composite: doc number + check, DOB + check, expiry + check +
-        // personal number + check (line 2 positions 1-10, 14-20, 22-43).
-        composite: verify(
-            &format!("{}{}{}", &line2[0..10], &line2[13..20], &line2[21..43]),
-            line2.as_bytes()[43] as char,
-        ),
-    };
+    let checks = Checks::from_verifications(
+        Format::Td3,
+        [
+            match &overflow {
+                Some(o) => o.check_ok,
+                None => verify(&line2[0..9], line2.as_bytes()[9] as char),
+            },
+            verify(&line2[13..19], line2.as_bytes()[19] as char),
+            verify(&line2[21..27], line2.as_bytes()[27] as char),
+            verify(personal_raw, line2.as_bytes()[42] as char),
+            // Composite: doc number + check, DOB + check, expiry + check +
+            // personal number + check (line 2 positions 1-10, 14-20, 22-43).
+            verify(
+                &format!("{}{}{}", &line2[0..10], &line2[13..20], &line2[21..43]),
+                line2.as_bytes()[43] as char,
+            ),
+        ],
+    );
 
     let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
@@ -343,21 +346,25 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
     let overflow = read_overflow(&line2[0..9], line2.as_bytes()[9] as char, optional_raw);
     let optional = optional_tail(optional_raw, &overflow);
 
-    let checks = Checks {
-        document_number: match &overflow {
-            Some(o) => o.check_ok,
-            None => verify(&line2[0..9], line2.as_bytes()[9] as char),
-        },
-        date_of_birth: verify(&line2[13..19], line2.as_bytes()[19] as char),
-        date_of_expiry: verify(&line2[21..27], line2.as_bytes()[27] as char),
-        personal_number: true, // TD2 has no separate personal-number check digit
-        // Composite: line 2 positions 1-10, 14-20, 22-35 (doc number + check,
-        // DOB + check, expiry + check + optional data).
-        composite: verify(
-            &format!("{}{}{}", &line2[0..10], &line2[13..20], &line2[21..35]),
-            line2.as_bytes()[35] as char,
-        ),
-    };
+    let checks = Checks::from_verifications(
+        Format::Td2,
+        [
+            match &overflow {
+                Some(o) => o.check_ok,
+                None => verify(&line2[0..9], line2.as_bytes()[9] as char),
+            },
+            verify(&line2[13..19], line2.as_bytes()[19] as char),
+            verify(&line2[21..27], line2.as_bytes()[27] as char),
+            // This layout's fourth slot is absent; the format matrix stamps None.
+            false,
+            // Composite: line 2 positions 1-10, 14-20, 22-35 (doc number + check,
+            // DOB + check, expiry + check + optional data).
+            verify(
+                &format!("{}{}{}", &line2[0..10], &line2[13..20], &line2[21..35]),
+                line2.as_bytes()[35] as char,
+            ),
+        ],
+    );
 
     let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
@@ -448,26 +455,30 @@ pub fn parse_td1_with(
         .collect::<Vec<_>>()
         .join(" ");
 
-    let checks = Checks {
-        document_number: match &overflow {
-            Some(o) => o.check_ok,
-            None => verify(&line1[5..14], line1.as_bytes()[14] as char),
-        },
-        date_of_birth: verify(&line2[0..6], line2.as_bytes()[6] as char),
-        date_of_expiry: verify(&line2[8..14], line2.as_bytes()[14] as char),
-        personal_number: true, // TD1 has no personal-number check digit
-        // Composite: line1 positions 6-30, line2 positions 1-7, 9-15, 19-29.
-        composite: verify(
-            &format!(
-                "{}{}{}{}",
-                &line1[5..30],
-                &line2[0..7],
-                &line2[8..15],
-                &line2[18..29]
+    let checks = Checks::from_verifications(
+        Format::Td1,
+        [
+            match &overflow {
+                Some(o) => o.check_ok,
+                None => verify(&line1[5..14], line1.as_bytes()[14] as char),
+            },
+            verify(&line2[0..6], line2.as_bytes()[6] as char),
+            verify(&line2[8..14], line2.as_bytes()[14] as char),
+            // This layout's fourth slot is absent; the format matrix stamps None.
+            false,
+            // Composite: line1 positions 6-30, line2 positions 1-7, 9-15, 19-29.
+            verify(
+                &format!(
+                    "{}{}{}{}",
+                    &line1[5..30],
+                    &line2[0..7],
+                    &line2[8..15],
+                    &line2[18..29]
+                ),
+                line2.as_bytes()[29] as char,
             ),
-            line2.as_bytes()[29] as char,
-        ),
-    };
+        ],
+    );
 
     let document_number_legacy_encoding = overflow.as_ref().is_some_and(|o| o.legacy);
     Ok(MrzData {
@@ -542,15 +553,17 @@ pub fn parse_mrv_a_with(
     let document_number = line2[0..9].trim_end_matches('<').to_string();
     let optional = line2[28..44].trim_end_matches('<');
 
-    let checks = Checks {
-        document_number: verify(&line2[0..9], line2.as_bytes()[9] as char),
-        date_of_birth: verify(&line2[13..19], line2.as_bytes()[19] as char),
-        date_of_expiry: verify(&line2[21..27], line2.as_bytes()[27] as char),
-        // MRV-A has no personal-number or composite check digit at all;
-        // vacuously true, same convention TD1/TD2 use for personal_number.
-        personal_number: true,
-        composite: true,
-    };
+    let checks = Checks::from_verifications(
+        Format::MrvA,
+        [
+            verify(&line2[0..9], line2.as_bytes()[9] as char),
+            verify(&line2[13..19], line2.as_bytes()[19] as char),
+            verify(&line2[21..27], line2.as_bytes()[27] as char),
+            // MRV prints neither a personal-number nor a composite check digit.
+            false,
+            false,
+        ],
+    );
 
     Ok(MrzData {
         format: Format::MrvA,
@@ -625,15 +638,17 @@ pub fn parse_mrv_b_with(
     let document_number = line2[0..9].trim_end_matches('<').to_string();
     let optional = line2[28..36].trim_end_matches('<');
 
-    let checks = Checks {
-        document_number: verify(&line2[0..9], line2.as_bytes()[9] as char),
-        date_of_birth: verify(&line2[13..19], line2.as_bytes()[19] as char),
-        date_of_expiry: verify(&line2[21..27], line2.as_bytes()[27] as char),
-        // MRV-B has no personal-number or composite check digit at all;
-        // vacuously true, same convention TD1/TD2 use for personal_number.
-        personal_number: true,
-        composite: true,
-    };
+    let checks = Checks::from_verifications(
+        Format::MrvB,
+        [
+            verify(&line2[0..9], line2.as_bytes()[9] as char),
+            verify(&line2[13..19], line2.as_bytes()[19] as char),
+            verify(&line2[21..27], line2.as_bytes()[27] as char),
+            // MRV prints neither a personal-number nor a composite check digit.
+            false,
+            false,
+        ],
+    );
 
     Ok(MrzData {
         format: Format::MrvB,
@@ -1216,7 +1231,8 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             return Some(data);
         }
         match &fallback {
-            Some(best) if best.checks.score() >= data.checks.score() => {}
+            Some(best)
+                if fallback_rank(&best.checks, &data.checks) != core::cmp::Ordering::Less => {}
             _ => fallback = Some(data),
         }
         None
@@ -2004,10 +2020,28 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     single(hits)
 }
 
-/// The one recovered reading, or `None` if the damage left more than one
-/// record standing. Readings that differ only in their raw zone but agree on
-/// every extracted field are the same answer reached twice (two insertion
-/// points inside one filler run, say) and count as one.
+/// Compare checksum evidence for two invalid fallback candidates. Applicable
+/// digits beat no evidence, fractions are compared exactly, then the reading
+/// with more applicable digits wins; ties retain the incumbent.
+fn fallback_rank(a: &Checks, b: &Checks) -> core::cmp::Ordering {
+    use core::cmp::Ordering;
+
+    match (a.applicable(), b.applicable()) {
+        (0, 0) => Ordering::Equal,
+        (0, _) => Ordering::Less,
+        (_, 0) => Ordering::Greater,
+        (a_applicable, b_applicable) => (a.verified() * b_applicable)
+            .cmp(&(b.verified() * a_applicable))
+            .then_with(|| a_applicable.cmp(&b_applicable)),
+    }
+}
+
+/// A damaged-recovery unanimity gate: the one recovered reading, or `None` if
+/// the damage left more than one record standing. Readings that differ only in
+/// their raw zone but agree on these six extracted fields are the same answer
+/// reached twice (two insertion points inside one filler run, say) and count
+/// as one. It intentionally ignores format and [`Checks`]; when all readings
+/// agree on those six fields, the first keeps its format and check states.
 fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
     let first = hits.first()?.clone();
     let same = |a: &MrzData, b: &MrzData| {
@@ -2022,4 +2056,56 @@ fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
         return Some(hits.remove(0));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::cmp::Ordering;
+
+    fn checks(states: [Option<bool>; 5]) -> Checks {
+        Checks {
+            document_number: states[0],
+            date_of_birth: states[1],
+            date_of_expiry: states[2],
+            personal_number: states[3],
+            composite: states[4],
+        }
+    }
+
+    #[test]
+    fn fallback_rank_uses_exact_fraction_then_coverage_then_incumbent() {
+        let none = checks([None, None, None, None, None]);
+        let one_verified = checks([Some(true), None, None, None, None]);
+        assert_eq!(fallback_rank(&none, &one_verified), Ordering::Less);
+
+        // Cross multiplication, rather than floats: 3/4 beats 2/3.
+        let three_of_four = checks([Some(true), Some(true), Some(true), Some(false), None]);
+        let two_of_three = checks([Some(true), Some(true), Some(false), None, None]);
+        assert_eq!(
+            fallback_rank(&three_of_four, &two_of_three),
+            Ordering::Greater
+        );
+
+        // The raw fraction comes before coverage: 3/3 beats 4/5.
+        let three_of_three = checks([Some(true), Some(true), Some(true), None, None]);
+        let four_of_five = checks([Some(true), Some(true), Some(true), Some(true), Some(false)]);
+        assert_eq!(
+            fallback_rank(&three_of_three, &four_of_five),
+            Ordering::Greater
+        );
+
+        // Equal fractions prefer more independently printed digits.
+        let four_of_four = checks([Some(true), Some(true), Some(true), Some(true), None]);
+        assert_eq!(
+            fallback_rank(&three_of_three, &four_of_four),
+            Ordering::Less
+        );
+
+        // Equal evidence leaves the incumbent unchanged.
+        assert_eq!(
+            fallback_rank(&three_of_three, &three_of_three),
+            Ordering::Equal
+        );
+    }
 }
