@@ -1,6 +1,6 @@
 # ADR-0017 — `Checks` must distinguish "absent" from "verified"
 
-**Status:** Implemented (2026-09-22)
+**Status:** Accepted (amended 2026-09-22)
 **Date:** 2026-09-20
 
 ## Context
@@ -185,6 +185,13 @@ not reconstructed as current maps.
 - **Rewriting historical benchmark observations.** Existing `failing_checks` bracket signatures
   retain their historical meaning; current `check_states` maps are recorded only from present parser
   observations.
+- **`synthpass-core`'s confidence mirror.** `FieldConfidence::mrz_checksum_scope` reports
+  `personal_number` as `PROVEN` on every format. This ADR does not change it, and the change is not
+  mechanical: the conversion that installs that scope has no `Format` in hand, so correcting it
+  either threads the format through `impl From<&Extraction> for ExtractionV2` or is applied at the
+  Tier-1 boundary in `synthpass-die`, where the `MrzData` is still available. Either way it moves a
+  wire-visible confidence value and needs its own measurement. Until then, a Tier-1 TD1 record can
+  carry `checks.personal_number: null` beside `confidence.personal_number: 1.0`.
 
 ## Timing — this is a deadline, not background
 
@@ -200,9 +207,10 @@ The window is open. It is not open indefinitely, and nothing about it is self-en
 
 ## Consequences
 
-- **Positive:** the difference between a verified check digit and an absent one is explicit in the
-  type and wire data; the MRV fallback-ranking bias is fixed; `synthpass-die` no longer asserts
-  proof a visa never supplied; and pipeline promotion is a direct `Some(true)` proof gate.
+- **Positive:** the difference between a verified check digit and an absent one is explicit in
+  `Checks` and the v2 `CheckDigits` block; the MRV fallback-ranking bias is fixed;
+  `synthpass-die` no longer asserts proof a visa never supplied; and pipeline promotion is a
+  direct `Some(true)` proof gate.
 
 - **Breaking wire change:** `mrz` and v2 now emit explicit `null` for an unprinted digit. The web
   demo renders that state as “not printed”, distinct from valid and failed. Schema and serde tests
@@ -222,3 +230,25 @@ The window is open. It is not open indefinitely, and nothing about it is self-en
 - **What would reverse it:** evidence that consumers overwhelmingly want the boolean collapse and
   write `matches!(c, Verified | NotPresent)` at every site anyway — at which point the three-state
   enum is ceremony, and D's mask with a convenience method would have been the better trade.
+
+## Amendment 2026-09-22 — what this ADR does not cover, recorded after implementation
+
+Implemented in #395 (`300cb06`). Three corrections to the record, made because the implementing
+PR's description asserted a scope this document does not contain.
+
+**`synthpass-core`'s confidence mirror was never excluded here.** #395's description and commit
+message both state that this ADR "scopes that type out". It does not — this document names neither
+`FieldConfidence` nor `synthpass-core` anywhere, and the exclusion list above originally held three
+items, none of them that. A fourth item now records the exclusion the implementing PR was read as
+making, so that the decision record and the merged code agree about what was decided.
+
+**The Consequences section overclaimed.** It read that absence is explicit "in the type and wire
+data". That is true of `Checks` and the v2 `CheckDigits` block, and false of one wire field:
+`FieldConfidence::mrz_checksum_scope` sets `personal_number` to `PROVEN` unconditionally, so a
+Tier-1 TD1 record can carry `checks.personal_number: null` beside `confidence.personal_number: 1.0`
+in the same JSON object. The sentence is narrowed to what is true. Correcting the code is a separate
+change with its own wire-visible confidence movement to measure.
+
+**Status vocabulary.** The status line read `Implemented (2026-09-22)`, which is not one of
+`Proposed | Accepted | Superseded by ADR-NNNN` ([README](README.md#format)). It was the only ADR of
+eighteen using it, and this decision never passed through `Accepted` on its way there.
