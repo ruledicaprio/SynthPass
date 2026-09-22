@@ -157,8 +157,9 @@ pub struct DocumentContext<'a> {
     /// ([`MrzData::valid`](mrz::MrzData::valid)), so a checksum-partial read
     /// (some individual check digits pass, the composite or another does
     /// not) leaves `prior` empty even though some fields are still
-    /// mathematically proven. The caller that holds the raw `mrz::MrzData`
-    /// builds this string directly from the individual check bits instead.
+    /// consistent with their own check digits. The caller that holds the
+    /// raw `mrz::MrzData` builds this string directly from the individual
+    /// check bits instead.
     /// Already fully rendered (not the raw `MrzData`) so this crate's
     /// dependency boundary — no `tokio`, no LLM engine, no prompt format
     /// opinions — stays intact; it is just a string.

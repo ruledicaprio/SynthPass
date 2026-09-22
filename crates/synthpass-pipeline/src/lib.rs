@@ -1106,8 +1106,8 @@ fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData
 /// one. Each ICAO check digit verifies its own field independently of the
 /// composite, so a document whose overall read escalated to Tier 2 (a bad
 /// composite, an unrelated failing field, or simply no read at all until
-/// now) can still have individual fields that are mathematically proven and
-/// deserve better than the LLM's heuristic score. A fully-valid read makes
+/// now) can still have individual fields that are consistent with their own
+/// check digits and deserve better than the LLM's heuristic score. A fully-valid read makes
 /// every promotion here trivially correct too, so this runs unconditionally
 /// rather than being gated on `!m.valid()`.
 ///
