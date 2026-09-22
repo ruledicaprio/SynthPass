@@ -600,6 +600,21 @@ pub struct MrzData {
     /// is all filler, and without the overflow remainder when a long document
     /// number spilled into it.
     pub personal_number: Option<String>,
+    /// The format's *primary* optional-data element, trailing filler trimmed,
+    /// and without the overflow remainder when a long document number spilled
+    /// into it: TD1 line 1 positions 16-30 (Doc 9303 Part 5's "optional data
+    /// element 1"), TD2 line 2 positions 29-35, TD3 line 2 positions 29-42
+    /// (Part 4 §4.2.2 titles it "personal number **or other optional data
+    /// elements**"), MRV-A line 2 positions 29-44, MRV-B line 2 positions
+    /// 29-36. It is the document-number overflow target on every format that
+    /// defines one. `None` when the field is all filler.
+    pub optional_data_1: Option<String>,
+    /// TD1's *second* optional-data element, line 2 positions 19-29, trailing
+    /// filler trimmed. `None` on every other format — each prints exactly one
+    /// optional-data element, which lives in
+    /// [`optional_data_1`](Self::optional_data_1) — and on a TD1 whose second
+    /// element is all filler.
+    pub optional_data_2: Option<String>,
     /// The raw MRZ lines, newline-joined, exactly as validated.
     pub mrz_lines: String,
     /// Per-field check-digit verification results — see [`Checks`].

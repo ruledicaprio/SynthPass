@@ -148,7 +148,11 @@ proptest! {
         // Clone rather than move: `MrzData` derives `ZeroizeOnDrop` when the
         // workspace unifies `mrz`'s `zeroize` feature on (e.g. via
         // `synthpass-pipeline`), and a `Drop` type forbids partial moves out of it.
-        prop_assert_eq!(parsed.personal_number.clone(), expected_personal);
+        prop_assert_eq!(parsed.personal_number.clone(), expected_personal.clone());
+        // ADR-0018 slot rule: TD3's element is the primary slot, and the
+        // second slot exists on TD1 only.
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_personal);
+        prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
 
         // `expand_date` turns YYMMDD into ISO YYYY-MM-DD; check the tail
         // (MM-DD) and that the parsed year's last two digits match.
@@ -250,7 +254,7 @@ proptest! {
             date_of_birth: date_of_birth.clone(),
             sex: sex.clone(),
             date_of_expiry: date_of_expiry.clone(),
-            optional_data,
+            optional_data: optional_data.clone(),
         };
 
         let mrz = format_td2(&fields);
@@ -265,6 +269,13 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.sex, &sex);
+
+        // ADR-0018 slot rule: TD2's one optional-data element is the primary
+        // slot; the second slot is TD1's alone.
+        let expected_optional = optional_data.filter(|s| !s.is_empty());
+        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
+        prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
 }
 
@@ -338,14 +349,14 @@ proptest! {
             document_code: "I".to_string(),
             issuing_country: "UTO".to_string(),
             document_number: document_number.clone(),
-            optional_data_1,
+            optional_data_1: optional_data_1.clone(),
             surname: surname.clone(),
             given_names: given_names.clone(),
             nationality: "UTO".to_string(),
             date_of_birth: date_of_birth.clone(),
             sex: sex.clone(),
             date_of_expiry: date_of_expiry.clone(),
-            optional_data_2,
+            optional_data_2: optional_data_2.clone(),
         };
 
         let mrz = format_td1(&fields);
@@ -364,6 +375,21 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.sex, &sex);
+
+        // ADR-0018 slot rule: each TD1 element lands in its own slot, and the
+        // joined `personal_number` is exactly their non-empty join — the
+        // relation the join's removal has to preserve nothing of, stated once
+        // before it goes.
+        let expected_1 = optional_data_1.filter(|s| !s.is_empty());
+        let expected_2 = optional_data_2.filter(|s| !s.is_empty());
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_1.clone());
+        prop_assert_eq!(parsed.optional_data_2.clone(), expected_2.clone());
+        let joined: Vec<&str> = [expected_1.as_deref(), expected_2.as_deref()]
+            .into_iter()
+            .flatten()
+            .collect();
+        let expected_join = (!joined.is_empty()).then(|| joined.join(" "));
+        prop_assert_eq!(parsed.personal_number.clone(), expected_join);
     }
 }
 
@@ -487,7 +513,7 @@ proptest! {
             date_of_birth,
             sex: sex.clone(),
             date_of_expiry,
-            optional_data,
+            optional_data: optional_data.clone(),
         };
 
         let mrz = format_mrv_a(&fields);
@@ -503,6 +529,13 @@ proptest! {
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
         prop_assert_eq!(&parsed.sex, &sex);
+
+        // ADR-0018 slot rule: a visa's one optional-data element is the
+        // primary slot.
+        let expected_optional = optional_data.filter(|s| !s.is_empty());
+        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
+        prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
 
     #[test]
@@ -526,7 +559,7 @@ proptest! {
             date_of_birth,
             sex: sex.clone(),
             date_of_expiry,
-            optional_data,
+            optional_data: optional_data.clone(),
         };
 
         let mrz = format_mrv_b(&fields);
@@ -542,7 +575,74 @@ proptest! {
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
         prop_assert_eq!(&parsed.sex, &sex);
+
+        // ADR-0018 slot rule: a visa's one optional-data element is the
+        // primary slot.
+        let expected_optional = optional_data.filter(|s| !s.is_empty());
+        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
+        prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
+}
+
+/// The permanent half of the slot proof: `optional_data_2` is TD1's second
+/// element and nothing else's. Every other format prints exactly one
+/// optional-data element, and it lands in the primary slot — including TD3's
+/// personal number, because Doc 9303 Part 4 §4.2.2 titles that field
+/// "personal number or other optional data elements". Each zone here carries a
+/// populated element, so the assertion cannot pass on an empty field.
+#[test]
+fn only_td1_ever_populates_optional_data_2() {
+    let td3 = parse_td3(TD3_L1, TD3_L2).unwrap();
+    assert!(td3.valid(), "checks: {:?}", td3.checks);
+    assert_eq!(td3.optional_data_1.as_deref(), Some("ZE184226B"));
+    assert_eq!(td3.optional_data_2, None);
+
+    let td2 = format_td2(&Td2Fields {
+        document_number: "D23145890".to_string(),
+        date_of_birth: "740812".to_string(),
+        date_of_expiry: "120415".to_string(),
+        optional_data: Some("XY12".to_string()),
+        ..Td2Fields::default()
+    });
+    let (l1, l2) = td2.split_once('\n').unwrap();
+    let td2 = parse_td2(l1, l2).unwrap();
+    assert!(td2.valid(), "checks: {:?}", td2.checks);
+    assert_eq!(td2.optional_data_1.as_deref(), Some("XY12"));
+    assert_eq!(td2.optional_data_2, None);
+
+    let mrv_a = format_mrv_a(&MrvAFields {
+        document_number: "XK9305487".to_string(),
+        date_of_birth: "850221".to_string(),
+        date_of_expiry: "270314".to_string(),
+        optional_data: Some("R5T6U7V8W9".to_string()),
+        ..MrvAFields::default()
+    });
+    let (l1, l2) = mrv_a.split_once('\n').unwrap();
+    let mrv_a = parse_mrv_a(l1, l2).unwrap();
+    assert!(mrv_a.valid(), "checks: {:?}", mrv_a.checks);
+    assert_eq!(mrv_a.optional_data_1.as_deref(), Some("R5T6U7V8W9"));
+    assert_eq!(mrv_a.optional_data_2, None);
+
+    let mrv_b = format_mrv_b(&MrvBFields {
+        document_number: "L23456789".to_string(),
+        date_of_birth: "920101".to_string(),
+        date_of_expiry: "270630".to_string(),
+        optional_data: Some("QW12ER34".to_string()),
+        ..MrvBFields::default()
+    });
+    let (l1, l2) = mrv_b.split_once('\n').unwrap();
+    let mrv_b = parse_mrv_b(l1, l2).unwrap();
+    assert!(mrv_b.valid(), "checks: {:?}", mrv_b.checks);
+    assert_eq!(mrv_b.optional_data_1.as_deref(), Some("QW12ER34"));
+    assert_eq!(mrv_b.optional_data_2, None);
+
+    // And the one format that has a second element populates it.
+    let (l1, l2, l3) = td1_zone(Some("AB"), Some("CD"));
+    let td1 = parse_td1(&l1, &l2, &l3).unwrap();
+    assert!(td1.valid(), "checks: {:?}", td1.checks);
+    assert_eq!(td1.optional_data_1.as_deref(), Some("AB"));
+    assert_eq!(td1.optional_data_2.as_deref(), Some("CD"));
 }
 
 #[test]
@@ -662,6 +762,8 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     // the optional field; the caller-supplied "XY" must survive right after
     // it rather than being overwritten or absorbed into the remainder.
     assert_eq!(d.personal_number.as_deref(), Some("XY"));
+    assert_eq!(d.optional_data_1.as_deref(), Some("XY"));
+    assert_eq!(d.optional_data_2, None);
 
     let td1 = Td1Fields {
         document_number: "D231458901234".to_string(), // 13 chars, remainder 5 fits width 15
@@ -681,6 +783,9 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     // optional_data_1's overflow prefix and "ZZZ" join as `personal_number`
     // (optional_data_2 is empty here, so no " " separator survives).
     assert_eq!(d.personal_number.as_deref(), Some("ZZZ"));
+    // The slot itself is the caller's data with the overflow prefix trimmed.
+    assert_eq!(d.optional_data_1.as_deref(), Some("ZZZ"));
+    assert_eq!(d.optional_data_2, None);
 }
 
 /// A TD1 long-document-number zone assembled directly from

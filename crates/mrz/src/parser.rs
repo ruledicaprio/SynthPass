@@ -285,6 +285,8 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(personal),
+        optional_data_1: opt_string(personal),
+        optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
     })
@@ -382,6 +384,8 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
+        optional_data_1: opt_string(optional),
+        optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
     })
@@ -496,6 +500,8 @@ pub fn parse_td1_with(
         sex: clean_sex(line2.as_bytes()[7] as char),
         date_of_expiry: expand_date_with_pivot(&line2[8..14], false, opts.pivot_yy),
         personal_number: opt_string(&personal),
+        optional_data_1: opt_string(optional1),
+        optional_data_2: opt_string(optional2),
         mrz_lines: format!("{line1}\n{line2}\n{line3}"),
         checks,
     })
@@ -581,6 +587,8 @@ pub fn parse_mrv_a_with(
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
+        optional_data_1: opt_string(optional),
+        optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
     })
@@ -666,6 +674,8 @@ pub fn parse_mrv_b_with(
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
         personal_number: opt_string(optional),
+        optional_data_1: opt_string(optional),
+        optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
     })
