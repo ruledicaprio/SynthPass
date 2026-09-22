@@ -67,7 +67,7 @@ class CheckChangelogTest(unittest.TestCase):
         (self.tmp / "scripts").mkdir()
         shutil.copyfile(SCRIPT, self.tmp / "scripts" / "check-changelog.sh")
 
-        (self.tmp / "crates" / "mrz").mkdir(parents=True)
+        (self.tmp / "crates" / "mrz" / "src").mkdir(parents=True)
         (self.tmp / "changelog.d" / "mrz").mkdir(parents=True)
 
         (self.tmp / "Cargo.toml").write_text(
@@ -76,7 +76,7 @@ class CheckChangelogTest(unittest.TestCase):
         (self.tmp / "crates" / "mrz" / "Cargo.toml").write_text(
             '[package]\nname = "mrz"\nversion = "1.0.0"\n', encoding="utf-8"
         )
-        (self.tmp / "crates" / "mrz" / "lib.rs").write_text("fn main() {}\n", encoding="utf-8")
+        (self.tmp / "crates" / "mrz" / "src" / "lib.rs").write_text("fn main() {}\n", encoding="utf-8")
         (self.tmp / "changelog.d" / "README.md").write_text("# fragments\n", encoding="utf-8")
         (self.tmp / "changelog.d" / "mrz" / "README.md").write_text(
             "# mrz fragments\n", encoding="utf-8"
@@ -124,7 +124,7 @@ class CheckChangelogTest(unittest.TestCase):
     def test_uncommitted_crates_change_warns_loudly_and_does_not_claim_docs_only(self):
         """The exact reproduction from the brief: append a non-md line, don't commit."""
         self.branch("feature-dirty")
-        with open(self.tmp / "crates" / "mrz" / "lib.rs", "a", encoding="utf-8") as f:
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
             f.write("fn helper() {}\n")
 
         r = self.run_check("--base", "main")
@@ -134,7 +134,7 @@ class CheckChangelogTest(unittest.TestCase):
         # A loud warning must replace it, naming the mechanism and the count.
         self.assertIn("WARNING", r.stderr)
         self.assertIn("1 uncommitted/untracked change", r.stderr)
-        self.assertIn("crates/mrz/lib.rs", r.stderr)
+        self.assertIn("crates/mrz/src/lib.rs", r.stderr)
         self.assertIn("do NOT see these changes", r.stderr)
 
     def test_untracked_file_under_changelog_d_also_warns(self):
@@ -151,7 +151,7 @@ class CheckChangelogTest(unittest.TestCase):
     def test_clean_checkout_has_no_dirty_warning(self):
         """Positive control: an ordinary committed-only diff triggers no warning."""
         self.branch("feature-clean")
-        with open(self.tmp / "crates" / "mrz" / "lib.rs", "a", encoding="utf-8") as f:
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
             f.write("fn helper() {}\n")
         (self.tmp / "changelog.d" / "mrz" / "feature-clean.added.md").write_text(
             "- add a helper.\n", encoding="utf-8"
@@ -166,7 +166,7 @@ class CheckChangelogTest(unittest.TestCase):
 
     def test_committed_non_md_crates_change_without_fragment_fails(self):
         self.branch("feature-no-fragment")
-        with open(self.tmp / "crates" / "mrz" / "lib.rs", "a", encoding="utf-8") as f:
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
             f.write("fn helper2() {}\n")
         self.commit_all("touch mrz lib, no fragment")
 
@@ -176,7 +176,7 @@ class CheckChangelogTest(unittest.TestCase):
 
     def test_committed_non_md_crates_change_with_fragment_passes(self):
         self.branch("feature-with-fragment")
-        with open(self.tmp / "crates" / "mrz" / "lib.rs", "a", encoding="utf-8") as f:
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
             f.write("fn helper3() {}\n")
         (self.tmp / "changelog.d" / "mrz" / "feature-with-fragment.added.md").write_text(
             "- add a helper function to mrz.\n", encoding="utf-8"
@@ -205,7 +205,7 @@ class CheckChangelogTest(unittest.TestCase):
 
     def test_skip_changelog_label_short_circuits_both_checks(self):
         self.branch("feature-labelled")
-        with open(self.tmp / "crates" / "mrz" / "lib.rs", "a", encoding="utf-8") as f:
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
             f.write("fn helper4() {}\n")
         self.commit_all("touch mrz lib, labelled")
 
