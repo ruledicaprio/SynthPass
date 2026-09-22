@@ -3,6 +3,8 @@ name = "synthpass-serve"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Application code, never published: `mrz` is the only crate on crates.io.
+publish = false
 
 [dependencies]
 synthpass-pipeline = { path = "../synthpass-pipeline" }

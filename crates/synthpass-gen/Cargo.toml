@@ -3,6 +3,8 @@ name = "synthpass-gen"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Application code, never published: `mrz` is the only crate on crates.io.
+publish = false
 
 [dependencies]
 # The zero-dep ICAO 9303 checksum oracle: this crate reuses `mrz::check_digit`
