@@ -12,8 +12,8 @@ synthpass-imageprep = { path = "../synthpass-imageprep" }
 # The zero-dep ICAO 9303 engine, used here only as the checksum oracle that
 # decides whether the MRZ retry passes need to run (see src/lib.rs).
 mrz = { path = "../mrz" }
-ocrs = "0.12.2"
-rten = "0.24.0"
+ocrs = "0.13.1"
+rten = "0.26.0"
 image = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
 
@@ -43,12 +43,12 @@ synthpass-gen = { path = "../synthpass-gen" }
 # `BBox` cannot express, so it names the type directly. Already present in the
 # lockfile at this exact version via `ocrs`/`rten`'s own dependency graph —
 # dev-only, so this adds nothing to the shipped crate.
-rten-imageproc = "0.24.0"
+rten-imageproc = "0.26.0"
 # Same rationale as `rten-imageproc` above: `rten::Model::run_one` and the
 # tensor reshape/permute/slice calls examples/probe_matrix.rs needs to drive
 # it directly are all `rten_tensor` types already in the lockfile via `rten`
 # itself. Dev-only.
-rten-tensor = "0.24.0"
+rten-tensor = "0.26.0"
 
 [features]
 # Bakes both .rten weight files into the binary via `include_bytes!` instead
