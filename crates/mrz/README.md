@@ -10,10 +10,14 @@ Zero-dependency [ICAO Doc 9303](https://www.icao.int/publications/pages/publicat
 Machine Readable Zone parser, emitter and check-digit validator for Rust — passports, ID cards
 and visas.
 
-A check digit is arithmetic, not a model score: it agrees with the read or it does not. `mrz`
-verifies every printed check digit under the standard 7-3-1 weighting and reports the result
-per field, so you always know *which* digit agreed and which one failed — and, just as
-importantly, [what agreement does not establish](#what-a-check-digit-cannot-prove).
+A check digit is **arithmetic, not a model score** — it agrees with the read or it does not.
+`mrz` verifies every printed digit under the standard 7-3-1 weighting and tells you exactly
+which one agreed and which one failed, field by field.
+
+It is equally exact about its own edges. A check digit is a strong *filter* and a weak
+*oracle*: what it passes is not a random remainder but precisely
+[what the arithmetic cannot see](#what-a-check-digit-cannot-prove) — a closed-form set,
+measured against a real corpus, and a public API rather than a footnote.
 
 - **Evidence, field by field** — document number, date of birth, expiry, personal number, composite.
 - **Reads messy OCR** — finds the zone in free text, and repairs a misread only when a check

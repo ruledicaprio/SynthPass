@@ -75,8 +75,19 @@ pub enum Blindspot {
     /// Values differ mod 10: any check digit covering the position rejects
     /// the swap. `delta_mod10` is the (non-zero) shift it would induce.
     Caught {
-        /// The (non-zero) shift mod 10 the swap would induce in a check
-        /// digit covering this position.
+        /// The (non-zero) shift mod 10 the swap would induce in a check digit
+        /// covering this position, measured as `value(a) - value(b)` for a
+        /// call of `blindspot(a, b)` — that is, the shift from putting `a`
+        /// where `b` was.
+        ///
+        /// **This payload is direction-dependent even though the verdict is
+        /// not.** `blindspot(a, b)` and `blindspot(b, a)` agree on
+        /// `Caught` vs [`Blind`](Blindspot::Blind) — congruence is symmetric —
+        /// but report complementary shifts. `blindspot('P', 'L')` is
+        /// `Caught { delta_mod10: 4 }` and `blindspot('L', 'P')` is
+        /// `Caught { delta_mod10: 6 }`, describing the one swap from its two
+        /// ends. Pass the *candidate* first to read the shift it would
+        /// introduce.
         delta_mod10: u32,
     },
     /// Values are congruent mod 10: the swap is provably undetectable by
