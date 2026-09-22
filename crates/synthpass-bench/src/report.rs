@@ -425,7 +425,7 @@ pub struct Report {
 /// Field order is the JSON key order — `#[derive(Serialize)]` on a struct
 /// serializes fields in declaration order, so this order **is** the schema;
 /// do not reorder the fields without treating that as a format change.
-/// `miss_reason` is the full [`MissReason`] [`Display`](std::fmt::Display)
+/// `miss_reason` is the full [`MissReason`](crate::MissReason) [`Display`](std::fmt::Display)
 /// string (may carry a parse/provider error message); `outcome` is the
 /// stable machine-readable class ([`miss_kind`] or `"hit"`) — the same
 /// hit-vs-noise split [`DocumentDetailReport::miss_reason`] draws for the
