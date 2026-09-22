@@ -6,9 +6,27 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      cargo-minor-patch:
+      # Patch only. `minor` is deliberately NOT grouped here.
+      #
+      # Cargo's breaking slot is the leftmost non-zero component, so for a
+      # pre-1.0 crate that is the MINOR version -- knowledge/ARCHITECTURE.md
+      # §13.4 states the rule, and RELEASING.md relies on it for `mrz`'s own
+      # release line. This workspace depends on several pre-1.0 crates
+      # (`ocrs`, `rten`, `rten-imageproc`, `rten-tensor`), so grouping `minor`
+      # with `patch` batches a *breaking* bump into a routine "chore(deps)"
+      # pull request wearing a routine label.
+      #
+      # That is not hypothetical. `ocrs` 0.13.1 announced that a future release
+      # removes the `.rten` model format this workspace ships -- two model
+      # files, two SHA-256 constants, eight checksum blocks across five
+      # workflows, and the `embedded-models` air-gapped build. That bump has to
+      # arrive on its own and be read deliberately.
+      #
+      # Minor bumps still get a pull request; they just get their own, with the
+      # dependency named in the title. Suppressing them instead would trade one
+      # failure mode for a worse one: never hearing about upstream at all.
+      cargo-patch:
         update-types:
-          - minor
           - patch
 
   - package-ecosystem: github-actions
