@@ -663,6 +663,13 @@ fn mrz_field_layout(format: &str) -> Option<&'static [MrzFieldSpan]> {
 /// `"document_type"` aliases the layout's `"document_code"`. Every other
 /// bench field name matches its span verbatim.
 ///
+/// The two optional-data fields are format-aware (ADR-0018): each format
+/// prints its optional-data element under its own span name — `optional_data_1`
+/// and `optional_data_2` on TD1, `optional_data` on TD2 and the MRVs, and
+/// `personal_number` on TD3, where the schema reports it under that name — so
+/// `"optional_data_1"` resolves to the `optional_data` span on TD2/MRV-A/MRV-B
+/// and to nothing on TD3, and `"optional_data_2"` resolves on TD1 only.
+///
 /// `None` covers two different reasons a field cannot be placed on a line,
 /// deliberately left undistinguished here so a caller reports both under one
 /// clearly-labelled group instead of inventing a line for either:
@@ -675,10 +682,11 @@ fn mrz_field_layout(format: &str) -> Option<&'static [MrzFieldSpan]> {
 ///   any format.
 pub fn mrz_field_line(format: &str, field: &str) -> Option<usize> {
     let layout = mrz_field_layout(format)?;
-    let span_name = match field {
-        "document_type" => "document_code",
-        "surname" | "given_names" => "name",
-        other => other,
+    let span_name = match (format, field) {
+        (_, "document_type") => "document_code",
+        (_, "surname" | "given_names") => "name",
+        ("TD2" | "MRVA" | "MRVB", "optional_data_1") => "optional_data",
+        (_, other) => other,
     };
     layout
         .iter()
@@ -1303,7 +1311,7 @@ pub struct JsonValidityStats {
     pub documents: usize,
 }
 
-/// The 10 [`CoreField`]s, paired with how to read the matching value off
+/// The 12 [`CoreField`]s, paired with how to read the matching value off
 /// [`mrz::MrzData`] — the synthetic corpus's ground truth. A local table
 /// rather than reusing `synthpass-bench`'s private `COMPARED_FIELDS`: that
 /// one is keyed by `&str` for the Tier-1-only report; this one is keyed by
@@ -1320,12 +1328,16 @@ fn mrz_field(field: CoreField, truth: &mrz::MrzData) -> String {
         CoreField::Sex => truth.sex.clone(),
         CoreField::DateOfExpiry => truth.date_of_expiry.clone(),
         CoreField::PersonalNumber => truth.personal_number.clone().unwrap_or_default(),
+        CoreField::OptionalData1 => synthpass_die::mrz_reader::reported_optional_data_1(truth)
+            .unwrap_or_default()
+            .to_string(),
+        CoreField::OptionalData2 => truth.optional_data_2.clone().unwrap_or_default(),
     }
 }
 
 /// Ground truth for a synthetic document, keyed by [`CoreField`]. A field
-/// with an empty string in `mrz::MrzData` (only ever `personal_number`,
-/// which is genuinely optional in a TD3 MRZ) is omitted rather than stored
+/// with an empty string in `mrz::MrzData` (`personal_number` and the two
+/// optional-data fields, all genuinely optional on the zone) is omitted rather than stored
 /// empty — "no ground truth for this field" and "ground truth is the empty
 /// string" must be distinguishable, and only the former should be excluded
 /// from `field_match_rate`/`mean_cer`.
@@ -1346,7 +1358,10 @@ fn mrz_ground_truth(truth: &mrz::MrzData) -> HashMap<CoreField, String> {
 /// "no ground truth," not as a false "expected empty string" that would
 /// score a non-empty answer as wrong.
 fn extraction_ground_truth(extraction: &synthpass_core::Extraction) -> HashMap<CoreField, String> {
-    let fields: [(CoreField, &Option<String>); 10] = [
+    // Sized by the schema, not by a literal: a fixed `10` here compiled
+    // unchanged when `CoreField` grew, and the new fields would simply never
+    // have had ground truth. Now a missing entry is a type error.
+    let fields: [(CoreField, &Option<String>); CoreField::ALL.len()] = [
         (CoreField::DocumentType, &extraction.document_type),
         (CoreField::IssuingCountry, &extraction.issuing_country),
         (CoreField::DocumentNumber, &extraction.document_number),
@@ -1357,6 +1372,8 @@ fn extraction_ground_truth(extraction: &synthpass_core::Extraction) -> HashMap<C
         (CoreField::Sex, &extraction.sex),
         (CoreField::DateOfExpiry, &extraction.date_of_expiry),
         (CoreField::PersonalNumber, &extraction.personal_number),
+        (CoreField::OptionalData1, &extraction.optional_data_1),
+        (CoreField::OptionalData2, &extraction.optional_data_2),
     ];
     fields
         .into_iter()
@@ -3895,6 +3912,36 @@ mod tests {
             None,
             "an unresolved format has no layout at all"
         );
+    }
+
+    /// ADR-0018's two schema fields land on the span each format prints them
+    /// under, and nowhere else: `optional_data_1` is TD2/MRV `optional_data`
+    /// and TD1 line 1, `optional_data_2` is TD1 line 2 only, and on TD3 the
+    /// element is `personal_number`, so `optional_data_1` resolves to nothing
+    /// there rather than double-counting the personal-number span.
+    #[test]
+    fn mrz_field_line_maps_the_optional_data_fields_per_format() {
+        assert_eq!(mrz_field_line("TD1", "optional_data_1"), Some(1));
+        assert_eq!(mrz_field_line("TD1", "optional_data_2"), Some(2));
+        for format in ["TD2", "MRVA", "MRVB"] {
+            assert_eq!(
+                mrz_field_line(format, "optional_data_1"),
+                Some(2),
+                "{format}: optional_data_1 is the printed optional_data span"
+            );
+            assert_eq!(
+                mrz_field_line(format, "optional_data_2"),
+                None,
+                "{format}: only TD1 prints a second element"
+            );
+        }
+        assert_eq!(mrz_field_line("TD3", "personal_number"), Some(2));
+        assert_eq!(
+            mrz_field_line("TD3", "optional_data_1"),
+            None,
+            "TD3's element is personal_number; optional_data_1 must not alias it"
+        );
+        assert_eq!(mrz_field_line("TD3", "optional_data_2"), None);
     }
 
     /// `"unmapped"` survives the guard, for the one case it is right for: the

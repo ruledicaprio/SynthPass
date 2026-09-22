@@ -1234,6 +1234,8 @@ fn extraction_from_v2_llm(v2: &ExtractionV2, mrz_checksums_valid: Option<bool>) 
         sex: v2.fields.sex.clone(),
         date_of_expiry: v2.fields.date_of_expiry.clone(),
         personal_number: v2.fields.personal_number.clone(),
+        optional_data_1: v2.fields.optional_data_1.clone(),
+        optional_data_2: v2.fields.optional_data_2.clone(),
         mrz_line: v2.mrz.as_ref().map(|m| m.lines.clone()),
         mrz_checksums_valid,
         validity: v2.validity,

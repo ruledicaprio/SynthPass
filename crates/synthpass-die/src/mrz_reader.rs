@@ -104,7 +104,7 @@ impl FieldReader for MrzReader {
 
         let Some(data) = mrz::find_and_parse_with(ctx.text, &crate::mrz_parse_options()).ok()
         else {
-            evidence.missing = synthpass_core::v2::CoreField::ALL.to_vec();
+            evidence.missing = synthpass_core::v2::ExtractionFields::default().missing();
             return Ok(Reading {
                 extraction: ExtractionV2::default(),
                 evidence,
@@ -121,7 +121,7 @@ impl FieldReader for MrzReader {
             // Its *evidence* is still valuable — which digits failed is the
             // most actionable escalation reason there is — but the fields are
             // not reported, exactly as before.
-            evidence.missing = synthpass_core::v2::CoreField::ALL.to_vec();
+            evidence.missing = synthpass_core::v2::ExtractionFields::default().missing();
             return Ok(Reading {
                 extraction: ExtractionV2::default(),
                 evidence,
@@ -223,6 +223,8 @@ pub fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
         sex: Some(m.sex.clone()),
         date_of_expiry: Some(m.date_of_expiry.clone()),
         personal_number: m.personal_number.clone(),
+        optional_data_1: reported_optional_data_1(m).map(str::to_string),
+        optional_data_2: m.optional_data_2.clone(),
         mrz_line: Some(m.mrz_lines.clone()),
         mrz_checksums_valid: Some(true),
         validity: Some(Validity {
@@ -232,6 +234,22 @@ pub fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
             days_until_expiry: v.days_until_expiry,
         }),
         extraction_method: EXTRACTION_METHOD.to_string(),
+    }
+}
+
+/// The product-schema view of [`mrz::MrzData::optional_data_1`]: the primary
+/// optional-data element on the formats that print one *as optional data*
+/// (TD1, TD2, MRV-A, MRV-B), and `None` on TD3, where that element is the
+/// personal number and is reported under `personal_number` — the field ICAO
+/// 9303 Part 4 names, and the one a check digit covers.
+///
+/// One rule, applied by [`extraction_from_mrz`] and by `synthpass-bench`'s
+/// Tier-1 columns, so a v2 record and a benchmark row never disagree about
+/// where a value lives (ADR-0018).
+pub fn reported_optional_data_1(m: &mrz::MrzData) -> Option<&str> {
+    match m.format {
+        mrz::Format::Td3 => None,
+        _ => m.optional_data_1.as_deref(),
     }
 }
 
@@ -393,7 +411,13 @@ mod tests {
         let reading = read("just some ordinary prose with no machine readable zone");
         assert!(!reading.evidence.mrz_found);
         assert!(!reading.evidence.mrz_checksums_valid);
-        assert_eq!(reading.missing().len(), CoreField::ALL.len());
+        // Everything a provider could be asked for is missing — which is every
+        // field but the two optional-data elements, by `missing`'s own rule.
+        assert!(!reading.missing().is_empty());
+        assert_eq!(
+            reading.missing(),
+            synthpass_core::v2::ExtractionFields::default().missing()
+        );
         assert_eq!(reading.by, MRZ_PROVIDER_ID);
     }
 

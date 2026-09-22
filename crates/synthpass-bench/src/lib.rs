@@ -1281,7 +1281,7 @@ fn run_check(
 /// `compare_fields` and `total_loss` cannot drift apart.
 type FieldAccessor = fn(&mrz::MrzData) -> String;
 
-const COMPARED_FIELDS: [(&str, FieldAccessor); 10] = [
+const COMPARED_FIELDS: [(&str, FieldAccessor); 12] = [
     ("document_type", |m| m.document_type.clone()),
     ("issuing_country", |m| m.issuing_country.clone()),
     ("document_number", |m| m.document_number.clone()),
@@ -1293,6 +1293,16 @@ const COMPARED_FIELDS: [(&str, FieldAccessor); 10] = [
     ("date_of_expiry", |m| m.date_of_expiry.clone()),
     ("personal_number", |m| {
         m.personal_number.clone().unwrap_or_default()
+    }),
+    // The product rule for the primary slot lives in `synthpass-die`, so this
+    // column and the v2 record agree that TD3's element is `personal_number`.
+    ("optional_data_1", |m| {
+        synthpass_die::mrz_reader::reported_optional_data_1(m)
+            .unwrap_or_default()
+            .to_string()
+    }),
+    ("optional_data_2", |m| {
+        m.optional_data_2.clone().unwrap_or_default()
     }),
 ];
 
