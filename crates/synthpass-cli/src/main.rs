@@ -587,11 +587,23 @@ fn decrypt_command(file: Option<&str>) -> Result<(), Box<dyn std::error::Error>>
 async fn doctor_command() -> Result<(), Box<dyn std::error::Error>> {
     let mut ok = true;
 
+    // `SYNTHPASS_OCR_ENGINE` no longer selects anything: `synthpass_pipeline::ocr::engine_from_env`
+    // treats any value other than `rust` (including the retired Tesseract-based
+    // `native` engine) as `rust` and only warns. Doctor used to special-case
+    // `native` and skip the model check entirely on the theory that it needed
+    // no local files — but the pipeline runs the Rust OCR engine regardless of
+    // this var, so that branch was checking a configuration nothing can
+    // actually select, while silently skipping the check that matters for the
+    // engine that always runs. Warn instead, and always check the real engine.
     let ocr_engine = env::var("SYNTHPASS_OCR_ENGINE").unwrap_or_else(|_| "rust".into());
-    match ocr_engine.as_str() {
-        "native" => println!("✅ OCR engine: native (in-process, no network check needed)"),
-        _ => check_rust_ocr_models(&mut ok),
+    if ocr_engine != "rust" {
+        println!(
+            "⚠️  SYNTHPASS_OCR_ENGINE={ocr_engine} is set but ignored — the pipeline always uses \
+             the pure-Rust OCR engine (the Tesseract-based `native` engine was retired in \
+             v1.2.0); checking that engine below"
+        );
     }
+    check_rust_ocr_models(&mut ok);
 
     let pipeline = Pipeline::from_env();
     let infer_desc = pipeline.infer_describe();
@@ -636,17 +648,43 @@ async fn doctor_command() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Models are baked into the binary at compile time (`ocr-embedded` feature,
-/// musl release builds) — nothing on disk to check, and no filesystem/network
-/// access at all is exactly the point.
+/// musl release builds) — nothing on disk to check, but that is not the same
+/// as nothing that can fail: a baked-in `.rten` file can still be in a format
+/// this build's `rten` can no longer parse (see `rten`'s own format
+/// deprecation), and that is exactly the failure a preflight command exists
+/// to catch before the user hits it mid-extraction. So this constructs the
+/// real engine from the embedded bytes rather than just asserting they are
+/// present — loading is cheap (well under a second); a full recognition pass
+/// is not (the `native_ocr_e2e` test takes ~268s), so this stops at "does it
+/// load", which is what a preflight can afford and what a format
+/// incompatibility actually breaks.
 #[cfg(all(feature = "ocr-native-rust", feature = "ocr-embedded"))]
-fn check_rust_ocr_models(_ok: &mut bool) {
-    println!("✅ OCR (rust) detection+recognition models embedded in binary");
+fn check_rust_ocr_models(ok: &mut bool) {
+    match synthpass_ocr::NativeOcr::load_embedded() {
+        Ok(_) => {
+            println!("✅ OCR (rust) detection+recognition models embedded in binary and load OK")
+        }
+        Err(e) => {
+            println!("❌ OCR (rust) embedded models present but failed to load: {e}");
+            *ok = false;
+        }
+    }
 }
 
 /// Checks the default `rust` OCR engine's two `.rten` weight files: present
-/// under `SYNTHPASS_OCR_MODEL_DIR` (default `.`) and sha256-verified — unlike a
-/// pure reachability check, this engine can fail at startup on missing or
-/// corrupt weights.
+/// under `SYNTHPASS_OCR_MODEL_DIR` (default `.`), sha256-verified, and —
+/// unlike a byte check — actually loadable by this build's `rten`.
+///
+/// The sha256 check alone is not enough: it proves the bytes on disk are the
+/// known-good file for that filename, not that the current binary can do
+/// anything with them. A `.rten` file whose *format* this `rten` version can
+/// no longer parse still has the correct, unmodified bytes, so the hash
+/// matches and this used to print a bare `✅` over a model the pipeline could
+/// not actually use. Constructing [`synthpass_ocr::NativeOcr`] from the files
+/// is what catches that: it deserializes both weight files and builds the
+/// `ocrs` engines around them, which is fast (well under a second) — unlike
+/// an actual recognition pass, which the `native_ocr_e2e` test measures at
+/// ~268s and which a preflight command cannot afford to run.
 #[cfg(all(feature = "ocr-native-rust", not(feature = "ocr-embedded")))]
 type OcrModelVerifyFn = fn(&Path) -> Result<(), synthpass_ocr::verify::VerifyError>;
 
@@ -655,29 +693,33 @@ fn check_rust_ocr_models(ok: &mut bool) {
     let model_dir = env::var("SYNTHPASS_OCR_MODEL_DIR").unwrap_or_else(|_| ".".into());
     let dir = Path::new(&model_dir);
     let skip = synthpass_ocr::verify::skip_verify();
-    let checks: [(&str, std::path::PathBuf, OcrModelVerifyFn); 2] = [
+    let detection_path = dir.join(synthpass_ocr::download::DETECTION_FILENAME);
+    let recognition_path = dir.join(synthpass_ocr::download::RECOGNITION_FILENAME);
+    let checks: [(&str, &PathBuf, OcrModelVerifyFn); 2] = [
         (
             "detection",
-            dir.join(synthpass_ocr::download::DETECTION_FILENAME),
+            &detection_path,
             synthpass_ocr::verify::verify_detection_model,
         ),
         (
             "recognition",
-            dir.join(synthpass_ocr::download::RECOGNITION_FILENAME),
+            &recognition_path,
             synthpass_ocr::verify::verify_recognition_model,
         ),
     ];
+    let mut both_present = true;
     for (label, path, verify_fn) in checks {
         if !path.exists() {
             println!("❌ OCR (rust) {label} model missing at {}", path.display());
             *ok = false;
+            both_present = false;
         } else if skip {
             println!(
                 "✅ OCR (rust) {label} model present at {} (sha256 verification skipped)",
                 path.display()
             );
         } else {
-            match verify_fn(&path) {
+            match verify_fn(path) {
                 Ok(()) => println!(
                     "✅ OCR (rust) {label} model present and sha256-verified at {}",
                     path.display()
@@ -686,6 +728,21 @@ fn check_rust_ocr_models(ok: &mut bool) {
                     println!("❌ OCR (rust) {label} model: {e}");
                     *ok = false;
                 }
+            }
+        }
+    }
+
+    // Only attempt a load when both files are at least present — a missing
+    // file already failed above, and there is nothing useful to load. This
+    // runs regardless of a hash mismatch or `skip_verify`, so it is the only
+    // check standing between "present" and "usable" when verification is
+    // disabled (`SYNTHPASS_OCR_MODEL_SKIP_VERIFY=1`).
+    if both_present {
+        match synthpass_ocr::NativeOcr::load(&detection_path, &recognition_path) {
+            Ok(_) => println!("✅ OCR (rust) models load OK (detection+recognition engines built)"),
+            Err(e) => {
+                println!("❌ OCR (rust) models present but failed to load: {e}");
+                *ok = false;
             }
         }
     }

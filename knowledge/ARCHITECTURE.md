@@ -104,7 +104,7 @@ sequenceDiagram
 4. **Persistence:** the Markdown is written to disk.
 5. **Tier 2 (if triggered):** `NativeInferer` runs, serialized behind `Pipeline`'s semaphore.
 6. **JSON generation:** the backend returns a typed `Extraction`; the pipeline writes a `.json` (or encrypted `.json.enc`) adjacent to the source and appends an audit record.
-7. **`synthpass doctor`:** preflight — for the `rust` OCR engine, checks the two `.rten` model files exist and SHA-256-verifies them; for `native`, no network check needed. Calls `Pipeline::infer_health()`, which confirms the GGUF file exists and SHA-256-verifies it (or reports the skip). Also verifies the configured license (or reports the skip).
+7. **`synthpass doctor`:** preflight — checks the `rust` OCR engine's two `.rten` model files (or, under `ocr-embedded`, the baked-in bytes): present, SHA-256-verified (skippable via `SYNTHPASS_OCR_MODEL_SKIP_VERIFY=1`), and — unlike a byte check — actually **loadable** by this build's `rten`, since a format this `rten` version can no longer parse still has the correct hash. `SYNTHPASS_OCR_ENGINE` no longer selects an engine (the Tesseract-based `native` engine was retired in v1.2.0; the pipeline always runs `rust`), so `doctor` warns and checks `rust` regardless of its value. Calls `Pipeline::infer_health()`, which confirms the GGUF file exists and SHA-256-verifies it (or reports the skip). Also verifies the configured license (or reports the skip).
 
 ### Web App (`synthpass-serve`)
 1. **GET /** serves an embedded, dependency-free upload page.
