@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+# Application code, never published: `mrz` is the only crate on crates.io.
+publish = false
 repository.workspace = true
 description = "Deterministic MRZ image preprocessing and layout geometry — pure Rust, no OCR engine, compiles to wasm32 for the browser demo."
 

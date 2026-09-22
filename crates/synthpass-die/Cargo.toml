@@ -3,6 +3,8 @@ name = "synthpass-die"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+# Application code, never published: `mrz` is the only crate on crates.io.
+publish = false
 description = "Document Intelligence Engine: the provider contract, capability model and catalog that MRZ, OCR, LLM and future vision/barcode providers all implement."
 
 # The dependency list is the deliverable, not an accident. This crate defines
