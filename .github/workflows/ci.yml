@@ -285,7 +285,7 @@ jobs:
       # the corpus exactly as the Rust bench does, hence the toolchain step;
       # nothing is cargo-built, so no cache is needed.
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # The version the suite was verified under locally; the tools are
           # stdlib-only, so this is a floor for determinism, not a dependency.
