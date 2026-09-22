@@ -45,6 +45,7 @@
   .chip { display: inline-block; padding: .05rem .5rem; border-radius: 1rem; font-size: .8rem; margin-left: .4rem; }
   .chip.ok { background: color-mix(in srgb, #10b981 18%, transparent); }
   .chip.bad { background: color-mix(in srgb, #c0392b 18%, transparent); }
+  .chip.na { background: color-mix(in srgb, currentColor 12%, transparent); }
   pre {
     padding: .75rem; border-radius: .375rem; overflow-x: auto;
     background: color-mix(in srgb, currentColor 8%, transparent);
@@ -153,8 +154,9 @@ async function scanImage(file) {
   setStatus('No MRZ found. Try a sharper, straighter photo of the data page — or paste the MRZ text below.', true);
 }
 
-function chip(ok) {
-  return `<span class="chip ${ok ? 'ok' : 'bad'}">${ok ? '✔ valid' : '✘ failed'}</span>`;
+function chip(check) {
+  if (check === null) return '<span class="chip na">— not printed</span>';
+  return `<span class="chip ${check ? 'ok' : 'bad'}">${check ? '✔ valid' : '✘ failed'}</span>`;
 }
 
 function esc(s) {
@@ -166,7 +168,7 @@ function render(r, rawText) {
   const v = document.getElementById('verdict');
   v.className = 'verdict ' + (r.valid ? 'ok' : 'bad');
   v.textContent = r.valid
-    ? '✔ VALID — every ICAO 9303 check digit verifies'
+    ? '✔ VALID — every printed ICAO 9303 check digit verifies'
     : '✘ CHECKSUM FAILURE — the MRZ does not verify (bad read or tampered document)';
 
   const rows = [

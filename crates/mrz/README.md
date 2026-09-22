@@ -64,11 +64,12 @@ let doc = mrz::parse_td3(
 assert_eq!(doc.surname, "ERIKSSON");
 assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
 
-// Per-field proof, not a single boolean.
-assert!(doc.checks.document_number);
-assert!(doc.checks.date_of_birth);
-assert!(doc.checks.composite);
-assert!(doc.valid()); // every check digit verified
+// Per-field proof, not a single boolean. `Some(true)` verified,
+// `Some(false)` refuted, `None` this format prints no such check digit.
+assert_eq!(doc.checks.document_number, Some(true));
+assert_eq!(doc.checks.date_of_birth, Some(true));
+assert_eq!(doc.checks.composite, Some(true));
+assert!(doc.valid()); // every check digit this format prints verified
 ```
 
 `parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other formats, each with a

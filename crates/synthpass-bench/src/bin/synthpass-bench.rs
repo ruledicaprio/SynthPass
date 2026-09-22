@@ -196,16 +196,16 @@ struct SeedResult {
     /// misses can be counted by kind without parsing prose.
     #[serde(skip_serializing_if = "Option::is_none")]
     miss_kind: Option<&'static str>,
-    /// Which check digit(s) failed, only present when `miss_kind` is
-    /// `"checksum_failed"` — `mrz::Field::as_str()` names
-    /// (`"document_number"`, `"date_of_birth"`, `"date_of_expiry"`,
-    /// `"personal_number"`, `"composite"`), one or more since a single
-    /// misread character can fail both its own field and the composite.
-    /// Turns the single largest, previously undifferentiated miss bucket
-    /// into an actionable breakdown — see
+    /// Observed state of every check digit on every parsed MRZ, keyed by
+    /// `mrz::Field::as_str()` names (`"document_number"`,
+    /// `"date_of_birth"`, `"date_of_expiry"`, `"personal_number"`,
+    /// `"composite"`). Values are `true` (verified), `false` (failed), or
+    /// `null` (the layout does not print that digit); absent only if no MRZ
+    /// parsed. This turns the largest miss bucket into an actionable breakdown
+    /// without discarding successful evidence — see
     /// `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    failing_checks: Vec<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_states: Option<BTreeMap<&'static str, Option<bool>>>,
     elapsed_ms: u128,
     /// Per-field character error rates, keyed by field name. Reported for
     /// every document that produced a parseable MRZ *and* for those that did
@@ -388,12 +388,7 @@ fn main() {
                 result.line1_integrity,
                 Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
             );
-            let failing_checks = match &result.reason {
-                Some(synthpass_bench::MissReason::ChecksumFailed { failing, .. }) => {
-                    failing.clone()
-                }
-                _ => Vec::new(),
-            };
+            let check_states = result.check_states.clone();
             let names_exact = result.names_exact;
             let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
             SeedResult {
@@ -401,7 +396,7 @@ fn main() {
                 profile: doc.profile.as_str(),
                 hit: result.hit,
                 miss_kind: result.reason.as_ref().map(miss_kind),
-                failing_checks,
+                check_states,
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
                 line1_flagged,
@@ -469,8 +464,12 @@ fn main() {
     // to `kinds["checksum_failed"]`.
     let mut failing_field_counts: BTreeMap<&'static str, usize> = BTreeMap::new();
     for r in &results {
-        for field in &r.failing_checks {
-            *failing_field_counts.entry(field).or_default() += 1;
+        if let Some(check_states) = &r.check_states {
+            for (field, state) in check_states {
+                if *state == Some(false) {
+                    *failing_field_counts.entry(field).or_default() += 1;
+                }
+            }
         }
     }
     if !failing_field_counts.is_empty() {
@@ -690,7 +689,15 @@ fn escalates_by_default(r: &SeedResult) -> bool {
 /// The narrow case `mrz::Checks::only_composite_failed` names: the composite is
 /// the sole failing digit.
 fn is_composite_only(r: &SeedResult) -> bool {
-    r.miss_kind == Some("checksum_failed") && r.failing_checks == ["composite"]
+    r.miss_kind == Some("checksum_failed")
+        && r.check_states.as_ref().is_some_and(|check_states| {
+            check_states
+                .values()
+                .filter(|state| **state == Some(false))
+                .count()
+                == 1
+                && check_states.get("composite") == Some(&Some(false))
+        })
 }
 
 /// Everything the Chunk 7 decision needs, separated from its formatting so the
@@ -841,7 +848,21 @@ mod tests {
             hit: miss.is_none(),
             reason: None,
             miss_kind: miss,
-            failing_checks: failing.to_vec(),
+            check_states: match miss {
+                Some("no_mrz_found" | "ocr_error") => None,
+                _ => Some(
+                    [
+                        "document_number",
+                        "date_of_birth",
+                        "date_of_expiry",
+                        "personal_number",
+                        "composite",
+                    ]
+                    .into_iter()
+                    .map(|field| (field, Some(!failing.contains(&field))))
+                    .collect(),
+                ),
+            },
             elapsed_ms: 0,
             fields: fields
                 .iter()

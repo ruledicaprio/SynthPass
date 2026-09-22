@@ -453,6 +453,11 @@ mod tests {
         assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
         assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
         assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+
+        let parsed = mrz::find_and_parse(TD1_SPECIMEN).expect("TD1 parses");
+        let block = mrz_block_from(&parsed);
+        assert_eq!(block.checks.personal_number, None);
+        assert_eq!(block.checks.composite, Some(true));
     }
 
     /// TD1's permanent, structural limitation: no check digit covers line 3
@@ -503,6 +508,11 @@ mod tests {
         assert_eq!(fields.get(CoreField::IssuingCountry), Some("UTO"));
         assert_eq!(reading.extraction.provenance, Provenance::MrzChecksum);
         assert_eq!(reading.extraction.extraction_method, EXTRACTION_METHOD);
+
+        let parsed = mrz::find_and_parse(MRV_A_SPECIMEN).expect("MRV-A parses");
+        let block = mrz_block_from(&parsed);
+        assert_eq!(block.checks.personal_number, None);
+        assert_eq!(block.checks.composite, None);
     }
 
     /// Same proof for MRV-B: 36-char, 2-line, distinct from TD2 despite the

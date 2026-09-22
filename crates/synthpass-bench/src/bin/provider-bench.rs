@@ -1471,9 +1471,11 @@ async fn main() {
             let mut by_failing_field: std::collections::BTreeMap<&str, usize> =
                 std::collections::BTreeMap::new();
             for d in &r.documents_detail {
-                if let Some(MissReason::ChecksumFailed { failing, .. }) = &d.miss_reason {
-                    for field in failing {
-                        *by_failing_field.entry(field).or_default() += 1;
+                if let Some(MissReason::ChecksumFailed { check_states, .. }) = &d.miss_reason {
+                    for (field, state) in check_states {
+                        if *state == Some(false) {
+                            *by_failing_field.entry(field).or_default() += 1;
+                        }
                     }
                 }
             }
@@ -2223,6 +2225,7 @@ mod tests {
             mrz_format: Some("TD3"),
             read_ok: true,
             mrz_checksums_valid: miss_reason.is_none(),
+            check_states: None,
             miss_reason,
             assertions_total: 0,
             assertions_unsupported: 0,

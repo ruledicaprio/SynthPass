@@ -841,6 +841,6 @@ fn neither_form_verifies_surfaces_full_number_with_failed_check() {
 
     let d = parse_td3(l1, &corrupted).unwrap();
     assert_eq!(d.document_number_full.as_deref(), Some("L898902C31234"));
-    assert!(!d.checks.document_number);
+    assert_eq!(d.checks.document_number, Some(false));
     assert!(!d.document_number_legacy_encoding);
 }

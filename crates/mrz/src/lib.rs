@@ -24,9 +24,9 @@
 //! assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
 //!
 //! // Per-field proof, not a single boolean.
-//! assert!(doc.checks.document_number);
-//! assert!(doc.checks.composite);
-//! assert!(doc.valid()); // every check digit verified
+//! assert_eq!(doc.checks.document_number, Some(true));
+//! assert_eq!(doc.checks.composite, Some(true));
+//! assert!(doc.valid()); // every printed check digit verified
 //! ```
 //!
 //! `parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other
@@ -235,9 +235,8 @@ impl ParseOptions {
 /// fields don't name, and adding it should not be a breaking change. Construct
 /// one from a `parse_*` function rather than by literal.
 ///
-/// A format that prints no such check digit reports that field as `true`: a
-/// check digit that does not exist cannot fail. So `personal_number` is `true`
-/// on every format but TD3, and `composite` is `true` on MRV-A and MRV-B.
+/// `Some(true)` means the printed check digit verified, `Some(false)` means it
+/// failed, and `None` means the format does not print that check digit.
 ///
 /// ```
 /// // The ICAO specimen with its date of birth altered: 740812 → 750812.
@@ -248,10 +247,10 @@ impl ParseOptions {
 /// .unwrap();
 ///
 /// // The damage is located, not merely detected.
-/// assert!(doc.checks.document_number);
-/// assert!(!doc.checks.date_of_birth);
-/// assert!(doc.checks.date_of_expiry);
-/// assert!(!doc.checks.composite); // the composite covers the date of birth too
+/// assert_eq!(doc.checks.document_number, Some(true));
+/// assert_eq!(doc.checks.date_of_birth, Some(false));
+/// assert_eq!(doc.checks.date_of_expiry, Some(true));
+/// assert_eq!(doc.checks.composite, Some(false)); // the composite covers the date of birth too
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -259,17 +258,15 @@ impl ParseOptions {
 pub struct Checks {
     /// The primary document-number field (or, for a number too long for it,
     /// the reassembled number — see [`MrzData::full_document_number`]).
-    pub document_number: bool,
+    pub document_number: Option<bool>,
     /// The date-of-birth field.
-    pub date_of_birth: bool,
+    pub date_of_birth: Option<bool>,
     /// The date-of-expiry field.
-    pub date_of_expiry: bool,
-    /// TD3's personal-number field. `true` on TD1, TD2, MRV-A and MRV-B, which
-    /// print no such check digit.
-    pub personal_number: bool,
-    /// The composite check digit over the zone. `true` on MRV-A and MRV-B,
-    /// which print none.
-    pub composite: bool,
+    pub date_of_expiry: Option<bool>,
+    /// TD3's personal-number field; absent on the other four formats.
+    pub personal_number: Option<bool>,
+    /// The composite check digit over the zone; absent on MRV-A and MRV-B.
+    pub composite: Option<bool>,
 }
 
 impl Checks {
@@ -282,15 +279,26 @@ impl Checks {
     /// )
     /// .unwrap();
     /// assert!(doc.checks.all_valid());
-    /// // TD2 prints no personal-number check digit, so that field is vacuously true.
-    /// assert!(doc.checks.personal_number);
+    /// // TD2 prints no personal-number check digit, so it is explicitly absent.
+    /// assert_eq!(doc.checks.personal_number, None);
     /// ```
     pub fn all_valid(&self) -> bool {
-        self.document_number
-            && self.date_of_birth
-            && self.date_of_expiry
-            && self.personal_number
-            && self.composite
+        self.applicable() > 0 && self.verified() == self.applicable()
+    }
+
+    /// Stamps the parser's five raw verification results with the check-digit
+    /// contract for `format`. A parser supplies a value for every slot; the
+    /// format matrix is the single source of truth for whether that value was
+    /// actually printed and therefore observable.
+    pub(crate) fn from_verifications(format: Format, verified: [bool; 5]) -> Self {
+        let applicable = format.check_digit_applicability();
+        Self {
+            document_number: applicable[0].then_some(verified[0]),
+            date_of_birth: applicable[1].then_some(verified[1]),
+            date_of_expiry: applicable[2].then_some(verified[2]),
+            personal_number: applicable[3].then_some(verified[3]),
+            composite: applicable[4].then_some(verified[4]),
+        }
     }
 }
 
@@ -461,6 +469,30 @@ pub enum Format {
     /// geometry mirrors TD2 through the expiry check digit, but there is no
     /// personal-number field and no composite check digit.
     MrvB,
+}
+
+impl Format {
+    /// Whether each [`Checks`] field has a printed check digit in this layout,
+    /// ordered as document number, date of birth, date of expiry, personal
+    /// number, then composite. This is layout data, never a property of an
+    /// individual read.
+    pub const CHECK_DIGIT_APPLICABILITY: [(Self, [bool; 5]); 5] = [
+        (Self::Td1, [true, true, true, false, true]),
+        (Self::Td2, [true, true, true, false, true]),
+        (Self::Td3, [true, true, true, true, true]),
+        (Self::MrvA, [true, true, true, false, false]),
+        (Self::MrvB, [true, true, true, false, false]),
+    ];
+
+    /// Check-digit applicability for this layout. Unknown future formats have
+    /// no declared check-digit contract until their parser and table row land
+    /// together.
+    pub fn check_digit_applicability(self) -> [bool; 5] {
+        Self::CHECK_DIGIT_APPLICABILITY
+            .iter()
+            .find_map(|(format, applicability)| (*format == self).then_some(*applicability))
+            .unwrap_or([false; 5])
+    }
 }
 
 /// Parsed and validated MRZ data.
@@ -789,20 +821,38 @@ impl core::fmt::Display for Field {
 }
 
 impl Checks {
-    /// The fields whose check digits failed, in field order. Empty when
-    /// [`all_valid`](Checks::all_valid) is `true`.
-    ///
-    /// ```
-    /// use mrz::Field;
-    ///
-    /// // The ICAO specimen with its date of birth altered: 740812 → 750812.
-    /// let doc = mrz::parse_td3(
-    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
-    ///     "L898902C36UTO7508122F1204159ZE184226B<<<<<10",
-    /// )
-    /// .unwrap();
-    /// assert_eq!(doc.checks.failed(), [Field::DateOfBirth, Field::Composite]);
-    /// ```
+    /// Number of check digits this format prints. A zero-applicable `Checks`
+    /// is never valid: there is no check-digit evidence to establish a read.
+    pub fn applicable(&self) -> u8 {
+        [
+            self.document_number,
+            self.date_of_birth,
+            self.date_of_expiry,
+            self.personal_number,
+            self.composite,
+        ]
+        .into_iter()
+        .filter(|check| check.is_some())
+        .count() as u8
+    }
+
+    /// Number of printed check digits that verified.
+    pub fn verified(&self) -> u8 {
+        [
+            self.document_number,
+            self.date_of_birth,
+            self.date_of_expiry,
+            self.personal_number,
+            self.composite,
+        ]
+        .into_iter()
+        .filter(|check| *check == Some(true))
+        .count() as u8
+    }
+
+    /// The fields whose printed check digits failed, in field order. Absent
+    /// checks are not failures. Empty when [`all_valid`](Checks::all_valid) is
+    /// `true`.
     pub fn failed(&self) -> Vec<Field> {
         [
             (self.document_number, Field::DocumentNumber),
@@ -812,14 +862,8 @@ impl Checks {
             (self.composite, Field::Composite),
         ]
         .into_iter()
-        .filter_map(|(ok, f)| (!ok).then_some(f))
+        .filter_map(|(ok, f)| (ok == Some(false)).then_some(f))
         .collect()
-    }
-
-    /// How many of the five check digits validate — the ranking signal the
-    /// scanner uses to pick its best-effort reading.
-    pub(crate) fn score(&self) -> u8 {
-        5 - self.failed().len() as u8
     }
 }
 
@@ -965,6 +1009,21 @@ impl std::error::Error for MrzError {}
 mod tests {
     use super::*;
 
+    #[test]
+    fn zero_applicable_checks_are_not_valid() {
+        let checks = Checks {
+            document_number: None,
+            date_of_birth: None,
+            date_of_expiry: None,
+            personal_number: None,
+            composite: None,
+        };
+        assert_eq!(checks.applicable(), 0);
+        assert_eq!(checks.verified(), 0);
+        assert!(!checks.all_valid());
+        assert!(checks.failed().is_empty());
+    }
+
     // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson). Part 4's own
     // copy is Appendix B Figure B-1 — an image in the source PDF, not
     // extracted as text into this corpus
@@ -997,8 +1056,8 @@ mod tests {
         // Change one digit of the date of birth: 740812 → 750812.
         let tampered = TD3_L2.replacen("740812", "750812", 1);
         let d = parse_td3(TD3_L1, &tampered).unwrap();
-        assert!(!d.checks.date_of_birth);
-        assert!(!d.checks.composite);
+        assert_eq!(d.checks.date_of_birth, Some(false));
+        assert_eq!(d.checks.composite, Some(false));
         assert!(!d.valid());
     }
 
@@ -1014,7 +1073,7 @@ mod tests {
         let l2 = format!("{}{}{}", &TD3_L2[0..13], "<<<<<<0", &TD3_L2[20..]);
         assert_eq!(l2.len(), TD3_L2.len());
         let d = parse_td3(TD3_L1, &l2).unwrap();
-        assert!(d.checks.date_of_birth);
+        assert_eq!(d.checks.date_of_birth, Some(true));
         assert_eq!(d.date_of_birth, "<<<<<<"); // left unexpanded, not a lie
         assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
     }
@@ -1034,8 +1093,8 @@ mod tests {
         // originally carried unasserted — see the comment above.
         let l2 = "L898902C36UTO7408122F1204159<<<<<<<<<<<<<<08";
         let d = parse_td3(TD3_L1, l2).unwrap();
-        assert!(d.checks.personal_number);
-        assert!(d.checks.composite);
+        assert_eq!(d.checks.personal_number, Some(true));
+        assert_eq!(d.checks.composite, Some(true));
         assert_eq!(d.personal_number, None);
     }
 
@@ -1045,8 +1104,8 @@ mod tests {
         // digit, since both digit characters have ICAO value 0.
         let l2 = "L898902C36UTO7408122F1204159<<<<<<<<<<<<<<<8";
         let d = parse_td3(TD3_L1, l2).unwrap();
-        assert!(d.checks.personal_number);
-        assert!(d.checks.composite);
+        assert_eq!(d.checks.personal_number, Some(true));
+        assert_eq!(d.checks.composite, Some(true));
         assert_eq!(d.personal_number, None);
     }
 
@@ -1147,7 +1206,7 @@ mod tests {
         let l2 = format!("{}{}", "<<<<<<0", &TD1_L2[7..]);
         assert_eq!(l2.len(), TD1_L2.len());
         let d = parse_td1(TD1_L1, &l2, TD1_L3).unwrap();
-        assert!(d.checks.date_of_birth);
+        assert_eq!(d.checks.date_of_birth, Some(true));
         assert_eq!(d.date_of_birth, "<<<<<<");
         assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
     }
@@ -1178,8 +1237,8 @@ mod tests {
     fn td2_tampered_expiry_fails_checksum() {
         let tampered = TD2_L2.replacen("120415", "120416", 1);
         let d = parse_td2(TD2_L1, &tampered).unwrap();
-        assert!(!d.checks.date_of_expiry);
-        assert!(!d.checks.composite);
+        assert_eq!(d.checks.date_of_expiry, Some(false));
+        assert_eq!(d.checks.composite, Some(false));
         assert!(!d.valid());
     }
 
@@ -1215,9 +1274,9 @@ mod tests {
         assert_eq!(d.surname, "SPECIMEN");
         assert_eq!(d.document_number, "007007007");
         assert_eq!(d.issuing_country, "HRV");
-        assert!(d.checks.document_number);
-        assert!(d.checks.date_of_birth);
-        assert!(d.checks.date_of_expiry);
+        assert_eq!(d.checks.document_number, Some(true));
+        assert_eq!(d.checks.date_of_birth, Some(true));
+        assert_eq!(d.checks.date_of_expiry, Some(true));
     }
 
     #[test]
@@ -1292,7 +1351,7 @@ mod tests {
         let text = format!("{TD3_L1}\n{tampered}");
         let d = find_and_parse(&text).unwrap();
         assert!(!d.valid());
-        assert!(!d.checks.date_of_birth);
+        assert_eq!(d.checks.date_of_birth, Some(false));
     }
 
     #[test]
@@ -1413,6 +1472,44 @@ mod tests {
     const MRV_B_L2: &str = "L234567897DEU9201017F2706306QW12ER34";
 
     #[test]
+    fn parser_check_presence_matches_the_format_matrix() {
+        let expected = [
+            (Format::Td3, [true, true, true, true, true]),
+            (Format::Td1, [true, true, true, false, true]),
+            (Format::Td2, [true, true, true, false, true]),
+            (Format::MrvA, [true, true, true, false, false]),
+            (Format::MrvB, [true, true, true, false, false]),
+        ];
+        for (format, applicability) in expected {
+            assert_eq!(format.check_digit_applicability(), applicability);
+        }
+
+        let parsed = [
+            parse_td1(TD1_L1, TD1_L2, TD1_L3).unwrap(),
+            parse_td2(TD2_L1, TD2_L2).unwrap(),
+            parse_td3(TD3_L1, TD3_L2).unwrap(),
+            parse_mrv_a(MRV_A_L1, MRV_A_L2).unwrap(),
+            parse_mrv_b(MRV_B_L1, MRV_B_L2).unwrap(),
+        ];
+
+        for data in parsed {
+            let observed = [
+                data.checks.document_number.is_some(),
+                data.checks.date_of_birth.is_some(),
+                data.checks.date_of_expiry.is_some(),
+                data.checks.personal_number.is_some(),
+                data.checks.composite.is_some(),
+            ];
+            assert_eq!(
+                observed,
+                data.format.check_digit_applicability(),
+                "{:?}: parser presence must follow the format matrix",
+                data.format
+            );
+        }
+    }
+
+    #[test]
     fn mrv_b_specimen_fully_valid() {
         let d = parse_mrv_b(MRV_B_L1, MRV_B_L2).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
@@ -1428,7 +1525,7 @@ mod tests {
     fn mrv_a_tampered_dob_fails_checksum() {
         let tampered = MRV_A_L2.replacen("850221", "860221", 1);
         let d = parse_mrv_a(MRV_A_L1, &tampered).unwrap();
-        assert!(!d.checks.date_of_birth);
+        assert_eq!(d.checks.date_of_birth, Some(false));
         assert!(!d.valid());
     }
 
@@ -1585,7 +1682,7 @@ mod tests {
         // corrupting "1234", not the pre-0.6 8-character-boundary "31234".
         let tampered = mrz.replacen("1234", "1235", 1);
         let d = parse_td3_str(&tampered);
-        assert!(!d.checks.document_number);
+        assert_eq!(d.checks.document_number, Some(false));
         assert!(!d.valid());
         assert!(d.checks.failed().contains(&Field::DocumentNumber));
     }
@@ -1675,9 +1772,9 @@ mod tests {
         assert!(!d.valid());
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.document_number, "L898902C3");
-        assert!(d.checks.document_number);
-        assert!(!d.checks.date_of_birth);
-        assert!(!d.checks.date_of_expiry);
+        assert_eq!(d.checks.document_number, Some(true));
+        assert_eq!(d.checks.date_of_birth, Some(false));
+        assert_eq!(d.checks.date_of_expiry, Some(false));
     }
 
     #[test]

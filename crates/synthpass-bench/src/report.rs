@@ -14,11 +14,11 @@
 //! Reordering, renaming, or adding a field without `#[serde(default)]`/
 //! `skip_serializing_if` is a file-format change, not a refactor.
 
+use crate::miss_kind;
 use crate::provider_bench::{
     AssertionBucket, DocumentDetail, ProviderReport, StrictNameHitRate, Tier1HitRate,
     UnsupportedAssertion,
 };
-use crate::{miss_kind, MissReason};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -104,13 +104,12 @@ pub struct DocumentDetailReport {
     /// message), which is aggregate-report noise, not report content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub miss_reason: Option<&'static str>,
-    /// Which check digit(s) failed, only present when `miss_reason` is
-    /// `"checksum_failed"` or `"checksum_failed_specimen"` — `mrz::Field::as_str()`
-    /// names. Field names only,
-    /// same discipline as `unsupported_fields` above — see this struct's
-    /// module doc. See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub failing_checks: Vec<&'static str>,
+    /// Observed state of every check digit on every parsed MRZ, keyed by
+    /// `mrz::Field::as_str()`. Values are `true` (verified), `false` (failed),
+    /// or `null` (not printed by this layout); absent only if no MRZ parsed.
+    /// See `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` chunk 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub check_states: Option<BTreeMap<&'static str, Option<bool>>>,
     pub assertions_total: usize,
     pub assertions_unsupported: usize,
     pub unsupported_fields: Vec<&'static str>,
@@ -363,10 +362,7 @@ impl From<ProviderReport> for ProviderRow {
                     read_ok: d.read_ok,
                     mrz_checksums_valid: d.mrz_checksums_valid,
                     miss_reason: d.miss_reason.as_ref().map(miss_kind),
-                    failing_checks: match &d.miss_reason {
-                        Some(MissReason::ChecksumFailed { failing, .. }) => failing.clone(),
-                        _ => Vec::new(),
-                    },
+                    check_states: d.check_states,
                     assertions_total: d.assertions_total,
                     assertions_unsupported: d.assertions_unsupported,
                     unsupported_fields: d.unsupported_fields,
@@ -429,7 +425,7 @@ pub struct Report {
 /// Field order is the JSON key order — `#[derive(Serialize)]` on a struct
 /// serializes fields in declaration order, so this order **is** the schema;
 /// do not reorder the fields without treating that as a format change.
-/// `miss_reason` is the full [`MissReason`] [`Display`](std::fmt::Display)
+/// `miss_reason` is the full [`MissReason`](crate::MissReason) [`Display`](std::fmt::Display)
 /// string (may carry a parse/provider error message); `outcome` is the
 /// stable machine-readable class ([`miss_kind`] or `"hit"`) — the same
 /// hit-vs-noise split [`DocumentDetailReport::miss_reason`] draws for the
@@ -738,6 +734,7 @@ pub struct RealSpecimenBaseline {
 mod tests {
     use super::*;
     use crate::provider_bench::{AccuracyStats, CapabilitySnapshot, SpeedStats};
+    use crate::MissReason;
     use std::time::Duration;
 
     #[test]
@@ -891,6 +888,7 @@ mod tests {
             mrz_format: Some("TD3"),
             read_ok: true,
             mrz_checksums_valid: miss_reason.is_none(),
+            check_states: None,
             miss_reason,
             assertions_total: 0,
             assertions_unsupported: 0,

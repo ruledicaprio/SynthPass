@@ -821,8 +821,8 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
 /// local that does not outlive the iteration. This is a diagnostic artifact,
 /// not a hot path.
 ///
-/// For a `no_mrz_found` row `recovered_mrz_lines` and `failing_checks` are
-/// empty and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
+/// For a `no_mrz_found` row `recovered_mrz_lines` is empty, `check_states` is
+/// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
 /// matters there is `mrz_band_score` (was a band even found?) and
 /// `raw_ocr_text` (what did the recognizer see?) — the localization-vs-
 /// recognition question `ADR-0008` chunk 1C cell (b) asks.
@@ -846,8 +846,10 @@ struct MissOcrDump {
     /// The MRZ zone `mrz::find_and_parse` recovered (post width/substitution
     /// repair), one entry per line; empty if nothing parsed.
     recovered_mrz_lines: Vec<String>,
-    /// The check digit field name(s) that did not validate.
-    failing_checks: Vec<String>,
+    /// Per-check-digit state: `true` verified, `false` failed, `null` not
+    /// printed by this layout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    check_states: Option<BTreeMap<String, Option<bool>>>,
     /// The hand-transcribed true printed MRZ zone, when this specimen carries
     /// a `samples/ocr_fixtures/<stem>.json` label; `None` for the unlabelled
     /// majority.
@@ -991,6 +993,10 @@ pub struct DocumentDetail {
     /// `read_ok` is `false` too (nothing to check), since a provider that
     /// errored produced no MRZ to validate.
     pub mrz_checksums_valid: bool,
+    /// Per-check-digit state from the parsed OCR MRZ. Absent only when no MRZ
+    /// parsed; otherwise all five fields are recorded, including `None` for
+    /// digits this layout does not print.
+    pub check_states: Option<BTreeMap<&'static str, Option<bool>>>,
     /// Why this document is not a Tier-1 hit. `None` on a genuine hit: MRZ
     /// found, checksums valid, and (when labelled) document number matches
     /// ground truth. Mirrors `synthpass-bench`'s own miss classification
@@ -1914,6 +1920,7 @@ async fn run_prepped_with_dump_options(
                         mrz_format: resolve_format(None),
                         read_ok: false,
                         mrz_checksums_valid: false,
+                        check_states: None,
                         miss_reason: Some(MissReason::OcrError(e.to_string())),
                         assertions_total: 0,
                         assertions_unsupported: 0,
@@ -2061,9 +2068,9 @@ async fn run_prepped_with_dump_options(
                 // same reason as `redacted`: the document decides this, not the
                 // run.
                 Some(MissReason::ChecksumFailed {
-                    failing: read_mrz
+                    check_states: read_mrz
                         .as_ref()
-                        .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
+                        .map(|d| crate::check_states(&d.checks))
                         .unwrap_or_default(),
                     specimen_nonconforming: true,
                 })
@@ -2079,9 +2086,9 @@ async fn run_prepped_with_dump_options(
                 // `--dump-ocr` already uses a few lines below to print which
                 // check digit(s) failed — reused here for the same reason.
                 Some(MissReason::ChecksumFailed {
-                    failing: read_mrz
+                    check_states: read_mrz
                         .as_ref()
-                        .map(|d| d.checks.failed().iter().map(|f| f.as_str()).collect())
+                        .map(|d| crate::check_states(&d.checks))
                         .unwrap_or_default(),
                     specimen_nonconforming: false,
                 })
@@ -2134,17 +2141,29 @@ async fn run_prepped_with_dump_options(
                     "--- {} ({provider}) recovered MRZ zone ---",
                     bench_page.name
                 );
-                let (recovered, failing): (Vec<String>, Vec<String>) = match &read_mrz {
+                let (recovered, check_states): (
+                    Vec<String>,
+                    Option<BTreeMap<String, Option<bool>>>,
+                ) = match &read_mrz {
                     Some(data) => {
                         let recovered: Vec<String> =
                             data.mrz_lines.lines().map(str::to_string).collect();
                         for (i, line) in recovered.iter().enumerate() {
                             println!("  [{i}] {line:?}");
                         }
-                        let failing: Vec<String> =
-                            data.checks.failed().iter().map(|f| f.to_string()).collect();
-                        println!("  failed check digit(s): {}", failing.join(", "));
-                        (recovered, failing)
+                        let failing: BTreeMap<String, Option<bool>> =
+                            crate::check_states(&data.checks)
+                                .into_iter()
+                                .map(|(field, state)| (field.to_string(), state))
+                                .collect();
+                        let failed: Vec<_> = failing
+                            .iter()
+                            .filter_map(|(field, state)| {
+                                (*state == Some(false)).then_some(field.as_str())
+                            })
+                            .collect();
+                        println!("  failed check digit(s): {}", failed.join(", "));
+                        (recovered, Some(failing))
                     }
                     // `no_mrz_found`: nothing MRZ-shaped parsed, so there is
                     // no zone to show — the band score and raw text above are
@@ -2153,7 +2172,7 @@ async fn run_prepped_with_dump_options(
                     // nothing — same output, and just as informative.)
                     None => {
                         println!("  (nothing MRZ-shaped parsed)");
-                        (Vec::new(), Vec::new())
+                        (Vec::new(), None)
                     }
                 };
 
@@ -2207,7 +2226,7 @@ async fn run_prepped_with_dump_options(
                     mrz_band_score: bench_page.page.mrz_band_score,
                     raw_ocr_text: bench_page.page.text.clone(),
                     recovered_mrz_lines: recovered,
-                    failing_checks: failing,
+                    check_states,
                     ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
                     zone_mismatch,
                     field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
@@ -2263,6 +2282,9 @@ async fn run_prepped_with_dump_options(
                 }
                 None => (None, None),
             };
+            let check_states = read_mrz
+                .as_ref()
+                .map(|data| crate::check_states(&data.checks));
 
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
@@ -2271,6 +2293,7 @@ async fn run_prepped_with_dump_options(
                 mrz_format,
                 read_ok: true,
                 mrz_checksums_valid: reading.evidence.mrz_checksums_valid,
+                check_states,
                 miss_reason,
                 assertions_total: doc_assertions,
                 assertions_unsupported: doc_unsupported_fields.len(),
@@ -2972,9 +2995,15 @@ mod tests {
                 .is_some_and(|t| t.contains("ERIKSSON")),
             "full pre-parse OCR text is carried verbatim"
         );
+        let check_states = row["check_states"]
+            .as_object()
+            .expect("a parsed MRZ records every check state");
+        assert_eq!(check_states.len(), 5);
+        assert_eq!(check_states["document_number"], true);
+        assert_eq!(check_states["date_of_birth"], false);
         assert!(
-            !row["failing_checks"].as_array().unwrap().is_empty(),
-            "at least one check digit field is named"
+            check_states.values().any(|state| state == false),
+            "at least one check must fail"
         );
         assert!(
             row["ground_truth_mrz"].is_null() && row["zone_mismatch"].is_null(),
@@ -2992,6 +3021,21 @@ mod tests {
     /// score and raw OCR text but no recovered zone: nothing MRZ-shaped
     /// parsed. This is the localization-vs-recognition material for
     /// `ADR-0008` chunk 1C cell (b).
+    #[test]
+    #[should_panic(expected = "at least one check must fail")]
+    fn checksum_failed_assertion_rejects_a_clean_read() {
+        let clean = mrz::parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("fixture parses");
+        let states = crate::check_states(&clean.checks);
+        assert!(
+            states.values().any(|state| *state == Some(false)),
+            "at least one check must fail"
+        );
+    }
+
     #[tokio::test]
     async fn dump_ocr_also_writes_a_row_for_a_no_mrz_found_miss() {
         let reader = std::sync::Arc::new(FixedReader {
@@ -3052,8 +3096,8 @@ mod tests {
         );
         assert!(
             row["recovered_mrz_lines"].as_array().unwrap().is_empty()
-                && row["failing_checks"].as_array().unwrap().is_empty(),
-            "nothing MRZ-shaped parsed, so no recovered zone or failing checks"
+                && row.get("check_states").is_none(),
+            "nothing MRZ-shaped parsed, so no recovered zone or check observations"
         );
     }
 
@@ -4005,6 +4049,7 @@ mod tests {
 
         struct Case {
             format: &'static str,
+            mrz_format: mrz::Format,
             lines: Vec<&'static str>,
             parse: fn(&[String]) -> Option<mrz::Checks>,
         }
@@ -4012,6 +4057,7 @@ mod tests {
         let cases = [
             Case {
                 format: "TD1",
+                mrz_format: mrz::Format::Td1,
                 lines: vec![
                     "I<UTOD231458907<<<<<<<<<<<<<<<",
                     "7408122F1204159UTO<<<<<<<<<<<6",
@@ -4025,6 +4071,7 @@ mod tests {
             },
             Case {
                 format: "TD2",
+                mrz_format: mrz::Format::Td2,
                 lines: vec![
                     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
                     "D231458907UTO7408122F1204159<<<<<<<6",
@@ -4033,6 +4080,7 @@ mod tests {
             },
             Case {
                 format: "TD3",
+                mrz_format: mrz::Format::Td3,
                 lines: vec![
                     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
                     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
@@ -4041,6 +4089,7 @@ mod tests {
             },
             Case {
                 format: "MRVA",
+                mrz_format: mrz::Format::MrvA,
                 lines: vec![
                     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
                     "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
@@ -4053,6 +4102,7 @@ mod tests {
             },
             Case {
                 format: "MRVB",
+                mrz_format: mrz::Format::MrvB,
                 lines: vec![
                     "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
                     "L898902C<3UTO6908061F9406236ZE184226",
@@ -4072,6 +4122,19 @@ mod tests {
             assert!(
                 baseline.all_valid(),
                 "{}: fixture must be checksum-clean before mutation",
+                case.format
+            );
+            let actual_applicability = [
+                baseline.document_number.is_some(),
+                baseline.date_of_birth.is_some(),
+                baseline.date_of_expiry.is_some(),
+                baseline.personal_number.is_some(),
+                baseline.composite.is_some(),
+            ];
+            assert_eq!(
+                actual_applicability,
+                case.mrz_format.check_digit_applicability(),
+                "{}: applicability table must match the parser's printed check digits",
                 case.format
             );
 
