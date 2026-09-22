@@ -3,7 +3,9 @@
 //! Field offsets follow ICAO 9303 parts 4 (TD3), 5 (TD1) and 6 (TD2). Each
 //! parser verifies every printed check digit; the scanner drives the OCR-repair
 //! machinery in [`crate::checksum`] and accepts a candidate reading only when
-//! its composite check digit proves the read.
+//! its composite check digit agrees with it. Agreement is checksum
+//! consistency, not byte-identity with the printed zone — see
+//! [`crate::Blindspot`].
 
 use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,

@@ -1,8 +1,12 @@
 //! ICAO 9303 check-digit math and generic OCR-repair primitives.
 //!
-//! The check digit is deterministic proof of a faithful read; the repair
-//! helpers generate candidate readings of noisy OCR whose correctness is then
-//! *proven* (or rejected) by that same math — see [`crate::find_and_parse`].
+//! A check digit is deterministic evidence rather than a model score: it
+//! either agrees with the candidate or it does not. What agreement establishes
+//! is *checksum consistency* over the field that digit covers — never
+//! byte-identity with the printed zone, which no check digit can establish
+//! (see [`crate::Blindspot`]). The repair helpers generate candidate readings
+//! of noisy OCR which that same arithmetic then accepts or rejects — see
+//! [`crate::find_and_parse`].
 
 use crate::MrzError;
 

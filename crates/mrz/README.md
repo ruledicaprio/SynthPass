@@ -10,14 +10,14 @@ Zero-dependency [ICAO Doc 9303](https://www.icao.int/publications/pages/publicat
 Machine Readable Zone parser, emitter and check-digit validator for Rust — passports, ID cards
 and visas.
 
-A valid check digit is **proof** that an OCR read is faithful to the printed document — not a
-probability, not a model score. `mrz` verifies every printed check digit under the standard
-7-3-1 weighting and reports the result per field, so you always know *which* digit proved the
-read and which one failed.
+A check digit is arithmetic, not a model score: it agrees with the read or it does not. `mrz`
+verifies every printed check digit under the standard 7-3-1 weighting and reports the result
+per field, so you always know *which* digit agreed and which one failed — and, just as
+importantly, [what agreement does not establish](#what-a-check-digit-cannot-prove).
 
-- **Proof, field by field** — document number, date of birth, expiry, personal number, composite.
+- **Evidence, field by field** — document number, date of birth, expiry, personal number, composite.
 - **Reads messy OCR** — finds the zone in free text, and repairs a misread only when a check
-  digit proves the repair.
+  digit agrees with the repair.
 - **Writes conformant zones** — all five formats, with Latin and Cyrillic names transliterated
   the way Doc 9303 prescribes.
 - **Honest about its limits** — the substitutions no check digit can catch are a public API.
@@ -32,7 +32,7 @@ read and which one failed.
 
 - [Install](#install) · [Supported formats](#supported-formats) · [Quick start](#quick-start)
 - [Reading OCR output](#reading-ocr-output) · [Emitting](#emitting) ·
-  [A proven read is not a valid document](#a-proven-read-is-not-a-valid-document)
+  [A checksum-consistent read is not a valid document](#a-checksum-consistent-read-is-not-a-valid-document)
 - [What a check digit cannot prove](#what-a-check-digit-cannot-prove) · [Conformance](#conformance)
 - [Feature flags](#feature-flags) · [Versioning and MSRV](#versioning-and-msrv) · [License](#license)
 
@@ -64,7 +64,7 @@ let doc = mrz::parse_td3(
 assert_eq!(doc.surname, "ERIKSSON");
 assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
 
-// Per-field proof, not a single boolean. `Some(true)` verified,
+// Per-field evidence, not a single boolean. `Some(true)` verified,
 // `Some(false)` refuted, `None` this format prints no such check digit.
 assert_eq!(doc.checks.document_number, Some(true));
 assert_eq!(doc.checks.date_of_birth, Some(true));
@@ -79,8 +79,8 @@ assert!(doc.valid()); // every check digit this format prints verified
 
 [`find_and_parse`](https://docs.rs/mrz/latest/mrz/fn.find_and_parse.html) locates an MRZ inside
 noisy OCR text — HTML-escaped fillers, lines merged onto one physical line — and runs a
-check-digit-guided repair pass. A repaired reading is accepted only when its check digits prove
-it. When nothing validates, you get the best-scoring partial read with its honest `Checks`, or
+check-digit-guided repair pass. A repaired reading is accepted only when its check digits agree
+with it. When nothing validates, you get the best-scoring partial read with its honest `Checks`, or
 `NotFound` if the text only looked like an MRZ.
 
 ```rust
@@ -146,10 +146,10 @@ National characters are **transliterated, not dropped**:
 Either way the crate can *produce* a conformant transliteration but cannot *validate* one: the
 standard admits several correct answers. §6 C (Arabic) is not implemented.
 
-## A proven read is not a valid document
+## A checksum-consistent read is not a valid document
 
-A verified composite proves the *read*. Whether the document is in date is a separate question,
-and the crate never reads the clock to answer it — you pass "today" in:
+A verified composite constrains the *read*. Whether the document is in date is a separate
+question, and the crate never reads the clock to answer it — you pass "today" in:
 
 ```rust
 use mrz::Date;
@@ -159,7 +159,7 @@ let doc = mrz::parse_td3(
     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
 ).unwrap();
 
-assert!(doc.valid());                                   // the read is proven ...
+assert!(doc.valid());                                   // every printed digit agrees ...
 assert!(!doc.validity(Date::new(2026, 9, 14)).in_date); // ... and the specimen expired in 2012
 ```
 

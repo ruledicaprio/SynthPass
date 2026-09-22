@@ -17,8 +17,9 @@ with no runtime dependencies.
 Non-goals, written down so they are not re-proposed:
 
 - **OCR.** The crate takes text. Pixels belong to the caller.
-- **Authenticity.** A check digit proves a faithful *read*, never a genuine *document*. No
-  forgery detection and no eMRTD chip signature checks.
+- **Authenticity.** A check digit establishes that a read is *checksum-consistent* with the
+  printed zone, never that the *document* is genuine. No forgery detection and no eMRTD chip
+  signature checks.
 - **A clock, a network, or a runtime dependency.** "Today" is always a parameter, the code
   registry is compiled in, and the default build pulls in nothing.
 - **Per-country special cases.** Rules come from Doc 9303 and apply to every issuer. A code table
@@ -94,9 +95,10 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 
    The five emitter inputs stay **deliberately exhaustive**: they mirror layouts ICAO 9303
    fixes, so future tunables belong in a separate non-exhaustive companion instead.
-2. **Say what "not applicable" means in `Checks`.** `personal_number` and `composite` report
-   `true` on formats that print no such check digit. The docs say so, but the type does not,
-   and a caller can read "absent" as "verified". A tri-state would make the difference visible.
+2. **Say what "not applicable" means in `Checks`. — DONE.** `personal_number` and `composite`
+   used to report `true` on formats that print no such check digit. Each check is now
+   `Option<bool>`: `Some(true)` verified, `Some(false)` refuted, `None` not printed by this
+   layout. See `knowledge/decisions/ADR-0017-checks-distinguish-absent-from-verified.md`.
 3. **Name the fields for what they hold.** `MrzData::personal_number` carries TD1, TD2 and MRV
    *optional data*, and TD1's two optional fields arrive joined into one. `optional_data`, kept
    per line, would be the honest shape.
@@ -104,8 +106,8 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
    or the raw field when a date is incomplete; `sex` is `"M"`, `"F"` or `"X"`. Typed accessors
    (`Date`, a `Sex` enum) can be added in a patch. Making them the primary representation is the
    breaking part, and it needs a decision on what the `serde` shape becomes.
-5. **Richer errors.** `MrzError::BadCharacter` names the character but not its line or its
-   position.
+5. **Richer errors. — DONE.** `MrzError::BadCharacter` now carries `character`, `line` and
+   `position` rather than a bare `char`.
 
 ## 0.9.0 — release candidate
 

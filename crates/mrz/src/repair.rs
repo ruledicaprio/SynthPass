@@ -158,7 +158,11 @@ pub enum FieldKind {
 #[non_exhaustive]
 pub enum Resolution {
     /// Exactly one reading satisfies the check digit and the field's
-    /// structural constraint. This is a proof, not a preference.
+    /// structural constraint. This is a proof, not a preference — of
+    /// *uniqueness within the candidate set*, which is built from the
+    /// [`UNKNOWN`] positions the caller marked. A character misread without
+    /// being marked is not in that set, so the uniqueness is conditional on
+    /// the damage model the caller supplied.
     Unique(String),
     /// Several readings satisfy both and nothing in the MRZ can separate them
     /// — the check digit's blindspot, made explicit. Sorted, so the output is
