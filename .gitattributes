@@ -11,3 +11,10 @@ knowledge/benchmarks/real-specimen-outcomes.jsonl text eol=lf
 # should be able to compare two checkouts and get the same bytes. Nothing pins its sha256
 # today -- this is so that a Windows and a Linux checkout never disagree if something ever does.
 knowledge/benchmarks/mrz-matrix-probe-2026-09-18.json text eol=lf
+
+# bench_report_golden compares these fixtures byte-for-byte against generated output, and
+# pulls them in with include_str!, which embeds working-tree bytes at compile time. Under
+# core.autocrlf they materialise with CRLF on Windows while the generated side uses LF, so
+# 2 of 11 tests fail there on a clean checkout of main and pass in Linux CI -- which is why
+# it went unnoticed. Same class of file, and same reason, as the two pins above.
+crates/synthpass-bench/tests/fixtures/bench_report/** text eol=lf
