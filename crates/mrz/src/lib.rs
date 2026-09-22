@@ -622,8 +622,42 @@ pub struct MrzData {
 }
 
 impl MrzData {
+    /// Every check digit this format prints agrees with the candidate.
+    ///
+    /// The named form of what [`valid`](Self::valid) computes, and the
+    /// preferred spelling: `valid` sits three letters from
+    /// [`validity`](Self::validity) and means something entirely different,
+    /// so the short name reads as a verdict on the *document* when it is a
+    /// verdict on the *arithmetic*. Both call
+    /// [`checks.all_valid()`](Checks::all_valid); neither is going away
+    /// inside 0.8.
+    ///
+    /// **This is checksum consistency — not document validity, and not
+    /// byte-identity with the printed zone.** Whether the document is in date
+    /// is [`validity`](Self::validity); what the arithmetic cannot see is
+    /// [`Blindspot`].
+    ///
+    /// ```
+    /// const L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    ///
+    /// let doc = mrz::parse_td3("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2).unwrap();
+    /// assert!(doc.checksum_consistent());
+    ///
+    /// // And what that does not establish. TD3's composite spans line 2 only
+    /// // (positions 1-10, 14-20, 22-43), so line 1 carries no check digit at
+    /// // all: a different surname is exactly as consistent.
+    /// let altered = mrz::parse_td3("P<UTOERIKSSDN<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2).unwrap();
+    /// assert_eq!(altered.surname, "ERIKSSDN");
+    /// assert!(altered.checksum_consistent());
+    /// ```
+    pub fn checksum_consistent(&self) -> bool {
+        self.checks.all_valid()
+    }
+
     /// Shorthand for [`checks.all_valid()`](Checks::all_valid): every check
-    /// digit this format prints agrees with the candidate.
+    /// digit this format prints agrees with the candidate. Same answer as
+    /// [`checksum_consistent`](Self::checksum_consistent), which is the
+    /// clearer name for it.
     ///
     /// A failed check digit is a verdict on the read, not a parse error: the
     /// zone still parses, and this is where the verdict lives.
@@ -642,7 +676,7 @@ impl MrzData {
     /// assert!(!tampered.valid());
     /// ```
     pub fn valid(&self) -> bool {
-        self.checks.all_valid()
+        self.checksum_consistent()
     }
 
     /// The complete document number: the overflow reassembly when there is

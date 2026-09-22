@@ -69,6 +69,25 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   derives today. Anyone serializing diagnostics wants them.
 - **A strict emit path** — `try_format_*` functions that return an error for input the
   emitters currently map to fillers or truncate. The existing total functions stay as they are.
+- **Parse evidence — the one gap the validation-vocabulary review left open.** A
+  `find_and_parse` result is indistinguishable from a `parse_*` one: nothing on `MrzData`
+  records whether the zone was normalized, repaired, or resolved uniquely, and `mrz_lines`
+  holds the repaired zone either way. So a caller cannot separate an exact read, a harmless
+  normalization, a uniquely check-digit-resolved repair, and a heuristic one — only outright
+  failure is visible, as `Err(NotFound)`. That matters most to accuracy measurement, where a
+  pristine read and a heavily repaired one currently score identically. A
+  `find_and_parse_detailed() -> (MrzData, ParseEvidence)` carries it without touching
+  `find_and_parse`. **Additive, so it is not gated on the breaking window** — it can land in
+  0.8.x.
+
+  The rest of that review's proposed vocabulary is already implemented under other names, and
+  needs no new API: *parsed* is `Ok` from a `parse_*`, *checksum consistency* is
+  `MrzData::checksum_consistent`, *plausibility* is `DateCompleteness` plus `country_name`
+  recognition, *document validity* is `MrzData::validity(today)`, and *issuer policy* stays
+  outside this crate by the non-goal above. `recovery_evidence` is the only missing layer.
+  Deliberately **not** proposed: a single confidence score. The dimensions are qualitatively
+  different and collapsing them hides exactly the information a caller needs.
+
 - **`no_std` + `alloc`** — worth investigating before 1.0. The core is integer arithmetic and
   string slicing, which suits embedded document readers. `core::error::Error` has been stable
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
