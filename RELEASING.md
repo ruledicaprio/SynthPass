@@ -23,8 +23,12 @@ git commit -am "release: vX.Y.Z — <title>"
 ```
 
 Merging is the whole release. `.github/workflows/release.yml` notices the version changed,
-creates the annotated tag **on the merge commit**, and opens the GitHub Release with that
-version's CHANGELOG section as the body. Nobody creates a tag by hand.
+confirms the release is actually assembled, creates the annotated tag **on the merge commit**,
+and opens the GitHub Release with that version's CHANGELOG section as the body. Nobody creates
+a tag by hand.
+
+The version changing is necessary and **not sufficient** — see "A version change is not a
+release" below, which is the difference between a release and an open breaking window.
 
 ## Why nobody creates a tag by hand
 
@@ -45,6 +49,65 @@ of them: 0.1.0–0.3.0 and 0.5.1–0.7.0 have no tag at all.
 Automating it is not about saving keystrokes. A workflow triggered by the version change can
 only ever tag the commit that made it, and that commit is on `main` by construction. The class
 of bug disappears rather than being remembered about.
+
+## A version change is not a release
+
+The trigger above watches the version *field*. For the workspace that is nearly the same thing
+as a release, because the version moves in the release PR and nowhere else. For `mrz` it is not:
+pre-1.0, the minor slot is the breaking slot, and CI's `semver` job only goes green once the
+version already reflects a breaking change — so `mrz` bumps in the PR that makes the **first**
+breaking change, and the release follows however many commits later the window takes to close.
+
+The workflow used to read that staged bump as a release. On 2026-09-19 the 0.8.0 window opened;
+the workflow tagged `mrz-v0.8.0` on that commit and queued a crates.io publish behind the
+`crates-io` approval gate. Twenty-three commits of 0.8 work landed after it, none of them in the
+tag. Nothing went red at any point — a publish waiting for approval looks exactly like a publish
+nobody has got round to yet.
+
+So the workflow asks two separate questions now, and `scripts/check-release-ready.sh` answers
+the second one from the repository itself:
+
+| | Ready | Not ready |
+| --- | --- | --- |
+| manifest version | is the version being released | disagrees with it |
+| CHANGELOG | an assembled `## [X.Y.Z]` section, with entries | absent, or present and empty |
+| `[Unreleased]` | empty | still holds this version's entries |
+| fragments | consumed | still pending |
+
+A staged bump fails the last two by construction, which is the whole design: readiness is
+witnessed by the same fragments that already derive the version number, so there is no new flag
+for anyone to remember to set. Run it yourself at any point:
+
+```bash
+scripts/check-release-ready.sh --scope mrz
+```
+
+`NOT READY` is the *normal* answer while a window is open, and the release run that reports it
+is **green** — it releases nothing and says so in the job summary. It flips to `READY` on the
+commit where the release PR assembles the changelog and consumes the fragments.
+
+### A tag that already exists is not "nothing to do"
+
+`scripts/tag-release.sh` owns the other half. Three states, and only the first two are ordinary:
+
+- **absent** — create it, annotated, on the release commit, and push it;
+- **present, naming this commit** — a notice; re-running a release is not an error;
+- **present, naming a different commit** — hard failure; nothing tagged, nothing published.
+
+The old workflow printed `already exists; nothing to do` and exited 0 for all three, which is
+how a stale `mrz-v0.8.0` kept a green publish job aimed at the wrong commit. Repairing such a
+tag stays deliberate and manual — see "Repairing the historical tags" below — because moving a
+tag someone has already fetched rewrites history they hold.
+
+### Everything binds to one commit
+
+The package, the tag, the approval and the GitHub Release all name the SHA recorded when the run
+started, never a branch: an approval can sit in the queue for days while `main` moves on
+underneath it. Before the publish job becomes available, a separate `evidence` job packages the
+crate from that commit, checks that the `.cargo_vcs_info.json` *inside the `.crate`* names it
+too, runs `cargo publish --dry-run`, and attaches the `.crate` and its file list to the run. So
+an approver is looking at a specific artifact built from a specific commit — and the publish job
+re-derives both from scratch before it publishes, rather than trusting the jobs above it.
 
 ## The version number is derived, not chosen
 
@@ -111,7 +174,10 @@ Same shape, with three differences.
   `check-changelog.sh` accepts the `crates/mrz/CHANGELOG.md` edit in place of a new fragment.
 - **A breaking change bumps in the PR that makes it**, not in a separate release PR. CI's
   `semver` job derives the permitted bump from `crates/mrz/Cargo.toml` and diffs against
-  crates.io, so a breaking change only goes green once the version already reflects it.
+  crates.io, so a breaking change only goes green once the version already reflects it. That
+  bump **opens the breaking window and releases nothing**: the release run it triggers reports
+  a staged bump and stops. Everything else in the window then ships under that same number, and
+  the release is the later commit that assembles the changelog.
 - **Cross-check the changelog against git before publishing.** Every commit that shipped should
   be covered by an entry:
   ```bash
@@ -121,10 +187,13 @@ Same shape, with three differences.
   `.crate` carries a `.cargo_vcs_info.json` naming the SHA it was packaged from. That is how
   `crates/mrz/CHANGELOG.md`'s sections for 0.1.0–0.7.0 were reconstructed.
 
-Merging tags `mrz-vX.Y.Z`. Publishing to crates.io is a **separate, gated step**: the
-`publish-mrz` job runs in the `crates-io` GitHub environment, which requires a manual approval,
-because a publish cannot be undone — a version can be yanked but never replaced. The job re-runs
-the full `mrz` test suite and a `-D warnings` rustdoc build before it publishes.
+Merging the *assembled* release tags `mrz-vX.Y.Z`. Publishing to crates.io is a **separate,
+gated step**: the `publish-mrz` job runs in the `crates-io` GitHub environment, which requires a
+manual approval, because a publish cannot be undone — a version can be yanked but never
+replaced. Before that approval is even offered, the `evidence` job must have packaged the crate
+from the release commit and dry-run the publish; the job itself then re-verifies the tag names
+that commit, re-runs the full `mrz` test suite and a `-D warnings` rustdoc build, and re-checks
+that what it is about to upload was packaged from it.
 
 Two things the workflow cannot do for itself:
 
