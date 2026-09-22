@@ -16,6 +16,33 @@ name: Release
 # Trigger: a push to main whose Cargo.toml or crates/mrz/Cargo.toml version
 # differs from its parent. That makes the release commit itself the trigger, so
 # a release cannot be "forgotten" and a tag cannot drift from what it names.
+#
+# ---------------------------------------------------------------------------
+# A version change is not a release. (Added after it cost us one.)
+#
+# The original version of this workflow treated "the version field moved" as
+# "release this now". Those are different events, and crates/mrz proves it:
+# under Cargo's 0.x rules the minor slot is the breaking slot, and CI's `semver`
+# job only goes green once the version already reflects a breaking change — so
+# `mrz` bumps to 0.8.0 in the PR that makes the *first* breaking change, and the
+# release follows some tens of commits later. This workflow read that staged
+# bump as a release, created mrz-v0.8.0 on it, and queued a crates.io publish
+# against a commit missing every 0.8 change that came after. The publish sat in
+# the approval gate; nothing anywhere went red.
+#
+# So the flow below separates three questions that used to be one:
+#
+#   detect   did a version field move?           (opens the window)
+#   detect   is that version actually assembled? (scripts/check-release-ready.sh)
+#   evidence does it package and dry-run clean, from this exact commit?
+#
+# Only all three together tag anything, and only a tag proven to name this exact
+# commit lets the publish job run. Every step defaults to not releasing, and the
+# one state that used to be silent — a tag that already exists on a *different*
+# commit — is now a hard failure (scripts/tag-release.sh).
+#
+# A staged bump is therefore an ordinary green run that releases nothing, and
+# says so in the job summary. That is the common case, not an error.
 
 on:
   push:
@@ -38,18 +65,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  tag:
-    name: Tag and release
+  detect:
+    name: Detect release intent
     runs-on: ubuntu-latest
     outputs:
+      # Recorded once, here, and consumed by every job below. Nothing downstream
+      # resolves a branch name or re-reads HEAD: the package, the tag, the
+      # approval and the GitHub Release all have to name one commit, and this is
+      # where that commit is named.
+      release_sha: ${{ github.sha }}
+      workspace_version: ${{ steps.detect.outputs.workspace_version }}
+      workspace_tag: ${{ steps.detect.outputs.workspace_tag }}
+      workspace_release: ${{ steps.detect.outputs.workspace_release }}
       mrz_version: ${{ steps.detect.outputs.mrz_version }}
-      mrz_changed: ${{ steps.detect.outputs.mrz_changed }}
+      mrz_tag: ${{ steps.detect.outputs.mrz_tag }}
+      mrz_release: ${{ steps.detect.outputs.mrz_release }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - name: Detect version changes
+      - name: Detect version changes, then release readiness
         id: detect
         run: |
           set -euo pipefail
@@ -80,91 +117,307 @@ jobs:
               echo "::error::could not read a version from $manifest"; exit 1
             fi
 
-            if [ "$now" = "$was" ]; then
-              echo "$scope: unchanged at $now"
-              echo "${scope}_changed=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "$scope: $was -> $now  (tag ${prefix}${now})"
-              echo "${scope}_changed=true" >> "$GITHUB_OUTPUT"
-            fi
             echo "${scope}_version=$now" >> "$GITHUB_OUTPUT"
             echo "${scope}_tag=${prefix}${now}" >> "$GITHUB_OUTPUT"
+
+            if [ "$now" = "$was" ]; then
+              echo "$scope: unchanged at $now"
+              echo "${scope}_release=false" >> "$GITHUB_OUTPUT"
+              continue
+            fi
+
+            echo "$scope: $was -> $now  (candidate tag ${prefix}${now})"
+
+            # The window is open. Whether this commit *is* the release is a
+            # separate question, and the repository already answers it: the
+            # fragments that derive the version number also witness whether it
+            # has been assembled. Exit 1 means "not a release" and is ordinary;
+            # anything else means the gate itself is broken, which must not be
+            # read as either answer.
+            rc=0
+            bash scripts/check-release-ready.sh --scope "$scope" --version "$now" || rc=$?
+
+            case "$rc" in
+              0)
+                echo "${scope}_release=true" >> "$GITHUB_OUTPUT"
+                echo "**$scope $now** — releasing \`${prefix}${now}\` from \`$GITHUB_SHA\`" >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              1)
+                echo "${scope}_release=false" >> "$GITHUB_OUTPUT"
+                echo "::notice::$scope moved to $now, but its changelog is not assembled — staged bump, releasing nothing"
+                {
+                  echo "**$scope $now** — staged version bump, **not** released."
+                  echo ""
+                  echo "The version field moved, which opens the window; the changelog for"
+                  echo "\`$now\` is not assembled and its fragments are still pending, so this"
+                  echo "commit is not the release. No tag was created and nothing was published."
+                  echo "See \`RELEASING.md\`."
+                  echo ""
+                } >> "$GITHUB_STEP_SUMMARY"
+                ;;
+              *)
+                echo "::error::scripts/check-release-ready.sh failed to run for $scope (exit $rc)"
+                exit 1
+                ;;
+            esac
           done
 
-      - name: Extract release notes from CHANGELOG.md
-        id: notes
-        if: steps.detect.outputs.workspace_changed == 'true'
+  # Everything a publish decision needs, produced from the release commit and
+  # nothing else. This runs on a dry run too: "would this release work?" is
+  # exactly what a dry run is for, and packaging writes nothing outside target/.
+  evidence:
+    name: Package evidence (mrz ${{ needs.detect.outputs.mrz_version }})
+    needs: detect
+    if: needs.detect.outputs.mrz_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      crate_file: ${{ steps.pkg.outputs.crate_file }}
+      crate_sha256: ${{ steps.pkg.outputs.crate_sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.detect.outputs.release_sha }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Package, and prove the package came from this commit
+        id: pkg
+        env:
+          MRZ_VERSION: ${{ needs.detect.outputs.mrz_version }}
+          RELEASE_SHA: ${{ needs.detect.outputs.release_sha }}
         run: |
           set -euo pipefail
-          v="${{ steps.detect.outputs.workspace_version }}"
-          # The section for this version, up to the next '## ' heading.
-          awk -v ver="$v" '
+
+          cargo package -p mrz --locked
+          crate="target/package/mrz-${MRZ_VERSION}.crate"
+          if [ ! -f "$crate" ]; then
+            echo "::error::cargo package produced no $crate"; exit 1
+          fi
+
+          # The binding that actually matters. cargo writes the commit it
+          # packaged from into .cargo_vcs_info.json inside the .crate — the same
+          # field RELEASING.md uses to reconstruct which commit a published
+          # version came from. If it is not the commit under review, the bytes
+          # about to reach crates.io are not the bytes that were reviewed, and
+          # crates.io is the one place that cannot be corrected afterwards.
+          vcs="$(tar -xzOf "$crate" "mrz-${MRZ_VERSION}/.cargo_vcs_info.json")"
+          packaged="$(printf '%s' "$vcs" | tr -d ' \n' \
+                      | sed -n 's/.*"sha1":"\([0-9a-f]\{40\}\)".*/\1/p')"
+          if [ -z "$packaged" ]; then
+            echo "::error::no commit recorded in the packaged .cargo_vcs_info.json"
+            printf '%s\n' "$vcs"; exit 1
+          fi
+          if [ "$packaged" != "$RELEASE_SHA" ]; then
+            echo "::error::.crate was packaged from $packaged, release is $RELEASE_SHA"
+            exit 1
+          fi
+
+          # Nothing outside the crate directory can reach a consumer's disk. The
+          # corpus under samples/ is the one that would matter, and it carries
+          # real document images.
+          cargo package -p mrz --locked --list > target/package-files.txt
+          if grep -qE '(^|/)(samples|artifacts|work)/' target/package-files.txt; then
+            echo "::error::the package includes corpus or working files:"
+            grep -nE '(^|/)(samples|artifacts|work)/' target/package-files.txt
+            exit 1
+          fi
+
+          sum="$(sha256sum "$crate" | cut -d' ' -f1)"
+          echo "crate_file=$(basename "$crate")" >> "$GITHUB_OUTPUT"
+          echo "crate_sha256=$sum" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### mrz ${MRZ_VERSION} package evidence"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| commit | \`${RELEASE_SHA}\` |"
+            echo "| packaged from | \`${packaged}\` |"
+            echo "| file | \`$(basename "$crate")\` |"
+            echo "| size | $(stat -c%s "$crate") bytes |"
+            echo "| sha256 | \`${sum}\` |"
+            echo "| files included | $(wc -l < target/package-files.txt) |"
+            echo ""
+            echo "<details><summary>Included files</summary>"
+            echo ""
+            echo '```'
+            cat target/package-files.txt
+            echo '```'
+            echo ""
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run the publish
+        run: cargo publish -p mrz --locked --dry-run
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mrz-${{ needs.detect.outputs.mrz_version }}-crate
+          path: |
+            target/package/mrz-${{ needs.detect.outputs.mrz_version }}.crate
+            target/package-files.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  tag:
+    name: Tag
+    needs: [detect, evidence]
+    # `evidence` is skipped whenever the workspace is releasing and mrz is not,
+    # so this cannot use the default "all needs succeeded" rule. It is written
+    # to fail closed instead: a skipped evidence job is fine, a failed or
+    # cancelled one stops the tag.
+    if: >-
+      always() &&
+      needs.detect.result == 'success' &&
+      needs.evidence.result != 'failure' &&
+      needs.evidence.result != 'cancelled' &&
+      github.event.inputs.dry_run != 'true' &&
+      (needs.detect.outputs.workspace_release == 'true' ||
+       needs.detect.outputs.mrz_release == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.detect.outputs.release_sha }}
+          fetch-depth: 0
+
+      - name: Fetch existing tags
+        run: git fetch origin --tags --force
+
+      - name: Configure the tagging identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Extract release notes from CHANGELOG.md
+        if: needs.detect.outputs.workspace_release == 'true'
+        env:
+          WORKSPACE_VERSION: ${{ needs.detect.outputs.workspace_version }}
+        run: |
+          set -euo pipefail
+          # The version is escaped before it becomes a regex: unescaped, the dots
+          # in "1.5.0" match any character.
+          awk -v ver="$WORKSPACE_VERSION" '
+            BEGIN { gsub(/\./, "\\.", ver) }
             $0 ~ "^## \\[" ver "\\]" { f = 1; print; next }
             f && /^## / { exit }
             f { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
-            echo "::error::no '## [$v]' section found in CHANGELOG.md"; exit 1
+            echo "::error::no '## [$WORKSPACE_VERSION]' section found in CHANGELOG.md"; exit 1
           fi
           echo "--- notes preview ---"; head -20 release-notes.md
 
-      - name: Create tag and GitHub Release
-        if: >-
-          steps.detect.outputs.workspace_changed == 'true' &&
-          github.event.inputs.dry_run != 'true'
+      - name: Tag the workspace release
+        if: needs.detect.outputs.workspace_release == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          WORKSPACE_TAG: ${{ needs.detect.outputs.workspace_tag }}
+          RELEASE_SHA: ${{ needs.detect.outputs.release_sha }}
         run: |
           set -euo pipefail
-          tag="${{ steps.detect.outputs.workspace_tag }}"
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "::notice::$tag already exists; nothing to do"; exit 0
+          bash scripts/tag-release.sh --tag "$WORKSPACE_TAG" --sha "$RELEASE_SHA"
+          # Re-running a release must not fail on a Release that already exists,
+          # but it must not silently skip a missing one either.
+          if gh release view "$WORKSPACE_TAG" >/dev/null 2>&1; then
+            echo "::notice::GitHub Release $WORKSPACE_TAG already exists"
+          else
+            gh release create "$WORKSPACE_TAG" --title "$WORKSPACE_TAG" \
+              --notes-file release-notes.md --verify-tag
           fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Annotated, on this commit — which is on main, which is the whole point.
-          git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
-          git push origin "$tag"
-          gh release create "$tag" --title "$tag" --notes-file release-notes.md --verify-tag
+          echo "**workspace** — tagged \`$WORKSPACE_TAG\` on \`$RELEASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Tag the mrz release line
+        # Belt and braces: the job-level `if` lets a *skipped* evidence job
+        # through for the workspace-only case, so the mrz tag re-asserts that
+        # evidence actually succeeded before anything names an mrz version.
         if: >-
-          steps.detect.outputs.mrz_changed == 'true' &&
-          github.event.inputs.dry_run != 'true'
+          needs.detect.outputs.mrz_release == 'true' &&
+          needs.evidence.result == 'success'
+        env:
+          MRZ_TAG: ${{ needs.detect.outputs.mrz_tag }}
+          RELEASE_SHA: ${{ needs.detect.outputs.release_sha }}
         run: |
           set -euo pipefail
-          tag="${{ steps.detect.outputs.mrz_tag }}"
-          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo "::notice::$tag already exists; nothing to do"; exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$tag" -m "$tag" "$GITHUB_SHA"
-          git push origin "$tag"
+          bash scripts/tag-release.sh --tag "$MRZ_TAG" --sha "$RELEASE_SHA"
+          echo "**mrz** — tagged \`$MRZ_TAG\` on \`$RELEASE_SHA\`" >> "$GITHUB_STEP_SUMMARY"
 
   # Publishing to crates.io is irreversible — a version can be yanked but never
   # replaced or deleted. So it does not run automatically: the `crates-io`
-  # environment gates it on a human approval, and the job only becomes available
-  # once the tag above exists.
+  # environment gates it on a human approval.
+  #
+  # What that human is approving is now a specific commit. The job re-derives
+  # every binding itself rather than trusting the jobs above, because an approval
+  # can sit in the queue for days while main moves on underneath it — which is
+  # exactly how the 0.8.0 publish came to be waiting against a stale commit.
   publish-mrz:
     name: Publish mrz to crates.io
-    needs: tag
-    if: needs.tag.outputs.mrz_changed == 'true' && github.event.inputs.dry_run != 'true'
+    needs: [detect, evidence, tag]
+    if: >-
+      needs.detect.outputs.mrz_release == 'true' &&
+      github.event.inputs.dry_run != 'true'
     runs-on: ubuntu-latest
     environment: crates-io
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Never the branch. By the time an approval is granted, main may be
+          # many commits past the one that was reviewed.
+          ref: ${{ needs.detect.outputs.release_sha }}
+          fetch-depth: 0
+
       - uses: dtolnay/rust-toolchain@stable
 
-      # The pre-publish gate: the same checks the `msrv`, `docs` and `semver` CI
-      # jobs run, re-run here because a publish is the one action that cannot be
-      # taken back.
+      - name: Re-verify the tag names this commit
+        env:
+          MRZ_TAG: ${{ needs.detect.outputs.mrz_tag }}
+          RELEASE_SHA: ${{ needs.detect.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch origin --tags --force
+          if ! git rev-parse -q --verify "refs/tags/$MRZ_TAG" >/dev/null; then
+            echo "::error::$MRZ_TAG does not exist; the tag job did not run or did not push"
+            exit 1
+          fi
+          bash scripts/tag-release.sh --tag "$MRZ_TAG" --sha "$RELEASE_SHA" --verify-only
+
+      # The same checks the `msrv`, `docs` and `semver` CI jobs run, re-run here
+      # because a publish is the one action that cannot be taken back.
       - name: Verify before publishing
         run: |
-          cargo test -p mrz --all-features
-          RUSTDOCFLAGS="-D warnings" cargo doc -p mrz --all-features --no-deps
+          cargo test -p mrz --all-features --locked
+          RUSTDOCFLAGS="-D warnings" cargo doc -p mrz --all-features --no-deps --locked
+
+      - name: Re-verify the package binds to this commit
+        env:
+          MRZ_VERSION: ${{ needs.detect.outputs.mrz_version }}
+          RELEASE_SHA: ${{ needs.detect.outputs.release_sha }}
+          EVIDENCE_SHA256: ${{ needs.evidence.outputs.crate_sha256 }}
+        run: |
+          set -euo pipefail
+          cargo package -p mrz --locked
+          crate="target/package/mrz-${MRZ_VERSION}.crate"
+          vcs="$(tar -xzOf "$crate" "mrz-${MRZ_VERSION}/.cargo_vcs_info.json")"
+          packaged="$(printf '%s' "$vcs" | tr -d ' \n' \
+                      | sed -n 's/.*"sha1":"\([0-9a-f]\{40\}\)".*/\1/p')"
+          if [ "$packaged" != "$RELEASE_SHA" ]; then
+            echo "::error::.crate was packaged from $packaged, release is $RELEASE_SHA"
+            exit 1
+          fi
+
+          # Reported, not asserted. Byte-identical output across two runners is
+          # a property of cargo's packaging, not something this release depends
+          # on; the commit recorded inside the archive is the binding, and it is
+          # checked above. A mismatch here is worth a human look, not a failed
+          # publish.
+          sum="$(sha256sum "$crate" | cut -d' ' -f1)"
+          if [ -n "${EVIDENCE_SHA256:-}" ] && [ "$sum" != "$EVIDENCE_SHA256" ]; then
+            echo "::warning::package sha256 differs from the evidence job ($sum vs $EVIDENCE_SHA256); same commit, different bytes"
+          fi
+          echo "publishing mrz ${MRZ_VERSION} from ${RELEASE_SHA} (sha256 ${sum})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish -p mrz
+        run: cargo publish -p mrz --locked

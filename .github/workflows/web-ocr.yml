@@ -82,7 +82,7 @@ jobs:
           version: latest
 
       - name: Cache OCR .rten models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             text-detection.rten

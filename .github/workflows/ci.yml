@@ -21,6 +21,11 @@ jobs:
   rust:
     name: Rust (Linux)
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
 
@@ -34,7 +39,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config clang libclang-dev
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
+      - uses: Swatinem/rust-cache@v2.9.1
 
       # Small (~12 MB total) and the URLs/checksums are fixed, so this runs on
       # every push rather than being workflow_dispatch-gated like native-llm's
@@ -169,6 +178,11 @@ jobs:
   m4-hit-rate:
     name: M4 Tier-1 hit-rate gate
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
 
@@ -180,7 +194,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake pkg-config clang libclang-dev
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
+      - uses: Swatinem/rust-cache@v2.9.1
 
       # Small (~12 MB total) and the URLs/checksums are fixed, so this runs on
       # every push rather than being workflow_dispatch-gated like native-llm's
@@ -267,7 +285,7 @@ jobs:
       # the corpus exactly as the Rust bench does, hence the toolchain step;
       # nothing is cargo-built, so no cache is needed.
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           # The version the suite was verified under locally; the tools are
           # stdlib-only, so this is a floor for determinism, not a dependency.
@@ -300,7 +318,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
       - name: Install cargo-about
         run: cargo install cargo-about --locked --features cli
       - name: Check every dependency's license is in about.toml's accept-list
@@ -317,7 +335,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.82.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
       - name: Zero-dependency build on the declared MSRV
         run: cargo check -p mrz --no-default-features
 
@@ -339,7 +357,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
       - name: Rustdoc builds clean at the docs.rs feature set
         run: cargo doc -p mrz --all-features --no-deps
 
@@ -371,7 +389,7 @@ jobs:
         feature-group: [default-features, all-features]
     steps:
       - uses: actions/checkout@v7
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
       - uses: obi1kenobi/cargo-semver-checks-action@v2
         with:
           package: mrz
@@ -421,7 +439,7 @@ jobs:
       # and the llama.cpp path did not.
       - name: Install cmake
         run: brew install cmake
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
       - name: Test the pure-Rust OCR path
         run: >
           cargo test
@@ -437,6 +455,11 @@ jobs:
     name: Native LLM (real model, opt-in)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -444,7 +467,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake clang libclang-dev
-      - uses: Swatinem/rust-cache@v2
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
+      - uses: Swatinem/rust-cache@v2.9.1
 
       - name: Download + checksum-verify the GGUF model
         run: |
@@ -472,7 +499,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@nightly
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: fuzz -> target
       - name: Install cargo-fuzz
@@ -500,7 +527,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.9.1
         with:
           key: musl
 
