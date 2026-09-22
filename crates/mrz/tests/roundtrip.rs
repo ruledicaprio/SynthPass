@@ -844,3 +844,96 @@ fn neither_form_verifies_surfaces_full_number_with_failed_check() {
     assert_eq!(d.checks.document_number, Some(false));
     assert!(!d.document_number_legacy_encoding);
 }
+
+// ---- TD1's two optional-data slots collapse into one `personal_number` ----
+
+/// A checksum-valid TD1 zone for the ICAO specimen identity, with the two
+/// optional-data slots set independently. Returns the three lines.
+fn td1_zone(
+    optional_data_1: Option<&str>,
+    optional_data_2: Option<&str>,
+) -> (String, String, String) {
+    let fields = Td1Fields {
+        issuing_country: "UTO".to_string(),
+        document_number: "D23145890".to_string(),
+        optional_data_1: optional_data_1.map(str::to_string),
+        surname: "ERIKSSON".to_string(),
+        given_names: "ANNA MARIA".to_string(),
+        nationality: "UTO".to_string(),
+        date_of_birth: "740812".to_string(),
+        sex: "F".to_string(),
+        date_of_expiry: "120415".to_string(),
+        optional_data_2: optional_data_2.map(str::to_string),
+        ..Td1Fields::default()
+    };
+    let mrz = format_td1(&fields);
+    let lines: Vec<&str> = mrz.split('\n').collect();
+    assert_eq!(lines.len(), 3, "format_td1 emits three lines: {mrz:?}");
+    (
+        lines[0].to_string(),
+        lines[1].to_string(),
+        lines[2].to_string(),
+    )
+}
+
+/// **This asserts a defect, deliberately** — a characterization test, pinning
+/// current behaviour so the change that fixes it has to state itself.
+///
+/// TD1 carries optional data in *two* separate fields — line 1 positions
+/// 16-30 and line 2 positions 19-29 — and `parse_td1` joins them with a space
+/// into a single `personal_number`. That join is not injective: when one slot
+/// is empty the result is identical whichever slot held the data, and no
+/// consumer of `MrzData` can recover which one it was.
+///
+/// This is not a hypothetical. Two tracked specimens sit on opposite sides of
+/// it: `Belgium_ID_Specimen_2021_back_mrz` carries `95202899874` in slot 2
+/// with slot 1 empty, and `Serbia_ID_Specimen_2008_back_with_mrz` carries
+/// `2902968000000` in slot 1 with slot 2 empty. Both surface as nothing but a
+/// bare `personal_number` string.
+///
+/// The ambiguity is *exactly* the one-empty-slot case, and that is worth
+/// stating precisely: a space is not in the MRZ charset, so a genuine two-slot
+/// join always contains a separator that no single slot can produce. Every
+/// other pair stays distinguishable.
+///
+/// ADR-0018 dissolves the join into `optional_data_1`/`optional_data_2` — the
+/// names the *emitter* has used all along, right above in [`Td1Fields`]. When
+/// it lands, the last assertion here inverts: the two zones must become
+/// distinguishable. Inverting it is part of that change, not a regression.
+#[test]
+fn td1_optional_data_slots_are_indistinguishable_after_parsing() {
+    const PAYLOAD: &str = "ZZZ";
+
+    let (a1, a2, a3) = td1_zone(Some(PAYLOAD), None);
+    let (b1, b2, b3) = td1_zone(None, Some(PAYLOAD));
+
+    // The two zones are genuinely different documents. Checked by position
+    // rather than by plain inequality, so this keeps its meaning even if the
+    // emitter changes how it pads.
+    assert!(a1[15..30].starts_with(PAYLOAD), "slot 1 of {a1:?}");
+    assert_eq!(a2[18..29].trim_end_matches('<'), "", "slot 2 of {a2:?}");
+    assert_eq!(b1[15..30].trim_end_matches('<'), "", "slot 1 of {b1:?}");
+    assert!(b2[18..29].starts_with(PAYLOAD), "slot 2 of {b2:?}");
+
+    let a = parse_td1(&a1, &a2, &a3).unwrap();
+    let b = parse_td1(&b1, &b2, &b3).unwrap();
+    assert!(
+        a.valid(),
+        "slot-1 zone must be checksum-valid: {:?}",
+        a.checks
+    );
+    assert!(
+        b.valid(),
+        "slot-2 zone must be checksum-valid: {:?}",
+        b.checks
+    );
+
+    // ...and the parse cannot tell them apart.
+    assert_eq!(a.personal_number.as_deref(), Some(PAYLOAD));
+    assert_eq!(b.personal_number.as_deref(), Some(PAYLOAD));
+    assert_eq!(
+        a.personal_number, b.personal_number,
+        "ADR-0018 inverts this assertion: once the slots are named, these two \
+         zones must no longer collapse to the same value"
+    );
+}

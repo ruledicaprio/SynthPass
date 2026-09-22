@@ -42,7 +42,7 @@ use std::time::Instant;
 use synthpass_core::v2::{CheckDigits, MrzFormat};
 use synthpass_core::v2::{EscalationKind, ExtractionTrace, ExtractionV2, ImageRef, Provenance};
 use synthpass_core::Extraction;
-use synthpass_die::mrz_reader::mrz_block_from;
+use synthpass_die::mrz_reader::{extraction_from_mrz, mrz_block_from};
 use synthpass_die::{
     Capability, CostClass, Decision, DocumentContext, MrzReader, ProviderCatalog, ProviderError,
     Recognition, RoutingPolicy, MRZ_PROVIDER_ID,
@@ -959,49 +959,6 @@ impl Pipeline {
         }
 
         Ok(written)
-    }
-}
-
-/// The current UTC date, for date-plausibility checks. Derived from the system
-/// clock with pure arithmetic (via [`mrz::Date::from_epoch_days`]) so the `mrz`
-/// crate itself stays clock-free.
-fn today() -> mrz::Date {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    mrz::Date::from_epoch_days((secs / 86_400) as i64)
-}
-
-/// Map validated MRZ data onto the canonical [`Extraction`] schema — the same
-/// shape Tier 2 and the WASM demo produce. Enriches with the resolved country
-/// names and a date-plausibility summary (checksum-valid does not imply
-/// in-date — see [`mrz::MrzData::validity`]).
-fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
-    let v = m.validity(today());
-    Extraction {
-        document_type: Some(m.document_type.clone()),
-        issuing_country: Some(m.issuing_country.clone()),
-        issuing_country_name: m.issuing_country_name().map(str::to_string),
-        document_number: Some(m.document_number.clone()),
-        surname: Some(m.surname.clone()),
-        given_names: Some(m.given_names.clone()),
-        nationality: Some(m.nationality.clone()),
-        nationality_name: m.nationality_name().map(str::to_string),
-        date_of_birth: Some(m.date_of_birth.clone()),
-        sex: Some(m.sex.clone()),
-        date_of_expiry: Some(m.date_of_expiry.clone()),
-        personal_number: m.personal_number.clone(),
-        mrz_line: Some(m.mrz_lines.clone()),
-        mrz_checksums_valid: Some(true),
-        validity: Some(synthpass_core::Validity {
-            dates_well_formed: v.dates_well_formed,
-            in_date: v.in_date,
-            dob_before_expiry: v.dob_before_expiry,
-            days_until_expiry: v.days_until_expiry,
-        }),
-        extraction_method: Method::MrzDeterministic.as_str().to_string(),
     }
 }
 

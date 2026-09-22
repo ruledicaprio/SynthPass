@@ -183,6 +183,9 @@ pub fn mrz_format_of(m: &mrz::MrzData) -> MrzFormat {
 
 /// Today, for the date-plausibility summary. Checksum-valid does not imply
 /// in-date.
+///
+/// Derived from the system clock with pure arithmetic (via
+/// [`mrz::Date::from_epoch_days`]) so the `mrz` crate itself stays clock-free.
 fn today() -> mrz::Date {
     let secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -193,8 +196,19 @@ fn today() -> mrz::Date {
 
 /// Map validated MRZ data onto the canonical v1 [`Extraction`] shape — the
 /// same shape Tier 2 and the WASM demo produce. Enriches with resolved country
-/// names and a date-plausibility summary.
-fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
+/// names and a date-plausibility summary (checksum-valid does not imply
+/// in-date — see [`mrz::MrzData::validity`]).
+///
+/// Public for the same reason as [`mrz_block_from`]: `synthpass-pipeline`'s
+/// Tier-2 accept path serializes this v1 shape for the very same document the
+/// Tier-1 path produces, so the two must agree field for field. It carried its
+/// own copy until now — the third construction in this module to be unified,
+/// after `mrz_block_from` (which had already drifted) and
+/// `extraction_v2_from_mrz`. That copy stamped
+/// `Method::MrzDeterministic.as_str()` where this one stamps the private
+/// `EXTRACTION_METHOD`; both are `"mrz-deterministic"`, which is what makes
+/// removing it a dedupe and not a wire change.
+pub fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
     let v = m.validity(today());
     Extraction {
         document_type: Some(m.document_type.clone()),
