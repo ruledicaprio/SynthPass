@@ -26,7 +26,7 @@ path = "src/bin/bench-report.rs"
 
 [dependencies]
 # Self-contained review pages embed specimen images without external assets.
-base64 = "0.22"
+base64 = "0.23"
 # Always built with real glyphs regardless of synthpass-gen's own default —
 # a benchmark measuring OCR hit rate against placeholder bars would be
 # measuring the wrong thing.
