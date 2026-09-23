@@ -271,10 +271,15 @@ fn core_field_names_match_the_serialized_fields() {
 #[test]
 fn missing_reports_empty_and_whitespace_only_fields() {
     let all_empty = ExtractionFields::default();
+    let missing = all_empty.missing();
     assert_eq!(
-        all_empty.missing().len(),
-        CoreField::ALL.len(),
-        "a default record has nothing in it"
+        missing.len(),
+        CoreField::ALL.len() - 2,
+        "a default record has nothing in it, and the two optional-data elements are never missing"
+    );
+    assert!(
+        missing.iter().all(|f| !f.is_optional_data()),
+        "an empty optional-data element is the issuer's choice, not a failed read"
     );
 
     let fields = ExtractionFields {

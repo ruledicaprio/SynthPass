@@ -331,12 +331,13 @@ fn build_row(
         _ => serde_json::Value::Null,
     };
 
-    // `MrzData::personal_number` is already `None` exactly when the field's
-    // content, after trimming trailing `<` filler, is empty — for TD1 it is
-    // the two optional-data fields joined, for TD2/TD3 the one optional-data
-    // field. That is exactly "is this format's optional-data element used at
-    // all", so no offset math is duplicated here.
-    let optional_data_present = data.personal_number.is_some();
+    // Each optional-data slot is already `None` exactly when its content,
+    // after trimming trailing `<` filler, is empty — TD1 has two slots, every
+    // other format one (TD3's holds the personal number). "Is this format's
+    // optional-data element used at all" is therefore "is either slot
+    // populated": the form ADR-0018 proved identical to the old joined
+    // field's presence, so no offset math is duplicated here.
+    let optional_data_present = data.optional_data_1.is_some() || data.optional_data_2.is_some();
 
     let checksums_valid = fixture
         .get("mrz_checksums_valid")

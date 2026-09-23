@@ -216,7 +216,7 @@ fn derive_row(corpus_row: &Value, fixture: &Value) -> Result<Value, String> {
         _ => Value::Null,
     };
 
-    let optional_data_present = data.personal_number.is_some();
+    let optional_data_present = data.optional_data_1.is_some() || data.optional_data_2.is_some();
 
     let checksums_valid = fixture
         .get("mrz_checksums_valid")
@@ -307,6 +307,70 @@ fn every_independently_derivable_row_is_tracked() {
         actual.len(),
         expected.len(),
         "template_traits.jsonl has a different row count than this test can independently derive"
+    );
+}
+
+/// An absolute pin on the aggregate — the one thing neither test above can
+/// give.
+///
+/// [`every_independently_derivable_row_is_tracked`] compares the tracked file's
+/// row count against this file's own re-derivation, and that is a real check.
+/// But both sides read the *same two inputs*, so anything that removes rows
+/// from those — a corpus entry losing its `ground_truth_stem`, a fixture
+/// becoming unparseable, a filename that stops classifying — lowers both counts
+/// together. Regenerate after such a change and the file agrees with itself
+/// perfectly, over a registry quietly smaller than anyone intended, and every
+/// existing assertion still passes.
+///
+/// These numbers were measured from the tracked file, not predicted. They are
+/// *expected* to change when a specimen is added or a fixture is corrected:
+/// update the table in the same commit and say in the message what moved. What
+/// this forbids is the count moving with nobody noticing.
+///
+/// The split is pinned per format because ADR-0018 replaces the predicate
+/// behind `optional_data_present` — `personal_number.is_some()` becomes
+/// `optional_data_1.is_some() || optional_data_2.is_some()`. Those two are
+/// provably the same set (`opt_string(join)` is `Some` exactly when at least
+/// one part is non-empty); this is what turns "provably" into "proven".
+#[test]
+fn the_aggregate_is_pinned_so_a_silent_drop_cannot_pass() {
+    // (td_format, optional_data_present) -> row count, measured 2026-09-22.
+    // No Td2 row exists yet; a first one must appear here deliberately.
+    const EXPECTED: &[(&str, bool, usize)] = &[
+        ("Td1", false, 4),
+        ("Td1", true, 5),
+        ("Td3", false, 20),
+        ("Td3", true, 34),
+    ];
+
+    let rows = registry_rows();
+    let want_total: usize = EXPECTED.iter().map(|(_, _, n)| n).sum();
+    assert_eq!(
+        rows.len(),
+        want_total,
+        "samples/template_traits.jsonl has {} rows, pinned at {want_total}. If a specimen or \
+         fixture changed, update EXPECTED in this test in the same commit and say what moved.",
+        rows.len()
+    );
+
+    let mut counts: BTreeMap<(String, bool), usize> = BTreeMap::new();
+    for row in &rows {
+        let format = row["td_format"].as_str().unwrap_or("<missing>").to_string();
+        let present = row["optional_data_present"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("row has no boolean `optional_data_present`: {row}"));
+        *counts.entry((format, present)).or_default() += 1;
+    }
+    let want: BTreeMap<(String, bool), usize> = EXPECTED
+        .iter()
+        .map(|(f, p, n)| ((f.to_string(), *p), *n))
+        .collect();
+    assert_eq!(
+        counts, want,
+        "the (td_format, optional_data_present) breakdown of \
+         samples/template_traits.jsonl moved. A change to which rows count as carrying \
+         optional data — ADR-0018's split included — must show up here and be stated, not \
+         absorbed silently."
     );
 }
 

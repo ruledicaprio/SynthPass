@@ -77,7 +77,11 @@ const PROMPT_ONLY_FIELDS: &[&str] = &["mrz_line"];
 /// schema); no tracked document records a reason beyond that. Listing it here
 /// keeps the omission a stated fact rather than an accident — see
 /// `knowledge/technical_debt.md`, "Three parallel lists of ICAO field names".
-const CORE_FIELDS_NOT_PROMPTED: &[&str] = &["personal_number"];
+/// The two optional-data fields (ADR-0018) follow it: they are
+/// issuer-discretionary zone content with no visual-zone counterpart the
+/// model could be asked to read.
+const CORE_FIELDS_NOT_PROMPTED: &[&str] =
+    &["personal_number", "optional_data_1", "optional_data_2"];
 
 /// The drift guard: the prompt's field list and [`CoreField::ALL`] may differ
 /// only in the two documented directions above.

@@ -70,6 +70,17 @@ pub struct Extraction {
     pub date_of_expiry: Option<String>,
     #[serde(default)]
     pub personal_number: Option<String>,
+    /// The format's primary optional-data element where it is not a personal
+    /// number: TD1 optional data 1, TD2/MRV-A/MRV-B optional data. `None` on
+    /// TD3, whose element is `personal_number`. Omitted from JSON until
+    /// populated, like the `*_name` metadata, so a record for a document
+    /// without one is byte-identical to what it was before ADR-0018.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional_data_1: Option<String>,
+    /// TD1's second optional-data element (line 2). `None` on every other
+    /// format. Omitted from JSON until populated, for the same reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub optional_data_2: Option<String>,
     /// The raw MRZ zone (newline-joined lines), when one was found.
     #[serde(default)]
     pub mrz_line: Option<String>,
@@ -152,8 +163,15 @@ mod tests {
         assert_eq!(obj["document_number"], serde_json::Value::Null);
         assert_eq!(obj["mrz_checksums_valid"], serde_json::json!(true));
 
-        // Unpopulated metadata omitted.
-        for key in ["issuing_country_name", "nationality_name", "validity"] {
+        // Unpopulated metadata omitted — and the two optional-data fields,
+        // which follow the same rule so unaffected records keep their bytes.
+        for key in [
+            "issuing_country_name",
+            "nationality_name",
+            "validity",
+            "optional_data_1",
+            "optional_data_2",
+        ] {
             assert!(!obj.contains_key(key), "metadata should be omitted: {key}");
         }
     }

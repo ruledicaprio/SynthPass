@@ -112,9 +112,12 @@ One JSON object per line. One line per row; a row is one document when `--pack-p
 }
 ```
 
-**Field vocabulary.** The nine VIZ `field` names are exactly `synthpass_core::v2::CoreField`'s
-`serde` names (`document_type`, `issuing_country`, `document_number`, `surname`, `given_names`,
-`nationality`, `date_of_birth`, `sex`, `date_of_expiry`, `personal_number`). MRZ lines use the
+**Field vocabulary.** The VIZ `field` names are `synthpass_core::v2::CoreField`'s `serde` names
+for the fields the generator paints on the card front (`document_type`, `issuing_country`,
+`document_number`, `surname`, `given_names`, `nationality`, `date_of_birth`, `sex`,
+`date_of_expiry`, `personal_number`). `CoreField` also names `optional_data_1` and
+`optional_data_2` (ADR-0018) — the zone's optional-data elements, which the generator writes into
+the MRZ and never paints as a VIZ field, so no block ever carries them. MRZ lines use the
 synthetic name `mrz_line` with a 0-based `line` index. `synthpass-export` re-exports the
 `CoreField` list rather than hard-coding a fourth parallel copy of the ICAO field names (the
 repo already has three — `ROADMAP.md` "Open backlog", `knowledge/technical_debt.md`).

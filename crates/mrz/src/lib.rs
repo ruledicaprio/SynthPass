@@ -529,7 +529,9 @@ impl Format {
 /// assert_eq!(doc.nationality, "UTO");
 /// assert_eq!(doc.sex, "F");
 /// assert_eq!(doc.date_of_expiry, "2012-04-15");
-/// assert_eq!(doc.personal_number.as_deref(), Some("ZE184226B"));
+/// assert_eq!(doc.optional_data_1.as_deref(), Some("ZE184226B")); // the primary optional-data slot...
+/// assert_eq!(doc.personal_number(), Some("ZE184226B"));         // ...which TD3 alone names a personal number
+/// assert_eq!(doc.optional_data_2, None);                        // the second slot is TD1's alone
 /// assert_eq!(doc.mrz_lines.lines().count(), 2); // exactly what was validated
 /// ```
 ///
@@ -540,7 +542,8 @@ impl Format {
 /// they're `#[zeroize(skip)]`.
 ///
 /// `#[non_exhaustive]`: this struct grows as the crate decodes more of the
-/// zone — `document_number_full` arrived in 0.4.0 — and that should not break
+/// zone — `document_number_full` arrived in 0.4.0, the two optional-data
+/// slots in 0.8.0 — and that should not break
 /// downstream code. Obtain one from a `parse_*` function; it is an output type
 /// and there is no reason to build it by literal.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -607,11 +610,21 @@ pub struct MrzData {
     /// ISO 8601 (`YYYY-MM-DD`), always read as 20xx (see [`expand_date`]).
     /// Holds the raw `YYMMDD` field instead when it is not six digits.
     pub date_of_expiry: String,
-    /// TD3: the personal-number field. TD1: optional data 1 and 2, joined.
-    /// TD2, MRV-A and MRV-B: the optional-data field. `None` when the field
-    /// is all filler, and without the overflow remainder when a long document
-    /// number spilled into it.
-    pub personal_number: Option<String>,
+    /// The format's *primary* optional-data element, trailing filler trimmed,
+    /// and without the overflow remainder when a long document number spilled
+    /// into it: TD1 line 1 positions 16-30 (Doc 9303 Part 5's "optional data
+    /// element 1"), TD2 line 2 positions 29-35, TD3 line 2 positions 29-42
+    /// (Part 4 §4.2.2 titles it "personal number **or other optional data
+    /// elements**"), MRV-A line 2 positions 29-44, MRV-B line 2 positions
+    /// 29-36. It is the document-number overflow target on every format that
+    /// defines one. `None` when the field is all filler.
+    pub optional_data_1: Option<String>,
+    /// TD1's *second* optional-data element, line 2 positions 19-29, trailing
+    /// filler trimmed. `None` on every other format — each prints exactly one
+    /// optional-data element, which lives in
+    /// [`optional_data_1`](Self::optional_data_1) — and on a TD1 whose second
+    /// element is all filler.
+    pub optional_data_2: Option<String>,
     /// The MRZ lines this record was parsed from, newline-joined, exactly as
     /// validated — which is the *repaired* zone when [`find_and_parse`]
     /// normalized or repaired the input, not the caller's original text.
@@ -716,6 +729,40 @@ impl MrzData {
         self.document_number_full
             .as_deref()
             .unwrap_or(&self.document_number)
+    }
+
+    /// The personal number, on the one format that prints one: TD3, whose
+    /// line 2 positions 29-42 carry it under its own check digit
+    /// ([`Checks::personal_number`]). It is
+    /// [`optional_data_1`](Self::optional_data_1) read through the name Doc
+    /// 9303 Part 4 gives that field. On every other format the same slot
+    /// holds issuer-discretionary optional data and this returns `None`, so
+    /// a caller cannot mistake one for the other.
+    ///
+    /// Before 0.8.0 this was a field that also held TD2 and MRV optional
+    /// data, and TD1's two elements joined with a space — a join that could
+    /// not be undone (ADR-0018).
+    ///
+    /// ```
+    /// let doc = mrz::parse_td3(
+    ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+    ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(doc.personal_number(), Some("ZE184226B"));
+    ///
+    /// let card = mrz::parse_td2(
+    ///     "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+    ///     "D231458907UTO7408122F1204159<<<<<<<6",
+    /// )
+    /// .unwrap();
+    /// assert_eq!(card.personal_number(), None); // TD2 prints optional data, not a personal number
+    /// ```
+    pub fn personal_number(&self) -> Option<&str> {
+        match self.format {
+            Format::Td3 => self.optional_data_1.as_deref(),
+            _ => None,
+        }
     }
 
     /// Human-readable name of the issuing state, if the code is recognized.
@@ -1102,7 +1149,7 @@ mod tests {
         assert_eq!(d.date_of_birth_completeness, DateCompleteness::Complete);
         assert_eq!(d.sex, "F");
         assert_eq!(d.date_of_expiry, "2012-04-15");
-        assert_eq!(d.personal_number.as_deref(), Some("ZE184226B"));
+        assert_eq!(d.personal_number(), Some("ZE184226B"));
     }
 
     #[test]
@@ -1149,7 +1196,7 @@ mod tests {
         let d = parse_td3(TD3_L1, l2).unwrap();
         assert_eq!(d.checks.personal_number, Some(true));
         assert_eq!(d.checks.composite, Some(true));
-        assert_eq!(d.personal_number, None);
+        assert_eq!(d.personal_number(), None);
     }
 
     #[test]
@@ -1160,7 +1207,7 @@ mod tests {
         let d = parse_td3(TD3_L1, l2).unwrap();
         assert_eq!(d.checks.personal_number, Some(true));
         assert_eq!(d.checks.composite, Some(true));
-        assert_eq!(d.personal_number, None);
+        assert_eq!(d.personal_number(), None);
     }
 
     // Same Utopia/Eriksson identity as the TD3/TD2 specimens, reshaped into
@@ -1359,7 +1406,7 @@ mod tests {
         assert!(d.valid(), "checks: {:?}", d.checks);
         assert_eq!(d.surname, "SPECIMEN");
         assert_eq!(d.document_number, "007007007");
-        assert_eq!(d.personal_number, None);
+        assert_eq!(d.personal_number(), None);
     }
 
     #[test]
@@ -1380,7 +1427,8 @@ mod tests {
         assert_eq!(d.date_of_expiry, "2032-03-28");
         // The trailing K in the EMŠO field is a filler misread that check
         // digits cannot catch (K ≡ < mod 10) — heuristic cleanup handles it.
-        assert_eq!(d.personal_number.as_deref(), Some("2806985505145"));
+        assert_eq!(d.optional_data_1.as_deref(), Some("2806985505145"));
+        assert_eq!(d.personal_number(), None, "a TD1 prints no personal number");
     }
 
     #[test]
@@ -1446,7 +1494,12 @@ mod tests {
         // be a filler — so no overflow is read here.
         assert_eq!(d.document_number, "L898902C");
         assert_eq!(d.document_number_full, None);
-        assert_eq!(d.personal_number.as_deref(), Some("ZE184226B"));
+        assert_eq!(d.optional_data_1.as_deref(), Some("ZE184226B"));
+        assert_eq!(
+            d.personal_number(),
+            None,
+            "a visa prints no personal number"
+        );
         assert_eq!(d.date_of_birth, "1969-08-06");
         // Doc 9303 defines no century rule (part 3 §4.8 is silent), so this
         // crate's own policy applies: expiry is always read as 20xx. ICAO's
@@ -1469,7 +1522,12 @@ mod tests {
         assert_eq!(d.nationality, "UTO");
         assert_eq!(d.document_number, "L898902C");
         assert_eq!(d.document_number_full, None);
-        assert_eq!(d.personal_number.as_deref(), Some("ZE184226"));
+        assert_eq!(d.optional_data_1.as_deref(), Some("ZE184226"));
+        assert_eq!(
+            d.personal_number(),
+            None,
+            "a visa prints no personal number"
+        );
         assert_eq!(d.date_of_birth, "1969-08-06");
         assert_eq!(d.date_of_expiry, "2094-06-23");
     }
@@ -1506,7 +1564,12 @@ mod tests {
         assert_eq!(d.sex, "F");
         assert_eq!(d.date_of_expiry, "2027-03-14");
         assert_eq!(d.document_number, "XK9305487");
-        assert_eq!(d.personal_number.as_deref(), Some("R5T6U7V8W9"));
+        assert_eq!(d.optional_data_1.as_deref(), Some("R5T6U7V8W9"));
+        assert_eq!(
+            d.personal_number(),
+            None,
+            "a visa prints no personal number"
+        );
     }
 
     // Hand-derived by this crate — NOT an ICAO-published specimen. Kept for
@@ -1572,7 +1635,12 @@ mod tests {
         assert_eq!(d.date_of_birth, "1992-01-01");
         assert_eq!(d.date_of_expiry, "2027-06-30");
         assert_eq!(d.document_number, "L23456789");
-        assert_eq!(d.personal_number.as_deref(), Some("QW12ER34"));
+        assert_eq!(d.optional_data_1.as_deref(), Some("QW12ER34"));
+        assert_eq!(
+            d.personal_number(),
+            None,
+            "a visa prints no personal number"
+        );
     }
 
     #[test]
@@ -1656,7 +1724,7 @@ mod tests {
         assert!(!d.document_number_legacy_encoding);
         // The 9-char field reading stays available and unsurprising.
         assert_eq!(d.document_number, "L898902C3");
-        assert_eq!(d.personal_number, None);
+        assert_eq!(d.personal_number(), None);
     }
 
     #[test]
@@ -1669,7 +1737,7 @@ mod tests {
         let d = parse_td3_str(&format_td3(&fields));
         assert!(d.valid(), "checks: {:?}", d.checks);
         assert_eq!(d.document_number_full.as_deref(), Some("AB1234567890"));
-        assert_eq!(d.personal_number.as_deref(), Some("ZE184"));
+        assert_eq!(d.personal_number(), Some("ZE184"));
     }
 
     #[test]

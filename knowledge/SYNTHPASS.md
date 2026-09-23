@@ -137,8 +137,9 @@ before being merged. The current per-format synthetic rate is in
 real MRZ glyph-rendering bug in `synthpass-gen` was found and fixed (misaligned character cells,
 thresholded anti-aliasing) during this measurement work, improving the rate from 50%→60% on a
 smaller sample. The residual gap is believed to be per-character OCR noise compounding over the
-longer `personal_number` field rather than one remaining fixable defect — closing it further is
-tracked as follow-up work, not a blocker.
+longer optional-data field (TD3's `personal_number`; `optional_data_1`/`optional_data_2` on
+the other formats since ADR-0018) rather than one remaining fixable defect — closing it further
+is tracked as follow-up work, not a blocker.
 
 ## Degraded profiles
 

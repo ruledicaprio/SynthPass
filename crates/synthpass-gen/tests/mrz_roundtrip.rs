@@ -4,6 +4,18 @@
 
 use synthpass_gen::{data::generate_passport, generate, DocumentType, GeneratorConfig};
 
+/// What the zone can carry of a painted value: `mrz::emit` pads or truncates
+/// every field to its exact width, and the generator draws a 14-character
+/// personal number for every format (`data::random_personal_number`), so on
+/// the formats whose optional-data slot is narrower than 14 the zone holds a
+/// prefix of the label — TD1's second element (11), TD2's element (7),
+/// MRV-B's (8). TD3 (14) and MRV-A (16) carry it whole. Pinned as a fact
+/// about the generator, not fixed here: shortening the value would change
+/// every generated corpus and export.
+fn as_emitted(value: Option<&str>, width: usize) -> Option<String> {
+    value.map(|v| v.chars().take(width).collect())
+}
+
 #[test]
 fn generated_mrz_round_trips_through_mrz_crate() {
     for seed in 0..100u64 {
@@ -60,8 +72,11 @@ fn generated_mrz_round_trips_through_mrz_crate() {
             ),
             "seed {seed}"
         );
+        // TD3 is the one format that prints a personal number; the accessor
+        // names the primary optional-data slot on it (ADR-0018).
         assert_eq!(
-            parsed.personal_number, passport.personal_number,
+            parsed.personal_number(),
+            passport.personal_number.as_deref(),
             "seed {seed}"
         );
     }
@@ -89,6 +104,16 @@ fn generated_td1_mrz_round_trips() {
         );
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+        // The generator writes its personal number into TD1's *second*
+        // optional-data element (`mrz_line.rs`), truncated to its 11
+        // characters, and a TD1 prints no personal number, so the accessor is
+        // `None` (ADR-0018).
+        assert_eq!(
+            parsed.optional_data_2,
+            as_emitted(passport.personal_number.as_deref(), 11),
+            "seed {seed}"
+        );
+        assert_eq!(parsed.personal_number(), None, "seed {seed}");
     }
 }
 
@@ -113,6 +138,15 @@ fn generated_td2_mrz_round_trips() {
         );
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+        // TD2 prints one optional-data element, the primary slot, 7 wide; it
+        // is not a personal number (ADR-0018).
+        assert_eq!(
+            parsed.optional_data_1,
+            as_emitted(passport.personal_number.as_deref(), 7),
+            "seed {seed}"
+        );
+        assert_eq!(parsed.optional_data_2, None, "seed {seed}");
+        assert_eq!(parsed.personal_number(), None, "seed {seed}");
     }
 }
 
@@ -137,6 +171,15 @@ fn generated_mrva_mrz_round_trips() {
         );
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+        // MRV-A's one optional-data element is the primary slot, 16 wide, so
+        // it carries the whole value (ADR-0018).
+        assert_eq!(
+            parsed.optional_data_1.as_deref(),
+            passport.personal_number.as_deref(),
+            "seed {seed}"
+        );
+        assert_eq!(parsed.optional_data_2, None, "seed {seed}");
+        assert_eq!(parsed.personal_number(), None, "seed {seed}");
     }
 }
 
@@ -161,6 +204,15 @@ fn generated_mrvb_mrz_round_trips() {
         );
         assert_eq!(parsed.surname, passport.surname, "seed {seed}");
         assert_eq!(parsed.given_names, passport.given_names, "seed {seed}");
+        // MRV-B's one optional-data element is the primary slot, 8 wide
+        // (ADR-0018).
+        assert_eq!(
+            parsed.optional_data_1,
+            as_emitted(passport.personal_number.as_deref(), 8),
+            "seed {seed}"
+        );
+        assert_eq!(parsed.optional_data_2, None, "seed {seed}");
+        assert_eq!(parsed.personal_number(), None, "seed {seed}");
     }
 }
 
@@ -178,7 +230,8 @@ fn generated_mrz_round_trips_without_personal_number() {
     let mut lines = mrz_string.lines();
     let parsed = mrz::parse_td3(lines.next().unwrap(), lines.next().unwrap()).unwrap();
     assert!(parsed.valid(), "checks: {:?}", parsed.checks);
-    assert_eq!(parsed.personal_number, None);
+    assert_eq!(parsed.personal_number(), None);
+    assert_eq!(parsed.optional_data_1, None);
 }
 
 /// Cyrillic-script identities: the generator draws a native-script name, stores

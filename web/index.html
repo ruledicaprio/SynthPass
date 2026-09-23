@@ -182,7 +182,11 @@ function render(r, rawText) {
     ['Date of birth', r.date_of_birth],
     ['Sex', r.sex],
     ['Date of expiry', r.date_of_expiry],
-    ['Personal number', r.personal_number],
+    // The crate reports the primary optional-data slot on every format and
+    // names it a personal number on TD3 only (ADR-0018); mirror that split.
+    ['Personal number', r.format === 'Td3' ? r.optional_data_1 : null],
+    ['Optional data 1', r.format === 'Td3' ? null : r.optional_data_1],
+    ['Optional data 2', r.optional_data_2],
   ];
   document.getElementById('fields').innerHTML =
     rows.map(([k, val]) => `<tr><th>${k}</th><td>${esc(val)}</td></tr>`).join('');
@@ -221,7 +225,11 @@ function showJsonPayload(r) {
     date_of_birth: r.date_of_birth,
     sex: r.sex,
     date_of_expiry: r.date_of_expiry,
-    personal_number: r.personal_number,
+    personal_number: r.format === 'Td3' ? r.optional_data_1 : null,
+    // Present only when populated, exactly as the pipeline's v1 serializer
+    // omits them (ADR-0018).
+    ...(r.format !== 'Td3' && r.optional_data_1 ? { optional_data_1: r.optional_data_1 } : {}),
+    ...(r.optional_data_2 ? { optional_data_2: r.optional_data_2 } : {}),
     mrz_checksums_valid: r.valid,
     extraction_method: 'mrz-wasm-client',
   }, null, 2);
