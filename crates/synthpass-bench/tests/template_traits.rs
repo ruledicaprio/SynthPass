@@ -216,7 +216,7 @@ fn derive_row(corpus_row: &Value, fixture: &Value) -> Result<Value, String> {
         _ => Value::Null,
     };
 
-    let optional_data_present = data.personal_number.is_some();
+    let optional_data_present = data.optional_data_1.is_some() || data.optional_data_2.is_some();
 
     let checksums_valid = fixture
         .get("mrz_checksums_valid")

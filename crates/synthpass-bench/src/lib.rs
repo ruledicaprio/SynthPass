@@ -1292,7 +1292,7 @@ const COMPARED_FIELDS: [(&str, FieldAccessor); 12] = [
     ("sex", |m| m.sex.clone()),
     ("date_of_expiry", |m| m.date_of_expiry.clone()),
     ("personal_number", |m| {
-        m.personal_number.clone().unwrap_or_default()
+        m.personal_number().unwrap_or_default().to_string()
     }),
     // The product rule for the primary slot lives in `synthpass-die`, so this
     // column and the v2 record agree that TD3's element is `personal_number`.

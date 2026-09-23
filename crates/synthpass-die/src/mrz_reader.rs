@@ -222,7 +222,7 @@ pub fn extraction_from_mrz(m: &mrz::MrzData) -> Extraction {
         date_of_birth: Some(m.date_of_birth.clone()),
         sex: Some(m.sex.clone()),
         date_of_expiry: Some(m.date_of_expiry.clone()),
-        personal_number: m.personal_number.clone(),
+        personal_number: m.personal_number().map(str::to_string),
         optional_data_1: reported_optional_data_1(m).map(str::to_string),
         optional_data_2: m.optional_data_2.clone(),
         mrz_line: Some(m.mrz_lines.clone()),
@@ -512,6 +512,10 @@ mod tests {
         assert!(
             c.surname < 1.0,
             "TD1 line 3 carries no check digit — the name is never proven"
+        );
+        assert!(
+            c.optional_data_1 < 1.0 && c.optional_data_2 < 1.0,
+            "neither TD1 optional-data element carries a check digit (ADR-0018)"
         );
     }
 

@@ -284,7 +284,6 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
-        personal_number: opt_string(personal),
         optional_data_1: opt_string(personal),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -383,7 +382,6 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
-        personal_number: opt_string(optional),
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -452,12 +450,6 @@ pub fn parse_td1_with(
     let overflow = read_overflow(&line1[5..14], line1.as_bytes()[14] as char, optional1_raw);
     let optional1 = optional_tail(optional1_raw, &overflow);
     let optional2 = line2[18..29].trim_end_matches('<');
-    let personal = [optional1, optional2]
-        .iter()
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .collect::<Vec<_>>()
-        .join(" ");
 
     let checks = Checks::from_verifications(
         Format::Td1,
@@ -499,7 +491,6 @@ pub fn parse_td1_with(
         date_of_birth_completeness: date_completeness(&line2[0..6]),
         sex: clean_sex(line2.as_bytes()[7] as char),
         date_of_expiry: expand_date_with_pivot(&line2[8..14], false, opts.pivot_yy),
-        personal_number: opt_string(&personal),
         optional_data_1: opt_string(optional1),
         optional_data_2: opt_string(optional2),
         mrz_lines: format!("{line1}\n{line2}\n{line3}"),
@@ -586,7 +577,6 @@ pub fn parse_mrv_a_with(
         date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
-        personal_number: opt_string(optional),
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -673,7 +663,6 @@ pub fn parse_mrv_b_with(
         date_of_birth_completeness: date_completeness(&line2[13..19]),
         sex: clean_sex(line2.as_bytes()[20] as char),
         date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
-        personal_number: opt_string(optional),
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),

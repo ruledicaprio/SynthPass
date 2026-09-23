@@ -148,9 +148,10 @@ proptest! {
         // Clone rather than move: `MrzData` derives `ZeroizeOnDrop` when the
         // workspace unifies `mrz`'s `zeroize` feature on (e.g. via
         // `synthpass-pipeline`), and a `Drop` type forbids partial moves out of it.
-        prop_assert_eq!(parsed.personal_number.clone(), expected_personal.clone());
-        // ADR-0018 slot rule: TD3's element is the primary slot, and the
-        // second slot exists on TD1 only.
+        // ADR-0018 slot rule: TD3's element is the primary slot, which the
+        // accessor names a personal number on this format only; the second
+        // slot exists on TD1 only.
+        prop_assert_eq!(parsed.personal_number(), expected_personal.as_deref());
         prop_assert_eq!(parsed.optional_data_1.clone(), expected_personal);
         prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
 
@@ -273,7 +274,7 @@ proptest! {
         // ADR-0018 slot rule: TD2's one optional-data element is the primary
         // slot; the second slot is TD1's alone.
         let expected_optional = optional_data.filter(|s| !s.is_empty());
-        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.personal_number(), None);
         prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
         prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
@@ -376,20 +377,13 @@ proptest! {
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.sex, &sex);
 
-        // ADR-0018 slot rule: each TD1 element lands in its own slot, and the
-        // joined `personal_number` is exactly their non-empty join — the
-        // relation the join's removal has to preserve nothing of, stated once
-        // before it goes.
+        // ADR-0018 slot rule: each TD1 element lands in its own slot, and
+        // nothing joins them — a TD1 prints no personal number.
         let expected_1 = optional_data_1.filter(|s| !s.is_empty());
         let expected_2 = optional_data_2.filter(|s| !s.is_empty());
-        prop_assert_eq!(parsed.optional_data_1.clone(), expected_1.clone());
-        prop_assert_eq!(parsed.optional_data_2.clone(), expected_2.clone());
-        let joined: Vec<&str> = [expected_1.as_deref(), expected_2.as_deref()]
-            .into_iter()
-            .flatten()
-            .collect();
-        let expected_join = (!joined.is_empty()).then(|| joined.join(" "));
-        prop_assert_eq!(parsed.personal_number.clone(), expected_join);
+        prop_assert_eq!(parsed.optional_data_1.clone(), expected_1);
+        prop_assert_eq!(parsed.optional_data_2.clone(), expected_2);
+        prop_assert_eq!(parsed.personal_number(), None);
     }
 }
 
@@ -533,7 +527,7 @@ proptest! {
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.
         let expected_optional = optional_data.filter(|s| !s.is_empty());
-        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.personal_number(), None);
         prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
         prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
@@ -579,7 +573,7 @@ proptest! {
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.
         let expected_optional = optional_data.filter(|s| !s.is_empty());
-        prop_assert_eq!(parsed.personal_number.clone(), expected_optional.clone());
+        prop_assert_eq!(parsed.personal_number(), None);
         prop_assert_eq!(parsed.optional_data_1.clone(), expected_optional);
         prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
     }
@@ -761,9 +755,13 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     // The overflow prefix (remainder + check + filler) occupies the front of
     // the optional field; the caller-supplied "XY" must survive right after
     // it rather than being overwritten or absorbed into the remainder.
-    assert_eq!(d.personal_number.as_deref(), Some("XY"));
     assert_eq!(d.optional_data_1.as_deref(), Some("XY"));
     assert_eq!(d.optional_data_2, None);
+    assert_eq!(
+        d.personal_number(),
+        None,
+        "TD2 prints optional data, not a personal number"
+    );
 
     let td1 = Td1Fields {
         document_number: "D231458901234".to_string(), // 13 chars, remainder 5 fits width 15
@@ -780,10 +778,7 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     let d = parse_td1(l1, l2, l3).unwrap();
     assert!(d.valid(), "checks: {:?}", d.checks);
     assert_eq!(d.document_number_full.as_deref(), Some("D231458901234"));
-    // optional_data_1's overflow prefix and "ZZZ" join as `personal_number`
-    // (optional_data_2 is empty here, so no " " separator survives).
-    assert_eq!(d.personal_number.as_deref(), Some("ZZZ"));
-    // The slot itself is the caller's data with the overflow prefix trimmed.
+    // The slot is the caller's data with the overflow prefix trimmed.
     assert_eq!(d.optional_data_1.as_deref(), Some("ZZZ"));
     assert_eq!(d.optional_data_2, None);
 }
@@ -950,7 +945,7 @@ fn neither_form_verifies_surfaces_full_number_with_failed_check() {
     assert!(!d.document_number_legacy_encoding);
 }
 
-// ---- TD1's two optional-data slots collapse into one `personal_number` ----
+// ---- TD1's two optional-data slots are reported separately (ADR-0018) ----
 
 /// A checksum-valid TD1 zone for the ICAO specimen identity, with the two
 /// optional-data slots set independently. Returns the three lines.
@@ -981,32 +976,26 @@ fn td1_zone(
     )
 }
 
-/// **This asserts a defect, deliberately** — a characterization test, pinning
-/// current behaviour so the change that fixes it has to state itself.
+/// The inverted characterization test. Until ADR-0018, this asserted a
+/// defect: TD1 carries optional data in *two* separate fields — line 1
+/// positions 16-30 and line 2 positions 19-29 — and `parse_td1` joined them
+/// with a space into a single `personal_number`. That join was not injective:
+/// when one slot was empty the result was identical whichever slot held the
+/// data, and no consumer of `MrzData` could recover which one it was.
 ///
-/// TD1 carries optional data in *two* separate fields — line 1 positions
-/// 16-30 and line 2 positions 19-29 — and `parse_td1` joins them with a space
-/// into a single `personal_number`. That join is not injective: when one slot
-/// is empty the result is identical whichever slot held the data, and no
-/// consumer of `MrzData` can recover which one it was.
-///
-/// This is not a hypothetical. Two tracked specimens sit on opposite sides of
+/// It was not a hypothetical. Two tracked specimens sit on opposite sides of
 /// it: `Belgium_ID_Specimen_2021_back_mrz` carries `95202899874` in slot 2
 /// with slot 1 empty, and `Serbia_ID_Specimen_2008_back_with_mrz` carries
-/// `2902968000000` in slot 1 with slot 2 empty. Both surface as nothing but a
-/// bare `personal_number` string.
+/// `2902968000000` in slot 1 with slot 2 empty. Both surfaced as nothing but
+/// a bare `personal_number` string.
 ///
-/// The ambiguity is *exactly* the one-empty-slot case, and that is worth
-/// stating precisely: a space is not in the MRZ charset, so a genuine two-slot
-/// join always contains a separator that no single slot can produce. Every
-/// other pair stays distinguishable.
-///
-/// ADR-0018 dissolves the join into `optional_data_1`/`optional_data_2` — the
-/// names the *emitter* has used all along, right above in [`Td1Fields`]. When
-/// it lands, the last assertion here inverts: the two zones must become
-/// distinguishable. Inverting it is part of that change, not a regression.
+/// Now each element is reported in its own slot — the names the *emitter*
+/// has used all along, right above in [`Td1Fields`] — and the two zones are
+/// distinguishable. The zone construction and the position checks are
+/// unchanged from the defect-asserting version, so this still cannot pass
+/// vacuously: it proves the slots are placed before it proves they are kept.
 #[test]
-fn td1_optional_data_slots_are_indistinguishable_after_parsing() {
+fn td1_optional_data_slots_are_distinguishable_after_parsing() {
     const PAYLOAD: &str = "ZZZ";
 
     let (a1, a2, a3) = td1_zone(Some(PAYLOAD), None);
@@ -1033,12 +1022,18 @@ fn td1_optional_data_slots_are_indistinguishable_after_parsing() {
         b.checks
     );
 
-    // ...and the parse cannot tell them apart.
-    assert_eq!(a.personal_number.as_deref(), Some(PAYLOAD));
-    assert_eq!(b.personal_number.as_deref(), Some(PAYLOAD));
-    assert_eq!(
-        a.personal_number, b.personal_number,
-        "ADR-0018 inverts this assertion: once the slots are named, these two \
-         zones must no longer collapse to the same value"
+    // ...and the parse reports each in its own slot: the inversion ADR-0018
+    // promised of the assertion that used to end here.
+    assert_eq!(a.optional_data_1.as_deref(), Some(PAYLOAD));
+    assert_eq!(a.optional_data_2, None);
+    assert_eq!(b.optional_data_1, None);
+    assert_eq!(b.optional_data_2.as_deref(), Some(PAYLOAD));
+    assert_ne!(
+        (a.optional_data_1.clone(), a.optional_data_2.clone()),
+        (b.optional_data_1.clone(), b.optional_data_2.clone()),
+        "once the slots are named, these two zones must no longer collapse to the same value"
     );
+    // And neither is a personal number: a TD1 does not print one.
+    assert_eq!(a.personal_number(), None);
+    assert_eq!(b.personal_number(), None);
 }

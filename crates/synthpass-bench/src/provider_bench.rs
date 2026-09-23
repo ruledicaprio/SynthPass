@@ -1327,7 +1327,7 @@ fn mrz_field(field: CoreField, truth: &mrz::MrzData) -> String {
         CoreField::DateOfBirth => truth.date_of_birth.clone(),
         CoreField::Sex => truth.sex.clone(),
         CoreField::DateOfExpiry => truth.date_of_expiry.clone(),
-        CoreField::PersonalNumber => truth.personal_number.clone().unwrap_or_default(),
+        CoreField::PersonalNumber => truth.personal_number().unwrap_or_default().to_string(),
         CoreField::OptionalData1 => synthpass_die::mrz_reader::reported_optional_data_1(truth)
             .unwrap_or_default()
             .to_string(),
