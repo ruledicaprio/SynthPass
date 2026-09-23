@@ -84,17 +84,27 @@ pub fn expand_date_with_pivot(yymmdd: &str, is_birth: bool, pivot_yy: u32) -> St
         return yymmdd.to_string(); // leave unparseable input untouched
     }
     let yy: u32 = yymmdd[0..2].parse().unwrap();
-    let century = if is_birth && yy > pivot_yy {
-        "19"
-    } else {
-        "20"
-    };
+    let century = century_for(yy, is_birth, pivot_yy) / 100;
     format!(
         "{century}{}-{}-{}",
         &yymmdd[0..2],
         &yymmdd[2..4],
         &yymmdd[4..6]
     )
+}
+
+/// The century (`1900` or `2000`) a two-digit MRZ year belongs to: birth
+/// years after the pivot roll back to the 1900s, everything else is 20xx.
+///
+/// The one place the rule lives, shared by [`expand_date_with_pivot`] and
+/// [`MrzDate::from_field`](crate::MrzDate::from_field) so the string and the
+/// typed value can never disagree about a century.
+pub(crate) fn century_for(yy: u32, is_birth: bool, pivot_yy: u32) -> i32 {
+    if is_birth && yy > pivot_yy {
+        1900
+    } else {
+        2000
+    }
 }
 
 /// Gregorian leap-year rule: divisible by 4, except century years, which must
@@ -345,6 +355,19 @@ impl Date {
             month: m as u32,
             day: d as u32,
         }
+    }
+}
+
+/// Wipes the three components to zero. A date of birth is PII, and once it is
+/// held as a `Date` inside [`MrzDate`](crate::MrzDate) rather than as a
+/// `String`, this is what keeps [`MrzData`](crate::MrzData)'s drop-time wipe
+/// covering it.
+#[cfg(feature = "zeroize")]
+impl zeroize::Zeroize for Date {
+    fn zeroize(&mut self) {
+        self.year.zeroize();
+        self.month.zeroize();
+        self.day.zeroize();
     }
 }
 

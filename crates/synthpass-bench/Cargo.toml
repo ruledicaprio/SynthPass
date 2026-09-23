@@ -34,8 +34,9 @@ base64 = "0.23"
 # measuring the wrong thing.
 synthpass-gen = { path = "../synthpass-gen", features = ["embedded-fonts"] }
 synthpass-ocr = { path = "../synthpass-ocr" }
-# The zero-dep checksum oracle deciding hit vs. miss.
-mrz = { path = "../mrz" }
+# The zero-dep checksum oracle deciding hit vs. miss. `serde` for the
+# mrz_wire_golden test, named here rather than inherited by feature unification.
+mrz = { path = "../mrz", features = ["serde"] }
 # `fusion::check_line1_integrity` — measures what fraction of Tier-1 hits
 # still have a structurally suspect line 1 (see knowledge/ROADMAP.md's per-field
 # CER note).
