@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "IDBIHTT13000057<<<300005<<<<<<\n8502119F2303015BIH8<<<<<<<<<<<\nKOVACEVIC<AZRA<MARINA<<<<<<<<<",
   "nationality": "BIH",
-  "personal_number": "<<<300005 8",
+  "optional_data_1": "<<<300005",
+  "optional_data_2": "8",
+  "personal_number": null,
   "sex": "F",
   "surname": "KOVACEVIC"
 }

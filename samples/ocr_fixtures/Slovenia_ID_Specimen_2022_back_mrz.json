@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "I<SVNIE987654302806985505145K<\n8506287F3203282SVN<<<<<<<<<<<2\nVZOREC<<JANA<<<<<<<<<<<<<<<<<<",
   "nationality": "SVN",
-  "personal_number": "2806985505145K",
+  "optional_data_1": "2806985505145K",
+  "optional_data_2": null,
+  "personal_number": null,
   "sex": "F",
   "surname": "VZOREC"
 }
