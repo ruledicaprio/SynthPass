@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "ARSWEXA0000015919820821<<<<<<<\n8208215F2501017UTO<<<<<<<<<<<1\nSPECIMEN<<SVEA<<<<<<<<<<<<<<<<",
   "nationality": "UTO",
-  "personal_number": "19820821",
+  "optional_data_1": "19820821",
+  "optional_data_2": null,
+  "personal_number": null,
   "sex": "F",
   "surname": "SPECIMEN"
 }

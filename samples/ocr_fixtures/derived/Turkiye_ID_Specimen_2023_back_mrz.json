@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "I<TURA11R812932<40096016028<<<\n0309127M2806099TUR<<<<<<<<<<<8\nGURBUZBARIS<<<<<<<<<<<<<<<<<<<",
   "nationality": "TUR",
-  "personal_number": "<40096016028",
+  "optional_data_1": "<40096016028",
+  "optional_data_2": null,
+  "personal_number": null,
   "sex": "M",
   "surname": "GURBUZBARIS"
 }

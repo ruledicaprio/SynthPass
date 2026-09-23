@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "IPUSAC030059887<<10<30<B22<498\n8101017M1911297USA<<0754052294\nTRAVELER<HAPPY<<<<<<<<<<<<<<<<",
   "nationality": "USA",
-  "personal_number": "<<10<30<B22<498 <<075405229",
+  "optional_data_1": "<<10<30<B22<498",
+  "optional_data_2": "<<075405229",
+  "personal_number": null,
   "sex": "M",
   "surname": "TRAVELER"
 }
