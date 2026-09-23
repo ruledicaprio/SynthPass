@@ -33,8 +33,11 @@ guessed at it — which is the honest outcome the refusal-class metric already r
 
 ## Four signals, and what each one is blind to
 
-Measured from the vendored OCR-B at `crates/synthpass-gen/fonts/ocr-b.ttf` (1024 units per em) using
-`fontTools`, directly from the glyph outlines. No rendering, no model, no OCR.
+Measured from the vendored OCR-B at `crates/synthpass-gen/fonts/ocr-b.ttf` (1024 units per em)
+directly from the glyph outlines. No rendering, no model, no OCR. First measured with `fontTools`;
+[`tools/ocrb_metrics.py`](../../tools/ocrb_metrics.py) now reproduces every figure below with a
+standard-library reader cross-checked against `fontTools`, and adds per-glyph ink runs, the
+confusable pairs ranked by what separates them, and the chargrid ink-floor comparison.
 
 | Signal | Source | Eliminates | Blind to |
 | --- | --- | --- | --- |
