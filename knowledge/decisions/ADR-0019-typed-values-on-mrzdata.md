@@ -1,11 +1,12 @@
 # ADR-0019 — Typed dates and sex on `MrzData`
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-23) — Option D, a fourth option recorded under [Decision](#decision)
 **Date:** 2026-09-20
 
-> **This ADR deliberately reaches no recommendation.** The options are laid out with their honest
-> costs, and the three questions that would settle the choice are named at the end. The decision is
-> the maintainer's, on acceptance.
+> **As proposed, this ADR reached no recommendation.** The options below are kept as written, with
+> their honest costs and the questions that would settle them. The maintainer's choice, and the
+> evidence it rests on, are recorded under [Decision](#decision). None of A, B or C was accepted as
+> written.
 
 ## Context
 
@@ -121,7 +122,90 @@ strings, or something between?
   merely changing, so the payload gets larger for every consumer including the browser demo; and it
   does not resolve the zeroize question — it doubles it.
 
-## What this ADR deliberately does not decide
+## Decision
+
+**Accepted: Option D — typed values as the primary representation, with a wire form that says
+exactly what the zone says.** Taken 2026-09-23 under the maintainer's instruction to prefer the
+option with the widest blast radius if it gives the cleaner crate. The pre-1.0 window is the only
+time a break is this cheap, and `mrz` has **zero reverse dependencies on crates.io** (checked
+2026-09-22), so every consumer the break reaches is in this workspace.
+
+### The shape
+
+```rust
+pub struct RawDateField(/* private: [u8; 6] */);   // six MRZ-charset characters, as printed
+
+#[non_exhaustive]
+pub enum MrzDate {
+    Calendar(Date),                     // six digits naming a real day
+    OutOfCalendar(Date),                // six digits that do not: 000000, 110229
+    PartiallyUnknown(RawDateField),     // digits and `<`: the issuer left part unknown
+    Unknown,                            // six `<`: the issuer left it all unknown
+    Malformed(RawDateField),            // any other character: a misread
+}
+
+#[non_exhaustive]
+pub enum Sex {
+    Male,                // zone `M`
+    Female,              // zone `F`
+    Unspecified,         // zone `<` — Part 4 note p: `<` in the MRZ, `X` in the VIZ
+    NonConformant(char), // any other zone character, `X` included, kept verbatim
+}
+```
+
+`MrzData::date_of_birth` and `date_of_expiry` become `MrzDate`, and `sex` becomes `Sex`.
+**`date_of_birth_completeness` is removed**: `MrzDate::completeness()` returns the same
+`DateCompleteness` from the value itself. `DateCompleteness` stays, because
+`SequenceCompleteness` and the `mrz-wasm` payload use it.
+
+### Why D and not A, B or C
+
+- **Why not B's bare `Date`?** It was the first draft of this option. It fails on the first
+  partially unknown date: `Date` is three integers and cannot hold `74<<12`, so B must either
+  invent a value (the fabrication this ADR exists to remove from `sex`) or discard the field. The
+  enum gives each of the five things a date field can hold its own variant.
+- **Why a fifth variant for six-digit non-dates?** `looks_like_non_mrz_text` rejects a candidate
+  whose date field has a character that is neither a digit nor `<`, and that rule carries a
+  measured 18/19 no-MRZ rejection rate. With `OutOfCalendar` separate, `Malformed` keeps exactly
+  that meaning and the rule's behaviour cannot move.
+- **Why not C's `*_raw` strings?** The raw characters live inside the variants that need them,
+  so there is nothing to disagree with. The verbatim zone is still `mrz_lines`.
+- **Why not A?** A would leave the collapse of every non-`M`/`F` character into `"X"` in place,
+  and the evidence below shows that every `"X"` it produces on this corpus asserts a meaning no zone printed.
+- **The wipe is kept, not traded.** `RawDateField` is six bytes, so `MrzDate` and `Sex` stay
+  `Copy`, carry no heap, and get a direct `Zeroize` impl (`Date`, `RawDateField`, `MrzDate`,
+  `Sex`) under the existing `zeroize` feature. A date of birth is still wiped on drop. The type
+  doc's claim is reworded to **best-effort**: `mrz-wasm` never enables `zeroize`, so the browser
+  build has never wiped anything, and the doc promised more than any build delivered.
+- **Question 3 answers itself.** Expiry has the same type, so the missing
+  `date_of_expiry_completeness` asymmetry disappears without adding a field.
+- **The emitter follows.** `Td3Fields` and its siblings take `Sex` and `MrzDate` too, so parse and
+  emit are symmetric by type. Today `emit` takes `sex: String`, where `"X"` means `<`, which is the
+  same loose vocabulary. Doing it now keeps the break to one release.
+
+### The wire form
+
+[ADR-0020](ADR-0020-mrz-value-wire-contract.md) records it as a contract: **`Display`, serde and
+the zone agree.** A date serialises as today's ISO string when it is six digits, and otherwise as
+its six raw characters. Every date that reaches JSON today reaches it byte-identically. Sex
+serialises as the zone character. That is the one deliberate wire change: `"<"` where the zone
+says unspecified, and the misread character itself (`"1"`, `"S"`) where today's `"X"` hid it. The
+product schema in `synthpass-core` keeps ICAO's VIZ vocabulary (`M`/`F`/`X`) through one mapping
+function.
+
+### Order of work
+
+1. The types land unwired, with a JSON snapshot of today's output for every fixture.
+2. The field swap, which must reproduce that snapshot except for the removed key and the four
+   sex cells below. The real-specimen gate must show no movement.
+3. Separately, and on its own measurement: a non-conformant sex cell stops reaching the product
+   as `"X"`, and Tier-1 promotion is gated on `MrzDate::Calendar` for both dates. Expiry is
+   promoted today without any completeness gate.
+4. The emitter inputs.
+
+Steps 2 and 3 are split so that a benchmark movement can always be attributed to one of them.
+
+## What this ADR deliberately did not decide, as proposed
 
 **Anything.** The recommendation is withheld on purpose, because the choice turns on three
 judgements that are the maintainer's rather than the analysis's:
@@ -163,32 +247,70 @@ different field rather than part of this one.
 
 ### Corpus evidence for the choice
 
-The acceptance test was run over the 64 ground-truth zones, counting from each raw `mrz_line` rather
-than only the curated fixture fields. Four of 64 `date_of_birth` values are not real calendar dates,
-four of 64 `date_of_expiry` values are not real calendar dates, and three of 64 sex cells are outside
-`M`/`F`/`<`. These are lower bounds: ground truth records the printed zone, and OCR can only add
-malformed reads beyond them.
+Counted over the raw zones of all **118** ground-truth fixtures (`samples/ocr_fixtures/**`,
+`derived/` included) by
+[`adr_0019_evidence.rs`](../../crates/synthpass-bench/examples/adr_0019_evidence.rs), which
+asserts every number below, so a corpus change that moves one fails instead of silently
+outdating this record:
 
-Neither branch of the original test holds. The evidence therefore points to Option C, with the
-serde shape permitted to change in 0.8.0, a hard zeroize guarantee for date-of-birth data, and the
-`date_of_expiry_completeness` asymmetry fixed in the same change. The A/B/C implementation details
-remain open for the maintainer; this ADR stays Proposed.
+| Field | Calendar | Out of calendar | Partially unknown | Unknown | Malformed |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `date_of_birth` | 114 | 3 | 0 | 0 | 1 |
+| `date_of_expiry` | 114 | 3 | 1 | 0 | 0 |
 
-## Timing — this is a deadline, not background
+Sex cells: `M` 58 · `F` 56 · `<` 0 · **non-conformant 4** (`1` ×2, `0`, `S`). Today every one of
+the four becomes `"X"`, ICAO's visual-zone word for *unspecified*. But an issuer that means
+unspecified prints `<`, and no zone in the corpus does. So **every `"X"` `mrz` produces over this
+corpus asserts a meaning the zone never printed.** Two of the four sit in checksum-valid zones
+(Croatia 2021, Kazakhstan 2004): sex is outside every check-digit range, so the checksum cannot
+flag them. (What the visual zone says is not established for all four: two hand-reviewed fixtures
+record sex as `null`, one records `M`, and Kazakhstan's `"X"` was itself derived from the MRZ
+without review.)
 
-`crates/mrz/Cargo.toml` already reads **0.8.0**, but `CHANGELOG.md`'s `[Unreleased]` section is empty
-and the last released version is 0.7.1. **The version is staged, not published.**
+**Read the date kinds with each zone's own checksum verdict.** A slice is only a field when the
+zone is aligned. Türkiye's 2024 passport specimen prints a deliberately broken zone: the
+document-number check digit is `<`, and every later field sits one column off. Its
+partially-unknown expiry `48<123` and its malformed birth date `R38473` are cuts across two
+fields, not an issuer's choice or a misread. Restricted to the 99 checksum-valid zones (198
+dates), the only non-calendar dates are **3 six-digit specimen placeholders**: Croatia's `000000`
+twice, and Czechia's `110229`, a 29 February in 2011. No issuer in the corpus prints a filler
+date.
 
-That has a precise consequence. `cargo-semver-checks` derives the permitted bump from `Cargo.toml`,
-which already sits in the breaking slot, so this change costs **one `!` changelog fragment and zero
-version movement** if it lands before 0.8.0 publishes — and **a whole additional 0.9.0** if it lands
-after, at which point "we broke once" stops being true.
+So the evidence for the date variants is uneven, and the ADR says so plainly:
 
-The window is open. It is not open indefinitely, and nothing about it is self-enforcing.
+- `OutOfCalendar` carries real, checksum-valid traffic.
+- `PartiallyUnknown` and `Unknown` exist because ICAO Part 3 §4.8 permits them, not because this
+  corpus contains them.
+- `Malformed` exists because OCR produces misreads. These counts are lower bounds for OCR output:
+  ground truth records the printed zone, and a recogniser can only add malformed reads.
+
+(An earlier count over the 64 top-level fixtures alone found 4/4/3; it missed `derived/`.)
+
+## Timing
+
+As proposed, this section warned that the 0.8.0 window was open but not self-enforcing. It was
+used. By the time of acceptance, `mrz` 0.8.0 already carried three breaking fragments
+(`changelog.d/mrz/*.changed!.md`) and had not yet been published. This decision adds its break to
+the same release, which costs one more fragment and no version movement.
 
 ## Consequences
 
-Stated per option, since none is chosen.
+**Of the decision (Option D):**
+
+- **Positive:** the type says what the value is, and a caller branches on one `match` instead of
+  consulting a second field. The fabricated `"X"` is gone at the source. The wipe guarantee holds
+  for the new types and is described honestly for the first time. Parse and emit share one
+  vocabulary.
+- **Negative:** the widest churn of any item in the window. About 13 production sites and 23 tests
+  outside `mrz` touch these fields, plus `mrz`'s own tests and doctests. Two new public types and
+  a newtype enter the 1.0 surface. The `mrz-wasm` payload loses `date_of_birth_completeness`, and
+  its `sex` can now be `"<"` or a raw character. The demo's check-in form already maps anything
+  other than `M`/`F` to `X`.
+- **What would reverse it:** a consumer outside this workspace that the wire change broke. There
+  is none today (zero reverse dependencies). After 0.8.0 publishes, that is precisely what the
+  pre-1.0 window can no longer absorb.
+
+**Of each option as proposed** (kept for the record):
 
 - **Positive, under A:** immediate, costs nobody an upgrade, and can ship before 0.8.0 publishes
   without consuming the window. **Under B or C:** the type finally says what the value is, and the
