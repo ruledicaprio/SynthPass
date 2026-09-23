@@ -125,10 +125,17 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
    `None` elsewhere — the shape the emitters and the spec transcription always had. The join
    was the defect worth the breaking slot: with one slot empty it lost which printed field held
    the value, and two tracked specimens sat on opposite sides of it.
-4. **Typed values alongside the strings.** `date_of_birth` and `date_of_expiry` hold ISO text,
-   or the raw field when a date is incomplete; `sex` is `"M"`, `"F"` or `"X"`. Typed accessors
-   (`Date`, a `Sex` enum) can be added in a patch. Making them the primary representation is the
-   breaking part, and it needs a decision on what the `serde` shape becomes.
+4. **Typed values as the primary representation. — DECIDED**
+   ([ADR-0019](../../knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), Option D).
+   - `date_of_birth` and `date_of_expiry` become an `MrzDate` enum: calendar day, out-of-calendar
+     digits, partially unknown, unknown, malformed.
+   - `sex` becomes a `Sex` enum whose fourth variant keeps a non-conformant character instead of
+     collapsing it to `"X"`.
+   - `date_of_birth_completeness` is removed in favour of `MrzDate::completeness()`.
+   - The emitter's `*Fields` inputs take the same types.
+   - The `serde` shape is fixed by
+     [ADR-0020](../../knowledge/decisions/ADR-0020-mrz-value-wire-contract.md): `Display`, serde and
+     the zone agree, so every date serialises exactly as before.
 5. **Richer errors. — DONE.** `MrzError::BadCharacter` now carries `character`, `line` and
    `position` rather than a bare `char`.
 

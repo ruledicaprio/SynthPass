@@ -49,4 +49,5 @@ the record.
 | [0016](ADR-0016-card-backs-declare-recoverable-fields.md) | Which fields a document side may be scored on | Accepted |
 | [0017](ADR-0017-checks-distinguish-absent-from-verified.md) | `Checks` must distinguish "absent" from "verified" | Accepted (amended 2026-09-22) |
 | [0018](ADR-0018-optional-data-named-for-what-it-holds.md) | Name the optional-data field for what it holds | Accepted |
-| [0019](ADR-0019-typed-values-on-mrzdata.md) | Typed dates and sex on `MrzData` | Proposed |
+| [0019](ADR-0019-typed-values-on-mrzdata.md) | Typed dates and sex on `MrzData` | Accepted (2026-09-23, Option D) |
+| [0020](ADR-0020-mrz-value-wire-contract.md) | The wire form of `MrzDate` and `Sex`: `Display`, serde and the zone agree | Accepted |

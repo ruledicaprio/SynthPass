@@ -187,9 +187,13 @@ not reconstructed as current maps.
   observations.
 - **`synthpass-core`'s confidence mirror.** `FieldConfidence::mrz_checksum_scope` reports
   `personal_number` as `PROVEN` on every format. This ADR does not change it, and the change is not
-  mechanical: the conversion that installs that scope has no `Format` in hand, so correcting it
-  either threads the format through `impl From<&Extraction> for ExtractionV2` or is applied at the
-  Tier-1 boundary in `synthpass-die`, where the `MrzData` is still available. Either way it moves a
+  mechanical. The conversion that installs that scope (`impl From<&Extraction> for ExtractionV2`)
+  has only a lossy guess at the format: `MrzFormat::guess_from_lines`, from line count and length.
+  It already uses that guess to gate `checks.personal_number`, a few lines from where the
+  confidence is set ungated. The guess can never return `MrvA` or `MrvB` and falls back to `Td3`,
+  so a fix built on it would keep the defect on the one format that prints neither digit. The
+  correction belongs at the Tier-1 boundary in `synthpass-die`, where the real `MrzData::format`
+  is still available. Either way it moves a
   wire-visible confidence value and needs its own measurement. Until then, a Tier-1 TD1 record can
   carry `checks.personal_number: null` beside `confidence.personal_number: 1.0`.
 
