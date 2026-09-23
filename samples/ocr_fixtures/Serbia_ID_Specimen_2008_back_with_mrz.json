@@ -9,7 +9,9 @@
   "mrz_checksums_valid": true,
   "mrz_line": "IDSRB95555554612902968000000<<\n6802295F1307245SRB<<<<<<<<<<<6\nTEST<<MILICA<<<<<<<<<<<<<<<<<<",
   "nationality": "SRB",
-  "personal_number": "2902968000000",
+  "optional_data_1": "2902968000000",
+  "optional_data_2": null,
+  "personal_number": null,
   "sex": "F",
   "surname": "TEST"
 }

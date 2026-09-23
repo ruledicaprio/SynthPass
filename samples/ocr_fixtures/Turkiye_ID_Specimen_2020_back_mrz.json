@@ -9,7 +9,9 @@
   "mrz_checksums_valid": false,
   "mrz_line": "I<TURA01T123456<12345678901<<<\n1234567M1234567TUR<<<<<<<<<<<0\nTEST<<TEST<<<<<<<<<<<<<<<<<<<<",
   "nationality": "TUR",
-  "personal_number": "12345678901",
+  "optional_data_1": "<12345678901",
+  "optional_data_2": null,
+  "personal_number": null,
   "sex": "M",
   "surname": "TEST"
 }
