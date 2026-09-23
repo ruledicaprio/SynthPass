@@ -18,3 +18,5 @@ knowledge/benchmarks/mrz-matrix-probe-2026-09-18.json text eol=lf
 # 2 of 11 tests fail there on a clean checkout of main and pass in Linux CI -- which is why
 # it went unnoticed. Same class of file, and same reason, as the two pins above.
 crates/synthpass-bench/tests/fixtures/bench_report/** text eol=lf
+# mrz_wire_golden compares MrzData's JSON with this file byte-for-byte; same reason.
+crates/synthpass-bench/tests/fixtures/mrz_wire_golden.jsonl text eol=lf
