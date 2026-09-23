@@ -17,8 +17,9 @@ with no runtime dependencies.
 Non-goals, written down so they are not re-proposed:
 
 - **OCR.** The crate takes text. Pixels belong to the caller.
-- **Authenticity.** A check digit proves a faithful *read*, never a genuine *document*. No
-  forgery detection and no eMRTD chip signature checks.
+- **Authenticity.** A check digit establishes that a read is *checksum-consistent* with the
+  printed zone, never that the *document* is genuine. No forgery detection and no eMRTD chip
+  signature checks.
 - **A clock, a network, or a runtime dependency.** "Today" is always a parameter, the code
   registry is compiled in, and the default build pulls in nothing.
 - **Per-country special cases.** Rules come from Doc 9303 and apply to every issuer. A code table
@@ -68,6 +69,25 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   derives today. Anyone serializing diagnostics wants them.
 - **A strict emit path** — `try_format_*` functions that return an error for input the
   emitters currently map to fillers or truncate. The existing total functions stay as they are.
+- **Parse evidence — the one gap the validation-vocabulary review left open.** A
+  `find_and_parse` result is indistinguishable from a `parse_*` one: nothing on `MrzData`
+  records whether the zone was normalized, repaired, or resolved uniquely, and `mrz_lines`
+  holds the repaired zone either way. So a caller cannot separate an exact read, a harmless
+  normalization, a uniquely check-digit-resolved repair, and a heuristic one — only outright
+  failure is visible, as `Err(NotFound)`. That matters most to accuracy measurement, where a
+  pristine read and a heavily repaired one currently score identically. A
+  `find_and_parse_detailed() -> (MrzData, ParseEvidence)` carries it without touching
+  `find_and_parse`. **Additive, so it is not gated on the breaking window** — it can land in
+  0.8.x.
+
+  The rest of that review's proposed vocabulary is already implemented under other names, and
+  needs no new API: *parsed* is `Ok` from a `parse_*`, *checksum consistency* is
+  `MrzData::checksum_consistent`, *plausibility* is `DateCompleteness` plus `country_name`
+  recognition, *document validity* is `MrzData::validity(today)`, and *issuer policy* stays
+  outside this crate by the non-goal above. `recovery_evidence` is the only missing layer.
+  Deliberately **not** proposed: a single confidence score. The dimensions are qualitatively
+  different and collapsing them hides exactly the information a caller needs.
+
 - **`no_std` + `alloc`** — worth investigating before 1.0. The core is integer arithmetic and
   string slicing, which suits embedded document readers. `core::error::Error` has been stable
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
@@ -94,9 +114,10 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 
    The five emitter inputs stay **deliberately exhaustive**: they mirror layouts ICAO 9303
    fixes, so future tunables belong in a separate non-exhaustive companion instead.
-2. **Say what "not applicable" means in `Checks`.** `personal_number` and `composite` report
-   `true` on formats that print no such check digit. The docs say so, but the type does not,
-   and a caller can read "absent" as "verified". A tri-state would make the difference visible.
+2. **Say what "not applicable" means in `Checks`. — DONE.** `personal_number` and `composite`
+   used to report `true` on formats that print no such check digit. Each check is now
+   `Option<bool>`: `Some(true)` verified, `Some(false)` refuted, `None` not printed by this
+   layout. See `knowledge/decisions/ADR-0017-checks-distinguish-absent-from-verified.md`.
 3. **Name the fields for what they hold. — DONE (ADR-0018).** `MrzData::personal_number`
    carried TD1, TD2 and MRV *optional data*, and TD1's two optional fields arrived joined into
    one. Now `optional_data_1` is every format's primary optional-data element,
@@ -108,8 +129,8 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
    or the raw field when a date is incomplete; `sex` is `"M"`, `"F"` or `"X"`. Typed accessors
    (`Date`, a `Sex` enum) can be added in a patch. Making them the primary representation is the
    breaking part, and it needs a decision on what the `serde` shape becomes.
-5. **Richer errors.** `MrzError::BadCharacter` names the character but not its line or its
-   position.
+5. **Richer errors. — DONE.** `MrzError::BadCharacter` now carries `character`, `line` and
+   `position` rather than a bare `char`.
 
 ## 0.9.0 — release candidate
 

@@ -1,9 +1,9 @@
 //! Date handling: `YYMMDD` → ISO expansion, and non-cryptographic
 //! plausibility checks (expiry vs. "today", DOB-before-expiry, well-formedness).
 //!
-//! A valid MRZ composite check digit proves a *faithful read* of the printed
-//! zone — it says nothing about whether the document is in date or whether the
-//! dates are internally consistent. Those judgements live here and take an
+//! A valid MRZ composite check digit makes the candidate *checksum-consistent*
+//! with the printed zone — it says nothing about whether the document is in
+//! date or whether the dates are internally consistent. Those judgements live here and take an
 //! explicit reference date so the crate stays deterministic and clock-free
 //! (the caller supplies "today").
 
@@ -423,9 +423,10 @@ impl DateValidity {
 impl crate::MrzData {
     /// Non-cryptographic date plausibility relative to `today`.
     ///
-    /// A valid MRZ composite proves a faithful *read* of the printed zone, not
-    /// that the document is in date or its dates are consistent — that separate
-    /// judgement is computed here from the already-expanded ISO date fields.
+    /// A valid MRZ composite makes the *read* checksum-consistent with the
+    /// printed zone; it does not establish that the document is in date, or
+    /// that its dates are consistent — that separate judgement is computed
+    /// here from the already-expanded ISO date fields.
     ///
     /// `today` is an explicit reference date rather than a reading of the system
     /// clock, so the answer is deterministic and the crate stays clock-free:
@@ -441,13 +442,13 @@ impl crate::MrzData {
     ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
     /// )
     /// .unwrap();
-    /// assert!(doc.valid()); // the read is checksum-proven ...
+    /// assert!(doc.valid()); // every printed check digit agrees ...
     ///
     /// let report = doc.validity(Date::new(2010, 1, 1));
     /// assert!(report.in_date); // ... and, as of 2010, still in date
     /// assert!(report.dob_before_expiry);
     ///
-    /// // The same faithful read, judged against a later day: still valid(), expired.
+    /// // The same zone, judged against a later day: still valid(), expired.
     /// assert!(!doc.validity(Date::new(2020, 1, 1)).in_date);
     /// ```
     pub fn validity(&self, today: Date) -> DateValidity {

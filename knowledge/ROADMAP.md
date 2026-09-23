@@ -21,7 +21,7 @@
 
 The evolution is **linear, M1 through M8** — no parallel tracks. Each milestone builds on the
 last and ships with a **Definition of Done (DoD)**: specific, measurable criteria, in the
-spirit of the accuracy gates already used in the repo (checksum-proven Tier 1, corpus
+spirit of the accuracy gates already used in the repo (checksum-consistent Tier 1, corpus
 hit-rate). Timelines are targets, not commitments.
 
 > **One deliberate exception to the ordering: M7 is built ahead of M6.** M7 introduces the

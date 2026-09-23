@@ -133,11 +133,13 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-/** Renders the v2 summary block: a provenance badge (checksum-proven vs.
+/** Renders the v2 summary block: a provenance badge (checksum-consistent vs.
  *  LLM-inferred), the document class, and a per-field table with confidence
- *  scores. 100% = proven by an ICAO 9303 check digit; anything below is a
- *  heuristic model score — extraction certainty, never document genuineness.
- *  Dependency-free DOM building, matching the rest of this page. */
+ *  scores. 100% = the field is consistent with its ICAO 9303 check digit —
+ *  consistency, not byte-identity, and no check digit covers the names;
+ *  anything below is a heuristic model score — extraction certainty, never
+ *  document genuineness. Dependency-free DOM building, matching the rest of
+ *  this page. */
 function renderV2Summary(v2) {
   const el = document.getElementById('v2-summary');
   el.textContent = '';
@@ -146,13 +148,13 @@ function renderV2Summary(v2) {
   const badge = document.createElement('span');
   if (prov.kind === 'mrz_checksum') {
     badge.className = 'badge proven';
-    badge.textContent = '✅ Tier 1 · checksum-proven';
+    badge.textContent = '✅ Tier 1 · checksum-consistent';
   } else if (prov.kind === 'llm') {
     badge.className = 'badge inferred';
-    badge.textContent = '🤖 Tier 2 · LLM (' + (prov.model || 'unknown') + ') — inferred, not proven';
+    badge.textContent = '🤖 Tier 2 · LLM (' + (prov.model || 'unknown') + ') — inferred, no check digit';
   } else if (prov.kind === 'wasm_client') {
     badge.className = 'badge proven';
-    badge.textContent = '🌐 Browser WASM · checksum-proven';
+    badge.textContent = '🌐 Browser WASM · checksum-consistent';
   } else {
     badge.className = 'badge';
     badge.textContent = prov.kind || 'unknown provenance';

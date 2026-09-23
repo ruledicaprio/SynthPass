@@ -501,8 +501,9 @@ mod tests {
     /// TD1's permanent, structural limitation: no check digit covers line 3
     /// (surname/given_names) or either optional-data field at all — unlike
     /// TD3, this is not something a future fix changes. A checksum-valid TD1
-    /// record proves the document number/DOB/expiry/composite, never the
-    /// name. See `knowledge/ROADMAP.md`'s M6 execution notes.
+    /// record is consistent with its check digits on the document
+    /// number/DOB/expiry/composite, and says nothing about the name. See
+    /// `knowledge/ROADMAP.md`'s M6 execution notes.
     #[test]
     fn td1_confidence_never_claims_the_name_is_proven() {
         let c = read(TD1_SPECIMEN).extraction.confidence;

@@ -599,8 +599,8 @@ impl Pipeline {
         tokio::fs::write(&md_path, &markdown).await?;
 
         // Tier 1: deterministic ICAO 9303 MRZ validation via the M7 provider
-        // catalog. A valid composite checksum mathematically proves the read
-        // — no LLM needed. `mrz_data` is parsed directly (not read back off
+        // catalog. A valid composite checksum is deterministic evidence the
+        // read is consistent with the printed zone — no LLM needed. `mrz_data` is parsed directly (not read back off
         // `reading`, which carries no raw `mrz::MrzData`) because it's still
         // needed for `PipelineResult.mrz` and the v1 `Extraction` shape below.
         let mrz_data = mrz::find_and_parse(&markdown).ok();
@@ -1063,8 +1063,8 @@ fn apply_deterministic_mrz(v2: &mut ExtractionV2, mrz_data: Option<&mrz::MrzData
 /// one. Each ICAO check digit verifies its own field independently of the
 /// composite, so a document whose overall read escalated to Tier 2 (a bad
 /// composite, an unrelated failing field, or simply no read at all until
-/// now) can still have individual fields that are mathematically proven and
-/// deserve better than the LLM's heuristic score. A fully-valid read makes
+/// now) can still have individual fields that are consistent with their own
+/// check digits and deserve better than the LLM's heuristic score. A fully-valid read makes
 /// every promotion here trivially correct too, so this runs unconditionally
 /// rather than being gated on `!m.valid()`.
 ///

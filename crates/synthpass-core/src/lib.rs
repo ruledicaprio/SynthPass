@@ -97,10 +97,10 @@ pub struct Extraction {
     pub extraction_method: String,
 }
 
-/// Date-plausibility summary for an MRZ. A valid composite check digit proves a
-/// *faithful read* of the printed zone — it says nothing about whether the
-/// document is *in date* or the dates are internally consistent. This captures
-/// that separate, non-cryptographic judgement.
+/// Date-plausibility summary for an MRZ. A valid composite check digit makes the
+/// read *checksum-consistent* with the printed zone — it says nothing about
+/// whether the document is *in date* or the dates are internally consistent.
+/// This captures that separate, non-cryptographic judgement.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Validity {
     /// Both dates parse as real calendar dates (`YYYY-MM-DD`, month/day in range).

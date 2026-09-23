@@ -10,9 +10,13 @@
 //! - **MRV-B** (visas, smaller size): 2 lines × 36 characters
 //!
 //! Check digits use the standard 7-3-1 weighting over the value mapping
-//! `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`. A field checksum that validates
-//! mathematically proves the OCR read is faithful to the printed document —
-//! no probabilistic model involved.
+//! `0-9 → 0-9`, `A-Z → 10-35`, `< → 0`. A field checksum that validates is
+//! deterministic evidence — arithmetic, not a probabilistic model. What it
+//! establishes is that the candidate is *checksum-consistent* with the printed
+//! check digit. It is a strong filter and a weak oracle: it does not establish
+//! byte-identity with the printed zone, and it constrains only the fields a
+//! digit actually covers — on TD2 and TD3 the whole of line 1, names included,
+//! carries no check digit at all. [`Blindspot`] is the exact account.
 //!
 //! ```
 //! let doc = mrz::parse_td3(
@@ -23,7 +27,7 @@
 //! assert_eq!(doc.surname, "ERIKSSON");
 //! assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
 //!
-//! // Per-field proof, not a single boolean.
+//! // Per-field evidence, not a single boolean.
 //! assert_eq!(doc.checks.document_number, Some(true));
 //! assert_eq!(doc.checks.composite, Some(true));
 //! assert!(doc.valid()); // every printed check digit verified
@@ -37,16 +41,18 @@
 //! | You have | Reach for |
 //! | --- | --- |
 //! | MRZ lines, already separated | [`parse_td3`], [`parse_td2`], [`parse_td1`], [`parse_mrv_a`], [`parse_mrv_b`] |
-//! | Free-form OCR text | [`find_and_parse`] — finds the zone, repairs it under check-digit proof |
+//! | Free-form OCR text | [`find_and_parse`] — finds the zone, repairs it only under check-digit agreement |
 //! | Fields to print as an MRZ | [`format_td3`] and its siblings, fed by [`Td3Fields`] and friends |
 //! | A name in a national script | [`transliterate`] (Doc 9303 Part 3 §6 A, Latin), [`transliterate_cyrillic`] (§6 B, Cyrillic), [`encode_name_component`] |
 //! | A number too long for its field | [`MrzData::full_document_number`] |
 //! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
 //! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
 //!
-//! A valid composite check digit proves a faithful *read*. It does not prove
-//! the document is in date — see [`MrzData::validity`] — and it has a known,
-//! exactly characterised blind set — see [`Blindspot`].
+//! A valid composite check digit establishes checksum consistency, not
+//! byte-identity. It does not prove the document is in date — see
+//! [`MrzData::validity`] — and its blind set is exactly characterised, both
+//! for single substitutions and for the combinations of individually-caught
+//! ones that cancel mod 10 — see [`Blindspot`].
 //!
 //! # Feature flags
 //!
@@ -270,7 +276,12 @@ pub struct Checks {
 }
 
 impl Checks {
-    /// All check digits valid — the MRZ read is mathematically verified.
+    /// Every check digit this format prints agrees with the candidate.
+    ///
+    /// This is checksum *consistency*, and it is deterministic. It is not
+    /// byte-identity with the printed zone: [`crate::Blindspot`] gives the
+    /// substitutions the arithmetic cannot see, and a field no digit covers
+    /// — on TD2 and TD3 that is all of line 1 — is not constrained at all.
     ///
     /// ```
     /// let doc = mrz::parse_td2(
@@ -347,7 +358,7 @@ impl Checks {
 ///     ..Default::default()
 /// });
 ///
-/// // Both lines found: a complete sequence, carrying its per-field proof.
+/// // Both lines found: a complete sequence, carrying its per-field evidence.
 /// assert!(matches!(
 ///     SequenceCompleteness::from_parse_result(&find_and_parse(&zone)),
 ///     Some(SequenceCompleteness::Complete { .. }),
@@ -369,10 +380,10 @@ impl Checks {
 #[non_exhaustive]
 pub enum SequenceCompleteness {
     /// Every line the format needs was found and parsed into an
-    /// [`MrzData`]. Whether every *field* is proven is a separate
+    /// [`MrzData`]. Which *fields* carry check-digit evidence is a separate
     /// question — see `checks`/`date_of_birth`.
     Complete {
-        /// Per-field check-digit proof — see [`MrzData::checks`].
+        /// Per-field check-digit evidence — see [`MrzData::checks`].
         checks: Checks,
         /// Date-of-birth field completeness — see
         /// [`MrzData::date_of_birth_completeness`]. No analogous signal
@@ -498,9 +509,10 @@ impl Format {
 /// Parsed and validated MRZ data.
 ///
 /// Every field is decoded from the zone's fixed positions; nothing is taken
-/// from outside it. Whether the *read* is proven is [`valid`](Self::valid)
-/// and, per field, [`checks`](Self::checks); whether the *document* is in date
-/// is a separate question, answered by [`validity`](Self::validity).
+/// from outside it. Whether the *read* is checksum-consistent is
+/// [`valid`](Self::valid) and, per field, [`checks`](Self::checks); whether the
+/// *document* is in date is a separate question, answered by
+/// [`validity`](Self::validity).
 ///
 /// ```
 /// let doc = mrz::parse_td3(
@@ -613,7 +625,9 @@ pub struct MrzData {
     /// [`optional_data_1`](Self::optional_data_1) — and on a TD1 whose second
     /// element is all filler.
     pub optional_data_2: Option<String>,
-    /// The raw MRZ lines, newline-joined, exactly as validated.
+    /// The MRZ lines this record was parsed from, newline-joined, exactly as
+    /// validated — which is the *repaired* zone when [`find_and_parse`]
+    /// normalized or repaired the input, not the caller's original text.
     pub mrz_lines: String,
     /// Per-field check-digit verification results — see [`Checks`].
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
@@ -621,10 +635,50 @@ pub struct MrzData {
 }
 
 impl MrzData {
-    /// Shorthand for `checks.all_valid()`.
+    /// Every check digit this format prints agrees with the candidate.
+    ///
+    /// The named form of what [`valid`](Self::valid) computes, and the
+    /// preferred spelling: `valid` sits three letters from
+    /// [`validity`](Self::validity) and means something entirely different,
+    /// so the short name reads as a verdict on the *document* when it is a
+    /// verdict on the *arithmetic*. Both call
+    /// [`checks.all_valid()`](Checks::all_valid); neither is going away
+    /// inside 0.8.
+    ///
+    /// **This is checksum consistency — not document validity, and not
+    /// byte-identity with the printed zone.** Whether the document is in date
+    /// is [`validity`](Self::validity); what the arithmetic cannot see is
+    /// [`Blindspot`].
+    ///
+    /// ```
+    /// const L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    ///
+    /// let doc = mrz::parse_td3("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2).unwrap();
+    /// assert!(doc.checksum_consistent());
+    ///
+    /// // And what that does not establish. TD3's composite spans line 2 only
+    /// // (positions 1-10, 14-20, 22-43), so line 1 carries no check digit at
+    /// // all: a different surname is exactly as consistent.
+    /// let altered = mrz::parse_td3("P<UTOERIKSSDN<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<", L2).unwrap();
+    /// assert_eq!(altered.surname, "ERIKSSDN");
+    /// assert!(altered.checksum_consistent());
+    /// ```
+    pub fn checksum_consistent(&self) -> bool {
+        self.checks.all_valid()
+    }
+
+    /// Shorthand for [`checks.all_valid()`](Checks::all_valid): every check
+    /// digit this format prints agrees with the candidate. Same answer as
+    /// [`checksum_consistent`](Self::checksum_consistent), which is the
+    /// clearer name for it.
     ///
     /// A failed check digit is a verdict on the read, not a parse error: the
     /// zone still parses, and this is where the verdict lives.
+    ///
+    /// **This is checksum consistency, not document validity and not
+    /// byte-identity with the printed zone.** Whether the document is in date
+    /// is [`validity`](Self::validity); what the arithmetic cannot see is
+    /// [`Blindspot`].
     ///
     /// ```
     /// let l1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
@@ -635,7 +689,7 @@ impl MrzData {
     /// assert!(!tampered.valid());
     /// ```
     pub fn valid(&self) -> bool {
-        self.checks.all_valid()
+        self.checksum_consistent()
     }
 
     /// The complete document number: the overflow reassembly when there is
@@ -1331,7 +1385,7 @@ mod tests {
         // Verbatim tesseract.js output for the Croatian specimen at low
         // resolution: trailing fillers read as K/L runs, a hallucinated
         // leading '1' on line 2 (45 chars), and 'B' where '8' is printed.
-        // The check digits prove which repaired variant is the true read.
+        // The check digits accept exactly one of the repaired variants.
         let text = "I 01072009 PUJZAGREB 0\n\nBIDFD WH5SS A 2\n\n01072014\nP<HRVSPECIMEN<<SPECIMEN<KLLLLLLLLLLLLLLLLLKLKL\n10070070071HRVB212258F1407019<<<<<<<<<<<<<<06\n";
         let d = find_and_parse(text).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
@@ -1383,7 +1437,7 @@ mod tests {
         // read perfectly, but line 1 loses NINE trailing fillers (35/44 chars)
         // and its `<` document-code filler is misread as `K`. The name line
         // carries no check digit of its own, so padding the filler run back is
-        // safe — line 2's check digits still prove the read.
+        // safe -- it cannot change any check digit, and line 2's still verify.
         let text = "PUTOVNICA\nPKHRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06\n";
         let d = find_and_parse(text).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
