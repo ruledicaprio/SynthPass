@@ -107,16 +107,17 @@ before its fix can be judged. **Severity:** Medium — a silent wrong field on a
 
 ### Three parallel lists of ICAO field names
 
-- `synthpass_core::v2::ExtractionFields` — the schema: the 10 ICAO fields plus
-  the two derived `*_name` keys (`issuing_country_name`, `nationality_name`)
+- `synthpass_core::v2::ExtractionFields` — the schema: the 12 ICAO fields (ten, plus
+  `optional_data_1`/`optional_data_2` since ADR-0018) plus the two derived `*_name` keys
+  (`issuing_country_name`, `nationality_name`)
 - `synthpass_bench::COMPARED_FIELDS` — what the benchmark scores
 - `synthpass_llm::prompt::FIELDS` — what the prompt asks for, and the source
   `grammar.rs` generates the GBNF from
 
-The third **deliberately differs** (it asks for `mrz_line`, omits
-`personal_number`), and `grammar.rs`'s "prompt and grammar cannot drift"
-invariant depends on it staying a Rust const. So this is not simply
-de-duplicable. `v2::CoreField` names the 10 ICAO fields; the third stays separate.
+The third **deliberately differs** (it asks for `mrz_line`, omits `personal_number` and both
+optional-data fields), and `grammar.rs`'s "prompt and grammar cannot drift" invariant depends on
+it staying a Rust const. So this is not simply de-duplicable. `v2::CoreField` names the 12 ICAO
+fields; the third stays separate.
 
 **Guarded since the `icao-fields-guard` change:** `CoreField::as_str` is `const`,
 and two `const _` blocks pin the lists at compile time — `synthpass-bench`

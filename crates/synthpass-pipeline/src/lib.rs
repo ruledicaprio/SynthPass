@@ -1107,11 +1107,15 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
 
     // Only TD3 prints a personal-number check digit. The other formats record
     // that absence as `None`, so they cannot promote an unverified value as
-    // mathematical proof. An all-filler-but-valid TD3 field also leaves an
-    // existing LLM value untouched rather than nulling it out.
+    // mathematical proof — and `personal_number()` is `None` off TD3 anyway,
+    // so the two guards agree. An all-filler-but-valid TD3 field also leaves
+    // an existing LLM value untouched rather than nulling it out. The two
+    // optional-data slots are never promoted: no check digit covers them
+    // (ADR-0018).
     if m.checks.personal_number == Some(true) {
-        if let Some(pn) = &m.personal_number {
-            v2.fields.set(CoreField::PersonalNumber, Some(pn.clone()));
+        if let Some(pn) = m.personal_number() {
+            v2.fields
+                .set(CoreField::PersonalNumber, Some(pn.to_string()));
             v2.confidence.prove(CoreField::PersonalNumber);
         }
     }
@@ -1178,7 +1182,7 @@ pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
         parts.push(format!("date_of_expiry={}", m.date_of_expiry));
     }
     if m.checks.personal_number == Some(true) {
-        if let Some(pn) = &m.personal_number {
+        if let Some(pn) = m.personal_number() {
             parts.push(format!("personal_number={pn}"));
         }
     }
@@ -1234,6 +1238,8 @@ fn extraction_from_v2_llm(v2: &ExtractionV2, mrz_checksums_valid: Option<bool>) 
         sex: v2.fields.sex.clone(),
         date_of_expiry: v2.fields.date_of_expiry.clone(),
         personal_number: v2.fields.personal_number.clone(),
+        optional_data_1: v2.fields.optional_data_1.clone(),
+        optional_data_2: v2.fields.optional_data_2.clone(),
         mrz_line: v2.mrz.as_ref().map(|m| m.lines.clone()),
         mrz_checksums_valid,
         validity: v2.validity,
@@ -2319,10 +2325,7 @@ mod tests {
             Some(m.date_of_expiry.as_str())
         );
         assert_eq!(v2.confidence.date_of_expiry, 1.0);
-        assert_eq!(
-            v2.fields.personal_number.as_deref(),
-            m.personal_number.as_deref()
-        );
+        assert_eq!(v2.fields.personal_number.as_deref(), m.personal_number());
         assert_eq!(v2.confidence.personal_number, 1.0);
 
         // Untouched: fields the ICAO check digits never cover.
@@ -2460,7 +2463,8 @@ mod tests {
         );
         assert_eq!(m.checks.personal_number, Some(true));
         assert_eq!(
-            m.personal_number, None,
+            m.personal_number(),
+            None,
             "sanity: all-filler-but-valid reads back as None, not an empty string"
         );
 
@@ -2601,10 +2605,7 @@ mod tests {
         let hint = result.expect("date_of_birth/date_of_expiry/personal_number still verify");
         assert!(hint.contains(&format!("date_of_birth={}", m.date_of_birth)));
         assert!(hint.contains(&format!("date_of_expiry={}", m.date_of_expiry)));
-        assert!(hint.contains(&format!(
-            "personal_number={}",
-            m.personal_number.as_deref().unwrap()
-        )));
+        assert!(hint.contains(&format!("personal_number={}", m.personal_number().unwrap())));
         assert!(
             !hint.contains("document_number="),
             "the corrupted check digit must not be reported as verified: {hint}"
@@ -2756,10 +2757,10 @@ mod tests {
             );
             assert_eq!(v2.confidence.date_of_expiry, 1.0);
             // This fixture's personal-number field is all filler (`m.checks
-            // .personal_number` is `Some(true)` but `m.personal_number` is
+            // .personal_number` is `Some(true)` but `m.personal_number()` is
             // `None`), so it must not be promoted — the mock backend's own
             // (absent) value survives untouched.
-            assert_eq!(m.personal_number, None, "sanity: all-filler field");
+            assert_eq!(m.personal_number(), None, "sanity: all-filler field");
             assert_eq!(v2.fields.personal_number.as_deref(), None);
             assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
             // The document-number check digit fails on this fixture, so the

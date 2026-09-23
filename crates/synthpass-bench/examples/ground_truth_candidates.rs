@@ -340,13 +340,17 @@ fn fixture_json(data: &mrz::MrzData) -> String {
     let v2 = synthpass_die::mrz_reader::extraction_v2_from_mrz(data);
     let mut map = serde_json::Map::new();
     for field in CoreField::ALL {
-        map.insert(
-            field.as_str().to_string(),
-            match v2.fields.get(field) {
-                Some(v) => serde_json::Value::String(v.to_string()),
-                None => serde_json::Value::Null,
-            },
-        );
+        let value = match v2.fields.get(field) {
+            Some(v) => serde_json::Value::String(v.to_string()),
+            // The two optional-data fields are omitted when empty, exactly as
+            // the v1 `Extraction` serializer omits them, so a regenerated
+            // fixture for a document without them is byte-identical.
+            None if matches!(field, CoreField::OptionalData1 | CoreField::OptionalData2) => {
+                continue;
+            }
+            None => serde_json::Value::Null,
+        };
+        map.insert(field.as_str().to_string(), value);
     }
     map.insert("mrz_line".into(), data.mrz_lines.clone().into());
     map.insert("mrz_checksums_valid".into(), true.into());

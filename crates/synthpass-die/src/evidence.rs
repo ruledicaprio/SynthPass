@@ -82,7 +82,8 @@ pub struct Evidence {
     pub text_lines: usize,
 
     // ---- derived from what a reader produced ----
-    /// Fields that came back with nothing usable.
+    /// Fields that came back with nothing usable. Never lists the two
+    /// optional-data elements — see `ExtractionFields::missing` (ADR-0018).
     pub missing: Vec<CoreField>,
 }
 

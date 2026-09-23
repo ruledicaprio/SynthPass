@@ -1,6 +1,6 @@
 # ADR-0018 — Name the optional-data field for what it holds
 
-**Status:** Accepted
+**Status:** Accepted (implemented 2026-09-23)
 **Date:** 2026-09-20
 
 ## Context
@@ -195,3 +195,38 @@ The window is open. It is not open indefinitely, and nothing about it is self-en
   point the change stops being a crate rename and becomes a published-wire-format break with dataset
   consumers attached, and the cost/benefit is a different calculation entirely — one that should be
   taken on its own evidence, not inherited from this ADR.
+
+## Implementation note — 2026-09-23
+
+Implemented as PR 3b of #379, in one atomic PR whose commits go scaffold → schema → break → docs,
+with a preparatory PR 3a (`f2e43db`) that deduplicated the bridge and pinned the defect with a
+characterization test. Two rules the option text above left implicit had to be stated, and are
+recorded here so they are not re-derived:
+
+- **The slot rule.** `optional_data_1` is every format's *primary* optional-data element — TD1
+  line 1 `[15,30)`, TD2 `[28,35)`, TD3 `[28,42)`, MRV-A `[28,44)`, MRV-B `[28,36)` — and the
+  document-number overflow target wherever one is defined. `optional_data_2` is TD1's second
+  element, `None` elsewhere. `personal_number()` returns `optional_data_1` on TD3 and `None` on
+  every other format. Slot 1 for the single-element formats is argued by overflow (both `parse_td2`
+  and `parse_td3` read the overflow remainder from that element), by ordinal reading, and by
+  alignment with `Checks::personal_number`, so that the accessor and the check-digit field are the
+  same TD3-only predicate. Proven, not described: the round-trip proptests assert it per generated
+  zone on all five formats, and a temporary walk over all 118 tracked fixtures (`2f91fc6`, deleted
+  with the field) confirmed the old joined value was recoverable from the two slots on every real
+  zone — 15 TD1, 9 populated, 6 in slot 1 only, 1 in slot 2 only, 2 in both.
+- **The product rule.** `personal_number` stays the schema key for TD3's check-digited element and
+  the schema's `optional_data_1` is `None` on TD3; on TD1, TD2 and the visas the element moves to
+  `optional_data_1`/`optional_data_2` at `MRZ_STRUCTURAL` (0.9) rather than `PROVEN` (1.0), since no
+  format check-digits optional data — the joined TD1 value had reached the wire at 1.0. The rule
+  lives once, in `synthpass_die::mrz_reader::reported_optional_data_1`, and the benchmark's Tier-1
+  columns call it, so a record and a bench row cannot disagree. Its consequence for reports:
+  [`compared-fields-twelve-columns-2026-09-23.md`](../benchmarks/compared-fields-twelve-columns-2026-09-23.md).
+  `ExtractionFields::missing` never lists the two elements — an empty one is the issuer's choice —
+  because the opt-in escalate-on-missing policy would otherwise escalate every TD3.
+
+The "What this ADR deliberately does not decide" section above is answered by the second rule:
+the schema gained the two keys and kept `personal_number`; `EXPORTS.md`'s dataset keys did not
+change, because the generator paints a personal number on the card front and never an
+optional-data element. `Field::PersonalNumber::as_str()` still returns `"personal_number"`, now
+naming the check digit and the accessor rather than a field on `MrzData` — the collision this ADR
+predicted, stated rather than discovered.

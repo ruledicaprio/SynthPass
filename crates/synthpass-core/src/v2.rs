@@ -58,7 +58,8 @@ const IMPLAUSIBLE: f32 = 0.3;
 /// `mrz::dates`: TD1/TD2/TD3 all check-digit exactly `document_number`,
 /// `date_of_birth`, `date_of_expiry`, `personal_number` — the composite
 /// excludes `nationality` and `sex` too, matching the published standard, not
-/// an oversight in this codebase. Everything else in [`ExtractionFields`] is
+/// an oversight in this codebase — and no format check-digits its
+/// optional-data elements. Everything else in [`ExtractionFields`] is
 /// structural parsing. Set below [`PROVEN`] and above the Tier-2
 /// [`PLAUSIBLE`] band — a real OCR+MRZ-charset read is more reliable than an
 /// LLM guess, but it is not a proof, and must never compare equal to one.
@@ -262,6 +263,19 @@ pub struct ExtractionFields {
     pub date_of_expiry: Option<String>,
     #[serde(default)]
     pub personal_number: Option<String>,
+    /// The format's primary optional-data element on the formats that print
+    /// one *as optional data*: TD1 optional data 1 (line 1), TD2/MRV-A/MRV-B
+    /// optional data. `None` on TD3, whose element is
+    /// [`personal_number`](Self::personal_number) — the field ICAO 9303 Part 4
+    /// names, and the one a check digit covers. No check digit covers this
+    /// field on any format (ADR-0018).
+    #[serde(default)]
+    pub optional_data_1: Option<String>,
+    /// TD1's second optional-data element (line 2). `None` on every other
+    /// format, which prints exactly one optional-data element. No check digit
+    /// covers it (ADR-0018).
+    #[serde(default)]
+    pub optional_data_2: Option<String>,
 }
 
 /// Per-field extraction certainty, one score per ICAO field in
@@ -286,6 +300,8 @@ pub struct FieldConfidence {
     pub sex: f32,
     pub date_of_expiry: f32,
     pub personal_number: f32,
+    pub optional_data_1: f32,
+    pub optional_data_2: f32,
 }
 
 impl FieldConfidence {
@@ -377,6 +393,8 @@ impl FieldConfidence {
             sex: score,
             date_of_expiry: score,
             personal_number: score,
+            optional_data_1: score,
+            optional_data_2: score,
         }
     }
 
@@ -392,8 +410,11 @@ impl FieldConfidence {
     /// which fields the ICAO check digits actually cover (same shape across
     /// TD1/TD2/TD3 — see [`MRZ_STRUCTURAL`]'s doc comment for how this was
     /// verified). Only `document_number`, `date_of_birth`, `date_of_expiry`,
-    /// and `personal_number` are mathematically proven; the rest are
-    /// structural parses.
+    /// and `personal_number` carry a check digit to be consistent with; the
+    /// rest are structural parses — including both optional-data fields,
+    /// which no format check-digits. That is why TD1's and TD2's optional
+    /// data, once stamped [`PROVEN`] through the old joined `personal_number`,
+    /// now score [`MRZ_STRUCTURAL`] (ADR-0018).
     pub fn mrz_checksum_scope() -> Self {
         Self {
             document_type: MRZ_STRUCTURAL,
@@ -406,6 +427,8 @@ impl FieldConfidence {
             sex: MRZ_STRUCTURAL,
             date_of_expiry: PROVEN,
             personal_number: PROVEN,
+            optional_data_1: MRZ_STRUCTURAL,
+            optional_data_2: MRZ_STRUCTURAL,
         }
     }
 
@@ -464,6 +487,8 @@ impl FieldConfidence {
             CoreField::Sex => self.sex,
             CoreField::DateOfExpiry => self.date_of_expiry,
             CoreField::PersonalNumber => self.personal_number,
+            CoreField::OptionalData1 => self.optional_data_1,
+            CoreField::OptionalData2 => self.optional_data_2,
         }
     }
 
@@ -484,6 +509,8 @@ impl FieldConfidence {
             CoreField::Sex => &mut self.sex,
             CoreField::DateOfExpiry => &mut self.date_of_expiry,
             CoreField::PersonalNumber => &mut self.personal_number,
+            CoreField::OptionalData1 => &mut self.optional_data_1,
+            CoreField::OptionalData2 => &mut self.optional_data_2,
         };
         *slot = PROVEN;
     }
@@ -532,7 +559,8 @@ pub enum Provenance {
 /// reason this type exists rather than passing `&str` around.
 ///
 /// Deliberately **not** unified with `synthpass_llm::prompt::FIELDS`. That list
-/// differs on purpose (it asks for `mrz_line` and omits `personal_number`) and
+/// differs on purpose (it asks for `mrz_line` and omits `personal_number` and
+/// both optional-data fields) and
 /// `synthpass-llm`'s GBNF grammar is generated from it, so the two must stay
 /// separate sources. See `knowledge/technical_debt.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -548,11 +576,19 @@ pub enum CoreField {
     Sex,
     DateOfExpiry,
     PersonalNumber,
+    /// `optional_data_1` — see [`ExtractionFields::optional_data_1`].
+    /// Renamed explicitly: `rename_all = "snake_case"` would write
+    /// `optional_data1`, and the wire name must equal [`Self::as_str`].
+    #[serde(rename = "optional_data_1")]
+    OptionalData1,
+    /// `optional_data_2` — see [`ExtractionFields::optional_data_2`].
+    #[serde(rename = "optional_data_2")]
+    OptionalData2,
 }
 
 impl CoreField {
     /// Every field, in [`ExtractionFields`] declaration order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::DocumentType,
         Self::IssuingCountry,
         Self::DocumentNumber,
@@ -563,6 +599,8 @@ impl CoreField {
         Self::Sex,
         Self::DateOfExpiry,
         Self::PersonalNumber,
+        Self::OptionalData1,
+        Self::OptionalData2,
     ];
 
     /// The snake_case wire name, identical to the serde representation and to
@@ -583,7 +621,18 @@ impl CoreField {
             Self::Sex => "sex",
             Self::DateOfExpiry => "date_of_expiry",
             Self::PersonalNumber => "personal_number",
+            Self::OptionalData1 => "optional_data_1",
+            Self::OptionalData2 => "optional_data_2",
         }
+    }
+
+    /// The two zone-only optional-data elements (ADR-0018):
+    /// issuer-discretionary content with no visual-zone counterpart, so no
+    /// provider can be asked for them and an empty one is the issuer's
+    /// choice, not a failed read. [`ExtractionFields::missing`] never lists
+    /// them.
+    pub const fn is_optional_data(self) -> bool {
+        matches!(self, Self::OptionalData1 | Self::OptionalData2)
     }
 }
 
@@ -609,16 +658,25 @@ impl ExtractionFields {
             CoreField::Sex => &self.sex,
             CoreField::DateOfExpiry => &self.date_of_expiry,
             CoreField::PersonalNumber => &self.personal_number,
+            CoreField::OptionalData1 => &self.optional_data_1,
+            CoreField::OptionalData2 => &self.optional_data_2,
         };
         raw.as_deref().filter(|s| !s.trim().is_empty())
     }
 
     /// Which fields came back with nothing usable. The input to an escalation
     /// decision: "ask a more capable provider for *these*."
+    ///
+    /// The two optional-data elements are never reported here: an empty one
+    /// is the issuer's choice, not a failed read, and no provider could be
+    /// asked to supply it ([`CoreField::is_optional_data`]). Under a policy
+    /// that escalates on missing fields, listing them would escalate every
+    /// TD3 — which prints no optional data at all — for two fields nothing
+    /// downstream can fill.
     pub fn missing(&self) -> Vec<CoreField> {
         CoreField::ALL
             .into_iter()
-            .filter(|f| self.get(*f).is_none())
+            .filter(|f| !f.is_optional_data() && self.get(*f).is_none())
             .collect()
     }
 
@@ -637,6 +695,8 @@ impl ExtractionFields {
             CoreField::Sex => &mut self.sex,
             CoreField::DateOfExpiry => &mut self.date_of_expiry,
             CoreField::PersonalNumber => &mut self.personal_number,
+            CoreField::OptionalData1 => &mut self.optional_data_1,
+            CoreField::OptionalData2 => &mut self.optional_data_2,
         };
         *slot = value;
     }
@@ -911,8 +971,11 @@ fn heuristic_field_confidence(v1: &Extraction) -> FieldConfidence {
         sex: score(&v1.sex, |v| matches!(v, "M" | "F" | "X")),
         date_of_expiry: score(&v1.date_of_expiry, looks_like_a_date),
         // No real sanity signal beyond presence/absence for an optional,
-        // format-varying field — don't invent one.
+        // format-varying field — don't invent one. The same holds for both
+        // optional-data fields, which ICAO leaves issuer-discretionary.
         personal_number: LLM_HEURISTIC_CONFIDENCE,
+        optional_data_1: LLM_HEURISTIC_CONFIDENCE,
+        optional_data_2: LLM_HEURISTIC_CONFIDENCE,
     }
 }
 
@@ -989,6 +1052,8 @@ impl From<&Extraction> for ExtractionV2 {
                 sex: v1.sex.clone(),
                 date_of_expiry: v1.date_of_expiry.clone(),
                 personal_number: v1.personal_number.clone(),
+                optional_data_1: v1.optional_data_1.clone(),
+                optional_data_2: v1.optional_data_2.clone(),
             },
             confidence,
             provenance,
@@ -1063,6 +1128,9 @@ mod tests {
         assert_eq!(v2.confidence.date_of_birth, PROVEN);
         assert_eq!(v2.confidence.date_of_expiry, PROVEN);
         assert_eq!(v2.confidence.personal_number, PROVEN);
+        // No check digit covers either optional-data field on any format.
+        assert_eq!(v2.confidence.optional_data_1, MRZ_STRUCTURAL);
+        assert_eq!(v2.confidence.optional_data_2, MRZ_STRUCTURAL);
         assert_eq!(v2.confidence.issuing_country, MRZ_STRUCTURAL);
         assert_eq!(v2.confidence.surname, MRZ_STRUCTURAL);
         assert_eq!(v2.confidence.given_names, MRZ_STRUCTURAL);
@@ -1153,6 +1221,8 @@ mod tests {
         // personal_number never moves regardless of presence/value — no real
         // sanity signal exists for it beyond presence/absence.
         assert_eq!(v2.confidence.personal_number, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.confidence.optional_data_1, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.confidence.optional_data_2, LLM_HEURISTIC_CONFIDENCE);
     }
 
     #[test]
@@ -1230,7 +1300,9 @@ mod tests {
                 "date_of_birth": "1982-12-25",
                 "sex": "F",
                 "date_of_expiry": "2014-07-01",
-                "personal_number": null
+                "personal_number": null,
+                "optional_data_1": null,
+                "optional_data_2": null
             },
             // Only the four check-digited fields are 1.0; the rest are
             // structural parses (MRZ_STRUCTURAL) — see
@@ -1246,7 +1318,9 @@ mod tests {
                 "date_of_birth": 1.0,
                 "sex": MRZ_STRUCTURAL,
                 "date_of_expiry": 1.0,
-                "personal_number": 1.0
+                "personal_number": 1.0,
+                "optional_data_1": MRZ_STRUCTURAL,
+                "optional_data_2": MRZ_STRUCTURAL
             },
             "provenance": { "kind": "mrz_checksum" },
             "mrz": {

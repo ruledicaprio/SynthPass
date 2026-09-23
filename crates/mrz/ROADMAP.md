@@ -97,9 +97,13 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 2. **Say what "not applicable" means in `Checks`.** `personal_number` and `composite` report
    `true` on formats that print no such check digit. The docs say so, but the type does not,
    and a caller can read "absent" as "verified". A tri-state would make the difference visible.
-3. **Name the fields for what they hold.** `MrzData::personal_number` carries TD1, TD2 and MRV
-   *optional data*, and TD1's two optional fields arrive joined into one. `optional_data`, kept
-   per line, would be the honest shape.
+3. **Name the fields for what they hold. — DONE (ADR-0018).** `MrzData::personal_number`
+   carried TD1, TD2 and MRV *optional data*, and TD1's two optional fields arrived joined into
+   one. Now `optional_data_1` is every format's primary optional-data element,
+   `optional_data_2` is TD1's second, and `personal_number()` names the TD3 element and returns
+   `None` elsewhere — the shape the emitters and the spec transcription always had. The join
+   was the defect worth the breaking slot: with one slot empty it lost which printed field held
+   the value, and two tracked specimens sat on opposite sides of it.
 4. **Typed values alongside the strings.** `date_of_birth` and `date_of_expiry` hold ISO text,
    or the raw field when a date is incomplete; `sex` is `"M"`, `"F"` or `"X"`. Typed accessors
    (`Date`, a `Sex` enum) can be added in a patch. Making them the primary representation is the

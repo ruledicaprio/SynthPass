@@ -39,7 +39,7 @@ const BATCH_A: [&str; 13] = [
     "passports/Russian_Federation_Passport_Specimen_P0_RUS_2019_mrz.jpg",
     "id_cards/Sweden_ID_Specimen_2022_back_mrz.jpg",
 ];
-const FIELD_NAMES: [&str; 11] = [
+const FIELD_NAMES: [&str; 13] = [
     "document_type",
     "issuing_country",
     "surname",
@@ -50,6 +50,8 @@ const FIELD_NAMES: [&str; 11] = [
     "date_of_birth",
     "date_of_expiry",
     "personal_number",
+    "optional_data_1",
+    "optional_data_2",
     "mrz_line",
 ];
 const HELP: &str = "ground-truth [--samples-root samples] [--fixtures-dir samples/ocr_fixtures]
@@ -277,7 +279,9 @@ fn validate(entry: &Entry) -> Result<Extraction> {
     if entry.fields.len() != FIELD_NAMES.len()
         || FIELD_NAMES.iter().any(|f| !entry.fields.contains_key(*f))
     {
-        return Err("fields: expected the ten core fields and mrz_line, with no extra keys".into());
+        return Err(
+            "fields: expected the twelve core fields and mrz_line, with no extra keys".into(),
+        );
     }
     let zone = entry.fields["mrz_line"]
         .as_deref()
@@ -991,7 +995,7 @@ body{font:16px system-ui;background:#edf1f5;color:#182838;margin:0}header,main{m
             "<h3>OCR read — unverified</h3><pre>{}</pre><div class=\"fields\">",
             escape(&card.ocr)
         ));
-        for key in &FIELD_NAMES[..10] {
+        for key in &FIELD_NAMES[..12] {
             let value = card.fields.get(*key).and_then(|v| v.as_deref());
             html.push_str(&format!(
                 "<label>{}<input data-field=\"{}\" value=\"{}\"></label>",
@@ -1034,7 +1038,7 @@ for (const card of cards) {
 document.querySelector('#export').addEventListener('click', () => {
   const entries = cards.map(card => ({stem:card.dataset.stem, asset:card.dataset.asset, status:card.querySelector('select').value,
     fields:Object.fromEntries([...card.querySelectorAll('[data-field]')].map(input => [input.dataset.field,
-      input.value === '' && input.dataset.field === 'personal_number' ? null : input.value]))}));
+      input.value === '' && ['personal_number', 'optional_data_1', 'optional_data_2'].includes(input.dataset.field) ? null : input.value]))}));
   const url = URL.createObjectURL(new Blob([JSON.stringify(entries,null,2)+'\n'],{type:'application/json'}));
   const a = document.createElement('a'); a.href = url; a.download = 'ground-truth-verified.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
