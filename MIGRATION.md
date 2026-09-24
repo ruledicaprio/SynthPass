@@ -70,6 +70,16 @@ Err(MrzError::BadCharacter(c)) => { /* ... */ }
 Err(MrzError::BadCharacter { character, line, position, .. }) => { /* ... */ }
 ```
 
+Two more `MrzError` payloads changed. Both matter only if you match on the values:
+
+- **Line length is counted in characters, not bytes.** In 0.7, a 44-character TD3 line holding
+  `É` was 45 bytes and failed as `BadLength { expected: 44, got: 45 }`. In 0.8 its length is
+  right, so it fails as `BadCharacter { character: 'É', line: Some(0), position }`, which names
+  the character that is actually wrong. `BadLength.got` counts characters too.
+- **`BadDocumentCode` carries both raw code cells on every format.** On TD1 and TD2, 0.7 trimmed
+  the trailing filler (`"Z"`), while TD3, MRV-A and MRV-B did not (`"Z<"`). In 0.8 all five
+  formats report `"Z<"`.
+
 ### 4. `ParseOptions`, `Date` and `DateValidity` are `#[non_exhaustive]`
 
 Only `ParseOptions` needs a caller change. Build it with the builder, because a struct literal is
@@ -81,6 +91,9 @@ let opts = ParseOptions { pivot_yy: 30 };
 // 0.8
 let opts = ParseOptions::default().with_pivot_yy(30);
 ```
+
+With the `serde` feature, `ParseOptions` JSON written by 0.7 (`{"pivot_yy":30}`) still
+deserializes. The new `class_sweep` field defaults to `false`.
 
 ### 5. Dates and sex are typed ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), [ADR-0020](knowledge/decisions/ADR-0020-mrz-value-wire-contract.md))
 
@@ -151,12 +164,23 @@ let fields = Td3Fields {
   them with `MrzDate::from_field(RawDateField::try_from("74<<12")?, DateRole::Birth, pivot)`.
 - Unspecified sex is `Sex::Unspecified`, written as `<`. The old API wrote `<` for anything
   that was not `M` or `F`. A `Sex::NonConformant(c)` is now written as `c`, so a parsed zone
-  re-emits exactly as it was read.
+  re-emits exactly as it was read. The parser only produces MRZ characters there. If you build
+  `NonConformant(c)` yourself with a character outside `A`–`Z`, `0`–`9` and `<` (for example
+  `'a'` or `'É'`), the emitter writes `<`, so the zone stays well-formed.
 - For equivalent values the emitted bytes and check digits are unchanged. The defaults are still
   `<<<<<<` and `<`.
 - The old `String` fields also accepted lowercase or wrong-length dates and padded or cleaned
   them. A `RawDateField` is exactly six MRZ characters, so such input now has to be fixed before
   it reaches the emitter.
+
+### Behaviour changes you may notice (no code change needed)
+
+- **A legal `K` in a document code survives the damaged-capture repair.** 0.7 turned any `K` in
+  the second cell of the document code into `<`. That destroyed a legal code: ICAO lets the
+  issuer choose the second character of TD1, TD2 and visa codes. In 0.8 only a passport's `PK`
+  becomes `P<`, because `K` is not in Doc 9303 Part 4 §4.4's passport code table.
+- **`country_name`'s scope.** It covers a documented subset of the Part 3 §5
+  registry, not all of it. `UNK` now returns ICAO's full name.
 
 ## Part 2: SynthPass JSON, 1.5 → 1.6
 
