@@ -80,6 +80,53 @@ class MechanismClassifierTests(unittest.TestCase):
         self.assertTrue(result["records"][0]["review_target"])
         self.assertEqual(result["records"][0]["truth_status"], "unlabelled")
 
+    def test_td1_hit_with_only_name_line_different_is_a_target(self):
+        truth_lines = ["A" * 30, "B" * 30, "C" * 30]
+        recovered = [*truth_lines[:2], "D" + "C" * 29]
+        row = ledger("id_cards/td1.png", mrz_format="TD1", names_exact=True)
+        result = classify([row], [dump("id_cards/td1.png", "\n".join(truth_lines),
+                                       "\n".join(recovered), recovered)])
+        record = result["records"][0]
+        self.assertFalse(record["line1_error"])
+        self.assertEqual(record["zone_lines_differing"], [2])
+        self.assertTrue(record["review_target"])
+
+    def test_td3_hit_with_only_second_line_different_is_a_target(self):
+        truth_lines = ["P" * 44, "A" * 44]
+        recovered = [truth_lines[0], "B" + "A" * 43]
+        row = ledger("passports/td3.png", mrz_format="TD3", names_exact=True)
+        result = classify([row], [dump("passports/td3.png", "\n".join(truth_lines),
+                                       "\n".join(recovered), recovered)])
+        record = result["records"][0]
+        self.assertFalse(record["line1_error"])
+        self.assertEqual(record["zone_lines_differing"], [1])
+        self.assertTrue(record["review_target"])
+
+    def test_hit_with_exact_zone_is_not_a_target(self):
+        truth = "A" * 30 + "\n" + "B" * 30 + "\n" + "C" * 30
+        row = ledger("id_cards/exact.png", mrz_format="TD1", names_exact=True)
+        result = classify([row], [dump("id_cards/exact.png", truth, truth,
+                                       truth.splitlines())])
+        record = result["records"][0]
+        self.assertEqual(record["zone_lines_differing"], [])
+        self.assertFalse(record["review_target"])
+
+    def test_hit_without_truth_has_no_zone_comparison(self):
+        row = ledger("passports/no-truth.png", names_exact=True)
+        result = classify([row], [dump("passports/no-truth.png")])
+        record = result["records"][0]
+        self.assertIsNone(record["zone_lines_differing"])
+        self.assertFalse(record["review_target"])
+
+    def test_hit_with_line_count_mismatch_keeps_existing_target_rule(self):
+        truth = "A" * 30 + "\n" + "B" * 30 + "\n" + "C" * 30
+        row = ledger("id_cards/missing-line.png", mrz_format="TD1", names_exact=True)
+        result = classify([row], [dump("id_cards/missing-line.png", truth, truth,
+                                       truth.splitlines()[:2])])
+        record = result["records"][0]
+        self.assertIsNone(record["zone_lines_differing"])
+        self.assertFalse(record["review_target"])
+
     def test_missing_asset_id_or_hash_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "unique asset_id"):
             classify([ledger("a")], [dump("")])
