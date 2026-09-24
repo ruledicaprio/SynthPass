@@ -12,8 +12,8 @@ use crate::checksum::{
 };
 use crate::repair::{solve_class_sweep, FieldKind, Resolution};
 use crate::{
-    country_name, Checks, DateRole, Format, MrzData, MrzDate, MrzError, ParseOptions, RawDateField,
-    Sex,
+    country_name, passport_type, Checks, DateRole, Format, MrzData, MrzDate, MrzError,
+    ParseOptions, RawDateField, Sex,
 };
 
 /// A document number that overflowed its 9-character field.
@@ -949,6 +949,112 @@ fn repair_td3_line1_shifted(l: &str) -> String {
     shift_or_unshift_line1(repaired, target_width)
 }
 
+/// Outcome of [`td3_prefix_verdict`]'s search for which single-cell deletion
+/// in a too-long TD3 line 1's issuing-state slot the OCR noise inserted.
+///
+/// #436: `fit_length` (`crate::checksum`) shrinks whatever filler run is
+/// longest — almost always the trailing name padding, never the
+/// issuing-state slot — so a character inserted *there* survives untouched
+/// into the "repaired" line. TD3 line 1 carries no check digit at all
+/// (Doc 9303 Part 4 §4.2.1), so that unresolved slot survives as an
+/// ordinary checksum-consistent success.
+#[derive(Debug, PartialEq, Eq)]
+enum Td3Prefix {
+    /// The line's own issuing-state slot already resolves once letterized,
+    /// or the line isn't the one-cell-too-long shape this deletion search
+    /// applies to. Callers proceed exactly as before this fix existed.
+    ///
+    /// Enumerating deletions is gated on the as-read slot *not* resolving:
+    /// a genuine `P<CAN` holder whose surname starts with `F` deletes to
+    /// the equally real `CAF` (Central African Republic), so touching an
+    /// already-resolving slot would break correct reads at a
+    /// name-dependent rate.
+    Keep,
+    /// Exactly one single-cell deletion inside the issuing-state slot
+    /// (positions 2..=4 — never the document code or its own position-1
+    /// filler repair) leaves an admissible reading (see
+    /// [`td3_line1_admissible`]). This is that corrected 44-character line.
+    Repair(String),
+    /// Two or more *distinct resulting lines* are each admissible. Nothing
+    /// on line 1 can arbitrate between them, so the read is refused rather
+    /// than guessed — the `COH` counterexample in
+    /// `crates/mrz/tests/alignment_threat_atlas.rs` deletes to both the
+    /// real, distinct `COL` and `CHL`.
+    Ambiguous,
+}
+
+/// Whether a 44-character TD3 line 1 is an admissible reading: its
+/// document code is real (`P<`, or one of Part 4 §4.4's genuine two-letter
+/// forms — see [`passport_type`]) and its issuing state, letterized,
+/// resolves in [`country_name`].
+fn td3_line1_admissible(line1: &str) -> bool {
+    if line1.len() != 44 {
+        return false;
+    }
+    let doc_code = &line1[0..2];
+    if doc_code != "P<" && passport_type(doc_code).is_none() {
+        return false;
+    }
+    let issuer: String = line1[2..5].chars().map(letterize).collect();
+    country_resolves(&issuer)
+}
+
+/// Decides [`Td3Prefix`] for a raw TD3 line-1 candidate, computed straight
+/// off the OCR text after [`normalize_line`] and [`fix_doc_code`] — before
+/// [`variants`]/[`fit_length`](crate::checksum::fit_length) ever see it.
+/// Every path that turns a raw candidate line into a TD3 line 1 (the merged
+/// 88-char fast path, the split-line scan, `class_sweep_pass`, and
+/// `damaged_pass`) must call this on that same pre-fitting text: fitting a
+/// too-long line first can shrink it down to 44 characters by a route that
+/// never touches the issuing-state slot, so a gate placed after fitting
+/// never sees the shape this function looks for.
+fn td3_prefix_verdict(line: &str) -> Td3Prefix {
+    const TD3_LINE1_LEN: usize = 44;
+    if line.len() != TD3_LINE1_LEN + 1 || !line.starts_with('P') || !is_mrz_charset(line) {
+        return Td3Prefix::Keep;
+    }
+    let as_read: String = line[2..5].chars().map(letterize).collect();
+    if country_resolves(&as_read) {
+        return Td3Prefix::Keep;
+    }
+    let mut resolved: Vec<String> = Vec::new();
+    for cell in 2..=4 {
+        let mut candidate = String::with_capacity(TD3_LINE1_LEN);
+        candidate.push_str(&line[..cell]);
+        candidate.push_str(&line[cell + 1..]);
+        if td3_line1_admissible(&candidate) && !resolved.contains(&candidate) {
+            resolved.push(candidate);
+        }
+    }
+    match resolved.len() {
+        1 => Td3Prefix::Repair(repair_td3_line1(&resolved.remove(0))),
+        0 => Td3Prefix::Keep,
+        _ => Td3Prefix::Ambiguous,
+    }
+}
+
+/// [`variants`] for a TD3 line-1 candidate, gated by [`td3_prefix_verdict`]
+/// when `(width, prefixes)` identify the caller's two-line-format-table row
+/// as TD3's. `class_sweep_pass` and `damaged_pass` share one data-driven
+/// loop across TD3/MRV-A/TD2/MRV-B (see their own `two_line` tables), so the
+/// gate has to be selected by row rather than hard-coded into the loop —
+/// every other row calls plain [`variants`] unchanged.
+fn td3_line1_variants(
+    raw: &str,
+    width: usize,
+    prefixes: &[u8],
+    rep1: fn(&str) -> String,
+) -> Vec<String> {
+    if width != 44 || prefixes != b"P" {
+        return variants(raw, width, rep1);
+    }
+    match td3_prefix_verdict(&fix_doc_code(&normalize_line(raw))) {
+        Td3Prefix::Ambiguous => Vec::new(),
+        Td3Prefix::Repair(fixed) => vec![fixed],
+        Td3Prefix::Keep => variants(raw, width, rep1),
+    }
+}
+
 fn repair_td3_line2(l: &str) -> String {
     let l = repair_positions(
         l,
@@ -1303,19 +1409,68 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         if merged.starts_with('P') && (84..=92).contains(&merged.len()) && is_mrz_charset(&merged) {
             let head = &merged[0..44];
             let tail = &merged[44..];
-            for l1 in [
-                repair_td3_line1_shifted(head),
-                repair_td3_line1(head),
-                head.to_string(),
-            ] {
-                for l2 in variants(tail, 44, repair_td3_line2) {
-                    if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
-                            return Ok(valid);
+            // `head` is always exactly 44 characters by construction (the
+            // split point is fixed), so `td3_prefix_verdict` — which only
+            // ever fires on a 45-character candidate — is a documented no-op
+            // here today. It is still called, so a future change to the
+            // split point cannot silently reopen this path to the same
+            // unresolved-issuer defect the split-line scan below closes.
+            match td3_prefix_verdict(&fix_doc_code(head)) {
+                Td3Prefix::Ambiguous => {}
+                Td3Prefix::Repair(l1) => {
+                    for l2 in variants(tail, 44, repair_td3_line2) {
+                        if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                            if let Some(valid) = consider(data) {
+                                return Ok(valid);
+                            }
+                        }
+                    }
+                }
+                Td3Prefix::Keep => {
+                    for l1 in [
+                        repair_td3_line1_shifted(head),
+                        repair_td3_line1(head),
+                        head.to_string(),
+                    ] {
+                        for l2 in variants(tail, 44, repair_td3_line2) {
+                            if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                                if let Some(valid) = consider(data) {
+                                    return Ok(valid);
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+
+        // A line 1 that arrived exactly one cell too long gets a narrower,
+        // more targeted pass first: see `td3_prefix_verdict`. Both non-`Keep`
+        // outcomes bypass the ordinary length-fitting candidates below
+        // entirely — `Repair` because it is already the better-evidenced
+        // reading, `Ambiguous` because those candidates cannot tell the
+        // unresolved issuing state apart from a genuine read either, so
+        // retrying them would just reproduce the same checksum-consistent
+        // wrong issuer.
+        match td3_prefix_verdict(&fix_doc_code(&merged)) {
+            Td3Prefix::Repair(l1) => {
+                shape_seen.get_or_insert(Format::Td3);
+                for l2_raw in lines.iter().skip(i + 1).take(3) {
+                    for l2 in variants(l2_raw, 44, repair_td3_line2) {
+                        if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                            if let Some(valid) = consider(data) {
+                                return Ok(valid);
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            Td3Prefix::Ambiguous => {
+                shape_seen.get_or_insert(Format::Td3);
+                continue;
+            }
+            Td3Prefix::Keep => {}
         }
 
         let l1_candidates = variants(lines[i], 44, repair_td3_line1_shifted)
@@ -1898,7 +2053,7 @@ fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     for i in 0..lines.len().saturating_sub(1) {
         let (a, b) = (lines[i], lines[i + 1]);
         for (width, prefixes, rep1, rep2, parse, cd_fields) in two_line {
-            let v1 = variants(a, width, rep1);
+            let v1 = td3_line1_variants(a, width, prefixes, rep1);
             let v2 = class_swept(b, width, rep2, cd_fields);
             for l1 in &v1 {
                 if !l1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {
@@ -2051,9 +2206,15 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
         for (width, prefixes, rep1, rep2, parse) in two_line {
             for (v1, v2) in [
                 (restored(a, width, rep1), variants(b, width, rep2)),
-                (variants(a, width, rep1), restored(b, width, rep2)),
+                (
+                    td3_line1_variants(a, width, prefixes, rep1),
+                    restored(b, width, rep2),
+                ),
                 (substituted(a, width, rep1), variants(b, width, rep2)),
-                (variants(a, width, rep1), substituted(b, width, rep2)),
+                (
+                    td3_line1_variants(a, width, prefixes, rep1),
+                    substituted(b, width, rep2),
+                ),
             ] {
                 for l1 in &v1 {
                     if !l1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {
@@ -2211,6 +2372,58 @@ mod tests {
             })
         );
     }
+    /// #436: `td3_prefix_verdict` against a table of 45-character (one cell
+    /// too long) and control inputs, each already `normalize_line` +
+    /// `fix_doc_code`'d — the state every call site is required to pass it
+    /// in.
+    #[test]
+    fn td3_prefix_verdict_table() {
+        // Deleting the OCR-inserted `H` gives `COL` (Colombia); deleting the
+        // originally-printed `O` gives `CHL` (Chile). Both real and
+        // distinct: refused.
+        let two_resolving = "P<COHLERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        assert_eq!(two_resolving.len(), 45);
+        assert_eq!(td3_prefix_verdict(two_resolving), Td3Prefix::Ambiguous);
+
+        // A spurious `X` right after the issuing state's first letter:
+        // deleting it is the only deletion (of the three tried) that
+        // resolves.
+        let one_resolving = "P<UXTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        assert_eq!(one_resolving.len(), 45);
+        let Td3Prefix::Repair(repaired) = td3_prefix_verdict(one_resolving) else {
+            panic!("expected exactly one resolving deletion to repair the line");
+        };
+        assert_eq!(repaired.len(), 44);
+        assert_eq!(&repaired[0..5], "P<UTO");
+        assert_eq!(&repaired[5..], &one_resolving[6..]);
+
+        // The as-read issuing state already resolves (`CAN`), even though
+        // the line is one cell too long from an extra filler further down —
+        // kept unmodified rather than enumerated. A genuine `P<CAN` holder
+        // whose surname starts with `F` would otherwise delete to the
+        // equally real `CAF` (Central African Republic).
+        let already_resolves = "P<CANFOO<<GIVEN<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<";
+        assert_eq!(already_resolves.len(), 45);
+        assert_eq!(td3_prefix_verdict(already_resolves), Td3Prefix::Keep);
+
+        // Same issuing-state corruption as `two_resolving`, but the
+        // document code itself (`PX`) is not real, so no deletion is
+        // admissible regardless of what its issuing state resolves to.
+        let bogus_doc_code = "PXCOHLERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        assert_eq!(bogus_doc_code.len(), 45);
+        assert_eq!(td3_prefix_verdict(bogus_doc_code), Td3Prefix::Keep);
+
+        // Not one cell too long: the ordinary-width, ordinary-length line
+        // and a two-cell overlong line are both left to the caller's usual
+        // repairs.
+        let right_length = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        assert_eq!(right_length.len(), 44);
+        assert_eq!(td3_prefix_verdict(right_length), Td3Prefix::Keep);
+        let two_cells_long = "P<XUTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<X";
+        assert_eq!(two_cells_long.len(), 46);
+        assert_eq!(td3_prefix_verdict(two_cells_long), Td3Prefix::Keep);
+    }
+
     use core::cmp::Ordering;
 
     fn checks(states: [Option<bool>; 5]) -> Checks {
