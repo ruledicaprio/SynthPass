@@ -67,20 +67,20 @@ impl fmt::Display for Sex {
     }
 }
 
-/// Rejection from parsing a [`Sex`]'s text form: it is exactly one character.
+/// Rejection from parsing a [`Sex`]'s text form: it is exactly one MRZ-alphabet character.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ParseSexError;
 
 impl fmt::Display for ParseSexError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("an MRZ sex value is exactly one character")
+        f.write_str("an MRZ sex value is exactly one character of 0-9, A-Z or <")
     }
 }
 
 impl std::error::Error for ParseSexError {}
 
-/// The inverse of `Display`: exactly one character, classified by
+/// The inverse of `Display`: exactly one MRZ-alphabet character, classified by
 /// [`Sex::from_zone`].
 impl FromStr for Sex {
     type Err = ParseSexError;
@@ -88,7 +88,7 @@ impl FromStr for Sex {
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let mut chars = text.chars();
         match (chars.next(), chars.next()) {
-            (Some(c), None) => Ok(Sex::from_zone(c)),
+            (Some(c), None) if crate::checksum::char_value(c).is_some() => Ok(Sex::from_zone(c)),
             _ => Err(ParseSexError),
         }
     }
@@ -109,12 +109,16 @@ impl<'de> serde::Deserialize<'de> for Sex {
     }
 }
 
-/// Wipes a kept character to NUL. The unit variants carry no payload.
+/// Overwrites the whole value. The variant itself carries M/F/<, so wiping
+/// only the payload of `NonConformant` would leave those values behind.
 #[cfg(feature = "zeroize")]
 impl zeroize::Zeroize for Sex {
     fn zeroize(&mut self) {
+        // Best-effort: overwrite the discriminant as well as the payload.
+        *self = Sex::NonConformant('\0');
         if let Sex::NonConformant(c) = self {
             c.zeroize();
         }
+        std::hint::black_box(&*self);
     }
 }

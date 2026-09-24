@@ -16,6 +16,7 @@ pub mod audit;
 #[cfg(feature = "security")]
 pub mod crypt;
 pub mod fusion;
+pub mod mrz_product;
 pub mod normalize;
 pub mod v2;
 

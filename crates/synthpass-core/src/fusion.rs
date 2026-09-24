@@ -507,7 +507,8 @@ fn document_types_agree(tier2_value: &str, mrz_value: &str) -> bool {
 /// A field is compared only when the Tier-2 side has a usable value
 /// ([`crate::v2::ExtractionFields::get`] already treats absent and
 /// present-but-empty alike) — a missing Tier-2 read is not a contradiction —
-/// and only when the MRZ side is non-empty, for the same reason.
+/// and only when the MRZ side has a value, for the same reason: a non-empty
+/// string, or for `sex` a product value from [`crate::mrz_product::sex`].
 /// `document_type`/`issuing_country`/`nationality`/`sex` are normalized with
 /// this crate's existing [`crate::normalize`] functions before comparing;
 /// `surname`/`given_names` are compared permissively against every
@@ -551,10 +552,13 @@ pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData
     }
 
     if let Some(v) = fields.get(CoreField::Sex) {
-        if !m.sex.is_empty() && crate::normalize::sex(v) != m.sex {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::Sex.as_str().to_string(),
-            });
+        // Compare in the product vocabulary that Tier 2 normalizes into.
+        if let Some(mrz_sex) = crate::mrz_product::sex(m.sex) {
+            if crate::normalize::sex(v) != mrz_sex {
+                findings.push(Finding::LlmContradictsMrzStructural {
+                    field: CoreField::Sex.as_str().to_string(),
+                });
+            }
         }
     }
 
@@ -1069,7 +1073,7 @@ mod tests {
     fn an_absent_tier2_field_is_skipped_not_flagged() {
         let mut m = base();
         // MRZ sex disagrees with nothing, since Tier-2's own value is absent.
-        "M".clone_into(&mut m.sex);
+        m.sex = mrz::Sex::Male;
         let mut fields = agreeing_fields();
         fields.sex = None;
         assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());
@@ -1078,7 +1082,7 @@ mod tests {
     #[test]
     fn an_empty_tier2_field_is_skipped_not_flagged() {
         let mut m = base();
-        "M".clone_into(&mut m.sex);
+        m.sex = mrz::Sex::Male;
         let mut fields = agreeing_fields();
         fields.sex = Some("   ".into());
         assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new());

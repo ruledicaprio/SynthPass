@@ -174,6 +174,9 @@ fn sex_keeps_the_three_icao_values_apart_from_everything_else() {
     assert_eq!(Sex::from_zone('1'), Sex::NonConformant('1'));
     assert!("".parse::<Sex>().is_err());
     assert!("MF".parse::<Sex>().is_err());
+    for text in ["a", "é", " "] {
+        assert!(text.parse::<Sex>().is_err(), "{text:?}");
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -253,5 +256,18 @@ mod wipe {
         let mut sex = Sex::NonConformant('1');
         sex.zeroize();
         assert_eq!(sex, Sex::NonConformant('\0'));
+    }
+
+    #[test]
+    fn every_sex_value_is_overwritten() {
+        for mut sex in [
+            Sex::Male,
+            Sex::Female,
+            Sex::Unspecified,
+            Sex::NonConformant('1'),
+        ] {
+            sex.zeroize();
+            assert_eq!(sex, Sex::NonConformant('\0'));
+        }
     }
 }

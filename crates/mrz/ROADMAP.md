@@ -82,7 +82,7 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
 
   The rest of that review's proposed vocabulary is already implemented under other names, and
   needs no new API: *parsed* is `Ok` from a `parse_*`, *checksum consistency* is
-  `MrzData::checksum_consistent`, *plausibility* is `DateCompleteness` plus `country_name`
+  `MrzData::checksum_consistent`, *plausibility* is the `MrzDate` variant plus `country_name`
   recognition, *document validity* is `MrzData::validity(today)`, and *issuer policy* stays
   outside this crate by the non-goal above. `recovery_evidence` is the only missing layer.
   Deliberately **not** proposed: a single confidence score. The dimensions are qualitatively
@@ -125,14 +125,14 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
    `None` elsewhere — the shape the emitters and the spec transcription always had. The join
    was the defect worth the breaking slot: with one slot empty it lost which printed field held
    the value, and two tracked specimens sat on opposite sides of it.
-4. **Typed values as the primary representation. — DECIDED**
+4. **Typed values as the primary representation. — DONE on `MrzData`; the emitter inputs follow.**
    ([ADR-0019](../../knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), Option D).
    - `date_of_birth` and `date_of_expiry` become an `MrzDate` enum: calendar day, out-of-calendar
      digits, partially unknown, unknown, malformed.
    - `sex` becomes a `Sex` enum whose fourth variant keeps a non-conformant character instead of
      collapsing it to `"X"`.
    - `date_of_birth_completeness` is removed in favour of `MrzDate::completeness()`.
-   - The emitter's `*Fields` inputs take the same types.
+   - The emitter's `*Fields` inputs take the same types. (Pending: they still take `String`.)
    - The `serde` shape is fixed by
      [ADR-0020](../../knowledge/decisions/ADR-0020-mrz-value-wire-contract.md): `Display`, serde and
      the zone agree, so every date serialises exactly as before.

@@ -193,12 +193,12 @@ pub fn given_names(input: &str) -> String {
 /// already ships in this crate, rather than inventing a second opinion.
 const PLAUSIBLE_YEAR_RANGE: std::ops::RangeInclusive<u32> = 1900..=2999;
 
-/// Normalize a date field to the strict ISO `YYYY-MM-DD` form
-/// `mrz::dates::parse_iso` requires (4-digit year, zero-padded 2-digit month
-/// and day, `-`-separated, exactly 10 characters) — read that parser first;
-/// this targets exactly its dialect rather than inventing a new one, since
-/// it is what every date-plausibility check in this workspace (`Validity`,
-/// `MrzData::validity`) is ultimately built on.
+/// Normalize a date field to the strict ISO `YYYY-MM-DD` form a calendar
+/// date takes in `mrz`'s text form (4-digit year, zero-padded 2-digit month
+/// and day, `-`-separated, exactly 10 characters: `mrz::MrzDate`'s `Display`,
+/// ADR-0020). This targets exactly that dialect rather than inventing a new
+/// one, since it is the form every MRZ-derived date in this workspace arrives
+/// in, and the one `Validity` is reported against.
 ///
 /// Recognizes:
 /// - already-correct or loosely-padded ISO order (`"2014-7-1"` →

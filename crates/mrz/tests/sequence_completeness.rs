@@ -14,7 +14,7 @@ fn a_fully_valid_read_reports_complete_with_matching_checks() {
         data.sequence_completeness(),
         SequenceCompleteness::Complete {
             checks: data.checks.clone(),
-            date_of_birth: data.date_of_birth_completeness,
+            date_of_birth: data.date_of_birth.completeness(),
         }
     );
 }

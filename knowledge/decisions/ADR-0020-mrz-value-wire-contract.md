@@ -44,12 +44,16 @@ Serialisation is `Display`. Deserialisation is its exact inverse:
 - Six `<` gives `Unknown`.
 - Six MRZ-charset characters mixing digits and `<`, and nothing else, give `PartiallyUnknown`.
 - Six MRZ-charset characters containing any other character give `Malformed`.
-- A single character gives the `Sex` whose zone character it is.
+- A single MRZ-alphabet character gives the `Sex` whose zone character it is.
 - Anything else is an error. That includes six bare digits: a century cannot be recovered without
   a pivot, and serialisation never produces that form.
 
-`from_str(to_string(x)) == x` holds for every value, and is property-tested over every six-character
-charset field, both date roles and every pivot.
+`from_str(to_string(x)) == x` holds for every value the parser or `FromStr` produces, and is
+property-tested over every six-character charset field, both date roles and every pivot. The
+variants are public, so a caller can build a value outside the grammar
+(`Sex::NonConformant('M')`, `MrzDate::Calendar` holding an ill-formed `Date`,
+`MrzDate::PartiallyUnknown` over a field with a letter); such a value reads back as the
+variant its text names.
 
 **`Date` keeps its own derived serde shape.** Only `MrzDate` and `Sex` get hand-written impls, and
 both sit behind the existing optional `serde` feature, so the default build stays zero-dependency.
