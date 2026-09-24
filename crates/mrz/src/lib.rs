@@ -1017,7 +1017,8 @@ impl Checks {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MrzError {
-    /// Line has the wrong length for the claimed format.
+    /// Line has the wrong length for the claimed format, counted in `char`s
+    /// (a right-length line holding a non-MRZ character is a [`MrzError::BadCharacter`]).
     BadLength {
         /// The length the claimed format requires.
         expected: usize,
@@ -1279,14 +1280,18 @@ mod tests {
 
     #[test]
     fn bad_character_position_counts_chars_not_bytes() {
-        // The length gate counts bytes, so a line carrying a two-byte
-        // character reaches the charset check only when it is one `char`
-        // short of the format width. `position` stays a `char` index -- the
-        // column someone counting glyphs would name, not a byte offset.
+        // The length gate counts `char`s, so a line of the format's width that
+        // carries a two-byte character reaches the charset check. `position`
+        // is a `char` index -- the column someone counting glyphs would name,
+        // not a byte offset.
         let e_acute = char::from_u32(0xC9).expect("U+00C9 is a valid scalar value");
-        let line1 = format!("P<UTO{e_acute}{}", "<".repeat(37));
-        assert_eq!(line1.len(), 44, "byte length must satisfy the TD3 gate");
-        assert_eq!(line1.chars().count(), 43);
+        let line1 = format!("P<UTO{e_acute}{}", "<".repeat(38));
+        assert_eq!(
+            line1.chars().count(),
+            44,
+            "char length must satisfy the TD3 gate"
+        );
+        assert_eq!(line1.len(), 45);
 
         let error = parse_td3(&line1, &"<".repeat(44)).unwrap_err();
         assert_eq!(

@@ -5,18 +5,33 @@ use mrz::{
 };
 
 #[test]
-fn bad_length_counts_characters() {
+fn length_is_counted_in_characters_not_bytes() {
     let zone = format_td3(&Td3Fields::default());
     let (line1, line2) = zone.split_once('\n').expect("two TD3 lines");
-    let mut line1 = line1.to_string();
-    line1.replace_range(5..6, "É");
-    assert_eq!(line1.chars().count(), 44);
-    assert_eq!(line1.len(), 45);
+
+    // 44 characters, 45 bytes: the length is right, so the error names the
+    // character that is wrong, at its character position.
+    let mut right_length = line1.to_string();
+    right_length.replace_range(5..6, "É");
+    assert_eq!(right_length.chars().count(), 44);
+    assert_eq!(right_length.len(), 45);
     assert_eq!(
-        parse_td3(&line1, line2),
+        parse_td3(&right_length, line2),
+        Err(MrzError::BadCharacter {
+            character: 'É',
+            line: Some(0),
+            position: 5,
+        })
+    );
+
+    // 45 characters, 46 bytes: the length is wrong, and `got` counts characters.
+    let too_long = format!("{right_length}<");
+    assert_eq!(too_long.len(), 46);
+    assert_eq!(
+        parse_td3(&too_long, line2),
         Err(MrzError::BadLength {
             expected: 44,
-            got: 44
+            got: 45
         })
     );
 }

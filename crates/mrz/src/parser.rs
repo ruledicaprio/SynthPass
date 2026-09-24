@@ -258,11 +258,9 @@ pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// ```
 pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
     for (line_number, line) in [line1, line2].into_iter().enumerate() {
-        if line.len() != 44 {
-            return Err(MrzError::BadLength {
-                expected: 44,
-                got: line.chars().count(),
-            });
+        let got = line.chars().count();
+        if got != 44 {
+            return Err(MrzError::BadLength { expected: 44, got });
         }
         ensure_charset(line, line_number)?;
     }
@@ -353,11 +351,9 @@ pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// ```
 pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
     for (line_number, line) in [line1, line2].into_iter().enumerate() {
-        if line.len() != 36 {
-            return Err(MrzError::BadLength {
-                expected: 36,
-                got: line.chars().count(),
-            });
+        let got = line.chars().count();
+        if got != 36 {
+            return Err(MrzError::BadLength { expected: 36, got });
         }
         ensure_charset(line, line_number)?;
     }
@@ -456,11 +452,9 @@ pub fn parse_td1_with(
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
     for (line_number, line) in [line1, line2, line3].into_iter().enumerate() {
-        if line.len() != 30 {
-            return Err(MrzError::BadLength {
-                expected: 30,
-                got: line.chars().count(),
-            });
+        let got = line.chars().count();
+        if got != 30 {
+            return Err(MrzError::BadLength { expected: 30, got });
         }
         ensure_charset(line, line_number)?;
     }
@@ -557,11 +551,9 @@ pub fn parse_mrv_a_with(
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
     for (line_number, line) in [line1, line2].into_iter().enumerate() {
-        if line.len() != 44 {
-            return Err(MrzError::BadLength {
-                expected: 44,
-                got: line.chars().count(),
-            });
+        let got = line.chars().count();
+        if got != 44 {
+            return Err(MrzError::BadLength { expected: 44, got });
         }
         ensure_charset(line, line_number)?;
     }
@@ -642,11 +634,9 @@ pub fn parse_mrv_b_with(
     opts: &ParseOptions,
 ) -> Result<MrzData, MrzError> {
     for (line_number, line) in [line1, line2].into_iter().enumerate() {
-        if line.len() != 36 {
-            return Err(MrzError::BadLength {
-                expected: 36,
-                got: line.chars().count(),
-            });
+        let got = line.chars().count();
+        if got != 36 {
+            return Err(MrzError::BadLength { expected: 36, got });
         }
         ensure_charset(line, line_number)?;
     }
