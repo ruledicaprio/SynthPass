@@ -45,6 +45,14 @@ normative JSON block in its §4 as the tiebreaker when its own human-rendered ta
 Derived from the Part files above, not a replacement for them — read it for "what position is
 this field at," and the Part files for the surrounding normative prose.
 
+## Delegated standards
+
+Part 3 does not define the typeface or the print quality itself. §4.4 requires OCR-B from
+[ISO 1073-2], and §4.11 takes the print-quality measures (spectral band, PCS, range X) from
+[ISO 1831]. The ISO documents cannot be reproduced here. Their facts are distilled, with
+clause-level citations, in [`../ocrb/README.md`](../ocrb/README.md), and the Ecma twins of both
+(ECMA-11, ECMA-15) are transcribed in [`../ecma/`](../ecma/README.md).
+
 ## Figures
 
 `figures/` holds diagrams rendered from the source PDFs, prefixed with the
