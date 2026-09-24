@@ -394,89 +394,33 @@ Reader manufacturers therefore need to consider how to design machine reading so
   </tr>
 </table>
 
-### A.4 Reading Process
+### A.4 Reading Processes
 
 Figure A-2 shows the processes involved in the reading of an eMRTD prior to and including the biometric verification of the holder.
 
 > **Figure A-2. eMRTD reading process**
 
-```
-MRTD to be inspected
-        |
-        v
-Preliminary verification of document bearer.
-Checking security features and physical integrity of document
-        |
-        v
-Document valid?
-    /       \
-   Y         N -> Manual inspection / Reject
-    |
-    v
-Need to read MRZ?
-    /       \
-   Y         N -> (Skip to database query)
-    |
-    v
-Reading MRZ
-    |
-    v
-MRZ valid?
-    /       \
-   Y         N -> Manual capturing of MRZ -> MRZ valid?
-    |                               /       \
-    v                              Y         N -> Reject
-Query database? (e.g. watchlist, API)
-    /       \
-   Y         N -> (Skip to ICC check)
-    |
-    v
-Query database(s) on basis of VIZ or MRZ
-    |
-    v
-Alert?
-    /       \
-   Y         N
-    |         |
-    v         v
-Secondary  (Proceed to ICC check)
-Inspection
-    |
-    v
-(Proceed or Reject)
-    |
-    v
-ICC present and wish to read?
-    /       \
-   Y         N -> Query database? -> Y -> Query database(s) on basis of DG1 and/or biometric database check -> Alert? -> Y -> Secondary Inspection
-    |         |                                                                                             |        |
-    v         N (Skip)                                                                                      N        v
-Address ICC                                                                                            (Proceed)
-    |
-    v
-ICC responding?
-    /       \
-   Y         N -> Handling of non-responsive eMRTD -> Manual biometric inspection procedure
-    |
-    v
-Checking electronic security (Passive Authentication, etc.)
-    |
-    v
-Integrity ok?
-    /       \
-   Y         N -> Handling of non-responsive eMRTD -> Manual biometric inspection procedure
-    |
-    v
-Visual and electronic biometric inspection procedure
-    |
-    v
-Acceptance procedure ok?
-    /       \
-   Y         N -> Manual biometric inspection procedure -> Acceptance procedure ok? -> N -> Reject
-    |                                                                                  |
-    v                                                                                  Y
-Document bearer ACCEPTED
-```
+[Editorial description, not ICAO text: Figure A-2 is a flowchart, reconstructed here as a
+numbered list rather than ASCII art. Each item quotes the figure's own box/diamond text and the
+destination of each printed "Y"/"N" branch. Branches marked "(unlabeled)" carry no printed text
+in the figure -- every failure/alert branch of this kind merges into a single unlabeled line that
+runs down the page and ends at the "Secondary Inspection" box; the figure prints no intermediate
+outcome such as "Reject" anywhere on that line.]
+
+1. MRTD to be inspected -> Preliminary verification of document bearer. Checking security features and physical integrity of document -> **Document valid?**
+2. **Document valid?** -- Y: continue to *Need to read MRZ?* (item 3). N: (unlabeled) -> Secondary Inspection.
+3. **Need to read MRZ?** -- Y: Reading MRZ -> **MRZ valid?** (item 4). N: (unlabeled) -> joins the point feeding *Query database?* (item 6).
+4. **MRZ valid?** (first) -- Y: continue to *Query database?* (item 6). N: Manual capturing of MRZ -> **MRZ valid?** (second, item 5).
+5. **MRZ valid?** (second) -- Y: joins the same point as item 4's Y. N: (unlabeled) -> Secondary Inspection.
+6. **Query database?** (first) -- Y: Query database(s) on basis of VIZ or MRZ -> **Alert?** (first, item 7). N: (unlabeled) -> joins the point feeding *ICC present and wish to read?* (item 8).
+7. **Alert?** (first) -- N: joins the same point as item 6's N. Y: (unlabeled) -> Secondary Inspection.
+8. **ICC present and wish to read?** -- Y: Address ICC -> **ICC responding?** (item 9). N: (unlabeled) -> Manual biometric inspection procedure.
+9. **ICC responding?** -- Y: Checking electronic security -> **Integrity ok?** (item 10). N: Handling of non-responsive eMRTD -> (unlabeled) -> Manual biometric inspection procedure.
+10. **Integrity ok?** -- Y: continue to *Query database?* (item 11). N: (unlabeled) -> Secondary Inspection.
+11. **Query database?** (second) -- N: Visual and electronic biometric inspection procedure. Y: Query database(s) on basis of DG1 and/or biometric database check -> **Alert?** (second, item 12).
+12. **Alert?** (second) -- N: Visual and electronic biometric inspection procedure. Y: (unlabeled) -> Secondary Inspection.
+13. Manual biometric inspection procedure and Visual and electronic biometric inspection procedure both lead to **Acceptance procedure ok?**
+14. **Acceptance procedure ok?** -- Y: Document bearer ACCEPTED. N: (unlabeled) -> Secondary Inspection.
 
 ---
 *— END —*

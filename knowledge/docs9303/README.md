@@ -110,6 +110,38 @@ heading, not just a real file.
 (`ICAO 9303 part 4 §4.2.2.2`) rather than as real links — wiring those up
 remains the one piece of this not done here.
 
+### PDF audit, 2026-09-24: the conversion had invented content
+
+A check against ICAO's own consolidated PDFs found content that **is not in Doc 9303**:
+
+- "MRZ dimensions" tables under the Part 4 and Part 5 MRZ figures, where the PDF has only
+  labels on the figure. Some of their values ("Line spacing 4.0", "2.54") appear nowhere in
+  that Part.
+- Invented table columns and labels: Part 7's "Optional" Zone IV, and Part 12's
+  "`cA` MUST be `TRUE`".
+- Made-up flowchart outcomes in Part 9.
+- **The whole section and appendix skeleton of Part 10.**
+
+Every Part was then audited against its PDF:
+
+1. **Two deterministic detectors, run first.** One lists every number token that does not occur
+   in that Part's PDF text. The other lists tables that sit directly under an image (the
+   invention pattern). A third check flags lines whose word 5-grams are mostly absent from the
+   PDF text.
+2. **Triage of every flagged item against the rendered PDF page.** Each is judged faithful,
+   wrong, invented or editorial. Wrong items were corrected, invented ones removed, and invented
+   figure tables replaced by "Labels printed on Figure N (not a table in the original)".
+   Converter descriptions of figures are marked `[Editorial description, not ICAO text: ...]`.
+3. **Part 10 was rebuilt from a deterministic PyMuPDF text extraction.** Only structure was
+   changed (headings, page furniture, table joins); nothing was reworded. The first repair
+   attempt had paraphrased it, which is a quieter version of the same failure.
+
+After the audit, no Part has an invented table under a figure, and Part 10 has 0 numbers absent
+from its PDF. The numbers still flagged in other Parts are text-layer artefacts that were each
+checked by hand: values the PDF splits (`23.` + `3`), MRZ strings with no word boundaries, and
+hex dumps. **The rule this leaves:** before calling anything here an ICAO error, open the PDF
+page. A table that reads well is not evidence that the source has a table.
+
 Part 8's Visible Digital Seal byte-dump example (Appendix B) was previously
 short about 13 of the 134 bytes the source PDF states it should have — a
 16-column × 9-row grid that plain text extraction flattened into the wrong

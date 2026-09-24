@@ -105,7 +105,7 @@ The encoded bar code consists of a header (see Section 2.2), message zone (see S
 | Signature Marker  | Length (1-5 Bytes)| Signature Data (# Length Bytes)                       |
 | (1 Byte)          |                   |                                                         |
 +-------------------+-------------------+---------------------------------------------------------+
-  ^ Header            ^ Message Zone                            ^ Signature Zone
+  ^ Header            ^ Message                                 ^ Signature
 ```
 
 ### 2.2 Header
@@ -324,21 +324,8 @@ The bar code Signer receives data from a Document Personalization System to enco
 > **Figure 2. Document Personalization: Scenario with centralized bar code Signer**
 >
 > <img src="./figures/Doc_9303_Part13_Visible_Digital_Seals_p18.png" alt="Document Personalization: Scenario with centralized bar code Signer">
-```text
-+---------------------------+       +---------------------------+
-| Document Personalization  |       | Bar code Signer           |
-| System                    | ----> |                           |
-+---------------------------+       +---------------------------+
-  | Personalization Data              | Personalization Data    |
-  v                                   | and Seal (temporary)    |
-+---------------------------+       +---------------------------+
-| Seal Generation           | ----> | Signing Key               |
-| Software                  |       +---------------------------+
-+---------------------------+
-  | Digital Seal
-  v
-(Issues document including VDS)
-```
+>
+> *[Editorial description, not ICAO text: the figure shows two boxes. An arrow labelled "Personalization Data" runs from "Document Personalization System" into "Bar code Signer". A second arrow labelled "Digital Seal" (shown with a small bar code icon) runs back from "Bar code Signer" to "Document Personalization System". Inside the "Bar code Signer" box are three elements with no arrows drawn between them: "Seal Generation Software", a "Personalization Data and Seal (temporary)" store, and a "Signing Key".]*
 
 The bar code Signer relies on the following software and data:
 - The **seal generation software** produces digital seals conforming to the present standard. It receives the personalization data sent by the client, signs these data with a private signing key, and encodes the personalization data and the signature to a bar code. The personalization data and the digital seal are the input and output data, respectively, of the seal generation software. This data must be stored temporarily in the bar code Signer during the generation of the seal.
@@ -373,17 +360,19 @@ The Bar code Signing System SHOULD be hosted and operated according to best secu
 
 ### APPENDIX A — Exemplary Use Case
 
-This section gives a general overview of using a digital seal to protect a non-electronic document. The specific use case considered here is the protection of a visa document. Whereas technical details may vary for other use cases, the same general principles apply.
+This section gives a general overview of using a digital seal to protect a non-electronic document. The specific use case considered here is the protection of a visa document, and depicted in Figure A.1. Whereas technical details may vary for other use cases, the same general principles apply.
 
 The general workflow can be separated into three steps. As a prerequisite, Visa Signer Certificates (VSCs) have to be generated. Next, digital seals are generated, and then later validated.
 
-> **Figure A.1. Exemplary VDS Use Case (Reconstructed Workflow)**
-1. **CSCA** publishes a CSCA-Certificate and CRL.
-2. CSCA-Certificate is delivered to the **Document Signer** (via bilateral exchange or download).
-3. **Document Personalization** (e.g., embassy) sends document data to be signed to the **Seal Generation** software.
-4. **Seal Generation** produces a cryptographic signature (Visible Digital Seal).
-5. The system issues the document including the VDS.
-6. **Document Validation** (e.g., immigration) performs verification using the VDS-Certificate, which is verifiable by the trusted CSCA-Certificate.
+> **Figure A.1. Exemplary VDS Use Case**
+>
+> *[Editorial description, not ICAO text: the original is a box-and-arrow diagram; it is reconstructed here as steps.]*
+1. **CSCA** issues a **CSCA-Certificate and CRL**, and separately issues a **VDS-Certificate**.
+2. The **VDS-Certificate** is delivered to the **Document Data Signer**. The **CSCA-Certificate and CRL** reaches **Document Validation** via bilateral exchange or download; the VDS-Certificate is verifiable by the CSCA-Certificate.
+3. **Document Personalization** (e.g., embassy) sends document data to be signed to the **Document Data Signer**, which returns a cryptographic signature.
+4. **Document Personalization** issues the document, including the VDS, to the person performing **Seal Generation**.
+5. The document passes to the person performing **Seal Verification**.
+6. **Document Validation** (e.g., immigration) verifies the document using the VDS-Certificate.
 
 #### A.1 Prerequisite: Visa Signer Certificate Generation
 The visa signing PKI is based upon the PKI set-up for electronic passports defined by ICAO. At the root is the Country Signing Certificate Authority (CSCA) of each country. The CSCA publishes a CSCA-Certificate containing the public key of the CSCA. To enable trust between countries, this CSCA-Certificate is distributed in a trustworthy manner via bilateral exchange, or via master lists.

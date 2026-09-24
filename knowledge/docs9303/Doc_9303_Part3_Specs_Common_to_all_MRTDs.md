@@ -133,7 +133,7 @@ Latin-alphabet characters, i.e. A to Z and a to z, and Arabic numerals, i.e. 123
 
 > **Figure 1. Example of a VIZ and MRZ from an MRTD**
 >
-> [Image: Example passport data page showing VIZ and MRZ layout]
+> [Editorial description, not ICAO text: a specimen passport data page for the fictitious State "Utopia", showing the VIZ (photo, captioned fields such as Surname/Nom, Given names/Prénoms, Date of Birth, Sex, Date of issue/expiry, Personal No., and holder's signature) above a two-line MRZ.]
 
 States that use other than Arabic numerals to represent numerical data in the VIZ shall provide a translation into Arabic numerals.
 
@@ -272,8 +272,8 @@ When the month is represented numerically, the issuing State or organization may
 - or 12 July 1942 or 12 July 42 (using English only)
 - or 12JUIL1942 or 12JUIL42 (using French abbreviation)
 - or 12JUL 1942 or 12JUL 42 (using English or Spanish abbreviation)
-- or 120742 or 12.07.42 (using numerical format).
-- or 1207 1942 or 12.07.1942 (using numerical format with four-digit year).
+- or 12 07 42 or 12.07.42 (using numerical format).
+- or 12 07 1942 or 12.07.1942 (using numerical format with four-digit year).
 
 **Unknown date of birth.** Where a date of birth is completely unknown, that data element shall appear in the date format used for dates of birth by the issuing State or organization but with Xs representing unknown elements (numbers and/or letters) of the date.
 
@@ -416,7 +416,7 @@ A displayed signature or usual mark, the acceptability of which is at the issuin
 
 > **Figure 2. Orientation of the displayed signature or usual mark**
 >
-> [Diagram showing A-dimension parallel to reference edge, B-dimension perpendicular]
+> [Editorial description, not ICAO text: a rounded rectangle representing the MRTD, with an arrow labelled "Reference edge of the MRTD" pointing to its bottom edge, a horizontal double-headed arrow labelled "A-dimension" spanning a sample signature, and a vertical double-headed arrow labelled "B-dimension" alongside it.]
 
 #### 3.9.3 Displayed single-digit fingerprint
 
@@ -436,7 +436,7 @@ A displayed single-digit fingerprint, if required by the issuing State or organi
 
 > **Figure 3. Orientation of the displayed single-digit fingerprint**
 >
-> [Diagram showing A-dimension (width) parallel to reference edge, B-dimension perpendicular]
+> [Editorial description, not ICAO text: a rounded rectangle representing the MRTD, with an arrow labelled "Reference edge of the MRTD" pointing to its bottom edge, a horizontal double-headed arrow labelled "A-dimension" spanning a sample fingerprint image, and a vertical double-headed arrow labelled "B-dimension" alongside it.]
 
 ---
 
@@ -472,7 +472,7 @@ Machine readable data shall be printed in OCR-B type font, size 1, constant stro
 
 > **Figure 4. Subset of OCR-B Characters from [ISO 1073-2] for use in machine readable travel documents**
 >
-> [Image: OCR-B character set showing 0-9, A-Z, <, and filler character]
+> [Editorial description, not ICAO text: rows of OCR-B glyphs — the digits 0-9, the letters A-Z, and the "<" character (used elsewhere in this Part as the MRZ filler character) — rendered enlarged for legibility.]
 
 Note. — For illustrative purposes only – the characters shown are larger than actual size.
 
@@ -486,7 +486,7 @@ To combat the threat to travel document security posed by, for example, photocop
 
 > **Figure 5. Schematic diagram of the MRTD effective reading zone**
 >
-> [Diagram showing ERZ dimensions and positions for TD1, TD2, TD3, MRV-A, MRV-B]
+> [Editorial description, not ICAO text: a schematic cross-section of the MRTD's reference edge and the grey MRZ/ERZ band above it, with dimension arrows labelled 23.2 +/- 1.0 (0.91 +/- 0.04), 20.0 (0.79), 17.0 (0.67) and 3.0 (0.12) — all in millimetres, with inches in parentheses — plus a 118.0 (4.65) mm span for the ERZ width, and four pointer lines to the reference edge labelled "TD1", "TD2/MRV-B", "MRV-A" and "TD3/MRP".]
 
 ### 4.6 Convention for Writing the Name of the Holder
 
@@ -625,10 +625,10 @@ Codes not included in [ISO 3166-1], such as extensions for other States and orga
 
 | Entity (short name) | 2-letter code | 3-letter code | Entity (short name) | 2-letter code | 3-letter code |
 |---------------------|---------------|---------------|---------------------|---------------|---------------|
-| British Overseas Territories Citizen | — | GBD | British National (Overseas) | — | GBN |
-| British Overseas Citizen | — | GBO | Germany | DE | D |
-| British Subject | — | GBS | Kosovo¹ | KS | RKS |
-| British Protected Person | — | GBP | | | |
+| British Overseas Territories Citizen | — | GBD | British Protected Person | — | GBP |
+| British National (Overseas) | — | GBN | Germany | DE | D |
+| British Overseas Citizen | — | GBO | Kosovo¹ | KS | RKS |
+| British Subject | — | GBS | | | |
 
 ¹ *The KS and RKS codes are operationally in use, although not reflected in [ISO 3166-1].*
 
@@ -1042,7 +1042,7 @@ The Receiving State will at its sole discretion choose to allow MRTDs with a dev
 
 #### 7.3.4 Categories of Deviations
 
-**7.3.4.1 Keys and certificates**
+##### 7.3.4.1 Keys and certificates
 
 Certificate and key deviations are restricted to the following:
 
@@ -1054,7 +1054,7 @@ Certificate and key deviations are restricted to the following:
 
 **Note.** — Where a reporting State decides to issue a new certificate, the certificate MUST NOT be included in the Deviation List, but could be pointed to via the free text field.
 
-**7.3.4.2 Logical Data Structure (LDS)**
+##### 7.3.4.2 Logical Data Structure (LDS)
 
 LDS deviations are restricted to the following:
 
@@ -1064,7 +1064,7 @@ LDS deviations are restricted to the following:
 | DG's | Described to the Data Group |
 | EF.sod | Described to the issue (e.g. DSC) |
 
-**7.3.4.3 Machine Readable Zone (MRZ)**
+##### 7.3.4.3 Machine Readable Zone (MRZ)
 
 MRZ deviations are restricted to the following:
 
