@@ -457,8 +457,9 @@ fn collapse_spaces(s: &str) -> String {
 ///
 /// Compared on the **first character only**, which is the part ICAO 9303
 /// defines as the document class. The MRZ field is two characters wide and
-/// its second position is issuer-discretionary: `PO` (official), `PD`
-/// (diplomatic), `PS` (service) are all passports, and most TD1/TD2 national
+/// its second position is issuer-discretionary until Doc 9303 Part 4 §4.4's table
+/// becomes mandatory in 2028: `PO` (official/service), `PD`
+/// (diplomatic), `PS` (stateless) are all passports, and most TD1/TD2 national
 /// identity cards print `ID`. Canada and — effective 15 December 2025 —
 /// Cyprus print an ordinary citizen passport as `PP` for the same reason
 /// (confirmed against real specimens in `samples/passports/`; see

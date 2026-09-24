@@ -124,13 +124,15 @@ const MAX_WIDTH_DEFICIT: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FieldKind {
-    /// Left-justified, `<`-padded (ICAO 9303 part 4 §4.2.2): a filler may only
-    /// appear in the trailing run, so `B<98730<` is not a document number
-    /// however well its check digit verifies.
+    /// The solver requires a left-justified value with only trailing `<`
+    /// padding, so it rejects `B<98730<` even with a matching check digit.
+    /// This heuristic is stricter than ICAO Part 4 §4.2.2.2, which allows
+    /// interior fillers for special characters or spaces.
     DocumentNumber,
     /// `YYMMDD`. Must be six digits naming a real calendar date.
     Date,
-    /// Left-justified and `<`-padded like [`FieldKind::DocumentNumber`].
+    /// The solver applies the same trailing-filler heuristic as
+    /// [`FieldKind::DocumentNumber`]; ICAO also permits interior fillers here.
     PersonalNumber,
     /// No constraint beyond the check digit and the MRZ alphabet.
     Other,
@@ -208,8 +210,8 @@ impl Resolution {
 /// them field-by-field with [`solve_field`] first.
 ///
 /// Bounded and deterministic: at most `target + 4` candidates, each exactly
-/// `target` characters, in a stable order. Returns empty for non-ASCII input
-/// or a deficit wider than the module's insertion bound.
+/// `target` characters, in a stable order. Returns empty for non-ASCII input. A deficit beyond the insertion bound
+/// skips the `UNKNOWN` sweep, but filler-padding candidates remain.
 ///
 /// ```
 /// use mrz::{width_candidates, UNKNOWN};

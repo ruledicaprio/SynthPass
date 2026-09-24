@@ -162,7 +162,8 @@ pub enum DateCompleteness {
     /// A mix of ASCII digits and `<` fillers: part of the date is known.
     PartiallyUnknown,
     /// All six characters are `<` fillers: the date is entirely unknown, per
-    /// Doc 9303 Part 3 §4.8 — not a bad read.
+    /// Doc 9303 Part 3 §4.8 for a date of birth. For expiry it is parser
+    /// tolerance, not an ICAO provision.
     Unknown,
     /// Not six characters, or contains a character that is neither an ASCII
     /// digit nor `<`: not a conformant MRZ date field at all.
@@ -187,7 +188,7 @@ pub enum DateCompleteness {
 /// - only ASCII digits and `<`, at least one of each → [`DateCompleteness::PartiallyUnknown`]
 /// - anything else → [`DateCompleteness::Malformed`]
 ///
-/// Part 3 §4.8 lets an issuer complete an unknown date with filler characters,
+/// Part 3 §4.8 lets an issuer complete an unknown date of birth with filler characters,
 /// and §4.9 gives a filler the value zero. An entirely unknown date of birth
 /// carrying check digit `0` is therefore a **valid** field, not a corrupt read:
 ///
@@ -380,7 +381,7 @@ impl zeroize::Zeroize for Date {
 /// ```
 /// use mrz::Date;
 ///
-/// // The ICAO specimen expires 2012-04-15.
+/// // The Part 3 §3.2 figure's line 2 expires 2012-04-15.
 /// let doc = mrz::parse_td3(
 ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
 ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
@@ -449,7 +450,7 @@ impl crate::MrzData {
     /// ```
     /// use mrz::{parse_td3, Date};
     ///
-    /// // The ICAO specimen (Utopia / Anna Maria Eriksson): expires 2012-04-15.
+    /// // The Part 3 §3.2 figure's Utopia line 2 expires 2012-04-15.
     /// let doc = parse_td3(
     ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
     ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
@@ -495,8 +496,7 @@ mod tests {
 
     // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson): DOB
     // 1974-08-12, expiry 2012-04-15. See `src/lib.rs`'s test module for this
-    // specimen's provenance (Part 4's own copy is a figure, not extracted
-    // text; corroborated via Part 6's literal TD2 specimen).
+    // specimen's provenance (Part 3 §3.2 figure, PDF p11).
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
     const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
