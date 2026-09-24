@@ -776,8 +776,9 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
 /// filler survives — so shape alone can't distinguish a genuine insertion
 /// from a correctly-formed line (both have `<` at position 1). Worse, some
 /// real ICAO document codes genuinely have a second real letter there
-/// (`PS` = service passport, `PP` = Canada/Cyprus's ordinary-passport code
-/// since 2025-12-15 — see `synthpass_core::fusion::document_types_agree`) —
+/// (Doc 9303 Part 4's document-code table: `PO` = official/service,
+/// `PS` = stateless, `PP` = national/ordinary passport, printed by Canada
+/// and, from 2025-12-15, Cyprus — see `synthpass_core::fusion::document_types_agree`) —
 /// a `fix_doc_code`-style "no real code has X there" blocklist would be
 /// simply wrong for this position. [`crate::country_name`] is the
 /// discriminator instead: only apply the shift when the as-read
@@ -856,9 +857,10 @@ fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String
 ///
 /// The unshift fallback is additionally gated on [`country_name`] —
 /// shared across all three callers, though only TD3 actually needs it:
-/// TD3's document code genuinely has real two-letter forms (`PO` = official/service
-/// passport; `PS` = stateless passport, `PP` = Canada's and — effective 15 December 2025 — Cyprus's
-/// ordinary-passport code; see `synthpass_core::fusion::document_types_agree`'s
+/// TD3's document code genuinely has real two-letter forms (Doc 9303 Part 4's
+/// document-code table: `PO` = official/service passport, `PS` = stateless
+/// passport, `PP` = national/ordinary passport, printed by Canada and, from
+/// 15 December 2025, Cyprus; see `synthpass_core::fusion::document_types_agree`'s
 /// doc comment), which [`unshift_line1_prefix`]'s shape-only guard cannot
 /// tell apart from a genuine drop (both leave position 1 as a real letter,
 /// not `<`). Applying the transform unconditionally would silently corrupt
