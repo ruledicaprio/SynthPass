@@ -838,6 +838,12 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
 struct MissOcrDump {
     /// Real specimen file stem.
     name: String,
+    /// Corpus-relative path identity; names are not unique in the corpus.
+    asset_id: Option<String>,
+    /// SHA-256 of the original encoded image, before OCR preprocessing.
+    source_sha256: Option<String>,
+    /// Filename, in this dump's directory, of the run details JSON.
+    run_manifest: Option<String>,
     /// `"checksum_failed"` or `"no_mrz_found"` — which gate this row is
     /// under, so a consumer can filter without re-deriving it from the
     /// other fields.
@@ -1404,6 +1410,7 @@ struct BenchPage {
     name: String,
     /// Explicit real-asset identity for cross-provider joins; synthetic rows have none.
     asset_id: Option<String>,
+    source_sha256: Option<String>,
     page: OcrPage,
     ground_truth: Option<HashMap<CoreField, String>>,
     /// The hand-transcribed true printed MRZ zone (`Extraction::mrz_line` from
@@ -1539,6 +1546,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             Some(BenchPage {
                 name: doc.seed.to_string(),
                 asset_id: None,
+                source_sha256: None,
                 page,
                 ground_truth: Some(mrz_ground_truth(&truth)),
                 ground_truth_mrz: None,
@@ -1610,6 +1618,7 @@ fn prep_specimens(
             Some(BenchPage {
                 name: doc.name.clone(),
                 asset_id: Some(doc.asset_id.clone()),
+                source_sha256: Some(doc.source_sha256.clone()),
                 page,
                 ground_truth,
                 ground_truth_mrz,
@@ -1680,6 +1689,15 @@ pub async fn run_provider_bench_real_with_dump_options(
     dump_ocr_hits: bool,
     progress: bool,
 ) -> Vec<ProviderReport> {
+    // The CLI writes this pointer immediately before the run. Reading it
+    // here keeps the existing public benchmark function signature intact.
+    let run_manifest = dump_ocr_dir.and_then(|dir| {
+        std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt"))
+            .ok()
+            .filter(|name| {
+                !name.is_empty() && !name.chars().any(|c| matches!(c, '/' | '\\' | '\n' | '\r'))
+            })
+    });
     let prepped = prep_specimens(ocr, specimens, progress);
     run_prepped_with_dump_options(
         catalog,
@@ -1687,6 +1705,7 @@ pub async fn run_provider_bench_real_with_dump_options(
         measure_memory,
         dump_ocr_dir,
         dump_ocr_hits,
+        run_manifest.as_deref(),
         progress,
     )
     .await
@@ -1815,6 +1834,7 @@ async fn run_prepped(
         measure_memory,
         dump_ocr_dir,
         false,
+        None,
         progress,
     )
     .await
@@ -1826,6 +1846,7 @@ async fn run_prepped_with_dump_options(
     measure_memory: bool,
     dump_ocr_dir: Option<&Path>,
     dump_ocr_hits: bool,
+    run_manifest: Option<&str>,
     progress: bool,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
@@ -2239,6 +2260,9 @@ async fn run_prepped_with_dump_options(
                 }
                 dump_rows.push(MissOcrDump {
                     name: bench_page.name.clone(),
+                    asset_id: bench_page.asset_id.clone(),
+                    source_sha256: bench_page.source_sha256.clone(),
+                    run_manifest: run_manifest.map(str::to_string),
                     miss_reason: dump_miss_kind,
                     provider: provider.to_string(),
                     mrz_format: mrz_format.map(str::to_string),
@@ -2792,6 +2816,7 @@ mod tests {
         let prepped = vec![
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -2810,6 +2835,7 @@ mod tests {
             }),
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "fixture".to_string(),
                 page: OcrPage {
                     text: "surname DOE, no label file for this one".to_string(),
@@ -2851,6 +2877,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE".to_string(),
@@ -2894,6 +2921,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -2971,7 +2999,8 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
-            asset_id: None,
+            asset_id: Some("passports/corrupted-td3-fixture.png".to_string()),
+            source_sha256: Some("a".repeat(64)),
             name: "corrupted-td3-fixture".to_string(),
             page: OcrPage {
                 text: mrz.to_string(),
@@ -2997,7 +3026,16 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let _reports = run_prepped(&catalog, &prepped, false, Some(&dir), false).await;
+        let _reports = run_prepped_with_dump_options(
+            &catalog,
+            &prepped,
+            false,
+            Some(&dir),
+            false,
+            Some("test-run.json"),
+            false,
+        )
+        .await;
 
         let path = dir.join("provider-bench-miss-ocr-dump.jsonl");
         let dump = std::fs::read_to_string(&path).expect("dump file written");
@@ -3007,6 +3045,9 @@ mod tests {
         assert_eq!(lines.len(), 1, "one row for the one checksum_failed miss");
         let row: serde_json::Value = serde_json::from_str(lines[0]).expect("valid JSON row");
         assert_eq!(row["name"], "corrupted-td3-fixture");
+        assert_eq!(row["asset_id"], "passports/corrupted-td3-fixture.png");
+        assert_eq!(row["source_sha256"], "a".repeat(64));
+        assert_eq!(row["run_manifest"], "test-run.json");
         assert_eq!(row["provider"], "fixed-test-reader");
         assert!(
             row["raw_ocr_text"]
@@ -3072,6 +3113,7 @@ mod tests {
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "no-mrz-found-fixture".to_string(),
             page: OcrPage {
                 text: "REPUBLIC OF EXAMPLE\nNAME  JANE DOE\n".to_string(),
@@ -3152,6 +3194,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "labelled-nonconforming-specimen".to_string(),
             page: OcrPage {
                 text: zone.to_string(),
@@ -3220,6 +3263,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "labelled-ocr-misread".to_string(),
             page: OcrPage {
                 text: ocr_zone,
@@ -3313,6 +3357,7 @@ mod tests {
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
             page: OcrPage {
                 text: zone.to_string(),
@@ -3366,6 +3411,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
             page: OcrPage {
                 text: "just some redaction smudge, nothing MRZ-shaped".to_string(),
@@ -3413,6 +3459,7 @@ mod tests {
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: name.to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -3475,6 +3522,7 @@ mod tests {
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: name.to_string(),
                 page: OcrPage {
                     text: "surname DOE".to_string(),
@@ -3539,6 +3587,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
             page: OcrPage {
                 text: "IDENTITY CARD  DOE  JANE".to_string(),
@@ -3591,6 +3640,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
             page: OcrPage {
                 text: "I<UTODOE<<JANE<<<<<<<<<<<<<<<<".to_string(),
@@ -4297,6 +4347,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, no SMITH anywhere in this text".to_string(),
@@ -4344,6 +4395,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -4397,6 +4449,7 @@ mod tests {
 
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage {
                 text: "surname DOE, birth date 1990".to_string(),
@@ -4447,6 +4500,7 @@ mod tests {
         let ocr_elapsed = Duration::from_millis(1234);
         let prepped = vec![Some(BenchPage {
             asset_id: None,
+            source_sha256: None,
             name: "fixture".to_string(),
             page: OcrPage::default(),
             ground_truth: None,
@@ -4517,6 +4571,7 @@ mod tests {
             // 1: Tier-1 hit, names read exactly right.
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "exact-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(exact_truth),
@@ -4534,6 +4589,7 @@ mod tests {
             // this document's true given names.
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "wrong-name-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(wrong_given_truth),
@@ -4551,6 +4607,7 @@ mod tests {
             // name-scorable, not a hit.
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "miss-with-name-truth".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(miss_truth),
@@ -4568,6 +4625,7 @@ mod tests {
             // not name-scorable.
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "unlabelled-hit".to_string(),
                 page: OcrPage::default(),
                 ground_truth: None,
@@ -4588,6 +4646,7 @@ mod tests {
             // derivation).
             Some(BenchPage {
                 asset_id: None,
+                source_sha256: None,
                 name: "off-denominator".to_string(),
                 page: OcrPage::default(),
                 ground_truth: Some(off_denominator_truth),

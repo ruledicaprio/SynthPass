@@ -10,6 +10,7 @@
 //! a reusable library instead of example-local logic.
 
 use image::DynamicImage;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -182,6 +183,8 @@ pub struct RealSpecimenDoc {
     pub name: String,
     /// Stable path identity relative to the samples root, using slash separators.
     pub asset_id: String,
+    /// SHA-256 of the original encoded image bytes, before decoding or OCR.
+    pub source_sha256: String,
     pub image: DynamicImage,
     /// `None` when `samples/ocr_fixtures/<name>.json` does not exist, or
     /// exists but fails to parse. Both cases mean "no ground truth for this
@@ -654,6 +657,10 @@ pub fn load_specimen(
 ) -> Option<RealSpecimenDoc> {
     let name = image_path.file_stem()?.to_str()?.to_string();
     let asset_id = specimen_asset_id(samples_root, image_path)?;
+    let source_sha256: String = Sha256::digest(std::fs::read(image_path).ok()?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     // Content-sniffing, not extension-trusting: `image::open` picks its decoder
     // from the file name, so a JPEG called `.png` returns `None` here and the
     // specimen vanishes from the benchmark without a word. Three corpus files
@@ -665,6 +672,7 @@ pub fn load_specimen(
     Some(RealSpecimenDoc {
         name,
         asset_id,
+        source_sha256,
         image,
         labels,
         class,
