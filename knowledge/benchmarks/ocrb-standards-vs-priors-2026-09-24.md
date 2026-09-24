@@ -121,7 +121,9 @@ All scratch work stayed out of the repository, in the session scratchpad's `ocrb
 ## Also found
 
 - **Doc 9303 transcription defects in this repository (not fixed here).** Either would mislead
-  anyone who builds a layout prior from the tables alone.
+  anyone who builds a layout prior from the tables alone. Checked against ICAO's PDFs on
+  2026-09-24, **neither table exists in Doc 9303 at all**. The figures carry only labels, and the
+  tables were invented during conversion. The Doc 9303 text itself is not in error.
   - [Part 4](../docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md)'s MRZ dimension table,
     below Figure 3, labels 7.25 mm the "upper reference line position" and 6.35 mm the "lower".
     On the figure itself, 6.35 mm is the *distance between* the two reference centre lines. The

@@ -105,7 +105,11 @@ provided the zone still reads in B900
 
 ## Doc 9303 transcription defects found while checking these figures
 
-Neither is corrected here; see the findings file.
+Checked against ICAO's own PDFs on 2026-09-24, **neither table exists in Doc 9303**. On Part 4
+p. 12 and Part 5 p. 14, the values are only labels on the figure. The tables were invented when
+the PDFs were converted, and some of their values (Part 5's "23.3" and "2.54") appear nowhere
+in that Part. Neither is corrected here. The repository-wide audit of `knowledge/docs9303/`
+against the PDFs is its own piece of work.
 
 - The **Part 4 MRZ dimension table** below Figure 3 labels 7.25 mm the "upper reference line
   position" and 6.35 mm the "lower reference line position". On the figure itself, 6.35 mm is the
