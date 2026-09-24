@@ -22,16 +22,16 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **140 / 152 = 92.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-19) |
-| Tier-1 hit rate, whole specimen corpus | 140 / 261 = 53.6% | same baseline; the gap is explained below |
-| Strict name hit rate, real specimens | **12 / 45 = 26.7%** of name-scorable scored documents (36.4% of name-scorable hits) | same baseline (CI, 2026-09-19); ADR-0013 |
-| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 109** | same baseline (CI, 2026-09-19) |
+| **Tier-1 hit rate, real specimens** | **139 / 151 = 92.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-24) |
+| Tier-1 hit rate, whole specimen corpus | 139 / 261 = 53.3% | same baseline; the gap is explained below |
+| Strict name hit rate, real specimens | **12 / 45 = 26.7%** of name-scorable scored documents (36.4% of name-scorable hits) | same baseline (CI, 2026-09-24); ADR-0013 |
+| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 110** | same baseline (CI, 2026-09-24) |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
 | Names, browser vs native, on documents both read validly | **28 / 31 vs 11 / 31** exact on both name fields (reviewed fixtures only) — 17 browser-right/native-wrong, 0 the other way | same run — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md) |
 
-**Why two rates.** 109 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 110 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -52,7 +52,7 @@ non-conforming one).
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
-| `checksum_failed_specimen` | 19 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
+| `checksum_failed_specimen` | 20 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
 readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
