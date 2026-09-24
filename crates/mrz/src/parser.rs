@@ -1671,6 +1671,18 @@ const MRV_LINE2_CD_FIELDS: CdFields = &[
     (21, 27, 27, FieldKind::Date),
 ];
 
+#[cfg(test)]
+pub(crate) fn cd_field_tables() -> [(Format, usize, CdFields); 6] {
+    [
+        (Format::Td1, 0, TD1_LINE1_CD_FIELDS),
+        (Format::Td1, 1, TD1_LINE2_CD_FIELDS),
+        (Format::Td2, 1, TD2_LINE2_CD_FIELDS),
+        (Format::Td3, 1, TD3_LINE2_CD_FIELDS),
+        (Format::MrvA, 1, MRV_LINE2_CD_FIELDS),
+        (Format::MrvB, 1, MRV_LINE2_CD_FIELDS),
+    ]
+}
+
 /// A two-line format plus the line-2 fields the class sweep may touch —
 /// [`TwoLineFormat`] with the sweep's own table appended.
 type TwoLineSweep = (
