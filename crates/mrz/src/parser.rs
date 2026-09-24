@@ -754,38 +754,6 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
     format!("{}<{}", &repaired[0..1], &repaired[1..target_width - 1])
 }
 
-/// Undo a spurious extra character **inserted** at line-1 position 2, right
-/// after `document_type`'s filler and before `issuing_country` — the mirror
-/// image of [`unshift_line1_prefix`]'s dropped-filler case, and the missing
-/// half [`unshift_line1_prefix`]'s own doc comment already flags ("not a
-/// full fix... a partial, hit-rate-safe improvement, not a claim of
-/// completeness").
-///
-/// Measured on real specimens (`crates/synthpass-ocr/examples/
-/// integrity_survey.rs --dir passports --mrz-only`, 2026-08-17): 34 of 57
-/// `UnrecognizedIssuingCountry` findings across 24 distinct countries shared
-/// this exact shape — one garbage character prepended, the real third
-/// letter lost, e.g. Czechia (`CZE`) read as `SCZ`, Iceland (`ISL`) as
-/// `AIS`, Slovakia (`SVK`) as `SSV`, the UK (`GBR`) as `SGB`, the USA
-/// (`USA`) as `SUS`.
-///
-/// **Why this needs a content-based guard, unlike the drop case.**
-/// `unshift_line1_prefix` self-limits purely from shape: position 1 not
-/// being `<` is unambiguous evidence of the drop, since a correctly-formed
-/// line always has `<` there. This corruption leaves position 1 alone — the
-/// filler survives — so shape alone can't distinguish a genuine insertion
-/// from a correctly-formed line (both have `<` at position 1). Worse, some
-/// real ICAO document codes genuinely have a second real letter there
-/// (Doc 9303 Part 4's document-code table: `PO` = official/service,
-/// `PS` = stateless, `PP` = national/ordinary passport, printed by Canada
-/// and, from 2025-12-15, Cyprus — see `synthpass_core::fusion::document_types_agree`) —
-/// a `fix_doc_code`-style "no real code has X there" blocklist would be
-/// simply wrong for this position. [`crate::country_name`] is the
-/// discriminator instead: only apply the shift when the as-read
-/// `issuing_country` fails to resolve to a real code but the
-/// one-position-right-shifted read does. A line with a genuine two-letter
-/// document code and a genuinely correct `issuing_country` already resolves
-/// on the first check and is returned unchanged.
 /// Whether an issuing-state slice resolves to a known state once its filler
 /// padding is removed.
 ///
@@ -823,6 +791,38 @@ fn looks_like_non_mrz_text(data: &MrzData) -> bool {
         && matches!(data.date_of_birth, MrzDate::Malformed(_))
 }
 
+/// Undo a spurious extra character **inserted** at line-1 position 2, right
+/// after `document_type`'s filler and before `issuing_country` — the mirror
+/// image of [`unshift_line1_prefix`]'s dropped-filler case, and the missing
+/// half [`unshift_line1_prefix`]'s own doc comment already flags ("not a
+/// full fix... a partial, hit-rate-safe improvement, not a claim of
+/// completeness").
+///
+/// Measured on real specimens (`crates/synthpass-ocr/examples/
+/// integrity_survey.rs --dir passports --mrz-only`, 2026-08-17): 34 of 57
+/// `UnrecognizedIssuingCountry` findings across 24 distinct countries shared
+/// this exact shape — one garbage character prepended, the real third
+/// letter lost, e.g. Czechia (`CZE`) read as `SCZ`, Iceland (`ISL`) as
+/// `AIS`, Slovakia (`SVK`) as `SSV`, the UK (`GBR`) as `SGB`, the USA
+/// (`USA`) as `SUS`.
+///
+/// **Why this needs a content-based guard, unlike the drop case.**
+/// `unshift_line1_prefix` self-limits purely from shape: position 1 not
+/// being `<` is unambiguous evidence of the drop, since a correctly-formed
+/// line always has `<` there. This corruption leaves position 1 alone — the
+/// filler survives — so shape alone can't distinguish a genuine insertion
+/// from a correctly-formed line (both have `<` at position 1). Worse, some
+/// real ICAO document codes genuinely have a second real letter there
+/// (Doc 9303 Part 4's document-code table: `PO` = official/service,
+/// `PS` = stateless, `PP` = national/ordinary passport, printed by Canada
+/// and, from 2025-12-15, Cyprus — see `synthpass_core::fusion::document_types_agree`) —
+/// a `fix_doc_code`-style "no real code has X there" blocklist would be
+/// simply wrong for this position. [`crate::country_name`] is the
+/// discriminator instead: only apply the shift when the as-read
+/// `issuing_country` fails to resolve to a real code but the
+/// one-position-right-shifted read does. A line with a genuine two-letter
+/// document code and a genuinely correct `issuing_country` already resolves
+/// on the first check and is returned unchanged.
 fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String {
     if repaired.len() != target_width
         || target_width < 6
@@ -902,6 +902,33 @@ fn repair_td3_line1(l: &str) -> String {
     format!("{}{}", &l[0..5], fix_name_separator(&defiller(&l[5..])))
 }
 
+/// Whether TD3 line 1, after [`repair_td3_line1`]'s ordinary repairs, already
+/// carries a genuine Part 4 §4.4 document code (or the `P<` filler) *and* an
+/// issuing state that resolves — the collision [`shift_or_unshift_line1`]'s
+/// unshift must be refused for, not merely outvoted by a checksum TD3's line 1
+/// doesn't have.
+///
+/// [`unshift_line1_prefix`] fires whenever position 1 is a letter, and a
+/// genuine §4.4 second letter (`PP`, `PD`, `PS`, `PR`, ...) always is one too
+/// — nothing on the line distinguishes "second letter of a real table code"
+/// from "dropped filler" by shape alone, which is exactly why
+/// [`unshift_if_country_resolves`] instead asks whether the *unshifted*
+/// reading's issuer resolves. That question is not enough on its own: 67
+/// pairs of a §4.4 letter and a real ISO/ICAO three-letter code collide (e.g.
+/// `PP` + `NGA`, whose unshift `P<PNG` also resolves), so a genuine `PPNGA…`
+/// was being silently rewritten to issuer `PNG` (#445). Checking the as-read
+/// line first — a real table code plus a resolving issuer — settles those
+/// collisions in favor of the printed text before the unshifted reading is
+/// even considered. TD2 and MRV share [`unshift_if_country_resolves`] and are
+/// deliberately not covered here: neither format has a closed document-code
+/// table to check the as-read line against (see [`repair_td2_line1`]'s doc
+/// comment), so there is nothing for an equivalent guard to test.
+fn td3_line1_is_genuine_table_code(l: &str) -> bool {
+    l.len() >= 5
+        && (&l[0..2] == "P<" || crate::passport_type(&l[0..2]).is_some())
+        && country_resolves(&l[2..5])
+}
+
 /// Second candidate alongside [`repair_td3_line1`] — composes both
 /// [`shift_line1_right_at_country`] and [`unshift_line1_prefix`], see
 /// [`shift_or_unshift_line1`]'s doc comment for why they can't be two
@@ -909,9 +936,17 @@ fn repair_td3_line1(l: &str) -> String {
 /// half is gated on [`country_name`] here specifically (TD3's document code
 /// has genuine two-letter forms `unshift_line1_prefix`'s shape-only guard
 /// can't tell apart from a real drop — the whole reason for the gate).
+///
+/// [`td3_line1_is_genuine_table_code`] runs first and, when it holds, returns
+/// the as-read (ordinarily repaired) line untouched — see that function's
+/// doc comment for the collision it exists to settle.
 fn repair_td3_line1_shifted(l: &str) -> String {
     let target_width = l.len();
-    shift_or_unshift_line1(repair_td3_line1(l), target_width)
+    let repaired = repair_td3_line1(l);
+    if td3_line1_is_genuine_table_code(&repaired) {
+        return repaired;
+    }
+    shift_or_unshift_line1(repaired, target_width)
 }
 
 fn repair_td3_line2(l: &str) -> String {

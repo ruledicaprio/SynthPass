@@ -455,9 +455,12 @@ What this means for the crate:
   the table, and in the 45 documents whose raw OCR line 1 survives in older dump logs,
   that position was never read as `K`.
 - `unshift_line1_prefix` acts only when position 1 is a letter, which a genuine `PP` also
-  is. On TD3 and TD2 the shift is therefore kept only when the *shifted* reading's issuing
-  state resolves to a real `country_name` (`unshift_if_country_resolves`), so a genuine
-  `PPCOL…` stays as read: `P<PCO…` names no country.
+  is. On TD3 the shift is refused when the as-read line already carries a §4.4 code and a
+  resolving issuing state: a genuine `PPNGA…` stays as read, although its unshifted reading
+  `P<PNG…` names a real state. That check comes first because such collisions are common:
+  67 pairs of a §4.4 letter and a table code collide. Outside that case the unshift is kept
+  only when the *shifted* reading's issuing state resolves (`unshift_if_country_resolves`,
+  also used by TD2 and MRV, which have no closed code table).
 - `shift_line1_right_at_country` acts only when position 1 is `<`, so it never fires on a
   `PP` line. A `PP` zone shifted right is not repaired today. That is a known gap, and it
   grows as issuers adopt `PP`.
