@@ -393,7 +393,74 @@ fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repair::FieldKind;
     use crate::{parse_mrv_a, parse_mrv_b, parse_td1, parse_td2, parse_td3, Checks, MrzData};
+
+    #[test]
+    fn class_sweep_fields_match_ordinary_strip_check_program() {
+        for (format, line, entries) in crate::parser::cd_field_tables() {
+            let (width, cells): (usize, &[CellSpec]) = match format {
+                Format::Td1 => (30, &TD1),
+                Format::Td2 => (36, &TD2),
+                Format::Td3 => (44, &TD3),
+                Format::MrvA => (44, &MRV_A),
+                Format::MrvB => (36, &MRV_B),
+            };
+            for (start, end, check_cell, kind) in entries.iter().copied() {
+                let entry = (start, end, check_cell, kind);
+                assert!(
+                    start < end && end <= width && check_cell < width,
+                    "{format:?} line {line} entry {entry:?}: invalid line-relative columns"
+                );
+                // CdFields columns are zero-based within one line; the strip is
+                // concatenated, so line * width translates them to cell indexes.
+                // This pins ordinary layouts only; overflow modes are out of scope.
+                let base = line * width;
+                assert!(
+                    base + end <= cells.len(),
+                    "{format:?} line {line} entry {entry:?}: data range exceeds strip"
+                );
+                let data = &cells[base + start..base + end];
+                let field = data[0].field;
+                let (check, expected_kind) = match field {
+                    Field::DocumentNumber => (Check::DocumentNumber, FieldKind::DocumentNumber),
+                    Field::Birth => (Check::Birth, FieldKind::Date),
+                    Field::Expiry => (Check::Expiry, FieldKind::Date),
+                    Field::Optional1 => (Check::Personal, FieldKind::PersonalNumber),
+                    _ => panic!(
+                        "{format:?} line {line} entry {entry:?}: unexpected strip field {field:?}"
+                    ),
+                };
+                assert_eq!(
+                    kind, expected_kind,
+                    "{format:?} line {line} entry {entry:?}: strip field {field:?} has another role"
+                );
+                for (column, cell) in (start..end).zip(data) {
+                    assert_eq!(
+                        cell.field, field,
+                        "{format:?} line {line} entry {entry:?}: column {column} has another field"
+                    );
+                    assert_eq!(
+                        cell.local.map(|local| local.check),
+                        Some(check),
+                        "{format:?} line {line} entry {entry:?}: column {column} has another local check"
+                    );
+                }
+                let comparison_cells: Vec<_> = cells
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, cell)| {
+                        (cell.compared_against == Some(check)).then_some(index)
+                    })
+                    .collect();
+                assert_eq!(
+                    comparison_cells,
+                    [base + check_cell],
+                    "{format:?} line {line} entry {entry:?}: strip comparison cell differs"
+                );
+            }
+        }
+    }
 
     // Deliberately independent of `CellSpec`, `WEIGHTS`, and the production
     // checksum helper. These are parser/Doc 9303 coordinates, not a second
