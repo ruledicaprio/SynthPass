@@ -140,8 +140,8 @@ pub fn is_leap_year(year: i32) -> bool {
 ///     issuing_country: "UTO".into(),
 ///     document_number: "L898902C3".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "<<<<<<".into(),
-///     date_of_expiry: "301231".into(),
+///     date_of_birth: mrz::MrzDate::Unknown,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2030, 12, 31)),
 ///     ..Default::default()
 /// });
 /// let (l1, l2) = zone.split_once('\n').unwrap();

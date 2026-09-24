@@ -2265,13 +2265,13 @@ mod tests {
     fn td3_corrupted_document_number() -> mrz::MrzData {
         let fields = mrz::Td3Fields {
             document_number: "L898902C3".into(),
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             personal_number: Some("ZE184226B".into()),
             ..Default::default()
         };
@@ -2374,13 +2374,13 @@ mod tests {
     fn td1_vacuous_personal_number_check_bit_is_not_promoted() {
         let fields = mrz::Td1Fields {
             document_number: "D231458907".into(),
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             ..Default::default()
         };
         let mrz_text = mrz::format_td1(&fields);
@@ -2416,13 +2416,13 @@ mod tests {
     fn td2_vacuous_personal_number_check_bit_is_not_promoted() {
         let fields = mrz::Td2Fields {
             document_number: "D231458907".into(),
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             ..Default::default()
         };
         let mrz_text = mrz::format_td2(&fields);
@@ -2449,13 +2449,13 @@ mod tests {
     fn all_filler_td3_personal_number_is_not_nulled() {
         let fields = mrz::Td3Fields {
             document_number: "L898902C3".into(),
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             personal_number: None, // all-filler personal-number field
             ..Default::default()
         };
@@ -2488,13 +2488,13 @@ mod tests {
     fn out_of_calendar_dob_is_not_promoted() {
         let fields = mrz::Td3Fields {
             document_number: "L898902C3".into(),
-            date_of_birth: "000000".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::OutOfCalendar(mrz::Date::new(2000, 0, 0)),
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             ..Default::default()
         };
         let zone = mrz::format_td3(&fields);
@@ -2524,13 +2524,13 @@ mod tests {
         // so before this gate it was promoted at 1.0 as the text `<<<<<<`.
         let fields = mrz::Td3Fields {
             document_number: "L898902C3".into(),
-            date_of_birth: "740812".into(),
-            date_of_expiry: "<<<<<<".into(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+            date_of_expiry: mrz::MrzDate::Unknown,
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             ..Default::default()
         };
         let zone = mrz::format_td3(&fields);
@@ -2554,13 +2554,13 @@ mod tests {
         // read, but the raw field holds `<<<<<<`, not an ISO date.
         let fields = mrz::Td1Fields {
             document_number: "D231458907".into(),
-            date_of_birth: "<<<<<<".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: mrz::MrzDate::Unknown,
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             issuing_country: "UTO".into(),
             nationality: "UTO".into(),
-            sex: "F".into(),
+            sex: mrz::Sex::Female,
             ..Default::default()
         };
         let mrz_text = mrz::format_td1(&fields);
@@ -2637,9 +2637,9 @@ mod tests {
             surname: "ERIKSSON".to_string(),
             given_names: "ANNA MARIA".to_string(),
             nationality: "BRA".to_string(),
-            date_of_birth: "850221".to_string(),
-            sex: "F".to_string(),
-            date_of_expiry: "270314".to_string(),
+            date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1985, 2, 21)),
+            sex: mrz::Sex::Female,
+            date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2027, 3, 14)),
             optional_data: Some("R5T6U7V8W9".to_string()),
         });
         let (l1, l2) = mrz_text.split_once('\n').expect("two lines");

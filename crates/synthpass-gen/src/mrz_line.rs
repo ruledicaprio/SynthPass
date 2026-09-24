@@ -19,14 +19,13 @@ use mrz::{
 
 use crate::model::{DocumentType, Passport};
 
-/// `mrz::Date` → the MRZ-native `YYMMDD` string [`mrz::Td3Fields`] expects.
-fn yymmdd(date: &mrz::Date) -> String {
-    format!(
-        "{:02}{:02}{:02}",
-        date.year.rem_euclid(100),
-        date.month,
-        date.day
-    )
+/// Convert the generator's visual-zone sex to the MRZ's typed cell.
+fn mrz_sex(sex: crate::model::Sex) -> mrz::Sex {
+    match sex {
+        crate::model::Sex::M => mrz::Sex::Male,
+        crate::model::Sex::F => mrz::Sex::Female,
+        crate::model::Sex::X => mrz::Sex::Unspecified,
+    }
 }
 
 /// Assemble the two TD3 MRZ lines for `passport` via [`mrz::format_td3`]. The
@@ -39,9 +38,9 @@ pub fn build_td3_lines(passport: &Passport) -> (String, String) {
         surname: passport.surname.clone(),
         given_names: passport.given_names.clone(),
         nationality: passport.nationality.clone(),
-        date_of_birth: yymmdd(&passport.date_of_birth),
-        sex: passport.sex.as_mrz_char().to_string(),
-        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        date_of_birth: mrz::MrzDate::Calendar(passport.date_of_birth),
+        sex: mrz_sex(passport.sex),
+        date_of_expiry: mrz::MrzDate::Calendar(passport.date_of_expiry),
         personal_number: passport.personal_number.clone(),
     };
     let emitted = format_td3(&fields);
@@ -69,9 +68,9 @@ pub fn build_td1_lines(passport: &Passport) -> (String, String, String) {
         surname: passport.surname.clone(),
         given_names: passport.given_names.clone(),
         nationality: passport.nationality.clone(),
-        date_of_birth: yymmdd(&passport.date_of_birth),
-        sex: passport.sex.as_mrz_char().to_string(),
-        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        date_of_birth: mrz::MrzDate::Calendar(passport.date_of_birth),
+        sex: mrz_sex(passport.sex),
+        date_of_expiry: mrz::MrzDate::Calendar(passport.date_of_expiry),
         optional_data_2: passport.personal_number.clone(), // TD1 uses optional_data_2 for personal number
     };
     let emitted = format_td1(&fields);
@@ -96,9 +95,9 @@ pub fn build_td2_lines(passport: &Passport) -> (String, String) {
         surname: passport.surname.clone(),
         given_names: passport.given_names.clone(),
         nationality: passport.nationality.clone(),
-        date_of_birth: yymmdd(&passport.date_of_birth),
-        sex: passport.sex.as_mrz_char().to_string(),
-        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        date_of_birth: mrz::MrzDate::Calendar(passport.date_of_birth),
+        sex: mrz_sex(passport.sex),
+        date_of_expiry: mrz::MrzDate::Calendar(passport.date_of_expiry),
         optional_data: passport.personal_number.clone(), // TD2 uses optional_data instead of personal_number
     };
     let emitted = format_td2(&fields);
@@ -122,9 +121,9 @@ pub fn build_mrv_a_lines(passport: &Passport) -> (String, String) {
         surname: passport.surname.clone(),
         given_names: passport.given_names.clone(),
         nationality: passport.nationality.clone(),
-        date_of_birth: yymmdd(&passport.date_of_birth),
-        sex: passport.sex.as_mrz_char().to_string(),
-        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        date_of_birth: mrz::MrzDate::Calendar(passport.date_of_birth),
+        sex: mrz_sex(passport.sex),
+        date_of_expiry: mrz::MrzDate::Calendar(passport.date_of_expiry),
         optional_data: passport.personal_number.clone(),
     };
     let emitted = format_mrv_a(&fields);
@@ -147,9 +146,9 @@ pub fn build_mrv_b_lines(passport: &Passport) -> (String, String) {
         surname: passport.surname.clone(),
         given_names: passport.given_names.clone(),
         nationality: passport.nationality.clone(),
-        date_of_birth: yymmdd(&passport.date_of_birth),
-        sex: passport.sex.as_mrz_char().to_string(),
-        date_of_expiry: yymmdd(&passport.date_of_expiry),
+        date_of_birth: mrz::MrzDate::Calendar(passport.date_of_birth),
+        sex: mrz_sex(passport.sex),
+        date_of_expiry: mrz::MrzDate::Calendar(passport.date_of_expiry),
         optional_data: passport.personal_number.clone(),
     };
     let emitted = format_mrv_b(&fields);
