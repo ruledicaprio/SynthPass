@@ -66,7 +66,7 @@ let doc = mrz::parse_td3(
 ).unwrap();
 
 assert_eq!(doc.surname, "ERIKSSON");
-assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
+assert_eq!(doc.date_of_birth.to_string(), "1974-08-12"); // expanded to ISO 8601
 
 // Per-field evidence, not a single boolean. `Some(true)` verified,
 // `Some(false)` refuted, `None` this format prints no such check digit.
@@ -106,9 +106,14 @@ Two cases that are easy to get wrong, both documented with runnable examples on 
   reassembles them.
 - **Unknown and partial dates** are conformant, not corrupt: §4.8 lets an issuer fill a date
   with `<`, and §4.9 gives a filler the value zero, so `<<<<<<` with check digit `0` is a
-  *valid* field.
-  [`date_completeness`](https://docs.rs/mrz/latest/mrz/fn.date_completeness.html) tells it
-  apart from an OCR failure.
+  *valid* field. A parsed date is an
+  [`MrzDate`](https://docs.rs/mrz/latest/mrz/enum.MrzDate.html) (`Calendar`, `OutOfCalendar`,
+  `PartiallyUnknown`, `Unknown` or `Malformed`), so an issuer's unknown never looks like an
+  OCR failure. [`date_completeness`](https://docs.rs/mrz/latest/mrz/fn.date_completeness.html)
+  classifies a raw field the same way.
+- **A sex cell other than `M`, `F` or `<`** is kept as read, as
+  [`Sex::NonConformant`](https://docs.rs/mrz/latest/mrz/enum.Sex.html), not rewritten to `X`. No
+  check digit covers the cell, so a misread there is otherwise invisible.
 
 ## Emitting
 
@@ -234,9 +239,13 @@ Both are off by default, keeping the base crate zero-dependency and wasm-clean:
 - **`serde`** — derives `Serialize` + `Deserialize` on the data types: `MrzData`, `Checks`,
   `Format`, `Field`, `SequenceCompleteness`, `ParseOptions`, `Date`, `DateValidity`,
   `DateCompleteness`, and the five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`,
-  `MrvAFields`, `MrvBFields`).
-- **`zeroize`** — derives `ZeroizeOnDrop` on `MrzData`, wiping its PII-bearing `String` fields
-  from memory when the value is dropped.
+  `MrvAFields`, `MrvBFields`). `MrzDate` and `Sex` implement both by hand as their text form:
+  a date serialises as `"1974-08-12"` (or its raw field, such as `"74<<12"`) and sex as its zone
+  character.
+- **`zeroize`** — derives `ZeroizeOnDrop` on `MrzData`, wiping its PII-bearing fields from memory
+  when the value is dropped. Best-effort: `format`, `document_number_legacy_encoding` and
+  `checks` are skipped, `MrzDate` keeps its variant after wiping its payload, `Sex` is fully
+  overwritten, and copies made before the drop are out of reach.
 
 ## Versioning and MSRV
 

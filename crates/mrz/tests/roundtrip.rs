@@ -3,8 +3,8 @@
 
 use mrz::{
     check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
-    parse_mrv_b, parse_td1, parse_td2, parse_td3, MrvAFields, MrvBFields, Td1Fields, Td2Fields,
-    Td3Fields,
+    parse_mrv_b, parse_td1, parse_td2, parse_td3, MrvAFields, MrvBFields, Sex, Td1Fields,
+    Td2Fields, Td3Fields,
 };
 use proptest::prelude::*;
 
@@ -101,6 +101,14 @@ fn sex_strategy() -> impl Strategy<Value = String> {
     ]
 }
 
+/// The emitter writes `<` for any sex input other than M/F.
+fn expected_sex(input: &str) -> Sex {
+    match input {
+        "M" => Sex::Male,
+        "F" => Sex::Female,
+        _ => Sex::Unspecified,
+    }
+}
 fn personal_number_strategy() -> impl Strategy<Value = Option<String>> {
     prop_oneof![Just(None), "[A-Z0-9]{1,14}".prop_map(Some),]
 }
@@ -142,7 +150,7 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(&parsed.sex, &sex);
+        prop_assert_eq!(parsed.sex, expected_sex(&sex));
 
         let expected_personal = personal_number.filter(|s| !s.is_empty());
         // Clone rather than move: `MrzData` derives `ZeroizeOnDrop` when the
@@ -157,15 +165,20 @@ proptest! {
 
         // `expand_date` turns YYMMDD into ISO YYYY-MM-DD; check the tail
         // (MM-DD) and that the parsed year's last two digits match.
-        let expected_mmdd = &date_of_birth[2..6];
-        prop_assert_eq!(&parsed.date_of_birth[5..7], &expected_mmdd[0..2]);
-        prop_assert_eq!(&parsed.date_of_birth[8..10], &expected_mmdd[2..4]);
-        prop_assert_eq!(&parsed.date_of_birth[2..4], &date_of_birth[0..2]);
-
-        let expected_mmdd_exp = &date_of_expiry[2..6];
-        prop_assert_eq!(&parsed.date_of_expiry[5..7], &expected_mmdd_exp[0..2]);
-        prop_assert_eq!(&parsed.date_of_expiry[8..10], &expected_mmdd_exp[2..4]);
-        prop_assert_eq!(&parsed.date_of_expiry[2..4], &date_of_expiry[0..2]);
+        // Both strategies draw real calendar days; compare their printed
+        // components with the typed dates after the pivot chose the century.
+        for (parsed_date, printed) in [
+            (parsed.date_of_birth, &date_of_birth),
+            (parsed.date_of_expiry, &date_of_expiry),
+        ] {
+            let date = parsed_date.calendar();
+            prop_assert!(date.is_some(), "not a calendar date: {:?}", parsed_date);
+            let date = date.unwrap();
+            prop_assert_eq!(
+                format!("{:02}{:02}{:02}", date.year % 100, date.month, date.day),
+                printed.as_str()
+            );
+        }
     }
 }
 
@@ -269,7 +282,7 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(&parsed.sex, &sex);
+        prop_assert_eq!(parsed.sex, expected_sex(&sex));
 
         // ADR-0018 slot rule: TD2's one optional-data element is the primary
         // slot; the second slot is TD1's alone.
@@ -375,7 +388,7 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(&parsed.sex, &sex);
+        prop_assert_eq!(parsed.sex, expected_sex(&sex));
 
         // ADR-0018 slot rule: each TD1 element lands in its own slot, and
         // nothing joins them — a TD1 prints no personal number.
@@ -522,7 +535,7 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
-        prop_assert_eq!(&parsed.sex, &sex);
+        prop_assert_eq!(parsed.sex, expected_sex(&sex));
 
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.
@@ -568,7 +581,7 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
-        prop_assert_eq!(&parsed.sex, &sex);
+        prop_assert_eq!(parsed.sex, expected_sex(&sex));
 
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.

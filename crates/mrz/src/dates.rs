@@ -129,11 +129,11 @@ pub fn is_leap_year(year: i32) -> bool {
 /// purposes (`:563`), an all-filler date of birth with check digit `0` is a
 /// *valid* field, not a corrupt read — this type is what lets a caller tell
 /// the two apart. See [`date_completeness`] to classify a raw field, and
-/// [`crate::MrzData::date_of_birth_completeness`] for where a parsed value
-/// ends up.
+/// [`MrzDate::completeness`](crate::MrzDate::completeness) for the same
+/// answer about a parsed date.
 ///
 /// ```
-/// use mrz::{format_td3, parse_td3, DateCompleteness, Td3Fields};
+/// use mrz::{format_td3, parse_td3, DateCompleteness, MrzDate, Td3Fields};
 ///
 /// // An issuer that does not know the holder's date of birth prints fillers.
 /// let zone = format_td3(&Td3Fields {
@@ -148,8 +148,9 @@ pub fn is_leap_year(year: i32) -> bool {
 /// let doc = parse_td3(l1, l2).unwrap();
 ///
 /// assert!(doc.valid()); // every check digit verifies ...
-/// assert_eq!(doc.date_of_birth_completeness, DateCompleteness::Unknown); // ... honestly
-/// assert_eq!(doc.date_of_birth, "<<<<<<"); // left raw, never invented
+/// assert_eq!(doc.date_of_birth, MrzDate::Unknown); // ... honestly
+/// assert_eq!(doc.date_of_birth.completeness(), DateCompleteness::Unknown);
+/// assert_eq!(doc.date_of_birth.to_string(), "<<<<<<"); // left raw, never invented
 /// ```
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
@@ -171,13 +172,13 @@ pub enum DateCompleteness {
 /// Classify a raw six-character MRZ `YYMMDD` date field.
 ///
 /// [`expand_date`] / [`expand_date_with_pivot`] leave any input that is not
-/// entirely ASCII digits untouched (existing behaviour, unchanged by this
-/// function) rather than expanding it to an ISO date — this function is how
-/// a caller interprets what it got back: a `date_of_birth` string that isn't
-/// `YYYY-MM-DD` shaped could mean "conformantly unknown" or "OCR garbage",
-/// and only this classification of the *raw* field (not the expanded one)
-/// can tell those apart, since a complete date is reshaped to ten characters
-/// and the original `YYMMDD` is not recoverable from it afterward.
+/// entirely ASCII digits untouched rather than expanding it to an ISO date,
+/// so their output alone cannot say whether a non-ISO string means
+/// "conformantly unknown" or "OCR garbage". This classification of the *raw*
+/// field can. A parsed [`MrzData`](crate::MrzData) already carries it: each
+/// date is an [`MrzDate`](crate::MrzDate), and
+/// [`MrzDate::completeness`](crate::MrzDate::completeness) returns what this
+/// function returns for the field it was read from.
 ///
 /// Rules, in order:
 /// - length != 6 → [`DateCompleteness::Malformed`]
@@ -371,20 +372,6 @@ impl zeroize::Zeroize for Date {
     }
 }
 
-/// Parse an ISO `YYYY-MM-DD` string into a well-formed [`Date`].
-pub(crate) fn parse_iso(date: &str) -> Option<Date> {
-    let b = date.as_bytes();
-    if date.len() != 10 || b[4] != b'-' || b[7] != b'-' {
-        return None;
-    }
-    let d = Date {
-        year: date[0..4].parse().ok()?,
-        month: date[5..7].parse().ok()?,
-        day: date[8..10].parse().ok()?,
-    };
-    d.is_well_formed().then_some(d)
-}
-
 /// Date-plausibility summary for an MRZ, relative to a reference "today".
 /// Distinct from the check digits: a checksum-valid MRZ can still be expired
 /// or carry impossible dates. Obtain one from
@@ -410,7 +397,7 @@ pub(crate) fn parse_iso(date: &str) -> Option<Date> {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[non_exhaustive]
 pub struct DateValidity {
-    /// Both `date_of_birth` and `date_of_expiry` parse as real calendar dates.
+    /// Both `date_of_birth` and `date_of_expiry` are [`MrzDate::Calendar`](crate::MrzDate::Calendar): real calendar dates.
     pub dates_well_formed: bool,
     /// Date of expiry is on or after the reference "today".
     pub in_date: bool,
@@ -449,7 +436,10 @@ impl crate::MrzData {
     /// A valid MRZ composite makes the *read* checksum-consistent with the
     /// printed zone; it does not establish that the document is in date, or
     /// that its dates are consistent — that separate judgement is computed
-    /// here from the already-expanded ISO date fields.
+    /// here from the typed date fields. Only an
+    /// [`MrzDate::Calendar`](crate::MrzDate::Calendar) date counts: an
+    /// out-of-calendar, unknown or malformed field makes
+    /// [`dates_well_formed`](DateValidity::dates_well_formed) false.
     ///
     /// `today` is an explicit reference date rather than a reading of the system
     /// clock, so the answer is deterministic and the crate stays clock-free:
@@ -475,8 +465,8 @@ impl crate::MrzData {
     /// assert!(!doc.validity(Date::new(2020, 1, 1)).in_date);
     /// ```
     pub fn validity(&self, today: Date) -> DateValidity {
-        let dob = parse_iso(&self.date_of_birth);
-        let exp = parse_iso(&self.date_of_expiry);
+        let dob = self.date_of_birth.calendar();
+        let exp = self.date_of_expiry.calendar();
         let (in_date, days_until_expiry) = match exp {
             Some(e) => {
                 let days = e.to_epoch_days() - today.to_epoch_days();

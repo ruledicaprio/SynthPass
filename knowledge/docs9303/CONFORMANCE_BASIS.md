@@ -394,7 +394,10 @@ change that arithmetic; it pins it with `checksum.rs`'s
 `td3_all_filler_dob_is_a_valid_field_not_a_bad_read` /
 `td1_all_filler_dob_reports_unknown` tests, and adds
 `dates::DateCompleteness` / `dates::date_completeness` plus
-`MrzData::date_of_birth_completeness` so a caller can distinguish this case
+`MrzData::date_of_birth_completeness` (since mrz 0.8.0, ADR-0019: the
+`MrzDate::Unknown` / `MrzDate::PartiallyUnknown` variants of
+`MrzData::date_of_birth` itself, with `MrzDate::completeness()` returning the
+same `DateCompleteness`) so a caller can distinguish this case
 from an OCR-garbage read, which was previously impossible: a complete date
 is reshaped from six characters to ten (`YYYY-MM-DD`) by `expand_date`, so
 the original raw `YYMMDD` field is not recoverable from `date_of_birth`

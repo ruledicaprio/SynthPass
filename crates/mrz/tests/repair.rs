@@ -180,7 +180,7 @@ fn an_undamaged_zone_is_unaffected() {
     let (l1, l2, l3) = td1_zone();
     let parsed = mrz::parse_td1(&l1, &l2, &l3).expect("parses");
     assert!(parsed.valid());
-    assert_eq!(parsed.date_of_expiry, "2030-12-30");
+    assert_eq!(parsed.date_of_expiry.to_string(), "2030-12-30");
 
     for line in [&l1, &l2, &l3] {
         assert_eq!(width_candidates(line, 30), vec![line.to_string()]);

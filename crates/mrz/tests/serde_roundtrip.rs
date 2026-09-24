@@ -56,3 +56,25 @@ fn check_states_serialize_true_false_and_absent_as_null() {
     let tampered_checks = serde_json::to_value(&tampered.checks).expect("serialize TD3 checks");
     assert_eq!(tampered_checks["date_of_birth"], false);
 }
+
+#[test]
+fn typed_fields_serialise_as_their_text_form() {
+    let doc = parse_td3(TD3_L1, TD3_L2).unwrap();
+    let json = serde_json::to_value(&doc).expect("serialize");
+    assert_eq!(json["date_of_birth"], "1974-08-12");
+    assert_eq!(json["date_of_expiry"], "2012-04-15");
+    assert_eq!(json["sex"], "F");
+    assert!(json
+        .as_object()
+        .expect("an object")
+        .get("date_of_birth_completeness")
+        .is_none());
+
+    let zone = mrz::format_td3(&mrz::Td3Fields {
+        sex: "X".into(),
+        ..Default::default()
+    });
+    let (l1, l2) = zone.split_once('\n').unwrap();
+    let unspecified = serde_json::to_value(parse_td3(l1, l2).unwrap()).expect("serialize");
+    assert_eq!(unspecified["sex"], "<");
+}

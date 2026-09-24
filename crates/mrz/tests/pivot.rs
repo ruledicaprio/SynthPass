@@ -60,7 +60,8 @@ fn birth_date_lands_in_the_intended_century_at_and_around_each_pivot() {
 
         let expected = format!("{expected_century}{yy:02}-06-15");
         assert_eq!(
-            d.date_of_birth, expected,
+            d.date_of_birth.to_string(),
+            expected,
             "pivot {pivot}, yy {yy}: expected {expected}, got {}",
             d.date_of_birth
         );
@@ -80,7 +81,8 @@ fn expiry_date_is_always_20xx_regardless_of_pivot() {
             let d = parse_td3_with(l1, l2, &opts).unwrap();
             let expected = format!("20{yy:02}-06-15");
             assert_eq!(
-                d.date_of_expiry, expected,
+                d.date_of_expiry.to_string(),
+                expected,
                 "pivot {pivot}, yy {yy}: expected {expected}, got {}",
                 d.date_of_expiry
             );
@@ -97,7 +99,10 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
         let (l1, l2) = mrz.split_once('\n').unwrap();
         let opts = ParseOptions::default().with_pivot_yy(pivot);
         let d = parse_td3_with(l1, l2, &opts).unwrap();
-        assert_eq!(d.date_of_birth, format!("{expected_century}29-02-29"));
+        assert_eq!(
+            d.date_of_birth.to_string(),
+            format!("{expected_century}29-02-29")
+        );
     }
 
     // 000229: yy=00 is the sharp Gregorian case where the century *does*
@@ -111,7 +116,10 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
     let (l1, l2) = mrz_00.split_once('\n').unwrap();
 
     let d_2000s = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(0)).unwrap();
-    assert_eq!(d_2000s.date_of_birth, "2000-02-29");
+    assert_eq!(
+        d_2000s.date_of_birth,
+        mrz::MrzDate::Calendar(mrz::Date::new(2000, 2, 29))
+    );
     assert!(
         d_2000s
             .validity(mrz::Date::new(2030, 1, 1))
@@ -125,7 +133,11 @@ fn leap_day_birth_dates_expand_to_the_correct_century_leap_status() {
     let mrz_01 = td3_with_dates("010229", "300101");
     let (l1, l2) = mrz_01.split_once('\n').unwrap();
     let d_1901 = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(0)).unwrap();
-    assert_eq!(d_1901.date_of_birth, "1901-02-29");
+    assert_eq!(
+        d_1901.date_of_birth,
+        mrz::MrzDate::OutOfCalendar(mrz::Date::new(1901, 2, 29))
+    );
+    assert_eq!(d_1901.date_of_birth.to_string(), "1901-02-29");
     assert!(
         !d_1901
             .validity(mrz::Date::new(2030, 1, 1))

@@ -6,12 +6,12 @@
 //! every `samples/ocr_fixtures/**/*.json` zone and compares the result with
 //! `tests/fixtures/mrz_wire_golden.jsonl`.
 //!
-//! It was blessed from `String`-typed `MrzData`, *before* ADR-0019 swapped the
-//! dates and sex for `MrzDate` and `Sex`. So when that swap lands, this test is
-//! the detector: the diff must show exactly the declared wire changes (the
-//! removed `date_of_birth_completeness` key, and sex cells that are not `M`/`F`
-//! serialising as their zone character instead of `"X"`) and nothing else. An
-//! empty diff at that point would mean the test never saw the new code.
+//! It was first blessed from `String`-typed `MrzData`, then re-blessed when
+//! ADR-0019 swapped the dates and sex for `MrzDate` and `Sex`. That re-bless
+//! changed exactly the declared wire deltas: the `date_of_birth_completeness`
+//! key left every line, and the four sex cells that are not `M`/`F` (`0`, `S`,
+//! `1`, `1`) serialise as their zone character instead of `"X"`. Every date is
+//! byte-identical.
 //!
 //! Each zone is parsed with the parser its shape names, not `find_and_parse`,
 //! which re-flows at least one TD1 zone into a TD2 read. A zone that does not

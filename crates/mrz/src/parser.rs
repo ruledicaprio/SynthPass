@@ -11,9 +11,11 @@ use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,
     is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
 };
-use crate::dates::{date_completeness, expand_date_with_pivot, DateCompleteness};
 use crate::repair::{solve_class_sweep, FieldKind, Resolution};
-use crate::{country_name, Checks, Format, MrzData, MrzError, ParseOptions};
+use crate::{
+    country_name, Checks, DateRole, Format, MrzData, MrzDate, MrzError, ParseOptions, RawDateField,
+    Sex,
+};
 
 /// A document number that overflowed its 9-character field.
 struct Overflow {
@@ -171,14 +173,6 @@ fn clean_name(field: &str) -> (String, String) {
     )
 }
 
-fn clean_sex(c: char) -> String {
-    match c {
-        'M' => "M".into(),
-        'F' => "F".into(),
-        _ => "X".into(),
-    }
-}
-
 fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
     for (position, c) in line.chars().enumerate() {
         if char_value(c).is_none() {
@@ -190,6 +184,38 @@ fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
         }
     }
     Ok(())
+}
+
+/// Read the six-character date field at `line[start..start + 6]`.
+///
+/// Every caller has vetted the line and its length. The error arm maps an
+/// impossible failed conversion to the same error as `ensure_charset` without
+/// panicking if this helper is called on an unvetted slice.
+fn date_field(
+    line: &str,
+    line_number: usize,
+    start: usize,
+    role: DateRole,
+    pivot_yy: u32,
+) -> Result<MrzDate, MrzError> {
+    let text = line
+        .get(start..start + 6)
+        .unwrap_or_else(|| line.get(start..).unwrap_or(""));
+    match RawDateField::try_from(text) {
+        Ok(field) => Ok(MrzDate::from_field(field, role, pivot_yy)),
+        Err(_) => {
+            let (offset, character) = text
+                .chars()
+                .enumerate()
+                .find(|&(_, c)| char_value(c).is_none())
+                .unwrap_or_else(|| (0, text.chars().next().unwrap_or('<')));
+            Err(MrzError::BadCharacter {
+                character,
+                line: Some(line_number),
+                position: start + offset,
+            })
+        }
+    }
 }
 
 /// Parse a TD3 (passport) MRZ: two lines of exactly 44 characters
@@ -205,7 +231,7 @@ fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
 /// ).unwrap();
 /// assert_eq!(doc.surname, "ERIKSSON");
 /// assert_eq!(doc.given_names, "ANNA MARIA");
-/// assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
+/// assert_eq!(doc.date_of_birth.to_string(), "1974-08-12"); // expanded to ISO 8601
 /// assert!(doc.valid());                        // every check digit verified
 /// ```
 pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
@@ -223,12 +249,12 @@ pub fn parse_td3(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 ///
 /// // The default pivot dates a `74` birth year to last century.
 /// let d = parse_td3_with(l1, l2, &ParseOptions::default()).unwrap();
-/// assert_eq!(d.date_of_birth, "1974-08-12");
+/// assert_eq!(d.date_of_birth.to_string(), "1974-08-12");
 ///
 /// // Raise the pivot past 74 and the same digits read as this century —
 /// // the check digits are unaffected, so the document still validates.
 /// let d = parse_td3_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
-/// assert_eq!(d.date_of_birth, "2074-08-12");
+/// assert_eq!(d.date_of_birth.to_string(), "2074-08-12");
 /// assert!(d.valid());
 /// ```
 pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
@@ -282,10 +308,9 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
-        date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
-        date_of_birth_completeness: date_completeness(&line2[13..19]),
-        sex: clean_sex(line2.as_bytes()[20] as char),
-        date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
+        date_of_birth: date_field(line2, 1, 13, DateRole::Birth, opts.pivot_yy)?,
+        sex: Sex::from_zone(line2.as_bytes()[20] as char),
+        date_of_expiry: date_field(line2, 1, 21, DateRole::Expiry, opts.pivot_yy)?,
         optional_data_1: opt_string(personal),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -319,11 +344,11 @@ pub fn parse_td2(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// let l2 = "D231458907UTO7408122F1204159<<<<<<<6";
 ///
 /// assert_eq!(
-///     parse_td2_with(l1, l2, &ParseOptions::default()).unwrap().date_of_birth,
+///     parse_td2_with(l1, l2, &ParseOptions::default()).unwrap().date_of_birth.to_string(),
 ///     "1974-08-12",
 /// );
 /// assert_eq!(
-///     parse_td2_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth,
+///     parse_td2_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth.to_string(),
 ///     "2074-08-12",
 /// );
 /// ```
@@ -380,10 +405,9 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
-        date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
-        date_of_birth_completeness: date_completeness(&line2[13..19]),
-        sex: clean_sex(line2.as_bytes()[20] as char),
-        date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
+        date_of_birth: date_field(line2, 1, 13, DateRole::Birth, opts.pivot_yy)?,
+        sex: Sex::from_zone(line2.as_bytes()[20] as char),
+        date_of_expiry: date_field(line2, 1, 21, DateRole::Expiry, opts.pivot_yy)?,
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -418,11 +442,11 @@ pub fn parse_td1(line1: &str, line2: &str, line3: &str) -> Result<MrzData, MrzEr
 /// let l3 = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
 ///
 /// assert_eq!(
-///     parse_td1_with(l1, l2, l3, &ParseOptions::default()).unwrap().date_of_birth,
+///     parse_td1_with(l1, l2, l3, &ParseOptions::default()).unwrap().date_of_birth.to_string(),
 ///     "1974-08-12",
 /// );
 /// assert_eq!(
-///     parse_td1_with(l1, l2, l3, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth,
+///     parse_td1_with(l1, l2, l3, &ParseOptions::default().with_pivot_yy(80)).unwrap().date_of_birth.to_string(),
 ///     "2074-08-12",
 /// );
 /// ```
@@ -489,10 +513,9 @@ pub fn parse_td1_with(
         surname,
         given_names,
         nationality: line2[15..18].trim_end_matches('<').to_string(),
-        date_of_birth: expand_date_with_pivot(&line2[0..6], true, opts.pivot_yy),
-        date_of_birth_completeness: date_completeness(&line2[0..6]),
-        sex: clean_sex(line2.as_bytes()[7] as char),
-        date_of_expiry: expand_date_with_pivot(&line2[8..14], false, opts.pivot_yy),
+        date_of_birth: date_field(line2, 1, 0, DateRole::Birth, opts.pivot_yy)?,
+        sex: Sex::from_zone(line2.as_bytes()[7] as char),
+        date_of_expiry: date_field(line2, 1, 8, DateRole::Expiry, opts.pivot_yy)?,
         optional_data_1: opt_string(optional1),
         optional_data_2: opt_string(optional2),
         mrz_lines: format!("{line1}\n{line2}\n{line3}"),
@@ -526,7 +549,7 @@ pub fn parse_mrv_a(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// let l2 = "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<";
 ///
 /// let d = parse_mrv_a_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
-/// assert_eq!(d.date_of_birth, "2069-08-06"); // `69` reads as this century past the pivot
+/// assert_eq!(d.date_of_birth.to_string(), "2069-08-06"); // `69` reads as this century past the pivot
 /// assert!(d.valid());
 /// ```
 pub fn parse_mrv_a_with(
@@ -575,10 +598,9 @@ pub fn parse_mrv_a_with(
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
-        date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
-        date_of_birth_completeness: date_completeness(&line2[13..19]),
-        sex: clean_sex(line2.as_bytes()[20] as char),
-        date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
+        date_of_birth: date_field(line2, 1, 13, DateRole::Birth, opts.pivot_yy)?,
+        sex: Sex::from_zone(line2.as_bytes()[20] as char),
+        date_of_expiry: date_field(line2, 1, 21, DateRole::Expiry, opts.pivot_yy)?,
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -612,7 +634,7 @@ pub fn parse_mrv_b(line1: &str, line2: &str) -> Result<MrzData, MrzError> {
 /// let l2 = "L898902C<3UTO6908061F9406236ZE184226";
 ///
 /// let d = parse_mrv_b_with(l1, l2, &ParseOptions::default().with_pivot_yy(80)).unwrap();
-/// assert_eq!(d.date_of_birth, "2069-08-06");
+/// assert_eq!(d.date_of_birth.to_string(), "2069-08-06");
 /// assert!(d.valid());
 /// ```
 pub fn parse_mrv_b_with(
@@ -661,10 +683,9 @@ pub fn parse_mrv_b_with(
         surname,
         given_names,
         nationality: line2[10..13].trim_end_matches('<').to_string(),
-        date_of_birth: expand_date_with_pivot(&line2[13..19], true, opts.pivot_yy),
-        date_of_birth_completeness: date_completeness(&line2[13..19]),
-        sex: clean_sex(line2.as_bytes()[20] as char),
-        date_of_expiry: expand_date_with_pivot(&line2[21..27], false, opts.pivot_yy),
+        date_of_birth: date_field(line2, 1, 13, DateRole::Birth, opts.pivot_yy)?,
+        sex: Sex::from_zone(line2.as_bytes()[20] as char),
+        date_of_expiry: date_field(line2, 1, 21, DateRole::Expiry, opts.pivot_yy)?,
         optional_data_1: opt_string(optional),
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
@@ -809,7 +830,7 @@ fn country_resolves(slice: &str) -> bool {
 fn looks_like_non_mrz_text(data: &MrzData) -> bool {
     !country_resolves(&data.issuing_country)
         && !country_resolves(&data.nationality)
-        && data.date_of_birth_completeness == DateCompleteness::Malformed
+        && matches!(data.date_of_birth, MrzDate::Malformed(_))
 }
 
 fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String {
@@ -2062,6 +2083,35 @@ fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn date_field_reads_a_vetted_slice() {
+        assert_eq!(
+            date_field("<<740812", 1, 2, DateRole::Birth, 30),
+            Ok(MrzDate::Calendar(crate::Date::new(1974, 8, 12)))
+        );
+    }
+
+    #[test]
+    fn date_field_maps_an_unvetted_slice_to_bad_character_not_a_panic() {
+        let line = format!("{}74a812", "<".repeat(13));
+        assert_eq!(
+            date_field(&line, 1, 13, DateRole::Birth, 30),
+            Err(MrzError::BadCharacter {
+                character: 'a',
+                line: Some(1),
+                position: 15
+            })
+        );
+        assert_eq!(
+            date_field("7408", 1, 0, DateRole::Expiry, 30),
+            Err(MrzError::BadCharacter {
+                character: '7',
+                line: Some(1),
+                position: 0
+            })
+        );
+    }
     use core::cmp::Ordering;
 
     fn checks(states: [Option<bool>; 5]) -> Checks {

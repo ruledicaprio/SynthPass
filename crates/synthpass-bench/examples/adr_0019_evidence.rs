@@ -4,7 +4,7 @@
 //! ADR-0019 replaces `MrzData`'s `String` dates and sex with typed values. Its
 //! argument is that the strings hide real distinctions: a date field can hold
 //! a calendar day, six digits that are not a calendar day, an issuer's
-//! "partly unknown", an issuer's "unknown", or a misread; and `clean_sex`
+//! "partly unknown", an issuer's "unknown", or a misread; and the pre-0.8 `clean_sex`
 //! collapses every character other than `M`/`F` into `"X"`, ICAO's word for
 //! *unspecified*. An argument like that is only as good as the claim that
 //! those cases occur. This counts them over every tracked ground-truth zone
@@ -214,7 +214,7 @@ fn main() {
         .sum();
     assert_eq!(
         non_conformant, 4,
-        "sex cells today's clean_sex turns into \"X\""
+        "sex cells the pre-0.8 clean_sex turns into \"X\""
     );
     // In checksum-valid zones, the only non-calendar dates are six-digit
     // specimen placeholders; the partially-unknown and malformed slices above

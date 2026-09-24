@@ -1324,9 +1324,11 @@ fn mrz_field(field: CoreField, truth: &mrz::MrzData) -> String {
         CoreField::Surname => truth.surname.clone(),
         CoreField::GivenNames => truth.given_names.clone(),
         CoreField::Nationality => truth.nationality.clone(),
-        CoreField::DateOfBirth => truth.date_of_birth.clone(),
-        CoreField::Sex => truth.sex.clone(),
-        CoreField::DateOfExpiry => truth.date_of_expiry.clone(),
+        CoreField::DateOfBirth => truth.date_of_birth.to_string(),
+        CoreField::Sex => synthpass_core::mrz_product::sex(truth.sex)
+            .unwrap_or_default()
+            .to_string(),
+        CoreField::DateOfExpiry => truth.date_of_expiry.to_string(),
         CoreField::PersonalNumber => truth.personal_number().unwrap_or_default().to_string(),
         CoreField::OptionalData1 => synthpass_die::mrz_reader::reported_optional_data_1(truth)
             .unwrap_or_default()

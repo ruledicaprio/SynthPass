@@ -25,7 +25,7 @@
 //! ).unwrap();
 //!
 //! assert_eq!(doc.surname, "ERIKSSON");
-//! assert_eq!(doc.date_of_birth, "1974-08-12"); // expanded to ISO 8601
+//! assert_eq!(doc.date_of_birth.to_string(), "1974-08-12"); // expanded to ISO 8601
 //!
 //! // Per-field evidence, not a single boolean.
 //! assert_eq!(doc.checks.document_number, Some(true));
@@ -62,9 +62,12 @@
 //!   [`MrzData`], [`Checks`], [`Format`], [`Field`], [`SequenceCompleteness`],
 //!   [`ParseOptions`], [`Date`], [`DateValidity`], [`DateCompleteness`], and the
 //!   five emitter inputs ([`Td3Fields`], [`Td2Fields`], [`Td1Fields`],
-//!   [`MrvAFields`], [`MrvBFields`]).
+//!   [`MrvAFields`], [`MrvBFields`]). [`MrzDate`] and [`Sex`] implement both by
+//!   hand as their text form (ADR-0020), so `MrzData`'s dates and sex serialise
+//!   as strings.
 //! - **`zeroize`** — derives `ZeroizeOnDrop` on [`MrzData`], wiping its
-//!   PII-bearing strings from memory when the value is dropped.
+//!   PII-bearing fields from memory when the value is dropped. Best-effort: see
+//!   [`MrzData`] for what it does not reach.
 //!
 //! # Stability
 //!
@@ -169,7 +172,7 @@ pub use translit::{
 /// let text = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
 ///             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 /// let doc = find_and_parse_with(text, &opts).unwrap();
-/// assert_eq!(doc.date_of_birth, "1974-08-12"); // 74 > 30, so last century
+/// assert_eq!(doc.date_of_birth.to_string(), "1974-08-12"); // 74 > 30, so last century
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -321,7 +324,7 @@ impl Checks {
 /// [`find_and_parse`] attempt.
 ///
 /// A successful read reports how complete it is through [`MrzData`]'s
-/// `checks` and `date_of_birth_completeness`; a scan that found only part of
+/// `checks` and the variant of its `date_of_birth`; a scan that found only part of
 /// a zone reports it through [`MrzError::IncompleteSequence`]. Those are two
 /// differently shaped vocabularies, and this type lets a caller hold *one*
 /// value instead of branching on both arms of `Result<MrzData, MrzError>` —
@@ -389,10 +392,10 @@ pub enum SequenceCompleteness {
     Complete {
         /// Per-field check-digit evidence — see [`MrzData::checks`].
         checks: Checks,
-        /// Date-of-birth field completeness — see
-        /// [`MrzData::date_of_birth_completeness`]. No analogous signal
-        /// exists for date-of-expiry today; that asymmetry is inherited
-        /// from [`DateCompleteness`] itself, not introduced here.
+        /// Date-of-birth field completeness: [`MrzDate::completeness`] of
+        /// [`MrzData::date_of_birth`]. Expiry carries the same
+        /// classification on [`MrzData::date_of_expiry`]; this variant has
+        /// reported birth only since it shipped, and keeps that shape.
         date_of_birth: DateCompleteness,
     },
     /// Fewer than `lines_expected` lines were found — mirrors
@@ -531,19 +534,28 @@ impl Format {
 /// assert_eq!(doc.surname, "ERIKSSON");
 /// assert_eq!(doc.given_names, "ANNA MARIA"); // `<` separators become spaces
 /// assert_eq!(doc.nationality, "UTO");
-/// assert_eq!(doc.sex, "F");
-/// assert_eq!(doc.date_of_expiry, "2012-04-15");
+/// assert_eq!(doc.sex, mrz::Sex::Female);
+/// assert_eq!(doc.date_of_expiry.to_string(), "2012-04-15");
 /// assert_eq!(doc.optional_data_1.as_deref(), Some("ZE184226B")); // the primary optional-data slot...
 /// assert_eq!(doc.personal_number(), Some("ZE184226B"));         // ...which TD3 alone names a personal number
 /// assert_eq!(doc.optional_data_2, None);                        // the second slot is TD1's alone
 /// assert_eq!(doc.mrz_lines.lines().count(), 2); // exactly what was validated
 /// ```
 ///
-/// The `zeroize` feature (off by default, kept off for the `wasm32-unknown-unknown`
-/// browser-demo build so this crate stays zero-dependency there) derives
-/// `ZeroizeOnDrop`, wiping the PII-bearing `String` fields from memory when a
-/// value is dropped. `format` and `checks` carry no PII and are `Copy`, so
-/// they're `#[zeroize(skip)]`.
+/// The `zeroize` feature (off by default) derives `ZeroizeOnDrop`. When a
+/// value is dropped, its `String` and `Option<String>` fields are wiped, and
+/// so are `date_of_birth`, `date_of_expiry` and `sex`, through the `Zeroize`
+/// impls of [`MrzDate`] and [`Sex`]. The wipe is **best-effort**:
+///
+/// - `format`, `document_number_legacy_encoding` and `checks` are
+///   `#[zeroize(skip)]`. They describe the layout and arithmetic, not the holder.
+/// - [`MrzDate`] wipes its payload, but its variant remains, revealing the kind
+///   of date read. [`Sex`] overwrites the whole value, including its variant.
+/// - Copies made before the drop are out of reach: [`MrzDate`] and [`Sex`]
+///   are `Copy`, and `clone`, `to_string` and `serde` buffers are not wiped.
+/// - `mrz-wasm`, the browser-demo build for `wasm32-unknown-unknown`, never
+///   enables the feature, so this crate stays zero-dependency there and wipes
+///   nothing.
 ///
 /// `#[non_exhaustive]`: this struct grows as the crate decodes more of the
 /// zone — `document_number_full` arrived in 0.4.0, the two optional-data
@@ -589,31 +601,33 @@ pub struct MrzData {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// ISO 8601 (`YYYY-MM-DD`), century inferred (see [`expand_date`]).
-    /// Holds the raw, unexpanded `YYMMDD` field instead whenever
-    /// [`date_of_birth_completeness`](Self::date_of_birth_completeness) is
-    /// not [`DateCompleteness::Complete`] — see that field's doc comment.
-    pub date_of_birth: String,
-    /// Whether the holder's date of birth was fully known, partly filled with
-    /// `<`, or entirely unknown (Doc 9303 Part 3 §4.8, `:547`). `date_of_birth`
-    /// holds the raw field rather than an ISO date whenever this is not
-    /// [`DateCompleteness::Complete`].
+    /// The holder's date of birth, as the field holds it: see [`MrzDate`].
+    /// Six digits are [`MrzDate::Calendar`], or [`MrzDate::OutOfCalendar`]
+    /// when they name no real day, with the century inferred from
+    /// [`ParseOptions::pivot_yy`] (see [`expand_date`]). Doc 9303 Part 3 §4.8
+    /// fillers are [`MrzDate::PartiallyUnknown`] or [`MrzDate::Unknown`]; any
+    /// other character is [`MrzDate::Malformed`].
     ///
-    /// An unknown or partially unknown date of birth is not a bad read: Part
+    /// An unknown or partially unknown date of birth is not a bad read. Part
     /// 3 §4.8 explicitly lets an issuer fill unknown positions with `<`, and
-    /// a filler counts as zero for check-digit purposes (`:563`), so an
-    /// all-filler date of birth with check digit `0` verifies. This field is
-    /// how a caller distinguishes "legitimately unknown, per the issuer" from
-    /// "garbage OCR" — `DateValidity::dates_well_formed` stays `false` either
-    /// way, since an unknown date is genuinely not a parseable calendar date,
-    /// so that struct alone cannot make the distinction.
-    #[cfg_attr(feature = "zeroize", zeroize(skip))]
-    pub date_of_birth_completeness: DateCompleteness,
-    /// "M", "F" or "X" (unspecified).
-    pub sex: String,
-    /// ISO 8601 (`YYYY-MM-DD`), always read as 20xx (see [`expand_date`]).
-    /// Holds the raw `YYMMDD` field instead when it is not six digits.
-    pub date_of_expiry: String,
+    /// a filler counts as zero for check-digit purposes, so an all-filler date
+    /// of birth with check digit `0` verifies. The variant distinguishes an
+    /// issuer's unknown from OCR garbage. [`MrzDate::completeness`] gives the
+    /// same answer as [`DateCompleteness`], and [`MrzDate::calendar`] gives a
+    /// usable date when one exists.
+    ///
+    /// Its text form is ISO `YYYY-MM-DD` for six digits and the raw field
+    /// otherwise: exactly the string this field held before 0.8.0 (ADR-0020).
+    pub date_of_birth: MrzDate,
+    /// The sex cell: [`Sex::Male`], [`Sex::Female`], [`Sex::Unspecified`] for
+    /// the filler `<`, or [`Sex::NonConformant`] holding any other character
+    /// as read. No check digit covers this cell. Its text form is the zone
+    /// character; before 0.8.0 every cell other than `M`/`F` read as `"X"`.
+    pub sex: Sex,
+    /// The document's date of expiry, as the field holds it: the same
+    /// [`MrzDate`] classification as [`date_of_birth`](Self::date_of_birth),
+    /// except that six digits always read as 20xx (see [`expand_date`]).
+    pub date_of_expiry: MrzDate,
     /// The format's *primary* optional-data element, trailing filler trimmed,
     /// and without the overflow remainder when a long document number spilled
     /// into it: TD1 line 1 positions 16-30 (Doc 9303 Part 5's "optional data
@@ -839,7 +853,7 @@ impl MrzData {
 
     /// This record's [`SequenceCompleteness`] — always
     /// [`SequenceCompleteness::Complete`], computed from `self.checks`/
-    /// `self.date_of_birth_completeness` rather than stored separately.
+    /// `self.date_of_birth.completeness()` rather than stored separately.
     /// [`SequenceCompleteness::Partial`] only ever comes from
     /// [`SequenceCompleteness::from_parse_result`] on the `Err` side of a
     /// [`find_and_parse`] call, since a `Partial`
@@ -864,7 +878,7 @@ impl MrzData {
     pub fn sequence_completeness(&self) -> SequenceCompleteness {
         SequenceCompleteness::Complete {
             checks: self.checks.clone(),
-            date_of_birth: self.date_of_birth_completeness,
+            date_of_birth: self.date_of_birth.completeness(),
         }
     }
 }
@@ -1149,10 +1163,10 @@ mod tests {
         assert_eq!(d.given_names, "ANNA MARIA");
         assert_eq!(d.document_number, "L898902C3");
         assert_eq!(d.nationality, "UTO");
-        assert_eq!(d.date_of_birth, "1974-08-12");
-        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Complete);
-        assert_eq!(d.sex, "F");
-        assert_eq!(d.date_of_expiry, "2012-04-15");
+        assert_eq!(d.date_of_birth.to_string(), "1974-08-12");
+        assert_eq!(d.date_of_birth.completeness(), DateCompleteness::Complete);
+        assert_eq!(d.sex, Sex::Female);
+        assert_eq!(d.date_of_expiry.to_string(), "2012-04-15");
         assert_eq!(d.personal_number(), Some("ZE184226B"));
     }
 
@@ -1179,8 +1193,9 @@ mod tests {
         assert_eq!(l2.len(), TD3_L2.len());
         let d = parse_td3(TD3_L1, &l2).unwrap();
         assert_eq!(d.checks.date_of_birth, Some(true));
-        assert_eq!(d.date_of_birth, "<<<<<<"); // left unexpanded, not a lie
-        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
+        assert_eq!(d.date_of_birth, MrzDate::Unknown); // an issuer's unknown
+        assert_eq!(d.date_of_birth.to_string(), "<<<<<<"); // raw text form
+        assert_eq!(d.date_of_birth.completeness(), DateCompleteness::Unknown);
     }
 
     // Mrz_Field_Layout.md §2.3: an unused TD3 personal number's check digit
@@ -1298,9 +1313,9 @@ mod tests {
         assert_eq!(d.document_number, "D23145890");
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.given_names, "ANNA MARIA");
-        assert_eq!(d.date_of_birth, "1974-08-12");
-        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Complete);
-        assert_eq!(d.date_of_expiry, "2012-04-15");
+        assert_eq!(d.date_of_birth.to_string(), "1974-08-12");
+        assert_eq!(d.date_of_birth.completeness(), DateCompleteness::Complete);
+        assert_eq!(d.date_of_expiry.to_string(), "2012-04-15");
     }
 
     #[test]
@@ -1312,8 +1327,8 @@ mod tests {
         assert_eq!(l2.len(), TD1_L2.len());
         let d = parse_td1(TD1_L1, &l2, TD1_L3).unwrap();
         assert_eq!(d.checks.date_of_birth, Some(true));
-        assert_eq!(d.date_of_birth, "<<<<<<");
-        assert_eq!(d.date_of_birth_completeness, DateCompleteness::Unknown);
+        assert_eq!(d.date_of_birth, MrzDate::Unknown);
+        assert_eq!(d.date_of_birth.completeness(), DateCompleteness::Unknown);
     }
 
     // Official ICAO 9303 part 6 TD2 specimen (Utopia / Anna Maria Eriksson),
@@ -1321,6 +1336,24 @@ mod tests {
     // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`.
     const TD2_L1: &str = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
     const TD2_L2: &str = "D231458907UTO7408122F1204159<<<<<<<6";
+
+    #[test]
+    fn sex_cell_is_classified_not_collapsed() {
+        for (cell, expected) in [
+            ('M', Sex::Male),
+            ('F', Sex::Female),
+            ('<', Sex::Unspecified),
+            ('X', Sex::NonConformant('X')),
+            ('1', Sex::NonConformant('1')),
+        ] {
+            let mut l2 = TD3_L2.to_string();
+            l2.replace_range(20..21, &cell.to_string());
+            let d = parse_td3(TD3_L1, &l2).unwrap();
+            assert!(d.valid(), "cell {cell:?}: checks {:?}", d.checks);
+            assert_eq!(d.sex, expected, "cell {cell:?}");
+            assert_eq!(d.sex.to_string(), cell.to_string());
+        }
+    }
 
     #[test]
     fn td2_specimen_fully_valid() {
@@ -1333,9 +1366,9 @@ mod tests {
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.given_names, "ANNA MARIA");
         assert_eq!(d.nationality, "UTO");
-        assert_eq!(d.date_of_birth, "1974-08-12");
-        assert_eq!(d.sex, "F");
-        assert_eq!(d.date_of_expiry, "2012-04-15");
+        assert_eq!(d.date_of_birth.to_string(), "1974-08-12");
+        assert_eq!(d.sex, Sex::Female);
+        assert_eq!(d.date_of_expiry.to_string(), "2012-04-15");
     }
 
     #[test]
@@ -1396,7 +1429,7 @@ mod tests {
         assert_eq!(d.surname, "SPECIMEN");
         assert_eq!(d.given_names, "SPECIMEN");
         assert_eq!(d.document_number, "007007007");
-        assert_eq!(d.date_of_birth, "1982-12-25");
+        assert_eq!(d.date_of_birth.to_string(), "1982-12-25");
     }
 
     #[test]
@@ -1427,8 +1460,8 @@ mod tests {
         assert_eq!(d.document_number, "IE9876543");
         assert_eq!(d.surname, "VZOREC");
         assert_eq!(d.given_names, "JANA");
-        assert_eq!(d.date_of_birth, "1985-06-28");
-        assert_eq!(d.date_of_expiry, "2032-03-28");
+        assert_eq!(d.date_of_birth.to_string(), "1985-06-28");
+        assert_eq!(d.date_of_expiry.to_string(), "2032-03-28");
         // The trailing K in the EMŠO field is a filler misread that check
         // digits cannot catch (K ≡ < mod 10) — heuristic cleanup handles it.
         assert_eq!(d.optional_data_1.as_deref(), Some("2806985505145"));
@@ -1491,7 +1524,7 @@ mod tests {
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.given_names, "ANNA MARIA");
         assert_eq!(d.nationality, "UTO");
-        assert_eq!(d.sex, "F");
+        assert_eq!(d.sex, Sex::Female);
         // The document-number field is `L898902C<`: eight characters padded to
         // nine with a filler, check digit 3. The filler is padding, not the
         // long-number signal — that would need the *check digit* position to
@@ -1504,14 +1537,14 @@ mod tests {
             None,
             "a visa prints no personal number"
         );
-        assert_eq!(d.date_of_birth, "1969-08-06");
+        assert_eq!(d.date_of_birth.to_string(), "1969-08-06");
         // Doc 9303 defines no century rule (part 3 §4.8 is silent), so this
         // crate's own policy applies: expiry is always read as 20xx. ICAO's
         // specimen is a 1990s document, so that policy renders 940623 as 2094
         // rather than 1994. Pinned deliberately — it is the documented
         // heuristic behaving as designed, and the clearest illustration of its
         // limit. See `dates::expand_date`.
-        assert_eq!(d.date_of_expiry, "2094-06-23");
+        assert_eq!(d.date_of_expiry.to_string(), "2094-06-23");
     }
 
     #[test]
@@ -1532,8 +1565,8 @@ mod tests {
             None,
             "a visa prints no personal number"
         );
-        assert_eq!(d.date_of_birth, "1969-08-06");
-        assert_eq!(d.date_of_expiry, "2094-06-23");
+        assert_eq!(d.date_of_birth.to_string(), "1969-08-06");
+        assert_eq!(d.date_of_expiry.to_string(), "2094-06-23");
     }
 
     // Hand-derived by this crate — NOT an ICAO-published specimen. Kept
@@ -1564,9 +1597,9 @@ mod tests {
         assert_eq!(d.surname, "ERIKSSON");
         assert_eq!(d.given_names, "ANNA MARIA");
         assert_eq!(d.nationality, "BRA");
-        assert_eq!(d.date_of_birth, "1985-02-21");
-        assert_eq!(d.sex, "F");
-        assert_eq!(d.date_of_expiry, "2027-03-14");
+        assert_eq!(d.date_of_birth.to_string(), "1985-02-21");
+        assert_eq!(d.sex, Sex::Female);
+        assert_eq!(d.date_of_expiry.to_string(), "2027-03-14");
         assert_eq!(d.document_number, "XK9305487");
         assert_eq!(d.optional_data_1.as_deref(), Some("R5T6U7V8W9"));
         assert_eq!(
@@ -1636,8 +1669,8 @@ mod tests {
         assert!(d.valid(), "checks: {:?}", d.checks);
         assert_eq!(d.format, Format::MrvB);
         assert_eq!(d.nationality, "DEU");
-        assert_eq!(d.date_of_birth, "1992-01-01");
-        assert_eq!(d.date_of_expiry, "2027-06-30");
+        assert_eq!(d.date_of_birth.to_string(), "1992-01-01");
+        assert_eq!(d.date_of_expiry.to_string(), "2027-06-30");
         assert_eq!(d.document_number, "L23456789");
         assert_eq!(d.optional_data_1.as_deref(), Some("QW12ER34"));
         assert_eq!(
@@ -1845,12 +1878,12 @@ mod tests {
     fn pivot_is_configurable_per_call() {
         // Birth dates land in the past relative to the pivot, expiry ahead.
         let d = parse_td3(TD3_L1, TD3_L2).unwrap();
-        assert_eq!(d.date_of_birth, "1974-08-12");
+        assert_eq!(d.date_of_birth.to_string(), "1974-08-12");
 
         // With a pivot of 80, YY=74 reads as 2074 rather than 1974.
         let opts = ParseOptions::default().with_pivot_yy(80);
         let d = parse_td3_with(TD3_L1, TD3_L2, &opts).unwrap();
-        assert_eq!(d.date_of_birth, "2074-08-12");
+        assert_eq!(d.date_of_birth.to_string(), "2074-08-12");
         // Check digits are untouched by the pivot — it only affects display.
         assert!(d.valid());
     }

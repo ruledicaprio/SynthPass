@@ -1087,21 +1087,20 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
         v2.confidence.prove(CoreField::DocumentNumber);
     }
 
-    // The raw field holds `YYMMDD`, not ISO `YYYY-MM-DD`, whenever the date
-    // is not fully known (see `MrzData::date_of_birth_completeness`'s doc
-    // comment) — promoting in that case would leak a non-ISO value into an
-    // ISO-typed slot.
+    // Promote only a six-digit date. Incomplete dates retain their raw field
+    // rather than ISO text. `Complete` still admits `OutOfCalendar`, exactly
+    // as the pre-0.8 gate did; narrowing that is a separately measured change.
     if m.checks.date_of_birth == Some(true)
-        && m.date_of_birth_completeness == mrz::DateCompleteness::Complete
+        && m.date_of_birth.completeness() == mrz::DateCompleteness::Complete
     {
         v2.fields
-            .set(CoreField::DateOfBirth, Some(m.date_of_birth.clone()));
+            .set(CoreField::DateOfBirth, Some(m.date_of_birth.to_string()));
         v2.confidence.prove(CoreField::DateOfBirth);
     }
 
     if m.checks.date_of_expiry == Some(true) {
         v2.fields
-            .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.clone()));
+            .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.to_string()));
         v2.confidence.prove(CoreField::DateOfExpiry);
     }
 
@@ -1174,7 +1173,7 @@ pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
         parts.push(format!("document_number={}", m.document_number));
     }
     if m.checks.date_of_birth == Some(true)
-        && m.date_of_birth_completeness == mrz::DateCompleteness::Complete
+        && m.date_of_birth.completeness() == mrz::DateCompleteness::Complete
     {
         parts.push(format!("date_of_birth={}", m.date_of_birth));
     }
@@ -2317,12 +2316,12 @@ mod tests {
         // confidence.
         assert_eq!(
             v2.fields.date_of_birth.as_deref(),
-            Some(m.date_of_birth.as_str())
+            Some(m.date_of_birth.to_string().as_str())
         );
         assert_eq!(v2.confidence.date_of_birth, 1.0);
         assert_eq!(
             v2.fields.date_of_expiry.as_deref(),
-            Some(m.date_of_expiry.as_str())
+            Some(m.date_of_expiry.to_string().as_str())
         );
         assert_eq!(v2.confidence.date_of_expiry, 1.0);
         assert_eq!(v2.fields.personal_number.as_deref(), m.personal_number());
@@ -2345,14 +2344,14 @@ mod tests {
 
         let mut v2 = llm_shaped_v2();
         // The LLM already guessed the correct date of birth.
-        v2.fields.date_of_birth = Some(m.date_of_birth.clone());
+        v2.fields.date_of_birth = Some(m.date_of_birth.to_string());
         let before = v2.confidence.date_of_birth;
 
         promote_verified_mrz_fields(&mut v2, &m);
 
         assert_eq!(
             v2.fields.date_of_birth.as_deref(),
-            Some(m.date_of_birth.as_str())
+            Some(m.date_of_birth.to_string().as_str())
         );
         assert!(
             v2.confidence.date_of_birth >= before,
@@ -2480,6 +2479,33 @@ mod tests {
     }
 
     #[test]
+    fn out_of_calendar_dob_is_still_promoted_in_5b() {
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "000000".into(),
+            date_of_expiry: "120415".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let zone = mrz::format_td3(&fields);
+        let (l1, l2) = zone.split_once('\n').unwrap();
+        let m = mrz::parse_td3(l1, l2).unwrap();
+        assert_eq!(
+            m.date_of_birth,
+            mrz::MrzDate::OutOfCalendar(mrz::Date::new(2000, 0, 0))
+        );
+        assert_eq!(m.checks.date_of_birth, Some(true));
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+        assert_eq!(v2.fields.date_of_birth.as_deref(), Some("2000-00-00"));
+        assert_eq!(v2.confidence.date_of_birth, 1.0);
+    }
+
+    #[test]
     fn incomplete_date_of_birth_is_not_promoted() {
         // TD1's optional-data date-of-birth field left entirely unknown
         // (Doc 9303 Part 3 §4.8): a legitimate issuer omission, not a bad
@@ -2504,7 +2530,7 @@ mod tests {
         )
         .expect("TD1 fixture parses");
         assert_eq!(
-            m.date_of_birth_completeness,
+            m.date_of_birth.completeness(),
             mrz::DateCompleteness::Unknown,
             "sanity: an all-filler date of birth is entirely unknown, not malformed"
         );
@@ -2748,12 +2774,12 @@ mod tests {
             let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
             assert_eq!(
                 v2.fields.date_of_birth.as_deref(),
-                Some(m.date_of_birth.as_str())
+                Some(m.date_of_birth.to_string().as_str())
             );
             assert_eq!(v2.confidence.date_of_birth, 1.0);
             assert_eq!(
                 v2.fields.date_of_expiry.as_deref(),
-                Some(m.date_of_expiry.as_str())
+                Some(m.date_of_expiry.to_string().as_str())
             );
             assert_eq!(v2.confidence.date_of_expiry, 1.0);
             // This fixture's personal-number field is all filler (`m.checks
@@ -2771,8 +2797,11 @@ mod tests {
 
             // The v1 projection gets the same promotion for free.
             let v1 = result.extracted.as_ref().expect("v1 json populated");
-            assert_eq!(v1["date_of_birth"], json_str(&m.date_of_birth));
-            assert_eq!(v1["date_of_expiry"], json_str(&m.date_of_expiry));
+            assert_eq!(v1["date_of_birth"], json_str(&m.date_of_birth.to_string()));
+            assert_eq!(
+                v1["date_of_expiry"],
+                json_str(&m.date_of_expiry.to_string())
+            );
         }
 
         assert_eq!(

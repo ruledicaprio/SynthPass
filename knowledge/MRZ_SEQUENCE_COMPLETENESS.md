@@ -10,6 +10,11 @@
 > five-key `check_states` map. This keeps the historical chunk record below
 > intact while correcting its former boolean convention.
 >
+> **ADR-0019 follow-up (2026-09-23):** `MrzData::date_of_birth_completeness` is gone. Both
+> dates are now `mrz::MrzDate`, whose `completeness()` returns the same `DateCompleteness`;
+> `SequenceCompleteness::Complete { date_of_birth }` keeps its shape and is computed from it.
+> This settles chunk 5's open question below. The chunk record is kept as written.
+>
 > **It stays in `knowledge/` rather than moving to `archive/` deliberately.** It is not
 > *superseded* — it is *finished*, and seventeen source files across `crates/mrz`,
 > `crates/synthpass-bench` and `crates/synthpass-die` cite it by path as the rationale of
@@ -53,7 +58,7 @@ Four separate, uncoordinated "is this record complete" vocabularies exist today:
 - `Checks` (`crates/mrz/src/lib.rs`) — 5 optional check states: verified,
   failed, or structurally not printed.
 - `DateCompleteness` (`crates/mrz/src/dates.rs`) — `Complete`/`PartiallyUnknown`/
-  `Unknown`/`Malformed`, scoped to date-of-birth only.
+  `Unknown`/`Malformed`, scoped to date-of-birth only (then; since ADR-0019 both dates are an `MrzDate`, whose `completeness()` returns it).
 - `repair::Resolution` (`crates/mrz/src/repair.rs`) — `Unique`/`Ambiguous{candidates}`/
   `Unresolvable`, per-field, ad hoc.
 - `synthpass_core::fusion::check_line1_integrity` — cross-field heuristics with **no**
@@ -343,6 +348,10 @@ missing" — do not repeat that mistake here).
 `date_of_expiry` get an analogous completeness treatment, or does the doc/type
 just document the current DOB-only asymmetry as-is? Either is fine; pick one and
 say so in the doctest/doc comment rather than leaving it ambiguous.
+
+**Resolved (ADR-0019, 2026-09-23):** expiry gets the same treatment through its type. Both dates
+are `mrz::MrzDate`, and `MrzDate::completeness()` answers for either.
+`SequenceCompleteness::Complete` keeps reporting birth only.
 
 Deliberately does **not** try to fold in `fusion::check_line1_integrity`'s
 verdict — that heuristic layer stays in `synthpass-core` on purpose (no

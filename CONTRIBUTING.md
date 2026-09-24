@@ -323,10 +323,13 @@ on every consumer.
 Which slot a change lands in follows from how the type is declared:
 
 - The output types — `MrzData`, `Checks`, `Format`, `Field`, `MrzError`,
-  `SequenceCompleteness`, and the enums `PassportType`, `DateCompleteness`, `Blindspot`,
-  `Resolution`, `FieldKind`, `TransliterationStyle` and `CyrillicLanguage` — are
-  `#[non_exhaustive]`. Callers already cannot match or construct them exhaustively, so **adding
-  a field or variant is a patch** (`0.5.1`).
+  `SequenceCompleteness`, the error structs `InvalidRawDateField`, `ParseMrzDateError` and
+  `ParseSexError`, and the enums `MrzDate`, `Sex`, `DateRole`, `PassportType`,
+  `DateCompleteness`, `Blindspot`, `Resolution`, `FieldKind`, `TransliterationStyle` and
+  `CyrillicLanguage` — are `#[non_exhaustive]`. Callers already cannot match or construct them
+  exhaustively, so **adding a field or variant is a patch** (`0.5.1`). `RawDateField` is not
+  marked and needs no mark: its one field is private, so it is only built through
+  `TryFrom<&str>`.
 - The five emit-side input structs — `Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`,
   `MrvBFields` — are deliberately left exhaustive, because `#[non_exhaustive]` rejects *every*
   struct expression from another crate (`..Default::default()` is refused too, E0639), leaving

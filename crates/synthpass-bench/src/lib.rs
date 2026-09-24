@@ -1288,9 +1288,14 @@ const COMPARED_FIELDS: [(&str, FieldAccessor); 12] = [
     ("surname", |m| m.surname.clone()),
     ("given_names", |m| m.given_names.clone()),
     ("nationality", |m| m.nationality.clone()),
-    ("date_of_birth", |m| m.date_of_birth.clone()),
-    ("sex", |m| m.sex.clone()),
-    ("date_of_expiry", |m| m.date_of_expiry.clone()),
+    ("date_of_birth", |m| m.date_of_birth.to_string()),
+    // Keep benchmark columns in the product M/F/X vocabulary.
+    ("sex", |m| {
+        synthpass_core::mrz_product::sex(m.sex)
+            .unwrap_or_default()
+            .to_string()
+    }),
+    ("date_of_expiry", |m| m.date_of_expiry.to_string()),
     ("personal_number", |m| {
         m.personal_number().unwrap_or_default().to_string()
     }),
