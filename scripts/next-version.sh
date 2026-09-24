@@ -80,6 +80,21 @@ esac
 
 [ -n "${frag_dir_override}" ] && frag_dir="$frag_dir_override"
 
+case "$scope" in
+    workspace) changelog="CHANGELOG.md" ;;
+    mrz)       changelog="crates/mrz/CHANGELOG.md" ;;
+esac
+
+# The bump is measured from the last *released* version: the topmost `## [X.Y.Z]` heading in
+# the scope's CHANGELOG. It is not measured from the manifest. They differ while a breaking
+# window is open. `mrz` bumps in the PR that makes the first breaking change (RELEASING.md), so
+# its manifest can say 0.8.0 while 0.7.1 is still the last release. Bumping from the manifest
+# answered 0.9.0 for a release that is 0.8.0, and would have let a second bump inside the same
+# window through.
+released="$(awk 'match($0, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/) {
+                    v = substr($0, RSTART + 4, RLENGTH - 5); print v; exit }' "$changelog" 2>/dev/null || true)"
+base="${released:-$current}"
+
 if ! printf '%s' "$current" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
     echo "could not parse a version out of $manifest (got '$current')" >&2
     exit 1
@@ -90,8 +105,8 @@ if [ "$current_only" -eq 1 ]; then
     exit 0
 fi
 
-major="${current%%.*}"
-rest="${current#*.}"
+major="${base%%.*}"
+rest="${base#*.}"
 minor="${rest%%.*}"
 patch="${rest##*.}"
 
@@ -149,6 +164,7 @@ if [ "$explain" -eq 1 ]; then
     printf 'scope     : %s (%s)\n' "$scope" "$manifest"
     printf 'fragments : %s\n' "$frag_dir"
     printf 'current   : %s\n' "$current"
+    printf 'released  : %s  (%s; the bump is measured from here)\n' "${released:-none found}" "$changelog"
     printf 'bump      : %s -- %s\n' "$slot" "$reason"
     printf 'next      : %s\n' "$next"
     if [ "${#breaking[@]}" -gt 0 ]; then

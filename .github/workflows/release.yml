@@ -50,6 +50,10 @@ on:
     paths:
       - Cargo.toml
       - crates/mrz/Cargo.toml
+      # A release PR that closes a staged breaking window leaves the version alone and
+      # assembles the changelog. That commit is the release (RELEASING.md).
+      - CHANGELOG.md
+      - crates/mrz/CHANGELOG.md
   workflow_dispatch:
     inputs:
       dry_run:
@@ -121,12 +125,25 @@ jobs:
             echo "${scope}_tag=${prefix}${now}" >> "$GITHUB_OUTPUT"
 
             if [ "$now" = "$was" ]; then
-              echo "$scope: unchanged at $now"
-              echo "${scope}_release=false" >> "$GITHUB_OUTPUT"
-              continue
+              # An unchanged version is still a release when this commit is the one that
+              # assembled its changelog section. That is how a staged breaking window closes:
+              # the version moved many commits earlier, and the release PR adds `## [X.Y.Z]`.
+              # Witness it by the heading appearing at HEAD and being absent at HEAD^, so
+              # later commits (heading already there) are never read as the release again.
+              if [ "$scope" = workspace ]; then log=CHANGELOG.md; else log=crates/mrz/CHANGELOG.md; fi
+              heading="^## \\[${now//./\\.}\\]"
+              if [ -n "$prev" ] \
+                && git show "HEAD:$log" 2>/dev/null | grep -qE "$heading" \
+                && ! git show "$prev:$log" 2>/dev/null | grep -qE "$heading"; then
+                echo "$scope: unchanged at $now, and this commit assembles [$now] (candidate tag ${prefix}${now})"
+              else
+                echo "$scope: unchanged at $now"
+                echo "${scope}_release=false" >> "$GITHUB_OUTPUT"
+                continue
+              fi
+            else
+              echo "$scope: $was -> $now  (candidate tag ${prefix}${now})"
             fi
-
-            echo "$scope: $was -> $now  (candidate tag ${prefix}${now})"
 
             # The window is open. Whether this commit *is* the release is a
             # separate question, and the repository already answers it: the

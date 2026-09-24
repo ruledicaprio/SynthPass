@@ -240,9 +240,16 @@ check_scope() { # <scope> <manifest> <section>
         done <<< "$(git ls-tree -r --name-only "$ref" -- changelog.d/)"
     done
 
-    # Computed against `$before`, not the working tree: at HEAD the manifest is
-    # already bumped, so next-version.sh would be reading the wrong side of the diff.
-    implied="$(compute_implied "$scope" "$before" "$tmp/f")"
+    # Computed against the last *released* version at the base commit (the topmost
+    # `## [X.Y.Z]` in the scope's CHANGELOG), falling back to `$before`. Not the working tree:
+    # at HEAD the manifest is already bumped. And not `$before` alone: inside an open breaking
+    # window `$before` is already the staged number, so a second bump would pass (0.8.0 ->
+    # 0.9.0 with 0.7.1 still the last release). next-version.sh uses the same base.
+    local log released
+    if [ "$scope" = "mrz" ]; then log="crates/mrz/CHANGELOG.md"; else log="CHANGELOG.md"; fi
+    released="$(git show "$base:$log" 2>/dev/null | awk 'match($0, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/) {
+                    v = substr($0, RSTART + 4, RLENGTH - 5); print v; exit }' || true)"
+    implied="$(compute_implied "$scope" "${released:-$before}" "$tmp/f")"
     rm -rf "$tmp"
 
     if [ "$after" = "$implied" ]; then
