@@ -18,6 +18,8 @@
 //! separator to reproduce the measured failure shape — no real document's
 //! data in the repository.
 
+mod support;
+
 use mrz::{parse_mrv_a, parse_mrv_b, parse_td3, MrvAFields, MrvBFields, Td3Fields};
 
 /// Replace a fixture's `<<` primary/secondary separator with a single `<`,
@@ -50,9 +52,9 @@ fn mrv_a_recovers_the_name_split_after_a_collapsed_separator() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_mrv_a emits two lines");
@@ -80,9 +82,9 @@ fn mrv_b_recovers_the_name_split_after_a_collapsed_separator() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_mrv_b emits two lines");
@@ -110,9 +112,9 @@ fn td3_recovers_the_name_split_after_a_collapsed_separator() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
@@ -140,9 +142,9 @@ fn a_fully_collapsed_separator_is_not_recoverable_and_must_not_be_silently_guess
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_mrv_a emits two lines");

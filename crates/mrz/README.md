@@ -117,8 +117,9 @@ Two cases that are easy to get wrong, both documented with runnable examples on 
 
 ## Emitting
 
-All five formats emit, from a `*Fields` struct in MRZ-native form (`YYMMDD` dates, 3-letter
-codes). Every check digit is computed for you, so the output always parses back as `valid()`.
+All five formats emit from a `*Fields` struct with typed `MrzDate` and `Sex` values,
+plus MRZ-native text fields such as 3-letter codes. Dates print as `YYMMDD` in the zone.
+Every check digit is computed for you, so the output parses back as `valid()`.
 
 ```rust
 use mrz::{format_td3, parse_td3, Td3Fields};
@@ -129,9 +130,9 @@ let zone = format_td3(&Td3Fields {
     surname: "Müller".into(),
     given_names: "Anna Maria".into(),
     nationality: "UTO".into(),
-    date_of_birth: "740812".into(),
-    sex: "F".into(),
-    date_of_expiry: "301231".into(),
+    date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+    sex: mrz::Sex::Female,
+    date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2030, 12, 31)),
     ..Default::default()
 });
 assert!(zone.starts_with("P<UTOMUELLER<<ANNA<MARIA<<")); // transliterated, not dropped

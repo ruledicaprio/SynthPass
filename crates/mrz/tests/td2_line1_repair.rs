@@ -24,6 +24,8 @@
 //! **Fixtures are emitted, not transcribed**, same discipline
 //! `tests/td1_line_gap.rs` and `tests/line1_prefix_shift.rs` follow.
 
+mod support;
+
 use mrz::{find_and_parse, format_td2, Format, Td2Fields};
 
 fn td2_lines() -> (String, String) {
@@ -34,9 +36,9 @@ fn td2_lines() -> (String, String) {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td2 emits two lines");

@@ -5,6 +5,8 @@
 //! knob — it must never change whether any check digit validates, since it
 //! never touches the printed characters the checksums are computed over.
 
+mod support;
+
 use mrz::{format_td3, parse_td3_with, ParseOptions, Td3Fields};
 
 /// Build a valid TD3 MRZ with the given `YYMMDD` birth/expiry fields, so each
@@ -17,9 +19,9 @@ fn td3_with_dates(date_of_birth: &str, date_of_expiry: &str) -> String {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: date_of_birth.to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: date_of_expiry.to_string(),
+        date_of_birth: support::birth(date_of_birth),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry(date_of_expiry),
         personal_number: None,
     };
     format_td3(&fields)

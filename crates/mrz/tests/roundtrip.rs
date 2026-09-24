@@ -1,6 +1,8 @@
 //! `format_td3`/`format_td2`/`format_td1` round-trip tests: each emitter is
 //! correct iff it is the exact inverse of its matching `parse_*` function.
 
+mod support;
+
 use mrz::{
     check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
     parse_mrv_b, parse_td1, parse_td2, parse_td3, MrvAFields, MrvBFields, Sex, Td1Fields,
@@ -45,9 +47,9 @@ fn specimen_byte_for_byte() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         personal_number: Some("ZE184226B".to_string()),
     };
 
@@ -64,9 +66,9 @@ fn specimen_round_trips_as_valid() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         personal_number: Some("ZE184226B".to_string()),
     };
 
@@ -87,28 +89,101 @@ fn name_strategy() -> impl Strategy<Value = String> {
     "[A-Z]{1,18}"
 }
 
-fn yymmdd_strategy() -> impl Strategy<Value = String> {
-    // Keep month/day within always-valid ranges so `expand_date` accepts
-    // them cleanly (no plausibility rejection to work around here).
-    (0u32..100, 1u32..=12, 1u32..=28).prop_map(|(yy, mm, dd)| format!("{yy:02}{mm:02}{dd:02}"))
+fn birth_date_strategy() -> impl Strategy<Value = mrz::MrzDate> {
+    (0u32..100, 1u32..=12, 1u32..=28).prop_map(|(yy, mm, dd)| {
+        let century = if yy > mrz::CURRENT_YY { 1900 } else { 2000 };
+        mrz::MrzDate::Calendar(mrz::Date::new(century + yy as i32, mm, dd))
+    })
 }
 
-fn sex_strategy() -> impl Strategy<Value = String> {
+fn expiry_date_strategy() -> impl Strategy<Value = mrz::MrzDate> {
+    (0u32..100, 1u32..=12, 1u32..=28)
+        .prop_map(|(yy, mm, dd)| mrz::MrzDate::Calendar(mrz::Date::new(2000 + yy as i32, mm, dd)))
+}
+
+fn sex_strategy() -> impl Strategy<Value = Sex> {
+    prop_oneof![Just(Sex::Male), Just(Sex::Female), Just(Sex::Unspecified)]
+}
+
+fn typed_birth_strategy() -> impl Strategy<Value = mrz::MrzDate> {
     prop_oneof![
-        Just("M".to_string()),
-        Just("F".to_string()),
-        Just("X".to_string())
+        birth_date_strategy(),
+        Just(support::birth("000000")),
+        Just(support::birth("74<<12")),
+        Just(support::birth("<<<<<<")),
+        Just(support::birth("74O812")),
     ]
 }
 
-/// The emitter writes `<` for any sex input other than M/F.
-fn expected_sex(input: &str) -> Sex {
-    match input {
-        "M" => Sex::Male,
-        "F" => Sex::Female,
-        _ => Sex::Unspecified,
+fn typed_expiry_strategy() -> impl Strategy<Value = mrz::MrzDate> {
+    prop_oneof![
+        expiry_date_strategy(),
+        Just(support::expiry("000000")),
+        Just(support::expiry("30<<12")),
+        Just(support::expiry("<<<<<<")),
+        Just(support::expiry("30O812")),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    #[test]
+    fn typed_values_round_trip_on_all_five_formats(
+        date_of_birth in typed_birth_strategy(),
+        sex in prop_oneof![
+            Just(Sex::Male),
+            Just(Sex::Female),
+            Just(Sex::Unspecified),
+            Just(Sex::NonConformant('X')),
+        ],
+        date_of_expiry in typed_expiry_strategy(),
+    ) {
+        for format in 0u8..5 {
+            let parsed = match format {
+                0 => {
+                    let zone = format_td3(&Td3Fields {
+                        date_of_birth, sex, date_of_expiry, ..Td3Fields::default()
+                    });
+                    let (l1, l2) = zone.split_once('\n').unwrap();
+                    parse_td3(l1, l2).unwrap()
+                }
+                1 => {
+                    let zone = format_td2(&Td2Fields {
+                        date_of_birth, sex, date_of_expiry, ..Td2Fields::default()
+                    });
+                    let (l1, l2) = zone.split_once('\n').unwrap();
+                    parse_td2(l1, l2).unwrap()
+                }
+                2 => {
+                    let zone = format_td1(&Td1Fields {
+                        date_of_birth, sex, date_of_expiry, ..Td1Fields::default()
+                    });
+                    let mut lines = zone.split('\n');
+                    parse_td1(lines.next().unwrap(), lines.next().unwrap(), lines.next().unwrap()).unwrap()
+                }
+                3 => {
+                    let zone = format_mrv_a(&MrvAFields {
+                        date_of_birth, sex, date_of_expiry, ..MrvAFields::default()
+                    });
+                    let (l1, l2) = zone.split_once('\n').unwrap();
+                    parse_mrv_a(l1, l2).unwrap()
+                }
+                _ => {
+                    let zone = format_mrv_b(&MrvBFields {
+                        date_of_birth, sex, date_of_expiry, ..MrvBFields::default()
+                    });
+                    let (l1, l2) = zone.split_once('\n').unwrap();
+                    parse_mrv_b(l1, l2).unwrap()
+                }
+            };
+            prop_assert_eq!(parsed.sex, sex);
+            prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+            prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
+        }
     }
 }
+
 fn personal_number_strategy() -> impl Strategy<Value = Option<String>> {
     prop_oneof![Just(None), "[A-Z0-9]{1,14}".prop_map(Some),]
 }
@@ -121,9 +196,9 @@ proptest! {
         document_number in doc_number_strategy(),
         surname in name_strategy(),
         given_names in name_strategy(),
-        date_of_birth in yymmdd_strategy(),
+        date_of_birth in birth_date_strategy(),
         sex in sex_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_expiry in expiry_date_strategy(),
         personal_number in personal_number_strategy(),
     ) {
         let fields = Td3Fields {
@@ -133,9 +208,9 @@ proptest! {
             surname: surname.clone(),
             given_names: given_names.clone(),
             nationality: "UTO".to_string(),
-            date_of_birth: date_of_birth.clone(),
-            sex: sex.clone(),
-            date_of_expiry: date_of_expiry.clone(),
+            date_of_birth,
+            sex,
+            date_of_expiry,
             personal_number: personal_number.clone(),
         };
 
@@ -150,7 +225,9 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(parsed.sex, expected_sex(&sex));
+        prop_assert_eq!(parsed.sex, sex);
+        prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+        prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
 
         let expected_personal = personal_number.filter(|s| !s.is_empty());
         // Clone rather than move: `MrzData` derives `ZeroizeOnDrop` when the
@@ -163,22 +240,6 @@ proptest! {
         prop_assert_eq!(parsed.optional_data_1.clone(), expected_personal);
         prop_assert_eq!(parsed.optional_data_2.as_deref(), None);
 
-        // `expand_date` turns YYMMDD into ISO YYYY-MM-DD; check the tail
-        // (MM-DD) and that the parsed year's last two digits match.
-        // Both strategies draw real calendar days; compare their printed
-        // components with the typed dates after the pivot chose the century.
-        for (parsed_date, printed) in [
-            (parsed.date_of_birth, &date_of_birth),
-            (parsed.date_of_expiry, &date_of_expiry),
-        ] {
-            let date = parsed_date.calendar();
-            prop_assert!(date.is_some(), "not a calendar date: {:?}", parsed_date);
-            let date = date.unwrap();
-            prop_assert_eq!(
-                format!("{:02}{:02}{:02}", date.year % 100, date.month, date.day),
-                printed.as_str()
-            );
-        }
     }
 }
 
@@ -198,9 +259,9 @@ fn td2_specimen_byte_for_byte() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data: None,
     };
 
@@ -217,9 +278,9 @@ fn td2_round_trips_as_valid() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data: None,
     };
 
@@ -253,9 +314,9 @@ proptest! {
         document_number in doc_number_strategy(),
         surname in short_name_strategy(),
         given_names in short_name_strategy(),
-        date_of_birth in yymmdd_strategy(),
+        date_of_birth in birth_date_strategy(),
         sex in sex_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_expiry in expiry_date_strategy(),
         optional_data in optional_data_strategy(7),
     ) {
         let fields = Td2Fields {
@@ -265,9 +326,9 @@ proptest! {
             surname: surname.clone(),
             given_names: given_names.clone(),
             nationality: "UTO".to_string(),
-            date_of_birth: date_of_birth.clone(),
-            sex: sex.clone(),
-            date_of_expiry: date_of_expiry.clone(),
+            date_of_birth,
+            sex,
+            date_of_expiry,
             optional_data: optional_data.clone(),
         };
 
@@ -282,7 +343,9 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(parsed.sex, expected_sex(&sex));
+        prop_assert_eq!(parsed.sex, sex);
+        prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+        prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
 
         // ADR-0018 slot rule: TD2's one optional-data element is the primary
         // slot; the second slot is TD1's alone.
@@ -310,9 +373,9 @@ fn td1_specimen_byte_for_byte() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data_2: None,
     };
 
@@ -330,9 +393,9 @@ fn td1_round_trips_as_valid() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data_2: None,
     };
 
@@ -354,9 +417,9 @@ proptest! {
         optional_data_1 in optional_data_strategy(15),
         surname in short_name_strategy(),
         given_names in short_name_strategy(),
-        date_of_birth in yymmdd_strategy(),
+        date_of_birth in birth_date_strategy(),
         sex in sex_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_expiry in expiry_date_strategy(),
         optional_data_2 in optional_data_strategy(11),
     ) {
         let fields = Td1Fields {
@@ -367,9 +430,9 @@ proptest! {
             surname: surname.clone(),
             given_names: given_names.clone(),
             nationality: "UTO".to_string(),
-            date_of_birth: date_of_birth.clone(),
-            sex: sex.clone(),
-            date_of_expiry: date_of_expiry.clone(),
+            date_of_birth,
+            sex,
+            date_of_expiry,
             optional_data_2: optional_data_2.clone(),
         };
 
@@ -388,7 +451,9 @@ proptest! {
         prop_assert_eq!(&parsed.document_number, &document_number);
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
-        prop_assert_eq!(parsed.sex, expected_sex(&sex));
+        prop_assert_eq!(parsed.sex, sex);
+        prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+        prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
 
         // ADR-0018 slot rule: each TD1 element lands in its own slot, and
         // nothing joins them — a TD1 prints no personal number.
@@ -415,9 +480,9 @@ fn mrv_a_specimen_line2_byte_for_byte() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "850221".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "270314".to_string(),
+        date_of_birth: support::birth("850221"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("270314"),
         optional_data: Some("R5T6U7V8W9".to_string()),
     };
 
@@ -435,9 +500,9 @@ fn mrv_b_specimen_line2_byte_for_byte() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "DEU".to_string(),
-        date_of_birth: "920101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "270630".to_string(),
+        date_of_birth: support::birth("920101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("270630"),
         optional_data: Some("QW12ER34".to_string()),
     };
 
@@ -455,9 +520,9 @@ fn mrv_a_round_trips_as_valid() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "850221".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "270314".to_string(),
+        date_of_birth: support::birth("850221"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("270314"),
         optional_data: Some("R5T6U7V8W9".to_string()),
     };
 
@@ -476,9 +541,9 @@ fn mrv_b_round_trips_as_valid() {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "DEU".to_string(),
-        date_of_birth: "920101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "270630".to_string(),
+        date_of_birth: support::birth("920101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("270630"),
         optional_data: Some("QW12ER34".to_string()),
     };
 
@@ -505,9 +570,9 @@ proptest! {
         surname in mrv_name_strategy(),
         given_names in mrv_name_strategy(),
         nationality in "[A-Z]{3}",
-        date_of_birth in yymmdd_strategy(),
+        date_of_birth in birth_date_strategy(),
         sex in sex_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_expiry in expiry_date_strategy(),
         optional_data in optional_data_strategy(16),
     ) {
         let fields = MrvAFields {
@@ -518,7 +583,7 @@ proptest! {
             given_names: given_names.clone(),
             nationality: nationality.clone(),
             date_of_birth,
-            sex: sex.clone(),
+            sex,
             date_of_expiry,
             optional_data: optional_data.clone(),
         };
@@ -535,7 +600,9 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
-        prop_assert_eq!(parsed.sex, expected_sex(&sex));
+        prop_assert_eq!(parsed.sex, sex);
+        prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+        prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
 
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.
@@ -551,9 +618,9 @@ proptest! {
         surname in mrv_name_strategy(),
         given_names in mrv_name_strategy(),
         nationality in "[A-Z]{3}",
-        date_of_birth in yymmdd_strategy(),
+        date_of_birth in birth_date_strategy(),
         sex in sex_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_expiry in expiry_date_strategy(),
         optional_data in optional_data_strategy(8),
     ) {
         let fields = MrvBFields {
@@ -564,7 +631,7 @@ proptest! {
             given_names: given_names.clone(),
             nationality: nationality.clone(),
             date_of_birth,
-            sex: sex.clone(),
+            sex,
             date_of_expiry,
             optional_data: optional_data.clone(),
         };
@@ -581,7 +648,9 @@ proptest! {
         prop_assert_eq!(&parsed.surname, &surname);
         prop_assert_eq!(&parsed.given_names, &given_names);
         prop_assert_eq!(&parsed.nationality, &nationality);
-        prop_assert_eq!(parsed.sex, expected_sex(&sex));
+        prop_assert_eq!(parsed.sex, sex);
+        prop_assert_eq!(parsed.date_of_birth, date_of_birth);
+        prop_assert_eq!(parsed.date_of_expiry, date_of_expiry);
 
         // ADR-0018 slot rule: a visa's one optional-data element is the
         // primary slot.
@@ -607,8 +676,8 @@ fn only_td1_ever_populates_optional_data_2() {
 
     let td2 = format_td2(&Td2Fields {
         document_number: "D23145890".to_string(),
-        date_of_birth: "740812".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        date_of_expiry: support::expiry("120415"),
         optional_data: Some("XY12".to_string()),
         ..Td2Fields::default()
     });
@@ -620,8 +689,8 @@ fn only_td1_ever_populates_optional_data_2() {
 
     let mrv_a = format_mrv_a(&MrvAFields {
         document_number: "XK9305487".to_string(),
-        date_of_birth: "850221".to_string(),
-        date_of_expiry: "270314".to_string(),
+        date_of_birth: support::birth("850221"),
+        date_of_expiry: support::expiry("270314"),
         optional_data: Some("R5T6U7V8W9".to_string()),
         ..MrvAFields::default()
     });
@@ -633,8 +702,8 @@ fn only_td1_ever_populates_optional_data_2() {
 
     let mrv_b = format_mrv_b(&MrvBFields {
         document_number: "L23456789".to_string(),
-        date_of_birth: "920101".to_string(),
-        date_of_expiry: "270630".to_string(),
+        date_of_birth: support::birth("920101"),
+        date_of_expiry: support::expiry("270630"),
         optional_data: Some("QW12ER34".to_string()),
         ..MrvBFields::default()
     });
@@ -661,8 +730,8 @@ fn td3_document_number_length_sweep() {
         let document_number = doc_number_of_len(len);
         let fields = Td3Fields {
             document_number: document_number.clone(),
-            date_of_birth: "740812".to_string(),
-            date_of_expiry: "120415".to_string(),
+            date_of_birth: support::birth("740812"),
+            date_of_expiry: support::expiry("120415"),
             ..Td3Fields::default()
         };
         let mrz = format_td3(&fields);
@@ -693,8 +762,8 @@ fn td2_document_number_length_sweep() {
         let document_number = doc_number_of_len(len);
         let fields = Td2Fields {
             document_number: document_number.clone(),
-            date_of_birth: "740812".to_string(),
-            date_of_expiry: "120415".to_string(),
+            date_of_birth: support::birth("740812"),
+            date_of_expiry: support::expiry("120415"),
             ..Td2Fields::default()
         };
         let mrz = format_td2(&fields);
@@ -723,8 +792,8 @@ fn td1_document_number_length_sweep() {
         let document_number = doc_number_of_len(len);
         let fields = Td1Fields {
             document_number: document_number.clone(),
-            date_of_birth: "740812".to_string(),
-            date_of_expiry: "120415".to_string(),
+            date_of_birth: support::birth("740812"),
+            date_of_expiry: support::expiry("120415"),
             ..Td1Fields::default()
         };
         let mrz = format_td1(&fields);
@@ -755,8 +824,8 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
     // concatenated right after that prefix, not get clobbered by it.
     let td2 = Td2Fields {
         document_number: "D2314589012".to_string(), // 11 chars, remainder 3 fits width 7
-        date_of_birth: "740812".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        date_of_expiry: support::expiry("120415"),
         optional_data: Some("XY".to_string()),
         ..Td2Fields::default()
     };
@@ -778,8 +847,8 @@ fn overflow_coexists_with_nonempty_optional_data_td2_td1() {
 
     let td1 = Td1Fields {
         document_number: "D231458901234".to_string(), // 13 chars, remainder 5 fits width 15
-        date_of_birth: "740812".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        date_of_expiry: support::expiry("120415"),
         optional_data_1: Some("ZZZ".to_string()),
         ..Td1Fields::default()
     };
@@ -915,8 +984,8 @@ fn legacy_encoding_zone_parses_and_is_flagged() {
 fn conformant_zone_is_not_flagged_legacy() {
     let fields = Td3Fields {
         document_number: "L898902C31234".to_string(), // 13 chars, overflows 9
-        date_of_birth: "740812".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        date_of_expiry: support::expiry("120415"),
         ..Td3Fields::default()
     };
     let mrz = format_td3(&fields);
@@ -937,8 +1006,8 @@ fn neither_form_verifies_surfaces_full_number_with_failed_check() {
     // `read_overflow`, not a legacy/spec collision.
     let fields = Td3Fields {
         document_number: "L898902C31234".to_string(), // 13 chars, overflows 9
-        date_of_birth: "740812".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        date_of_expiry: support::expiry("120415"),
         ..Td3Fields::default()
     };
     let mrz = format_td3(&fields);
@@ -973,9 +1042,9 @@ fn td1_zone(
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data_2: optional_data_2.map(str::to_string),
         ..Td1Fields::default()
     };
