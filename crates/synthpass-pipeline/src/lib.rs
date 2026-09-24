@@ -1087,18 +1087,22 @@ fn promote_verified_mrz_fields(v2: &mut ExtractionV2, m: &mrz::MrzData) {
         v2.confidence.prove(CoreField::DocumentNumber);
     }
 
-    // Promote only a six-digit date. Incomplete dates retain their raw field
-    // rather than ISO text. `Complete` still admits `OutOfCalendar`, exactly
-    // as the pre-0.8 gate did; narrowing that is a separately measured change.
-    if m.checks.date_of_birth == Some(true)
-        && m.date_of_birth.completeness() == mrz::DateCompleteness::Complete
+    // Promote a date only when it is a real calendar date. A check digit
+    // proves the six cells were read as printed, not that they name a day:
+    // a checksum-valid `000000` placeholder (`OutOfCalendar`), an all-filler
+    // field (`Unknown`) or a partly unknown one would otherwise land in an
+    // ISO-typed slot at confidence 1.0 as non-ISO text. Those keep whatever
+    // the LLM read, at its own confidence.
+    if m.checks.date_of_birth == Some(true) && matches!(m.date_of_birth, mrz::MrzDate::Calendar(_))
     {
         v2.fields
             .set(CoreField::DateOfBirth, Some(m.date_of_birth.to_string()));
         v2.confidence.prove(CoreField::DateOfBirth);
     }
 
-    if m.checks.date_of_expiry == Some(true) {
+    if m.checks.date_of_expiry == Some(true)
+        && matches!(m.date_of_expiry, mrz::MrzDate::Calendar(_))
+    {
         v2.fields
             .set(CoreField::DateOfExpiry, Some(m.date_of_expiry.to_string()));
         v2.confidence.prove(CoreField::DateOfExpiry);
@@ -1172,12 +1176,14 @@ pub fn mrz_hint(mrz_data: Option<&mrz::MrzData>) -> Option<String> {
     if m.checks.document_number == Some(true) {
         parts.push(format!("document_number={}", m.document_number));
     }
-    if m.checks.date_of_birth == Some(true)
-        && m.date_of_birth.completeness() == mrz::DateCompleteness::Complete
+    // Same rule as `promote_verified_mrz_fields`: only a real calendar date.
+    if m.checks.date_of_birth == Some(true) && matches!(m.date_of_birth, mrz::MrzDate::Calendar(_))
     {
         parts.push(format!("date_of_birth={}", m.date_of_birth));
     }
-    if m.checks.date_of_expiry == Some(true) {
+    if m.checks.date_of_expiry == Some(true)
+        && matches!(m.date_of_expiry, mrz::MrzDate::Calendar(_))
+    {
         parts.push(format!("date_of_expiry={}", m.date_of_expiry));
     }
     if m.checks.personal_number == Some(true) {
@@ -2479,7 +2485,7 @@ mod tests {
     }
 
     #[test]
-    fn out_of_calendar_dob_is_still_promoted_in_5b() {
+    fn out_of_calendar_dob_is_not_promoted() {
         let fields = mrz::Td3Fields {
             document_number: "L898902C3".into(),
             date_of_birth: "000000".into(),
@@ -2501,7 +2507,43 @@ mod tests {
         assert_eq!(m.checks.date_of_birth, Some(true));
         let mut v2 = llm_shaped_v2();
         promote_verified_mrz_fields(&mut v2, &m);
-        assert_eq!(v2.fields.date_of_birth.as_deref(), Some("2000-00-00"));
+        assert_eq!(
+            v2.fields.date_of_birth.as_deref(),
+            Some("1900-01-01"),
+            "a checksum-valid 000000 placeholder is not a date of birth"
+        );
+        assert_eq!(v2.confidence.date_of_birth, LLM_HEURISTIC_CONFIDENCE);
+        // The expiry on the same zone is a real date and still promotes.
+        assert_eq!(v2.fields.date_of_expiry.as_deref(), Some("2012-04-15"));
+        assert_eq!(v2.confidence.date_of_expiry, 1.0);
+    }
+
+    #[test]
+    fn unknown_expiry_is_not_promoted() {
+        // An all-filler expiry passes its check digit (filler counts as zero),
+        // so before this gate it was promoted at 1.0 as the text `<<<<<<`.
+        let fields = mrz::Td3Fields {
+            document_number: "L898902C3".into(),
+            date_of_birth: "740812".into(),
+            date_of_expiry: "<<<<<<".into(),
+            surname: "ERIKSSON".into(),
+            given_names: "ANNA MARIA".into(),
+            issuing_country: "UTO".into(),
+            nationality: "UTO".into(),
+            sex: "F".into(),
+            ..Default::default()
+        };
+        let zone = mrz::format_td3(&fields);
+        let (l1, l2) = zone.split_once('\n').unwrap();
+        let m = mrz::parse_td3(l1, l2).unwrap();
+        assert_eq!(m.date_of_expiry, mrz::MrzDate::Unknown, "sanity");
+        assert_eq!(m.checks.date_of_expiry, Some(true), "sanity");
+
+        let mut v2 = llm_shaped_v2();
+        promote_verified_mrz_fields(&mut v2, &m);
+        assert_eq!(v2.fields.date_of_expiry.as_deref(), Some("1900-01-01"));
+        assert_eq!(v2.confidence.date_of_expiry, LLM_HEURISTIC_CONFIDENCE);
+        assert_eq!(v2.fields.date_of_birth.as_deref(), Some("1974-08-12"));
         assert_eq!(v2.confidence.date_of_birth, 1.0);
     }
 
