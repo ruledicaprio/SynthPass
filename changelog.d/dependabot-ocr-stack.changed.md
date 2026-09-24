@@ -1,1 +1,0 @@
-- Updated the native OCR stack to ocrs 0.13.1 and rten 0.26.0. Real-specimen Tier-1 accuracy remains unchanged (140/152); OCR time fell 18.2%, from 57.2 to 46.8 minutes across 261 documents.

@@ -6,7 +6,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.82-blue.svg)](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
 
-Zero-dependency [ICAO Doc 9303](https://www.icao.int/publications/pages/publication.aspx?docnum=9303)
+Zero-dependency (by default) [ICAO Doc 9303](https://www.icao.int/publications/pages/publication.aspx?docnum=9303)
 Machine Readable Zone parser, emitter and check-digit validator for Rust — passports, ID cards
 and visas.
 
@@ -25,7 +25,7 @@ measured against a real corpus, and a public API rather than a footnote.
 - **Writes conformant zones** — all five formats, with Latin and Cyrillic names transliterated
   the way Doc 9303 prescribes.
 - **Honest about its limits** — the substitutions no check digit can catch are a public API.
-- **Small and safe** — no runtime dependencies, no `unsafe`, no clock, no network. Builds for
+- **Small and safe** — no dependencies in the default build, no `unsafe`, no clock, no network. Builds for
   `wasm32-unknown-unknown`, and is property-tested never to panic on arbitrary input.
 
 **▶ [Try it in your browser](https://ruledicaprio.github.io/SynthPass/)** — live WASM MRZ validator.
@@ -46,6 +46,12 @@ measured against a real corpus, and a public API rather than a footnote.
 [dependencies]
 mrz = "0.8"
 ```
+
+**Upgrading from 0.7?** 0.8 is a breaking release. The
+[migration guide](https://github.com/ruledicaprio/SynthPass/blob/main/MIGRATION.md#part-1-the-mrz-crate-07--08)
+has a before/after for every change, and the
+[changelog](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/CHANGELOG.md)
+says why each one was made.
 
 ## Supported formats
 

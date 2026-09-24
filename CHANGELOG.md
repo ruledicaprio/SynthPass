@@ -8,6 +8,263 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
+## [1.6.0] — 2026-09-24 — mrz 0.8 inside: optional data in its own slots, and only a real date is certified
+
+This release carries `mrz` 0.8.0 ([its changelog](crates/mrz/CHANGELOG.md)). Most of that
+crate's breaking changes stop at SynthPass's product boundary, but two reach a strict JSON
+consumer: optional data has its own slots, and the pass-through `mrz` object uses 0.8's wire
+form. It ships as a minor release by maintainer decision.
+[MIGRATION.md, Part 2](MIGRATION.md#part-2-synthpass-json-15--16) lists both, and the
+behaviour fixes you may notice:
+- A misread sex cell is now `null`, not `"X"`.
+- Only a real calendar date is certified at confidence `1.0`.
+
+The measurement side grew as well:
+- A per-document real-specimen outcome ledger, and `bench-report`.
+- Per-field MRZ mismatch attribution.
+- Explicit miss buckets, and a strict-name count in the baseline.
+- Chargrid name-line repair and the confusable-class sweep, both off by default until
+  measured.
+
+### Added
+- **`bench-report` binary.** Turns a `provider-bench` gate report JSON, the committed
+  `real-specimen-mrz-baseline.json`, and `samples/corpus.jsonl` into a deterministic Markdown
+  benchmark report — no corpus image is read and no OCR runs. Covers provenance (MAIN/`samples-data`
+  SHAs, provider/OCR configuration), the two Tier-1 hit rates (scored and whole-corpus, both
+  denominators stated), the full outcome-bucket table, a per-format and per-issuing-state accuracy
+  cut (joining `documents_detail[].mrz_format` against the manifest's `mrz.issuing_state`, every row
+  reconciling exactly to the headline totals, a manifest gap distinguished from a join failure), a
+  separate corpus-composition breakdown by `samples/corpus.jsonl`'s `dir`/`provenance`/`year`/licence
+  fields, the ADR-0013 strict-name rates when measured, methodology, limitations, and reproduction
+  commands. Verified against the real committed `samples/corpus.jsonl` (`mrz.issuing_state` is `null`
+  on 69 of 295 rows) and a real three-arm gate report, not only hand-built fixtures. `cargo run -p
+  synthpass-bench --bin bench-report -- --report PATH --baseline PATH --corpus PATH [--out PATH]`.
+- **`synthpass-bench`'s per-field CER table groups by MRZ line.** The "mean character error rate
+  by field" table (stdout and `bench-report.json`) now annotates each field with the physical MRZ
+  line it lives on for the run's format, and prints/reports the mean CER per line plus their
+  ratio — the split between a format's lines has been the single most informative fact in this
+  table and was previously invisible unless the reader already knew the format's layout by heart.
+  Format-aware: TD1 assigns different fields to line 1 than TD2/TD3/MRV-A/MRV-B do. The line
+  lookup (`synthpass_bench::provider_bench::mrz_field_line`) shares the existing ICAO field-layout
+  tables rather than duplicating their offsets. `mrz_lines` (a whole-zone aggregate) and any field
+  with no span in a given format's layout are reported under a clearly-labelled "no single line"
+  group and excluded from the per-line means, never assigned a line they do not have. Additive
+  reporting only — `hit`/`hit_rate`, the strict-name figures and every existing baseline are
+  unchanged.
+- **`synthpass_bench::report` is now public.** The `provider-bench` report and real-specimen
+  baseline types (`Report`, `ProviderRow`, `OutcomeRow`, `RealSpecimenSnapshot`,
+  `RealSpecimenBaseline`, and the rest of the JSON vocabulary) are library API instead of being
+  private to the `provider-bench` binary's `main`, so other tools can build or read the same
+  report/baseline JSON without duplicating its shape. Pure move: the serialized JSON — including
+  the committed `knowledge/benchmarks/real-specimen-mrz-baseline.json` — is byte-for-byte
+  unchanged.
+- **Fixed-grid MRZ name-line repair (`synthpass_ocr::chargrid`).** New pure module: fits a
+  fixed-pitch character grid to the glyphs `ocrs` did read, and reconstructs the collapsed `<`
+  fillers the recognizer drops on the MRZ name line, with a check-digit-free arbitration
+  gate (document-code/issuer prefix protection, plus a mandatory ink check: the empty cells carrying ink must equal the missing-glyph count)
+  so an unrecoverable line is rejected rather than guessed at. Not yet wired into
+  `NativeOcr` — that is a follow-up.
+- **Chargrid MRZ name-line repair, wired in behind `SYNTHPASS_OCR_CHARGRID` (off by default).**
+  `ocrs` never emits an isolated `<` filler, so a name line like `KOVALENKO<<ANDRII` can come back
+  `KOVALENKOANDRII` even on an otherwise checksum-valid Tier-1 hit. Setting
+  `SYNTHPASS_OCR_CHARGRID=on` re-recognizes the matched name line's characters on the image the
+  valid MRZ was actually read from, fits them to the format's fixed-pitch grid, and — only when
+  the fit is corroborated by the image's own ink and re-verified to change nothing else the MRZ
+  parsed — prepends a corrected MRZ block ahead of the original OCR text. `control` runs the
+  identical pass as a cost-matched placebo with no repair applied. This is a measurement arm, not
+  yet promoted: the default (`off`, or the variable unset) is byte-for-byte unchanged, and
+  `--write-baseline`/`--assert-baseline` now refuse to run unless every `SYNTHPASS_OCR_*`
+  measurement knob — including this one — is at its default.
+- **`SYNTHPASS_MRZ_CLASS_SWEEP` — a three-arm switch for the `mrz` confusable-class sweep.**
+  `on` enables it, `off` (the default) does not, and `control` is a **placebo**: behaviourally
+  identical to `off`, present so a run can tell a real effect from the noise between two nominally
+  identical arms. Decision rule `on > control >= off`, the same-binary A/B shape this repo uses for
+  every measured change.
+
+  The arm lives in `synthpass-die`, beside the MRZ provider, because **that is the parse the
+  real-specimen benchmark actually exercises**. `provider-bench --real-specimens --mrz-only` reads
+  through `MrzReader`, not through the synthetic corpus path — so wiring only the latter would have
+  produced an A/B that moved nothing and read as a clean null. The synthetic path in
+  `synthpass-bench` and the two `mrz_found` diagnostics in `provider-bench` reuse the same helper
+  rather than reading the variable again, so no two call sites can drift into measuring different
+  arms.
+
+  **An unrecognised value falls back to `off` silently**, which is why `class_sweep_arm()` returns
+  the arm by name: quote what the binary reports it measured, never the variable you believe you
+  set. Ground-truth parsing is deliberately left alone — it reads known-good transcriptions, and
+  applying a repair there would corrupt the reference the run is scored against.
+
+  Nothing changes unless the variable is set.
+- **Forced corpus observation refresh:** add `--force` to the corpus manifest generator to bypass cached OCR observations for selected images, including with `--only` and `--check`. Default runs continue reusing unchanged images.
+- **Offline ground-truth review tool.** `ground-truth review` builds a self-contained specimen
+  review page; `apply` validates human transcriptions with the benchmark's MRZ parser before
+  promoting fixtures. Dry runs, exact field comparisons and overwrite checks protect reviewed
+  truth; non-conforming printed zones retain their failing checksum verdict.
+- **Per-field MRZ mismatch attribution in `provider-bench`'s OCR dump.** Each `checksum_failed`/
+  `no_mrz_found` row with both ground truth and a resolved format now carries
+  `field_mismatch_counts` (differing characters per ICAO field, e.g. `{"optional_data_2": 7,
+  "composite_cd": 1}`), `field_mismatch_positions` (0-based columns per 1-based line), and
+  `field_mismatch_coverage` (whether a check digit — dedicated, composite-only, or none — would
+  have caught an error in each differing field). All three are `Option`, absent under the same
+  conditions as the existing `zone_mismatch`, plus when the format itself is unknown. Positions,
+  field names and coverage states only — never a character value. The field-layout table (TD1,
+  TD2, TD3, MRV-A, MRV-B) is pinned against `crates/mrz`'s actual parser behaviour by a
+  mutate-and-reparse test, not duplicated as a second, driftable copy of its offsets.
+- **`synthpass_imageprep::geometry::detect_mrz_band_range`.** Returns the winning MRZ line group's
+  `(start, end_exclusive, avg_score)` index range instead of its union bounding box, for a caller
+  that needs to know *which* lines composed the band — the bbox alone cannot say. `detect_mrz_band`
+  and `detect_mrz_band_scored` are unchanged for existing callers; `detect_mrz_band_scored` is now
+  a thin wrapper over the new function, so the two can never disagree about which group won.
+- **`examples/probe_matrix.rs` (`synthpass-ocr`), a read-only CTC matrix diagnostic.** Reads the
+  recognition model's probability matrix directly, via the public `prepare_recognition_input` plus
+  `rten::Model::run_one`, rather than the beam decode — so a per-cell read can be compared against
+  the beam on the same cells, and probability mass can be measured at cells the beam resolved some
+  other way. Example-only: no default code path changes, and nothing is added to the shipped crate.
+  Its measured summary is committed as `knowledge/benchmarks/mrz-matrix-probe-2026-09-18.json`.
+- The provider benchmark accepts `--dump-ocr-hits` with `--real-specimens` to include Tier-1 hits
+  in the diagnostic OCR JSONL. The default `--dump-ocr` miss-only behavior is unchanged.
+- **Real-specimen outcome ledger.** `provider-bench --write-baseline` now also writes
+  `real-specimen-outcomes.jsonl` next to the baseline: one JSON row per document (`asset_id`,
+  `outcome`, the full miss reason, format, checksum/name outcomes, OCR timing, native-retry
+  telemetry), sorted deterministically by `asset_id`. Its SHA-256 is pinned in the baseline's new
+  `outcomes_sha256` field, and `--assert-baseline` now fails if a committed ledger no longer
+  hashes to it, and otherwise prints an informational per-document outcome diff against it. The
+  ledger exists so a dated finding stays re-derivable after the `real-specimen-gate-report` CI
+  artifact expires (it carries no `retention-days`).
+- **Every miss bucket is now explicit in the baseline, including zero.** The committed baseline's
+  `by_miss_kind` always states every known bucket (`false_positive_mrz` included) as an explicit
+  `0` rather than an absent key, so "0 false accepts across N documents" is a visible claim, not
+  an inference from silence.
+- **New baseline field: `refusal_population`.** The off-denominator population (`documents -
+  scored`) a false accept could come from, report-only like ADR-0013's `strict_names`.
+  `tools/rebless.py` installs the ledger alongside the baseline and rewrites
+  `knowledge/benchmarks/README.md`'s new False accepts row once a baseline carries it;
+  `scripts/check-headline-numbers.sh` gained checks 15-16 for the ledger's integrity and this
+  field's arithmetic, both skipped cleanly on a baseline that predates them.
+- **Prepare a reproducible Phase D provider-gap measurement.** The pinned native/browser join records each asset by `asset_id`, native `retry_*` telemetry, and exact MAIN/DATA/provider provenance; the browser comparison requires `--native-report` for measured native results.
+- **`provider-bench` now records which `mrz` parse arm it actually measured**, as
+  `mrz_class_sweep_arm` in the report JSON and on stdout as
+  `mrz class-sweep arm measured: <arm>`.
+
+  `SYNTHPASS_MRZ_CLASS_SWEEP` falls back to `off` on any unrecognised value, **silently** — so a
+  three-arm A/B with a misspelling in one arm produces two identical populations and reads as a
+  clean null. Verified across all four cases: unset and a deliberate typo both report `off`, `on`
+  reports `on`, `control` reports `control`.
+
+  Quote this field, never the variable you believe you set.
+
+### Changed
+- **`optional_data_1` and `optional_data_2` join the extraction schema, and `personal_number` now
+  means only a TD3 personal number** (ADR-0018). v2 `fields` and `confidence` carry the two new
+  keys on every record; the v1 `Extraction` carries them only when populated, so a record for a
+  document without optional data is byte-identical to what it was. On TD1, TD2, MRV-A and MRV-B
+  the value that used to arrive under `personal_number` — for TD1, two printed fields joined with
+  a space — now arrives in its own slot under `optional_data_1` (and `optional_data_2` for TD1's
+  second element), at `0.9` confidence rather than `1.0`: no check digit covers optional data on
+  any format, and the old `1.0` was an over-claim. On TD3 nothing moves. `personal_number` is
+  `null` off TD3, so a consumer reading it on an identity card or a visa must read
+  `optional_data_1`/`optional_data_2` instead. The benchmark scores the two new columns
+  (`COMPARED_FIELDS` 10 → 12), which lowers every mean-over-fields CER with no accuracy change
+  because both columns are empty on most documents — recorded as a discontinuity under
+  `knowledge/benchmarks/`, not an improvement. The live demo, the server UI and the ground-truth
+  review form show the two fields; the `mrz-wasm` payload follows the crate's fields.
+
+  **Breaking for JSON consumers, released in a minor version by maintainer decision (2026-09-24):**
+  the workspace crates are unpublished and the product is pre-adoption. The published `mrz`
+  crate carries its own breaking release (0.8.0). The migration guide covers this change.
+- **Every document in the scored `checksum_failed` bucket now carries a hand-transcribed printed
+  zone.** Three specimens added by cohorts c03/c07/c09 (Germany `P0_D00_2024`, Hong Kong
+  `P0_HKG_2007` and `P0_HKG_2019`) sat in the denominator with no ground truth, so nothing
+  distinguished "our OCR misread it" from "the specimen prints a zone no correct read could
+  validate". All three are now transcribed and verified — by hand against the ICAO 7-3-1 weights
+  and by the repo's own parser — and each prints a zone whose five check digits validate.
+
+  That **refutes** the recorded hypothesis that the published 91.2% was up to three documents
+  pessimistic: none of the three is a non-conforming specimen, so none moves off-denominator.
+  91.2% is not pessimistic; it is the rate. No bucket count changes.
+
+  Measurement in `knowledge/benchmarks/denominator-t14-2026-09-16.md`, which also records the
+  character-level attribution for Hong Kong 2007 (26 of 29 line-1 errors are `<` fillers read as
+  letters; 12 of 15 line-2 errors are `0` read as `O` or `D`), confirms Germany 2024 as a genuine
+  one-character miss on a sideways-stored page, establishes San Marino 2017 back as MRZ-less, and
+  censuses nineteen fixtures whose `mrz_line` is not ICAO-exact. The reclassification, the
+  untagged-filename fallback and the wall-clock retry budget are each scoped to their own
+  follow-up.
+- Updated the native OCR stack to ocrs 0.13.1 and rten 0.26.0. Real-specimen Tier-1 accuracy remains unchanged (140/152); OCR time fell 18.2%, from 57.2 to 46.8 minutes across 261 documents.
+- **One findings home.** The dated benchmark-findings log (`## Weak-spot findings`, formerly the back half -- 626 of 1,190 lines -- of `knowledge/benchmarks/README.md`) moved to its own file, [`knowledge/benchmarks/FINDINGS.md`](knowledge/benchmarks/FINDINGS.md), alongside a generated index covering it, the 20 dated report files in that directory, and `knowledge/WEB_OCR_BASELINE.md`'s dated sections. Each dated report file now carries an additive `**Date:** ... **MAIN:** ... **DATA:** ... **Evidence:** ... **Status:** ...` header. Regenerate the index with `python tools/index_findings.py --write` after adding a finding; `--check` catches a stale index. No dated file moved, so existing citations still resolve.
+- **Real-specimen strict-name counts now flow through to the baseline (report-only).** The
+  committed `real-specimen-mrz-baseline.json` can carry ADR-0013's `strict_names` counts
+  (`strict_hits`, `name_scorable_documents`, `name_scorable_hits`) once a CI re-bless measures
+  them; `provider-bench --assert-baseline` warns, never fails, when they move — the strict-name
+  rate is published for visibility, not gated on. `tools/rebless.py` and
+  `scripts/check-headline-numbers.sh` carry the same field through to
+  `knowledge/benchmarks/README.md`'s headline table.
+- **The pass-through `mrz` object follows `mrz` 0.8's wire form** (ADR-0019, ADR-0020): in the
+  browser demo's `parse_mrz_text` result, and under the `mrz` key of `synthpass-serve`'s
+  streamed `done` event and document-status responses. The `date_of_birth_completeness` key is
+  gone, and `sex` is the MRZ's own character: `"<"` for an unspecified cell and the character as
+  read for a non-conformant one (`"1"`, `"S"`), where both used to arrive as `"X"`. Dates are
+  unchanged. The extraction schema (`extracted`, `extracted_v2`), exports and benchmark reports
+  keep `M`/`F`/`X` byte-identically through one mapping in `synthpass-core` (`mrz_product::sex`).
+  The demo's copied JSON and check-in form keep `M`/`F`/`X`; its results table shows the zone
+  character.
+
+  **Breaking for JSON consumers, released in a minor version by maintainer decision (2026-09-24):**
+  the workspace crates are unpublished and the product is pre-adoption. The published `mrz`
+  crate carries its own breaking release (0.8.0). The migration guide covers this change.
+
+### Fixed
+- **Benchmark asset identity and temporary images:** reject specimen paths outside the samples root or containing parent traversal, and give each prepared image a process-wide unique filename so duplicate document names and concurrent runs cannot overwrite one another.
+- **`synthpass doctor` now proves the OCR models actually load, not just that their bytes are
+  present.** Previously all three OCR checks could pass over a model this build's `rten` cannot
+  use: the sha256 check only proved the on-disk bytes were the known-good file for that
+  filename, and the `ocr-embedded` (musl release) and `SYNTHPASS_OCR_ENGINE=native` paths never
+  touched the `ok` flag at all, so neither could fail. `doctor` now constructs the real OCR
+  engine from the model files (disk or embedded) and reports a load failure as `❌`; this is a
+  format/deserialization check, not a full recognition pass, so it stays fast. Also,
+  `SYNTHPASS_OCR_ENGINE` no longer skips the model check for `native`: the pipeline retired the
+  Tesseract-based native engine in v1.2.0 and always runs the Rust OCR engine regardless of this
+  variable, so `doctor` now warns that the value is ignored and checks the engine that actually
+  runs.
+- `--dump-ocr`'s `field_mismatch_counts`, `field_mismatch_positions` and
+  `field_mismatch_coverage` are now absent when the resolved MRZ format does not match the shape of
+  the document's ground-truth zone, instead of attributing the zone against a layout that does not
+  describe it. A reader that misdetects the format previously produced a well-formed but
+  meaningless breakdown — measured on a TD3 specimen read as TD1, it reported differing characters
+  on line 3 of a two-line zone and populated TD1-only fields the printed format does not have.
+  `Some` now carries a guarantee: the zone really is the declared format.
+- **Only a real calendar date is promoted as verified** (ADR-0019): a checksum-valid date of
+  birth or expiry now reaches `extracted_v2` at confidence 1.0, and the Tier-2 MRZ hint, only
+  when it names a real day. A `000000` placeholder, an all-filler field or a partly unknown one
+  passes its check digit, and until now it was promoted as non-ISO text (`2000-00-00`, `<<<<<<`) in
+  an ISO-typed slot. The expiry had no such gate at all. Those dates now keep the LLM's value at
+  its own confidence. Tier-1 output and the real-specimen gate are unaffected, because promotion runs
+  at Tier 2.
+- **The `synthpass-ocr` env-var tests no longer race each other.** They mutate process-global
+  `std::env`, and `cargo test` runs a binary's tests on parallel threads, so one test writing
+  `SYNTHPASS_OCR_ORDER=band-first` could read back a value a concurrently-running test had just
+  cleared. Measured before the fix: **2 failures in 12 consecutive runs**, on two *different*
+  tests — so this was the whole env-test set racing, not one bad case. After: 0 in 12.
+
+  The previous arrangement was a convention, stated in a comment beside the tests: give each
+  variable exactly one test. **It could not hold.** `ocr_arms_from_env_is_default_when_every_knob_is_unset`
+  and its sibling have to clear *every* knob to assert their default, so they necessarily collide
+  with each per-knob test. A rule the tests cannot obey is replaced by a lock that enforces itself
+  — `crate::env_lock()`, taken by all twelve env-mutating tests across `lib.rs` and `verify.rs`.
+
+  Mutex poisoning is recovered deliberately: without that, one panicking env test would leave every
+  later one failing on the poisoned lock instead of its own assertion, turning a single real failure
+  into a dozen misleading ones and hiding which test actually broke.
+
+  Tests only — no production code, and no behaviour changes.
+- Non-conformant MRZ sex cells now leave the product sex unknown instead of asserting `X`. The check-in form leaves unreadable sex blank and the demo's copied JSON gives `null`; the bench sex column for these documents changes from `"X"` to empty.
+- **The live demo footer and the server UI's provenance badge no longer say a check digit
+  "proves" the read.** A ✔ composite means the read is consistent with the printed check digits
+  over the fields they cover — never the names, and not byte-for-byte proof. `synthpass-core`'s
+  `v2` module keeps "checksum-proven" as its confidence vocabulary and now defines it, at the
+  constant, as exactly that consistency; the pipeline, provider-context, README and roadmap prose
+  that said "mathematically proven" now says what the arithmetic establishes.
+
 ## [1.5.0] — 2026-09-17 — Real-specimen Tier-1 gated in CI, on a denominator that counts only readable documents
 
 Roadmap: knowledge/ROADMAP.md, knowledge/benchmarks/README.md. The cycle opened with the README

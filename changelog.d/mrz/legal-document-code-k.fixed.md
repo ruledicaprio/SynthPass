@@ -1,1 +1,0 @@
-- **Preserve legal second-position `K` codes.** OCR filler repair changes `PK` to `P<` only for passport codes; TD1, TD2 and visa issuer-defined `K` codes remain intact.
