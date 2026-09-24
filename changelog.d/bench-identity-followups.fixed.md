@@ -1,1 +1,0 @@
-- **Benchmark asset identity and temporary images:** reject specimen paths outside the samples root or containing parent traversal, and give each prepared image a process-wide unique filename so duplicate document names and concurrent runs cannot overwrite one another.

@@ -1,1 +1,0 @@
-- **Restore old options JSON.** `ParseOptions` deserializes a 0.7-shaped object containing only `pivot_yy`; the new `class_sweep` flag defaults to `false`.

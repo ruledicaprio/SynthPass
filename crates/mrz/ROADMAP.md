@@ -39,7 +39,7 @@ The mechanics are enforced, not remembered. Each change drops a fragment in
 `!` marks a break). CI checks the version bump against the fragments
 (`scripts/check-changelog.sh`) and against the published API (`cargo-semver-checks`).
 
-## Where it stands — 0.8.0 release candidate
+## Where it stands — 0.8.0 (released 2026-09-24)
 
 Delivered:
 
@@ -94,7 +94,7 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
   needs is an audit of the `std::` paths and of the `serde` feature's `alloc` configuration.
 
-## The breaking window — 0.8.0
+## The breaking window — 0.8.0 (closed)
 
 Pre-1.0 is the cheap time to break, and the plan is to break **once**: collect every change
 below into a single release rather than spreading them across several minors. Each is a

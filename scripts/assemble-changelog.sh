@@ -46,6 +46,11 @@ title_of() {
 
 shopt -s nullglob
 
+# A category's fragments are `<id>.<cat>.md` and, for a breaking change, `<id>.<cat>!.md`
+# (changelog.d/README.md). Every `files=` glob below names both, breaking entries first. The
+# `!` form was once missed: `*.changed.md` does not match `x.changed!.md`, so every breaking
+# entry was silently left out of the section that announced the break.
+
 # `$'\r'` is not ANSI-C-expanded inside double quotes, so the strip pattern needs a variable.
 cr=$'\r'
 
@@ -61,7 +66,7 @@ read_fragment() {
 if [ "$write" -eq 0 ]; then
   found=0
   for cat in "${categories[@]}"; do
-    files=( "$frag_dir"/*."$cat".md )
+    files=( "$frag_dir"/*."$cat"!.md "$frag_dir"/*."$cat".md )
     [ ${#files[@]} -eq 0 ] && continue
     found=1
     printf '### %s\n' "$(title_of "$cat")"
@@ -75,7 +80,7 @@ fi
 # ---------------------------------------------------------------- write mode
 pending=()
 for cat in "${categories[@]}"; do
-  files=( "$frag_dir"/*."$cat".md )
+  files=( "$frag_dir"/*."$cat"!.md "$frag_dir"/*."$cat".md )
   [ ${#files[@]} -gt 0 ] && pending+=( "${files[@]}" )
 done
 if [ ${#pending[@]} -eq 0 ]; then
@@ -122,7 +127,7 @@ insert_into_section() {
 }
 
 for cat in "${categories[@]}"; do
-  files=( "$frag_dir"/*."$cat".md )
+  files=( "$frag_dir"/*."$cat"!.md "$frag_dir"/*."$cat".md )
   [ ${#files[@]} -eq 0 ] && continue
   merged=()
   for f in "${files[@]}"; do read_fragment "$f"; merged+=( "${body[@]}" ); done

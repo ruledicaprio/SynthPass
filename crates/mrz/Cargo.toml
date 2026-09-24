@@ -21,7 +21,7 @@ edition.workspace = true
 # their own upstream MSRVs, which are higher than this floor — a consumer on
 # 1.82 pins those to matching versions.
 rust-version = "1.82"
-description = "Zero-dependency ICAO 9303 Machine Readable Zone (MRZ) parser, emitter, and check-digit validator for TD1/TD2/TD3 and MRV-A/MRV-B (visa) documents."
+description = "Zero-dependency (by default) ICAO 9303 Machine Readable Zone (MRZ) parser, emitter, and check-digit validator for TD1/TD2/TD3 and MRV-A/MRV-B (visa) documents."
 license = "MIT"
 repository = "https://github.com/ruledicaprio/SynthPass"
 documentation = "https://docs.rs/mrz"
