@@ -12,3 +12,7 @@
   because both columns are empty on most documents — recorded as a discontinuity under
   `knowledge/benchmarks/`, not an improvement. The live demo, the server UI and the ground-truth
   review form show the two fields; the `mrz-wasm` payload follows the crate's fields.
+
+  **Breaking for JSON consumers, released in a minor version by maintainer decision (2026-09-24):**
+  the workspace crates are unpublished and the product is pre-adoption. The published `mrz`
+  crate carries its own breaking release (0.8.0). The migration guide covers this change.
