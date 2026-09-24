@@ -16,6 +16,8 @@
 //! behavior (`a_genuine_td1_never_parses_as_td2` in `td1_line_gap.rs`) and
 //! not what these tests exist to exercise.
 
+mod support;
+
 use mrz::{
     find_and_parse, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, Format,
     MrvAFields, MrvBFields, MrzError, Td1Fields, Td2Fields, Td3Fields,
@@ -48,9 +50,9 @@ fn td3_line_1_alone_is_incomplete_not_not_found() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let l1 = mrz
@@ -69,9 +71,9 @@ fn mrv_a_line_1_alone_is_incomplete_not_not_found() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let l1 = mrz
@@ -90,9 +92,9 @@ fn mrv_b_line_1_alone_is_incomplete_not_not_found() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let l1 = mrz
@@ -119,9 +121,9 @@ fn td2_line_1_with_an_unrelated_companion_is_incomplete_not_not_found() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let l1 = mrz
@@ -140,9 +142,9 @@ fn td1_fields() -> Td1Fields {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data_1: None,
         optional_data_2: None,
     }

@@ -16,6 +16,8 @@
 //! `mrz::format_td1` from placeholder field values, so the suite reproduces
 //! the real failure *shape* with no real document's data in the repository.
 
+mod support;
+
 use mrz::{find_and_parse, format_td1, Format, Td1Fields};
 
 /// A synthetic TD1 zone (three 30-char lines), built and check-digit-verified
@@ -29,9 +31,9 @@ fn td1_lines() -> (String, String, String) {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data_1: None,
         optional_data_2: None,
     });

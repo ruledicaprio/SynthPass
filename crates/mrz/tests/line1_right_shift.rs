@@ -14,6 +14,8 @@
 //! **Fixtures are emitted, not transcribed**, same discipline
 //! `line1_prefix_shift.rs` follows.
 
+mod support;
+
 use mrz::{
     find_and_parse, format_mrv_a, format_mrv_b, format_td3, Format, MrvAFields, MrvBFields,
     Td3Fields,
@@ -41,9 +43,9 @@ fn td3_recovers_issuing_country_after_an_inserted_position_2_character() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
@@ -67,9 +69,9 @@ fn mrv_a_recovers_issuing_country_after_an_inserted_position_2_character() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_mrv_a emits two lines");
@@ -93,9 +95,9 @@ fn mrv_b_recovers_issuing_country_after_an_inserted_position_2_character() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         optional_data: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_mrv_b emits two lines");
@@ -125,9 +127,9 @@ fn an_undamaged_td3_zone_is_not_spuriously_shifted() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "BRA".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
@@ -154,9 +156,9 @@ fn a_genuine_two_letter_document_code_is_unaffected() {
         surname: "ESKANDARI".to_string(),
         given_names: "MAREN".to_string(),
         nationality: "CAN".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");

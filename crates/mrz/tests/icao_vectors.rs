@@ -16,6 +16,8 @@
 //! than asserting a blanket "these come from ICAO". See
 //! `knowledge/docs9303/CONFORMANCE_BASIS.md`.
 
+mod support;
+
 use mrz::{
     check_digit, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
     parse_mrv_b, parse_td1, parse_td2, parse_td3, verify, MrvAFields, MrvBFields, MrzData,
@@ -988,9 +990,9 @@ fn cyrillic_language_aware_emit_round_trip() {
         issuing_country: "SRB".into(),
         nationality: "SRB".into(),
         document_number: "123456789".into(),
-        date_of_birth: "900101".into(),
-        sex: "F".into(),
-        date_of_expiry: "300101".into(),
+        date_of_birth: support::birth("900101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("300101"),
         ..Default::default()
     });
     let (l1, l2) = mrz.split_once('\n').unwrap();

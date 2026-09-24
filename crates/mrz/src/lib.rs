@@ -359,9 +359,9 @@ impl Checks {
 ///     surname: "ESKANDARI".into(),
 ///     given_names: "MAREN".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "800101".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "301230".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1980, 1, 1)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2030, 12, 30)),
 ///     ..Default::default()
 /// });
 ///
@@ -730,9 +730,9 @@ impl MrzData {
     ///     surname: "ERIKSSON".into(),
     ///     given_names: "ANNA MARIA".into(),
     ///     nationality: "UTO".into(),
-    ///     date_of_birth: "740812".into(),
-    ///     sex: "F".into(),
-    ///     date_of_expiry: "120415".into(),
+    ///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+    ///     sex: mrz::Sex::Female,
+    ///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
     ///     ..Default::default()
     /// });
     ///
@@ -1745,9 +1745,9 @@ mod tests {
             surname: "ERIKSSON".into(),
             given_names: "ANNA MARIA".into(),
             nationality: "UTO".into(),
-            date_of_birth: "740812".into(),
-            sex: "F".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
+            sex: Sex::Female,
+            date_of_expiry: MrzDate::Calendar(Date::new(2012, 4, 15)),
             personal_number: None,
         };
         let mrz = format_td3(&fields);
@@ -1781,8 +1781,8 @@ mod tests {
     fn td2_and_td1_long_document_numbers_round_trip() {
         let td2 = Td2Fields {
             document_number: "D23145890XY".into(), // 11 chars; remainder fits 7
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
+            date_of_expiry: MrzDate::Calendar(Date::new(2012, 4, 15)),
             ..Td2Fields::default()
         };
         let mrz = format_td2(&td2);
@@ -1793,8 +1793,8 @@ mod tests {
 
         let td1 = Td1Fields {
             document_number: "D23145890ABCDE".into(), // 14 chars; remainder fits 15
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
+            date_of_expiry: MrzDate::Calendar(Date::new(2012, 4, 15)),
             ..Td1Fields::default()
         };
         let mrz = format_td1(&td1);
@@ -1816,8 +1816,8 @@ mod tests {
         // ordinary (non-overflow) encoding still validates.
         let td2 = Td2Fields {
             document_number: "D23145890ABCDEF".into(), // remainder 7 → needs 9
-            date_of_birth: "740812".into(),
-            date_of_expiry: "120415".into(),
+            date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
+            date_of_expiry: MrzDate::Calendar(Date::new(2012, 4, 15)),
             ..Td2Fields::default()
         };
         let mrz = format_td2(&td2);

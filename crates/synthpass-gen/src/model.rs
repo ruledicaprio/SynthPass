@@ -2,18 +2,20 @@
 
 pub use mrz::Date;
 
-/// Sex marker, as printed on a TD3 MRZ (position 20 of line 2).
+/// Visual-zone sex marker. `X` means unspecified there; the MRZ prints `<`.
+///
+/// The emitter adapter maps this to [`mrz::Sex`] before writing the zone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sex {
     M,
     F,
-    /// Unspecified — ICAO 9303 allows `X` but [`crate::data::generate_passport`]
-    /// never produces it (kept for completeness / future use).
+    /// Unspecified in the visual zone (Doc 9303 Part 4); the MRZ uses `<`.
+    /// [`crate::data::generate_passport`] never produces it.
     X,
 }
 
 impl Sex {
-    /// The single MRZ character for this value.
+    /// The visual-zone character for this value; `X` maps to MRZ `<` when emitted.
     pub fn as_mrz_char(self) -> char {
         match self {
             Sex::M => 'M',
