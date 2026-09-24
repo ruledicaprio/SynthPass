@@ -37,7 +37,7 @@ Multiply values by repeating weights `7,3,1,…`; sum; digit = sum mod 10.
 
 ### 2.3 Issuer options (parsers must accept; generators must not emit ambiguously)
 - TD3 unused personal number: pos 43 may be `0` or `<`.
-- Document numbers > 9 chars use the format-specific continuation rules (ICAO 9303 Parts 4–6); apply before interpreting optional data.
+- Document numbers > 9 chars use the format-specific continuation rules (ICAO 9303 Parts 5–6: TD1 and TD2; Part 4 defines none for TD3); apply before interpreting optional data.
 
 ## 3. Field tables (rendering of §4)
 

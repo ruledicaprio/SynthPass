@@ -60,7 +60,8 @@ use crate::checksum::char_value;
 /// the real danger, exactly one K↔`<` appears in the whole corpus.
 ///
 /// This is why the crate layers structural guards on top of the arithmetic
-/// (recognized country codes, date plausibility, name charset): the oracle is
+/// (country-code recognition and date plausibility in the scanner
+/// repair gates; direct `parse_*` calls do not apply those guards): the oracle is
 /// exact, and it is exact about its own edges too. It is a strong *filter* — it
 /// rejects most misreads — and a weak *oracle*: what it passes is not a random
 /// remainder but specifically what the arithmetic cannot see.

@@ -24,7 +24,10 @@
     "1974-08-12"`, or `d.date_of_birth == MrzDate::Calendar(Date::new(1974, 8, 12))`;
     `d.date_of_birth_completeness` becomes `d.date_of_birth.completeness()`; `d.sex == "X"`
     becomes a match on `Sex::Unspecified | Sex::NonConformant(_)`.
-  - JSON written by 0.7 still deserialises: the removed `date_of_birth_completeness` key is
+  - JSON written by 0.7 still deserialises, but should be re-parsed from `mrz_lines`:
+    old boolean `Checks` values can become `Some(true)` even for checks absent from the
+    format, and the old `personal_number` key is dropped rather than mapped to
+    `optional_data_1`. The removed `date_of_birth_completeness` key is
     ignored, but its `"sex": "X"` now reads as `Sex::NonConformant('X')`. 0.7 wrote `"X"` for
     `<` and for every misread cell alike, so the original cannot be recovered from old JSON;
-    re-parse `mrz_lines` instead.
+    Re-parsing `mrz_lines` also restores the correct check applicability and optional data.

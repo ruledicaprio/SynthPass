@@ -6,8 +6,8 @@
 //! [`format_td1`], [`format_mrv_a`], and [`format_mrv_b`] produce the
 //! ICAO-specified lines with every check digit computed via the same
 //! [`crate::check_digit`] math the parsers verify against. Feeding the output
-//! back through the matching `parse_*` function always yields a record with
-//! `valid() == true`.
+//! back through the matching `parse_*` function yields `valid() == true`
+//! when the document code is accepted by that parser.
 //!
 //! Field widths and offsets mirror the parsers exactly:
 //! - **TD3** (two 44-char lines): document code (2) + issuing country (3) +
@@ -104,7 +104,7 @@ use serde::{Deserialize, Serialize};
 pub struct Td3Fields {
     /// Document code, e.g. `"P"` for passport. Defaults to `"P"`.
     pub document_code: String,
-    /// Issuing state (3-letter ICAO code).
+    /// Issuing-state code, filler-padded to three cells (ICAO `D` is one letter).
     pub issuing_country: String,
     /// Document number. Up to 9 characters fit the field; a longer one
     /// overflows into the personal-number field (see the type docs).
@@ -114,11 +114,11 @@ pub struct Td3Fields {
     /// Secondary identifier / given names, encoded per
     /// [`encode_name_component`].
     pub given_names: String,
-    /// Nationality (3-letter ICAO code).
+    /// Nationality code, filler-padded to three cells.
     pub nationality: String,
     /// Typed date of birth, emitted as six MRZ zone characters.
     pub date_of_birth: MrzDate,
-    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    /// Typed sex cell; unspecified emits `<`, and non-MRZ characters emit `<`.
     pub sex: Sex,
     /// Typed date of expiry, emitted as six MRZ zone characters.
     pub date_of_expiry: MrzDate,
@@ -197,55 +197,6 @@ fn field(s: &str, width: usize) -> String {
     out
 }
 
-/// Clean one half (primary or secondary identifier) of a name field per
-/// ICAO 9303 Part 3 §4.6
-/// (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:509-535`).
-/// Unlike `clean`, this does **not** map every non-alphanumeric character
-/// to the filler `<` — names get their own punctuation rules:
-///
-/// - Each character is first uppercased via `char::to_uppercase()` (not
-///   `to_ascii_uppercase`), then, for **each** resulting char `u` (usually
-///   one, but see `ß`→`SS` below):
-///   1. if `u` is a Table A national character (Part 3 §6,
-///      `:703-807`), it is replaced by its
-///      [`Expanded`](crate::TransliterationStyle::Expanded)
-///      transliteration — e.g. `Ü`→`UE`, `Ñ`→`N` — with **no** separator
-///      pushed around it. This is the transliteration Part 3 `:493` mandates
-///      ("The issuing State or organization shall transliterate national
-///      characters using only the allowed OCR-B characters") and fixes what
-///      was previously silent data loss: `MÜLLER` used to emit as `MLLER`,
-///      now `MUELLER`.
-///   2. else if `u` is one of the 48 Cyrillic code points of Part 3 §6 B
-///      (`:809-863`), it is replaced by its base-column (≈ Russian)
-///      transliteration — e.g. `Ж`→`ZH` — for the same reason. This path has
-///      no language context, so a name whose language's column differs must
-///      be pre-transliterated with `transliterate_cyrillic`.
-///   3. else if `u` is `A`-`Z` or `0`-`9`, it is kept as-is.
-///   4. else the existing punctuation rules below apply to `u`.
-/// - Hyphen (`:517-521`), comma (`:523-532`), and whitespace each become a
-///   single separator filler `<`.
-/// - **Apostrophe is dropped entirely, with no filler in its place**
-///   (`:511-515`) — e.g. `O'CONNOR` becomes `OCONNOR`, not `O<CONNOR`. This
-///   is the one rule the crate got wrong before this function existed.
-/// - Every other punctuation character is likewise dropped entirely, with
-///   no filler (`:534-535`).
-/// - `0`-`9` is kept as-is. Part 3 §4.6 (`:507`) states plainly that
-///   "numeric characters shall not be used in the name fields of the MRZ",
-///   but — unlike the apostrophe/hyphen/comma cases above — it defines no
-///   mapping for one that shows up anyway. Silently rewriting a digit to a
-///   filler would erase information with no textual basis in the spec, so
-///   this function instead preserves digits verbatim, matching the
-///   "alphanumeric survives untouched" behavior `clean` already applies
-///   to the document-number and optional-data fields. A digit reaching this
-///   function means the caller handed it a name that isn't spec-clean;
-///   per CLAUDE.md's OCR philosophy ("every field should be validated"),
-///   that validation belongs upstream of emission, not inside it.
-///
-/// After the per-character pass, consecutive separators collapse to one and
-/// leading/trailing separators are trimmed. That collapse is what makes
-/// `"ANNA, MARIA"` (a comma *immediately followed by* a space) yield
-/// `ANNA<MARIA` rather than `ANNA<<MARIA`, matching
-/// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:531-532`'s worked example.
 /// ICAO 9303 §4.6 encoding of one name component (a surname half or a given-
 /// names half), as it would be printed into an MRZ name field: uppercased,
 /// transliterated, apostrophes dropped with no filler, hyphens/commas/spaces
@@ -278,6 +229,54 @@ pub fn encode_name_component(s: &str) -> String {
     clean_name_half(s)
 }
 
+/// Clean one half (primary or secondary identifier) of a name field per
+/// ICAO 9303 Part 3 §4.6
+/// (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:509-535`).
+/// Unlike `clean`, this does **not** map every non-alphanumeric character
+/// to the filler `<` — names get their own punctuation rules:
+///
+/// - Each character is first uppercased via `char::to_uppercase()` (not
+///   `to_ascii_uppercase`), then, for **each** resulting char `u` (usually
+///   one, but `ß` uppercases to `ẞ`, then Table A maps it to `SS`):
+///   1. if `u` is a Table A national character (Part 3 §6,
+///      `:703-807`), it is replaced by its
+///      [`Expanded`](crate::TransliterationStyle::Expanded)
+///      transliteration — e.g. `Ü`→`UE`, `Ñ`→`N` — with **no** separator
+///      pushed around it. This is the transliteration Part 3 `:493` mandates
+///      ("The issuing State or organization shall transliterate national
+///      characters using only the allowed OCR-B characters") and fixes what
+///      was previously silent data loss: `MÜLLER` used to emit as `MLLER`,
+///      now `MUELLER`.
+///   2. else if `u` is one of the 48 Cyrillic code points of Part 3 §6 B
+///      (`:809-863`), it is replaced by its base-column (≈ Russian)
+///      transliteration — e.g. `Ж`→`ZH` — for the same reason. This path has
+///      no language context, so a name whose language's column differs must
+///      be pre-transliterated with `transliterate_cyrillic`.
+///   3. else if `u` is `A`-`Z` or `0`-`9`, it is kept as-is.
+///   4. else the existing punctuation rules below apply to `u`.
+/// - Hyphen (`:517-521`), comma (`:523-532`), and whitespace each become a
+///   single separator filler `<`.
+/// - **Apostrophe is dropped entirely, with no filler in its place**
+///   (`:511-515`) — e.g. `O'CONNOR` becomes `OCONNOR`, not `O<CONNOR`. This
+///   follows Part 3 §4.6.
+/// - Every other punctuation character is likewise dropped entirely, with
+///   no filler (`:534-535`).
+/// - `0`-`9` is kept as-is. Part 3 §4.6 (`:507`) states plainly that
+///   "numeric characters shall not be used in the name fields of the MRZ",
+///   but — unlike the apostrophe/hyphen/comma cases above — it defines no
+///   mapping for one that shows up anyway. Silently rewriting a digit to a
+///   filler would erase information with no textual basis in the spec, so
+///   this function instead preserves digits verbatim, matching the
+///   "alphanumeric survives untouched" behavior `clean` already applies
+///   to the document-number and optional-data fields. A digit reaching this
+///   function means the caller handed it a name that isn't spec-clean;
+///   callers should validate it before emission.
+///
+/// After the per-character pass, consecutive separators collapse to one and
+/// leading/trailing separators are trimmed. That collapse is what makes
+/// `"ANNA, MARIA"` (a comma *immediately followed by* a space) yield
+/// `ANNA<MARIA` rather than `ANNA<<MARIA`, matching
+/// `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:531-532`'s worked example.
 fn clean_name_half(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last_was_sep = false;
@@ -326,7 +325,8 @@ fn clean_name_half(s: &str) -> String {
 /// their combined length exceeds it.
 ///
 /// ICAO 9303 Part 4 §4.2.3 (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`)
-/// illustrates *several* issuer-discretionary truncation strategies —
+/// illustrates several truncation strategies; Parts 5 and 6 §4.2.3
+/// explicitly allow issuer discretion —
 /// truncating trailing components to initials, truncating components to a
 /// shorter fixed length, or dropping whole components from the end. Part 4
 /// does not prefer any one of these, so *which* characters get removed is a
@@ -493,9 +493,8 @@ fn fill_components(pairs: &[(&str, &str)], width: usize) -> String {
 ///
 /// Reproduces ICAO 9303 Part 4 §4.2.3.3(b)
 /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:559-566`) byte-for-byte,
-/// which is the only width-39 worked example of "one or more components
-/// truncated" and therefore the only place ICAO pins actual per-component
-/// lengths. Those lengths are what fix the strategy below; they are not
+/// the width-39 example that truncates the primary unevenly and pins
+/// per-component lengths. Those lengths are what fix the strategy below; they are not
 /// derivable from the prose:
 ///
 /// ```text
@@ -642,7 +641,8 @@ fn digit_char(field: &str) -> char {
 /// Emit a TD3 (passport) MRZ: two 44-character lines joined by `\n`.
 ///
 /// All four field check digits and the composite check digit are computed
-/// from `fields` — the result always round-trips through
+/// from `fields`. With a document code accepted by the matching parser,
+/// the result round-trips through
 /// [`crate::parse_td3`] with `valid() == true` (see `tests/roundtrip.rs`).
 ///
 /// ```
@@ -672,7 +672,7 @@ fn digit_char(field: &str) -> char {
 /// silently deleted. Every emitter does this, through
 /// [`encode_name_component`]:
 ///
-/// - **Latin** — Doc 9303 Part 3 §6 A: `Ü`→`UE`, `É`→`E`, `ß`→`SS`. Five
+/// - **Latin** — Doc 9303 Part 3 §6 A: `Ü`→`UE`, `É`→`E`, `ß`→`SS` via uppercase `ẞ` (Table A). Five
 ///   characters have more than one recommended form; the emitters use the
 ///   `Expanded` one. See [`crate::transliterate`] for the others.
 /// - **Cyrillic** — Part 3 §6 B: `ИВАНОВ`→`IVANOV`. Twelve rows and five
@@ -800,7 +800,7 @@ pub fn format_td3(fields: &Td3Fields) -> String {
 pub struct Td2Fields {
     /// Document code, e.g. `"I"` for identity card. Defaults to `"I"`.
     pub document_code: String,
-    /// Issuing state (3-letter ICAO code).
+    /// Issuing-state code, filler-padded to three cells (ICAO `D` is one letter).
     pub issuing_country: String,
     /// Document number. Up to 9 characters fit the field; a longer one
     /// overflows into `optional_data` (see the type docs).
@@ -810,11 +810,11 @@ pub struct Td2Fields {
     /// Secondary identifier / given names, encoded per
     /// [`encode_name_component`].
     pub given_names: String,
-    /// Nationality (3-letter ICAO code).
+    /// Nationality code, filler-padded to three cells.
     pub nationality: String,
     /// Typed date of birth, emitted as six MRZ zone characters.
     pub date_of_birth: MrzDate,
-    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    /// Typed sex cell; unspecified emits `<`, and non-MRZ characters emit `<`.
     pub sex: Sex,
     /// Typed date of expiry, emitted as six MRZ zone characters.
     pub date_of_expiry: MrzDate,
@@ -843,7 +843,8 @@ impl Default for Td2Fields {
 /// Emit a TD2 (identity-card) MRZ: two 36-character lines joined by `\n`.
 ///
 /// The document number, date-of-birth, date-of-expiry, and composite check
-/// digits are computed from `fields` — the result always round-trips through
+/// digits are computed from `fields`. With a document code accepted by the matching parser,
+/// the result round-trips through
 /// [`crate::parse_td2`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// TD2 has no separate check digit over the optional-data field.
 ///
@@ -957,7 +958,7 @@ pub fn format_td2(fields: &Td2Fields) -> String {
 pub struct Td1Fields {
     /// Document code, e.g. `"I"` for identity card. Defaults to `"I"`.
     pub document_code: String,
-    /// Issuing state (3-letter ICAO code).
+    /// Issuing-state code, filler-padded to three cells (ICAO `D` is one letter).
     pub issuing_country: String,
     /// Document number. Up to 9 characters fit the field; a longer one
     /// overflows into `optional_data_1` (see the type docs).
@@ -970,11 +971,11 @@ pub struct Td1Fields {
     /// Secondary identifier / given names, encoded per
     /// [`encode_name_component`].
     pub given_names: String,
-    /// Nationality (3-letter ICAO code).
+    /// Nationality code, filler-padded to three cells.
     pub nationality: String,
     /// Typed date of birth, emitted as six MRZ zone characters.
     pub date_of_birth: MrzDate,
-    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    /// Typed sex cell; unspecified emits `<`, and non-MRZ characters emit `<`.
     pub sex: Sex,
     /// Typed date of expiry, emitted as six MRZ zone characters.
     pub date_of_expiry: MrzDate,
@@ -1004,7 +1005,8 @@ impl Default for Td1Fields {
 /// Emit a TD1 (ID-card) MRZ: three 30-character lines joined by `\n`.
 ///
 /// The document number, date-of-birth, date-of-expiry, and composite check
-/// digits are computed from `fields` — the result always round-trips through
+/// digits are computed from `fields`. With a document code accepted by the matching parser,
+/// the result round-trips through
 /// [`crate::parse_td1`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// TD1 has no separate check digit over either optional-data field.
 ///
@@ -1100,7 +1102,7 @@ pub fn format_td1(fields: &Td1Fields) -> String {
 ///     nationality: "UTO".into(),
 ///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
 ///     sex: mrz::Sex::Female,
-///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)), // ICAO meant 1994; century does not change `940623`.
 ///     optional_data: Some("ZE184226B".into()),
 ///     ..Default::default()
 /// };
@@ -1123,9 +1125,10 @@ pub fn format_td1(fields: &Td1Fields) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvAFields {
-    /// Document code, always `"V"` for a visa. Defaults to `"V"`.
+    /// First character `V`; the second may designate an issuer-defined visa
+    /// type (Part 7 §4.2.2.1/§7.2.2.1). Defaults to `"V"`.
     pub document_code: String,
-    /// Issuing state (3-letter ICAO code).
+    /// Issuing-state code, filler-padded to three cells (ICAO `D` is one letter).
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
@@ -1134,11 +1137,11 @@ pub struct MrvAFields {
     /// Secondary identifier / given names, encoded per
     /// [`encode_name_component`].
     pub given_names: String,
-    /// Nationality (3-letter ICAO code).
+    /// Nationality code, filler-padded to three cells.
     pub nationality: String,
     /// Typed date of birth, emitted as six MRZ zone characters.
     pub date_of_birth: MrzDate,
-    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    /// Typed sex cell; unspecified emits `<`, and non-MRZ characters emit `<`.
     pub sex: Sex,
     /// Typed date of expiry, emitted as six MRZ zone characters.
     pub date_of_expiry: MrzDate,
@@ -1168,7 +1171,8 @@ impl Default for MrvAFields {
 /// by `\n`.
 ///
 /// The document number, date-of-birth, and date-of-expiry check digits are
-/// computed from `fields` — the result always round-trips through
+/// computed from `fields`. With a document code accepted by the matching parser,
+/// the result round-trips through
 /// [`crate::parse_mrv_a`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// MRV-A has no personal-number check digit and no composite check digit.
 ///
@@ -1182,7 +1186,7 @@ impl Default for MrvAFields {
 ///     nationality: "UTO".into(),
 ///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
 ///     sex: mrz::Sex::Female,
-///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)), // ICAO meant 1994; century does not change `940623`.
 ///     ..MrvAFields::default()
 /// };
 /// let mrz = format_mrv_a(&fields);
@@ -1233,7 +1237,7 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
 ///     nationality: "UTO".into(),
 ///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
 ///     sex: mrz::Sex::Female,
-///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)), // ICAO meant 1994; century does not change `940623`.
 ///     optional_data: Some("ZE184226".into()),
 ///     ..Default::default()
 /// };
@@ -1256,9 +1260,10 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MrvBFields {
-    /// Document code, always `"V"` for a visa. Defaults to `"V"`.
+    /// First character `V`; the second may designate an issuer-defined visa
+    /// type (Part 7 §4.2.2.1/§7.2.2.1). Defaults to `"V"`.
     pub document_code: String,
-    /// Issuing state (3-letter ICAO code).
+    /// Issuing-state code, filler-padded to three cells (ICAO `D` is one letter).
     pub issuing_country: String,
     /// Document number, up to 9 characters.
     pub document_number: String,
@@ -1267,11 +1272,11 @@ pub struct MrvBFields {
     /// Secondary identifier / given names, encoded per
     /// [`encode_name_component`].
     pub given_names: String,
-    /// Nationality (3-letter ICAO code).
+    /// Nationality code, filler-padded to three cells.
     pub nationality: String,
     /// Typed date of birth, emitted as six MRZ zone characters.
     pub date_of_birth: MrzDate,
-    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    /// Typed sex cell; unspecified emits `<`, and non-MRZ characters emit `<`.
     pub sex: Sex,
     /// Typed date of expiry, emitted as six MRZ zone characters.
     pub date_of_expiry: MrzDate,
@@ -1301,7 +1306,8 @@ impl Default for MrvBFields {
 /// by `\n`.
 ///
 /// The document number, date-of-birth, and date-of-expiry check digits are
-/// computed from `fields` — the result always round-trips through
+/// computed from `fields`. With a document code accepted by the matching parser,
+/// the result round-trips through
 /// [`crate::parse_mrv_b`] with `valid() == true` (see `tests/roundtrip.rs`).
 /// MRV-B has no personal-number check digit and no composite check digit.
 ///
@@ -1315,7 +1321,7 @@ impl Default for MrvBFields {
 ///     nationality: "UTO".into(),
 ///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
 ///     sex: mrz::Sex::Female,
-///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)), // ICAO meant 1994; century does not change `940623`.
 ///     ..MrvBFields::default()
 /// };
 /// let mrz = format_mrv_b(&fields);

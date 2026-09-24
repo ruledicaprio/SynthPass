@@ -11,7 +11,7 @@
 //!
 //! On provenance: the corpus in `knowledge/docs9303/` carries Doc 9303 as
 //! converted text, and not every worked example survived that conversion as
-//! text — several specimens are images in the source PDFs. Each vector below
+//! text — consult the PDFs for each specimen's current text layer. Each vector below
 //! therefore records whether the corpus can actually corroborate it, rather
 //! than asserting a blanket "these come from ICAO". See
 //! `knowledge/docs9303/CONFORMANCE_BASIS.md`.
@@ -38,21 +38,11 @@ const VECTORS: &[(&str, u32, &str)] = &[
     ("AB2134<<<", 5, "9303 pt3 alphanumeric+filler example"),
     // TD3 specimen (Utopia / Anna Maria Eriksson) field check digits.
     //
-    // Part 4's specimen data page is an IMAGE in the source PDF and did not
-    // survive conversion as text: searching the corpus for `L898902` or
-    // `ZE184226` hits only Part 7's MRV specimens, never Part 4. So the two
-    // document-specific values below cannot be corroborated from this corpus,
-    // and are labelled accordingly rather than credited to Part 4.
-    (
-        "L898902C3",
-        6,
-        "TD3 specimen document number (not corroborated by the corpus - Part 4's specimen is image-only)",
-    ),
-    (
-        "ZE184226B<<<<<",
-        1,
-        "TD3 specimen personal number (not corroborated by the corpus - Part 4's specimen is image-only)",
-    ),
+    // Part 3 §3.2 (PDF p11) prints both field checks in a text layer.
+    // The P< line 1 is from a pre-amendment edition; current Part 4
+    // instead prints PP and a 2034 expiry.
+    ("L898902C3", 6, "Part 3 §3.2 Utopia document number"),
+    ("ZE184226B<<<<<", 1, "Part 3 §3.2 Utopia personal number"),
     // These two ARE corroborated, though from Part 6 rather than Part 4: the
     // TD2 specimen's line 2 survived as literal text and carries the same
     // date of birth and date of expiry, with the same check digits.
@@ -181,7 +171,7 @@ fn composite_check_digit_matches_icao_worked_examples() {
 /// §4.2.3.1's worked VIZ→MRZ name examples
 /// (`knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-533`),
 /// transcribed verbatim as string literals. Every TD3 upper line, name field
-/// included, is a fixed 44 characters (`PP<UTO` document code/country
+/// included, is a fixed 44 characters (`PPUTO` document code/country
 /// prefix + 39-character name field); ICAO's own examples must therefore
 /// each be exactly 44 characters.
 ///
@@ -196,11 +186,8 @@ fn composite_check_digit_matches_icao_worked_examples() {
 /// character when this file was typed in), not an implementation bug —
 /// there is no implementation under test here.
 ///
-/// The §4.2.3.3c example (`:571`, `PPUTOBENNEL<WOOLOOM<WARRAN<WARNAM<<DINGO<POTO`)
-/// is deliberately excluded: it counts to 45 characters, not the 44 the
-/// format requires, and is either a dropped/added character in the source
-/// PDF's own typesetting or an erratum — a known corpus defect, not
-/// something to pin as a passing vector. See `CONFORMANCE_BASIS.md`.
+/// Part 4 §4.2.3.3(c) prints the 44-character
+/// `PPUTOBENNEL<WOOLOO<WARRAN<WARNAM<<DINGO<POTO` example.
 const SECTION_4_2_3_1_NAME_EXAMPLES: &[(&str, &str)] = &[
     (
         "a) Anna Maria Eriksson",
@@ -934,7 +921,7 @@ fn emit_transliterates_table_a_characters_expanded() {
 
 // ---- Part 3 §6 B Cyrillic transliteration ----
 //
-// Doc 9303 §6 B carries NO worked example (unlike §6 A's `Térèsa CAÑON`), so
+// Doc 9303 Part 3 §6 B carries no worked example in Part 3; Part 4 Appendix A Figure A-2 does carry one (unlike §6 A's `Térèsa CAÑON`), so
 // the table-level vectors live in `translit.rs`'s unit tests, constructed from
 // the table's own rows. What this file adds is the *emit path*: a Cyrillic
 // name reaching an MRZ name field through `format_td3`. The CONFORMANCE_BASIS

@@ -39,33 +39,34 @@ The mechanics are enforced, not remembered. Each change drops a fragment in
 `!` marks a break). CI checks the version bump against the fragments
 (`scripts/check-changelog.sh`) and against the published API (`cargo-semver-checks`).
 
-## Where it stands — 0.7.x
+## Where it stands — 0.8.0 release candidate
 
 Delivered:
 
-- All five Doc 9303 layouts (TD1, TD2, TD3, MRV-A, MRV-B) parse and emit, and emitted zones
+- All five Doc 9303 layouts (TD1, TD2, TD3, MRV-A, MRV-B) parse and emit, and emitted zones with parser-accepted document codes
   round-trip through the parsers as valid.
-- Per-field check-digit proof, and a free-text scanner that repairs OCR damage only under
-  check-digit proof.
-- Long document numbers, unknown and partial dates, Part 4 §4.4 passport types, and the
-  Part 3 §5 code registry.
+- Per-field check-digit consistency, and a free-text scanner that uses
+  check digits to constrain OCR repairs.
+- Long document numbers, unknown and partial dates, Part 4 §4.4 passport types, and a substantial but incomplete
+  subset of the Part 3 §5 code registry.
 - Part 3 §6 A (Latin) and §6 B (Cyrillic) transliteration.
 - The check-digit blind-spot atlas (`Blindspot`, `CLASSES`).
 - CI gates for the MSRV, semver and rustdoc warnings. Every public item is documented, and
   every item docs.rs counts carries a runnable example.
 
-## Patch track — 0.7.x
+## Patch track — 0.8.x
 
 Additive work and fixes that break nothing. None of it is ordered or scheduled.
 
 - **Repair heuristics measured on real specimens** — new `CONFUSABLES` rows, new shift and
   drop repairs. Each one ships with the measurement that justified it.
-- **Registry data** — new or retired §5 codes, and the `CURRENT_YY` century pivot, bumped every
+- **Registry data** — additions to the incomplete §5 code table, retired codes, and the `CURRENT_YY` century pivot, bumped every
   year. CI fails once the pivot falls two years behind the clock.
 - **Part 3 §6 C (Arabic) transliteration** — the last missing table. It needs a verifiable
   source the way §6 A had its Appendix B example. Not started.
 - **`serde` on the remaining public types** — `PassportType`, `CyrillicLanguage`,
-  `TransliterationStyle`, `Blindspot`, `Resolution`, `FieldKind` and `MrzError` carry no
+  `TransliterationStyle`, `Blindspot`, `Resolution`, `FieldKind`, `MrzError`,
+  `DateRole`, `RawDateField`, `InvalidRawDateField`, `ParseMrzDateError` and `ParseSexError` carry no
   derives today. Anyone serializing diagnostics wants them.
 - **A strict emit path** — `try_format_*` functions that return an error for input the
   emitters currently map to fillers or truncate. The existing total functions stay as they are.
@@ -93,7 +94,7 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
   needs is an audit of the `std::` paths and of the `serde` feature's `alloc` configuration.
 
-## The breaking window — 0.8.0 (proposed)
+## The breaking window — 0.8.0
 
 Pre-1.0 is the cheap time to break, and the plan is to break **once**: collect every change
 below into a single release rather than spreading them across several minors. Each is a
@@ -125,14 +126,14 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
    `None` elsewhere — the shape the emitters and the spec transcription always had. The join
    was the defect worth the breaking slot: with one slot empty it lost which printed field held
    the value, and two tracked specimens sat on opposite sides of it.
-4. **Typed values as the primary representation. — DONE on `MrzData`; the emitter inputs follow.**
+4. **Typed values as the primary representation. — DONE on `MrzData` and emitter inputs.**
    ([ADR-0019](../../knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), Option D).
    - `date_of_birth` and `date_of_expiry` become an `MrzDate` enum: calendar day, out-of-calendar
      digits, partially unknown, unknown, malformed.
    - `sex` becomes a `Sex` enum whose fourth variant keeps a non-conformant character instead of
      collapsing it to `"X"`.
    - `date_of_birth_completeness` is removed in favour of `MrzDate::completeness()`.
-   - The emitter's `*Fields` inputs take the same types. (Pending: they still take `String`.)
+   - The emitter's `*Fields` inputs take the same types.
    - The `serde` shape is fixed by
      [ADR-0020](../../knowledge/decisions/ADR-0020-mrz-value-wire-contract.md): `Display`, serde and
      the zone agree, so every date serialises exactly as before.

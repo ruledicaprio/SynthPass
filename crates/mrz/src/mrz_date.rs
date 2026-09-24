@@ -2,7 +2,7 @@
 //! (ADR-0019), and its text form (ADR-0020).
 //!
 //! A date field in the zone is not always a date. Doc 9303 Part 3 §4.8 lets an
-//! issuer fill unknown positions with `<`; printed specimens carry six-digit
+//! issuer fill unknown date-of-birth positions with `<`; printed specimens carry six-digit
 //! placeholders such as `000000` that name no calendar day; and a recogniser
 //! can put any charset character in the cell. [`MrzDate`] gives each of those
 //! its own variant, so a caller branches on one value instead of reconciling
@@ -122,17 +122,19 @@ pub enum DateRole {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MrzDate {
-    /// Six digits naming a real calendar day, century from the parse pivot.
+    /// Six digits naming a real calendar day when produced by the parser, century
+    /// from the parse pivot. The public variant also accepts unchecked `Date` values.
     Calendar(Date),
     /// Six digits that name no calendar day: month `00` or `45`, 29 February
     /// in a non-leap year, the `000000` placeholder some specimens print. The
     /// components are what was read, and
     /// [`Date::is_well_formed`](crate::Date::is_well_formed) is `false`.
     OutOfCalendar(Date),
-    /// Digits and `<` fillers: the issuer left part of the date unknown, as
-    /// Doc 9303 Part 3 §4.8 permits. Not a bad read.
+    /// Digits and `<` fillers. Part 3 §4.8 permits this for birth dates;
+    /// accepting it in an expiry field is parser tolerance, not an ICAO rule.
     PartiallyUnknown(RawDateField),
-    /// Six `<` fillers: the issuer left the whole date unknown. Not a bad read.
+    /// Six `<` fillers. Part 3 §4.8 permits this for a birth date; accepting
+    /// it in an expiry field is parser tolerance, not an ICAO rule.
     Unknown,
     /// A character that is neither a digit nor `<`: not a conformant date
     /// field, so a misread rather than an issuer's choice.
@@ -217,13 +219,15 @@ impl fmt::Display for ParseMrzDateError {
 
 impl std::error::Error for ParseMrzDateError {}
 
-/// The inverse of `Display`. A ten-character `YYYY-MM-DD` of digits is
+/// The inverse of `Display` for values produced by [`MrzDate::from_field`]
+/// or this parser. A caller can construct variants that normalize on parsing
+/// (for example `Malformed("<<<<<<")` becomes `Unknown`). A ten-character
+/// `YYYY-MM-DD` of digits is
 /// `Calendar` or `OutOfCalendar` by well-formedness, deliberately without the
 /// calendar check that would reject the second. Six fillers are `Unknown`;
 /// six charset characters mixing digits and fillers are `PartiallyUnknown`;
 /// any other six charset characters are `Malformed`. Six bare digits are
-/// rejected: no century can be recovered without a pivot, and `Display` never
-/// produces them.
+/// rejected: no century can be recovered without a pivot, although caller-built variants can display them.
 impl FromStr for MrzDate {
     type Err = ParseMrzDateError;
 

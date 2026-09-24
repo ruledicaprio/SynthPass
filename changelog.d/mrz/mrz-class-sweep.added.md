@@ -4,4 +4,4 @@
   check-digit cell of the same digit, all read as one confusable letter. Field-scoped only (never
   a whole-line sweep), requires at least two occurrences of the swept character across the field
   and its check digit, and is additive alongside `solve_substitution`'s single-position repair —
-  `MAX_SUBSTITUTIONS` is unchanged. Not wired into `find_and_parse`/`find_and_parse_with` yet.
+  `MAX_SUBSTITUTIONS` is unchanged.
