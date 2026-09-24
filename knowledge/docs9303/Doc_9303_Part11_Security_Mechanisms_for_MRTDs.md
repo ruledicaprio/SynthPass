@@ -394,11 +394,11 @@ Standardized domain parameters SHOULD be used. Explicit domain parameters MUST N
 **Table 12. Standardized domain parameters (Excerpt)**
 | ID | Name | Size (bit) | Type | Reference |
 | :---: | :--- | :--- | :---: | :--- |
-| 0 | 1024-bit MODP Group | 1024/160 | GFP | [RFC 5114] |
-| 8 | NIST P-192 (secp192r1) | 192 | ECP | [RFC 5114] |
-| 12 | NIST P-256 (secp256r1) | 256 | ECP | [RFC 5114] |
+| 0 | 1024-bit MODP Group with 160-bit Prime Order Subgroup | 1024/160 | GFP | [RFC 5114] |
+| 8 | NIST P-192 (secp192r1) | 192 | ECP | [RFC 5114], [FIPS 186-4] |
+| 12 | NIST P-256 (secp256r1) | 256 | ECP | [RFC 5114], [FIPS 186-4] |
 | 13 | BrainpoolP256r1 | 256 | ECP | [RFC 5639] |
-| 18 | NIST P-521 (secp521r1) | 521 | ECP | [RFC 5114] |
+| 18 | NIST P-521 (secp521r1) | 521 | ECP | [RFC 5114], [FIPS 186-4] |
 
 ### 9.6 Key Agreement Algorithms
 This specification supports Diffie-Hellman and Elliptic Curve Diffie-Hellman key agreement, summarized in Table 13.
@@ -408,8 +408,8 @@ This specification supports Diffie-Hellman and Elliptic Curve Diffie-Hellman key
 | :--- | :--- | :--- |
 | Key Agreement Algorithm | [PKCS#3] | ECKA [TR-03111] |
 | X.509 Public Key Format | [PKCS#3] | [TR-03111] |
-| TLV Public Key Format | TLV (see Section 9.4) | [TR-03111] |
-| Ephemeral Public Key Validation | [RFC 2631] | TLV (see Section 9.4) / [TR-03111] |
+| TLV Public Key Format | TLV (see Section 9.4.3) | TLV (see Section 9.4.4) |
+| Ephemeral Public Key Validation | [RFC 2631] | [TR-03111] |
 
 ### 9.7 Key Derivation Mechanism
 ```text

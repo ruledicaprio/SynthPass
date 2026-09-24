@@ -199,7 +199,7 @@ A functioning contactless IC in an eMRTD can also aid optical machine authentica
 
 > **Figure 1. Three sizes of MRTD including the MRP (TD3 size) with recommended positions for machine assisted document verification features**
 >
-> [Diagram: Dimensioned line drawings of the three MRTD sizes (TD1, TD2, and TD3/MRP) showing the recommended data-page positions for machine-verifiable security features. On each drawing, a shaded area on the left marks where a structure verification feature should be centred, and a shaded area on the right marks where a substance verification feature should be centred, both positioned clear of the MRZ. Called-out dimensions (in millimetres, with inches in parentheses) give the offsets of these feature centres from the document edges: 20.0 mm (0.79 in) and 17.0 mm (0.67 in) for the structure-feature centre, 10.0 mm (0.39 in) for the substance-feature centre, and 80.6 mm (3.17 in), 29.0 mm (1.14 in), and 23.2 mm (0.91 in) for the surrounding layout relative to the MRZ. The drawings are explicitly marked "Not to scale." The shaded area on the left is recommended for the incorporation of a structure feature and that on the right for the incorporation of a substance feature.]
+> [Editorial description, not ICAO text: Dimensioned line drawings of the three MRTD sizes (TD1, TD2, and TD3/MRP), each drawn nested inside the next, with a shaded area on the left marking where a structure verification feature should be centred and a shaded area on the right marking where a substance verification feature should be centred, both above the MRZ band. Labelled dimensions (nominal millimetres, with inches in parentheses) read: 20.0 (0.79) and 17.0 (0.67) as two alternative offsets from the left edge to the nominal centre of the structure feature; 10.0 (0.39) as the offset to the nominal centre of the substance feature; 80.6 (3.17) as the horizontal distance between the two feature centres; and 29.0 (1.14) and 23.2 (0.91) as two vertical distances from the top of the document down to the MRZ. The drawing is captioned "Nominal dimensions in millimetres (inch dimensions in parentheses)" and "Not to scale."]
 
 ## 4. SECURITY OF MRTD PRODUCTION (DESIGN AND MANUFACTURING) AND ISSUANCE FACILITIES
 
@@ -1338,7 +1338,7 @@ The authentication software sends the document model’s identifier to the authe
 >
 > <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p52.png" alt="Process of document identification and verification">
 >
-> [Diagram: Flow chart of the document-identification-and-verification process. The full page reader captures a live data set (VIS-image, UV-image, IR-image) from the document (step 1) and passes it to the authentication (inspection) software. The software sends the document model identifier (ID) to the inspection database (step 2), which returns the corresponding inspection data set (inspection routine 1, inspection routine 2, ..., inspection routine n) for that model (step 3). Optionally, the software also sends the ID to a reference database (step 4), which returns a reference data set (VIS-image, UV-image, IR-image, plus detailed images) to support manual verification by a human operator.]
+> [Editorial description, not ICAO text: Flow chart of the document-identification-and-verification process. The full page reader captures a live data set (VIS-image, UV-image, IR-image) from the document and passes it to the inspection software (step 1). The inspection software sends the document model identifier (ID) to the inspection database and receives back the corresponding inspection data set (inspection routine 1, inspection routine 2, ..., inspection routine n) for that model (step 2). The inspection software displays the result to the operator on a monitor, shown with a check mark and a cross (step 3). Optionally, the inspection software also sends the ID to a reference database, which returns a reference data set (VIS-image, UV-image, IR-image, plus detailed images) to support manual verification by a human operator (step 4).]
 
 The verification is then performed by the authentication software. The check routines are applied to the travel document’s live data set. This examination usually leads to a Pass- or Fail-result. A Pass-result implies that the checked document does not present any abnormalities, whereby a Fail-result means the opposite. Depending on the application scenario, the interpretation of the result (pass or fail) is the responsibility of the human operator.
 
@@ -1360,13 +1360,13 @@ In terms of the EU regulation on minimum standards for security features and bio
 >
 > <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p54.png" alt="Schematic diagram of the setup of an authentication system">
 >
-> [Diagram: Block diagram of an authentication system's architecture. An Inspection System comprises a Full Page Reader (capturing images under Light Source 1/white light, Light Source 2/infrared light, and Light Source 3/ultraviolet light) feeding an Inspection Software component, which runs a set of Inspection Algorithms (e.g. Algorithm 1 = brightness, Algorithm 2 = consistence, ..., Algorithm n = pattern matching). The Inspection Software queries an Inspection Database organized by Document Model (e.g. Document Model 1 = Germany 2007, Document Model 2 = Great Britain 2008, Document Model n = Great Britain 2010). Each document model defines a set of Features (e.g. Feature 1 = photo, Feature 2 = static printing technique, Feature n = MRZ), and each feature has one or more Inspection Routines, each testing a Property (e.g. Property 1 = absorbing, Property 2 = transparent, Property x = luminescent) using a numbered check algorithm.]
+> [Editorial description, not ICAO text: Block diagram of an authentication system's architecture. An Inspection System comprises a Full Page Reader (capturing images under Light Source 1/white light, Light Source 2/infrared light, and Light Source 3/ultraviolet light) feeding an Inspection Software component, which runs a set of Inspection Algorithms (e.g. Algorithm 1 = brightness, Algorithm 2 = consistence, ..., Algorithm n = pattern matching). The Inspection Software queries an Inspection Database organized by Document Model (e.g. Document Model 1 = Germany 2007, Document Model 2 = Great Britain 2008, Document Model n = Great Britain 2010). Each document model defines a set of Features (e.g. Feature 1 = photo, Feature 2 = static printing technique, Feature n = MRZ), and each feature has one or more Inspection Routines, each testing a Property (e.g. Property 1 = absorbing, Property 2 = transparent, Property x = luminescent) using a numbered check algorithm.]
 
 > **Figure C-3. Features and properties under different light sources using the German passport**
 >
 > <img src="./figures/Doc_9303_Part2_Security_of_MRTDs_p55.png" alt="Features and properties under different light sources using the German passport">
 >
-> [Diagram: Mapping diagram, illustrated with the German passport, showing how the same document feature exhibits different properties depending on which light source is used to examine it. Under Light source 1 (visible), the feature shows Property 1 (absorbing). Under Light source 2 (infrared), the same feature shows both Property 1 (absorbing) and Property 2 (transparent). Under Light source 3 (ultraviolet), it shows Property 3 (luminescent, with a luminescent overprint), demonstrating that a single security feature can be checked for multiple, spectrally distinct properties.]
+> [Editorial description, not ICAO text: Mapping diagram, illustrated with the German passport, showing Feature 1 (photo) and Feature 2 (print static) each checked for a property under three light sources. Under Light source 1 (visible), both Feature 1 and Feature 2 are mapped to Property 1: absorbing. Under Light source 2 (infrared), Feature 2 is mapped to Property 2: transparent and Feature 1 is mapped to Property 2: absorbing (the diagram labels both "Property 2" despite the differing description). Under Light source 3 (ultraviolet), Feature 2 is mapped to Property 3: luminescent and Feature 1 is mapped to Property 3: luminescent overprint.]
 
 ### C.3 CATALOGUE OF GENERIC CHECK ROUTINES
 
@@ -1892,7 +1892,7 @@ C.30 Display optical overview area on start page: This area shows an overview of
 
 > **Figure C-14. Exemplary start page for stationary border control GUI**
 >
-> [Diagram: Screenshot mock-up of a stationary border-control inspection GUI's start page, shown with a specimen document (holder "SCHWAIGER MICHAEL", document number G20002068, nationality AUT, sample MRZ "P<UTOSCHWAIGER<<MICHAEL<<<<<<<<<<<<<<<<<" / "G20020GB<0AUT8502050M19111721122334455<<<<<B4"). The layout comprises a process summary area (overall pass/fail result -- in this example flagging "The chip is cloned!") and an optical overview area showing the VI document image, the personal data extracted from the MRZ (name, date of birth, sex, nationality), the document data (type, number, issuing State, date of expiry), the extracted MRZ text, and status indicators for local peripheral devices and the connection to central server systems.]
+> [Editorial description, not ICAO text: Screenshot mock-up of a stationary border-control inspection GUI's start page, shown with a specimen document (holder "SCHWAIGER MICHAEL", document number G20002068, nationality AUT, sample MRZ "P<UTOSCHWAIGER<<MICHAEL<<<<<<<<<<<<<<<<<" / "G20020GB<0AUT8502050M19111721122334455<<<<<B4"). The layout comprises, on the left, a process summary area (menu, pass/fail icons for optical checks/electronic checks/police search -- in this example a red icon for the electronic check -- and the document/chip photos) and, on the right, an optical overview area showing the document data, the personal data extracted from the MRZ (name, date of birth, sex, nationality), the document data (type, number, issuing State, date of expiry), the extracted MRZ text, a document check results panel (here reading "The chip is cloned!"), and status indicators for local peripheral devices and the connection to central server systems.]
 
 - The extracted MRZ to allow comparison of the extracted MRZ with the MRZ printed on the document.
 
@@ -1958,7 +1958,7 @@ C.35 Display details in a dedicated optical details area: The details view is on
 
 > **Figure C-15. Exemplary view for the optical details area**
 >
-> [Diagram: Screenshot mock-up of the optical details area of the inspection GUI, showing the White light (VIS), Infrared (IR), and Ultraviolet (UV) images of the document side by side. Personal data (last name, first name, date of birth, sex, nationality) and document data (type, number, issuing State/country code, date of expiry, optional data) are each shown twice -- once as read from the optical MRZ and once from the chip's DG1 -- for direct comparison. A traffic-light panel summarizes the optical check results: document model identified, MRZ consistency, date of expiry, MRZ IR-readability, UV brightness, and pattern check.]
+> [Editorial description, not ICAO text: Screenshot mock-up of the optical details area of the inspection GUI, showing the White light (VIS), Infrared (IR), and Ultraviolet (UV) images of the document side by side. Personal data (last name, first name, date of birth, sex, nationality) and document data (type, number, issuing State/country code, date of expiry, optional data) are each shown twice -- once as read from the optical MRZ and once from the chip's DG1 -- for direct comparison. A traffic-light panel summarizes the optical check results: document model identified, MRZ consistency, date of expiry, MRZ IR-readability, UV brightness, and pattern check.]
 
 - The extracted MRZ.
 
@@ -1990,7 +1990,7 @@ C.40 Allow comparison of passport and visa/electronic residence permit (eRP) con
 
 > **Figure C-16. Exemplary view for the comparison of passport and visa**
 >
-> [Diagram: Screenshot mock-up showing three side-by-side instances of the visa/passport comparison panel (Optical checks, Status of Visa, Police search, Document/Chip, Visa/C-VIS), illustrating how the passport holder's facial image is displayed alongside the corresponding visa and central visa-information-system (C-VIS) images for comparison.]
+> [Editorial description, not ICAO text: Screenshot mock-up showing, stacked vertically, a traffic-light panel (Optical checks, Status of Visa, Police search, all green) above a 2x2 grid of four facial images labelled Document, Chip, Visa, and C-VIS, illustrating how the passport holder's facial image is displayed alongside the corresponding visa and central visa-information-system (C-VIS) images for comparison.]
 
 Recommendations for displaying errors are given below:
 
@@ -2006,7 +2006,7 @@ C.43 Display errors in optical overview area: If errors occur because of optical
 
 > **Figure C-17. Exemplary view for error visualization: MRZ consistency**
 >
-> [Diagram: Screenshot mock-up showing the same specimen document as Figure C-14 but with an inconsistent MRZ (date of birth optically read as "04.02.85" against an expected "05.02.85") and a chip that cannot be accessed. The inconsistent date of birth, the extracted MRZ text, and the "MRZ Error!" / "Chip access not possible!" results are all highlighted in red, and the IR image of the data page is shown in place of the standard VI image.]
+> [Editorial description, not ICAO text: Screenshot mock-up showing the same specimen document as Figure C-14 but with an inconsistent MRZ (date of birth optically read as "04.02.85" against an expected "05.02.85") and a chip that cannot be accessed. The inconsistent date of birth, the extracted MRZ text, and the "MRZ Error!" / "Chip access not possible!" results are all highlighted in red, and the IR image of the data page is shown in place of the standard VI image.]
 
 - Document expired: If the document is expired, the date of expiry should be highlighted in red.
 
@@ -2018,7 +2018,7 @@ C.44 Display errors in optical details area: If errors occur because of optical 
 
 > **Figure C-18. Exemplary for view error visualization: Document model and negative verification check**
 >
-> [Diagram: Screenshot mock-up of the optical check results panel showing a warning symbol for "Document model could not be identified", alongside traffic lights for MRZ consistency, date of expiry, MRZ IR-readability, UV brightness, and pattern check -- illustrating how a negative verification result is flagged in the details view.]
+> [Editorial description, not ICAO text: Screenshot mock-up of the optical check results panel showing a warning symbol for "Document model could not be identified", followed by traffic lights for MRZ consistency (green), date of expiry (green), MRZ IR-readability (green), UV brightness (red), and pattern check (grey/not performed) -- illustrating how a negative verification result is flagged in the details view.]
 
 - Negative verification check: For every verification check displayed in the details page (see Figure C-18), a negative check result should lead to a red traffic light. The respective features of the failed spectrally selective check should be highlighted on the corresponding image, e.g. by showing a red rectangle surrounding the searching area of the feature (e.g. the MRZ of the IR image due to a negative MRZ IR readability).
 
@@ -2028,7 +2028,7 @@ C.44 Display errors in optical details area: If errors occur because of optical 
 
 > **Figure C-19. Exemplary view for error visualization: MRZ data**
 >
-> [Diagram: Screenshot mock-up comparing personal data as read from the optical MRZ against the chip's DG1 side by side. All fields match (last name, first name, date of birth, nationality, document type/number, country code, date of expiry, optional data) except Sex, shown as "F" from the MRZ against "M" on the chip -- the mismatched pair is highlighted in red with a warning symbol.]
+> [Editorial description, not ICAO text: Screenshot mock-up comparing personal data as read from the optical MRZ against the chip's DG1 side by side. All fields match (last name, first name, date of birth, nationality, document type/number, country code, date of expiry, optional data) except Sex, shown as "F" from the MRZ against "M" on the chip -- the mismatched pair is highlighted in red with a warning symbol.]
 
 C.45 Display errors of passport and visa/eRP comparison: If at least one of the comparable MRZ data is not the same for the passport and the visa/eRP, this inconsistency should be displayed in the following way:
 
@@ -2036,7 +2036,7 @@ C.45 Display errors of passport and visa/eRP comparison: If at least one of the 
 
 > **Figure C-20. Exemplary view for the comparison of the visa and the passport data**
 >
-> [Diagram: Screenshot mock-up comparing the visa holder's personal data ("LIN VALERY", born 30.04.73, male, nationality CHN/China) against the passport holder's personal data ("SCHWAIGER MICHAEL", born 05.02.85, male, nationality D/Germany) side by side. Because the last name, first name, date of birth, and nationality all differ between the visa and the passport, every field is highlighted in red with a warning symbol, illustrating a failed cross-document consistency check.]
+> [Editorial description, not ICAO text: Screenshot mock-up comparing the visa holder's personal data ("LIN VALERY", born 30.04.73, male, nationality CHN/China) against the passport holder's personal data ("SCHWAIGER MICHAEL", born 05.02.85, male, nationality D/Germany) side by side. Because the last name, first name, date of birth, and nationality all differ between the visa and the passport, those fields are highlighted in red with a warning symbol; Sex, which matches (M for both), is shown in black, not highlighted, illustrating a failed cross-document consistency check.]
 
 - Visa/eRP details area: For every MRZ data which is not the same for the visa/eRP and the passport, the inconsistent pair of information should be displayed in red (with a warning symbol).
 

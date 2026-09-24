@@ -37,14 +37,12 @@
 //!   expiry (6) + check (1) + optional data (8) on line 2. Same as MRV-A: no
 //!   personal-number check digit, no composite check digit.
 //!
-//! Input fields are taken in MRZ-native form (`YYMMDD` dates, uppercase
-//! `[A-Z0-9]`) rather than the parser's output form (ISO dates, spaced given
-//! names) — this keeps emission lossless and deterministic instead of forcing
-//! a fragile un-parse of the parser's normalized/century-inferred output.
-//! Any character outside `[A-Z0-9]` (including spaces between given names) is
-//! mapped to the filler `<`, and every fixed-width field is padded with `<`
-//! or truncated to its exact width — this function never panics and always
-//! returns exactly 44+1+44 = 89 characters.
+//! Dates and sex use the parser's typed MRZ vocabulary. Other fields use
+//! MRZ-native text; names are transliterated and fixed-width fields are
+//! cleaned and padded deterministically.
+//! Non-name text fields map characters outside `[A-Z0-9]` to filler `<`
+//! and are padded or truncated to their fixed widths. Typed dates and sex
+//! write their six and one zone characters directly.
 //!
 //! The `surname`/`given_names` pair feeding the name field is the one
 //! exception to the blanket "non-alphanumeric maps to filler" rule above:
@@ -59,15 +57,15 @@
 //! punctuation carve-out.
 
 use crate::checksum::check_digit;
+use crate::{MrzDate, Sex};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 /// Raw TD3 sub-fields, in MRZ-native form.
 ///
-/// The inputs are what the MRZ prints, not what a parser returns: dates are
-/// `YYMMDD` rather than ISO, and states are 3-letter ICAO codes. Every field is
-/// uppercased, any character outside `[A-Z0-9]` becomes the filler `<`, and
-/// the result is padded or truncated to the field's exact width, so emitting
+/// Dates and sex use the parser's typed MRZ vocabulary; states are
+/// 3-letter ICAO codes. Non-name text fields are cleaned and padded or
+/// truncated to their exact widths, so emitting
 /// never panics and never produces a line of the wrong length. The two name
 /// fields are the exception: they are encoded per Doc 9303 Part 3 §4.6 and
 /// transliterated per §6 A/§6 B, exactly as [`encode_name_component`] does,
@@ -118,12 +116,12 @@ pub struct Td3Fields {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// Date of birth as `YYMMDD`.
-    pub date_of_birth: String,
-    /// `"M"`, `"F"`, or `"X"` (unspecified — emitted as the filler `<`).
-    pub sex: String,
-    /// Date of expiry as `YYMMDD`.
-    pub date_of_expiry: String,
+    /// Typed date of birth, emitted as six MRZ zone characters.
+    pub date_of_birth: MrzDate,
+    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    pub sex: Sex,
+    /// Typed date of expiry, emitted as six MRZ zone characters.
+    pub date_of_expiry: MrzDate,
     /// Optional personal number, up to 14 characters.
     pub personal_number: Option<String>,
 }
@@ -137,11 +135,40 @@ impl Default for Td3Fields {
             surname: String::new(),
             given_names: String::new(),
             nationality: String::new(),
-            date_of_birth: String::new(),
-            sex: String::new(),
-            date_of_expiry: String::new(),
+            date_of_birth: MrzDate::Unknown,
+            sex: Sex::Unspecified,
+            date_of_expiry: MrzDate::Unknown,
             personal_number: None,
         }
+    }
+}
+
+/// The printed sex cell. `M`, `F` and `<` come from [`Sex::zone_char`]. A
+/// [`Sex::NonConformant`] cell is written as given when it is a character of
+/// the MRZ alphabet (`A`-`Z`, `0`-`9`, `<`), so a parsed zone re-emits as it
+/// was read. Any other character is written as `<`, as 0.7 wrote every
+/// non-`M`/`F` value. The variant is public and can hold any `char`, and one
+/// non-ASCII character would otherwise make the line the wrong length in bytes.
+fn sex_cell(sex: Sex) -> char {
+    let c = sex.zone_char();
+    if matches!(c, 'A'..='Z' | '0'..='9' | '<') {
+        c
+    } else {
+        '<'
+    }
+}
+
+/// The six printed characters of a typed date, with the century dropped.
+fn date_zone(value: MrzDate) -> String {
+    match value {
+        MrzDate::Calendar(date) | MrzDate::OutOfCalendar(date) => format!(
+            "{:02}{:02}{:02}",
+            date.year.rem_euclid(100),
+            date.month % 100,
+            date.day % 100
+        ),
+        MrzDate::PartiallyUnknown(raw) | MrzDate::Malformed(raw) => raw.as_str().to_string(),
+        MrzDate::Unknown => "<<<<<<".to_string(),
     }
 }
 
@@ -628,9 +655,9 @@ fn digit_char(field: &str) -> char {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "740812".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "120415".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
 ///     personal_number: Some("ZE184226B".into()),
 /// };
 /// let mrz = format_td3(&fields);
@@ -693,14 +720,10 @@ pub fn format_td3(fields: &Td3Fields) -> String {
         optional_prefix,
     } = doc_number(&fields.document_number, 14);
     let nationality = field(&fields.nationality, 3);
-    let dob = field(&fields.date_of_birth, 6);
+    let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = match fields.sex.to_ascii_uppercase().as_str() {
-        "M" => 'M',
-        "F" => 'F',
-        _ => '<',
-    };
-    let expiry = field(&fields.date_of_expiry, 6);
+    let sex = sex_cell(fields.sex);
+    let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let personal = field(
         &format!(
@@ -752,9 +775,9 @@ pub fn format_td3(fields: &Td3Fields) -> String {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "740812".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "120415".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
 ///     ..Default::default()
 /// };
 /// assert_eq!(fields.document_code, "I"); // the default document code
@@ -789,12 +812,12 @@ pub struct Td2Fields {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// Date of birth as `YYMMDD`.
-    pub date_of_birth: String,
-    /// `"M"`, `"F"`, or `"X"` (unspecified — emitted as the filler `<`).
-    pub sex: String,
-    /// Date of expiry as `YYMMDD`.
-    pub date_of_expiry: String,
+    /// Typed date of birth, emitted as six MRZ zone characters.
+    pub date_of_birth: MrzDate,
+    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    pub sex: Sex,
+    /// Typed date of expiry, emitted as six MRZ zone characters.
+    pub date_of_expiry: MrzDate,
     /// Optional data, up to 7 characters. TD2 has no check digit over this
     /// field on its own — it only feeds the composite check.
     pub optional_data: Option<String>,
@@ -809,9 +832,9 @@ impl Default for Td2Fields {
             surname: String::new(),
             given_names: String::new(),
             nationality: String::new(),
-            date_of_birth: String::new(),
-            sex: String::new(),
-            date_of_expiry: String::new(),
+            date_of_birth: MrzDate::Unknown,
+            sex: Sex::Unspecified,
+            date_of_expiry: MrzDate::Unknown,
             optional_data: None,
         }
     }
@@ -832,9 +855,9 @@ impl Default for Td2Fields {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "740812".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "120415".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
 ///     ..Td2Fields::default()
 /// };
 /// let mrz = format_td2(&fields);
@@ -854,14 +877,10 @@ pub fn format_td2(fields: &Td2Fields) -> String {
         optional_prefix,
     } = doc_number(&fields.document_number, 7);
     let nationality = field(&fields.nationality, 3);
-    let dob = field(&fields.date_of_birth, 6);
+    let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = match fields.sex.to_ascii_uppercase().as_str() {
-        "M" => 'M',
-        "F" => 'F',
-        _ => '<',
-    };
-    let expiry = field(&fields.date_of_expiry, 6);
+    let sex = sex_cell(fields.sex);
+    let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(
         &format!(
@@ -911,9 +930,9 @@ pub fn format_td2(fields: &Td2Fields) -> String {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "740812".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "120415".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
 ///     ..Default::default()
 /// };
 /// assert_eq!(fields.document_code, "I"); // the default document code
@@ -953,12 +972,12 @@ pub struct Td1Fields {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// Date of birth as `YYMMDD`.
-    pub date_of_birth: String,
-    /// `"M"`, `"F"`, or `"X"` (unspecified — emitted as the filler `<`).
-    pub sex: String,
-    /// Date of expiry as `YYMMDD`.
-    pub date_of_expiry: String,
+    /// Typed date of birth, emitted as six MRZ zone characters.
+    pub date_of_birth: MrzDate,
+    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    pub sex: Sex,
+    /// Typed date of expiry, emitted as six MRZ zone characters.
+    pub date_of_expiry: MrzDate,
     /// Optional data on line 2, up to 11 characters. TD1 has no separate
     /// check digit over this field on its own — it only feeds the composite.
     pub optional_data_2: Option<String>,
@@ -974,9 +993,9 @@ impl Default for Td1Fields {
             surname: String::new(),
             given_names: String::new(),
             nationality: String::new(),
-            date_of_birth: String::new(),
-            sex: String::new(),
-            date_of_expiry: String::new(),
+            date_of_birth: MrzDate::Unknown,
+            sex: Sex::Unspecified,
+            date_of_expiry: MrzDate::Unknown,
             optional_data_2: None,
         }
     }
@@ -997,9 +1016,9 @@ impl Default for Td1Fields {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "740812".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "120415".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1974, 8, 12)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2012, 4, 15)),
 ///     ..Td1Fields::default()
 /// };
 /// let mrz = format_td1(&fields);
@@ -1027,14 +1046,10 @@ pub fn format_td1(fields: &Td1Fields) -> String {
     let line1 = format!("{doc_code}{issuing}{doc_num}{doc_num_check}{optional1}");
     debug_assert_eq!(line1.len(), 30);
 
-    let dob = field(&fields.date_of_birth, 6);
+    let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = match fields.sex.to_ascii_uppercase().as_str() {
-        "M" => 'M',
-        "F" => 'F',
-        _ => '<',
-    };
-    let expiry = field(&fields.date_of_expiry, 6);
+    let sex = sex_cell(fields.sex);
+    let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let nationality = field(&fields.nationality, 3);
     let optional2 = field(fields.optional_data_2.as_deref().unwrap_or(""), 11);
@@ -1083,9 +1098,9 @@ pub fn format_td1(fields: &Td1Fields) -> String {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "690806".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "940623".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
 ///     optional_data: Some("ZE184226B".into()),
 ///     ..Default::default()
 /// };
@@ -1121,12 +1136,12 @@ pub struct MrvAFields {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// Date of birth as `YYMMDD`.
-    pub date_of_birth: String,
-    /// `"M"`, `"F"`, or `"X"` (unspecified — emitted as the filler `<`).
-    pub sex: String,
-    /// Date of expiry as `YYMMDD`.
-    pub date_of_expiry: String,
+    /// Typed date of birth, emitted as six MRZ zone characters.
+    pub date_of_birth: MrzDate,
+    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    pub sex: Sex,
+    /// Typed date of expiry, emitted as six MRZ zone characters.
+    pub date_of_expiry: MrzDate,
     /// Optional free-form data, up to 16 characters. No check digit covers
     /// this field — MRVs have neither a personal-number nor composite check.
     pub optional_data: Option<String>,
@@ -1141,9 +1156,9 @@ impl Default for MrvAFields {
             surname: String::new(),
             given_names: String::new(),
             nationality: String::new(),
-            date_of_birth: String::new(),
-            sex: String::new(),
-            date_of_expiry: String::new(),
+            date_of_birth: MrzDate::Unknown,
+            sex: Sex::Unspecified,
+            date_of_expiry: MrzDate::Unknown,
             optional_data: None,
         }
     }
@@ -1165,9 +1180,9 @@ impl Default for MrvAFields {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "690806".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "940623".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
 ///     ..MrvAFields::default()
 /// };
 /// let mrz = format_mrv_a(&fields);
@@ -1184,14 +1199,10 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
     let doc_num = field(&fields.document_number, 9);
     let doc_num_check = digit_char(&doc_num);
     let nationality = field(&fields.nationality, 3);
-    let dob = field(&fields.date_of_birth, 6);
+    let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = match fields.sex.to_ascii_uppercase().as_str() {
-        "M" => 'M',
-        "F" => 'F',
-        _ => '<',
-    };
-    let expiry = field(&fields.date_of_expiry, 6);
+    let sex = sex_cell(fields.sex);
+    let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(fields.optional_data.as_deref().unwrap_or(""), 16);
 
@@ -1220,9 +1231,9 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "690806".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "940623".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
 ///     optional_data: Some("ZE184226".into()),
 ///     ..Default::default()
 /// };
@@ -1258,12 +1269,12 @@ pub struct MrvBFields {
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
-    /// Date of birth as `YYMMDD`.
-    pub date_of_birth: String,
-    /// `"M"`, `"F"`, or `"X"` (unspecified — emitted as the filler `<`).
-    pub sex: String,
-    /// Date of expiry as `YYMMDD`.
-    pub date_of_expiry: String,
+    /// Typed date of birth, emitted as six MRZ zone characters.
+    pub date_of_birth: MrzDate,
+    /// Typed sex cell; unspecified emits `<`, and non-conformant cells are preserved.
+    pub sex: Sex,
+    /// Typed date of expiry, emitted as six MRZ zone characters.
+    pub date_of_expiry: MrzDate,
     /// Optional free-form data, up to 8 characters. No check digit covers
     /// this field — MRVs have neither a personal-number nor composite check.
     pub optional_data: Option<String>,
@@ -1278,9 +1289,9 @@ impl Default for MrvBFields {
             surname: String::new(),
             given_names: String::new(),
             nationality: String::new(),
-            date_of_birth: String::new(),
-            sex: String::new(),
-            date_of_expiry: String::new(),
+            date_of_birth: MrzDate::Unknown,
+            sex: Sex::Unspecified,
+            date_of_expiry: MrzDate::Unknown,
             optional_data: None,
         }
     }
@@ -1302,9 +1313,9 @@ impl Default for MrvBFields {
 ///     surname: "ERIKSSON".into(),
 ///     given_names: "ANNA MARIA".into(),
 ///     nationality: "UTO".into(),
-///     date_of_birth: "690806".into(),
-///     sex: "F".into(),
-///     date_of_expiry: "940623".into(),
+///     date_of_birth: mrz::MrzDate::Calendar(mrz::Date::new(1969, 8, 6)),
+///     sex: mrz::Sex::Female,
+///     date_of_expiry: mrz::MrzDate::Calendar(mrz::Date::new(2094, 6, 23)),
 ///     ..MrvBFields::default()
 /// };
 /// let mrz = format_mrv_b(&fields);
@@ -1321,14 +1332,10 @@ pub fn format_mrv_b(fields: &MrvBFields) -> String {
     let doc_num = field(&fields.document_number, 9);
     let doc_num_check = digit_char(&doc_num);
     let nationality = field(&fields.nationality, 3);
-    let dob = field(&fields.date_of_birth, 6);
+    let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = match fields.sex.to_ascii_uppercase().as_str() {
-        "M" => 'M',
-        "F" => 'F',
-        _ => '<',
-    };
-    let expiry = field(&fields.date_of_expiry, 6);
+    let sex = sex_cell(fields.sex);
+    let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(fields.optional_data.as_deref().unwrap_or(""), 8);
 

@@ -13,6 +13,8 @@
 //! lookalike, **check-digit cell included**. See
 //! `knowledge/benchmarks/twelve-scored-misses-2026-09-19.md`.
 
+mod support;
+
 use mrz::{find_and_parse_with, format_td1, ParseOptions, Td1Fields};
 
 /// A checksum-valid TD1 zone whose document number is nine identical digits,
@@ -27,9 +29,9 @@ fn valid_zone() -> String {
         surname: "ERIKSSON".to_string(),
         given_names: "ANNA MARIA".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "740812".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "120415".to_string(),
+        date_of_birth: support::birth("740812"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("120415"),
         optional_data_2: None,
     })
 }

@@ -71,7 +71,7 @@ fn typed_fields_serialise_as_their_text_form() {
         .is_none());
 
     let zone = mrz::format_td3(&mrz::Td3Fields {
-        sex: "X".into(),
+        sex: mrz::Sex::Unspecified,
         ..Default::default()
     });
     let (l1, l2) = zone.split_once('\n').unwrap();

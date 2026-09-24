@@ -88,7 +88,7 @@ In no event shall the dimensions of the finished TD2 document exceed the dimensi
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p10.png" alt="TD2 dimensional illustration">
 >
-> [Diagram showing outer and inner rectangles on TD2 card]
+> [Editorial description, not ICAO text: Diagram showing outer and inner rectangles on TD2 card]
 >
 > *Not to scale*
 
@@ -142,19 +142,19 @@ To accommodate the various requirements of States' laws and practices and to ach
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p12.png" alt="Nominal layout of the Zones on the front side of a TD2 Size MROTD">
 >
-> [Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right, Zone VII at bottom]
+> [Editorial description, not ICAO text: Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right, Zone VII at bottom]
 
 > **Figure 4. The reverse side of a TD2**
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p12.png" alt="The reverse side of a TD2">
 >
-> [Diagram showing Zone VI on back]
+> [Editorial description, not ICAO text: Diagram showing Zone VI on back]
 
 > **Figure 5. Sequence of data elements on the front side of a TD2**
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p13.png" alt="Sequence of data elements on the front side of a TD2">
 >
-> [Diagram showing sequence of data elements]
+> [Editorial description, not ICAO text: Diagram showing sequence of data elements]
 
 #### 3.1.2 Back of the TD2
 
@@ -225,11 +225,11 @@ Zone IV may overlay Zone V, as illustrated in Appendix A, Figure A-3, although t
 
 > **Figure 7. Zones III and IV have been reduced in size to permit the addition of an optional displayed identification feature e.g. a fingerprint, in Zone II**
 >
-> [Diagram showing flexible layout with fingerprint in Zone II]
+> [Editorial description, not ICAO text: Diagram showing flexible layout with fingerprint in Zone II]
 
 > **Figure 8. Illustrating the possibility for Zone V to overlay a portion of the Mandatory Header, Zone I**
 >
-> [Diagram showing Zone V extending upward to overlay Zone I]
+> [Editorial description, not ICAO text: Diagram showing Zone V extending upward to overlay Zone I]
 
 ---
 
@@ -245,7 +245,7 @@ If any optional field or data element is not used, the data may be spread more e
 
 #### 4.1.1 Data element directory
 
-**4.1.1.1 Visual inspection zone — Data element directory**
+##### 4.1.1.1 Visual inspection zone — Data element directory
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
@@ -271,21 +271,21 @@ If any optional field or data element is not used, the data may be spread more e
 
 #### 4.2.1 Data position, data elements, and print position in the MRZ
 
-**4.2.1.1 Data position**
+##### 4.2.1.1 Data position
 
 Figure 6 shows the nominal dimensions and position of the data in the MRZ.
 
-**4.2.1.2 Data elements**
+##### 4.2.1.2 Data elements
 
 The data elements corresponding to specified fields of the VIZ shall be printed, in machine readable form, in the MRZ, beginning with the left most character position in each field in the sequence indicated in the data structure specifications. Details on the data elements to be included in the MRZ are set out in Paragraph 4.2.2. Appendix B, Figure B-1 indicates the structure of the MRZ.
 
-**4.2.1.3 Print position**
+##### 4.2.1.3 Print position
 
 The position of the left-hand edge of the first character shall be 4.0 ± 1.0 mm (0.16 ± 0.04 in) from the left-hand edge of the document. Reference centre lines for the OCR lines and a nominal starting position for the first character of each line are shown in Figure 6. The positioning of the characters is indicated by those reference lines and by the printing zones for the two code lines.
 
 #### 4.2.2 Data structure of machine readable data for the TD2
 
-**4.2.2.1 Data structure of the upper machine readable line**
+##### 4.2.2.1 Data structure of the upper machine readable line
 
 | MRZ character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -302,7 +302,7 @@ The position of the left-hand edge of the first character shall be 4.0 ± 1.0 mm
 
 * Notes can be found in the last portion of sub-section 4.2.2.2.
 
-**4.2.2.2 Data structure of the lower machine readable line**
+##### 4.2.2.2 Data structure of the lower machine readable line
 
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -347,7 +347,7 @@ l) The field caption shall be printed on the document.
 
 The basic rules for writing the name of the holder in the VIZ and the MRZ are contained in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). Where the name contains more characters than are available in the name field of the MRZ of the TD2, it is necessary to truncate the name. The following methods provide a number of options available for use at the discretion of the issuing State or organization.
 
-**4.2.3.1 Truncated names — Secondary identifier truncated**
+##### 4.2.3.1 Truncated names — Secondary identifier truncated
 
 a) One or more name components truncated to initials:
 
@@ -365,7 +365,7 @@ VIZ: NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG
 MRZ (upper line): I<UTONILAVADHANANANDA<<ARN<PET<CHARO
 ```
 
-**4.2.3.2 Truncated names — Primary identifier truncated**
+##### 4.2.3.2 Truncated names — Primary identifier truncated
 
 a) One or more components truncated to initials:
 
@@ -391,7 +391,7 @@ VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
 MRZ (upper line): I<UTOBENNEL<WOOLO<WARRA<WARNA<<DIN<P
 ```
 
-**4.2.3.3 Names that fit into the maximum positions available within the same field, indicating possible truncation by the letter in the last position, but which are not truncated**
+##### 4.2.3.3 Names that fit into the maximum positions available within the same field, indicating possible truncation by the letter in the last position, but which are not truncated
 
 ```text
 Name: Jonathoon Alec Papandropoulous
@@ -401,7 +401,7 @@ MRZ (upper line): I<UTOPAPANDROPOULOUS<<JONATHOON<ALEC
 
 *Note.* — *Even though there is an alphabetic character in the 36th character position of this TD2 lower machine readable line, this name has not been truncated, but it must be assumed that it has been truncated.*
 
-**4.2.3.4 Names that contain multiple components**
+##### 4.2.3.4 Names that contain multiple components
 
 ```text
 Name: Martin Van Der Muellen
@@ -417,7 +417,7 @@ VIZ: VILARCHAO FERNANDEZ, JOSE RAMON
 MRZ (upper line): I<UTOVILARCHAO<FERNANDEZ<<JOSE<RAMON
 ```
 
-**4.2.3.5 No secondary identifier**
+##### 4.2.3.5 No secondary identifier
 
 ```text
 Name: Arkfreith
@@ -466,7 +466,7 @@ The use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Co
 
 > **Figure A-1. Typical layout of a TD2 Size MROTD**
 >
-> [Example card front showing UTOPIA official travel document with standard layout]
+> [Editorial description, not ICAO text: Example card front showing UTOPIA official travel document with standard layout]
 >
 > ```
 > UTOPIA
@@ -490,15 +490,15 @@ The use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Co
 
 > **Figure A-2. Flexible layout in which Zone II has been enlarged to accommodate an optional displayed fingerprint**
 >
-> [Example card front showing fingerprint in Zone II]
+> [Editorial description, not ICAO text: Example card front showing fingerprint in Zone II]
 
 > **Figure A-3. Flexible layout in which Zone IV, the signature, overlays the portrait, Zone V**
 >
-> [Example card front showing signature overlaying portrait]
+> [Editorial description, not ICAO text: Example card front showing signature overlaying portrait]
 
 > **Figure A-4. Flexible layout in which Zone II has been extended to the left to overlap Zone V, the portrait. Zone III has been extended upwards, beside and to the right of Zone I, to accommodate the Document Number**
 >
-> [Example card front showing extended Zone II and Zone III]
+> [Editorial description, not ICAO text: Example card front showing extended Zone II and Zone III]
 
 ---
 

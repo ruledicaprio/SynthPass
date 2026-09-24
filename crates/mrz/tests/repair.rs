@@ -10,6 +10,8 @@
 //! digits, so each fixture is self-verifying: if the emitter is wrong the
 //! undamaged assertions fail first.
 
+mod support;
+
 use mrz::{
     find_and_parse, format_td1, format_td3, solve_field, width_candidates, FieldKind, Resolution,
     Td1Fields, Td3Fields, UNKNOWN,
@@ -26,9 +28,9 @@ fn td1_zone() -> (String, String, String) {
         surname: "SPECIMEN".to_string(),
         given_names: "TEST".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "M".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Male,
+        date_of_expiry: support::expiry("301230"),
         optional_data_1: None,
         optional_data_2: None,
     });
@@ -49,9 +51,9 @@ fn td3_zone() -> (String, String) {
         surname: "SPECIMEN".to_string(),
         given_names: "TEST".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let lines: Vec<&str> = mrz.lines().collect();
@@ -211,9 +213,9 @@ fn a_single_misread_glyph_in_the_document_number_resolves_through_find_and_parse
         surname: "SPECIMEN".to_string(),
         given_names: "TEST".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let lines: Vec<&str> = mrz.lines().collect();
@@ -270,9 +272,9 @@ fn td3_with_document_number(document_number: &str) -> (String, String) {
         surname: "SPECIMEN".to_string(),
         given_names: "TEST".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: "800101".to_string(),
-        sex: "F".to_string(),
-        date_of_expiry: "301230".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
         personal_number: None,
     });
     let lines: Vec<&str> = mrz.lines().collect();

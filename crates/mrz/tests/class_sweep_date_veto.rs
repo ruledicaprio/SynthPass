@@ -35,6 +35,8 @@
 //! values, then is corrupted programmatically. No real specimen's zone text,
 //! character value, or read name appears in this file.
 
+mod support;
+
 use mrz::{
     check_digit, find_and_parse_with, format_td1, parse_td1_with, solve_class_sweep, Date,
     FieldKind, ParseOptions, Resolution, Td1Fields,
@@ -56,9 +58,9 @@ fn td1_zone(date_of_birth: &str, date_of_expiry: &str) -> String {
         surname: "SPECIMEN".to_string(),
         given_names: "TEST".to_string(),
         nationality: "UTO".to_string(),
-        date_of_birth: date_of_birth.to_string(),
-        sex: "M".to_string(),
-        date_of_expiry: date_of_expiry.to_string(),
+        date_of_birth: support::birth(date_of_birth),
+        sex: mrz::Sex::Male,
+        date_of_expiry: support::expiry(date_of_expiry),
         optional_data_2: None,
     })
 }

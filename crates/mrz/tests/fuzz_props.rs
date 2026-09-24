@@ -12,6 +12,8 @@
 //! panics — they say nothing about correctness (the existing unit tests in
 //! `src/lib.rs`/`src/parser.rs` already cover that against real specimens).
 
+mod support;
+
 use mrz::{
     find_and_parse, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
     parse_mrv_b, parse_td1, parse_td2, parse_td3, substitution_candidates, transliterate,
@@ -346,8 +348,8 @@ proptest! {
         document_number in any_length_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
-        date_of_birth in yymmdd_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
+        date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
         let fields = Td3Fields {
             document_number: document_number.clone(),
@@ -371,8 +373,8 @@ proptest! {
         document_number in any_length_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
-        date_of_birth in yymmdd_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
+        date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
         let fields = Td2Fields {
             document_number: document_number.clone(),
@@ -396,8 +398,8 @@ proptest! {
         document_number in any_length_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
-        date_of_birth in yymmdd_strategy(),
-        date_of_expiry in yymmdd_strategy(),
+        date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
+        date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
         let fields = Td1Fields {
             document_number: document_number.clone(),
