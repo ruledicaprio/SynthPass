@@ -316,8 +316,8 @@ design, the `tolerance` knob, and the rollout to a required check are in
 ## Semver policy (the `mrz` crate)
 
 `crates/mrz` is [published to crates.io](https://crates.io/crates/mrz) on its own version line,
-decoupled from the workspace. It is pre-1.0, so **the minor slot is the breaking slot** — `^0.5`
-resolves `0.5.x` but never `0.6.0`, which means a careless minor bump forces a `Cargo.toml` edit
+decoupled from the workspace. It is pre-1.0, so **the minor slot is the breaking slot** — `^0.8`
+resolves `0.8.x` but never `0.9.0`, which means a careless minor bump forces a `Cargo.toml` edit
 on every consumer.
 
 Which slot a change lands in follows from how the type is declared:
@@ -327,14 +327,14 @@ Which slot a change lands in follows from how the type is declared:
   `ParseSexError`, and the enums `MrzDate`, `Sex`, `DateRole`, `PassportType`,
   `DateCompleteness`, `Blindspot`, `Resolution`, `FieldKind`, `TransliterationStyle` and
   `CyrillicLanguage` — are `#[non_exhaustive]`. Callers already cannot match or construct them
-  exhaustively, so **adding a field or variant is a patch** (`0.5.1`). `RawDateField` is not
+  exhaustively, so **adding a field or variant is a patch** (`0.8.1`). `RawDateField` is not
   marked and needs no mark: its one field is private, so it is only built through
   `TryFrom<&str>`.
 - The five emit-side input structs — `Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`,
   `MrvBFields` — are deliberately left exhaustive, because `#[non_exhaustive]` rejects *every*
   struct expression from another crate (`..Default::default()` is refused too, E0639), leaving
   callers nothing but `default()` plus field-by-field mutation. So **adding a field to one of
-  those is breaking** (`0.6.0`). Output types grow with the crate's capability; input types are
+  those is breaking** (`0.9.0`). Output types grow with the crate's capability; input types are
   pinned to a spec ICAO controls and has not changed in decades.
 - Removing or renaming anything public, changing a signature, or tightening a contract is
   likewise breaking. Test-only and CI-only changes ship no release at all.
