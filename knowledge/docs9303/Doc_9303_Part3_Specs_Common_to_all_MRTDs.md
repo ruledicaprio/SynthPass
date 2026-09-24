@@ -1042,7 +1042,7 @@ The Receiving State will at its sole discretion choose to allow MRTDs with a dev
 
 #### 7.3.4 Categories of Deviations
 
-**7.3.4.1 Keys and certificates**
+##### 7.3.4.1 Keys and certificates
 
 Certificate and key deviations are restricted to the following:
 
@@ -1054,7 +1054,7 @@ Certificate and key deviations are restricted to the following:
 
 **Note.** — Where a reporting State decides to issue a new certificate, the certificate MUST NOT be included in the Deviation List, but could be pointed to via the free text field.
 
-**7.3.4.2 Logical Data Structure (LDS)**
+##### 7.3.4.2 Logical Data Structure (LDS)
 
 LDS deviations are restricted to the following:
 
@@ -1064,7 +1064,7 @@ LDS deviations are restricted to the following:
 | DG's | Described to the Data Group |
 | EF.sod | Described to the issue (e.g. DSC) |
 
-**7.3.4.3 Machine Readable Zone (MRZ)**
+##### 7.3.4.3 Machine Readable Zone (MRZ)
 
 MRZ deviations are restricted to the following:
 

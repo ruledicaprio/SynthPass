@@ -355,7 +355,7 @@ If any optional field or data element is not used, the data may be spread more e
 
 The data elements in the VIZ are specified as follows:
 
-**4.1.1.1 Visual inspection zone — Data element directory**
+##### 4.1.1.1 Visual inspection zone — Data element directory
 
 | Field/ zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
@@ -399,21 +399,21 @@ Further information concerning the technical specifications, derivation and impl
 
 #### 4.2.1 Data position, data elements and print position in the MRZ
 
-**4.2.1.1 Data position**
+##### 4.2.1.1 Data position
 
 The MRZ is located on the front of the MRP data page. Figure 3 defines the location of the MRZ and the nominal position of the data therein.
 
-**4.2.1.2 Data elements**
+##### 4.2.1.2 Data elements
 
 The data elements corresponding to Fields 03 to 09, 11 and 16 of the VIZ shall be personalized in machine readable form, in the MRZ, beginning with the left most character position in each field in the sequence indicated in the data structure specifications shown below. Appendix B, Figure B-1 indicates the structure of the MRZ.
 
-**4.2.1.3 Print position**
+##### 4.2.1.3 Print position
 
 The position of the left-hand edge of the first character shall be 6.0 ± 1.0 mm (0.24 ± 0.04 in) from the left-hand edge of the document. Reference centre lines for the OCR lines and the minimum starting position for the first character of each line are shown in Figure 3. The positioning of the characters is indicated by those reference lines and by the printing zones for the two code lines in Figure 7.
 
 #### 4.2.2 Data structure of machine readable data for the MRP data page
 
-**4.2.2.1 Data structure of the upper machine readable line**
+##### 4.2.2.1 Data structure of the upper machine readable line
 
 | MRZ character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -427,7 +427,7 @@ The position of the left-hand edge of the first character shall be 6.0 ± 1.0 mm
 
 * Notes can be found in the last portion of subsection 4.2.2.2.
 
-**4.2.2.2 Data structure of the lower machine readable line**
+##### 4.2.2.2 Data structure of the lower machine readable line
 
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -487,7 +487,7 @@ In truncating the name components, the last character of the name field shall be
 
 > *Note.— Where long names extend to the last character position in the name field, the presence of an alphabetic character means that the name must be treated as though truncation had occurred.*
 
-**4.2.3.1 Examples of name of the holder in the MRZ**
+##### 4.2.3.1 Examples of name of the holder in the MRZ
 
 > *Note.— In the following examples, the document is assumed to be a passport issued by the State of Utopia. The first five characters of the upper machine readable line are PP<UTO.*
 
@@ -551,7 +551,7 @@ VIZ: SATRIYA SUDARPA
 MRZ: PPUTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<<<<<<<<<
 ```
 
-**4.2.3.2 Truncated names — Secondary identifier truncated**
+##### 4.2.3.2 Truncated names — Secondary identifier truncated
 
 **a) One or more name components truncated to initials:**
 
@@ -569,7 +569,7 @@ VIZ: NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG
 MRZ: PPUTONILAVADHANANANDA<<ARNPOL<PETCH<CHARONGU
 ```
 
-**4.2.3.3 Truncated names — Primary identifier truncated**
+##### 4.2.3.3 Truncated names — Primary identifier truncated
 
 **a) One or more components truncated to initials:**
 
@@ -595,7 +595,7 @@ VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
 MRZ: PPUTOBENNEL<WOOLOO<WARRAN<WARNAM<<DINGO<POTO
 ```
 
-**4.2.3.4 Names that fit into the maximum positions available within the name field, indicating possible truncation by the letter in the last position, but which are not truncated.**
+##### 4.2.3.4 Names that fit into the maximum positions available within the name field, indicating possible truncation by the letter in the last position, but which are not truncated.
 
 ```text
 Name: Jonathon Warren Trevor Papandropoulous

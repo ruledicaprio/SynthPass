@@ -245,7 +245,7 @@ If any optional field or data element is not used, the data may be spread more e
 
 #### 4.1.1 Data element directory
 
-**4.1.1.1 Visual inspection zone — Data element directory**
+##### 4.1.1.1 Visual inspection zone — Data element directory
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
@@ -271,21 +271,21 @@ If any optional field or data element is not used, the data may be spread more e
 
 #### 4.2.1 Data position, data elements, and print position in the MRZ
 
-**4.2.1.1 Data position**
+##### 4.2.1.1 Data position
 
 Figure 6 shows the nominal dimensions and position of the data in the MRZ.
 
-**4.2.1.2 Data elements**
+##### 4.2.1.2 Data elements
 
 The data elements corresponding to specified fields of the VIZ shall be printed, in machine readable form, in the MRZ, beginning with the left most character position in each field in the sequence indicated in the data structure specifications. Details on the data elements to be included in the MRZ are set out in Paragraph 4.2.2. Appendix B, Figure B-1 indicates the structure of the MRZ.
 
-**4.2.1.3 Print position**
+##### 4.2.1.3 Print position
 
 The position of the left-hand edge of the first character shall be 4.0 ± 1.0 mm (0.16 ± 0.04 in) from the left-hand edge of the document. Reference centre lines for the OCR lines and a nominal starting position for the first character of each line are shown in Figure 6. The positioning of the characters is indicated by those reference lines and by the printing zones for the two code lines.
 
 #### 4.2.2 Data structure of machine readable data for the TD2
 
-**4.2.2.1 Data structure of the upper machine readable line**
+##### 4.2.2.1 Data structure of the upper machine readable line
 
 | MRZ character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -302,7 +302,7 @@ The position of the left-hand edge of the first character shall be 4.0 ± 1.0 mm
 
 * Notes can be found in the last portion of sub-section 4.2.2.2.
 
-**4.2.2.2 Data structure of the lower machine readable line**
+##### 4.2.2.2 Data structure of the lower machine readable line
 
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -347,7 +347,7 @@ l) The field caption shall be printed on the document.
 
 The basic rules for writing the name of the holder in the VIZ and the MRZ are contained in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). Where the name contains more characters than are available in the name field of the MRZ of the TD2, it is necessary to truncate the name. The following methods provide a number of options available for use at the discretion of the issuing State or organization.
 
-**4.2.3.1 Truncated names — Secondary identifier truncated**
+##### 4.2.3.1 Truncated names — Secondary identifier truncated
 
 a) One or more name components truncated to initials:
 
@@ -365,7 +365,7 @@ VIZ: NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG
 MRZ (upper line): I<UTONILAVADHANANANDA<<ARN<PET<CHARO
 ```
 
-**4.2.3.2 Truncated names — Primary identifier truncated**
+##### 4.2.3.2 Truncated names — Primary identifier truncated
 
 a) One or more components truncated to initials:
 
@@ -391,7 +391,7 @@ VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
 MRZ (upper line): I<UTOBENNEL<WOOLO<WARRA<WARNA<<DIN<P
 ```
 
-**4.2.3.3 Names that fit into the maximum positions available within the same field, indicating possible truncation by the letter in the last position, but which are not truncated**
+##### 4.2.3.3 Names that fit into the maximum positions available within the same field, indicating possible truncation by the letter in the last position, but which are not truncated
 
 ```text
 Name: Jonathoon Alec Papandropoulous
@@ -401,7 +401,7 @@ MRZ (upper line): I<UTOPAPANDROPOULOUS<<JONATHOON<ALEC
 
 *Note.* — *Even though there is an alphabetic character in the 36th character position of this TD2 lower machine readable line, this name has not been truncated, but it must be assumed that it has been truncated.*
 
-**4.2.3.4 Names that contain multiple components**
+##### 4.2.3.4 Names that contain multiple components
 
 ```text
 Name: Martin Van Der Muellen
@@ -417,7 +417,7 @@ VIZ: VILARCHAO FERNANDEZ, JOSE RAMON
 MRZ (upper line): I<UTOVILARCHAO<FERNANDEZ<<JOSE<RAMON
 ```
 
-**4.2.3.5 No secondary identifier**
+##### 4.2.3.5 No secondary identifier
 
 ```text
 Name: Arkfreith

@@ -219,7 +219,7 @@ All data in the VIZ shall be clearly legible.
 
 #### 4.1.1 Data element directory
 
-**4.1.1.1 Visual inspection zone — Data element directory**
+##### 4.1.1.1 Visual inspection zone — Data element directory
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
@@ -248,25 +248,25 @@ All data in the VIZ shall be clearly legible.
 
 #### 4.2.1 MRZ position, data elements, print specifications and print position in the MRZ
 
-**4.2.1.1 MRZ position**
+##### 4.2.1.1 MRZ position
 
 The MRZ is located at the bottom of the MRV-A. Section 4.4, Figure 3, shows the nominal position of the data in the MRZ.
 
-**4.2.1.2 Data elements**
+##### 4.2.1.2 Data elements
 
 The data elements corresponding to Fields 01, 05, 10, 11, and 13 to 15 of the VIZ are mandatory in the MRZ and shall be printed in machine readable form in the MRZ, beginning with the leftmost character position in each field in the sequence indicated in the data structure specifications shown below. Appendix B, Section B.1, indicates the structure of the MRZ.
 
-**4.2.1.3 Print specifications**
+##### 4.2.1.3 Print specifications
 
 Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). The MRZ shall be printed with the line spacing as defined in Section 4.4, Figure 3, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
 
-**4.2.1.4 Print position**
+##### 4.2.1.4 Print position
 
 The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0 mm (0.16 in ± 0.04 in) from the left-hand edge of the document. Reference centre lines for the two OCR lines and a nominal starting position for the first character of each line are shown in Section 4.4, Figure 3. The positioning of the characters is indicated by those reference lines and by the printing zones of the two code lines in Section 4.4, Figure 3.
 
 #### 4.2.2 Data Structure of Machine Readable Data for the MRV-A
 
-**4.2.2.1 Data structure of the upper machine readable line**
+##### 4.2.2.1 Data structure of the upper machine readable line
 
 | MRZ field character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -283,7 +283,7 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 
 * Notes can be found in the last portion of sub-section 4.2.2.2.
 
-**4.2.2.2 Data structure of the lower machine readable line**
+##### 4.2.2.2 Data structure of the lower machine readable line
 
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -361,7 +361,7 @@ k) The field caption shall be printed on the document.
 - VIZ: ARKFREITH
 - MRZ (upper line): V<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
-**4.2.3.1 Truncated names — Secondary identifier truncated**
+##### 4.2.3.1 Truncated names — Secondary identifier truncated
 
 **a) One or more name components truncated to initials:**
 
@@ -375,7 +375,7 @@ k) The field caption shall be printed on the document.
 - VIZ: NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG
 - MRZ (upper line): V<UTONILAVADHANANANDA<<ARNPOL<PETCH<CHARONGU
 
-**4.2.3.2 Truncated names — Primary identifier truncated**
+##### 4.2.3.2 Truncated names — Primary identifier truncated
 
 **a) One or more components truncated to initials:**
 
@@ -395,7 +395,7 @@ k) The field caption shall be printed on the document.
 - VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
 - MRZ (upper line): V<UTOBENNEL<WOOLOO<WARRAN<WARNAM<<DINGO<POTO
 
-**4.2.3.3 Names that just fit, indicating possible truncation by letter in the last position of the name field, but which are not truncated**
+##### 4.2.3.3 Names that just fit, indicating possible truncation by letter in the last position of the name field, but which are not truncated
 
 - Name: Jonathon Warren Trevor Papandropoulous
 - VIZ: PAPANDROPOULOUS, JONATHON WARREN TREVOR
@@ -577,7 +577,7 @@ All data in the VIZ shall be clearly legible.
 
 #### 7.1.1 Data element directory
 
-**7.1.1.1 Visual inspection zone — Data element directory**
+##### 7.1.1.1 Visual inspection zone — Data element directory
 
 | Field/zone no. | Data element | Specifications | Maximum no. of character positions | References and notes* |
 |---|---|---|---|---|
@@ -606,25 +606,25 @@ All data in the VIZ shall be clearly legible.
 
 #### 7.2.1 MRZ position, data elements, print specifications and print position in the MRZ
 
-**7.2.1.1 MRZ position**
+##### 7.2.1.1 MRZ position
 
 The MRZ is located at the bottom of the MRV-B. Section 7.4, Figure 8, shows the nominal position of the data in the MRZ.
 
-**7.2.1.2 Data elements**
+##### 7.2.1.2 Data elements
 
 The data elements corresponding to Fields 01, 05, 10, 11, and 13 to 15 of the VIZ are mandatory in the MRZ and shall be printed in machine readable form in the MRZ, beginning with the leftmost character position in each field in the sequence indicated in the data structure specifications shown below. Appendix B, Section B.2, indicates the structure of the MRZ.
 
-**7.2.1.3 Print specifications**
+##### 7.2.1.3 Print specifications
 
 Machine readable data shall be printed in OCR-B type font, size 1, constant stroke width, as specified in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md). The MRZ shall be printed with the line spacing as defined in Section 7.4, Figure 8, and a horizontal printing density of 10 characters per 25.4 mm (1.0 in).
 
-**7.2.1.4 Print position**
+##### 7.2.1.4 Print position
 
 The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0 mm (0.16 in ± 0.04 in) from the left-hand edge of the document. Reference centre lines for the two OCR lines and a nominal starting position for the first character of each line are shown in Section 7.4, Figure 8. The positioning of the characters is indicated by those reference lines and by the printing zones of the two code lines in Section 7.4, Figure 8.
 
 #### 7.2.2 Data Structure of Machine Readable Data for the MRV-B
 
-**7.2.2.1 Data structure of the upper machine readable line**
+##### 7.2.2.1 Data structure of the upper machine readable line
 
 | MRZ field character positions (line 1) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -641,7 +641,7 @@ The position of the left-hand edge of the first character shall be 4.0 mm ± 1.0
 
 * Notes can be found in the last portion of sub-section 7.2.2.2.
 
-**7.2.2.2 Data structure of the lower machine readable line**
+##### 7.2.2.2 Data structure of the lower machine readable line
 
 | MRZ character positions (line 2) | Field no. in VIZ | Data element | Specifications | Number of characters | References and notes* |
 |---|---|---|---|---|---|
@@ -719,7 +719,7 @@ k) The field caption shall be printed on the document.
 - VIZ: ARKFREITH
 - MRZ (upper line): V<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<
 
-**7.2.3.1 Truncated names — Secondary identifier truncated**
+##### 7.2.3.1 Truncated names — Secondary identifier truncated
 
 **a) One or more name components truncated to initials:**
 
@@ -733,7 +733,7 @@ k) The field caption shall be printed on the document.
 - VIZ: NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG
 - MRZ (upper line): V<UTONILAVADHANANANDA<<ARNP<PE<CHARO
 
-**7.2.3.2 Truncated names — Primary identifier truncated**
+##### 7.2.3.2 Truncated names — Primary identifier truncated
 
 **a) One or more components truncated to initials:**
 
@@ -753,7 +753,7 @@ k) The field caption shall be printed on the document.
 - VIZ: BENNELONG WOOLOOMOOLOO WARRANDYTE WARNAMBOOL, DINGO POTOROO
 - MRZ (upper line): V<UTOBENN<WOOL<WARR<WARN<<DINGO<POTO
 
-**7.2.3.3 Names that just fit, indicating possible truncation by letter in the last position of the name field, but which are not truncated**
+##### 7.2.3.3 Names that just fit, indicating possible truncation by letter in the last position of the name field, but which are not truncated
 
 - Name: Stephen Trevor Papandropoulous
 - VIZ: PAPANDROPOULOUS, STEPHEN TREVOR
