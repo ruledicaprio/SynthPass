@@ -17,8 +17,9 @@ mod support;
 use mrz::{
     find_and_parse, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a,
     parse_mrv_b, parse_td1, parse_td2, parse_td3, substitution_candidates, transliterate,
-    transliterate_cyrillic, transliterate_cyrillic_char, transliterations, CyrillicLanguage,
-    MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields, TransliterationStyle,
+    transliterate_cyrillic, transliterate_cyrillic_char, transliterations, CyrillicLanguage, Date,
+    MrvAFields, MrvBFields, MrzDate, RawDateField, Sex, Td1Fields, Td2Fields, Td3Fields,
+    TransliterationStyle,
 };
 use proptest::prelude::*;
 
@@ -582,5 +583,54 @@ proptest! {
                 }
             }
         }
+    }
+}
+
+fn arbitrary_typed_date() -> impl Strategy<Value = MrzDate> {
+    let raw =
+        "[A-Z0-9<]{6}".prop_map(|s| RawDateField::try_from(s.as_str()).expect("MRZ strategy"));
+    prop_oneof![
+        (any::<i32>(), any::<u32>(), any::<u32>())
+            .prop_map(|(y, m, d)| MrzDate::Calendar(Date::new(y, m, d))),
+        (any::<i32>(), any::<u32>(), any::<u32>())
+            .prop_map(|(y, m, d)| MrzDate::OutOfCalendar(Date::new(y, m, d))),
+        raw.clone().prop_map(MrzDate::PartiallyUnknown),
+        raw.prop_map(MrzDate::Malformed),
+        Just(MrzDate::Unknown),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    #[test]
+    fn typed_emitters_and_parsers_never_panic(
+        c in any::<char>(),
+        variant in 0u8..4,
+        birth in arbitrary_typed_date(),
+        expiry in arbitrary_typed_date(),
+    ) {
+        let sex = match variant {
+            0 => Sex::Male,
+            1 => Sex::Female,
+            2 => Sex::Unspecified,
+            _ => Sex::NonConformant(c),
+        };
+        let td3 = format_td3(&Td3Fields { sex, date_of_birth: birth, date_of_expiry: expiry, ..Default::default() });
+        let td2 = format_td2(&Td2Fields { sex, date_of_birth: birth, date_of_expiry: expiry, ..Default::default() });
+        let td1 = format_td1(&Td1Fields { sex, date_of_birth: birth, date_of_expiry: expiry, ..Default::default() });
+        let mrv_a = format_mrv_a(&MrvAFields { sex, date_of_birth: birth, date_of_expiry: expiry, ..Default::default() });
+        let mrv_b = format_mrv_b(&MrvBFields { sex, date_of_birth: birth, date_of_expiry: expiry, ..Default::default() });
+        for (zone, parser) in [
+            (&td3, parse_td3 as fn(&str, &str) -> Result<_, _>),
+            (&td2, parse_td2),
+            (&mrv_a, parse_mrv_a),
+            (&mrv_b, parse_mrv_b),
+        ] {
+            let (l1, l2) = zone.split_once('\n').expect("two emitted lines");
+            let _ = parser(l1, l2);
+        }
+        let mut lines = td1.lines();
+        let _ = parse_td1(lines.next().expect("TD1 line 1"), lines.next().expect("TD1 line 2"), lines.next().expect("TD1 line 3"));
     }
 }

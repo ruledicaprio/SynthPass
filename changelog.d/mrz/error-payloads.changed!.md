@@ -1,0 +1,1 @@
+- **Make parser error payloads consistent.** `BadLength.got` counts Unicode characters, and `BadDocumentCode` carries both raw document-code cells for all five formats, including a trailing `<`. Callers comparing these payloads should update their matches.

@@ -1,7 +1,7 @@
 //! The MRZ sex cell as a type (ADR-0019), and its text form (ADR-0020).
 //!
-//! Doc 9303 Part 4 note p puts three values in the zone: `M`, `F`, and the
-//! filler `<` for unspecified. `X` is the visual zone's letter for
+//! Doc 9303 Part 4 §4.2.2.2 position 21 puts `M`, `F` and `<` in the
+//! zone; note p explains `<` in the MRZ and `X` in the VIZ. `X` is the visual zone's letter for
 //! unspecified, not the MRZ's. No check digit covers the cell on any format,
 //! so a misread there is invisible to the arithmetic. That is why a
 //! non-conformant character is kept as read rather than mapped to a legal
@@ -33,8 +33,9 @@ pub enum Sex {
     Female,
     /// Zone `<`: the issuer does not identify the holder's sex (Part 4 note p).
     Unspecified,
-    /// Any other zone character, `X` included, kept verbatim. Never `M`, `F`
-    /// or `<`: [`Sex::from_zone`] maps those to the variants above.
+    /// Any other zone character, `X` included, kept verbatim by
+    /// [`Sex::from_zone`]. Callers can construct this variant with any `char`,
+    /// including `M`, `F`, `<` or a character outside the MRZ alphabet.
     NonConformant(char),
 }
 
@@ -49,7 +50,7 @@ impl Sex {
         }
     }
 
-    /// The character the zone holds: the inverse of [`Sex::from_zone`].
+    /// The stored character. Inverse of [`Sex::from_zone`] for values that method produces.
     pub fn zone_char(self) -> char {
         match self {
             Sex::Male => 'M',
@@ -80,8 +81,10 @@ impl fmt::Display for ParseSexError {
 
 impl std::error::Error for ParseSexError {}
 
-/// The inverse of `Display`: exactly one MRZ-alphabet character, classified by
-/// [`Sex::from_zone`].
+/// Parse exactly one MRZ-alphabet character via [`Sex::from_zone`].
+/// Inverse of `Display` for values produced by this parser; a caller-built
+/// `NonConformant` containing `M`, `F` or `<` normalizes to the named variant,
+/// while a character outside the alphabet is rejected.
 impl FromStr for Sex {
     type Err = ParseSexError;
 

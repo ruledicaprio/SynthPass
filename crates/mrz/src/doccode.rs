@@ -3,7 +3,7 @@
 //!
 //! MRZ line 1 positions 1-2 hold the document code. For an MRP the first
 //! character is `P`; the second identifies the passport *type* against a table
-//! Part 4 §4.4 enumerates in full:
+//! Part 4 §4.4 lists in its table and Note 1:
 //!
 //! ```text
 //! PP  National/ordinary passport      PT  Alien/Non-citizen passport
@@ -17,10 +17,10 @@
 //!
 //! `knowledge/MRZ_SEQUENCE_COMPLETENESS.md` records a decision *not* to build a
 //! document-code dictionary, and that decision stands — but it was reasoned
-//! about **TD1 and TD2**, citing Part 5 §Note k and Part 6 §Note k: *"The
-//! second character shall be at the discretion of the issuing State or
-//! organization except that V shall not be used, and C shall not be used after
-//! A."* That is an open set with two exclusions, so there is no registry to
+//! about **TD1 and TD2**. Both notes leave the second character to the
+//! issuer and exclude `V`. Part 6 note k excludes `AC`; Part 5 note k
+//! excludes `AI` and allows `AC` for a crew member certificate. This remains
+//! an open set, so there is no registry to
 //! build a dictionary from, and a table assembled from observed codes would be
 //! exactly the unproven heuristic this crate refuses to ship.
 //!
@@ -140,7 +140,7 @@ impl PassportType {
         }
     }
 
-    /// Every code in the §4.4 table, in the order the specification lists them.
+    /// The nine §4.4 table codes and Note 1's `PU`, in the order the specification lists them.
     pub const ALL: [Self; 10] = [
         Self::National,
         Self::Emergency,

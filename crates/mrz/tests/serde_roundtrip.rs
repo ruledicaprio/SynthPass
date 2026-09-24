@@ -7,10 +7,8 @@
 
 use mrz::{parse_td2, parse_td3, MrzData};
 
-// ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson) — see
-// `src/lib.rs`'s test module for the full provenance note (Part 4's own copy
-// is a figure, not extracted text; corroborated via Part 6's literal TD2
-// specimen).
+// Utopia/Eriksson line 2 is printed in Part 3 §3.2 (PDF p11).
+// The P< line 1 is from a pre-amendment edition.
 const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
 const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
@@ -77,4 +75,11 @@ fn typed_fields_serialise_as_their_text_form() {
     let (l1, l2) = zone.split_once('\n').unwrap();
     let unspecified = serde_json::to_value(parse_td3(l1, l2).unwrap()).expect("serialize");
     assert_eq!(unspecified["sex"], "<");
+}
+
+#[test]
+fn old_parseoptions_json_defaults_class_sweep_off() {
+    let options: mrz::ParseOptions = serde_json::from_str(r#"{"pivot_yy":30}"#).expect("0.7 shape");
+    assert_eq!(options.pivot_yy, 30);
+    assert!(!options.class_sweep);
 }

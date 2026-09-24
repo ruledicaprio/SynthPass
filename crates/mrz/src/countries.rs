@@ -1,6 +1,6 @@
 //! ICAO 9303 / ISO 3166-1 alpha-3 issuing-state & nationality code ↔ name.
 //!
-//! The MRZ carries a 3-letter code for the issuing state and the holder's
+//! The MRZ carries a code in a three-cell field for the issuing state and the holder's
 //! nationality. [`country_name`] maps that code to a human-readable name so
 //! callers can enrich the extraction (`issuing_country_name`,
 //! `nationality_name`); [`code_for_name`] is the reverse direction, needed
@@ -8,20 +8,18 @@
 //! MRZ code (`HRV`) and a downstream normalizer wants the canonical code.
 //!
 //! Both functions read the same [`CODES`] table — single-sourced, so the two
-//! directions can never drift apart — which follows ISO 3166-1 and the ICAO
-//! 9303 code list *verbatim and neutrally*: every code that can legitimately
-//! appear on a travel document is included — ISO member states, the ICAO
-//! stateless/refugee/organization codes, the `GBR` nationality subvariants,
-//! and the specimen code `UTO` — because the parser must be able to name
-//! whatever a real document prints. Zero dependencies, just `&'static str`
+//! directions can never drift apart — which includes many ISO 3166-1 and ICAO
+//! 9303 codes, including stateless/refugee/organization codes, `GBR`
+//! nationality subvariants, and specimen code `UTO`. The table is incomplete: an
+//! unlisted code can still be legitimate. Zero dependencies, just `&'static str`
 //! literals, so it compiles for native and wasm alike.
 
 /// `(code, name)` pairs, in the same order as the original per-region match
 /// arms. Order matters for [`code_for_name`]: a couple of names have more
-/// than one legitimate code on real documents (Kosovo: `XKX`/`RKS`; Germany:
-/// `DEU`/`D`, the legacy single-letter code) — [`code_for_name`] returns the
-/// first match, so the primary ISO/ICAO code wins over the alias by virtue
-/// of appearing earlier in this table.
+/// than one legitimate code on real documents (Kosovo: user-assigned `XKX`/ICAO `RKS`; Germany:
+/// `DEU`/`D`, ICAO's current single-letter code) — [`code_for_name`] returns the
+/// first match. For Kosovo this is the user-assigned `XKX`, because it
+/// appears before ICAO's `RKS`; for Germany it is ISO `DEU`, before ICAO `D`.
 const CODES: &[(&str, &str)] = &[
     // ── Africa ──
     ("DZA", "Algeria"),
@@ -239,9 +237,9 @@ const CODES: &[(&str, &str)] = &[
     ("SXM", "Sint Maarten (Dutch part)"),
     // ── ICAO 9303 special / non-ISO codes ──
     ("UTO", "Utopia (ICAO specimen)"),
-    ("D", "Germany"), // legacy single-letter code on older passports
+    ("D", "Germany"), // current ICAO single-letter code (Part 3 §5 Part A)
     ("EUE", "European Union"),
-    ("RKS", "Kosovo"), // code used on Kosovo travel documents
+    ("RKS", "Kosovo"), // ICAO Part 3 §5 code
     // British nationality subvariants used in the MRZ nationality field
     ("GBD", "British Overseas Territories Citizen"),
     ("GBN", "British National (Overseas)"),
@@ -258,7 +256,7 @@ const CODES: &[(&str, &str)] = &[
     ("UNA", "United Nations specialized agency"),
     (
         "UNK",
-        "United Nations Interim Administration Mission in Kosovo",
+        "Resident of Kosovo to whom a travel document has been issued by the United Nations Interim Administration Mission in Kosovo (UNMIK)",
     ),
     ("XOM", "Sovereign Military Order of Malta"),
     ("XBA", "African Development Bank"),
@@ -285,15 +283,14 @@ const CODES: &[(&str, &str)] = &[
     ("IAO", "International Civil Aviation Organization"),
 ];
 
-/// Map a 3-letter ICAO/ISO 3166-1 code to a country or entity name.
+/// Map an ICAO/ISO 3166-1 code (usually three letters; ICAO `D` is one) to a country or entity name.
 /// Returns `None` for codes not in the table.
 ///
-/// The table covers the full Doc 9303 Part 3 §5 registry — ISO 3166-1 codes
-/// plus the ICAO extensions, United Nations codes, stateless/refugee codes,
-/// deprecated codes kept for backward compatibility, and the specimen code
-/// `UTO`. Because a check digit has a known blind set (see [`crate::Blindspot`]),
-/// recognizing the code is one of the structural guards the crate layers on
-/// top of the arithmetic.
+/// The table contains many ISO 3166-1 and Doc 9303 Part 3 §5 codes,
+/// including organization, stateless/refugee and specimen codes, but it is
+/// not exhaustive; `None` does not prove a code invalid.
+/// `find_and_parse` uses recognition as a guard in its repair passes; direct
+/// `parse_*` calls do not validate country codes.
 ///
 /// ```
 /// assert_eq!(mrz::country_name("DEU"), Some("Germany"));
@@ -308,13 +305,13 @@ pub fn country_name(code: &str) -> Option<&'static str> {
         .map(|&(_, name)| name)
 }
 
-/// Map a country or entity name back to its 3-letter ICAO/ISO 3166-1 code —
+/// Map a country or entity name back to its ICAO/ISO 3166-1 code —
 /// the reverse of [`country_name`], over the same `CODES` table so the two
 /// directions can't drift apart. Case-insensitive (Tier-2 LLM reads commonly
 /// come back upper/lower/title-cased inconsistently, e.g. `"CROATIA"` vs
 /// `"Croatia"`). Returns `None` for names not in the table; when a name has
 /// more than one legitimate code (Kosovo, Germany — see `CODES`'s doc
-/// comment), the first (primary) code in table order wins.
+/// comment), the first code in table order wins (`XKX` for Kosovo, `DEU` for Germany).
 ///
 /// ```
 /// assert_eq!(mrz::code_for_name("Germany"), Some("DEU"));
@@ -346,8 +343,8 @@ pub fn codes() -> &'static [(&'static str, &'static str)] {
 /// Whether two ICAO/ISO 3166-1 codes name the same country or entity.
 ///
 /// Not the same question as `a == b`, because `CODES` deliberately carries
-/// more than one legitimate code for some entities (Germany: `DEU` and the
-/// legacy single-letter `D`; Kosovo: `XKX` and `RKS` — see `CODES`'s doc
+/// more than one legitimate code for some entities (Germany: `DEU` and ICAO's
+/// current single-letter `D`; Kosovo: user-assigned `XKX` and ICAO `RKS` — see `CODES`'s doc
 /// comment). A German passport prints `D` in the MRZ, while any name-based
 /// resolution of "Germany" goes through [`code_for_name`], which returns the
 /// primary code `DEU`. Comparing those two as plain strings reports a
@@ -358,7 +355,7 @@ pub fn codes() -> &'static [(&'static str, &'static str)] {
 /// strings being equal is the most that can honestly be said about them.
 ///
 /// ```
-/// assert!(mrz::codes_equivalent("D", "DEU")); // legacy German code
+/// assert!(mrz::codes_equivalent("D", "DEU")); // current ICAO German code
 /// assert!(!mrz::codes_equivalent("DEU", "AUT"));
 /// ```
 pub fn codes_equivalent(a: &str, b: &str) -> bool {
@@ -386,7 +383,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn maps_codes_neutrally_and_completely() {
+    fn maps_representative_codes_neutrally() {
         // Ordinary members.
         assert_eq!(country_name("HRV"), Some("Croatia"));
         assert_eq!(country_name("SRB"), Some("Serbia"));
@@ -406,8 +403,8 @@ mod tests {
     }
 
     #[test]
-    fn maps_the_seven_codes_added_by_the_full_registry_sweep() {
-        // Part 3 §5 registry, Parts A-H — segment S5 added these after a full
+    fn maps_seven_additional_codes() {
+        // Part 3 §5 registry, Parts A-H — segment S5 added these after a broad
         // diff against the codes already present in `CODES`.
         assert_eq!(country_name("XCE"), Some("Council of Europe"));
         assert_eq!(
@@ -449,9 +446,22 @@ mod tests {
     }
 
     #[test]
+    fn part3_authority_codes_have_verified_names() {
+        assert_eq!(country_name("UNK"), Some("Resident of Kosovo to whom a travel document has been issued by the United Nations Interim Administration Mission in Kosovo (UNMIK)"));
+        assert_eq!(
+            country_name("XCO"),
+            Some("Common Market for Eastern and Southern Africa (COMESA)")
+        );
+        assert_eq!(
+            country_name("XPO"),
+            Some("International Criminal Police Organization (INTERPOL)")
+        );
+    }
+
+    #[test]
     fn aliased_codes_are_equivalent_to_their_primary_code() {
         // The case this function exists for: German documents print the
-        // legacy `D` in the MRZ, while any name-based resolution of
+        // ICAO `D` in the MRZ, while any name-based resolution of
         // "Germany" yields `DEU`. They are the same country.
         assert!(codes_equivalent("D", "DEU"));
         assert!(codes_equivalent("DEU", "D"));

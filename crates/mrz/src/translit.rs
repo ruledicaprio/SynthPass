@@ -3,7 +3,7 @@
 //! (`knowledge/docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:703-863`).
 //!
 //! - **§6 A — multinational Latin-based characters** ([`transliterate`],
-//!   [`TransliterationStyle`]): `Ä`→`AE`, `Ø`→`OE`, `ß`→`SS` …
+//!   [`TransliterationStyle`]): `Ä`→`AE`, `Ø`→`OE`, `ß`→`SS` via uppercasing to Table A's `ẞ` …
 //! - **§6 B — Cyrillic characters** ([`transliterate_cyrillic`],
 //!   [`CyrillicLanguage`]): `Иванов`→`IVANOV`. Twelve of the 48 rows and five
 //!   positional rules depend on the name's language, so this half needs a
@@ -244,7 +244,7 @@ pub fn transliterate_char(c: char, style: TransliterationStyle) -> Option<&'stat
 /// // The multi-valued cells: same input, two conformant answers.
 /// assert_eq!(transliterate("Ñ", TransliterationStyle::Expanded), "N");
 /// assert_eq!(transliterate("Ñ", TransliterationStyle::XxSuffix), "NXX");
-/// assert_eq!(transliterate("ß", TransliterationStyle::Simple), "SS"); // only one ICAO answer
+/// assert_eq!(transliterate("ß", TransliterationStyle::Simple), "SS"); // via uppercase `ẞ`, the Table A entry
 /// ```
 pub fn transliterate(s: &str, style: TransliterationStyle) -> String {
     let mut out = String::with_capacity(s.len());

@@ -44,7 +44,7 @@ pub fn check_digit(field: &str) -> Result<u32, MrzError> {
 }
 
 /// Verify `field` against its printed check digit character.
-/// A `<` check digit counts as 0 (used for empty optional fields).
+/// A `<` check digit counts as 0; ICAO permits it for an unused TD3 personal number (Part 4 §4.2.2.2).
 ///
 /// ```
 /// assert!(mrz::verify("L898902C3", '6'));
@@ -155,10 +155,10 @@ pub(crate) fn repair_positions(line: &str, spec: &[RepairRule]) -> String {
         .collect()
 }
 
-/// Fix a document-code second character misread: no ICAO document code has
-/// `K` there, but OCR reads the `<` filler as `K` constantly.
+/// Fix a passport-code second character misread: Part 4 §4.4 has no `PK`,
+/// but OCR can read the `<` filler in `P<` as `K`. Other formats permit `K`.
 pub(crate) fn fix_doc_code(l: &str) -> String {
-    if l.as_bytes().get(1) == Some(&b'K') {
+    if l.as_bytes().first() == Some(&b'P') && l.as_bytes().get(1) == Some(&b'K') {
         format!("{}<{}", &l[0..1], &l[2..])
     } else {
         l.to_string()
@@ -330,6 +330,14 @@ mod tests {
         assert_eq!(aggressive_defiller(untouched), untouched);
         // Length is always preserved.
         assert_eq!(aggressive_defiller("AB<KL<CD").len(), 8);
+    }
+
+    #[test]
+    fn doc_code_repair_preserves_legal_second_position_k() {
+        assert_eq!(fix_doc_code("PKUTO"), "P<UTO");
+        for code in ["IKUTO", "AKUTO", "CKUTO", "VKUTO"] {
+            assert_eq!(fix_doc_code(code), code);
+        }
     }
 
     #[test]

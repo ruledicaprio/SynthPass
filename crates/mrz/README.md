@@ -3,8 +3,8 @@
 [![crates.io](https://img.shields.io/crates/v/mrz.svg)](https://crates.io/crates/mrz)
 [![docs.rs](https://docs.rs/mrz/badge.svg)](https://docs.rs/mrz)
 [![downloads](https://img.shields.io/crates/d/mrz.svg)](https://crates.io/crates/mrz)
-[![MSRV](https://img.shields.io/badge/MSRV-1.82-blue.svg)](#versioning-and-msrv)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
+[![MSRV](https://img.shields.io/badge/MSRV-1.82-blue.svg)](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
 
 Zero-dependency [ICAO Doc 9303](https://www.icao.int/publications/pages/publication.aspx?docnum=9303)
 Machine Readable Zone parser, emitter and check-digit validator for Rust — passports, ID cards
@@ -16,7 +16,7 @@ which one agreed and which one failed, field by field.
 
 It is equally exact about its own edges. A check digit is a strong *filter* and a weak
 *oracle*: what it passes is not a random remainder but precisely
-[what the arithmetic cannot see](#what-a-check-digit-cannot-prove) — a closed-form set,
+[what the arithmetic cannot see](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) — a closed-form set,
 measured against a real corpus, and a public API rather than a footnote.
 
 - **Evidence, field by field** — document number, date of birth, expiry, personal number, composite.
@@ -34,11 +34,11 @@ measured against a real corpus, and a public API rather than a footnote.
 
 ## Contents
 
-- [Install](#install) · [Supported formats](#supported-formats) · [Quick start](#quick-start)
-- [Reading OCR output](#reading-ocr-output) · [Emitting](#emitting) ·
-  [A checksum-consistent read is not a valid document](#a-checksum-consistent-read-is-not-a-valid-document)
-- [What a check digit cannot prove](#what-a-check-digit-cannot-prove) · [Conformance](#conformance)
-- [Feature flags](#feature-flags) · [Versioning and MSRV](#versioning-and-msrv) · [License](#license)
+- [Install](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#install) · [Supported formats](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#supported-formats) · [Quick start](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#quick-start)
+- [Reading OCR output](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#reading-ocr-output) · [Emitting](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#emitting) ·
+  [A checksum-consistent read is not a valid document](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#a-checksum-consistent-read-is-not-a-valid-document)
+- [What a check digit cannot prove](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) · [Conformance](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#conformance)
+- [Feature flags](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#feature-flags) · [Versioning and MSRV](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv) · [License](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
 
 ## Install
 
@@ -100,13 +100,14 @@ assert!(doc.valid());
 
 Two cases that are easy to get wrong, both documented with runnable examples on docs.rs:
 
-- **Document numbers longer than the 9-character field** overflow into the optional-data field
-  per Doc 9303, and
+- **Document numbers longer than the 9-character field** can overflow into optional data
+  under Parts 5/6 note j; TD3 uses that form by crate policy, while visas do not.
   [`full_document_number`](https://docs.rs/mrz/latest/mrz/struct.MrzData.html#method.full_document_number)
   reassembles them.
-- **Unknown and partial dates** are conformant, not corrupt: §4.8 lets an issuer fill a date
-  with `<`, and §4.9 gives a filler the value zero, so `<<<<<<` with check digit `0` is a
-  *valid* field. A parsed date is an
+- **Unknown and partial birth dates** are conformant: Part 3 §4.8 lets an issuer fill
+  an unknown date of birth with `<`, and §4.9 gives a filler the value zero, so `<<<<<<` with check digit `0` is a
+  *valid* birth-date field. The parser also accepts fillers in expiry dates as a
+  tolerance policy; Part 3 §4.8 does not authorize them there. A parsed date is an
   [`MrzDate`](https://docs.rs/mrz/latest/mrz/enum.MrzDate.html) (`Calendar`, `OutOfCalendar`,
   `PartiallyUnknown`, `Unknown` or `Malformed`), so an issuer's unknown never looks like an
   OCR failure. [`date_completeness`](https://docs.rs/mrz/latest/mrz/fn.date_completeness.html)
@@ -119,7 +120,8 @@ Two cases that are easy to get wrong, both documented with runnable examples on 
 
 All five formats emit from a `*Fields` struct with typed `MrzDate` and `Sex` values,
 plus MRZ-native text fields such as 3-letter codes. Dates print as `YYMMDD` in the zone.
-Every check digit is computed for you, so the output parses back as `valid()`.
+Every check digit is computed for you. With a document code accepted by the matching parser,
+the output parses back as `valid()`.
 
 ```rust
 use mrz::{format_td3, parse_td3, Td3Fields};
@@ -210,7 +212,8 @@ the undetectable ones were *dominated* by pairs this table calls caught. Read it
 single swaps are safe", never as "which characters are safe".
 
 That is why the crate layers structural checks on top of the arithmetic — recognized country
-codes, date plausibility, name charset rules. The full derivation and the corpus numbers are on
+country-code recognition and date plausibility in `find_and_parse` repair
+gates. Direct `parse_*` calls do not apply these structural guards. The full derivation and the corpus numbers are on
 [`Blindspot`](https://docs.rs/mrz/latest/mrz/enum.Blindspot.html), and
 `cargo run -p mrz --example checksum_blindspots` demonstrates the law against the real parser.
 
@@ -218,7 +221,9 @@ codes, date plausibility, name charset rules. The full derivation and the corpus
 
 `mrz` is verified against the ICAO Doc 9303 text, not against memory of it. Worked examples
 published in the standard — composite check digits, name encodings, transliterations, the
-published TD1/TD2/TD3 and visa specimens — are pinned as test vectors. Where the standard is
+published TD1/TD2/visa specimens and TD3 fields from Part 3 §3.2 — are
+pinned as test vectors. The older-edition `P<` TD3 line 1 differs from the
+current Part 4 `PP` specimen. Where the standard is
 **silent**, the crate says so rather than inventing conformance:
 
 - Two-digit-year century inference has no rule anywhere in Doc 9303. The pivot is this crate's
@@ -226,8 +231,8 @@ published TD1/TD2/TD3 and visa specimens — are pinned as test vectors. Where t
 - Name truncation is issuer-discretionary; Doc 9303 defines several strategies and states that
   truncation is not reliably detectable.
 - §6 A transliteration is deliberately multi-valued for five characters. §6 B is
-  language-dependent and has no worked example in the standard, so its 48 rows are pinned by
-  table-integrity checks only.
+  language-dependent. Part 3 §6 B has no worked example, while Part 4 Appendix A
+  Figure A-2 illustrates one. Its 48 rows are pinned by table-integrity checks.
 
 The corroboration record — which passages are relied on, how each was verified, and which
 remain unverified — is kept alongside the source corpus in
@@ -239,7 +244,8 @@ Both are off by default, keeping the base crate zero-dependency and wasm-clean:
 
 - **`serde`** — derives `Serialize` + `Deserialize` on the data types: `MrzData`, `Checks`,
   `Format`, `Field`, `SequenceCompleteness`, `ParseOptions`, `Date`, `DateValidity`,
-  `DateCompleteness`, and the five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`,
+  `DateCompleteness`, `DateRole`, `RawDateField`, `InvalidRawDateField`,
+  `ParseMrzDateError`, `ParseSexError`, and the five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`,
   `MrvAFields`, `MrvBFields`). `MrzDate` and `Sex` implement both by hand as their text form:
   a date serialises as `"1974-08-12"` (or its raw field, such as `"74<<12"`) and sex as its zone
   character.

@@ -1,6 +1,6 @@
 - **`ParseOptions::class_sweep` (off by default) reaches `solve_class_sweep` from `find_and_parse`.**
   Built with `ParseOptions::default().with_class_sweep(true)` — the first option added since the
-  struct became `#[non_exhaustive]`, and additive because of it.
+  struct became `#[non_exhaustive]`, and serde-compatible with 0.7 options JSON because the new field defaults to false.
 
   The sweep runs in its own pass at the head of the damaged-capture search, for the fields that
   carry a check digit of their own (TD1 line 1's document number and line 2's dates; line 2's

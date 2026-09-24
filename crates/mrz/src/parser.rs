@@ -1,9 +1,8 @@
-//! MRZ line parsers (TD1/TD2/TD3) and the free-text scanner [`find_and_parse`].
+//! MRZ line parsers (TD1/TD2/TD3/MRV-A/MRV-B) and the free-text scanner [`find_and_parse`].
 //!
-//! Field offsets follow ICAO 9303 parts 4 (TD3), 5 (TD1) and 6 (TD2). Each
-//! parser verifies every printed check digit; the scanner drives the OCR-repair
-//! machinery in [`crate::checksum`] and accepts a candidate reading only when
-//! its composite check digit agrees with it. Agreement is checksum
+//! Field offsets follow ICAO 9303 Parts 4 (TD3), 5 (TD1), 6 (TD2) and 7 (MRV-A/B). Each
+//! parser verifies applicable printed check digits; the scanner drives OCR
+//! repair in [`crate::checksum`] and accepts a fully validating reading. Agreement is checksum
 //! consistency, not byte-identity with the printed zone — see
 //! [`crate::Blindspot`].
 
@@ -224,7 +223,7 @@ fn date_field(
 /// to part 5 note j / part 6 note j, because issuers do it in practice.
 ///
 /// ```
-/// // ICAO 9303 Part 4's Utopia specimen.
+/// // Pre-amendment Utopia line 1, paired with Part 3 §3.2 line 2.
 /// let doc = mrz::parse_td3(
 ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
 ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
@@ -262,7 +261,7 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         if line.len() != 44 {
             return Err(MrzError::BadLength {
                 expected: 44,
-                got: line.len(),
+                got: line.chars().count(),
             });
         }
         ensure_charset(line, line_number)?;
@@ -357,14 +356,14 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         if line.len() != 36 {
             return Err(MrzError::BadLength {
                 expected: 36,
-                got: line.len(),
+                got: line.chars().count(),
             });
         }
         ensure_charset(line, line_number)?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
-        return Err(MrzError::BadDocumentCode(code.to_string()));
+        return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
 
     let (surname, given_names) = clean_name(&line1[5..36]);
@@ -460,14 +459,14 @@ pub fn parse_td1_with(
         if line.len() != 30 {
             return Err(MrzError::BadLength {
                 expected: 30,
-                got: line.len(),
+                got: line.chars().count(),
             });
         }
         ensure_charset(line, line_number)?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
-        return Err(MrzError::BadDocumentCode(code.to_string()));
+        return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
 
     let (surname, given_names) = clean_name(line3);
@@ -561,7 +560,7 @@ pub fn parse_mrv_a_with(
         if line.len() != 44 {
             return Err(MrzError::BadLength {
                 expected: 44,
-                got: line.len(),
+                got: line.chars().count(),
             });
         }
         ensure_charset(line, line_number)?;
@@ -646,7 +645,7 @@ pub fn parse_mrv_b_with(
         if line.len() != 36 {
             return Err(MrzError::BadLength {
                 expected: 36,
-                got: line.len(),
+                got: line.chars().count(),
             });
         }
         ensure_charset(line, line_number)?;
@@ -694,9 +693,9 @@ pub fn parse_mrv_b_with(
 }
 
 /// Undo a **dropped** (not merely misread) line-1 position-1 filler —
-/// generalizes [`repair_td1_line1_unshifted`]'s transformation to formats
-/// whose document code can *only* ever be a single letter plus filler, never
-/// a genuine second letter.
+/// generalizes [`repair_td1_line1_unshifted`]'s transformation to other
+/// formats. A genuine second document-code letter is possible; the country
+/// gate below guards against shifting one away.
 ///
 /// **Ordering is load-bearing here, unlike TD1.** TD1 tries its unshifted
 /// reading as a second candidate in either order, because its own line-1
@@ -801,7 +800,7 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
 ///
 /// The repair gates below take a raw 3-byte slice off line 1, and
 /// [`country_name`] is exact string equality. A state shorter than three
-/// characters is filler-padded in the MRZ -- Germany's legacy code is `D<<` --
+/// characters is filler-padded in the MRZ -- Germany's current ICAO code is `D<<` --
 /// so passing the untrimmed slice asked the table for `"D<<"`, got `None`, and
 /// silently discarded an otherwise correct repair for every German document
 /// whose line 1 had lost its position-1 filler. `D` is the only sub-3-character
@@ -867,8 +866,8 @@ fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String
 ///
 /// The unshift fallback is additionally gated on [`country_name`] —
 /// shared across all three callers, though only TD3 actually needs it:
-/// TD3's document code genuinely has real two-letter forms (`PS` = service
-/// passport, `PP` = Canada's and — effective 15 December 2025 — Cyprus's
+/// TD3's document code genuinely has real two-letter forms (`PO` = official/service
+/// passport; `PS` = stateless passport, `PP` = Canada's and — effective 15 December 2025 — Cyprus's
 /// ordinary-passport code; see `synthpass_core::fusion::document_types_agree`'s
 /// doc comment), which [`unshift_line1_prefix`]'s shape-only guard cannot
 /// tell apart from a genuine drop (both leave position 1 as a real letter,
@@ -877,10 +876,8 @@ fn shift_line1_right_at_country(repaired: String, target_width: usize) -> String
 /// `a_genuine_two_letter_document_code_is_unaffected`, which caught this
 /// pre-existing gap in `unshift_line1_prefix` itself (present before this
 /// fix, on the raw candidate — this composition is the first place it's
-/// actually guarded). MRV-A/MRV-B's document code is unconditionally `V`
-/// plus filler (see `MrvAFields`'/`MrvBFields`' doc comments), so the gate
-/// is a no-op there — a genuine drop always resolves to a real country once
-/// unshifted, same as before. Only accept the unshifted reading when it
+/// actually guarded). MRV-A/MRV-B also allow an issuer-defined second character after `V`, so
+/// the country gate protects those codes too. Only accept the unshifted reading when it
 /// actually resolves to a real country; otherwise there's no positive
 /// evidence it helped, so leave the line as
 /// `repair_td3_line1`/`repair_mrv_*_line1` already produced it.
@@ -977,8 +974,8 @@ fn repair_td2_line1(l: &str) -> String {
 /// **The document-code dictionary this crate's own MRZ_SEQUENCE_COMPLETENESS
 /// plan proposed for this doesn't exist.** ICAO 9303 Part 5 §Note k / Part 6
 /// §Note k are explicit: the document code's second character is "at the
-/// discretion of the issuing State or organization" — only `V`, and `C`
-/// immediately after `A`, are excluded. That's not a closed enumerable set;
+/// discretion of the issuing State or organization" — Part 6 excludes `V` and `AC`; Part 5 also excludes `AI`
+/// but permits `AC` for a crew member certificate. That's not a closed enumerable set;
 /// building a "known-legitimate TD2 code" table would mean guessing at
 /// real-world issuer choices with no normative ground truth, exactly the
 /// kind of unproven heuristic `crate::repair::solve_substitution`'s "prove
@@ -1116,12 +1113,10 @@ fn repair_mrv_b_line1(l: &str) -> String {
 /// Second candidate alongside `repair_mrv_a_line1`/`repair_mrv_b_line1` —
 /// see [`unshift_line1_prefix`]'s doc comment for why this is additive, not
 /// a replacement, and why the call site must try this one *first*. MRV-A/
-/// MRV-B's document code is unconditionally `"V"` plus filler (see
-/// `MrvAFields`'/`MrvBFields`' doc comments), so unlike TD2 there is no
-/// genuine two-real-letter document code this could mistakenly "fix" — the
-/// only reason this is a second candidate rather than an in-place mutation,
-/// like the TD3 sibling, is the hit-rate regression documented on
-/// [`unshift_line1_prefix`], not a document-code ambiguity here.
+/// MRV-B's code can have an issuer-defined second character after `V`, so
+/// this remains a second candidate rather than an unconditional rewrite.
+/// The country gate and the hit-rate regression are documented on
+/// [`unshift_line1_prefix`].
 fn repair_mrv_a_line1_unshifted(l: &str) -> String {
     let target_width = l.len();
     unshift_line1_prefix(repair_mrv_a_line1(l), target_width)
@@ -1181,14 +1176,13 @@ fn repair_mrv_b_line2(l: &str) -> String {
 
 /// Scan free-form text (e.g. OCR output) for an MRZ and parse it.
 ///
-/// Tries TD3 (two 44-char lines starting with `P`), then TD1 (three 30-char
-/// lines starting with `I`/`A`/`C`), then TD2 (two 36-char lines starting with
-/// `I`/`A`/`C`). Tolerates HTML-escaped fillers (`&lt;`, as produced by
+/// Tries TD3, MRV-B, MRV-A, TD1, then TD2. Tolerates HTML-escaped fillers (`&lt;`, as produced by
 /// docling's Markdown) and MRZ lines merged onto a single physical line.
 ///
 /// A reading whose check digits all validate is returned immediately. When no
-/// candidate fully validates, the *best-scoring* one — the reading with the
-/// most passing check digits — is returned with its honest (partially `false`)
+/// candidate fully validates, a damaged-capture pass may reconstruct one.
+/// Otherwise the fallback ranks by verified/applicable check-digit fraction,
+/// then applicable count, and returns the best reading with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
 /// escalate. [`MrzError::NotFound`] means nothing MRZ-shaped was found at all —
 /// or that the best-scoring candidate fails every structural signal at once

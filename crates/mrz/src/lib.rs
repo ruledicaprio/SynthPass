@@ -71,8 +71,8 @@
 //!
 //! # Stability
 //!
-//! The crate is pre-1.0, so the **minor** version is the breaking slot: `^0.7`
-//! resolves any `0.7.x` but never `0.8.0`. Output types ([`MrzData`],
+//! The crate is pre-1.0, so the **minor** version is the breaking slot: `^0.8`
+//! resolves any `0.8.x` but never `0.9.0`. Output types ([`MrzData`],
 //! [`Checks`], [`Format`], [`Field`], [`MrzError`], [`SequenceCompleteness`] and
 //! the other enums) are `#[non_exhaustive]`, so they can grow in a patch
 //! release; the five `*Fields` emitter inputs are deliberately exhaustive, so
@@ -95,7 +95,7 @@
 //! - `repair` — check-digit-guided recovery of damaged or misread fields
 //! - `blindspot` — the substitutions check digits provably cannot catch
 //! - `dates` — `YYMMDD` expansion, the calendar, and date plausibility
-//! - `countries` — the Part 3 §5 registry of state and organization codes
+//! - `countries` — a subset of Part 3 §5 state and organization codes
 //! - `doccode` — Part 4 §4.4 secondary passport document codes
 //! - `translit` — Part 3 §6 A (Latin) and §6 B (Cyrillic) transliteration
 
@@ -191,6 +191,7 @@ pub struct ParseOptions {
     /// not been established — so this exists to be A/B'd against a control,
     /// not to be switched on. Only the damaged pass consults it, which runs
     /// only after an ordinary read has already failed to validate.
+    #[cfg_attr(feature = "serde", serde(default))]
     pub class_sweep: bool,
 }
 
@@ -630,8 +631,8 @@ pub struct MrzData {
     pub date_of_expiry: MrzDate,
     /// The format's *primary* optional-data element, trailing filler trimmed,
     /// and without the overflow remainder when a long document number spilled
-    /// into it: TD1 line 1 positions 16-30 (Doc 9303 Part 5's "optional data
-    /// element 1"), TD2 line 2 positions 29-35, TD3 line 2 positions 29-42
+    /// into it: TD1 line 1 positions 16-30 (Doc 9303 Part 5 §4.2.2.1's "Optional data
+    /// elements"), TD2 line 2 positions 29-35, TD3 line 2 positions 29-42
     /// (Part 4 §4.2.2 titles it "personal number **or other optional data
     /// elements**"), MRV-A line 2 positions 29-44, MRV-B line 2 positions
     /// 29-36. It is the document-number overflow target on every format that
@@ -741,7 +742,7 @@ impl MrzData {
     /// assert!(doc.valid());
     /// assert_eq!(doc.document_number, "L898902C3");            // the printed 9-char field
     /// assert_eq!(doc.full_document_number(), "L898902C31234"); // the reassembled number
-    /// assert!(!doc.document_number_legacy_encoding);           // read as the Doc 9303 form
+    /// assert!(!doc.document_number_legacy_encoding);           // read as the Part 5/6 note j form, applied to TD3 by analogy
     /// ```
     pub fn full_document_number(&self) -> &str {
         self.document_number_full
@@ -749,8 +750,9 @@ impl MrzData {
             .unwrap_or(&self.document_number)
     }
 
-    /// The personal number, on the one format that prints one: TD3, whose
-    /// line 2 positions 29-42 carry it under its own check digit
+    /// The personal number under this crate's ADR-0018 naming policy. TD3's
+    /// line 2 positions 29-42 are the only field ICAO labels a personal number
+    /// with its own check digit
     /// ([`Checks::personal_number`]). It is
     /// [`optional_data_1`](Self::optional_data_1) read through the name Doc
     /// 9303 Part 4 gives that field. On every other format the same slot
@@ -774,7 +776,7 @@ impl MrzData {
     ///     "D231458907UTO7408122F1204159<<<<<<<6",
     /// )
     /// .unwrap();
-    /// assert_eq!(card.personal_number(), None); // TD2 prints optional data, not a personal number
+    /// assert_eq!(card.personal_number(), None); // ADR-0018 names TD2's field optional data
     /// ```
     pub fn personal_number(&self) -> Option<&str> {
         match self.format {
@@ -821,7 +823,7 @@ impl MrzData {
     /// let (l1, l2) = zone.split_once('\n').unwrap();
     /// assert_eq!(parse_td3(l1, l2).unwrap().passport_type(), Some(PassportType::Diplomatic));
     ///
-    /// // The ICAO specimen prints `P<`: no secondary code, which is conformant.
+    /// // The older-edition ICAO specimen prints `P<`: no secondary code, which is conformant.
     /// let specimen = parse_td3(
     ///     "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
     ///     "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
@@ -1019,7 +1021,7 @@ pub enum MrzError {
     BadLength {
         /// The length the claimed format requires.
         expected: usize,
-        /// The length actually supplied.
+        /// The number of characters actually supplied.
         got: usize,
     },
     /// Character outside `[A-Z0-9<]`.
@@ -1045,7 +1047,7 @@ pub enum MrzError {
         /// `line` is `None`.
         position: usize,
     },
-    /// Document code not recognized for the format.
+    /// Document code not recognized for the format; the payload is the two raw cells, including filler.
     BadDocumentCode(String),
     /// A check digit did not validate against its field.
     ///
@@ -1143,13 +1145,10 @@ mod tests {
         assert!(checks.failed().is_empty());
     }
 
-    // ICAO 9303 specimen identity (Utopia / Anna Maria Eriksson). Part 4's own
-    // copy is Appendix B Figure B-1 — an image in the source PDF, not
-    // extracted as text into this corpus
-    // (`knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:669-687`
-    // is the figure caption, no MRZ text). Corroborated instead by the
-    // byte-identical TD2 zone Part 6 publishes as literal text (see below,
-    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`).
+    // Utopia / Anna Maria Eriksson: line 2 is printed in Part 3 §3.2
+    // (PDF p11), including document-number check 6 and personal-number
+    // check 1. This P< line 1 is from a pre-amendment edition; current
+    // Parts 3 and 4 print PP and Part 4 uses a 2034 expiry.
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
     const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 
@@ -1198,7 +1197,7 @@ mod tests {
         assert_eq!(d.date_of_birth.completeness(), DateCompleteness::Unknown);
     }
 
-    // Mrz_Field_Layout.md §2.3: an unused TD3 personal number's check digit
+    // Doc 9303 Part 4 §4.2.2.2 position 43: an unused TD3 personal number's check digit
     // may be issued as either '0' or '<' — both are zero-valued under the
     // ICAO 7-3-1 arithmetic (`char_value('<') == char_value('0') == 0`), so
     // the composite digit is identical either way. These two tests pin both
@@ -1230,12 +1229,8 @@ mod tests {
     }
 
     // Same Utopia/Eriksson identity as the TD3/TD2 specimens, reshaped into
-    // TD1's 3-line layout. Part 5's own Appendix A/B examples are images in
-    // the source PDF, not extracted as text
-    // (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:504-534`);
-    // this zone is corroborated by cross-part agreement with the literal TD2
-    // specimen (same document number, dates and name), not a published Part 5
-    // text specimen.
+    // TD1's three lines are printed in Part 5 Appendix A Figure A-2
+    // (PDF p29), byte for byte.
     const TD1_L1: &str = "I<UTOD231458907<<<<<<<<<<<<<<<";
     const TD1_L2: &str = "7408122F1204159UTO<<<<<<<<<<<6";
     const TD1_L3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
@@ -1450,12 +1445,14 @@ mod tests {
     fn td1_from_single_docling_line_with_k_misreads() {
         // Verbatim docling OCR of the Slovenian 2022 specimen ID card rear:
         // all three TD1 lines in ONE paragraph, `<` escaped as &lt;, and the
-        // usual K-for-filler misreads (IK→I<, 145K<→145<<, VZORECKK→VZOREC<<).
+        // K-for-filler misreads in data fields (145K<→145<<, VZORECKK→VZOREC<<).
+        // IK is also a legal TD1 code, so its second cell cannot be repaired
+        // from the code alone and is preserved as read.
         let text = "1F9874543\n\nIKSVNIE987654302806985505145K&lt; 8506287F3203282SVN&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;&lt;2 VZORECKKJANAKKKKKKKKK&lt;&lt;KK";
         let d = find_and_parse(text).unwrap();
         assert!(d.valid(), "checks: {:?}", d.checks);
         assert_eq!(d.format, Format::Td1);
-        assert_eq!(d.document_type, "I");
+        assert_eq!(d.document_type, "IK");
         assert_eq!(d.issuing_country, "SVN");
         assert_eq!(d.document_number, "IE9876543");
         assert_eq!(d.surname, "VZOREC");
