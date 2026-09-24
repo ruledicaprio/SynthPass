@@ -123,8 +123,40 @@ let day: Option<Date> = data.date_of_birth.calendar();   // Some only for a real
 - Under the `zeroize` feature, `MrzDate` clears its payload and keeps its variant; `Sex` is
   overwritten whole.
 
-<!-- TODO(5d): section 6, the emitter `*Fields` inputs take `Sex` / `MrzDate`. Added when that
-PR lands; this guide is not released without it. -->
+### 6. The emitters take typed sex and dates ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md))
+
+`Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields` and `MrvBFields` take `MrzDate` for
+`date_of_birth` and `date_of_expiry`, and `Sex` for `sex`, the same types `MrzData` returns.
+Emit and parse therefore share one typed vocabulary, and a parse-then-emit round trip needs no
+string handling.
+
+```rust
+// 0.7
+let fields = Td3Fields {
+    date_of_birth: "740812".into(),
+    sex: "F".into(),
+    date_of_expiry: "120415".into(),
+    ..Default::default()
+};
+// 0.8
+let fields = Td3Fields {
+    date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
+    sex: Sex::Female,
+    date_of_expiry: MrzDate::Calendar(Date::new(2012, 4, 15)),
+    ..Default::default()
+};
+```
+
+- To write six zone characters as they are (a placeholder, or a partly unknown date), classify
+  them with `MrzDate::from_field(RawDateField::try_from("74<<12")?, DateRole::Birth, pivot)`.
+- Unspecified sex is `Sex::Unspecified`, written as `<`. The old API wrote `<` for anything
+  that was not `M` or `F`. A `Sex::NonConformant(c)` is now written as `c`, so a parsed zone
+  re-emits exactly as it was read.
+- For equivalent values the emitted bytes and check digits are unchanged. The defaults are still
+  `<<<<<<` and `<`.
+- The old `String` fields also accepted lowercase or wrong-length dates and padded or cleaned
+  them. A `RawDateField` is exactly six MRZ characters, so such input now has to be fixed before
+  it reaches the emitter.
 
 ## Part 2: SynthPass JSON, 1.5 → 1.6
 
