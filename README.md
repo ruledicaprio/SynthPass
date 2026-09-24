@@ -105,8 +105,8 @@ flowchart LR
     TIER2 --> JSON
 ```
 
-Tier 1 is deterministic: OCR feeds the MRZ and its printed ICAO 9303 check digits either prove the read or
-reject it. Tier 2 — the local LLM — runs only on what Tier 1 could not recover. Every field then
+Tier 1 is deterministic: OCR feeds the MRZ and its printed ICAO 9303 check digits either confirm
+it is consistent or reject it. Tier 2 — the local LLM — runs only on what Tier 1 could not recover. Every field then
 passes `synthpass-core`'s deterministic normalizers (dates, sex, document type, country/demonym
 resolution), each added only once a real specimen proved it moved the measured parity rate. See
 [ARCHITECTURE.md](knowledge/ARCHITECTURE.md), [LICENSING.md](knowledge/LICENSING.md), and the
