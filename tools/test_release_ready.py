@@ -26,6 +26,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CHECK_READY = REPO / "scripts" / "check-release-ready.sh"
 TAG_RELEASE = REPO / "scripts" / "tag-release.sh"
+ASSEMBLE = REPO / "scripts" / "assemble-changelog.sh"
 
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
@@ -261,3 +262,46 @@ class TagReleaseTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+@unittest.skipUnless(BASH, "bash is required to run the assembler")
+class AssembleChangelogTest(unittest.TestCase):
+    """scripts/assemble-changelog.sh must carry breaking (`!`) fragments.
+
+    The fragment convention marks a breaking change as `<id>.<cat>!.md`. The
+    assembler globbed only `*.<cat>.md`, so every breaking entry was left
+    behind while the plain ones were spliced in: the release section that
+    announces a break omitted the break. check-release-ready.sh would then
+    refuse on the leftovers, but only after the section had been written.
+    """
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="assemble-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        # The script resolves its repository root from its own location.
+        (self.tmp / "scripts").mkdir()
+        shutil.copy(ASSEMBLE, self.tmp / "scripts" / ASSEMBLE.name)
+        self.frags = self.tmp / "changelog.d" / "mrz"
+        self.frags.mkdir(parents=True)
+        (self.frags / "README.md").write_text("# how fragments work\n", encoding="utf-8")
+        self.log = self.tmp / "crates" / "mrz" / "CHANGELOG.md"
+        self.log.parent.mkdir(parents=True)
+        self.log.write_text(
+            "# Changelog\n\n## [Unreleased]\n\n## [0.7.1] — 2026-09-14\n\n- Older entry.\n",
+            encoding="utf-8",
+        )
+
+    def test_breaking_fragments_are_assembled_first_and_consumed(self):
+        (self.frags / "plain.changed.md").write_text("- A plain change.\n", encoding="utf-8")
+        (self.frags / "breaking.changed!.md").write_text("- A breaking change.\n", encoding="utf-8")
+        (self.frags / "new.added.md").write_text("- A new thing.\n", encoding="utf-8")
+
+        result = run(self.tmp / "scripts" / ASSEMBLE.name, "--scope", "mrz", "--write")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        text = self.log.read_text(encoding="utf-8")
+        self.assertIn("- A breaking change.", text)
+        self.assertIn("- A plain change.", text)
+        self.assertLess(text.index("- A breaking change."), text.index("- A plain change."))
+        self.assertLess(text.index("- A plain change."), text.index("## [0.7.1]"))
+        pending = sorted(p.name for p in self.frags.iterdir() if p.name != "README.md")
+        self.assertEqual(pending, [])
