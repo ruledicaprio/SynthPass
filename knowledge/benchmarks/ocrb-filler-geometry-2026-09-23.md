@@ -160,6 +160,11 @@ better candidates. The measurement that would settle it is a same-binary A/B: ge
 synthetic corpus with the filler raised by 0.035 cap, arm A against arm B, and read the name
 repair outcome. It is recorded here and not run.
 
+*Amended 2026-09-24:* ISO 1073-2's own §13 illustration centres `<` at 0.532 cap (bottom
++0.047), matching the real-print median of 0.528. So the raise the standard supports is
+**≈0.025 cap**, not 0.035; see
+[`ocrb-standards-vs-priors-2026-09-24.md`](ocrb-standards-vs-priors-2026-09-24.md).
+
 ## 4. Print-quality limits relevant to chargrid's `DEFAULT_INK_FLOOR = 0.05`
 
 Numbers and section references only (ISO 1831-1980 unless stated):
@@ -178,7 +183,7 @@ Numbers and section references only (ISO 1831-1980 unless stated):
   may be at most 0.3 mm (§5.4.4.5). Spots are allowed within a 0.2 mm circle covering less than
   1/3 of its area (§5.4.4.6).
 - **Skew:** at most 3° per character (§6.4).
-- **What ICAO Doc 9303-3 §4.4 adopts from ISO 1831 for the MRZ:** PCS_min ≥ 0.6 in the B900
+- **What ICAO Doc 9303-3 §4.11 adopts from ISO 1831 for the MRZ:** PCS_min ≥ 0.6 in the B900
   band, range-X stroke width (§5.3.1), CVR < 1.50, and void d = 0.4 at the reading surface. Lines
   must be readable in B900 (near infrared) even when security print runs under the zone (§4.5).
 
@@ -199,7 +204,7 @@ Added the same day, from the same 16 crops. Units are line-1 cap heights unless 
 | Quantity | Value | Source |
 | --- | --- | --- |
 | Typeface and pitch | OCR-B size 1, constant stroke width, 2.54 mm fixed pitch (10 per 25.4 mm) | Doc 9303-3 §4.4 |
-| Capital / digit height, size I | 2.46 / 2.60 mm (ISO 1831 table 2: 2.40 mm, "indicative" for OCR-B) | ECMA-11 §4.1; ISO 1831 §5.3.1 |
+| Capital / digit height, size I | 2.46 / 2.60 mm (ISO 1831 table 2's 2.40 mm is the centreline height of EIGHT, not a cap or digit height; corrected 2026-09-24) | ECMA-11 §4.1; ISO 1831 §5.3.1 |
 | TD3 and MRV line pitch (reference centre lines) | 6.35 mm; lower line 9.40 mm and upper line 15.75 mm above the bottom edge | Doc 9303-4 §4.2.1.3, figure 3; Doc 9303-7 (same values) |
 | TD3 printing zone per line | 4.3 mm tall (upper zone 13.6-17.9 mm, lower 7.25-11.55 mm from the bottom edge) | Doc 9303-4 figure 3 |
 | TD3 MRZ | 23.2 ± 1.0 mm tall; first character's left edge 6.0 ± 1.0 mm from the document edge; 114.0 mm reading width | Doc 9303-4 figure 3, §4.2.1.3 |

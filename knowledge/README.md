@@ -91,6 +91,8 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 | **[research/](research/)** | Distilled, actionable summaries drawn from `papers/`. |
 | **[papers/](papers/)** | Source academic material, kept as reference. |
 | **[docs9303/](docs9303/)** | ICAO Doc 9303, Parts 1–13 — the spec behind `crates/mrz` and `synthpass-die`, kept as reference. |
+| **[ecma/](ecma/)** | The Ecma OCR standards under the MRZ typeface (ECMA-11, 15, 18, 21, 30), transcribed; the Ecma twins of the ISO standards Doc 9303 cites. |
+| **[ocrb/](ocrb/)** | OCR-B glyph geometry, print quality, pitch and line spacing from ISO 1073-2 / ISO 1831 / ECMA, as cited facts tied to SynthPass code and measurements. |
 
 ## Where the numbers live
 
