@@ -1782,6 +1782,9 @@ const MAX_DAMAGED_ATTEMPTS: usize = 200_000;
 /// would cost 37² candidates per insertion point for a result this function is
 /// required to throw away.
 ///
+/// The first cell is the format letter. Never fill an unknown there: a
+/// missing passport letter must not become an invented visa letter.
+///
 /// Empty for any other line, which is what keeps this off the happy path.
 fn restored(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String> {
     let n = normalize_line(raw);
@@ -1791,7 +1794,7 @@ fn restored(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String>
     let mut seen = std::collections::HashSet::new();
     let mut out: Vec<String> = Vec::new();
     for shaped in crate::repair::width_candidates(&n, target) {
-        if !shaped.contains(crate::repair::UNKNOWN) {
+        if shaped.starts_with(crate::repair::UNKNOWN) || !shaped.contains(crate::repair::UNKNOWN) {
             continue;
         }
         for concrete in crate::repair::concrete_fillings(&shaped) {
@@ -2372,6 +2375,42 @@ mod tests {
             })
         );
     }
+    /// The cell-zero guard still permits an unknown inside the name field.
+    #[test]
+    fn a_missing_interior_cell_is_still_restored() {
+        let zone = crate::format_td3(&crate::Td3Fields {
+            document_code: "P".to_string(),
+            issuing_country: "UTO".to_string(),
+            document_number: "E00000000".to_string(),
+            surname: "SPECIMEN".to_string(),
+            given_names: "TEST".to_string(),
+            nationality: "UTO".to_string(),
+            date_of_birth: MrzDate::from_field(
+                RawDateField::try_from("800101").expect("six MRZ date characters"),
+                DateRole::Birth,
+                crate::CURRENT_YY,
+            ),
+            sex: Sex::Female,
+            date_of_expiry: MrzDate::from_field(
+                RawDateField::try_from("301230").expect("six MRZ date characters"),
+                DateRole::Expiry,
+                crate::CURRENT_YY,
+            ),
+            personal_number: None,
+        });
+        let (line1, _) = zone.split_once('\n').expect("emitted TD3 has two lines");
+        let at = line1.find("<<").expect("emitted name separator") + 1;
+        let mut short_line1 = line1.to_string();
+        short_line1.remove(at);
+        assert_eq!(short_line1.len(), 43);
+
+        let candidates = restored(&short_line1, 44, repair_td3_line1);
+        assert!(
+            candidates.iter().any(|line| line == line1),
+            "the original line must remain a restoration candidate"
+        );
+    }
+
     /// #436: `td3_prefix_verdict` against a table of 45-character (one cell
     /// too long) and control inputs, each already `normalize_line` +
     /// `fix_doc_code`'d — the state every call site is required to pass it
