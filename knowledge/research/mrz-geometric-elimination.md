@@ -129,6 +129,8 @@ at 2.54 mm, and §11.4-11.5 the nominal strokewidth at 0.35 mm (0.31 mm for smal
 refers to ECMA-30, which has no geometry either. Drawing 79 is not among the reproduced reference
 drawings (`1`, `E`, `§`, `¥`), so the only in-document evidence is the §13 4:1 illustration.
 
+*Amended 2026-09-24:* the 5.7% gap above is ECMA-11's **letterpress** table. ICAO requires the constant-strokewidth style, whose ISO 1073-2 Table 1 digit height is 2.66 mm, **8.1%** above capitals; see [`../ocrb/glyph-dimensions.md`](../ocrb/glyph-dimensions.md).
+
 **Cross-font table** (cap units: baseline 0, cap line 1, cap = median flat capital; the
 Barcodesoft files are local, commercial and not vendored):
 
