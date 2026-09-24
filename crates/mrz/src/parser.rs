@@ -1908,10 +1908,11 @@ fn accept_damaged(data: &MrzData) -> bool {
 /// crosses it against the ordinary variants of the others — linear in the
 /// number of restored candidates rather than a product of three searches.
 ///
-/// Returns `Some` only when the surviving readings all agree on the fields
-/// that matter. Several genuinely different readings means the MRZ cannot
-/// distinguish them, and the honest answer is the ordinary checksum-failed
-/// fallback, not the first candidate off the list.
+/// Returns `Some` only when the surviving readings are one answer: they agree
+/// on every field except the raw zone (see `single`). Several genuinely
+/// different readings means the MRZ cannot distinguish them, and the honest
+/// answer is the ordinary checksum-failed fallback, not the first candidate
+/// off the list.
 fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     // Preferred over the search below when it lands -- see `class_sweep_pass`
     // for why pooling the two makes the sweep lose to the machinery it
@@ -2057,22 +2058,34 @@ fn fallback_rank(a: &Checks, b: &Checks) -> core::cmp::Ordering {
 }
 
 /// A damaged-recovery unanimity gate: the one recovered reading, or `None` if
-/// the damage left more than one record standing. Readings that differ only in
-/// their raw zone but agree on these six extracted fields are the same answer
-/// reached twice (two insertion points inside one filler run, say) and count
-/// as one. It intentionally ignores format and [`Checks`]; when all readings
-/// agree on those six fields, the first keeps its format and check states.
+/// the damage left more than one answer standing.
+///
+/// Two readings are the same answer when they agree on everything [`MrzData`]
+/// exposes except `mrz_lines`, the raw zone they were read from. Two insertion
+/// points inside one filler run reach the same answer twice, and count as one.
+/// Every other field takes part, format included.
+///
+/// The gate used to compare only the document number, the dates, the names and
+/// the nationality. Readings that disagreed on sex, issuer, document code,
+/// optional data, the full document number or format therefore counted as
+/// unanimous, and the first one off the list won. No check digit covers sex,
+/// issuer, document code or format, so nothing downstream could catch that
+/// pick. Comparing the whole record minus the zone also makes a field added
+/// later take part by default, which is the safe direction for a refusal gate.
+///
+/// Every hit has already passed [`accept_damaged`], so their [`Checks`] agree
+/// whenever their formats do. Comparing `checks` costs nothing and keeps the
+/// rule simple.
 fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
-    let first = hits.first()?.clone();
-    let same = |a: &MrzData, b: &MrzData| {
-        a.document_number == b.document_number
-            && a.date_of_birth == b.date_of_birth
-            && a.date_of_expiry == b.date_of_expiry
-            && a.surname == b.surname
-            && a.given_names == b.given_names
-            && a.nationality == b.nationality
+    // Not struct-update syntax: with the `zeroize` feature `MrzData` implements
+    // `Drop`, and fields cannot be moved out of a `Drop` type.
+    let answer = |data: &MrzData| {
+        let mut data = data.clone();
+        data.mrz_lines.clear();
+        data
     };
-    if hits.iter().all(|h| same(h, &first)) {
+    let first = answer(hits.first()?);
+    if hits.iter().all(|h| answer(h) == first) {
         return Some(hits.remove(0));
     }
     None
@@ -2081,6 +2094,59 @@ fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `single` treats readings as one answer only when every exposed field and
+    /// the format agree. Each mutation below touches one field the gate once
+    /// ignored; any of them makes the pair a disagreement, so the gate refuses.
+    #[test]
+    fn single_refuses_readings_that_disagree_on_any_exposed_field() {
+        let base = parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        )
+        .expect("the Doc 9303 specimen parses");
+
+        // The same answer reached through a different raw zone counts as one.
+        let mut twin = base.clone();
+        twin.mrz_lines.push('<');
+        assert_eq!(single(vec![base.clone(), twin]), Some(base.clone()));
+        assert_eq!(single(vec![base.clone()]), Some(base.clone()));
+        assert_eq!(single(Vec::new()), None);
+
+        /// A field's name, and an edit that changes only that field.
+        type Mutation = (&'static str, fn(&mut MrzData));
+        let mutations: [Mutation; 8] = [
+            ("format", |d| d.format = Format::MrvA),
+            ("document_type", |d| d.document_type = "PO".into()),
+            ("issuing_country", |d| d.issuing_country = "D".into()),
+            ("document_number_full", |d| {
+                d.document_number_full = Some("L898902C3123".into());
+            }),
+            ("document_number_legacy_encoding", |d| {
+                d.document_number_legacy_encoding = !d.document_number_legacy_encoding;
+            }),
+            ("sex", |d| d.sex = Sex::Male),
+            ("optional_data_1", |d| {
+                d.optional_data_1 = Some("ZE184226C".into())
+            }),
+            ("optional_data_2", |d| d.optional_data_2 = Some("1".into())),
+        ];
+        for (field, mutate) in mutations {
+            let mut other = base.clone();
+            mutate(&mut other);
+            assert_ne!(other, base, "the {field} mutation must change the record");
+            assert_eq!(
+                single(vec![base.clone(), other.clone()]),
+                None,
+                "readings that disagree on {field} are not one answer"
+            );
+            assert_eq!(
+                single(vec![other, base.clone()]),
+                None,
+                "the refusal on {field} does not depend on candidate order"
+            );
+        }
+    }
 
     #[test]
     fn date_field_reads_a_vetted_slice() {
