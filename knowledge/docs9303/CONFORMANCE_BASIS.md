@@ -428,6 +428,48 @@ trust. Basis is empirical, not textual — the 2026-09-08 real-specimen dump
 gate rejects 18 of them and none of the 118 hits or the two pinned real
 non-conformant line-1 specimens.
 
+### Part 4 §4.4 — harmonized TD3 document codes (`PP` and the 2026/2028/2038 dates)
+
+[`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:631`](Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#44-document-codes)
+(the section), verified against the source PDF (`9303_p4_cons_en.pdf`, physical page 33, printed page 25).
+
+§4.4 defines the second character of a passport's document code as a closed table:
+`PP` national/ordinary, `PE` emergency, `PD` diplomatic, `PO` official/service,
+`PR` refugee, `PT` alien/non-citizen, `PS` stateless, `PL` laissez-passer, `PM` military.
+Three dates follow, and they change what a "normal" passport looks like:
+
+- **1 January 2026:** an MRP issued *with* a secondary document code must use this table.
+- **1 January 2028:** *every* MRP must be issued with a secondary document code from this table.
+- **Before 1 January 2038:** every MRP issued without a harmonized secondary code must expire.
+
+So `P<` is the legacy form: new passports move to `PP`, and after 2037 no valid
+passport carries `P<`. Some issuers moved early: Canada already prints `PP`, and Cyprus
+does from 15 December 2025 (its [official specimen page](https://www.gov.cy/moi/en/documents/passports/passport-specimens/);
+cited from `synthpass_core::fusion::document_types_agree`). The corpus also has `PP`
+specimens for Colombia (2026) and Uruguay (2025).
+
+What this means for the crate:
+
+- Position 1 of a TD3 line 1 is a **real letter on a growing share of documents**, so no
+  repair may assume `<` there. `fix_doc_code` rewrites only `PK` to `P<`: `K` is not in
+  the table, and in the 45 documents whose raw OCR line 1 survives in older dump logs,
+  that position was never read as `K`.
+- `unshift_line1_prefix` acts only when position 1 is a letter, which a genuine `PP` also
+  is. On TD3 and TD2 the shift is therefore kept only when the *shifted* reading's issuing
+  state resolves to a real `country_name` (`unshift_if_country_resolves`), so a genuine
+  `PPCOL…` stays as read: `P<PCO…` names no country.
+- `shift_line1_right_at_country` acts only when position 1 is `<`, so it never fires on a
+  `PP` line. A `PP` zone shifted right is not repaired today. That is a known gap, and it
+  grows as issuers adopt `PP`.
+- `document_type` keeps a real second letter (`PP`) and trims only a trailing filler
+  (`P<` → `P`). The two are different document codes, not two spellings of one.
+- Codes outside the table are not rejected: until 2038 a valid passport may still carry
+  an issuer's pre-harmonization secondary code.
+
+**Status: cross-part agreement** for the table and the dates (the literal PDF text,
+checked directly). The issuer adoption dates are **unverified** against ICAO: they come
+from issuer publications and specimens, not from Doc 9303.
+
 ## Known corpus defects
 
 ### Part 7 MRV-A §4.2.3 examples (a) and (d) — length discrepancies
