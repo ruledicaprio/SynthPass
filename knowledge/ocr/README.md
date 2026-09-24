@@ -30,3 +30,9 @@ input path.
 
 Does this become a trait, a struct, an algorithm, a pipeline stage, a benchmark,
 a configuration knob, or a heuristic? If none of those, it does not get kept.
+
+## Contents
+
+| Note | What it holds |
+|---|---|
+| [`duobango_mrz_field_reference.md`](duobango_mrz_field_reference.md) | A third-party MRZ SDK's field-boundary regexes and check-digit position tables, kept as a secondary cross-check against `crates/mrz`'s own offsets — not a source of truth. |
