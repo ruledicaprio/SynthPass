@@ -224,9 +224,9 @@ function showJsonPayload(r) {
     nationality: r.nationality,
     date_of_birth: r.date_of_birth,
     // The MRZ wire gives the zone character (ADR-0020); the product
-    // vocabulary is M/F/X, as synthpass_core::mrz_product::sex and
-    // checkin.html map it.
-    sex: ['M', 'F'].includes(r.sex) ? r.sex : 'X',
+    // vocabulary is M/F/X for conformant cells, and an unreadable cell is
+    // null, exactly as synthpass_core::mrz_product::sex serializes it.
+    sex: r.sex === '<' ? 'X' : (['M', 'F'].includes(r.sex) ? r.sex : null),
     date_of_expiry: r.date_of_expiry,
     personal_number: r.format === 'Td3' ? r.optional_data_1 : null,
     // Present only when populated, exactly as the pipeline's v1 serializer

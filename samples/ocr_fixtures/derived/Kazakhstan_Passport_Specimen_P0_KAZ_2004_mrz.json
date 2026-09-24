@@ -10,6 +10,6 @@
   "mrz_line": "PEKAZSURNAMEECIIRSTNAMECCCKC<<ERKKEKKEKEECCC\nN000000001KAZ800101413411045800101300007<<20",
   "nationality": "KAZ",
   "personal_number": "800101300007",
-  "sex": "X",
+  "sex": null,
   "surname": "SURNAMEECIIRSTNAMECCCKC"
 }

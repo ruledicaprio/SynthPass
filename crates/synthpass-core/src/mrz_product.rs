@@ -7,19 +7,17 @@
 //! `mrz::MrzData` into product output, a benchmark column or a comparison goes
 //! through [`sex`], so the mapping is decided here and nowhere else.
 
-/// The product-schema sex for an MRZ sex cell: `M`, `F` or `X`.
+/// The product-schema sex for an MRZ sex cell: `M`, `F`, `X`, or unknown.
 ///
-/// This reproduces the parser's pre-0.8 collapse exactly. Every cell other
-/// than `M`/`F` (the conformant filler `<` and a non-conformant misread
-/// alike) becomes `X`, so product output is byte-identical to what it was
-/// before `mrz` typed the field. It never returns `None` yet. The `Option` is
-/// the shape a later, separately measured change needs, to leave a misread
-/// cell empty instead of asserting a confident `X` (ADR-0019, step 3).
+/// The conformant filler `<` means unspecified and maps to the visual-zone
+/// value `X`. A non-conformant cell is unreadable, so it maps to `None`
+/// rather than asserting `X` (ADR-0019, step 3).
 pub fn sex(sex: mrz::Sex) -> Option<&'static str> {
     match sex {
         mrz::Sex::Male => Some("M"),
         mrz::Sex::Female => Some("F"),
-        mrz::Sex::Unspecified | mrz::Sex::NonConformant(_) => Some("X"),
+        mrz::Sex::Unspecified => Some("X"),
+        mrz::Sex::NonConformant(_) => None,
         _ => Some("X"),
     }
 }
@@ -30,24 +28,25 @@ mod tests {
     use mrz::Sex;
 
     #[test]
-    fn reproduces_the_pre_0_8_collapse_exactly() {
+    fn maps_conformant_sex_and_leaves_nonconformant_unknown() {
         assert_eq!(sex(Sex::Male), Some("M"));
         assert_eq!(sex(Sex::Female), Some("F"));
         assert_eq!(sex(Sex::Unspecified), Some("X"));
         for c in ['X', '1', '0', 'S', '\0'] {
-            assert_eq!(sex(Sex::NonConformant(c)), Some("X"), "{c:?}");
+            assert_eq!(sex(Sex::NonConformant(c)), None, "{c:?}");
         }
     }
 
     #[test]
-    fn matches_the_old_clean_sex_over_the_whole_mrz_alphabet() {
+    fn maps_the_whole_mrz_alphabet_without_inventing_x() {
         for c in ('0'..='9').chain('A'..='Z').chain(['<']) {
-            let old = match c {
-                'M' => "M",
-                'F' => "F",
-                _ => "X",
+            let expected = match c {
+                'M' => Some("M"),
+                'F' => Some("F"),
+                '<' => Some("X"),
+                _ => None,
             };
-            assert_eq!(sex(Sex::from_zone(c)), Some(old), "{c:?}");
+            assert_eq!(sex(Sex::from_zone(c)), expected, "{c:?}");
         }
     }
 }
