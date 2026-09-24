@@ -22,17 +22,30 @@ deny() {
 
 [ -n "$path" ] || deny "could not read file_path from the tool input"
 
-# Normalise to a path relative to the repo root when absolute.
-cwd=$(printf '%s' "$in" | grep -oE '"cwd":[[:space:]]*"([^"\\]|\\.)*"' | head -1 \
-  | sed -E 's/^"cwd":[[:space:]]*"//; s/"$//; s/\\\\/\//g; s#\\/#/#g')
-case "$path" in
-  "$cwd"/*) [ -n "$cwd" ] && path=${path#"$cwd"/} ;;
-esac
+# Matching is on a repo-relative SUFFIX, not on `cwd`-stripping, for the reason recorded in
+# docpoet-write-scope.sh: a linked-worktree session reports `cwd` as the MAIN checkout while the
+# target lives under D:/Projects/worktrees/..., so a cwd-relative rule denied every allowlisted
+# path in a worktree (it did, on 2026-09-24, for a whole knowledge tree). Deny rules come first,
+# also by suffix, so they hold wherever the session is rooted.
 
+# 1. Scratchpad is always fine.
 case "$path" in
   */Temp/claude/*|*/temp/claude/*) exit 0 ;;
-  artifacts/*) exit 0 ;;
-  knowledge/benchmarks/real-specimen-mrz-baseline.json) deny "the baseline is produced only by CI (gh workflow run real-specimen-gate.yml -f mode=write-baseline)" ;;
-  knowledge/benchmarks/*.md|knowledge/benchmarks/*.jsonl|knowledge/benchmarks/*.json|knowledge/benchmarks/*.txt|knowledge/benchmarks/*/*.md|knowledge/benchmarks/*/*.py|knowledge/benchmarks/*/*.json) exit 0 ;;
+esac
+
+# 2. Deny rules first.
+case "$path" in
+  *knowledge/benchmarks/real-specimen-mrz-baseline.json)
+    deny "the baseline is produced only by CI (gh workflow run real-specimen-gate.yml -f mode=write-baseline)" ;;
+esac
+
+# 3. Allow rules, by suffix.
+case "$path" in
+  artifacts/*|*/artifacts/*) exit 0 ;;
+  knowledge/benchmarks/*.md|*/knowledge/benchmarks/*.md) exit 0 ;;
+  knowledge/benchmarks/*.jsonl|*/knowledge/benchmarks/*.jsonl) exit 0 ;;
+  knowledge/benchmarks/*.json|*/knowledge/benchmarks/*.json) exit 0 ;;
+  knowledge/benchmarks/*.txt|*/knowledge/benchmarks/*.txt) exit 0 ;;
+  knowledge/benchmarks/*/*.py|*/knowledge/benchmarks/*/*.py) exit 0 ;;
   *) deny "$path is outside the analyst's write scope" ;;
 esac

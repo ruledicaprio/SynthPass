@@ -21,14 +21,14 @@ deny() {
 
 [ -n "$path" ] || deny "could not read file_path from the tool input"
 
-cwd=$(printf '%s' "$in" | grep -oE '"cwd":[[:space:]]*"([^"\\]|\\.)*"' | head -1 \
-  | sed -E 's/^"cwd":[[:space:]]*"//; s/"$//; s/\\\\/\//g; s#\\/#/#g')
-case "$path" in
-  "$cwd"/*) [ -n "$cwd" ] && path=${path#"$cwd"/} ;;
-esac
+# Matching is on a repo-relative SUFFIX, not on `cwd`-stripping, for the reason recorded in
+# docpoet-write-scope.sh: a linked-worktree session reports `cwd` as the MAIN checkout while the
+# target lives under D:/Projects/worktrees/..., so a cwd-relative rule denied every allowlisted
+# path in a worktree (it did, on 2026-09-24, for a whole knowledge tree). Deny rules come first,
+# also by suffix, so they hold wherever the session is rooted.
 
 case "$path" in
   */Temp/claude/*|*/temp/claude/*) exit 0 ;;
-  work/scouting/*) exit 0 ;;
+  work/scouting/*|*/work/scouting/*) exit 0 ;;
   *) deny "$path is outside the screener's write scope" ;;
 esac
