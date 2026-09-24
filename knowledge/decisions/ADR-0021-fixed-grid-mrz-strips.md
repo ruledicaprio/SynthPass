@@ -1,6 +1,6 @@
 # ADR-0021 — Fixed-grid MRZ strips: align the read to its format's template, anchored by check digits, and refuse when the anchors cannot decide
 
-**Status:** Proposed
+**Status:** Proposed (amended 2026-09-24)
 **Date:** 2026-09-24
 
 > **What this ADR asks for first is a measurement, not code.** Its first stage (Phase 0 below) is
@@ -651,3 +651,470 @@ Off by default at every stage until the go/no-go, like the chargrid and class-sw
   against the frozen list, per [ADR-0011](ADR-0011-split-m6-packaging-into-m8.md)'s amendment.
   Target release: `mrz` 0.9.0.
 - **Layer 3 waits on ADR-0015's own sequencing.**
+
+## Amendment 1 (2026-09-24) — the independent review, Phase 0's instruments, and three geometric anchors
+
+**Status is unchanged: Proposed.** An independent, read-only review of this ADR (summarized on
+[#430](https://github.com/ruledicaprio/SynthPass/pull/430#issuecomment-5816125922)) returned
+**go with changes**. It approves Phase 0 and a template that changes no behaviour. It does not
+approve the aligner or a default-on rollout. Phase 0's instruments are built in
+[#432](https://github.com/ruledicaprio/SynthPass/pull/432), and the real-specimen run is in
+progress. This amendment records what that review and #432 changed, and what the maintainer
+added. It does not depend on the review's own text: every counterexample it uses is pinned in
+[`alignment_threat_atlas.rs`](../../crates/mrz/tests/alignment_threat_atlas.rs), and the
+arithmetic is written out below.
+
+Evidence labels follow [`benchmarks/README.md`](../benchmarks/README.md#benchmark-maintenance-contract):
+**Observed** (inspected in the tree or pinned by a test), **Derived** (calculated from those),
+**Hypothesized** (a prediction). Nothing in this amendment is a corpus measurement.
+
+### 1. The template is a check program, not one role per cell
+
+Layer 1 said "every cell of every format has exactly one role". That loses information. A date
+cell is structurally constrained **and** covered by a check digit. A check-digit cell is a
+comparison operand **and**, on TD1, TD2 and TD3, an input to the composite.
+
+**Observed**, [`strip.rs`](../../crates/mrz/src/strip.rs) (#432, crate-private, no behaviour
+change):
+
+- **One `CellSpec` per cell, with orthogonal properties.** These are line and column, field,
+  allowed alphabet, local check and weight, composite weight, the check it is compared against,
+  and an edit policy. "Exactly one record per cell" holds. "Exactly one kind of evidence per
+  cell" is withdrawn.
+- **Weights count positions in each concatenated checksum input**, not strip positions.
+- **Layout modes.** Overflow and legacy encoding are explicit modes, resolved from the printed
+  lines: `Ordinary`, `Td1Overflow`, `Td2Overflow` and `Td3Extension`, each with `Spec` or
+  `Legacy` encoding. TD3's extension is this crate's own, by analogy with Parts 5 and 6; Part 4
+  defines no such encoding. Visas never select overflow.
+- **The contract is residue prediction, not "mutation causes rejection".** The tests predict each
+  mutated cell's weighted residue with an independent reference checksum, and check that
+  `Checks` agrees on all five direct parsers and in every mode.
+  `blind_substitution_is_not_called_a_rejection` pins `L`→`B` at cell 44 (weight 7):
+  (21 − 11) × 7 ≡ 0 (mod 10), so the document-number and composite digits both still agree.
+
+**Not yet done.** The table does not yet replace `parser.rs`'s `CdFields`; until it does, the two
+coexist and a test should pin one to the other. Registry membership and the calendar are
+multi-cell predicates. They belong in the search state, not in a cell's alphabet mask.
+
+### 2. Check digits are not independent anchors
+
+**Derived** from the weights in `strip.rs`:
+
+- **The document-number field adds nothing new to the composite.** In every format with a
+  composite (TD1, TD2, TD3), that field is the composite's first input, at offsets 0–8, so it
+  enters with exactly its local weights.
+- **The same holds for TD3's personal-number field.** It enters at composite offset 24
+  (≡ 0 mod 3), again with its local weights.
+- **So an edit inside either field that keeps the local digit keeps the composite too.** The
+  composite adds a differently weighted second equation only for the date fields, and for data
+  that no local digit covers.
+
+**Observed** (`two_optional_alignments_satisfy_local_and_composite_digits`): these two TD3 lower
+lines, under the Utopia line 1, both satisfy all five digits.
+
+```text
+A: 1234567897UTO7408122F1204159A5<<<<<<<<<<<<56
+B: 1234567897UTO7408122F1204159A<5<<<<<<<<<<<56
+```
+
+The optional field reads `A5` in A and `A<5` in B. Its sums are 10×7 + 5×3 = 85 and
+10×7 + 0×3 + 5×1 = 75, and both end in 5. The composite sums are 406 and 396, and both end in 6.
+B is one deletion plus one insertion away from A on line 2.
+
+**Consequence.** Exact unanimity at k ≥ 2 must **refuse this perfect input** and must not pick its
+zero-edit reading. That is the rule working as intended, and it gives Phase 0 a concrete example
+of a clean read being refused. Single-digit probabilities are never multiplied. Anchoring is
+analysed through the joint checksum equations, and P0.3 reports the rate at which perfect inputs
+are refused, per format and per k.
+
+### 3. First-valid format hides cross-format disagreement
+
+Layer 2 promises refusal on disagreement "on format". But `find_and_parse_with` returns inside
+each format's loop on the first verified candidate (`parser.rs:1277–1279` at `e6fa10c`), and
+this ADR's Relationships section keeps those loops. A later format is never searched once an
+earlier one verifies, so a cross-format disagreement is never seen. The ADR takes **one** of two
+positions (decision below):
+
+- **(a) Defer acceptance.** Keep ARCHITECTURE §13.3's order as the **traversal** order. Under
+  `with_strip_align(true)` only, search every eligible format and window before accepting
+  anything. Two verified readings that differ in format are a refusal. This amends §13.3's
+  contract for the option; the default path is unchanged. **Hypothesized cost:** a document that
+  reads correctly today *because of* the order becomes a refusal. The P0-E crosstab below counts
+  these before any tuning.
+- **(b) Narrow the promise to one format.** `AmbiguousAlignment` then never means cross-format.
+  The "subsumes #409" row is withdrawn, and #409 stays an ordinary task.
+
+Recommended: (a).
+
+### 4. The line-1 prefix exception is withdrawn
+
+The Outcome table's third row said: when readings agree on every checked field and differ only in
+the line-1 prefix, return line 1 "as the existing repairs produce it". **That row is withdrawn.**
+
+**Observed** (`prefix_insertion_leaves_a_checksum_consistent_unanchored_issuer`):
+
+- **The input.** The printed line 1 is `P<COLERIKSSON<<…`, and OCR inserted an `H`, giving
+  `P<COHLERIKSSON<<ANNA<MARIA<<<…` (45 characters).
+- **Two readings, and no digit can choose.** At k = 1, deleting the `H` gives issuer `COL`;
+  deleting the `O` gives `CHL`. Both are in `countries.rs`, and both leave the same name. No TD3
+  check digit reads line 1: the Utopia lower line's five sums (316, 122, 49, 401, 880) do not
+  involve it.
+- **Today's scanner already returns a third reading.** It returns issuer **`COH`** and surname
+  **`LERIKSSON`**, and `valid()` is true. `COH` is in neither structurally admissible reading.
+
+So the exception would return a line that sits outside the set of readings that passed the
+structural anchors. This happens today in standalone `mrz`, which has no fusion layer
+downstream.
+
+**Replacement:** in v1, a prefix disagreement is a refusal. A later partial-consensus API may
+report the prefix explicitly as **unresolved**, in its own type, never as an ordinary `MrzData`.
+With the option off, today's behaviour stays pinned as a known limitation.
+
+### 5. Uniqueness holds within the declared candidate set, never as correctness
+
+**Observed** (`omitted_truth_can_make_a_wrong_filler_alignment_look_unique`, MRV-B):
+
+- **The input.** The printed lower line starts `4FWF<E9E21…`. OCR dropped the filler and read the
+  later `E` as `G`: `4FWFE9G21…`, 35 cells. E→G is not in `CONFUSABLES`.
+- **The wrong completion checks out.** Inserting one filler to give `4FWFE9<G21…` satisfies all
+  three digits (document-number sums: truth 331, completion 311, both ending in 1). Under a
+  filler-only insertion grammar at k = 1, it is the only insertion that does. The truth is
+  outside that grammar, because it also needs the E→G correction.
+- **Today's scanner does not make this mistake.** It pads the tail and returns a failed read
+  (`valid()` false). So this is **a hazard for a future filler-insertion aligner, not a current
+  bug**.
+
+"It may claim" (What an alignment may and may not claim) is replaced by:
+
+> Under this format's template **and a declared candidate grammar** (the windows formed, the
+> inserted alphabet, the repair modes composed into the search), within k edits per line, the
+> **completed** search found exactly one distinct reading that satisfies every applicable check
+> digit and structural anchor.
+
+If the truth is in the complete candidate set and acceptance requires equality on every exposed
+field, a wrong singleton cannot occur, because the truth is itself a second verifier. What makes
+a wrong singleton possible is an omitted truth, an incomplete search, a mutation after consensus,
+or an exception to equality. The acceptance rule allows none of the last three, and P0.3 measures
+the first.
+
+Three related corrections:
+
+- **Filler runs are evidence, not guarantees.** Doc 9303 Part 4
+  [§4.2](../docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#42-machine-readable-zone-mrz-zone-vii)
+  (the upper-line table, "Truncation of the name") ends a full or truncated name with a letter at
+  position 44, with no filler tail. Populated optional fields need not end in fillers either.
+  Context's "Filler runs are the zone's most repeated glyph" and Layer 3's "a long run … exists"
+  are withdrawn. Where a filler run is present, it is positive evidence; its absence proves
+  nothing.
+- **"About 4/5" is exact, but only under a model.** The weight changes are all even, so a
+  one-cell filler move changes the residue by 2S, where S is a weighted sum mod 5. If at least one
+  moved character's value is independent and uniform mod 5, a single digit misses the move with
+  probability **exactly 1/5**. Under an equally simple alternative model, the answer differs: an
+  adjacent filler/glyph swap, with the glyph uniform over all 37 symbols, is caught in
+  **28/37 ≈ 75.7%** of cases (**28/36 ≈ 77.8%** when the glyph is not a filler). The difference
+  comes from nine symbols being ≡ 0 (mod 5): `0 5 A F K P U Z <`. Both figures are **Derived**;
+  neither is a corpus rate. The heading claim that an alignment anchor is weaker than a
+  substitution anchor "and this can be proved" is withdrawn: that comparison needs a named
+  distribution on both sides.
+- **The registry can create a false reading after all.** Risks said an incomplete registry "can
+  cost a repair, but it cannot manufacture one". Withdrawn: take away the true candidate from a
+  two-candidate set and a false singleton is left. A code the registry does not know is
+  **unresolved evidence**, never proof for a competing alignment.
+
+### 6. Layer 3 moves to an ADR-0015 amendment
+
+Detection, grid fitting and filler evidence go to an amendment of
+[ADR-0015](ADR-0015-geometric-mrz-band-location.md).
+[ADR-0014](ADR-0014-per-cell-ocrb-classification.md) keeps cell classification. This ADR keeps
+only Layer 3's integer interface: characters with optional cell indices.
+
+- **Letter confirmation becomes optional.** Confirming the top-left cell is `P`, `V`, `A`, `C` or
+  `I` is a recognition decision. It also cannot come before the grid phase is known. The order
+  becomes: coarse geometry, then provisional grid(s), then optional visual cues (letter, filler
+  runs) as **re-ranking** inputs, then a refined grid. A **geometry-only path** is always kept.
+  Several grid hypotheses stay open when the phase is unresolved.
+- **The pitch bound is a starting range.** 0.93–1.07 cap is where the search starts, with a
+  measured fallback. Its upper bound is a measurement, not a standard limit
+  ([`line-and-pitch.md`](../ocrb/line-and-pitch.md)).
+- **7a and 7b below belong in that amendment too.** They are recorded here because they arose in
+  this review cycle.
+
+### 7. Maintainer additions: anchors that text alone cannot supply
+
+**7a — The reference edge, for passports and visas.** Doc 9303 fixes where the zone sits on the
+page, not only what it contains:
+
+- **Part 4, passports.**
+  [§3](../docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md#3-general-layout-of-the-mrp-data-page),
+  Figure 3: overall MRZ height **23.2 ± 1.0 mm from the bottom edge**, with a "Reference centre
+  line" drawn through each code line. "The MRZ shall be positioned adjacent to the outside long
+  edge of the book." §4.2.1.3 positions the characters by those reference centre lines. Figure 7,
+  Note 1: the boundary between the VIZ and the MRZ may not be skewed more than 0.5 mm over
+  125 mm.
+- **Part 7, visas.**
+  [§2.1](../docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md#21-dimensions-and-placement-of-the-mrv-a)
+  and [§5.1](../docs9303/Doc_9303_Part7_Machine_Readable_Visas_MRVs.md#51-dimensions-and-placement-of-the-mrv-b):
+  the MRV is placed so that its MRZ is "coincident with and parallel to the outside edge
+  (reference edge) of the passport visa page".
+- **Part 3, skew.**
+  [§4.11](../docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#411-quality-specifications-of-the-mrz):
+  skew of at most 3° from the reference edge.
+
+**Derived** from the Figure 3 labels as transcribed:
+
+- **The two reference centre lines are at 9.40 mm and 15.75 mm.** Those right-hand dimensions are
+  the exact midpoints of the lower (7.25–11.55 mm) and upper (13.6–17.9 mm) printing zones. The
+  transcription does not name them; the identification is by arithmetic.
+- **Their spacing is 2.5 pitches.** The lines are 6.35 mm apart, which is 2.5 × the 2.54 mm pitch
+  of Part 3 §4.4.
+- **A scale-free form.** Counted in pitches from the reference edge, the lower line's centre is
+  about 3.7 up and the upper line's about 6.2.
+- **Real prints vary from these values.** The 2026-09-23 geometry note measured TD3 line spacing
+  as a band, not one value
+  ([`ocrb-filler-geometry-2026-09-23.md`](../benchmarks/ocrb-filler-geometry-2026-09-23.md) §5).
+
+**How it is used.** Each band candidate gets a three-state geometric anchor, following ADR-0017's
+absent-versus-verified discipline:
+
+- **consistent:** the lower line is parallel to a detected page edge within the skew tolerance,
+  and its line centres sit where the reference centre lines predict at the fitted pitch;
+- **inconsistent;**
+- **not observed.**
+
+It may re-rank band candidates, and it may downgrade ordinal support or attach a finding with no
+field content. It **never rejects a checksum-consistent read on its own**, and it never becomes a
+number next to `confidence` (principle 2).
+
+**Limits:**
+
+- **"Not observed" will be common.** Specimens are often cropped to the page or show no edge, and
+  nothing in the tree detects a page edge today. That is new geometry in `synthpass-imageprep`,
+  measured under ADR-0015.
+- **Visas are looser.** Part 3
+  [§4.5](../docs9303/Doc_9303_Part3_Specs_Common_to_all_MRTDs.md#45-machine-reading-requirements-and-the-effective-reading-zone)
+  says the reading zone exists partly to absorb the manual placement of MRVs.
+- **ID cards (TD1, TD2) are excluded by scope, not by the standard.** Parts 5 and 6 say Zone VII
+  "conforms in height to the MRZ defined for all MRTDs", and Part 3's Figure 5 draws TD1 and TD2
+  against the reference edge too. Widening the scope is its own measured change.
+
+**7b — A bottom-up line-pair signature.** In the oriented page, scan candidate lines upward from
+the reference edge for the TD3 pair:
+
+- **upper line:** cell 0 `P`; cell 1 `<` or a Part 4 §4.4 second letter (`P E D O R T S L M`);
+  cells 2–4 resolve in the country registry;
+- **the line directly below:** a digit in every cell the check program marks digit-only (the two
+  dates and the check-digit cells). This replaces a digit-density constant, which would need a
+  sweep behind it (principle 6);
+- **a line with characters outside the MRZ alphabet is not a signature line**, judged after the
+  parser's existing normalization (case, escaped fillers).
+
+Three constraints keep it from becoming one more rule where the first match wins:
+
+- **It ranks; it never gates.** Missing on cell 1 or on the country lowers the rank and excludes
+  nothing. The §4.4 table is a prior until 2038 (Alternative F), and the registry is incomplete
+  ([#425](https://github.com/ruledicaprio/SynthPass/issues/425)), so a hard filter on either can
+  remove the truth (item 5).
+- **Order does not decide.** Inside `mrz`, scanning bottom-up changes only which candidate is
+  tried first. It is safe only under item 3(a).
+- **Crate home.** `synthpass-imageprep` has exactly one dependency and must stay
+  `wasm32`-clean. It ranks geometry using a line check the caller supplies. `synthpass-ocr`,
+  which already depends on both `mrz` and `synthpass-imageprep`, supplies that check from `mrz`'s
+  registry and check program.
+
+Visas use `V` in place of `P` under the same rules. TD1 and TD2 are out of scope, as in 7a.
+
+**7c — Template-constrained per-cell decoding on the recognizer's CTC matrix.**
+
+- **What exists.** `synthpass-ocr`'s MRZ engine already restricts recognition to `MRZ_CHARSET`
+  for a whole line, with beam decoding (`build_mrz` in `crates/synthpass-ocr/src/lib.rs`).
+- **The next step.** A per-cell mask from the check program, applied at the matrix timesteps that
+  a fitted grid assigns to each cell. `crates/synthpass-ocr/examples/probe_matrix.rs` already
+  does that mapping by arithmetic.
+- **It opens no new track.** This is ADR-0014's first obligation ("masks and position classes",
+  threshold 1), with the check program as its `position_class`.
+- **Costs are ranks.** Measured confusion costs come from
+  [#433](https://github.com/ruledicaprio/SynthPass/issues/433)'s glyph robustness atlas. They
+  enter as **ordinal ranks** with a fixed tie-break, never as probabilities; Alternative D stands.
+  The current correction pairs remain the allowed substitution set, and measured ranks never
+  quietly widen it.
+
+Conditions:
+
+- **It is not training.** It decodes the existing model's output under the template. Alternative
+  B's rejection and VISION's non-goal are untouched.
+- **Masks are the alphabet the parser preserves, not the standard's.** mrz 0.8.0 deliberately
+  returns `Sex::NonConformant` and partially unknown dates. A decoder mask of {`M`, `F`, `<`} at
+  the sex cell would overwrite a printed `X` before the parser could keep it. `strip.rs`'s masks
+  are alignment metadata and are not decoder masks as they stand.
+- **No check digit chosen to fit.** A mask restricts a check-digit cell to digits; it never picks
+  the digit that makes the arithmetic agree. An inferred check digit is never counted as an
+  observed anchor.
+- **Engine specifics stay inside `synthpass-ocr`.** The CTC label table is `ocrs`'s private
+  alphabet, pinned by hand; nothing reaches `synthpass-die` or `synthpass-core`. Decisions made
+  over floating-point log-probabilities are reproducible only with the backend pinned.
+- **`synthpass-ocr` cannot read the check program yet.** It is crate-private in `mrz` (decision
+  below).
+
+### 8. Other statements in this ADR that no longer hold
+
+| ADR text | What holds instead |
+| --- | --- |
+| Layer 2: "the aligner decides *where*; the existing repairs decide *what*", and unverifiable cells are "taken as the existing per-line repairs produce them" | Repairs change values that feed the residues, and `fit_length` moves filler placement. Repairs are composed into the search state; nothing mutates a strip after consensus. |
+| Search: "about 10⁴–10⁵ states per format and window" | Unverified. **Derived** loose upper bound: (N+1)(2Lk+1)(k+1)·R = 91 × 19 × 4 × 100 = 691,600 state slots per format, window and profile, at N = 90, L = 3, k = 3, R = 100 residue pairs, one grammar state. Phase 0 counts the states actually visited. A search that hits its work limit is incomplete, never unique. |
+| `MrzError::AmbiguousAlignment { format, readings }` | One `format` cannot express cross-format ambiguity. Payload: a small, PII-free set of formats and "at least N readings". A distinct incomplete-search outcome is added. Candidate strings never appear in `Display` or `Debug`. |
+| Subsumes #409: an intact 90-cell zone read as 72 "costs 18 deletions" | True only when one complete stream is consumed. Windows skip lines, and #409 is not root-caused. It stays a task, and the Phase 0 replay reproduces it. |
+| Alternative C: line-based alignment "loses TD1's composite as a joint anchor" | Carry the composite residue across line boundaries. Only realignment across a break is lost. |
+| Benchmark taxonomy: "re-blesses the baseline in the same PR" | The new bucket stays inside the scored denominator. Each moved asset is inspected, then the baseline is regenerated from the CI artifact, never from a hand count. |
+| Go/no-go 6: "byte-identical reports" | Identical canonical semantic records. Timings and run identifiers are excluded; the outcome ledger carries `ocr_ms`. |
+| Retirement: every pinned test "passes unchanged under the aligner" | Every test keeps its behaviour in the off arm. Any change of expectation in the on arm is an explicit, reviewed semantic decision. |
+
+### 9. What Phase 0 has built, and what it has not (#432, as of `738cd16`)
+
+| Step | State |
+| --- | --- |
+| Layer 1 check program | **Built** in `mrz`, crate-private, no behaviour change. This is staged-rollout step 1, done early. Not yet: the shift-law property test, and replacing `CdFields`. |
+| P0.1: one dump with asset keys | **Built.** Dump rows carry `asset_id`, the source image's SHA-256, and a content-addressed run manifest, next to an outcome ledger from the same run ([method](../benchmarks/mrz-strip-phase0-method.md)). The manifest does not record the `samples-data` commit, model hashes, OCR backend or machine; those are recorded by hand. |
+| P0.2: classification | **Built** ([`classify_mrz_mechanisms.py`](../../tools/classify_mrz_mechanisms.py)). It gives several labels per asset, and its labels are **candidate explanations ranked by edit cost, not observed mechanisms**. Only glyph positions on a fitted grid can observe a physical shift. Two gaps are handled in the tables below: `checksum_failed_specimen` assets get `printed non-conformance` but are never review targets, and `line1_error` is also `false` when the line counts differ. |
+| P0.3: atlas of wrong readings that still verify | **Only the three constructed cases are pinned.** The enumerator waits on a declared grammar: insertion alphabet, windows, edit accounting, repair modes and equality. |
+| P0.4: which existing path produced each hit | **Not built.** |
+
+### 10. Answers to the open questions — pending maintainer decision
+
+Recommended; none of this is decided.
+
+1. **Reframing and funding.** Fund Phase 0 at small scope: asset-keyed capture, the check
+   program, and the adversarial oracle. #408's whitespace handling does not wait for an aligner.
+   #409 is root-caused and #429 tested in parallel, as ordinary tasks. Build the line-based
+   variant unless measured cases cross a line break.
+2. **Ambiguity.** Refuse on disagreement in **any exposed field or in format**.
+   `ambiguous_alignment` is a scored miss inside the unchanged denominator. A separate
+   incomplete-search outcome is recommended to be scored the same way. The damaged pass's
+   `single()` is widened to the same equality
+   ([#431](https://github.com/ruledicaprio/SynthPass/issues/431)).
+3. **Tier 2.** It does not choose among checksum-consistent readings in v1.
+4. **Format order.** Keep it as the traversal order, and defer acceptance under the option
+   (item 3(a)).
+5. **The check program's visibility.** Crate-private until #421 decides its public shape. 7c needs
+   a consumer outside `mrz`, which brings that decision forward.
+6. **Layer 3.** Moves to an ADR-0015 amendment (item 6), carrying 7a and 7b.
+7. **Numbering.** Keep 0021. Nothing in the tree holds 0022.
+
+### Phase 0 results (measured 2026-09-24)
+
+> One run of #432's instruments on a clean tree at `738cd16`: release `provider-bench
+> --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults, 261
+> documents, 171 dumped. It was followed by the classifier and hand adjudication. The dated finding
+> [`mrz-strip-phase0-results-2026-09-24.md`](../benchmarks/mrz-strip-phase0-results-2026-09-24.md)
+> carries every table, the named assets and the method:
+>
+> - run identity;
+> - both denominators;
+> - mechanism labels;
+> - string relations, raw and tail-normalized;
+> - hits on line 1;
+> - class (C) by region.
+>
+> This section keeps only what the go/no-go needs. It gives counts and asset IDs, never field
+> content. These are dated figures pinned to that run, not headline numbers.
+
+**What the run established**
+
+- **The instruments are behaviour-neutral.** All 261 outcomes equal the committed ledger. Tier-1
+  is 140 / 152 (92.1%) on scored documents, and 140 / 261 corpus-wide.
+- **Review targets: 37.** Twelve are scored misses (7 TD3, 5 TD1). The other 25 are hits with a
+  name error or a line-1 difference (24 TD3, 1 TD1).
+- **The classifier's `indel` label overstates alignment.** Trailing fillers the parser pads anyway
+  trigger it. With the tail set aside it covers 6 of 12 misses (not 9) and 13 of 25 hit targets (not
+  16).
+- **Class (C) in the zone the parser returned:**
+
+| Region | within one line | crossing a line break | reachable at k = 1 / 2 / 3 | fixture-confirmed better value |
+| --- | --- | --- | --- | --- |
+| (a) checked data | 1 | 0 | 0 / 1 / 1 | 1, in position only: Sweden 2022 card back. The inserted cell's value is not in the returned line |
+| (b) prefix, cells 0–4 | 4 | 1 | 1 / 2 / 3 | 5 |
+| sex, nationality | 0 | 0 | — | — |
+| names | 18 | 2 | not admissible from text | — |
+| optional data with no local digit | 0 | 0 | — | — |
+| **Silent wrong field on a hit** | 11 (3 non-name) | 1 | — | 12 |
+
+- **Better attempts go unused.** For 10 of the 25 hit targets, the provider input already holds a
+  line-1 attempt strictly closer to the fixture than the returned line. Two of those attempts are
+  exact. Line 1 has no check digit, so nothing ranks those attempts today (P0.4).
+- **Two fixtures disagree with their printed zone.**
+  - **The Belgium 2021 card back** has line-2 cells 20–21 transposed. The fixture fails its own TD1
+    composite digit, while the swapped reading passes.
+  - **The Somaliland personal number** has a three-cell shift over zeros. Both readings satisfy all
+    five TD3 digits. This is a real-corpus instance of item 2's collision: zeros and fillers are both
+    worth 0, and the weights repeat every three cells.
+- **Tables 6 (P0.3 atlas) and 7 (decisions compared with legacy) are not measured.** They need the
+  enumerator over a declared grammar and a replay arm, which Phase 0 did not build. Their layout
+  stays in [`mrz-strip-phase0-method.md`](../benchmarks/mrz-strip-phase0-method.md).
+
+**Verdict**
+
+| Criterion | Holds? | Deciding row |
+| --- | --- | --- |
+| K1 | **No kill, at exactly the threshold.** Three assets meet it: Cetis TRC 2022 (k = 1), Germany 2024 (k = 2) and Djibouti 2017 (k = 3). All three are in the line-1 prefix, and none is in check-digit-covered data. Counting Sweden's position-only case makes four on a loose reading | (b) prefix; region (a) is 0 strict, 1 loose |
+| K2 | **Not assessable.** It needs the P0.3 refusal rates and an aligner's recoveries on the same population | — |
+| K3 | **Not assessable.** The Somaliland pair bears on it: a real zone with two checksum-consistent readings in a checked field | — |
+
+**What the verdict means here.** K1 passes without a margin, and region (b) supplies all of it. Under
+item 4, a v1 aligner refuses there unless exactly one prefix reading survives the registry and the
+§4.4 prior. Realignment turns none of the three into a new hit: Germany 2024 stays a miss because of
+a separate class-(B) substitution, and the other two are hits already. **Region (a), where the check
+digits arbitrate, contributes no strict case, and it is the core of this ADR's claim.** If anything
+is built, the evidence favours the line-based variant, since no admissible class-(C) case crosses a
+line break.
+
+**Decision (maintainer, 2026-09-24): do not build the general text aligner now.**
+
+- Keep the behaviour-neutral check program, #432 and its pin #437.
+- Take the narrow fixes as ordinary tasks, each gated on the real-specimen run with a
+  correct→refused crosstab:
+  - [#429](https://github.com/ruledicaprio/SynthPass/issues/429), a right-shifted `PP` line 1;
+  - [#431](https://github.com/ruledicaprio/SynthPass/issues/431), the `single()` equality;
+  - [#436](https://github.com/ruledicaprio/SynthPass/issues/436), the unresolved issuer;
+  - line-1 attempt selection (P0.4).
+- Pursue the geometry under ADR-0015 ([#433](https://github.com/ruledicaprio/SynthPass/issues/433)).
+- Re-run Phase 0's instruments whenever the corpus or the recogniser changes. Reopen the aligner
+  only when region (a) shows cases.
+
+### Go / no-go, restated
+
+**Kill criteria at the end of Phase 0** (these replace K1–K3; thresholds remain the maintainer's
+call):
+
+- **K1.** Fewer than three review-target assets are in class (C) at a position an admissible edit
+  reaches, with a fixture-confirmed better value (Table 5). "Three" is an effort threshold for a
+  general aligner, not a truth criterion. Any single silent wrong field on a hit is fixed narrowly
+  under Alternative A, whatever K1 says.
+- **K2.** Refusals cost more than recoveries earn. The comparison is on the **same population and
+  unit**: real assets against real assets, synthetic against synthetic. Synthetic refusal rates
+  are never netted against real recoveries.
+- **K3.** At the smallest k that reaches class (C), the aligner introduces a wrong acceptance that
+  today's scanner does not make, on any fixture truth with at most one substitution, modelled or
+  not. Every wrong singleton, inherited or new, stays in the atlas as a pinned failure case.
+  Inherited ones are reported, not charged to the aligner. No absolute guarantee exists while the
+  truth can fall outside the grammar.
+- **What a no-go does not discard.** A no-go on the text aligner does not discard the
+  behaviour-neutral check program or the geometry experiment under ADR-0015.
+
+**Default-on** (all must hold; amends the list above):
+
+1. **No Tier-1 loss.** Zero hit→miss, apart from individually named hits that the fixtures show
+   were already wrong. The policy for correct→refused is fixed **before** tuning and never relaxed
+   afterwards.
+2. **A real gain.** At least one miss→hit or one fixture-verified field correction. Refusing a
+   previously checksum-consistent **wrong** read counts as a correctness gain.
+3. **No invented reads**, at field level: `false_positive_mrz` and `document_number_mismatch`
+   stay 0, and no issuer, name, nationality, sex or optional field becomes wrong.
+4. **Synthetic can only veto.** No loss in hits, and no rise in readings that are wrong but
+   verify.
+5. **Cost.** Native p50 added ≤ 20 ms on the recorded machine. Also reported: states and
+   transitions visited, memory, and WASM p50/p95/p99 on named desktop and mobile targets. Hitting
+   the work limit is an incomplete search, never a unique reading.
+6. **Determinism.** Two runs of one commit produce identical canonical semantic records, excluding
+   timings and run identifiers. OCR reproducibility is claimed only with the backend pinned.
+7. **Baseline.** `ambiguous_alignment` and the incomplete-search outcome stay inside the scored
+   denominator. Every moved asset is inspected before the baseline is regenerated from the CI
+   artifact.
