@@ -138,7 +138,7 @@ Only one MRV-A shall be located on a passport visa page (see Appendix C, Section
 >
 > *Not to scale*
 >
-> [Diagram showing outer rectangle, inner rectangle, and outer edge of MRV-A]
+> [Editorial description, not ICAO text: Diagram showing outer rectangle, inner rectangle, and outer edge of MRV-A]
 
 ---
 
@@ -152,14 +152,14 @@ The standard layout incorporates space for a portrait of the holder and other id
 
 An MRV-A is divided into six zones as follows:
 
-| Zone | Type | Content |
-|---|---|---|
-| Zone I | Mandatory | Header |
-| Zone II | Mandatory and optional | Personal data elements |
-| Zone III | Mandatory and optional | Document data elements |
-| Zone IV | Optional | Signature (original or reproduction) or authentication |
-| Zone V | Mandatory zone | Identification feature (feature optional) |
-| Zone VII | Mandatory | Machine readable zone (MRZ) |
+| Zone | Description |
+|---|---|
+| Zone I | Mandatory header |
+| Zone II | Mandatory and optional personal data elements |
+| Zone III | Mandatory and optional document data elements |
+| Zone IV | Signature (original or reproduction) or authentication |
+| Zone V | Mandatory zone for identification feature (feature optional) |
+| Zone VII | Mandatory machine readable zone (MRZ) |
 
 > **Note 1.** — The signature in Zone IV of a visa is that of an issuing officer, not of the document holder. The signature may be replaced or accompanied by an official stamp.
 >
@@ -425,7 +425,7 @@ k) The field caption shall be printed on the document.
 >
 > *Note 4. — The borderlines of the zones are not printed on the actual visa.*
 
-[Diagram showing Zone I, III, II, IV, V, and VII with field numbers and data element labels]
+[Editorial description, not ICAO text: Diagram showing Zone I, III, II, IV, V, and VII with field numbers and data element labels]
 
 > **Figure 3. Schematic diagram of the Machine Readable Zone of an MRV-A**
 >
@@ -433,7 +433,7 @@ k) The field caption shall be printed on the document.
 >
 > *Note. — For illustration purposes, the smallest option for the 120.0 mm (4.72 in) dimension of the MRV-A and the smallest option for the left-hand margin in the MRZ have been selected.*
 
-[Diagram showing MRZ with dimensions: 17.9 (0.70), 13.6 (0.54), 11.55 (0.45), 7.25 (0.29), 9.40 (0.37), 6.35 (0.25), 15.75 (0.62), 4.0 (0.16), 3.0 (0.12), 4.3 (0.17), 2.0 (0.08), 114.0 (4.49), 119.0 (4.69)]
+[Editorial description, not ICAO text: Diagram showing MRZ with dimensions: 17.9 (0.70), 13.6 (0.54), 11.55 (0.45), 7.25 (0.29), 9.40 (0.37), 6.35 (0.25), 15.75 (0.62), 4.0 (0.16), 3.0 (0.12), 4.3 (0.17), 2.0 (0.08), 114.0 (4.49), 119.0 (4.69)]
 
 > **Figure 4. Nominal positioning of zones on an MRV-A**
 >
@@ -447,7 +447,7 @@ k) The field caption shall be printed on the document.
 >
 > Affixed photographs (even if protected by a laminate) shall not be applied. Identification features shall be personalized.
 
-[Diagram showing nominal positions with dimensions: 120.0 ± 1.0 (4.72 ± 0.04), 80.0 ± 1.0 (3.15 ± 0.04), Zone I 12.0 (0.47), Zone V 36.0 ± 4.0 (1.42 ± 0.16) × 29.0 ± 3.0 (1.14 ± 0.12), Zone VII 23.2 ± 1.0 (0.91 ± 0.04)]
+[Editorial description, not ICAO text: Diagram showing nominal positions with dimensions: 120.0 ± 1.0 (4.72 ± 0.04), 80.0 ± 1.0 (3.15 ± 0.04), Zone I 12.0 (0.47), Zone V 36.0 ± 4.0 (1.42 ± 0.16) × 29.0 ± 3.0 (1.14 ± 0.12), Zone VII 23.2 ± 1.0 (0.91 ± 0.04)]
 
 > **Figure 5. Data elements on an MRV-A**
 >
@@ -457,7 +457,7 @@ k) The field caption shall be printed on the document.
 >
 > *Note 3. — An issuing State may elect to issue a visa with the identification feature replaced by a crest or symbol.*
 
-[Diagram showing data elements layout with Zones I, III, II, IV, V, and VII labeled]
+[Editorial description, not ICAO text: Diagram showing data elements layout with Zones I, III, II, IV, V, and VII labeled]
 
 ---
 
@@ -484,7 +484,7 @@ The dimensions and placement of the MRV-B shall be as follows:
 >
 > *Not to scale*
 >
-> [Diagram showing outer rectangle, inner rectangle, and outer edge of MRV-B]
+> [Editorial description, not ICAO text: Diagram showing outer rectangle, inner rectangle, and outer edge of MRV-B]
 
 **MRV-B thickness.** If the visa is issued as a label, the increase in thickness once the label is attached to the passport visa page shall not exceed 0.19 mm (0.0075 in). The thickness of the area within the machine readable zone (MRZ) shall not vary by more than 0.05 mm (0.002 in). If a protective laminate is used, it is recommended that its thickness not exceed 0.15 mm (0.006 in).
 
@@ -510,14 +510,14 @@ The standard layout incorporates space for a portrait of the holder and other id
 
 An MRV-B is divided into six zones as follows:
 
-| Zone | Type | Content |
-|---|---|---|
-| Zone I | Mandatory | Header |
-| Zone II | Mandatory and optional | Personal data elements |
-| Zone III | Mandatory and optional | Document data elements |
-| Zone IV | Optional | Signature (original or reproduction) or authentication |
-| Zone V | Mandatory zone | Identification feature (feature optional) |
-| Zone VII | Mandatory | Machine readable zone (MRZ) |
+| Zone | Description |
+|---|---|
+| Zone I | Mandatory header |
+| Zone II | Mandatory and optional personal data elements |
+| Zone III | Mandatory and optional document data elements |
+| Zone IV | Signature (original or reproduction) or authentication |
+| Zone V | Mandatory zone for identification feature (feature optional) |
+| Zone VII | Mandatory machine readable zone (MRZ) |
 
 > **Note 1.** — The signature in Zone IV of a visa is that of an issuing officer, not of the document holder. The signature may be replaced or accompanied by an official stamp.
 >
@@ -781,13 +781,13 @@ k) The field caption shall be printed on the document.
 >
 > *Note 4. — The borderlines of the zones are not printed on the actual visa.*
 
-[Diagram showing Zone I, III, II, IV, V, and VII with field numbers and data element labels]
+[Editorial description, not ICAO text: Diagram showing Zone I, III, II, IV, V, and VII with field numbers and data element labels]
 
 > **Figure 8. Schematic diagram of the Machine Readable Zone of an MRV-B.**
 >
 > *Note. — For illustration purposes, the smallest option for the 105.0 mm (4.13 in) dimension of the MRV-B and the smallest option for the left-hand margin in the MRZ have been selected.*
 
-[Diagram showing MRZ with dimensions: 93.3 (3.67), 104.0 (4.09), 2.0 (0.08), 9.40 (0.37), 6.35 (0.25), 15.75 (0.62), 4.0 (0.16), 3.0 (0.12), 4.3 (0.17), 17.9 (0.70), 13.6 (0.54), 11.55 (0.45), 7.25 (0.29)]
+[Editorial description, not ICAO text: Diagram showing MRZ with dimensions: 93.3 (3.67), 104.0 (4.09), 2.0 (0.08), 9.40 (0.37), 6.35 (0.25), 15.75 (0.62), 4.0 (0.16), 3.0 (0.12), 4.3 (0.17), 17.9 (0.70), 13.6 (0.54), 11.55 (0.45), 7.25 (0.29)]
 
 > **Figure 9. Nominal positioning of zones on an MRV-B.**
 >
@@ -801,7 +801,7 @@ k) The field caption shall be printed on the document.
 >
 > Affixed photographs (even if protected by a laminate) shall not be applied. Identification features shall be personalized.
 
-[Diagram showing nominal positions with dimensions: 105.0 ± 1.0 (4.13 ± 0.04), 74.0 ± 1.0 (2.91 ± 0.04), Zone I 12.0 (0.47), Zone V 35.5 ± 3.5 (1.40 ± 0.14) × 28.5 ± 2.5 (1.12 ± 0.10), Zone VII 23.2 ± 1.0 (0.91 ± 0.04)]
+[Editorial description, not ICAO text: Diagram showing nominal positions with dimensions: 105.0 ± 1.0 (4.13 ± 0.04), 74.0 ± 1.0 (2.91 ± 0.04), Zone I 12.0 (0.47), Zone V 35.5 ± 3.5 (1.40 ± 0.14) × 28.5 ± 2.5 (1.12 ± 0.10), Zone VII 23.2 ± 1.0 (0.91 ± 0.04)]
 
 > **Figure 10. Data elements on an MRV-B.**
 >
@@ -811,7 +811,7 @@ k) The field caption shall be printed on the document.
 >
 > *Note 3. — An issuing State may elect to issue a visa with the identification feature replaced by a crest or symbol.*
 
-[Diagram showing data elements layout with Zones I, III, II, IV, V, and VII labeled]
+[Editorial description, not ICAO text: Diagram showing data elements layout with Zones I, III, II, IV, V, and VII labeled]
 
 ---
 
@@ -831,11 +831,11 @@ Figures 11 and 12 illustrate the location of a bar code on the MRV-A and MRV-B, 
 
 > **Figure 11. MRV-A with optional linear or two dimensional bar code**
 >
-> [Diagram showing MRV-A with optional barcode area dimensions: 120.0 (4.72), 78.0 (3.07), 39.0 (1.54), 23.20 ± 1.0 (0.91 ± 0.04), 18.35 (0.72), 3.0 (0.12)]
+> [Editorial description, not ICAO text: Diagram showing MRV-A with optional barcode area dimensions: 120.0 (4.72), 78.0 (3.07), 39.0 (1.54), 23.20 ± 1.0 (0.91 ± 0.04), 18.35 (0.72), 3.0 (0.12)]
 
 > **Figure 12. MRV-B with optional linear or two dimensional bar code**
 >
-> [Diagram showing MRV-B with optional barcode area dimensions: 105.0 (4.13), 70.0 (2.76), 35.0 (1.38), 23.20 ± 1.0 (0.91 ± 0.04), 18.35 (0.72)]
+> [Editorial description, not ICAO text: Diagram showing MRV-B with optional barcode area dimensions: 105.0 (4.13), 70.0 (2.76), 35.0 (1.38), 23.20 ± 1.0 (0.91 ± 0.04), 18.35 (0.72)]
 
 ### 8.4 Quality of Bar Code(s)
 
@@ -1065,13 +1065,13 @@ Certain provisions of the following international Standards, referenced in this 
 >
 > *Not to scale*
 >
-> [Example MRV-A showing UTOPIA VISA with standard layout]
+> [Editorial description, not ICAO text: Example MRV-A showing UTOPIA VISA with standard layout]
 
 > **Figure A-2. Example illustrates the same MRV-A as in Figure A-1 but with: Zone V increased in size to accommodate fingerprint and thus overlaying part of Zone I; part of Zone II (passport number) overlaying Zone V; and an issuing office stamp instead of the signature in Zone IV.**
 >
 > *Not to scale*
 >
-> [Example MRV-A showing flexible layout with fingerprint overlay]
+> [Editorial description, not ICAO text: Example MRV-A showing flexible layout with fingerprint overlay]
 
 ### A.2 MRV-B Examples
 
@@ -1079,13 +1079,13 @@ Certain provisions of the following international Standards, referenced in this 
 >
 > *Not to scale*
 >
-> [Example MRV-B showing UTOPIA VISA with standard layout]
+> [Editorial description, not ICAO text: Example MRV-B showing UTOPIA VISA with standard layout]
 
 > **Figure A-4. Example illustrates the same MRV-B as in Figure A-3 but with: Zone V increased in size to accommodate fingerprint and thus overlaying part of Zone I; part of Zone II (passport number) overlaying Zone V; and an issuing office stamp instead of the signature in Zone IV.**
 >
 > *Not to scale*
 >
-> [Example MRV-B showing flexible layout with fingerprint overlay]
+> [Editorial description, not ICAO text: Example MRV-B showing flexible layout with fingerprint overlay]
 
 ---
 
@@ -1163,7 +1163,7 @@ L898902C<3UTO6908061F9406236ZE184226
 
 > **Figure C-1. MRV-A Positioning**
 >
-> [Diagram showing MRV-A placement on passport visa page with MRZ adjacent to reference edge]
+> [Editorial description, not ICAO text: Diagram showing MRV-A placement on passport visa page with MRZ adjacent to reference edge]
 
 Each MRV shall be placed so that:
 
@@ -1176,7 +1176,7 @@ Each MRV shall be placed so that:
 
 > **Figure C-2. MRV-B Positioning**
 >
-> [Diagrams showing MRV-B placement on passport visa page in two examples: printed or perforated number at top of page, and at bottom of page]
+> [Editorial description, not ICAO text: Diagrams showing MRV-B placement on passport visa page in two examples: printed or perforated number at top of page, and at bottom of page]
 
 ---
 
@@ -1245,7 +1245,7 @@ FF89E0A344512B02207B0136C44050F117E507BC2A782FFE15F68DDD68
 
 > **Figure E-1. Example Visible Digital Seal for Visa**
 >
-> [Diagram showing Visible Digital Seal structure with Header and Message zones]
+> [Editorial description, not ICAO text: Screenshot of a VDS-generation tool. Left side: a Header section (Issuing Country, Document Issue Date, Signing Certificate) and a Visa Document section (MRZ 1st line, MRZ 2nd line, Passport Number, Duration of Stay, Number of Entries, Visa Type, Additional Feature). Right side: the resulting 2D barcode image, a Status message, SignerCertRef, and the Encoded RAW data as a grid of hex byte values.]
 
 Suppose that seal.bin contains the header and message zone (note that start and length of the signature zone 0xFF and 0x40 are excluded), that the signature is DER encoded in sig.bin, and the above PEM encoded private key in priv_key.pem. The signature can then be verified with openssl by:
 

@@ -92,7 +92,7 @@ In no event shall the dimensions of the finished TD1 document exceed the dimensi
 >
 > <img src="./figures/Doc_9303_Part5_Specs_for_TD1_MROTDs_p10.png" alt="TD1 dimensional illustration">
 >
-> [Diagram showing outer and inner rectangles with dimensions]
+> [Editorial description, not ICAO text: Diagram showing the outer and inner rectangles of the TD1, labelled ‘TD1 edge’, ‘Outer rectangle’ and ‘Inner rectangle’; no dimension values are shown on this figure]
 
 ### 2.3 Margins
 
@@ -146,7 +146,7 @@ The location, contents and dimensional specifications of zones are described bel
 >
 > <img src="./figures/Doc_9303_Part5_Specs_for_TD1_MROTDs_p12.png" alt="Nominal layout of the zones on the front side of a TD1 Size MROTD">
 >
-> [Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right]
+> [Editorial description, not ICAO text: Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right]
 
 #### 3.1.2 Back of the TD1
 
@@ -159,7 +159,7 @@ The location, contents and dimensional specifications of zones are described bel
 >
 > <img src="./figures/Doc_9303_Part5_Specs_for_TD1_MROTDs_p12.png" alt="Layout of zones on the reverse side of a TD1">
 >
-> [Diagram showing Zone VI and Zone VII on back]
+> [Editorial description, not ICAO text: Diagram showing Zone VI and Zone VII on back]
 
 ### 3.2 Content and Use of Zones
 
@@ -171,7 +171,7 @@ Zones I to V and Zone VII contain mandatory elements which represent the minimum
 >
 > <img src="./figures/Doc_9303_Part5_Specs_for_TD1_MROTDs_p13.png" alt="Sequence of data elements on the front side of a TD1">
 >
-> [Diagram showing sequence of data elements]
+> [Editorial description, not ICAO text: Diagram showing sequence of data elements]
 
 #### 3.2.1 Mandatory zones
 
@@ -197,13 +197,18 @@ All MRZ data elements shall be shown in Zone VII. For a TD1 Size MROTD, these ar
 >
 > <img src="./figures/Doc_9303_Part5_Specs_for_TD1_MROTDs_p14.png" alt="Position and dimensions of Zone VII the Machine Readable Zone">
 >
-> | Dimension | mm | in |
-> |---|---|---|
-> | MRZ width | 77.7 | 3.06 |
-> | MRZ height | 23.3 ± 1.0 | 0.91 ± 0.04 |
-> | Left margin | 5.0 ± 1.0 | 0.20 ± 0.04 |
-> | Line spacing | 4.0 | 0.157 |
-> | Character spacing | 2.54 | 0.100 |
+> Labels printed on Figure 6 (not a table in the original):
+>
+> - 85.6 ± 0.75 mm (3.37 ± 0.03 in) — overall width of the TD1, spanning the full card
+> - 77.7 mm (3.06 in) — width of the printing zone
+> - 5.0 ± 1.0 mm (0.20 ± 0.04 in) — left margin from the card edge to the start of the printing zone
+> - 2.0 mm (0.08 in) — margin at the top-left and top-right corners of the MRZ box (shown three times)
+> - 2.95 mm (0.12 in) — height of each of the three MRZ line boxes
+> - 4.23 mm (0.167 in) — vertical gap between consecutive line boxes (shown twice)
+> - 11.5 ± 1.0 mm (0.45 ± 0.04 in) — vertical span from the top of the MRZ box to the second line
+> - 23.3 ± 1.0 mm (0.91 ± 0.04 in) — vertical span from the top of the MRZ box to the bottom of the MRZ box (overall MRZ height)
+> - “Machine reading zone”, “Reference centre line”, “Printing zone” — leader-line labels pointing at the three dashed lines running through the line boxes
+> - “Not to scale. Nominal dimensions in millimetres (inch dimensions in parentheses)” — note text
 
 #### 3.2.2 Optional data zone
 
@@ -237,19 +242,19 @@ The lower boundary of Zone II may be positioned at the discretion of the issuing
 
 > **Figure 7. Flexible zone layout with Zone II extending above the portrait**
 >
-> [Diagram: Schematic of the TD1 front side. Zone I spans the full width across the top. Below it, Zone V (the portrait) forms a tall box on the left that does not reach the bottom edge; Zone II sits to its right at the same top level, with Zone III beneath Zone II filling the rest of the right-hand area. A full-width Zone IV band runs along the bottom edge, beneath both Zone V and Zone III.]
+> [Editorial description, not ICAO text: Diagram showing the TD1 front side. Zone I spans the full width across the top. Below it, Zone II continues at full width for a short band before narrowing to the right-hand portion only. Zone V (the portrait) occupies the left portion beneath that band and extends down to the bottom edge. To the right of Zone V, Zone III sits below the narrowed Zone II, and Zone IV sits below Zone III, both flush with Zone V's bottom edge; there is no separate band running beneath Zone V.]
 
 > **Figure 8. Flexible zone layout with Zone IV, Signature, beneath the portrait**
 >
-> [Diagram: Schematic of the TD1 front side. Zone I spans the full width across the top. Below it, three columns sit side by side: Zone V (the portrait) on the left, a narrower Zone II in the middle, and Zone III on the right, with Zone III extending further down than the other two. A Zone IV band runs beneath Zone V and Zone II only, not extending under Zone III.]
+> [Editorial description, not ICAO text: Diagram: Schematic of the TD1 front side. Zone I spans the full width across the top. Below it, three columns sit side by side: Zone V (the portrait) on the left, a narrower Zone II in the middle, and Zone III on the right, with Zone III extending further down than the other two. A Zone IV band runs beneath Zone V and Zone II only, not extending under Zone III.]
 
 > **Figure 9. Flexible zone layout with Zone II extending beneath the portrait**
 >
-> [Diagram: Schematic of the TD1 front side. Zone I spans the full width across the top. Below it, Zone V (the portrait) forms a box on the left that stops short of the bottom edge, with Zone II occupying the remaining right-hand area and extending beneath Zone V to the bottom of the card. Two small stacked boxes for Zone III and Zone IV sit within the Zone II area near the bottom-right corner.]
+> [Editorial description, not ICAO text: Diagram: Schematic of the TD1 front side. Zone I spans the full width across the top. Below it, Zone V (the portrait) forms a box on the left that stops short of the bottom edge, with Zone II occupying the remaining right-hand area and extending beneath Zone V to the bottom of the card. Two small stacked boxes for Zone III and Zone IV sit within the Zone II area near the bottom-right corner.]
 
 > **Figure 10. Alternate layout showing flexibility for Zone V to overlay a portion of Zone I**
 >
-> [Diagram showing Zone V extending upward to overlay Zone I]
+> [Editorial description, not ICAO text: Diagram showing Zone V extending upward to overlay Zone I]
 
 Zone III may start at the right vertical boundary of Zone V and may extend, at the discretion of the issuing State or organization, to the right edge of the TD1. Figures 7 to 9 illustrate some options for a flexible layout of Zone III.
 
@@ -505,19 +510,19 @@ Use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Common
 
 > **Figure A-1. Front side of a TD1 size MROTD with nominal layout with no zone overlaying another**
 >
-> [Example card front showing UTOPIA UTO-MRTD with standard layout]
+> [Editorial description, not ICAO text: Example card front showing UTOPIA UTO-MRTD with standard layout]
 
 > **Figure A-2. Reverse side of a TD1 size MROTD showing the MRZ and with no optional document data elements**
 >
-> [Example card back showing three-line MRZ]
+> [Editorial description, not ICAO text: Example card back showing three-line MRZ]
 
 > **Figure A-3. Front side of a TD1 Size MROTD with Zones II and IV overlaying the portrait, Zone V**
 >
-> [Example card front showing layout with overlay]
+> [Editorial description, not ICAO text: Example card front showing layout with overlay]
 
 > **Figure A-4. Reverse side of a TD1 Size MROTD showing the MRZ and including a condition in Zone VI, the Optional Document Data Element zone**
 >
-> [Example card back with conditions in Zone VI]
+> [Editorial description, not ICAO text: Example card back with conditions in Zone VI]
 
 ---
 
@@ -525,7 +530,7 @@ Use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Common
 
 > **Figure B-1. Construction of the 3-line MRZ data on a TD1 Size MROTD**
 >
-> [Diagram showing annotation of all three MRZ lines]
+> [Editorial description, not ICAO text: Diagram showing annotation of all three MRZ lines]
 >
 > *Note 1.— Three-letter codes are given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).*
 >
@@ -557,11 +562,11 @@ In Zone VII (MRZ), the first two (2) characters in the upper machine readable li
 
 > **Figure C-1. Layout of zones and data elements on the front side of a Crew Member Certificate**
 >
-> [Diagram showing CMC front layout]
+> [Editorial description, not ICAO text: Diagram showing CMC front layout]
 
 > **Figure C-2. Layout of zones and data elements on the reverse side of a Crew Members Certificate**
 >
-> [Diagram showing CMC reverse layout]
+> [Editorial description, not ICAO text: Diagram showing CMC reverse layout]
 
 ---
 *— END —*

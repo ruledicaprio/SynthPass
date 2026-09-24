@@ -173,6 +173,9 @@ Issuing States or organizations MAY have additional key pair types:
 | SPOC Server | Not Specified | 6-18 months |
 | Visa Bar Code Signer | 1-2 years | Private Key Usage Time + Validity of Visa |
 | Emergency Travel Document Bar Code Signer | 1 year + 2 months | Private Key Usage Time + ETD validity timeframe |
+| Master List Signer | Discretion of issuing State or organization | Discretion of issuing State or organization |
+| Deviation List Signer | Discretion of issuing State or organization | Discretion of issuing State or organization |
+| Communication | Discretion of issuing State or organization | Discretion of issuing State or organization |
 
 #### 4.1.1 Document Signer Keys and Certificates
 The usage period of a Document Signer private key is much shorter than the validity period of the DS certificate for the corresponding public key. It is RECOMMENDED that the maximum period any Document Signer private key is used to sign eMRTDs be three months. Once the last document signed with a given private key has been produced, it is RECOMMENDED that issuing States or organizations erase the private key in an auditable and accountable manner.
@@ -325,7 +328,7 @@ The profiles use the following terminology for presence requirements: `m` (manda
 | SubjectAltName | m/nc | m/nc | m/nc | m/nc | m/nc | See 7.1.1.2 |
 | IssuerAltName | m/nc | m/nc | m/nc | m/nc | m/nc | See 7.1.1.2 |
 | SubjectDirectoryAttributes | x | x | x | x | x | |
-| Basic Constraints | m/c | m/c | x | x | x | `cA` MUST be `TRUE` for CSCA, `PathLenConstraint` MUST always be ‘0’. |
+| Basic Constraints | m/c | m/c | x | x | x | `PathLenConstraint` MUST always be ‘0’. |
 | NameConstraints | x | x | x | x | x | See Note 1 |
 | PolicyConstraints | x | x | x | x | x | See Note 1 |
 | ExtKeyUsage | x | x | x | m/c | m/c | See 7.1.1.3 |
@@ -473,6 +476,7 @@ LDS2 SPOC certificates (client and server) MUST comply with the communication ce
 - **Subject Field**:
   - `countryName`: MUST be present (two-letter country code).
   - `commonName`: MUST be present. For SPOC TLS client certificates, the value SHOULD be “SPOC TLS client”. For SPOC TLS server certificates, the value SHOULD be “SPOC TLS server”.
+  - Other attributes MAY also be included at the discretion of the issuing State or organization.
 - **Extended Key Usage Extensions**:
   - SPOC client certificates: OID is `2.23.136.1.1.10.1`;
   - SPOC server certificates: OID is `2.23.136.1.1.10.2`.
@@ -683,7 +687,7 @@ The TLS server SHALL perform following verifications:
 - the client certificate subject country SHALL correspond to the intended one.
 
 #### 8.3.3 WSDL for SPOC Web Service Interface
-*(Note: Full WSDL XML definition omitted for brevity, but conforms to standard ICAO SPOC SOAP interface definitions including RequestCertificate, SendCertificates, GetCACertificates, and GeneralMessage operations).*
+*[Editorial note, not ICAO text: the source spells out the full WSDL XML schema for the SPOC SOAP interface across several pages, defining `RequestCertificateRequest`/`RequestCertificateResponse`, `SendCertificatesRequest`/`SendCertificatesResponse`, `GetCACertificatesRequest`/`GetCACertificatesResponse`, and `GeneralMessageRequest`/`GeneralMessageResponse` message types, a `SPOCPortType` with the four corresponding operations, a `SPOCSOAPBinding`, and a `SPOC` service; it is not reproduced verbatim here.]*
 
 ---
 
@@ -910,7 +914,9 @@ The following examples illustrate calculation of private key usage periods and p
 **Example 3**: eMRTDs valid for ten years. Document Signer private key usage period: 3 months. Document Signer certificate validity: 10 years + 3 months. CSCA private key usage period: 5 years. CSCA certificate validity: 15 years + 3 months.
 
 ### APPENDIX B — CERTIFICATE AND CRL PROFILE REFERENCE TEXT
-This appendix replicates brief excerpts of relevant sections from source documents (e.g., RFC 5280, X.690) to assist the reader in understanding the background for some of the requirements specified in the eMRTD certificate and CRL profiles. (See full reference tables in the source document for detailed excerpts on TBSCertificate, signatureAlgorithm, validity, SubjectKeyIdentifier, KeyUsage, BasicConstraints, etc.)
+The certificate and CRL profiles defined in Section 7 are based on definitions and base profile requirements specified in referenced documents. Brief excerpts of some relevant sections from these source documents are replicated in the tables below. These excerpts are provided to assist the reader in understanding the background for some of the requirements specified in the eMRTD certificate and CRL profiles. They are not intended to be relied on instead of the referenced documents.
+
+*[Editorial note, not ICAO text: the source's Table B-1 spans several pages, listing every profiled certificate/CRL component or extension (Certificate, TBSCertificate, version, serialNumber, validity, SubjectKeyIdentifier, KeyUsage, CertificatePolicies, CRLDistributionPoints, Basic Constraints, etc.) against its RFC 5280 / X.690 clause number and a short excerpt of that clause's text. It is not reproduced verbatim here — consult the source document for the full table.]*
 
 ### APPENDIX C — EARLIER CERTIFICATE PROFILES
 The certificate profiles in this appendix were specified in the Sixth Edition of ICAO Doc 9303. Although CSCAs MUST issue certificates that comply with the current profiles as specified in Section 7, the earlier profiles are included here for information only as certificates that were issued in compliance with the earlier profiles will be in circulation, and processed by Inspection Systems for several years.

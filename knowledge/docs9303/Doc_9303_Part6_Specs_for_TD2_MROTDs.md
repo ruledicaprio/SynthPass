@@ -88,7 +88,7 @@ In no event shall the dimensions of the finished TD2 document exceed the dimensi
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p10.png" alt="TD2 dimensional illustration">
 >
-> [Diagram showing outer and inner rectangles on TD2 card]
+> [Editorial description, not ICAO text: Diagram showing outer and inner rectangles on TD2 card]
 >
 > *Not to scale*
 
@@ -142,19 +142,19 @@ To accommodate the various requirements of States' laws and practices and to ach
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p12.png" alt="Nominal layout of the Zones on the front side of a TD2 Size MROTD">
 >
-> [Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right, Zone VII at bottom]
+> [Editorial description, not ICAO text: Diagram showing Zone I at top, Zone II and Zone III in middle, Zone V on left, Zone IV on right, Zone VII at bottom]
 
 > **Figure 4. The reverse side of a TD2**
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p12.png" alt="The reverse side of a TD2">
 >
-> [Diagram showing Zone VI on back]
+> [Editorial description, not ICAO text: Diagram showing Zone VI on back]
 
 > **Figure 5. Sequence of data elements on the front side of a TD2**
 >
 > <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p13.png" alt="Sequence of data elements on the front side of a TD2">
 >
-> [Diagram showing sequence of data elements]
+> [Editorial description, not ICAO text: Diagram showing sequence of data elements]
 
 #### 3.1.2 Back of the TD2
 
@@ -225,11 +225,11 @@ Zone IV may overlay Zone V, as illustrated in Appendix A, Figure A-3, although t
 
 > **Figure 7. Zones III and IV have been reduced in size to permit the addition of an optional displayed identification feature e.g. a fingerprint, in Zone II**
 >
-> [Diagram showing flexible layout with fingerprint in Zone II]
+> [Editorial description, not ICAO text: Diagram showing flexible layout with fingerprint in Zone II]
 
 > **Figure 8. Illustrating the possibility for Zone V to overlay a portion of the Mandatory Header, Zone I**
 >
-> [Diagram showing Zone V extending upward to overlay Zone I]
+> [Editorial description, not ICAO text: Diagram showing Zone V extending upward to overlay Zone I]
 
 ---
 
@@ -466,7 +466,7 @@ The use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Co
 
 > **Figure A-1. Typical layout of a TD2 Size MROTD**
 >
-> [Example card front showing UTOPIA official travel document with standard layout]
+> [Editorial description, not ICAO text: Example card front showing UTOPIA official travel document with standard layout]
 >
 > ```
 > UTOPIA
@@ -490,15 +490,15 @@ The use of the three-letter codes listed in [Doc 9303-3](Doc_9303_Part3_Specs_Co
 
 > **Figure A-2. Flexible layout in which Zone II has been enlarged to accommodate an optional displayed fingerprint**
 >
-> [Example card front showing fingerprint in Zone II]
+> [Editorial description, not ICAO text: Example card front showing fingerprint in Zone II]
 
 > **Figure A-3. Flexible layout in which Zone IV, the signature, overlays the portrait, Zone V**
 >
-> [Example card front showing signature overlaying portrait]
+> [Editorial description, not ICAO text: Example card front showing signature overlaying portrait]
 
 > **Figure A-4. Flexible layout in which Zone II has been extended to the left to overlap Zone V, the portrait. Zone III has been extended upwards, beside and to the right of Zone I, to accommodate the Document Number**
 >
-> [Example card front showing extended Zone II and Zone III]
+> [Editorial description, not ICAO text: Example card front showing extended Zone II and Zone III]
 
 ---
 

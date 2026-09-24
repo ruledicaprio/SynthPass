@@ -8,7 +8,7 @@ Approved by and published under the authority of the Secretary General
 
 Published in separate English, Arabic, Chinese, French, Russian and Spanish editions by the
 INTERNATIONAL CIVIL AVIATION ORGANIZATION
-999 Robert-Bourassa Boulevard, Montréal, Quebec, Canada H3C 5H7
+999 Robert-Bourassa Boulevard, Montréal, Québec, Canada H3C 5H7
 Downloads and additional information are available at [www.icao.int/Security/mrtd](http://www.icao.int/Security/mrtd)
 
 **Doc 9303, Machine Readable Travel Documents**

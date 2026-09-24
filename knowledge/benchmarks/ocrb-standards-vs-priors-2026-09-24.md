@@ -120,7 +120,8 @@ All scratch work stayed out of the repository, in the session scratchpad's `ocrb
 
 ## Also found
 
-- **Doc 9303 transcription defects in this repository (not fixed here).** Either would mislead
+- **Doc 9303 transcription defects in this repository (since fixed by the PDF audit of
+  `knowledge/docs9303/`).** Either would mislead
   anyone who builds a layout prior from the tables alone. Checked against ICAO's PDFs on
   2026-09-24, **neither table exists in Doc 9303 at all**. The figures carry only labels, and the
   tables were invented during conversion. The Doc 9303 text itself is not in error.

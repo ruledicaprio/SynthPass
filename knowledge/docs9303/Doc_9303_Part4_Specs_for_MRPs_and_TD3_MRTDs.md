@@ -100,7 +100,7 @@ Outer rectangle: 88.75 mm × 125.75 mm (3.49 in × 4.95 in)
 >
 > <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p10.png" alt="MRP data page dimensional illustration">
 >
-> [Diagram showing inner and outer rectangles on MRP data page]
+> [Editorial description, not ICAO text: Diagram showing the inner and outer rectangles on the MRP data page, labelled "MRP edge", "Inner rectangle" and "Outer rectangle"]
 
 ### 2.4 MRP Data Page Margins
 
@@ -111,16 +111,15 @@ as shown in Figure 2. The position of data in the machine readable zone is as sh
 >
 > <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p11.png" alt="Edge margins of the MRP data page">
 >
-> [Diagram showing edge margins of 2.00 mm on all sides, with radius R3.18 ± 0.30 mm]
+> [Editorial description, not ICAO text: Diagram showing the edge margins of the MRP data page]
 
-**Dimensions in millimetres (inch dimensions in parentheses)**
+Labels printed on Figure 2 (not a table in the original):
 
-| Dimension | mm | in |
-|---|---|---|
-| Width | 125.0 ± 0.75 | 4.92 ± 0.03 |
-| Height | 88.0 ± 0.75 | 3.46 ± 0.03 |
-| Margin | 2.00 | 0.08 |
-| Radius | R3.18 ± 0.30 | R0.125 ± 0.012 |
+- 125.0 ± 0.75 mm (4.92 ± 0.03 in) — overall width, top dimension line
+- 88.0 ± 0.75 mm (3.46 ± 0.03 in) — overall height, right-hand dimension line
+- 2.00 mm (0.08 in) — margin, shown three times (top, left and right edges)
+- R3.18 ± 0.30 mm (0.125 ± 0.012 in) — corner radius; the figure notes "R = Radius" — only the millimetre value carries the "R" prefix, the inch value in parentheses does not
+- "Dimensions in millimetres (inch dimensions in parentheses)"; "Not to scale"
 
 ### 2.5 MRP Data Page Thickness
 
@@ -149,18 +148,26 @@ The MRP data page should either be an inner page in close proximity to an end le
 >
 > <img src="./figures/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs_p12.png" alt="Schematic diagram of the Machine Readable Zone (MRZ)">
 >
-> [Diagram showing MRZ layout with dimensions]
+> [Editorial description, not ICAO text: Diagram showing the MRZ as two boxes ("Personalization Zone upper code line" and "Personalization Zone lower code line") near the bottom of the data page, each with a "Reference centre line" running through it, and dimension lines down to the bottom edge]
 
-**MRZ Dimensions:**
+Labels printed on Figure 3 (not a table in the original):
 
-| Element | mm | in |
-|---|---|---|
-| Width | 125.0 ± 0.75 | 4.92 ± 0.03 |
-| Left margin | 6.0 ± 1.0 | 0.24 ± 0.04 |
-| Effective reading width | 114.0 | 4.49 |
-| MRZ height | 23.2 ± 1.0 | 0.91 ± 0.04 |
-| Upper reference line position | 7.25 | 0.29 |
-| Lower reference line position | 6.35 | 0.25 |
+- 125.0 ± 0.75 mm (4.92 ± 0.03 in) — overall width, bottom dimension line
+- 114.0 mm (4.49 in) — width between the two 2.0 mm side margins
+- 6.0 ± 1.0 mm (0.24 ± 0.04 in) — left margin, measured to the start of the 114.0 mm span
+- 2.0 mm (0.08 in) — margin, shown at each side
+- 23.2 ± 1.0 mm (0.91 ± 0.04 in) — overall MRZ height, from the bottom edge to the top boundary line
+- 17.9 mm (0.70 in) — height from the bottom edge to the topmost of four boundary lines on the left-hand side
+- 13.6 mm (0.54 in) — height from the bottom edge to the next boundary line down
+- 11.55 mm (0.45 in) — height from the bottom edge to the next boundary line down
+- 7.25 mm (0.29 in) — height from the bottom edge to the lowest of the four left-hand boundary lines
+- 4.3 mm (0.17 in) — a short vertical span, drawn twice from a single leader with two arrows: it marks the gap between the 7.25 mm and 11.55 mm lines, and separately the gap between the 13.6 mm and 17.9 mm lines
+- 15.75 mm (0.62 in) — height from the bottom edge to a boundary line on the right-hand side
+- 9.40 mm (0.37 in) — height from the bottom edge to a lower boundary line on the right-hand side
+- 6.35 mm (0.25 in) — the gap between the 9.40 mm and 15.75 mm lines
+- "Reference centre line" — a leader pointing to a dotted line drawn through each of the two code-line boxes
+- "Personalization Zone upper code line" / "Personalization Zone lower code line" — leaders naming the two boxes
+- "Dimensions in millimetres (inch dimensions in parentheses)"; "Not to scale"
 
 ### 3.1 MRP Zones
 
@@ -197,7 +204,7 @@ Within Zone V, the holder's portrait shall be at least 2.0 mm (0.08 in) from the
 
 > **Figure 4. Sequence of data elements on front side of MRP data page**
 >
-> [Diagram showing data elements layout on front of MRP data page]
+> [Editorial description, not ICAO text: Diagram of the front of the MRP data page showing Fields 01–19 positioned in Zones I–V and VII, in the sequence listed below]
 
 **Field Legend:**
 
@@ -216,7 +223,7 @@ Within Zone V, the holder's portrait shall be at least 2.0 mm (0.08 in) from the
 
 > **Figure 5. Data elements on reverse side**
 >
-> [Diagram showing Zone VI on back of MRP data page]
+> [Editorial description, not ICAO text: Diagram of the back of the MRP data page showing Field 20 in Zone VI]
 
 *Notes to Figures 4 and 5:*
 
@@ -238,7 +245,7 @@ Zone IV shall be present either on the data page or on an adjacent page and cont
 
 > **Figure 6. Schematic of nominal layout of data elements**
 >
-> [Diagram showing nominal layout of data elements with bilingual captions]
+> [Editorial description, not ICAO text: Diagram of the front of the MRP data page with each field box captioned in English and French, e.g. "Name of issuing State or organization/Nom de l’État émetteur ou de l’organisation émettrice"]
 
 *Note 1.— Optional data Fields 13 and 17 are excluded in the recommended practice.*
 
@@ -276,19 +283,31 @@ The lower boundary of Zone II may be positioned at the discretion of the issuing
 
 > **Figure 7. Template for the personalization data fields**
 >
-> [Detailed template showing dimensions for all zones and fields]
+> [Editorial description, not ICAO text: Detailed template of the MRP data page showing the "Identification feature" box and a grid of field rows, each row boundary marked "Z" on both sides]
 
-**Template Dimensions:**
+Labels printed on Figure 7 (not a table in the original):
 
-| Dimension | mm | in |
-|---|---|---|
-| Total width | 125.0 | 4.92 |
-| Total height | 88.0 | 3.46 |
-| Zone V (portrait) width | 35.0 ± 1.38 | |
-| Zone V (portrait) height | 45.0 ± 1.77 | |
-| MRZ height | 23.2 ± 1.0 | 0.91 ± 0.04 |
-| Left margin | 2.0 | 0.08 |
-| Top margin | 2.0 | 0.08 |
+- 125.0 mm (4.92 in) — total width, top dimension line
+- 88.0 mm (3.46 in) — total height, right-hand dimension line
+- 37.0 mm (1.46 in) — width from the left edge to a vertical divider right of the "Identification feature" box
+- 35.0 mm (1.38 in) — width from the left edge to a line just inside the 37.0 mm span (width of the "Identification feature" box)
+- 43.0 mm (1.69 in) — width of each of the two right-hand columns (shown twice)
+- 15.2 mm (0.60 in) — a width marked on the middle column, near the top
+- 2.0 mm (0.08 in) — margin, shown four times (top-left, top-right, and twice more at bottom-left)
+- 8.35 mm (0.33 in) — a vertical dimension at the top right, above the "Z"-marked rows
+- 12.0 mm (0.47 in) — a vertical dimension lower on the right side, below the "Z"-marked rows
+- 45.0 mm (1.77 in) — height of the "Identification feature" box, left side
+- 14.8 mm (0.58 in) — a vertical dimension near the bottom left
+- 23.2 mm (0.91 in) — MRZ height, right-hand side near the bottom
+- 15.75 mm (0.62 in) — a vertical dimension near the bottom left, below the 14.8 mm one
+- 6.0 ± 1.0 mm (0.24 ± 0.04 in) — distance from the left edge to the vertical line marked "A"
+- Radius 3.18 ± 0.30 mm (0.125 ± 0.012 in) — corner radius, pointed to by a "Reference edge" leader
+- "Z = 6.35 (0.25)" — defines the value of each "Z" spacing marked at the row boundaries on both sides
+- "Identification feature" — label on the shaded box (the Zone V portrait area)
+- "Reference edge" — leader pointing at the bottom-right rounded corner
+- "A" — labels the left-hand vertical reference line (see Note 2 below)
+- "Reference character centre line (detail of printing zones above and below these lines shown in Figure 3)" — labels the two dash-dot horizontal lines near the bottom
+- "Dimensions in millimetres (inch dimensions in parentheses)"; "Not to scale"
 
 *Note 1.— To allow for variations during manufacture of the MRP, a tolerance of ± 1.0 mm (± 0.04 in) is allowed for the 23.2 mm (0.91 in) dimension of the MRZ and within that overall tolerance the boundary between the VIZ and the MRZ shall not be skewed more than 0.5 mm (0.02 in) over the 125.0 mm (4.92 in) dimension.*
 
@@ -302,7 +321,7 @@ The lower boundary of Zone II may be positioned at the discretion of the issuing
 
 > **Figure 8. Nominal positions of Zones I-V**
 >
-> [Diagram showing nominal zone positions with dimensions]
+> [Editorial description, not ICAO text: Diagram of the MRP data page with dashed lines marking the nominal boundaries of Zones I–V and VII, and dimension lines for 88.0 ± 0.75 mm (total height), 23.2 (0.91) mm (MRZ height), 37.0 (1.46) mm and 125.0 ± 0.75 mm (total width)]
 
 *Note 1.— Dotted lines indicate zone boundaries whose positions are not fixed, enabling issuing States or organizations flexibility in the presentation of data. See 3.3.*
 
@@ -318,11 +337,11 @@ When an issuing State or organization wishes to have a displayed image of an MRP
 
 > **Figure 9. Example of flexible positioning of zones illustrating a staircase boundary between Zones II and III**
 >
-> [Diagram showing staircase boundary between Zones II and III]
+> [Editorial description, not ICAO text: Diagram of the MRP data page with a stepped dashed boundary between Zones II and III]
 
 > **Figure 10. Example of flexible positioning of zones in which Zone IV (signature) is moved to an adjacent page and Zone III positioned such that it does not extend to the right-hand edge of the data page**
 >
-> [Diagram showing Zone IV moved to adjacent page]
+> [Editorial description, not ICAO text: Diagram of the MRP data page with no Zone IV box shown, and Zone III’s dashed boundary stopping short of the right-hand edge]
 
 ## 4. CONTENTS OF THE MRP DATA PAGE
 
@@ -650,19 +669,19 @@ MRPs issued without a harmonized secondary document code in accordance with Sect
 
 > **Figure A-1. Example of an MRP data page that conforms to the recommended practice layout.**
 >
-> [Example passport data page showing UTOPIA passport with standard layout]
+> [Editorial description, not ICAO text: Example passport data page showing a UTOPIA passport with the standard layout]
 
 > **Figure A-2. Example of an MRP data page excluding Zone IV (the holder's signature or usual mark) and including a national language and Optional Data Field 13, for optional personal details (e.g. occupation) in Zone II.**
 >
-> [Example showing bilingual УТОПИЯ/UTOPIA passport with occupation field]
+> [Editorial description, not ICAO text: Example showing a bilingual УТОПИЯ/UTOPIA passport with an occupation field in Zone II]
 
 > **Figure A-3. Example of an MRP data page appearing on an interior page of the book. The name of the issuing State or organization and the name of the document have appeared on an earlier page and are therefore omitted from the data page. The example also illustrates Zone V (the portrait) moved vertically upwards with Zone IV (the signature) overlaying the portrait, and the personal number from Zone II placed beneath the portrait.**
 >
-> [Example showing interior data page layout with signature overlaying portrait]
+> [Editorial description, not ICAO text: Example showing an interior-page data layout, with the holder’s signature overlaying the portrait, the personal number placed beneath the portrait, and a CAN (Card Access Number) field]
 
 > **Figure A-4. Example of an MRP data page with the layout adjusted to accommodate a displayed fingerprint in Zone II.**
 >
-> [Example showing fingerprint displayed in Zone II with CAN (Card Access Number)]
+> [Editorial description, not ICAO text: Example showing a fingerprint displayed in Zone II; no CAN field appears in this figure]
 
 ---
 
@@ -672,7 +691,7 @@ MRPs issued without a harmonized secondary document code in accordance with Sect
 
 > **Figure B-1. Example showing the sequence and content of data elements in the MRZ**
 >
-> [Diagram showing MRZ layout with annotation of fields]
+> [Editorial description, not ICAO text: Diagram of the two MRZ lines with callout boxes identifying each component, e.g. "Primary identifier", "Check digit on the document number", "Holder’s date of birth in format YYMMDD"]
 
 *Note 1.— Three-letter codes are given in [Doc 9303-3](Doc_9303_Part3_Specs_Common_to_all_MRTDs.md).*
 
