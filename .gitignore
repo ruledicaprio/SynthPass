@@ -1,5 +1,8 @@
 # Rust
 target/
+# cargo-mutants output, written at the root of whichever tree ran it.
+mutants.out/
+mutants.out.old/
 
 # Python (tools/*.py)
 __pycache__/

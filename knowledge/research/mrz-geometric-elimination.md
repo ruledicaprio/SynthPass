@@ -33,8 +33,11 @@ guessed at it — which is the honest outcome the refusal-class metric already r
 
 ## Four signals, and what each one is blind to
 
-Measured from the vendored OCR-B at `crates/synthpass-gen/fonts/ocr-b.ttf` (1024 units per em) using
-`fontTools`, directly from the glyph outlines. No rendering, no model, no OCR.
+Measured from the vendored OCR-B at `crates/synthpass-gen/fonts/ocr-b.ttf` (1024 units per em)
+directly from the glyph outlines. No rendering, no model, no OCR. First measured with `fontTools`;
+[`tools/ocrb_metrics.py`](../../tools/ocrb_metrics.py) now reproduces every figure below with a
+standard-library reader cross-checked against `fontTools`, and adds per-glyph ink runs, the
+confusable pairs ranked by what separates them, and the chargrid ink-floor comparison.
 
 | Signal | Source | Eliminates | Blind to |
 | --- | --- | --- | --- |
@@ -114,6 +117,40 @@ the name field its **first verification signal**. Geometry cannot tell `E` from 
 position can never legitimately hold a digit-height glyph, and a filler run can be confirmed by mass.
 ADR-0013's premise — that names are unverifiable — is true of check digits and not quite true of the
 document.
+
+## Addendum 2026-09-23: what the standard says, and where the filler sits across fonts
+
+**ECMA-11 (3rd edition, March 1976) figures.** §4.1 gives the size I letterpress heights: digits
+2.60 mm, capitals 2.46 mm, small letters 1.83 mm, descender 0.60 mm. That makes digits 5.7%
+taller than capitals, which is the height gap §"Four signals" relies on. §3.6 says the tallest
+character is digit `8` and §3.7 that the widest is digit `0`. §3.8 sets the minimum size I pitch
+at 2.54 mm, and §11.4-11.5 the nominal strokewidth at 0.35 mm (0.31 mm for small letters and
+`#`, `%`, `@`). ECMA-11 gives **no numeric position for `<`**. The index table (ref. 79, page 19)
+refers to ECMA-30, which has no geometry either. Drawing 79 is not among the reproduced reference
+drawings (`1`, `E`, `§`, `¥`), so the only in-document evidence is the §13 4:1 illustration.
+
+**Cross-font table** (cap units: baseline 0, cap line 1, cap = median flat capital; the
+Barcodesoft files are local, commercial and not vendored):
+
+| Source | Digit / cap | `<` bottom | `<` top | `<` height | `<` centre |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| ECMA-11 §4.1 (text) | 1.057 | — | — | — | — |
+| ECMA-11 §13 illustration, 4:1 (measured) | 1.063 | +0.050 | 1.046 | 0.996 | 0.548 |
+| Vendored `ocr-b.ttf` (Raisty 2019, OFL) | 1.087 (`1`) | +0.010 | 1.006 | 0.996 | 0.508 |
+| Barcodesoft `ocrbI.ttf`, `ocrbIV.ttf` | 1.077 (`1`) | +0.074 | 0.995 | 0.921 | 0.535 |
+| Barcodesoft `OCRB.TTF` | 1.079 (`1`) | +0.162 | 1.037 | 0.875 | 0.600 |
+| 16 real TD3 specimens, median (measured) | — | +0.061 | 0.997 | 0.924 | 0.528 |
+
+The vendored filler matches ECMA-11's height but sits about 0.04 cap lower than the illustration
+draws it, and about 0.03 cap lower than 14 of 16 real specimens print it (≈0.6 px at a 20 px cap).
+Real print spans at least two filler families; United Arab Emirates 2011 prints a short raised
+filler of the `OCRB.TTF` kind. The per-specimen table, the positive control that calibrates the
+instrument, and the ISO 1831 tolerances that bound all of this are in
+[`ocrb-filler-geometry-2026-09-23.md`](../benchmarks/ocrb-filler-geometry-2026-09-23.md).
+
+One consequence for this note: a threshold that separates `<` from a letter by vertical position
+must be measured on real bands. A synthetic `<` rendered from the vendored font sits lower than
+most printed ones.
 
 ## What this does not touch
 
