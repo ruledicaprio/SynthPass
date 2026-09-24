@@ -78,6 +78,14 @@ A staged bump fails the last two by construction, which is the whole design: rea
 witnessed by the same fragments that already derive the version number, so there is no new flag
 for anyone to remember to set. Run it yourself at any point:
 
+The release PR that *closes* a staged window leaves the version where the bump put it, so it
+does not move the version field. The workflow also watches the two CHANGELOGs, and treats a
+commit as a release candidate when the version is unchanged but **this commit added the
+`## [X.Y.Z]` heading**: present at `HEAD`, absent at `HEAD^`. Later commits already carry the
+heading and are never read as the release again. The candidate still has to pass
+`check-release-ready.sh`. Before 2026-09-24 the workflow only looked at the version field, so
+a staged window could not be released by it at all.
+
 ```bash
 scripts/check-release-ready.sh --scope mrz
 ```
@@ -124,6 +132,13 @@ which slot moves:
 The `mrz` column is not a typo. Pre-1.0, cargo treats the minor slot as the breaking slot —
 `^0.7` resolves `0.7.x` but never `0.8.0` — so a breaking change there must move the minor.
 `CONTRIBUTING.md`'s "Semver policy" section is the long form.
+
+**The bump is measured from the last release, not from the manifest.** The base is the topmost
+`## [X.Y.Z]` heading in the scope's CHANGELOG. The two differ while a window is open. With
+`mrz` staged at 0.8.0 and 0.7.1 the last release, the pending breaking fragments imply 0.8.0,
+the number already staged, and a second bump to 0.9.0 inside the same window is refused.
+Before 2026-09-24 both scripts bumped from the manifest: `next-version.sh` answered 0.9.0, and
+`check-changelog.sh` accepted the double bump. `tools/test_release_window.py` pins both.
 
 `scripts/check-changelog.sh` enforces this on every PR: a version bump that disagrees with its
 fragments fails CI. It derives the implied version from the union of the fragments pending at
