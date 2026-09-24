@@ -7,10 +7,10 @@
   "given_names": "SPECIMEN",
   "issuing_country": "BEL",
   "mrz_checksums_valid": true,
-  "mrz_line": "IDBEL000001115<7027<<<<<<<<<<<\n9502286F3001064UTO952028998747\nSPECIMEN<<SPECIMEN<<<<<<<<<<<<",
+  "mrz_line": "IDBEL000001115<7027<<<<<<<<<<<\n9502286F3001064UTO950228998747\nSPECIMEN<<SPECIMEN<<<<<<<<<<<<",
   "nationality": "UTO",
   "optional_data_1": null,
-  "optional_data_2": "95202899874",
+  "optional_data_2": "95022899874",
   "personal_number": null,
   "sex": "F",
   "surname": "SPECIMEN"
