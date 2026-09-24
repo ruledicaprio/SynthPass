@@ -184,6 +184,45 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(512))]
+
+    /// Any `char` in a `Sex::NonConformant` cell still gives a well-formed
+    /// zone on every format. Every line is exactly its width in characters
+    /// and in bytes, the zone parses, and the cell is the character itself
+    /// when it is in the MRZ alphabet, `<` otherwise. A non-ASCII cell used
+    /// to make the TD formats panic while slicing for the composite.
+    #[test]
+    fn any_sex_cell_emits_a_well_formed_zone(c in any::<char>()) {
+        let sex = Sex::NonConformant(c);
+        let written = if matches!(c, 'A'..='Z' | '0'..='9' | '<') { c } else { '<' };
+        let expected = Sex::from_zone(written);
+        let zones = [
+            (format_td3(&Td3Fields { sex, ..Td3Fields::default() }), 44),
+            (format_td2(&Td2Fields { sex, ..Td2Fields::default() }), 36),
+            (format_td1(&Td1Fields { sex, ..Td1Fields::default() }), 30),
+            (format_mrv_a(&MrvAFields { sex, ..MrvAFields::default() }), 44),
+            (format_mrv_b(&MrvBFields { sex, ..MrvBFields::default() }), 36),
+        ];
+        for (i, (zone, width)) in zones.iter().enumerate() {
+            for line in zone.split('\n') {
+                prop_assert_eq!(line.chars().count(), *width, "format {} line {:?}", i, line);
+                prop_assert_eq!(line.len(), *width, "format {} is not ASCII: {:?}", i, line);
+            }
+            let lines: Vec<&str> = zone.split('\n').collect();
+            let parsed = match i {
+                0 => parse_td3(lines[0], lines[1]),
+                1 => parse_td2(lines[0], lines[1]),
+                2 => parse_td1(lines[0], lines[1], lines[2]),
+                3 => parse_mrv_a(lines[0], lines[1]),
+                _ => parse_mrv_b(lines[0], lines[1]),
+            };
+            prop_assert!(parsed.is_ok(), "format {} did not parse: {:?}", i, parsed);
+            prop_assert_eq!(parsed.unwrap().sex, expected);
+        }
+    }
+}
+
 fn personal_number_strategy() -> impl Strategy<Value = Option<String>> {
     prop_oneof![Just(None), "[A-Z0-9]{1,14}".prop_map(Some),]
 }

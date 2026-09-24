@@ -143,6 +143,21 @@ impl Default for Td3Fields {
     }
 }
 
+/// The printed sex cell. `M`, `F` and `<` come from [`Sex::zone_char`]. A
+/// [`Sex::NonConformant`] cell is written as given when it is a character of
+/// the MRZ alphabet (`A`-`Z`, `0`-`9`, `<`), so a parsed zone re-emits as it
+/// was read. Any other character is written as `<`, as 0.7 wrote every
+/// non-`M`/`F` value. The variant is public and can hold any `char`, and one
+/// non-ASCII character would otherwise make the line the wrong length in bytes.
+fn sex_cell(sex: Sex) -> char {
+    let c = sex.zone_char();
+    if matches!(c, 'A'..='Z' | '0'..='9' | '<') {
+        c
+    } else {
+        '<'
+    }
+}
+
 /// The six printed characters of a typed date, with the century dropped.
 fn date_zone(value: MrzDate) -> String {
     match value {
@@ -707,7 +722,7 @@ pub fn format_td3(fields: &Td3Fields) -> String {
     let nationality = field(&fields.nationality, 3);
     let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = fields.sex.zone_char();
+    let sex = sex_cell(fields.sex);
     let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let personal = field(
@@ -864,7 +879,7 @@ pub fn format_td2(fields: &Td2Fields) -> String {
     let nationality = field(&fields.nationality, 3);
     let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = fields.sex.zone_char();
+    let sex = sex_cell(fields.sex);
     let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(
@@ -1033,7 +1048,7 @@ pub fn format_td1(fields: &Td1Fields) -> String {
 
     let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = fields.sex.zone_char();
+    let sex = sex_cell(fields.sex);
     let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let nationality = field(&fields.nationality, 3);
@@ -1186,7 +1201,7 @@ pub fn format_mrv_a(fields: &MrvAFields) -> String {
     let nationality = field(&fields.nationality, 3);
     let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = fields.sex.zone_char();
+    let sex = sex_cell(fields.sex);
     let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(fields.optional_data.as_deref().unwrap_or(""), 16);
@@ -1319,7 +1334,7 @@ pub fn format_mrv_b(fields: &MrvBFields) -> String {
     let nationality = field(&fields.nationality, 3);
     let dob = date_zone(fields.date_of_birth);
     let dob_check = digit_char(&dob);
-    let sex = fields.sex.zone_char();
+    let sex = sex_cell(fields.sex);
     let expiry = date_zone(fields.date_of_expiry);
     let expiry_check = digit_char(&expiry);
     let optional = field(fields.optional_data.as_deref().unwrap_or(""), 8);
