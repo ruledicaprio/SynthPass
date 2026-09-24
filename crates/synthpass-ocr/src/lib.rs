@@ -1777,8 +1777,7 @@ fn chargrid_fields_match(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
         && a.date_of_birth == b.date_of_birth
         && a.date_of_expiry == b.date_of_expiry
         && a.nationality == b.nationality
-        // In the product vocabulary, both non-conformant cells read as X.
-        && synthpass_core::mrz_product::sex(a.sex) == synthpass_core::mrz_product::sex(b.sex)
+        && a.sex == b.sex
         && a.issuing_country == b.issuing_country
 }
 
@@ -2259,7 +2258,7 @@ mod tests {
     }
 
     #[test]
-    fn chargrid_match_ignores_which_nonconformant_sex_cell() {
+    fn chargrid_match_distinguishes_nonconformant_sex_cells() {
         const L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
         let mut one = "L898902C36UTO7408122F1204159ZE184226B<<<<<10".to_string();
         let mut another = one.clone();
@@ -2269,7 +2268,7 @@ mod tests {
         let b = mrz::parse_td3(L1, &another).unwrap();
         assert_eq!(a.sex, mrz::Sex::NonConformant('1'));
         assert_eq!(b.sex, mrz::Sex::NonConformant('S'));
-        assert!(chargrid_fields_match(&a, &b));
+        assert!(!chargrid_fields_match(&a, &b));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- Non-conformant MRZ sex cells now leave the product sex unknown instead of asserting `X`. The check-in form leaves unreadable sex blank and the demo's copied JSON gives `null`; the bench sex column for these documents changes from `"X"` to empty.

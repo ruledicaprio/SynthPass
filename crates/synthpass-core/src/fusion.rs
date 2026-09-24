@@ -554,7 +554,8 @@ pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData
     if let Some(v) = fields.get(CoreField::Sex) {
         // Compare in the product vocabulary that Tier 2 normalizes into.
         if let Some(mrz_sex) = crate::mrz_product::sex(m.sex) {
-            if crate::normalize::sex(v) != mrz_sex {
+            let normalized = crate::normalize::sex(v);
+            if normalized != mrz_sex && !(m.sex == mrz::Sex::Unspecified && normalized == "<") {
                 findings.push(Finding::LlmContradictsMrzStructural {
                     field: CoreField::Sex.as_str().to_string(),
                 });
@@ -809,6 +810,36 @@ mod tests {
     #[test]
     fn a_sex_mismatch_is_flagged() {
         let m = base();
+        let mut fields = agreeing_fields();
+        fields.sex = Some("M".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "sex".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn nonconformant_mrz_sex_does_not_contradict_llm() {
+        let mut m = base();
+        m.sex = mrz::Sex::NonConformant('1');
+        for value in ["F", "M", "X", "<"] {
+            let mut fields = agreeing_fields();
+            fields.sex = Some(value.into());
+            assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new(), "{value}");
+        }
+    }
+
+    #[test]
+    fn unspecified_mrz_sex_agrees_with_x_and_filler() {
+        let mut m = base();
+        m.sex = mrz::Sex::Unspecified;
+        for value in ["X", "<"] {
+            let mut fields = agreeing_fields();
+            fields.sex = Some(value.into());
+            assert_eq!(check_tier2_against_mrz(&fields, &m), Vec::new(), "{value}");
+        }
         let mut fields = agreeing_fields();
         fields.sex = Some("M".into());
         assert_eq!(

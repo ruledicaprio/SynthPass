@@ -172,7 +172,7 @@ function fillForm(r) {
   $('f-docnum').value = r.document_number ?? '';
   $('f-nationality').value = r.nationality ?? '';
   $('f-dob').value = r.date_of_birth ?? '';
-  $('f-sex').value = ['M', 'F'].includes(r.sex) ? r.sex : 'X';
+  $('f-sex').value = r.sex === '<' ? 'X' : (['M', 'F'].includes(r.sex) ? r.sex : '');
   $('f-expiry').value = r.date_of_expiry ?? '';
   for (const id of DOC_FIELDS) $(id).classList.add('autofilled');
 
