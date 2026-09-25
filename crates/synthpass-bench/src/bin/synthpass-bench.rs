@@ -229,6 +229,23 @@ struct SeedResult {
     /// `true` and when no MRZ parsed (distinguish via `names_exact`).
     #[serde(skip_serializing_if = "Option::is_none")]
     name_error: Option<&'static str>,
+    /// `true` iff `hit` and at least one of the 12 ICAO-scored fields (see
+    /// `synthpass_bench`'s `COMPARED_FIELDS`; excludes the diagnostic
+    /// `mrz_lines` row) differs from the generator's ground truth — issue
+    /// #453's "wrong accept": `hit` proves only a checksum-consistent zone
+    /// whose document number matches truth. `document_type`,
+    /// `issuing_country`, both names, `nationality` and `sex` carry no check
+    /// digit at all, and even a check-digited field can still be wrong — a
+    /// check digit is consistency, not proof, so two compensating errors or a
+    /// damaged-pass candidate that happens to validate can both pass it.
+    /// Report-only: never redefines `hit`/`hit_rate`, and no gate reads this
+    /// field. `false` when `hit` is `false` — there is no "accept" to judge.
+    wrong_accept: bool,
+    /// Which of the 12 scored fields differed from truth, in `COMPARED_FIELDS`
+    /// order, when `wrong_accept` is `true`. Empty (and omitted from JSON)
+    /// otherwise, including on every non-hit.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    wrong_fields: Vec<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -320,6 +337,23 @@ struct Report {
     /// accuracy. `0.0` when `hits` is `0` — there is no hit population to
     /// divide by, not a measured "every hit had a wrong name".
     names_exact_among_hits: f64,
+    /// Tier-1 hits where at least one of the 12 scored fields
+    /// (`synthpass_bench::COMPARED_FIELDS`) differs from the generator's
+    /// ground truth — issue #453's "wrong accept". `hit` proves only a
+    /// checksum-consistent zone whose document number matches truth.
+    /// `document_type`, `issuing_country`, both names, `nationality` and
+    /// `sex` carry no check digit at all, and even a check-digited field can
+    /// still be wrong — a check digit is consistency, not proof, so two
+    /// compensating errors or a damaged-pass candidate that happens to
+    /// validate can both pass it. **Report-only**: never redefines `hit`,
+    /// `hit_rate`, or the `--min-hit-rate` gate — see
+    /// `knowledge/benchmarks/README.md`.
+    wrong_accepts: u64,
+    /// `wrong_accepts / hits`, the same denominator `names_exact_among_hits`
+    /// uses — of the Tier-1 hits specifically, how many are wrong on at
+    /// least one scored field. `0.0` when `hits` is `0`, not a fabricated
+    /// "every hit wrong".
+    wrong_accept_rate: f64,
     /// Mean CER per field (worst first), each annotated with the physical
     /// MRZ line it lives on for `document_type` — the JSON form of the
     /// stdout "mean character error rate by field" table. Empty when no
@@ -391,6 +425,8 @@ fn main() {
             let check_states = result.check_states.clone();
             let names_exact = result.names_exact;
             let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
+            let wrong_fields = wrong_scored_fields(&result.fields);
+            let wrong_accept = result.hit && !wrong_fields.is_empty();
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
@@ -402,6 +438,8 @@ fn main() {
                 line1_flagged,
                 names_exact,
                 name_error,
+                wrong_accept,
+                wrong_fields,
                 fields: result
                     .fields
                     .into_iter()
@@ -502,6 +540,16 @@ fn main() {
     let strict_hits = results.iter().filter(|r| r.hit && r.names_exact).count() as u64;
     let strict_hit_rate = strict_hits as f64 / parsed.count.max(1) as f64;
     let names_exact_among_hits = strict_hits as f64 / hits.max(1) as f64;
+
+    // Wrong accepts (issue #453): a Tier-1 hit whose checksum and document
+    // number match truth but at least one of the other 11 scored fields does
+    // not. `wrong_accept` is computed per-document above, from the same
+    // per-field CER comparison `fields`/`strict_hits` already use — see
+    // `wrong_scored_fields`. Report-only: does not affect `hit`, `hit_rate`,
+    // or `--min-hit-rate`.
+    let wrong_accepts = results.iter().filter(|r| r.wrong_accept).count() as u64;
+    let wrong_accept_rate = wrong_accepts as f64 / hits.max(1) as f64;
+
     if hits > 0 {
         println!(
             "\nof {hits} Tier-1 hits, {strict_hits} ({:.1}%) read both names exactly — strict \
@@ -523,6 +571,18 @@ fn main() {
                 println!("  {n:>4}  {kind}");
             }
         }
+
+        // Wrong accepts (issue #453): of the Tier-1 hits, how many are wrong
+        // on at least one of the 12 ICAO-scored fields. Every synthetic
+        // document carries exact ground truth, so this is the same check
+        // digit blind spot the m4-gate-440 finding measured by hand
+        // (knowledge/benchmarks/m4-gate-440-wrong-reads-refused-2026-09-25.md)
+        // — report-only, never gated and never a redefinition of `hit`.
+        println!(
+            "\nof {hits} Tier-1 hits, {wrong_accepts} ({:.1}%) are wrong on at least one of the \
+             12 scored fields — report-only (issue #453), not gated",
+            wrong_accept_rate * 100.0
+        );
     }
 
     // Mean CER per field, over every document — including those that never
@@ -612,6 +672,8 @@ fn main() {
         strict_hits,
         strict_hit_rate,
         names_exact_among_hits,
+        wrong_accepts,
+        wrong_accept_rate,
         mean_cer_by_field,
         mean_cer_by_line: mean_cer_by_line_map,
         results,
@@ -679,6 +741,26 @@ const CHECK_DIGITED_FIELDS: [&str; 4] = [
 /// digits verified, so the router accepts them. They are wrong *and* accepted —
 /// the separate compound-cancellation blind spot, which this opt-in neither
 /// helps nor worsens.
+/// The 12 ICAO-scored fields (`synthpass_bench::COMPARED_FIELDS`'s names)
+/// that differ from ground truth on this read, in scoring order. Excludes the
+/// diagnostic `mrz_lines` row `compare_fields` appends — that row is the raw
+/// zone, not one of the 12 fields the schema reports.
+///
+/// Issue #453: `hit` proves only a checksum-consistent zone whose document
+/// number matches truth. `document_type`, `issuing_country`, either name
+/// field, `nationality` and `sex` carry no check digit at all, and even a
+/// check-digited field can still be wrong — a check digit is consistency,
+/// not proof, so two compensating errors or a damaged-pass candidate that
+/// happens to validate can both pass it. A `hit` can be a wrong read on any
+/// of the 12 scored fields.
+fn wrong_scored_fields(fields: &[synthpass_bench::FieldOutcome]) -> Vec<&'static str> {
+    fields
+        .iter()
+        .filter(|f| f.field != "mrz_lines" && f.cer > 0.0)
+        .map(|f| f.field)
+        .collect()
+}
+
 fn escalates_by_default(r: &SeedResult) -> bool {
     matches!(
         r.miss_kind,
@@ -876,6 +958,8 @@ mod tests {
             line1_flagged: false,
             names_exact: false,
             name_error: None,
+            wrong_accept: false,
+            wrong_fields: Vec::new(),
         }
     }
 
@@ -964,6 +1048,70 @@ mod tests {
         assert_eq!(s.newly_accepted, 0);
         assert_eq!(s.escalate_on, s.escalate_off);
         assert_eq!(s.wrong_docs, 0);
+    }
+
+    fn field_outcome(
+        field: &'static str,
+        expected: &str,
+        got: &str,
+    ) -> synthpass_bench::FieldOutcome {
+        synthpass_bench::FieldOutcome {
+            field,
+            expected: expected.to_string(),
+            got: Some(got.to_string()),
+            cer: synthpass_bench::cer(expected, got),
+        }
+    }
+
+    /// A hit whose every scored field matches truth is not a wrong accept —
+    /// the ordinary, unremarkable case issue #453 does not touch.
+    #[test]
+    fn all_fields_equal_is_not_a_wrong_accept() {
+        let fields = vec![
+            field_outcome("document_type", "P", "P"),
+            field_outcome("surname", "SMITH", "SMITH"),
+            field_outcome(
+                "mrz_lines",
+                "P<GBRSMITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+                "P<GBRSMITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
+            ),
+        ];
+        assert!(wrong_scored_fields(&fields).is_empty());
+    }
+
+    /// One scored field diverging from truth is exactly issue #453's "wrong
+    /// accept" — the checksum and document-number match `hit` requires never
+    /// covered `surname`.
+    #[test]
+    fn one_differing_scored_field_is_a_wrong_accept() {
+        let fields = vec![
+            field_outcome("document_type", "P", "P"),
+            field_outcome("surname", "SMITH", "ASTELLANO"),
+        ];
+        assert_eq!(wrong_scored_fields(&fields), vec!["surname"]);
+    }
+
+    /// `mrz_lines` is the diagnostic raw-zone row `compare_fields` appends,
+    /// not one of the 12 ICAO-scored fields — a difference there alone must
+    /// not mark a document a wrong accept.
+    #[test]
+    fn mrz_lines_divergence_alone_is_not_a_wrong_accept() {
+        let fields = vec![
+            field_outcome("document_type", "P", "P"),
+            field_outcome("mrz_lines", "P<GBR...", "P<GBR<.."),
+        ];
+        assert!(wrong_scored_fields(&fields).is_empty());
+    }
+
+    /// A non-hit is never a wrong accept, regardless of how wrong its fields
+    /// are — `wrong_accept` judges an *accepted* read, and there is nothing
+    /// accepted here.
+    #[test]
+    fn a_non_hit_is_never_a_wrong_accept() {
+        let fields = vec![field_outcome("surname", "SMITH", "ASTELLANO")];
+        assert!(!wrong_scored_fields(&fields).is_empty());
+        let hit = false;
+        assert!(!(hit && !wrong_scored_fields(&fields).is_empty()));
     }
 
     fn field_line_cer(field: &'static str, mean_cer: f64, line: Option<usize>) -> FieldLineCer {
