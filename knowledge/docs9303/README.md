@@ -94,8 +94,21 @@ script). Every part genuinely ends with `-- END --` in the official ICAO
 text; that surprised the first pass at this cleanup enough to be worth
 saying plainly here.
 
-Every `Doc 9303-N` mention in the corpus is now a real Markdown link to that
-part's file — 247 of them. The source documents cite each other only at
+Every `Doc 9303-N` mention was made into a real Markdown link to that part's
+file in the pass this note originally described (265 of them, still true
+today) — a hand step, not part of `tools/docs9303_extract.py`'s output. The
+2026-09-25 Part 11/12 rebuild below did not repeat it: cross-linking needs a
+number-to-filename lookup this repo's naming has no mechanical rule for
+(`Doc 9303-4` isn't `Doc_9303_Part4.md`, it's
+`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md`), so the rebuilt files carry
+their 60 `Doc 9303-N` mentions as ICAO printed them, plain text, same as
+every other word in that rebuild. `scripts/check-doc-links.sh` does not
+require this — it checks that a link, once made, resolves, not that a
+prose mention becomes one — so nothing is broken; it is a completeness gap
+against this paragraph's original claim, worth an issue if the cross-links
+matter enough to script rather than repeat by hand.
+
+The source documents cite each other only at
 whole-part granularity in prose (`Doc 9303-11`, `see Part 4`); they do not
 cite specific section numbers across parts, so there was nothing finer to
 link at that level there. Headings do carry their section number in the
@@ -141,6 +154,46 @@ from its PDF. The numbers still flagged in other Parts are text-layer artefacts 
 checked by hand: values the PDF splits (`23.` + `3`), MRZ strings with no word boundaries, and
 hex dumps. **The rule this leaves:** before calling anything here an ICAO error, open the PDF
 page. A table that reads well is not evidence that the source has a table.
+
+### Parts 11-12 rebuilt, 2026-09-25: 68 missing clause titles, #424
+
+Part 10's rebuild script from the audit above was never committed, so #424 asked for both:
+rebuild Parts 11 and 12 the same way, and this time keep the tool. [`tools/docs9303_extract.py`](../../tools/docs9303_extract.py)
+is a general PyMuPDF-based extractor for this corpus's PDFs — furniture stripping, numbered-clause
+heading promotion by numbering depth, paragraph reflow with a hyphen-aware line join, and a table
+pass via `page.find_tables()` — with pure text-transform functions unit-tested in
+[`tools/test_docs9303_extract.py`](../../tools/test_docs9303_extract.py) against no PDF at all.
+It reproduces Part 10's own "structure only, nothing reworded" method, so Part 10 itself was
+**not** regenerated (it already passed that bar); only Parts 11 and 12, which had not yet been
+rebuilt this way, were.
+
+The old Part 11/12 text turned out to be summarized, not transcribed: whole tables were replaced
+with "(Tables of OIDs for DH and ECDH mappings omitted for brevity, see Section 9.2.3 for full OID
+trees)", and appendices were reduced to one-paragraph descriptions ("Demonstrates an RSA-based
+Active Authentication flow...") instead of ICAO's own worked-example text. Measured against a
+direct read of the PDF text layer:
+
+- **Clause-title coverage: 175/175 (Part 11), 122/122 (Part 12), 0 missing.** The issue's own
+  count was 68 missing titles; the rebuilt files have every numbered clause heading the PDF text
+  layer has, cross-checked by running the same heading detector used to generate the Markdown
+  against the raw PDF text.
+- **Number tokens in the Markdown absent from the PDF: 0**, both Parts.
+- **Determinism:** running the extractor twice over the same PDF produces byte-identical output
+  (`diff` reports no difference).
+- **Wording spot-check:** 10 paragraphs sampled at random, cross-checked verbatim against the PDF
+  text layer (modulo the extractor's own whitespace/dehyphenation join) — no paraphrase, no
+  invented word, one confirmed case of ICAO repeating the same sentence with different punctuation
+  in two places in Part 12 (a real inconsistency in the source, not an extraction artefact).
+
+Two known, documented limitations, both from PyMuPDF's own table-grid detector rather than from
+guessing: a vertically-merged cell in a table (a cell whose content is shared with the row above
+it) extracts as empty rather than reconstructing the merge, affecting a handful of cells in Part
+11's Table 1 and Table 4; and Part 12's Table 6 ("Certificate Extensions Profile", pages 36-37)
+is wide and dense enough that the grid detector fragments its header into 30+ spurious columns —
+rather than render a table structure that confident, the tool falls back to the same page's plain
+reading-order text there, verbatim but not tabulated. Neither is a hand-tuned fix to the output;
+both are structural decisions in the tool itself (`MAX_TABLE_COLUMNS` in
+`tools/docs9303_extract.py`), so they apply the same way if the tool is ever re-run.
 
 Part 8's Visible Digital Seal byte-dump example (Appendix B) was previously
 short about 13 of the 134 bytes the source PDF states it should have — a
