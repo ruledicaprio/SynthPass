@@ -19,6 +19,8 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-24 | [The chargrid A/B, reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic](chargrid-ab-reconciliation-2026-09-24.md) | Observed (per-document transitions re-derived from the 30 retained A/B reports; no cargo, no benchmark run) | current | chargrid-ab-reconciliation-2026-09-24.md |
+| 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](#2026-09-25--440-on-the-m4-synthetic-gate-42--50--39--50-is-three-wrong-reads-refused-none-lost) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](m4-gate-440-wrong-reads-refused-2026-09-25.md) | Observed (two local release `synthpass-bench --count 50 --seed 0 --profile clean` runs, one per commit, plus single-seed re-runs of the before arm and an instrumented replay of the pre-#440 parser) plus Derived (per-seed field comparison against the generator's exact truth) | current | m4-gate-440-wrong-reads-refused-2026-09-25.md |
 | 2026-09-24 | [ADR-0021 Phase 0: class (C) meets K1 only in the line-1 prefix, and two fixtures are wrong](#2026-09-24--adr-0021-phase-0-class-c-meets-k1-only-in-the-line-1-prefix-and-two-fixtures-are-wrong) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-24 | [a manufactured hit refused: Bosnia 2013 card back leaves Tier-1, 140 / 152 → 139 / 151](#2026-09-24--a-manufactured-hit-refused-bosnia-2013-card-back-leaves-tier-1-140--152--139--151) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-24 | [the chargrid A/B reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic](#2026-09-24--the-chargrid-ab-reconciled-30-and-33-are-two-metrics-of-one-run-and-all-13-regressions-were-synthetic) | — | current | FINDINGS.md (Weak-spot findings) |
@@ -975,3 +977,36 @@ and #342 ruled out the whole-cell form of that hypothesis. `twelve-scored-misses
 "13 real regressions" is imprecise, and the filler-geometry note's "+30 / 0" is correct as a net
 but omits the swap. Verdicts and proposed replacement text:
 [`chargrid-ab-reconciliation-2026-09-24.md`](chargrid-ab-reconciliation-2026-09-24.md).
+---
+
+### 2026-09-25 — #440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost
+
+**Observed:** two local release `synthpass-bench --count 50 --seed 0 --profile clean
+--min-hit-rate 0.30` runs, the M4 gate's own command, at `4a027cd` (before) and `69d5dac` (#440
+merged), 2026-09-24. The gate's count went **42 / 50 → 39 / 50**, both exit 0 (the gate is a 0.30
+floor). Exactly seeds **7, 46 and 48** moved, each `hit` → `checksum_failed`, and none moved back.
+
+**Derived**, against the generator's exact truth:
+
+- **All three old hits were wrong reads.** Each had a wrong document code, issuer and surname
+  (`PG`/`BRC`/`ASTELLANO`, `PS`/`WES`/`TRAND`, `PF`/`RAA`/`DEYEMI`). Seed 7 also had wrong given
+  names, and 46 and 48 a wrong personal number. So the drop is zero correct reads lost, and the
+  pre-#440 count net of its wrong accepts was already 39 / 50. `strict_hits` went **20 → 21** and
+  hits exact on all twelve scored fields **15 → 16**, both from seed 20.
+- **Mechanism (Observed in an instrumented replay of the pre-#440 parser).** Each seed's damaged
+  pass yielded two checksum-valid candidates. They agreed on every field but the TD3 personal
+  number (`optional_data_1`), which the old six-field rule never compared, so it returned
+  candidate 0.
+- **Every refused read lost the filler at line-1 cell 1**, a prefix error that no check digit
+  covers. Three such hits remain after #440 (seeds 18, 26, 37). Seed 37's shifted issuer `BRN`
+  resolves, so an issuer-resolution rule would not see it. This relates to
+  [#445](https://github.com/ruledicaprio/SynthPass/issues/445) and
+  [#447](https://github.com/ruledicaprio/SynthPass/pull/447); neither was measured here.
+- **The gate cannot see a checksum-consistent wrong read** even though its truth is exact. A hit is
+  a checksum-valid record with the right document number. This is the same blind spot as
+  [#443](https://github.com/ruledicaprio/SynthPass/issues/443) on real specimens, and the same
+  six-field failure as Bosnia 2013 in the entry above.
+
+The per-seed tables, the two seeds whose read changed while staying hits (12 and 20), the invocation
+and what this does not claim:
+[`m4-gate-440-wrong-reads-refused-2026-09-25.md`](m4-gate-440-wrong-reads-refused-2026-09-25.md).

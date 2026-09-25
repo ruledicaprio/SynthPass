@@ -46,7 +46,7 @@ non-conforming one).
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **140** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| **Tier-1 HIT** | **139** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 2 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13; two real detection targets since the San Marino template (2026-09-17) and Moldova PA 2014 (2026-09-19) left the bucket, each reclassified as carrying no zone |
 | `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 3.3× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
@@ -153,6 +153,25 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   The real-specimen strict rate becomes Observed, not Derived, once a CI-written
   `real-specimen-mrz-baseline.json` carries the `strict_names` counts (report-only — see
   ADR-0013); the row above states no real-specimen figure until then.
+- **Wrong accepts (report-only)** — `synthpass-bench`'s `Report.wrong_accepts` /
+  `wrong_accept_rate`, and per-document `results[].wrong_accept` / `wrong_fields`. `hit` proves
+  only a checksum-consistent zone whose document number matches truth. `document_type`,
+  `issuing_country`, both names, `nationality` and `sex` carry no check digit at all, and even a
+  check-digited field can still be wrong — a check digit is consistency, not proof, so two
+  compensating errors, or a damaged-pass candidate that happens to validate, can both pass it. A
+  document counts as a wrong accept when `hit` is `true` **and** at least one of the 12
+  `COMPARED_FIELDS` (excluding the diagnostic `mrz_lines` row) has CER > 0 against the
+  generator's exact ground truth — the same per-field comparison `strict_hits`/`fields` already
+  use, restricted to a hit. `wrong_accept_rate`'s denominator is `hits`, matching
+  `names_exact_among_hits`; `0.0` when `hits` is `0`, not a fabricated "every hit wrong".
+  Synthetic-only: ground truth is exact by construction there, where a real specimen's truth can
+  itself be incomplete. Added for issue
+  [#453](https://github.com/ruledicaprio/SynthPass/issues/453), which found the M4 gate's pre-#440
+  42/50 TD3 count included three checksum-valid hits that were wrong on `document_type`,
+  `issuing_country` and `surname` alike
+  ([`m4-gate-440-wrong-reads-refused-2026-09-25.md`](m4-gate-440-wrong-reads-refused-2026-09-25.md)).
+  **Report-only**: does not affect `hit`, `hit_rate`, or the `--min-hit-rate` gate — whether to
+  gate on it is a separate, not-yet-made decision.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
