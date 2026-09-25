@@ -95,10 +95,10 @@ A change under `crates/` needs a changelog fragment: `changelog.d/<branch-slug>.
 (`crates/mrz` changes go under `changelog.d/mrz/`), the bullet body only, written for someone
 upgrading — `changelog.d/README.md` has the rules; the `!` in the name is what bumps a version,
 so use it only for a real break.
-`mrz` ships patch releases only until the user decides otherwise, and before 1.0 an `.added`
-or `!` fragment under `changelog.d/mrz/` forces a minor. Use `.fixed` where that is honest, and
-when a change is genuinely `.added` or breaking, stop and say so in the report instead of
-writing the fragment. If users would never notice the change, write
+`mrz` ships patch releases only until the user decides otherwise. Before 1.0 only a `!`
+fragment under `changelog.d/mrz/` forces a minor (`.added` is a patch there; see the table in
+`changelog.d/README.md`). Pick the honest category, and when an `mrz` change is genuinely
+breaking, stop and say so in the report instead of writing a `!` fragment. If users would never notice the change, write
 "skip-changelog" in the report and why. When behaviour or architecture changed, update
 `knowledge/`, README and the Rust docs in the same pass: documentation is part of the
 implementation, and a doc that disagrees with the code is a bug you must not leave behind.
