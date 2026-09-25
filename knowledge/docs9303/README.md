@@ -204,6 +204,15 @@ grid (see [`CONFORMANCE_BASIS.md`](CONFORMANCE_BASIS.md)); the same
 coordinate-clustering approach also fixed the same page's MRZ example, which
 had literal spaces where filler characters belonged.
 
+## Re-auditing
+
+Run [audit_docs9303.py](../../tools/audit_docs9303.py) from the repository root with
+`python tools/audit_docs9303.py --pdf-dir <local-pdf-dir>`; add `--part N` to narrow the run.
+It checks
+digit tokens, numbered clause coverage, tables under figure captions, and normalized prose
+5-gram coverage against the local PDFs. It reports findings without changing files; the unit
+tests need no PDFs.
+
 ## What does not belong here
 
 PDFs. The point of this tree is that it is greppable, diffable text a model
