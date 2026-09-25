@@ -1069,10 +1069,34 @@ fn td3_line1_variants(
     match td3_prefix_verdict(&fix_doc_code(&normalize_line(raw))) {
         Td3Prefix::Ambiguous => Vec::new(),
         Td3Prefix::Repair(fixed) => vec![fixed],
-        Td3Prefix::Keep => variants(raw, width, repair_td3_line1_shifted)
-            .into_iter()
-            .chain(variants(raw, width, rep1))
-            .collect(),
+        Td3Prefix::Keep => {
+            let candidates: Vec<String> = variants(raw, width, repair_td3_line1_shifted)
+                .into_iter()
+                .chain(variants(raw, width, rep1))
+                .collect();
+            // #469: the unshift chain above and `rep1` can each produce a
+            // *distinct* 44-character line that individually passes
+            // `variants`' own checksum/length gate — one the genuine,
+            // unshifted reading, the other the original left-shifted text
+            // with its issuing-state slot still wrong. Both survive to
+            // `single()`, which then refuses on the disagreement even
+            // though only one of them is a document `td3_line1_admissible`
+            // would ever accept on its own. When at least one candidate is
+            // admissible, drop the ones that are not: this is the same
+            // predicate `td3_prefix_verdict` already applies above, not a
+            // new heuristic, and it never invents a candidate that was not
+            // already produced by `variants`. If none is admissible,
+            // behaviour is unchanged — `single()` still sees every
+            // candidate it always did.
+            if candidates.iter().any(|c| td3_line1_admissible(c)) {
+                candidates
+                    .into_iter()
+                    .filter(|c| td3_line1_admissible(c))
+                    .collect()
+            } else {
+                candidates
+            }
+        }
     }
 }
 
