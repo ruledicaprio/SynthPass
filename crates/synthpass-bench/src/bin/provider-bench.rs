@@ -443,6 +443,9 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.include_private && !parsed.real_specimens {
         return Err("--include-private is only valid together with --real-specimens".to_string());
     }
+    if parsed.include_private && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+        return Err("OCR dumps cannot include samples/private/".to_string());
+    }
     if parsed.include_local && !parsed.real_specimens {
         return Err("--include-local is only valid together with --real-specimens".to_string());
     }
@@ -1096,6 +1099,93 @@ fn git_head() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+#[derive(Serialize)]
+struct OcrDumpRunManifest<'a> {
+    started_unix_seconds: u64,
+    git_commit: String,
+    working_tree_dirty: bool,
+    flags: &'a [String],
+    pivot_yy: u32,
+    ocr_arms: BTreeMap<&'static str, &'static str>,
+    corpus_manifest: &'static str,
+    corpus_manifest_sha256: Option<String>,
+    documents_loaded: usize,
+    labelled_loaded: usize,
+    raw_ocr_stage: &'static str,
+    source_hash_stage: &'static str,
+    outcome_ledger: &'static str,
+}
+
+/// Persist a content-addressed run description next to the raw OCR dump.
+/// A row's `run_manifest` is a filename relative to its JSONL, so repeated
+/// runs in one output directory cannot silently re-point old rows.
+fn write_ocr_run_manifest(
+    root: &Path,
+    dir: &Path,
+    flags: &[String],
+    documents_loaded: usize,
+    labelled_loaded: usize,
+) -> Result<String, String> {
+    let arms = synthpass_ocr::OcrArms::from_env();
+    let ocr_arms = BTreeMap::from([
+        ("texture", arms.texture),
+        ("order", arms.order),
+        ("rotate", arms.rotate),
+        ("skew", arms.skew),
+        ("chargrid", arms.chargrid),
+    ]);
+    let commit_output = std::process::Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("git rev-parse HEAD: {e}"))?;
+    if !commit_output.status.success() {
+        return Err("git rev-parse HEAD failed".to_string());
+    }
+    let git_commit = String::from_utf8(commit_output.stdout)
+        .map_err(|e| format!("git rev-parse HEAD was not UTF-8: {e}"))?
+        .trim()
+        .to_string();
+    let dirty_output = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| format!("git status --porcelain: {e}"))?;
+    if !dirty_output.status.success() {
+        return Err("git status --porcelain failed".to_string());
+    }
+    let manifest = OcrDumpRunManifest {
+        started_unix_seconds: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("system clock before Unix epoch: {e}"))?
+            .as_secs(),
+        git_commit,
+        working_tree_dirty: !dirty_output.stdout.is_empty(),
+        flags,
+        pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
+        ocr_arms,
+        corpus_manifest: "samples/corpus.jsonl",
+        corpus_manifest_sha256: std::fs::read(root.join("samples/corpus.jsonl"))
+            .ok()
+            .map(|bytes| sha256_hex(&bytes)),
+        documents_loaded,
+        labelled_loaded,
+        raw_ocr_stage: "provider input after any OCR retries (may join attempts)",
+        source_hash_stage: "original encoded image bytes",
+        outcome_ledger: "provider-bench-ocr-outcomes.jsonl",
+    };
+    let body = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
+    let name = format!("provider-bench-ocr-run-{}.json", sha256_hex(&body));
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(&name), body).map_err(|e| e.to_string())?;
+    std::fs::write(
+        dir.join("provider-bench-ocr-current-run.txt"),
+        name.as_bytes(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
 /// `YYYY-MM-DD` (UTC) from a Unix timestamp — a trimmed civil-from-days
 /// (Howard Hinnant's algorithm). One date string in a report does not justify a
 /// `chrono`/`time` dependency.
@@ -1215,6 +1305,14 @@ async fn main() {
                 .map(std::path::Path::to_path_buf)
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
         });
+        if let Some(dir) = dump_dir.as_deref() {
+            write_ocr_run_manifest(&root, dir, &args, specimens.len(), labelled).unwrap_or_else(
+                |e| {
+                    eprintln!("❌ cannot write OCR run manifest: {e}");
+                    std::process::exit(1);
+                },
+            );
+        }
         let reports = run_provider_bench_real_with_dump_options(
             catalog,
             &ocr,
@@ -1249,6 +1347,28 @@ async fn main() {
             Some(parsed.seed),
         )
     };
+
+    // The committed baseline ledger may describe a different OCR run. Keep
+    // this run's exact outcomes beside its dump so the classifier never has
+    // to guess that historical outcomes still match the current pass.
+    if parsed.real_specimens && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+        let mrz = reports
+            .iter()
+            .find(|r| r.provider_id == "mrz")
+            .unwrap_or_else(|| {
+                eprintln!("❌ OCR mechanism dump requires the mrz provider");
+                std::process::exit(1);
+            });
+        let dir = std::path::Path::new(&parsed.out)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let path = dir.join("provider-bench-ocr-outcomes.jsonl");
+        std::fs::write(&path, ledger_bytes(&build_outcome_rows(mrz))).unwrap_or_else(|e| {
+            eprintln!("❌ cannot write OCR outcome ledger {}: {e}", path.display());
+            std::process::exit(1);
+        });
+    }
 
     for r in &reports {
         let field_match = r
@@ -1704,6 +1824,55 @@ mod tests {
 
         let bad: Vec<String> = ["--dump-ocr-hits"].iter().map(|s| s.to_string()).collect();
         assert!(parse_args(&bad).is_err());
+    }
+
+    #[test]
+    fn raw_ocr_dump_rejects_the_private_track() {
+        let args: Vec<String> = ["--real-specimens", "--include-private", "--dump-ocr-hits"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert!(parse_args(&args)
+            .err()
+            .expect("private OCR dump must be rejected")
+            .contains("samples/private/"));
+    }
+
+    #[test]
+    fn ocr_run_manifest_pins_flags_pivot_and_corpus_hash() {
+        let dir = std::env::temp_dir().join(format!(
+            "provider-bench-ocr-run-test-{}",
+            std::process::id()
+        ));
+        let flags = vec!["--real-specimens".to_string(), "--dump-ocr".to_string()];
+        let name = write_ocr_run_manifest(&repo_root(), &dir, &flags, 2, 1)
+            .expect("write local run manifest");
+        let body = std::fs::read(dir.join(&name)).expect("manifest exists");
+        assert_eq!(
+            name,
+            format!("provider-bench-ocr-run-{}.json", sha256_hex(&body))
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(manifest["flags"], serde_json::json!(flags));
+        assert_eq!(manifest["documents_loaded"], 2);
+        assert_eq!(manifest["labelled_loaded"], 1);
+        assert!(manifest["started_unix_seconds"].as_u64().is_some());
+        assert_eq!(
+            manifest["pivot_yy"],
+            synthpass_die::mrz_parse_options().pivot_yy
+        );
+        assert_eq!(manifest["git_commit"], git_head());
+        assert_eq!(manifest["corpus_manifest"], "samples/corpus.jsonl");
+        assert!(manifest["corpus_manifest_sha256"]
+            .as_str()
+            .is_some_and(|s| s.len() == 64));
+        assert_eq!(
+            std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt")).unwrap(),
+            name
+        );
+        let _ = std::fs::remove_file(dir.join(name));
+        let _ = std::fs::remove_file(dir.join("provider-bench-ocr-current-run.txt"));
+        let _ = std::fs::remove_dir(dir);
     }
 
     #[test]

@@ -126,6 +126,8 @@ mod mrz_date;
 mod parser;
 mod repair;
 mod sex;
+#[allow(dead_code)] // Phase 0 check program; parser wiring is a later, measured change.
+mod strip;
 mod translit;
 
 pub use blindspot::{blindspot, class_of, collisions, Blindspot, CLASSES};

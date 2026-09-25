@@ -1,6 +1,6 @@
 # ADR-0017 — `Checks` must distinguish "absent" from "verified"
 
-**Status:** Accepted (amended 2026-09-22)
+**Status:** Accepted (amended 2026-09-22 and 2026-09-24)
 **Date:** 2026-09-20
 
 ## Context
@@ -256,3 +256,12 @@ change with its own wire-visible confidence movement to measure.
 **Status vocabulary.** The status line read `Implemented (2026-09-22)`, which is not one of
 `Proposed | Accepted | Superseded by ADR-NNNN` ([README](README.md#format)). It was the only ADR of
 eighteen using it, and this decision never passed through `Accepted` on its way there.
+
+## Amendment 2026-09-24 — the `single()` gate no longer compares six fields
+
+The scope list above says the damaged path's unanimity gate kept its six compared fields. That
+bullet records what this ADR left alone, and it is no longer current behaviour.
+[#431](https://github.com/ruledicaprio/SynthPass/issues/431) widened the gate. Recovered
+readings are now one answer only when they agree on every `MrzData` field except
+`mrz_lines`, format included, and the gate refuses otherwise. A disagreement in sex,
+issuer, document code, optional data or format no longer lets the first hit decide.

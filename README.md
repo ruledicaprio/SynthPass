@@ -122,14 +122,14 @@ one headline below is checked against the committed baseline by CI.
 Two rates, because one number cannot answer both questions honestly. A hit means a checksum-valid
 MRZ whose document number matches hand-verified ground truth.
 
-- **140 / 152 = 92.1% on documents that can yield a hit** — how often extraction succeeds when
+- **139 / 151 = 92.1% on documents that can yield a hit** — how often extraction succeeds when
   success is possible. This is the number accuracy work moves, and any PR touching the extraction
   path is checked against it by
   [`real-specimen-gate.yml`](.github/workflows/real-specimen-gate.yml), which reports a
   regression against
   [a committed baseline](knowledge/benchmarks/real-specimen-mrz-baseline.json) — advisory today,
   not yet a required check.
-- **140 / 261 = 53.6% across the whole specimen corpus** — what happens if you point it at a pile
+- **139 / 261 = 53.3% across the whole specimen corpus** — what happens if you point it at a pile
   of real documents. The 108-specimen gap is not failure: those carry no machine-readable zone at
   all (ID-card fronts, driving licences), have it blacked out by the publisher, or print a zone
   whose own check digits are wrong by design. Returning nothing for them is the correct answer, and
