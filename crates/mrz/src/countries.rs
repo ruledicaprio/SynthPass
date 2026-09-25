@@ -8,10 +8,10 @@
 //! MRZ code (`HRV`) and a downstream normalizer wants the canonical code.
 //!
 //! Both functions read the same [`CODES`] table — single-sourced, so the two
-//! directions can never drift apart — which includes many ISO 3166-1 and ICAO
-//! 9303 codes, including stateless/refugee/organization codes, `GBR`
-//! nationality subvariants, and specimen code `UTO`. The table is incomplete: an
-//! unlisted code can still be legitimate. Zero dependencies, just `&'static str`
+//! directions can never drift apart — which holds every ISO 3166-1 alpha-3
+//! code in the UN M49 list as of 2026-09-25, plus the ICAO 9303 codes: stateless/refugee/
+//! organization codes, `GBR` nationality subvariants, and specimen code `UTO`.
+//! ISO 3166-1 changes over time, so an unlisted code can still be legitimate. Zero dependencies, just `&'static str`
 //! literals, so it compiles for native and wasm alike.
 
 /// `(code, name)` pairs, in the same order as the original per-region match
@@ -281,14 +281,62 @@ const CODES: &[(&str, &str)] = &[
     ("NTZ", "Neutral Zone"),
     // ICAO-internal: used only when ICAO itself digitally signs a master list.
     ("IAO", "International Civil Aviation Organization"),
+    // ── ISO 3166-1 dependent territories and other areas ──
+    // The 42 ISO 3166-1 alpha-3 codes this table lacked (#425), with names exactly as
+    // the UN Statistics Division's M49 list prints them (retrieved 2026-09-25,
+    // https://unstats.un.org/unsd/methodology/m49/overview/). None is a sovereign
+    // state.
+    ("AIA", "Anguilla"),
+    ("ALA", "Åland Islands"),
+    ("ASM", "American Samoa"),
+    ("ATA", "Antarctica"),
+    ("ATF", "French Southern Territories"),
+    ("BES", "Bonaire, Sint Eustatius and Saba"),
+    ("BLM", "Saint Barthélemy"),
+    ("BVT", "Bouvet Island"),
+    ("CCK", "Cocos (Keeling) Islands"),
+    ("COK", "Cook Islands"),
+    ("CXR", "Christmas Island"),
+    ("FLK", "Falkland Islands (Malvinas)"),
+    ("GGY", "Guernsey"),
+    ("GLP", "Guadeloupe"),
+    ("GUF", "French Guiana"),
+    ("GUM", "Guam"),
+    ("HMD", "Heard Island and McDonald Islands"),
+    ("IMN", "Isle of Man"),
+    ("IOT", "British Indian Ocean Territory"),
+    ("JEY", "Jersey"),
+    ("MAF", "Saint Martin (French Part)"),
+    ("MNP", "Northern Mariana Islands"),
+    ("MSR", "Montserrat"),
+    ("MTQ", "Martinique"),
+    ("MYT", "Mayotte"),
+    ("NCL", "New Caledonia"),
+    ("NFK", "Norfolk Island"),
+    ("NIU", "Niue"),
+    ("PCN", "Pitcairn"),
+    ("PRI", "Puerto Rico"),
+    ("PYF", "French Polynesia"),
+    ("REU", "Réunion"),
+    ("SGS", "South Georgia and the South Sandwich Islands"),
+    ("SHN", "Saint Helena"),
+    ("SJM", "Svalbard and Jan Mayen Islands"),
+    ("SPM", "Saint Pierre and Miquelon"),
+    ("TCA", "Turks and Caicos Islands"),
+    ("TKL", "Tokelau"),
+    ("UMI", "United States Minor Outlying Islands"),
+    ("VGB", "British Virgin Islands"),
+    ("VIR", "United States Virgin Islands"),
+    ("WLF", "Wallis and Futuna Islands"),
 ];
 
 /// Map an ICAO/ISO 3166-1 code (usually three letters; ICAO `D` is one) to a country or entity name.
 /// Returns `None` for codes not in the table.
 ///
-/// The table contains many ISO 3166-1 and Doc 9303 Part 3 §5 codes,
-/// including organization, stateless/refugee and specimen codes, but it is
-/// not exhaustive; `None` does not prove a code invalid.
+/// The table holds every ISO 3166-1 alpha-3 code in the UN M49 list (2026-09-25)
+/// and the Doc 9303 Part 3 §5 additions, including organization,
+/// stateless/refugee and specimen codes. ISO 3166-1 changes over time, so
+/// `None` does not prove a code invalid.
 /// `find_and_parse` uses recognition as a guard in its repair passes; direct
 /// `parse_*` calls do not validate country codes.
 ///
