@@ -65,10 +65,11 @@ where cells should be, geometry says where glyphs are, and check digits judge co
 proposed reading.
 
 Every scored miss is a review target. A hit is a review target when the ledger reports a name
-error, or a labelled zone shows a line-1 difference. A hit lacking fixture truth is explicitly
-`unlabelled`; it is never counted as correct. `checksum_failed_specimen` is outside the scored
-denominator and receives the `printed non-conformance` label from the ledger. The output retains
-both the total and scored populations, and never deduplicates by display name.
+error, or when a labelled zone differs from its fixture on any line. The 2026-09-24 run used the
+earlier line-1 rule; its results note records the TD1 case it missed. A hit lacking fixture truth
+is explicitly `unlabelled`; it is never counted as correct. `checksum_failed_specimen` is outside
+the scored denominator and receives the `printed non-conformance` label from the ledger. The
+output retains both the total and scored populations, and never deduplicates by display name.
 
 Manual adjudication remains necessary for whether an MRZ band was visible, which retry or line
 produced a candidate, whether a printed zone is non-conforming, and which errors an aligner could
