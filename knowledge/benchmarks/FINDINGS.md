@@ -1023,6 +1023,9 @@ and what this does not claim:
 The two builds agree on **every seed of every format**: stack 451 has no effect on the synthetic
 corpus. Hits are **TD3 74, TD2 72, TD1 52, MRV-A 85, MRV-B 87 = 370 / 500**, against 377 / 500
 last observed in CI (78/73/54/85/87, `bench-charts.yml` at `9c8f03d` and `b0337e1`).
+**CI-confirmed** later the same day: `bench-charts.yml` [run 36111444345](https://github.com/ruledicaprio/SynthPass/actions/runs/36111444345) at `f80877b` (crates equal to
+`174366b`'s apart from the mrz version) observed the same five counts on Linux, so the −7 is not a
+platform difference.
 
 - **The −7.** TD3's −3 on seeds 0–49 is
   [#440](https://github.com/ruledicaprio/SynthPass/pull/440) refusing three wrong reads. Those 50
