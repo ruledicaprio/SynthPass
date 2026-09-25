@@ -99,6 +99,9 @@
 //! - `doccode` — Part 4 §4.4 secondary passport document codes
 //! - `translit` — Part 3 §6 A (Latin) and §6 B (Cyrillic) transliteration
 
+// docs.rs builds with `--cfg docsrs` on nightly; `doc_cfg` then badges every
+// feature-gated item. The attribute is inert on stable and on the 1.82 MSRV (#428).
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
 #![forbid(unsafe_code)]
 
@@ -508,6 +511,18 @@ impl Format {
     /// Check-digit applicability for this layout. Unknown future formats have
     /// no declared check-digit contract until their parser and table row land
     /// together.
+    ///
+    /// ```
+    /// use mrz::Format;
+    ///
+    /// // A passport prints all five check digits.
+    /// assert_eq!(Format::Td3.check_digit_applicability(), [true; 5]);
+    /// // An MRV-A visa prints no personal-number or composite digit.
+    /// assert_eq!(
+    ///     Format::MrvA.check_digit_applicability(),
+    ///     [true, true, true, false, false]
+    /// );
+    /// ```
     pub fn check_digit_applicability(self) -> [bool; 5] {
         Self::CHECK_DIGIT_APPLICABILITY
             .iter()
@@ -946,6 +961,17 @@ impl core::fmt::Display for Field {
 impl Checks {
     /// Number of check digits this format prints. A zero-applicable `Checks`
     /// is never valid: there is no check-digit evidence to establish a read.
+    ///
+    /// ```
+    /// use mrz::{parse_td3, Field};
+    ///
+    /// let line1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    /// let good = parse_td3(line1, "L898902C36UTO7408122F1204159ZE184226B<<<<<10").unwrap();
+    /// // The date-of-birth check digit misprinted as 3: that check and the composite fail.
+    /// let bad = parse_td3(line1, "L898902C36UTO7408123F1204159ZE184226B<<<<<10").unwrap();
+    /// assert_eq!(good.checks.applicable(), 5);
+    /// assert_eq!(bad.checks.applicable(), 5); // a failed check is still applicable
+    /// ```
     pub fn applicable(&self) -> u8 {
         [
             self.document_number,
@@ -960,6 +986,17 @@ impl Checks {
     }
 
     /// Number of printed check digits that verified.
+    ///
+    /// ```
+    /// use mrz::{parse_td3, Field};
+    ///
+    /// let line1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    /// let good = parse_td3(line1, "L898902C36UTO7408122F1204159ZE184226B<<<<<10").unwrap();
+    /// // The date-of-birth check digit misprinted as 3: that check and the composite fail.
+    /// let bad = parse_td3(line1, "L898902C36UTO7408123F1204159ZE184226B<<<<<10").unwrap();
+    /// assert_eq!(good.checks.verified(), 5);
+    /// assert_eq!(bad.checks.verified(), 3);
+    /// ```
     pub fn verified(&self) -> u8 {
         [
             self.document_number,
@@ -976,6 +1013,17 @@ impl Checks {
     /// The fields whose printed check digits failed, in field order. Absent
     /// checks are not failures. Empty when [`all_valid`](Checks::all_valid) is
     /// `true`.
+    ///
+    /// ```
+    /// use mrz::{parse_td3, Field};
+    ///
+    /// let line1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    /// let good = parse_td3(line1, "L898902C36UTO7408122F1204159ZE184226B<<<<<10").unwrap();
+    /// // The date-of-birth check digit misprinted as 3: that check and the composite fail.
+    /// let bad = parse_td3(line1, "L898902C36UTO7408123F1204159ZE184226B<<<<<10").unwrap();
+    /// assert!(good.checks.failed().is_empty());
+    /// assert_eq!(bad.checks.failed(), vec![Field::DateOfBirth, Field::Composite]);
+    /// ```
     pub fn failed(&self) -> Vec<Field> {
         [
             (self.document_number, Field::DocumentNumber),
