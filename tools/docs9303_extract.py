@@ -158,6 +158,21 @@ _HEADING_RE = re.compile(
     r"^(?P<number>\d+(?:\.\d+){0,5}|[A-Z](?:\.\d+){1,5})\.?[ \t]{2,}(?P<title>\S.*?)[ \t]*$"
 )
 
+# A normative (RFC 2119-style) keyword. NOT safe to use as a general "this
+# isn't a real heading" test: plenty of real ICAO clause titles carry one on
+# purpose (Part 10's own "DATA GROUP 3 ... (OPTIONAL)", "EF.CardAccess
+# (CONDITIONAL)", "LDS1 eMRTD APPLICATION (MANDATORY)", Part 12's "D.2 STEPS
+# NOT REQUIRED BY eMRTD" — a first attempt at this fix applied the keyword
+# check to every heading and silently demoted those two Part 12 appendix
+# headings, caught only by diffing the regenerated file against the
+# committed one). Used below only inside `_looks_like_split_title`, whose
+# candidates were each checked by hand against the full set of number-alone
+# lines in Parts 11 and 12's PDF text (see `detect_split_heading`) — within
+# that narrower, fully-enumerated set, no real split-heading title has one.
+_NORMATIVE_KEYWORD_RE = re.compile(
+    r"\b(?:shall|should|must|may|required|optional|conditional)\b", re.IGNORECASE
+)
+
 
 @dataclass(frozen=True)
 class Heading:
@@ -200,6 +215,151 @@ def detect_heading(line: str) -> Optional[Heading]:
     if not title or not title[0].isalpha():
         return None
     return Heading(number=m.group("number"), title=title)
+
+
+# ICAO indents a deep clause number (5-6 numbering levels) far enough right
+# that PyMuPDF's "text" extraction mode puts the number alone on its own
+# line and wraps the title onto the next: Part 11's `4.4.3.3.1` and Part
+# 12's `7.2.3.1.1` are both real clause headings this way, found and
+# verified against the rendered PDF page during the 2026-09-25 rebuild (see
+# `knowledge/docs9303/README.md`). The same shape — a clause number alone on
+# a line, immediately followed by a capitalised line — also occurs where it
+# must NOT become a heading: Part 12's Appendix B quotes RFC 5280's own
+# clause numbering inline in a wide reference table (`4.1.2.1`, `5.2.3`,
+# ...) whose "Reference" column wraps the same way, immediately followed by
+# the quoted normative prose ("CAs conforming to this profile MUST use
+# either the..."). Both were confirmed by dumping every number-alone line in
+# both Parts' raw PDF text and classifying each by hand; the checks below
+# are exactly what separated the two groups with no exceptions found:
+#
+# 1. The number's parent clause (`4.4.3.3.1`'s parent is `4.4.3.3`) must
+#    already be a known heading, found earlier in the same document. Every
+#    real split heading's parent is a real, same-line ICAO heading that
+#    appears earlier in reading order. Doc 9303 Part 12 happens to reuse
+#    some of RFC 5280's own numbers for genuinely different clauses of its
+#    own (`4.1.2.1` is both an RFC 5280 field AND a real Part 12 heading,
+#    "LDS2 Signer Public Key Validity") — the parent check alone is not
+#    enough to separate every case, which is why checks 2-3 exist too.
+# 2. The candidate title reads like a short label, not a wrapped sentence:
+#    it starts with a capital letter, is no more than six words (the
+#    longest of the 26 real split-heading titles found is six), does not
+#    end in a comma or a dangling connector word ("...MUST use either the",
+#    "...To facilitate certification path construction, this"), and
+#    contains no RFC 2119-style normative keyword (see
+#    `_NORMATIVE_KEYWORD_RE`) — no real split-heading title has one, every
+#    rejected RFC-quote continuation does.
+MAX_SPLIT_TITLE_WORDS = 6
+
+_HEADING_NUMBER_ONLY_RE = re.compile(r"^(?P<number>\d+(?:\.\d+){1,5})\.?$")
+
+_DANGLING_LAST_WORDS = frozenset(
+    {
+        "the", "a", "an", "of", "in", "on", "at", "to", "by", "for", "with",
+        "and", "or", "as", "is", "are", "be", "that", "this", "section", "from",
+    }
+)
+
+
+def _looks_like_split_title(text: str) -> bool:
+    """True if `text` reads like a short ICAO clause title rather than a
+    wrapped sentence. See `detect_split_heading`'s docstring for why each of
+    these conditions was kept and what real line it rules out."""
+    title = text.strip()
+    if not title or not title[0].isupper():
+        return False
+    if title.endswith(","):
+        return False
+    words = title.split()
+    if not words or len(words) > MAX_SPLIT_TITLE_WORDS:
+        return False
+    if words[-1].strip(".,;:").lower() in _DANGLING_LAST_WORDS:
+        return False
+    if _NORMATIVE_KEYWORD_RE.search(title):
+        return False
+    return True
+
+
+def detect_split_heading(
+    number_line: str, title_line: str, known_numbers: set[str]
+) -> Optional[Heading]:
+    """Detect a clause heading split by ICAO's own layout across two
+    adjacent, already-furniture-stripped lines: `number_line` holding only
+    the clause number, `title_line` holding its title. `known_numbers` is
+    every heading number already found earlier in the same document (in
+    reading order) — required so the candidate's parent clause is one of
+    them, which is what tells a real split heading apart from a quoted
+    outside numbering scheme (RFC 5280's own clause numbers, quoted inline
+    in Part 12's Appendix B). See the block comment above
+    `_HEADING_NUMBER_ONLY_RE` for how this was verified against every
+    number-alone line in Parts 11 and 12's PDF text."""
+    m = _HEADING_NUMBER_ONLY_RE.match(number_line.strip())
+    if m is None:
+        return None
+    number = m.group("number")
+    parent = number.rsplit(".", 1)[0]
+    if parent not in known_numbers:
+        return None
+    if not _looks_like_split_title(title_line):
+        return None
+    return Heading(number=number, title=title_line.strip())
+
+
+def _find_next_heading(
+    non_blank: list[str], known_numbers: set[str]
+) -> Optional[tuple[int, int, Heading]]:
+    """Scan `non_blank` (one blank-line-delimited group's non-blank lines)
+    for the first heading, same-line or split across two adjacent lines.
+    Returns `(start_index, lines_consumed, Heading)`, or None if the group
+    has no heading at all. Used by both `_flush_group` (which also needs
+    the surrounding text turned into Blocks) and `find_headings_in_lines`
+    (which only needs the headings themselves, e.g. for the audit tool)."""
+    for i, line in enumerate(non_blank):
+        h = detect_heading(line)
+        if h is not None:
+            return i, 1, h
+        if i + 1 < len(non_blank):
+            h = detect_split_heading(line, non_blank[i + 1], known_numbers)
+            if h is not None:
+                return i, 2, h
+    return None
+
+
+def find_headings_in_lines(lines: list[str]) -> list[tuple[int, Heading]]:
+    """Find every clause heading (same-line or split) in a flat list of
+    furniture-stripped body lines, blank lines included. Returns
+    `(line_index, Heading)` pairs in reading order, `line_index` being the
+    offset into `lines` of the heading's first physical line. This is the
+    same detection `build_blocks_from_segments` promotes into the rendered
+    Markdown, exposed standalone for `tools/audit_docs9303.py`'s
+    `pdf_headings` so the audit checks the PDF against the same rule the
+    extractor itself uses, without re-running the whole PDF pipeline."""
+    results: list[tuple[int, Heading]] = []
+    known_numbers: set[str] = set()
+    group: list[tuple[int, str]] = []
+
+    def process_group() -> None:
+        idxs = [i for i, _ in group]
+        texts = [t for _, t in group]
+        offset = 0
+        while offset < len(texts):
+            found = _find_next_heading(texts[offset:], known_numbers)
+            if found is None:
+                break
+            rel_idx, consumed, heading = found
+            results.append((idxs[offset + rel_idx], heading))
+            known_numbers.add(heading.number)
+            offset += rel_idx + consumed
+
+    for i, line in enumerate(lines):
+        if is_blank_line(line):
+            if group:
+                process_group()
+                group = []
+        else:
+            group.append((i, line))
+    if group:
+        process_group()
+    return results
 
 
 def heading_markdown_level(h: Heading) -> int:
@@ -465,7 +625,7 @@ def _flush_group_simple(non_blank: list[str]) -> list[Block]:
     return [Block(kind="para", text=reflow(non_blank))]
 
 
-def _flush_group(group: list[str]) -> list[Block]:
+def _flush_group(group: list[str], known_numbers: set[str]) -> list[Block]:
     """Turn one blank-line-delimited group of raw lines into zero or more
     Blocks (zero for a group that was only furniture/blank).
 
@@ -480,21 +640,26 @@ def _flush_group(group: list[str]) -> list[Block]:
     bullet item or paragraph it happens to be glued to; both the found
     heading and its surrounding text are still emitted, split at the
     heading's own line rather than folded into one Block together.
+
+    `known_numbers` is every heading number already promoted earlier in the
+    document (in reading order); `_find_next_heading` needs it to recognise
+    a split heading (see `detect_split_heading`), and this function adds its
+    own finds to the same set — passed in by the caller and mutated in
+    place — so a later split heading nested under one found here (Part 12's
+    `7.2.3.1.1` under the `7.2.3.1` found moments earlier) still resolves.
     """
     non_blank = [l for l in group if not is_blank_line(l)]
     if not non_blank:
         return []
-    heading_idx = next((i for i, l in enumerate(non_blank) if detect_heading(l)), None)
-    if heading_idx is None:
+    found = _find_next_heading(non_blank, known_numbers)
+    if found is None:
         return _flush_group_simple(non_blank)
-    before, heading_line, after = (
-        non_blank[:heading_idx],
-        non_blank[heading_idx],
-        non_blank[heading_idx + 1 :],
-    )
+    heading_idx, consumed, heading = found
+    before, after = non_blank[:heading_idx], non_blank[heading_idx + consumed :]
     blocks = _flush_group_simple(before)
-    blocks.append(Block(kind="heading", heading=detect_heading(heading_line)))
-    blocks.extend(_flush_group(after))
+    blocks.append(Block(kind="heading", heading=heading))
+    known_numbers.add(heading.number)
+    blocks.extend(_flush_group(after, known_numbers))
     return blocks
 
 
@@ -541,9 +706,12 @@ def build_blocks_from_segments(
 
     blocks: list[tuple[int, Block]] = []
     pending_appendix: Optional[tuple[int, str, str]] = None
+    known_numbers: set[str] = set()
     for page_number, kind, payload in raw:
         group_blocks = (
-            [Block(kind="table", table_rows=payload)] if kind == "table" else _flush_group(payload)
+            [Block(kind="table", table_rows=payload)]
+            if kind == "table"
+            else _flush_group(payload, known_numbers)
         )
         for block in group_blocks:
             if pending_appendix is not None:
