@@ -1745,61 +1745,61 @@ The following two letters are commonly used for foreign names:
 
 #### B.5.5 Comments on Transliteration Table
 
-**B.5.5.1 Alef with madda above**
+##### B.5.5.1 Alef with madda above
 
 *Alef with madda above* (**آ**) is not represented in the ALA-LC Romanisation Tables [1]. However, both Interpol [5] and Dr Hoogland [6] recommend the transliteration XAA.
 
-**B.5.5.2 Alef with hamza above**
+##### B.5.5.2 Alef with hamza above
 
 *Alef with hamza above* (**أ**) is not represented in the ALA-LC Romanisation Tables [1]. However, Interpol [5] recommends the transliteration XAE.
 
-**B.5.5.3 Waw with hamza above**
+##### B.5.5.3 Waw with hamza above
 
 *Waw with hamza above* (**ؤ**) is not represented in the ALA-LC Romanisation Tables [1]. U is used here as *waw with hamza above* is commonly transcribed by "U".
 
-**B.5.5.4 Alef with hamza below**
+##### B.5.5.4 Alef with hamza below
 
 *Alef with hamza below* (**إ**) is not represented in the ALA-LC Romanisation Tables [1]. The transliteration used here is I as that Latin letter is otherwise unused, and *alef with hamza below* often commences names such as **إبراھيم** (Ibrahim) where the *alef with hamza below* is commonly transcribed by "I".
 
-**B.5.5.5 Yeh with hamza above**
+##### B.5.5.5 Yeh with hamza above
 
 *Yeh with hamza above* (**ئ**) is not represented in the ALA-LC Romanisation Tables [1]. The transliteration used here is XI as *yeh with hamza above* is used in names such as **فائز** (Faiz) where the *yeh with hamza above* is commonly transcribed by "I".
 
-**B.5.5.6 Teh marbuta**
+##### B.5.5.6 Teh marbuta
 
 *Teh marbuta* (**ة**) is represented in the ALA-LC Romanisation Tables [1] as H or T or TAN, depending upon the context. Dr Hoogland [6] recommends XTA. The transliteration here of *teh marbuta* has two alternatives: XTA is used generally except if *teh marbuta* occurs at the end of the name component, in which case XAH is used. This is because feminine names often use *teh marbuta* to modify a masculine name, e.g. **فاطمة** (Fatimah). Search algorithms should take these two possibilities into account.
 
-**B.5.5.7 Hah and heh**
+##### B.5.5.7 Hah and heh
 
 The transliterations for *hah* (**ح**) and *heh* (**ه**) have been swapped at the advice of Interpol [5]. *Hah* is now XH and *heh* is H.
 
-**B.5.5.8 Tatwheel**
+##### B.5.5.8 Tatwheel
 
 *Tatwheel* (**ـ**) is a graphic character and not transliterated.
 
-**B.5.5.9 Alef maksura**
+##### B.5.5.9 Alef maksura
 
 *Alef maksura* (**ى**) is now transliterated as XAY at the recommendation of Dr Hoogland [6]. Other characters are transliterated as XY_, thus the former XY is incompatible.
 
-**B.5.5.10 Short vowels fatha, damma, kasra, fathatan, dammatan and kasratan**
+##### B.5.5.10 Short vowels fatha, damma, kasra, fathatan, dammatan and kasratan
 
 The optional short vowels (haracat) are not generally used in names and are not transliterated.
 
-**B.5.5.11 Shadda**
+##### B.5.5.11 Shadda
 
 *Shadda* (**ّ**) denotes a doubling of the consonant below it, so this is transliterated by doubling the appropriate character. Search algorithms should note that *shaddah* is optional and sometimes a doubling of the character will be present and sometimes not.
 
 Note the special case of **الله** (Allah).
 
-**B.5.5.12 Sukun**
+##### B.5.5.12 Sukun
 
 *Sukun* (**ّ**) denotes the absence of a vowel, is optional, and is not transliterated.
 
-**B.5.5.13 Superscript alef**
+##### B.5.5.13 Superscript alef
 
 *Superscript alef* (ٰ) ("vowel-dagger-alef") is not transliterated.
 
-**B.5.5.14 Alef wasla**
+##### B.5.5.14 Alef wasla
 
 *Alef wasla* (**ٱ**) is now transliterated as XXA at the recommendation of Interpol [5]. Other characters are transliterated XA_, thus the former XA is incompatible. Dr Hoogland [6] also recommends XXA.
 
