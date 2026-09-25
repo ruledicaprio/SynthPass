@@ -16,6 +16,37 @@ Every entry names the pull request or commit it came from, so it traces back to 
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-09-25
+
+### Fixed
+- **Damaged-zone recovery no longer invents the format letter.** A passport whose line 1 OCR
+  dropped a character could be returned as a checksum-valid MRV-A visa: restoration inserted
+  `V` at cell 0, and the visa layout lacks TD3's personal-number and composite checks.
+  Restoration now keeps the observed first cell while still recovering missing interior cells.
+- **Damaged-zone recovery no longer picks one of several disagreeing readings.** When
+  `find_and_parse` rebuilds a damaged zone, it returns a reading only if every recovered
+  candidate is the same answer. It used to compare six fields: the document number, the two
+  dates, the two names and the nationality. Candidates that differed in sex, issuing state,
+  document code, optional data, the full document number or format counted as unanimous, and the
+  first candidate won. The rest of the zone decided which one that was.
+
+  No check digit covers sex, the issuing state, the document code or the format, so such a
+  reading was checksum-consistent and still wrong. Candidates now have to agree on every
+  `MrzData` field except `mrz_lines`, format included. Otherwise the recovery refuses and the
+  ordinary checksum-failed result is returned.
+- **A TD3 line 1 one cell too long no longer defaults to an unresolved issuing state.** Line 1
+  carries no check digit, so when the as-read issuing state doesn't resolve in `country_name`,
+  `find_and_parse` now tries deleting each single cell of the three-letter issuing-state slot on
+  its own. Exactly one resolving deletion is used; two or more real, distinct countries are
+  equally admissible, so the read is refused instead of guessed. An already-resolving issuing
+  state is left untouched either way.
+- **A genuine Part 4 §4.4 TD3 document code is no longer rewritten into another country.**
+  `find_and_parse` was unshifting a real second document-code letter (`PP`, `PD`, `PS`, `PR`, ...)
+  whenever the code's letter plus the issuer's first two letters happened to spell a different
+  real ISO/ICAO state — e.g. a genuine Nigerian `PP` passport (`PPNGA...`) was read back as
+  document code `P` and issuer `PNG` (Papua New Guinea). The as-read line is now kept whenever it
+  already carries a resolving §4.4 code and issuer, before the unshifted reading is even tried.
+
 ## [0.8.0] — 2026-09-24
 
 **Upgrading from 0.7:** follow the
