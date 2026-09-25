@@ -1704,6 +1704,14 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
+    // An intact TD1 triple carries stronger format evidence than a 36-cell
+    // reading manufactured by padding its first two 30-cell rows (#409, the
+    // Türkiye 2020 specimen: its printed check digits fail, and the padded TD2
+    // happened to verify one more digit). Record the exact start positions, so
+    // a separate genuine TD2 elsewhere in the OCR text stays eligible. A
+    // checksum failure does not erase the TD1 shape.
+    let intact_td1_starts = intact_td1_starts(&lines, opts);
+
     // TD2: two 36-char lines starting with I/A/C — or both merged into one
     // ~72-char physical line.
     for &line in &lines {
@@ -1730,6 +1738,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
     for i in 0..lines.len().saturating_sub(1) {
+        if intact_td1_starts.contains(&i) {
+            continue;
+        }
         let l1_candidates = variants(lines[i], 36, repair_td2_line1_shifted)
             .into_iter()
             .chain(variants(lines[i], 36, repair_td2_line1));
@@ -1756,7 +1767,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // some line already matched a format's shape — a document with no MRZ at
     // all never pays for it.
     if fallback.is_some() {
-        if let Some(data) = damaged_pass(&lines, opts) {
+        if let Some(data) = damaged_pass(&lines, opts, &intact_td1_starts) {
             return Ok(data);
         }
     }
@@ -2024,7 +2035,11 @@ fn class_swept(
 ///
 /// Returns `None` unless [`ParseOptions::class_sweep`] is on, so the whole
 /// pass — and this judgement — costs nothing until the arm is measured.
-fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+fn class_sweep_pass(
+    lines: &[&str],
+    opts: &ParseOptions,
+    intact_td1_starts: &[usize],
+) -> Option<MrzData> {
     if !opts.class_sweep {
         return None;
     }
@@ -2101,6 +2116,9 @@ fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     for i in 0..lines.len().saturating_sub(1) {
         let (a, b) = (lines[i], lines[i + 1]);
         for (width, prefixes, rep1, rep2, parse, cd_fields) in two_line {
+            if width == 36 && prefixes == b"IAC" && intact_td1_starts.contains(&i) {
+                continue;
+            }
             let v1 = td3_line1_variants(a, width, prefixes, rep1);
             let v2 = class_swept(b, width, rep2, cd_fields);
             for l1 in &v1 {
@@ -2121,6 +2139,25 @@ fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     }
 
     single(hits)
+}
+
+/// Start indices of every three consecutive rows that are exactly a TD1 zone:
+/// three 30-cell rows in the MRZ charset that `parse_td1_with` accepts as a
+/// layout, whether or not their check digits verify (#409). The TD2 paths
+/// skip a pair starting at one of these rows, so an intact TD1 is never padded
+/// into a TD2 reading.
+fn intact_td1_starts(lines: &[&str], opts: &ParseOptions) -> Vec<usize> {
+    lines
+        .windows(3)
+        .enumerate()
+        .filter_map(|(index, rows)| {
+            let [first, second, third] = [rows[0], rows[1], rows[2]].map(normalize_line);
+            let shaped = [&first, &second, &third]
+                .iter()
+                .all(|row| row.len() == 30 && is_mrz_charset(row));
+            (shaped && parse_td1_with(&first, &second, &third, opts).is_ok()).then_some(index)
+        })
+        .collect()
 }
 
 /// A reading recovered from damage has to clear a higher bar than one read
@@ -2151,11 +2188,15 @@ fn accept_damaged(data: &MrzData) -> bool {
 /// different readings means the MRZ cannot distinguish them, and the honest
 /// answer is the ordinary checksum-failed fallback, not the first candidate
 /// off the list.
-fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+fn damaged_pass(
+    lines: &[&str],
+    opts: &ParseOptions,
+    intact_td1_starts: &[usize],
+) -> Option<MrzData> {
     // Preferred over the search below when it lands -- see `class_sweep_pass`
     // for why pooling the two makes the sweep lose to the machinery it
     // complements. No-op unless the arm is on.
-    if let Some(data) = class_sweep_pass(lines, opts) {
+    if let Some(data) = class_sweep_pass(lines, opts, intact_td1_starts) {
         return Some(data);
     }
     let mut budget = MAX_DAMAGED_ATTEMPTS;
@@ -2252,6 +2293,9 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     for i in 0..lines.len().saturating_sub(1) {
         let (a, b) = (lines[i], lines[i + 1]);
         for (width, prefixes, rep1, rep2, parse) in two_line {
+            if width == 36 && prefixes == b"IAC" && intact_td1_starts.contains(&i) {
+                continue;
+            }
             for (v1, v2) in [
                 (restored(a, width, rep1), variants(b, width, rep2)),
                 (
