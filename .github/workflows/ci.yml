@@ -292,6 +292,8 @@ jobs:
           python-version: "3.11"
       - name: tools/ unit tests (offline)
         run: python -m unittest discover -s tools -p "test_*.py"
+      - name: Fixture intake gate
+        run: python tools/check_fixture_intake.py
 
   cargo-deny:
     name: cargo-deny (advisories & licenses)
