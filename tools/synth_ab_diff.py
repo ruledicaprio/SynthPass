@@ -35,6 +35,12 @@ unreadable input.
   `refused -> wrong`, `wrong -> correct`, `correct -> wrong`;
 - `wrong -> wrong` when both are wrong accepts but the wrong fields changed.
 
+`valid-miss` is a miss whose every reported check digit passed: the parser
+returned a checksum-valid reading, but its document number (or another hit
+criterion) is wrong. The bench scores it as a miss, not a wrong accept, so a
+plain hit/miss view would call it `refused`. It is a wrong read, and the worst
+kind: nothing downstream can tell it from a correct one (#473, PR #471's seed 99).
+
 A report written before #457 has no `wrong_accept`. For those reports, a hit
 is classed from its `fields` CER, the same rule `wrong_scored_fields` uses.
 """
@@ -63,9 +69,10 @@ def wrong_fields(doc: dict) -> tuple[str, ...]:
 
 
 def state(doc: dict) -> str:
-    """One of `correct`, `wrong`, `refused`."""
+    """One of `correct`, `wrong`, `valid-miss`, `refused`."""
     if not doc.get("hit"):
-        return "refused"
+        checks = [v for v in (doc.get("check_states") or {}).values() if v is not None]
+        return "valid-miss" if checks and all(checks) else "refused"
     if "wrong_accept" in doc:
         return "wrong" if doc["wrong_accept"] else "correct"
     return "wrong" if wrong_fields(doc) else "correct"
@@ -120,6 +127,7 @@ def compare(before: dict, after: dict) -> dict:
             "hits": sum(1 for d in docs if d.get("hit")),
             "correct": sum(1 for d in docs if state(d) == "correct"),
             "wrong_accepts": sum(1 for d in docs if state(d) == "wrong"),
+            "valid_misses": sum(1 for d in docs if state(d) == "valid-miss"),
             "count": len(docs),
         }
 
@@ -138,7 +146,8 @@ def render(result: dict) -> str:
         lines.append(f"NOT AN A/B: {p}")
     b, a = result["before"], result["after"]
     lines.append(f"hits {b['hits']} -> {a['hits']}   correct {b['correct']} -> {a['correct']}   "
-                 f"wrong accepts {b['wrong_accepts']} -> {a['wrong_accepts']}   (of {a['count']})")
+                 f"wrong accepts {b['wrong_accepts']} -> {a['wrong_accepts']}   "
+                 f"valid misses {b['valid_misses']} -> {a['valid_misses']}   (of {a['count']})")
     for cls, n in result["classes"].items():
         lines.append(f"  {n:3d}  {cls}")
     for m in result["moved"]:

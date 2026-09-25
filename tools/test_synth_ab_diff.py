@@ -38,6 +38,15 @@ class State(unittest.TestCase):
         self.assertEqual(d.state(doc(0, True, fields=PREFIX_WRONG)), "wrong")
         self.assertEqual(d.state(doc(0, True, fields=[field("surname")])), "correct")
 
+    def test_checksum_valid_miss_is_not_refused(self):
+        # PR #471's seed 99: every check digit passes, the document number is wrong.
+        valid = dict(doc(99, False), check_states={"composite": True, "document_number": True,
+                                                   "personal_number": None})
+        self.assertEqual(d.state(valid), "valid-miss")
+        failed = dict(doc(99, False), check_states={"composite": False, "document_number": True})
+        self.assertEqual(d.state(failed), "refused")
+        self.assertEqual(d.state(dict(doc(99, False), check_states={})), "refused")
+
     def test_mrz_lines_alone_is_not_wrong(self):
         self.assertEqual(d.state(doc(0, True, fields=[field("mrz_lines", 0.02, "a", "b")])), "correct")
 
