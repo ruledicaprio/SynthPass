@@ -14,6 +14,20 @@
 //! mirrors; `synthetic TD3 --seed 0 --count 100` seeds 18, 26, 37, 60, 66,
 //! 72 and 86 (`TRACE_461.md`) are the measured real-shape occurrences this
 //! reproduces synthetically.
+//!
+//! #469: chaining `repair_td3_line1_shifted` ahead of `rep1` in
+//! `td3_line1_variants` (the fix above) made two of those seven seeds
+//! (26, 86) regress from a silent wrong hit to a needless refusal --
+//! `single()` saw the corrected unshifted reading *and* the still-shifted
+//! plain one disagree, even though the plain one is never admissible under
+//! `td3_line1_admissible` (its issuer never resolves, and its document code
+//! is never a genuine `P<`/section-4.4 code). `td3_line1_variants` now drops
+//! the inadmissible candidates before `single()` ever sees them, but only
+//! when at least one admissible candidate survives -- see its own doc
+//! comment. `damaged_pass_no_longer_returns_a_left_shifted_td3_line1` below
+//! is exactly that seed-26/86 shape (`document_type`/`issuing_country` "PR"/
+//! "USP" is inadmissible on both counts) and its outcome flips from
+//! checksum-failed to a validated hit as a result.
 
 mod support;
 
@@ -82,22 +96,20 @@ fn genuine_rus_petrov() -> (String, String) {
 /// `damaged_pass`'s single-substitution repair.
 ///
 /// `single()` (#440) still arbitrates: chaining `repair_td3_line1_shifted`
-/// into `td3_line1_variants` means this shape now offers *two* line-1
-/// readings against the recovered line 2 -- the corrected unshifted one and
-/// the un-repaired left-shifted one ("PR"/"USP", a structurally valid but
+/// into `td3_line1_variants` means this shape offers *two* line-1 readings
+/// against the recovered line 2 -- the corrected unshifted one and the
+/// un-repaired left-shifted one ("PR"/"USP", a structurally valid but
 /// meaningless document-type/issuer pair) -- and both parse and validate
 /// structurally. They disagree on `document_type`, `issuing_country` and
-/// `surname`, so the unanimity gate refuses this document to `damaged_pass`'s
-/// caller, which then falls back to `find_and_parse_with`'s own best-evidence
-/// candidate (`consider`'s `fallback`) rather than a hard error. That
-/// fallback happens to carry the *correct* line 1 already, because the
-/// ordinary TD3 scan tries `repair_td3_line1_shifted`'s candidate before
-/// `repair_td3_line1`'s and ties keep the incumbent -- but the fallback's
-/// line 2 is still whatever `repair_td3_line2` alone produced, uncorrected,
-/// so it is reported checksum-failed rather than a hit. That is the correct,
-/// honest outcome: nothing on this MRZ's line 1 disambiguates the two
-/// readings, and #461's own bug was exactly this wrong reading being
-/// returned as if it were the only one, silently, as a Tier-1 hit.
+/// `surname`, but #469's admissibility filter drops "PR"/"USP" before
+/// `single()` ever sees it: its document code is not `P<` nor a genuine
+/// section 4.4 code, and "USP" does not resolve as a country, so
+/// `td3_line1_admissible` rejects it outright while the unshifted "P<RUS"
+/// reading passes. `single()` is left with one candidate, not two, so this
+/// now returns a validated hit rather than refusing -- #461's own bug was
+/// this exact wrong reading being returned as if it were the only one,
+/// silently, as a Tier-1 hit; #469 restores the correct one instead of
+/// merely refusing both.
 #[test]
 fn damaged_pass_no_longer_returns_a_left_shifted_td3_line1() {
     let (l1, l2) = genuine_rus_petrov();
@@ -107,32 +119,23 @@ fn damaged_pass_no_longer_returns_a_left_shifted_td3_line1() {
     let damaged_l2 = confuse_document_number_lead(&l2);
     let text = format!("{damaged_l1}\n{damaged_l2}");
 
-    let data = find_and_parse(&text).unwrap_or_else(|e| {
-        panic!(
-            "expected either the corrected reading or a checksum-failed \
-             fallback carrying the correct identity fields, got a hard error: {e:?}"
-        )
-    });
+    let data = find_and_parse(&text)
+        .unwrap_or_else(|e| panic!("expected the corrected reading, got a hard error: {e:?}"));
 
-    // Whichever candidate surfaces, it must never be the left-shifted wrong
-    // reading (`document_type` "PR", `issuing_country` "USP", `surname`
-    // starting from the wrong offset) that #461 reported as a silent hit.
+    // The left-shifted wrong reading (`document_type` "PR", `issuing_country`
+    // "USP", `surname` starting from the wrong offset) that #461 reported as
+    // a silent hit must never surface, whether or not it now validates.
     assert_eq!(data.format, Format::Td3);
     assert_eq!(data.document_type, "P", "must not stay left-shifted");
     assert_eq!(data.issuing_country, "RUS", "must not stay left-shifted");
     assert_eq!(data.surname, "PETROV", "must not stay left-shifted");
-    // Measured behaviour: the unanimity gate refuses (two disagreeing line-1
-    // readings), so this surfaces as `find_and_parse_with`'s checksum-failed
-    // fallback, not a `damaged_pass` hit. Asserted explicitly, not merely
-    // tolerated, so a future change that starts silently returning the wrong
-    // reading again still fails the identity-field asserts above, and a
-    // future change that resolves the ambiguity and starts validating fails
-    // *this* assert as a prompt to update the comment above, not silently.
+    // #469: with the inadmissible "PR"/"USP" candidate dropped before
+    // `single()`, only the corrected reading remains, so this is now a full
+    // validated hit rather than a checksum-failed fallback.
     assert!(
-        !data.valid(),
-        "measured outcome is a refusal surfaced as a checksum-failed \
-         fallback; if this now validates, the ambiguity above was resolved \
-         and this assertion (and the doc comment above it) should flip"
+        data.valid(),
+        "#469's admissibility filter should leave only the corrected \
+         reading, which fully validates"
     );
 }
 
@@ -179,5 +182,58 @@ fn a_genuine_table_code_survives_the_damaged_pass_line2_substitution() {
     assert!(
         data.valid(),
         "the line-2 substitution must be fully recovered"
+    );
+}
+
+/// #469's filter only drops candidates whose *country or document code*
+/// never resolves -- it must never paper over a genuine disagreement on
+/// another field. A given-names field ending in a lone `L` right before the
+/// name-padding filler run is exactly that: `repair_td3_line1`'s ordinary
+/// `defiller` leaves a single K/L touching filler alone (its "at least 3 of
+/// a run of 4" guard doesn't fire), so the *plain* candidate keeps "IVANL";
+/// `variants`' `aggressive_defiller` last-resort form folds that same `L`
+/// into the filler run instead, so a *second* candidate reads "IVAN". Both
+/// have the same document code (`P<`) and issuing country (`RUS`), so both
+/// are `td3_line1_admissible` -- #469's filter keeps both, exactly as before
+/// this change, and `single()`'s unanimity gate still refuses on the
+/// differing `given_names`. This is the synthetic shape behind seed 66's
+/// real `IURII`/`IURIL` disagreement (`TRACE_461.md`): the proposal must
+/// leave a genuine same-country, same-code name disagreement refused.
+#[test]
+fn two_admissible_same_country_readings_that_disagree_on_name_still_refuse() {
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "RUS".to_string(),
+        document_number: DISTINCT_DIGIT_DOCUMENT_NUMBER.to_string(),
+        surname: "PETROV".to_string(),
+        given_names: "IVANL".to_string(),
+        nationality: "RUS".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Male,
+        date_of_expiry: support::expiry("301230"),
+        personal_number: None,
+    });
+    let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+    assert!(l1.starts_with("P<RUS"), "sanity: emitted line 1 is {l1}");
+    assert!(
+        l1.contains("IVANL<"),
+        "sanity: given name must sit directly against the filler run, got {l1}"
+    );
+
+    let damaged_l2 = confuse_document_number_lead(l2);
+    let text = format!("{l1}\n{damaged_l2}");
+
+    let data = find_and_parse(&text)
+        .unwrap_or_else(|e| panic!("expected a checksum-failed fallback, got a hard error: {e:?}"));
+
+    // Both readings share `document_type`/`issuing_country`, so #469's
+    // admissibility filter cannot distinguish them -- unanimity is the only
+    // thing left to refuse this, and it must still do so.
+    assert_eq!(data.format, Format::Td3);
+    assert_eq!(data.issuing_country, "RUS");
+    assert!(
+        !data.valid(),
+        "two admissible readings disagreeing on given_names (\"IVANL\" vs \
+         \"IVAN\") must still be refused by single()'s unanimity gate"
     );
 }
