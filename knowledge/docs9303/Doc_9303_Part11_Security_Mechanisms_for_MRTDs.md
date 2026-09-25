@@ -59,8 +59,15 @@ All rights reserved. No part of this publication may be reproduced, stored in a 
       - 4.4.3.1 DH
       - 4.4.3.2 ECDH
       - 4.4.3.3 Encrypting and Mapping Nonces
+        - 4.4.3.3.1 Generic Mapping
+        - 4.4.3.3.2 Integrated Mapping
+        - 4.4.3.3.3 Chip Authentication Mapping
       - 4.4.3.4 Authentication Token
       - 4.4.3.5 Encrypted Chip Authentication Data
+        - 4.4.3.5.1 Generation by the eMRTD chip
+        - 4.4.3.5.2 Verification by the terminal
+        - 4.4.3.5.3 Padding
+        - 4.4.3.5.4 AES
     - 4.4.4 Application Protocol Data Units
       - 4.4.4.1 MSE:Set AT
       - 4.4.4.2 GENERAL AUTHENTICATE
@@ -68,6 +75,9 @@ All rights reserved. No part of this publication may be reproduced, stored in a 
     - 4.4.5 Exchanged Data
       - 4.4.5.1 Encrypted Nonce
       - 4.4.5.2 Mapping Data
+        - 4.4.5.2.1 Generic Mapping
+        - 4.4.5.2.2 Integrated Mapping
+        - 4.4.5.2.3 Chip Authentication Mapping
       - 4.4.5.3 Public Keys
       - 4.4.5.4 Authentication Token
       - 4.4.5.5 Certification Authority Reference
@@ -675,7 +685,7 @@ To map the nonce s or the nonces s, t into the cryptographic group one of the fo
 
 <!-- page 26 -->
 
-4.4.3.3.1 Generic Mapping
+##### 4.4.3.3.1 Generic Mapping
 
 ECDH
 
@@ -689,7 +699,7 @@ The function Map:g → ĝ is defined as ĝ =gs×h, where h in <g> is chosen such
 
 Note.— The public key validation method described in [RFC 2631] MUST be used to prevent small subgroup attacks.
 
-4.4.3.3.2 Integrated Mapping
+##### 4.4.3.3.2 Integrated Mapping
 
 ECDH
 
@@ -732,7 +742,7 @@ The constants c0 and c1 are defined as follows:
 * c0= 0xd463d65234124ef7897054986dca0a174e28df758cbaa03f240616414d5a1676
 * c1= 0x54bd7255f0aaf831bec3423fcf39d69b6cbf066677d0faae5aadd99df8e53517
 
-4.4.3.3.3 Chip Authentication Mapping
+##### 4.4.3.3.3 Chip Authentication Mapping
 
 The mapping phase of the PACE-CAM is identical to the mapping phase of PACE-GM (cf. Section 4.4.3.3.1).
 
@@ -758,23 +768,23 @@ AES [FIPS 197] SHALL be used in CMAC-mode [SP 800-38B] with a MAC length of 8 by
 
 The eMRTD chip MUST provide static key pair(s) SKIC, PKIC as described in Section 6.2. Encrypted Chip Authentication Data is REQUIRED for PACE with Chip Authentication Mapping.
 
-4.4.3.5.1 Generation by the eMRTD chip
+##### 4.4.3.5.1 Generation by the eMRTD chip
 
 The Chip Authentication Data SHALL be computed as CAIC = (SKIC)-1 * SKMap,IC mod p, where SKIC is the static private key of the chip, SKMap, IC is the ephemeral private key used by the chip to compute H in the mapping phase of PACE (cf. Section 4.4.3.3.1) and p is the order of the used cryptographic group. The Chip Authentication Data SHALL be encrypted using the key KSEnc derived from the key agreement as AIC = E(KSEnc, CAIC) to yield the Encrypted Chip Authentication Data.
 
 Note.— (SKIC)-1 can be precomputed during personalization of the eMRTD chip and securely stored in the chip, avoiding the modular inversion during run-time.
 
-4.4.3.5.2 Verification by the terminal
+##### 4.4.3.5.2 Verification by the terminal
 
 The terminal SHALL decrypt AIC to recover CAIC and verify PKMap,IC = KA(CAIC, PKIC, DIC), where PKIC is the static public key of the eMRTD chip.
 
 Note.— Passive Authentication MUST be performed in combination with the Chip Authentication Mapping. Only after a successful validation of the respective Security Object may the eMRTD chip be considered genuine.
 
-4.4.3.5.3 Padding
+##### 4.4.3.5.3 Padding
 
 The data to be encrypted SHALL be padded according to [ISO/IEC 9797-1] “Padding Method 2”.
 
-4.4.3.5.4 AES
+##### 4.4.3.5.4 AES
 
 AES [19] SHALL be used in CBC-mode according to [ISO/IEC 10116] with IV=E(KSEnc,-1), where -1 is the bit string of length 128 with all bits set to 1.
 
@@ -873,17 +883,17 @@ The encrypted nonce (cf. Section 4.4.3.3) SHALL be encoded as octet string.
 
 The exchanged data is specific to the used mapping:
 
-4.4.5.2.1 Generic Mapping
+##### 4.4.5.2.1 Generic Mapping
 
 The ephemeral public keys (cf. Section 4.4.3.3 and Section 9.4.5) SHALL be encoded as elliptic curve point (ECDH) or unsigned integer (DH).
 
-4.4.5.2.2 Integrated Mapping
+##### 4.4.5.2.2 Integrated Mapping
 
 The nonce t SHALL be encoded as octet string.
 
 Note.— The context specific data object 0x82 SHALL be empty for the Integrated Mapping.
 
-4.4.5.2.3 Chip Authentication Mapping
+##### 4.4.5.2.3 Chip Authentication Mapping
 
 The encoding of the mapping data is identical to the Generic Mapping (cf. Section 4.4.5.2.1).
 
