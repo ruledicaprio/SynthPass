@@ -46,7 +46,7 @@ non-conforming one).
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **140** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| **Tier-1 HIT** | **139** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 2 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13; two real detection targets since the San Marino template (2026-09-17) and Moldova PA 2014 (2026-09-19) left the bucket, each reclassified as carrying no zone |
 | `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 3.3× the other since the c03/c07/c09 cohort |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
