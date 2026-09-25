@@ -221,3 +221,164 @@ fn an_all_filler_issuing_state_still_does_not_resolve() {
     assert_eq!(mrz::country_name(""), None);
     assert_eq!(mrz::country_name("<<<"), None);
 }
+
+/// #445: a genuine Part 4 §4.4 document code collides with `unshift_line1_prefix`
+/// whenever the code's second letter plus the issuer's first two letters also
+/// spell a real ISO/ICAO three-letter state. `unshift_if_country_resolves`
+/// only ever checked whether the *unshifted* reading's issuer resolved — never
+/// whether the as-read line already had a resolving code and issuer of its
+/// own — so a genuine Nigerian `PP` passport (`PPNGA...`) was silently
+/// rewritten to a `P<PNG...` (Papua New Guinea) reading. `PP`+`RKS` (Kosovo,
+/// whose unshifted form spells `PRK`, North Korea), `PD`+`ZAF` (unshifts to
+/// `DZA`, Algeria), `PS`+`AUT` (unshifts to `SAU`, Saudi Arabia) and `PR`+`USA`
+/// (unshifts to `RUS`, Russia) are four more of the 67 colliding pairs the
+/// architect enumerated against `countries.rs`. Every one of these must
+/// survive `find_and_parse` exactly as printed.
+///
+/// Written first and confirmed to fail on the unfixed code (see the PR/commit
+/// this test shipped with): before `td3_line1_is_genuine_table_code`,
+/// `PPNGA...` read back as document type `P` / issuer `PNG`.
+#[test]
+fn genuine_table_code_whose_unshift_collides_is_kept() {
+    for (code, issuer) in [
+        ("PP", "NGA"),
+        ("PP", "RKS"),
+        ("PD", "ZAF"),
+        ("PS", "AUT"),
+        ("PR", "USA"),
+    ] {
+        let mrz = format_td3(&Td3Fields {
+            document_code: code.to_string(),
+            issuing_country: issuer.to_string(),
+            document_number: "E000000000".to_string(),
+            surname: "OKAFOR".to_string(),
+            given_names: "ADA".to_string(),
+            nationality: issuer.to_string(),
+            date_of_birth: support::birth("800101"),
+            sex: mrz::Sex::Female,
+            date_of_expiry: support::expiry("301230"),
+            personal_number: None,
+        });
+        let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+
+        let data = find_and_parse(&format!("{l1}\n{l2}"))
+            .unwrap_or_else(|e| panic!("{code}+{issuer} must parse: {e:?}"));
+        assert_eq!(
+            data.document_type, code,
+            "{code}+{issuer}: document code must survive as printed"
+        );
+        assert_eq!(
+            data.issuing_country, issuer,
+            "{code}+{issuer}: issuer must survive as printed, not the unshifted collision"
+        );
+        assert!(
+            data.valid(),
+            "{code}+{issuer}: line 2's check digits are untouched"
+        );
+    }
+}
+
+/// `PS`/`PO`/`PE` (stateless, official, emergency) are genuine §4.4 codes
+/// whose unshifted reading does *not* happen to collide with a real country
+/// (`BRA`'s first two letters paired with each code's second letter spell
+/// `SBR`/`OBR`/`EBR`, none of which resolve) — pinning that the new guard
+/// keeps them for the ordinary reason (a genuine table code plus a resolving
+/// issuer), not merely because the collision list happens to be empty here.
+#[test]
+fn genuine_ps_po_pe_are_kept() {
+    for code in ["PS", "PO", "PE"] {
+        let mrz = format_td3(&Td3Fields {
+            document_code: code.to_string(),
+            issuing_country: "BRA".to_string(),
+            document_number: "E000000000".to_string(),
+            surname: "ESKANDARI".to_string(),
+            given_names: "MAREN".to_string(),
+            nationality: "BRA".to_string(),
+            date_of_birth: support::birth("800101"),
+            sex: mrz::Sex::Female,
+            date_of_expiry: support::expiry("301230"),
+            personal_number: None,
+        });
+        let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+
+        let data = find_and_parse(&format!("{l1}\n{l2}")).expect("emitted TD3 parses");
+        assert_eq!(data.document_type, code);
+        assert_eq!(data.issuing_country, "BRA");
+        assert!(data.valid());
+    }
+}
+
+/// Status quo, unchanged by the #445 fix: a genuinely dropped position-1
+/// filler (`P<GBR...` read as `PGBR...`) must still be unshifted back, since
+/// `PG` is not a §4.4 table code and does not pass
+/// `td3_line1_is_genuine_table_code`'s first check.
+#[test]
+fn dropped_filler_is_still_unshifted() {
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "GBR".to_string(),
+        document_number: "E000000000".to_string(),
+        surname: "ESKANDARI".to_string(),
+        given_names: "MAREN".to_string(),
+        nationality: "GBR".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Female,
+        date_of_expiry: support::expiry("301230"),
+        personal_number: None,
+    });
+    let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+    assert!(l1.starts_with("P<GBR"), "sanity: emitted line 1 is {l1}");
+
+    let damaged = drop_position_1(l1);
+    let text = format!("{damaged}\n{l2}");
+    let data = find_and_parse(&text).expect("a dropped position-1 filler must still parse");
+
+    assert_eq!(data.format, Format::Td3);
+    assert_eq!(data.document_type, "P");
+    assert_eq!(data.issuing_country, "GBR");
+    assert!(data.valid());
+}
+
+/// **Known limitation**, pinned honestly rather than hidden: a genuine `P<RUS`
+/// whose surname starts with `A` and whose position-1 filler is dropped reads
+/// as `PRUSA...`, which is byte-for-byte indistinguishable from a genuine `PR`
+/// (refugee passport) issued by `USA`. `td3_line1_is_genuine_table_code`
+/// cannot tell the two apart — both are a real §4.4 code plus a resolving
+/// issuer on the as-read line — so this reading is now kept as `PR`/`USA`
+/// rather than unshifted back to `P<`/`RUS`. Nothing on line 1 disambiguates
+/// this case; only a name/photo cross-check outside this crate's scope could.
+#[test]
+fn known_limitation_dropped_filler_colliding_with_a_genuine_code_is_kept_as_the_code() {
+    let mrz = format_td3(&Td3Fields {
+        document_code: "P".to_string(),
+        issuing_country: "RUS".to_string(),
+        document_number: "E000000000".to_string(),
+        surname: "ALEKSANDROV".to_string(),
+        given_names: "IVAN".to_string(),
+        nationality: "RUS".to_string(),
+        date_of_birth: support::birth("800101"),
+        sex: mrz::Sex::Male,
+        date_of_expiry: support::expiry("301230"),
+        personal_number: None,
+    });
+    let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+    assert!(
+        l1.starts_with("P<RUSALEKSANDROV"),
+        "sanity: emitted line 1 is {l1}"
+    );
+
+    let damaged = drop_position_1(l1);
+    let text = format!("{damaged}\n{l2}");
+    let data = find_and_parse(&text).expect("still parses, just to the wrong reading");
+
+    assert_eq!(data.format, Format::Td3);
+    assert_eq!(
+        data.document_type, "PR",
+        "known limitation: indistinguishable from a genuine PR+USA on line 1 alone"
+    );
+    assert_eq!(data.issuing_country, "USA");
+    assert!(
+        data.valid(),
+        "the collision reading still validates on line 2's real check digits"
+    );
+}
