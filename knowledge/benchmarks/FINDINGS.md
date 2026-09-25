@@ -20,8 +20,10 @@ regenerate.
 | --- | --- | --- | --- | --- |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](#2026-09-25--440-on-the-m4-synthetic-gate-42--50--39--50-is-three-wrong-reads-refused-none-lost) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](m4-gate-440-wrong-reads-refused-2026-09-25.md) | Observed (two local release `synthpass-bench --count 50 --seed 0 --profile clean` runs, one per commit, plus single-seed re-runs of the before arm and an instrumented replay of the pre-#440 parser) plus Derived (per-seed field comparison against the generator's exact truth) | current | m4-gate-440-wrong-reads-refused-2026-09-25.md |
+| 2026-09-24 | [The chargrid A/B, reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic](chargrid-ab-reconciliation-2026-09-24.md) | Observed (per-document transitions re-derived from the 30 retained A/B reports; no cargo, no benchmark run) | current | chargrid-ab-reconciliation-2026-09-24.md |
 | 2026-09-24 | [ADR-0021 Phase 0: class (C) meets K1 only in the line-1 prefix, and two fixtures are wrong](#2026-09-24--adr-0021-phase-0-class-c-meets-k1-only-in-the-line-1-prefix-and-two-fixtures-are-wrong) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-24 | [a manufactured hit refused: Bosnia 2013 card back leaves Tier-1, 140 / 152 → 139 / 151](#2026-09-24--a-manufactured-hit-refused-bosnia-2013-card-back-leaves-tier-1-140--152--139--151) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-24 | [the chargrid A/B reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic](#2026-09-24--the-chargrid-ab-reconciled-30-and-33-are-two-metrics-of-one-run-and-all-13-regressions-were-synthetic) | — | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-24 | [ADR-0021 Phase 0: class (C) meets K1 only in the line-1 prefix, and two fixtures are wrong](mrz-strip-phase0-results-2026-09-24.md) | Observed (release `provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults; 261 documents, 171 dumped) plus Derived (tail-normalized string alignment against fixtures, hand adjudication) | current | mrz-strip-phase0-results-2026-09-24.md |
 | 2026-09-24 | [The OCR-B standards against our priors: TD1 spacing and the cell width are confirmed wrong, the filler offset is real but ≈0.025 cap, and the ink floor is thin only on a pitch-tall band](ocrb-standards-vs-priors-2026-09-24.md) | Observed (ISO 1073-2 §13 illustration measured on a 600 dpi render; ISO 1831, ECMA-11 and ECMA-18 clauses read on page renders; six OCR-B font files measured by outline) plus Modelled (ink fractions) | current | ocrb-standards-vs-priors-2026-09-24.md |
 | 2026-09-23 | [`COMPARED_FIELDS` grows from ten to twelve columns: a discontinuity in every mean CER, not an improvement](compared-fields-twelve-columns-2026-09-23.md) | Derived (from `synthpass-bench`'s `COMPARED_FIELDS`, `cer` and `total_loss`, and a census of `samples/ocr_fixtures/`; no benchmark run) | current | compared-fields-twelve-columns-2026-09-23.md |
@@ -960,6 +962,21 @@ parser still returned an invented zone. Adding sex or optional data
 to the six-field list was also rejected, because comparing the whole record makes a field added
 later take part by default. That is the safe direction for a refusal gate (#440's commit message).
 
+### 2026-09-24 — the chargrid A/B reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic
+
+Three committed documents quoted the 2026-09-18 chargrid A/B (`SYNTHPASS_OCR_CHARGRID`, #334)
+three different ways. Re-derived per document from the 30 retained reports in
+`artifacts/chargrid-ab-20260917-2356/` (binary built from `daab97e`, a local 257-document tree).
+On **500 synthetic** documents, `names_exact` went +46 / −13 (net **+33**, 205 → 238) and strict
+hits +43 / −13 (net **+30**, 199 → 229 of 377 hits). Tier-1 hits were flat at 377 / 500.
+On **257 real** specimens, strict hits stayed 12 / 43 in all six runs, with Tier-1 at 141 / 155
+scored and 141 / 257 corpus-wide. That flat 12 is a +1 / −1 swap: Somalia P0 2023 was fixed and
+Serbia P0 2012 was broken, both reproduced in two runs. All 13 regressions are synthetic (8 of them
+MRV-A). No artifact attributes a cause. ADR-0015's "traced … to grid-origin error" is unsupported,
+and #342 ruled out the whole-cell form of that hypothesis. `twelve-scored-misses` §8's
+"13 real regressions" is imprecise, and the filler-geometry note's "+30 / 0" is correct as a net
+but omits the swap. Verdicts and proposed replacement text:
+[`chargrid-ab-reconciliation-2026-09-24.md`](chargrid-ab-reconciliation-2026-09-24.md).
 ---
 
 ### 2026-09-25 — #440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost
