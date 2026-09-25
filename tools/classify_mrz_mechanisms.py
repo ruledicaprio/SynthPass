@@ -133,6 +133,7 @@ def classify_row(ledger: dict, dump: dict | None) -> dict:
         "scored": outcome not in OFF_DENOMINATOR,
         "review_target": False,
         "truth_status": "not_in_dump" if dump is None else "unlabelled",
+        "zone_lines_differing": None,
         "labels": [],
         "distance_relations": [],
         "evidence_status": "missing_dump" if dump is None else "available",
@@ -163,6 +164,11 @@ def classify_row(ledger: dict, dump: dict | None) -> dict:
             record["line1_error"] = True
         else:
             record["line1_error"] = False
+        if len(true_lines) == len(recovered):
+            record["zone_lines_differing"] = [
+                index for index, (expected, actual) in enumerate(zip(true_lines, recovered))
+                if expected != actual
+            ]
         raw_lines = [line.strip().upper().replace(" ", "") for line in raw.splitlines()]
         if all(line in raw_lines for line in true_lines):
             contiguous = any(
@@ -193,6 +199,7 @@ def classify_row(ledger: dict, dump: dict | None) -> dict:
         ledger.get("names_exact") is False
         or ledger.get("name_error") is not None
         or record["line1_error"] is True
+        or bool(record["zone_lines_differing"])
     ))
     record["labels"] = sorted(labels, key=LABEL_ORDER.index)
     return record

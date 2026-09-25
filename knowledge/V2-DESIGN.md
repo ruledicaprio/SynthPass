@@ -111,19 +111,21 @@ This is a permanent non-goal, not a v2.0.0 scoping decision — stated in
 [`VISION.md`](VISION.md)'s non-goals callout:
 
 > SynthPass crops a portrait region; it never *identifies* a person — no
-> face recognition, no biometric matching, no liveness. It proves a
-> faithful *read*; it does not judge document *authenticity* — forgery and
-> tamper detection are out of scope. It does not do cloud anything. These
-> lines do not move.
+> face recognition, no biometric matching, no liveness. A checksum-valid MRZ is
+> *consistent* with its check digits, not proof of a byte-identical *read*; it does not judge
+> document *authenticity* — forgery and tamper detection are out of scope. It does not do
+> cloud anything. These lines do not move.
 
 and restated in [`project_principles.md`](project_principles.md)'s "what
-these rule out" list: "No authenticity or forgery detection. A checksum
-proves a faithful *read*, never a genuine *document*."
+these rule out" list: "No authenticity or forgery detection. A checksum-valid read is
+*consistent* with its check digits, not proof of a faithful *read* — and never proof of a
+genuine *document*."
 
-Concretely: a checksum-valid MRZ proves the extraction pipeline transcribed
-the document's printed data correctly (arithmetic on the check digits
-matches). It proves nothing about whether the document was forged, altered,
-or issued to the person presenting it. `ExtractionV2.confidence` and
+Concretely: a checksum-valid MRZ shows the arithmetic on the check digits agrees — consistent
+with the extraction pipeline having transcribed that data correctly, not proof of it (blind
+character pairs and multi-cell errors can still cancel mod 10, and TD2/TD3 line 1 carries no
+check digit at all). Either way, it proves nothing about whether the document was forged,
+altered, or issued to the person presenting it. `ExtractionV2.confidence` and
 `FieldConfidence` must never be read, displayed, or documented as an
 authenticity signal — every field that inherits this constraint (`portrait`
 in §4, `confidence` itself) says so at its own definition site rather than

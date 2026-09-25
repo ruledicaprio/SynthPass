@@ -94,6 +94,11 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 | **[ecma/](ecma/)** | The Ecma OCR standards under the MRZ typeface (ECMA-11, 15, 18, 21, 30), transcribed; the Ecma twins of the ISO standards Doc 9303 cites. |
 | **[ocrb/](ocrb/)** | OCR-B glyph geometry, print quality, pitch and line spacing from ISO 1073-2 / ISO 1831 / ECMA, as cited facts tied to SynthPass code and measurements. |
 
+**[LIBRARY.md](LIBRARY.md)** is the card catalog for this table: every directory's file count,
+plus the half of the picture this README has no reason to carry — what the private `ocr-b`
+repository holds, which of it is mirrored here, and why a given standard is public (Ecma) or
+distilled-only (ISO). Read it before filing a new standard or wondering where one already lives.
+
 ## Where the numbers live
 
 **[benchmarks/README.md](benchmarks/README.md) is the only document that carries live accuracy
