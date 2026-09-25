@@ -1039,6 +1039,24 @@ fn td3_prefix_verdict(line: &str) -> Td3Prefix {
 /// loop across TD3/MRV-A/TD2/MRV-B (see their own `two_line` tables), so the
 /// gate has to be selected by row rather than hard-coded into the loop —
 /// every other row calls plain [`variants`] unchanged.
+///
+/// #461: the `Keep` arm used to call `variants(raw, width, rep1)` alone —
+/// `rep1` is always [`repair_td3_line1`] at this row, never
+/// [`repair_td3_line1_shifted`], so a line whose position-1 filler was
+/// dropped by the OCR retry loop (rather than caught by
+/// [`td3_prefix_verdict`]'s 45-cell search) was never unshifted here, only in
+/// `find_and_parse_with`'s ordinary TD3 scan. `class_sweep_pass` and
+/// `damaged_pass` both call this function to build a TD3 line 1 and then
+/// cross it against a *repaired line 2* the ordinary scan never gets to try
+/// before returning its own (still left-shifted) candidate first — so a
+/// checksum-valid repaired line 2 paired with this still-shifted line 1 was
+/// returned outright, with the wrong `document_type`/`issuing_country`/
+/// name. Chaining [`repair_td3_line1_shifted`]'s candidates here, exactly as
+/// `find_and_parse_with`'s `l1_candidates` already does for the ordinary
+/// scan, is a **second, independent [`variants`] call** rather than
+/// replacing `rep1` — see [`unshift_line1_prefix`]'s doc comment for why
+/// mutating what a single repair function returns silently drops a
+/// previously-tried candidate rather than only adding one.
 fn td3_line1_variants(
     raw: &str,
     width: usize,
@@ -1051,7 +1069,10 @@ fn td3_line1_variants(
     match td3_prefix_verdict(&fix_doc_code(&normalize_line(raw))) {
         Td3Prefix::Ambiguous => Vec::new(),
         Td3Prefix::Repair(fixed) => vec![fixed],
-        Td3Prefix::Keep => variants(raw, width, rep1),
+        Td3Prefix::Keep => variants(raw, width, repair_td3_line1_shifted)
+            .into_iter()
+            .chain(variants(raw, width, rep1))
+            .collect(),
     }
 }
 
