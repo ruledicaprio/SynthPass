@@ -69,6 +69,38 @@ fn delete_at(line: &str, at: usize) -> String {
     s
 }
 
+/// A dropped passport format letter must not be replaced with a visa letter.
+/// The two TD3-only digits are then damaged, leaving a validating MRV-A
+/// reading if the missing cell is allowed to become `V` at the front.
+#[test]
+fn a_restored_line_never_invents_the_format_letter() {
+    let (line1, line2) = td3_zone();
+    assert!(mrz::parse_td3(&line1, &line2)
+        .expect("emitted TD3 parses")
+        .valid());
+
+    let short_line1 = delete_at(&line1, 0);
+    assert_eq!(short_line1.len(), 43);
+    let mut line2 = line2.into_bytes();
+    line2[42] = b'1'; // the unused personal-number digit is no longer valid
+    line2[43] = if line2[43] == b'0' { b'1' } else { b'0' };
+    let line2 = String::from_utf8(line2).expect("ASCII MRZ line");
+    assert!(!mrz::parse_td3(&line1, &line2)
+        .expect("damaged TD3 still parses")
+        .valid());
+    assert!(mrz::parse_mrv_a(&format!("V{short_line1}"), &line2)
+        .expect("same cells can form MRV-A")
+        .valid());
+
+    // A parseable but checksum-failed pair enables the damaged-capture pass.
+    let text = format!("{line1}\n{line2}\n{short_line1}\n{line2}");
+    let recovered = find_and_parse(&text);
+    assert!(
+        !matches!(recovered, Ok(data) if data.format == mrz::Format::MrvA),
+        "a missing passport letter must not become a visa letter"
+    );
+}
+
 /// The punched-hole case: one character destroyed inside the expiry field.
 ///
 /// TD1 line 2 is `YYMMDD C S YYMMDD C NNN ... C`; the expiry field is

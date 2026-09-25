@@ -140,9 +140,9 @@ dated weak-spot findings. This section states one figure and the shape of the mi
 more specific belongs there, because restating numbers in a second document is precisely how
 `README.md` came to advertise a hit rate ten points stale.
 
-**Tier-1 on real specimens: 140 / 152 = 92.1%** over the documents that can yield a hit — from
+**Tier-1 on real specimens: 139 / 151 = 92.1%** over the documents that can yield a hit — from
 the CI-written baseline
-([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-19)
+([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-24)
 that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every
 PR. The rest of the corpus carries no MRZ, has it blacked out, or prints a zone whose own check
 digits fail; [the denominator correction](benchmarks/denominator-correction-2026-09-09.md)
@@ -231,7 +231,11 @@ buyer should trust first.
    the specimen loop is paused per `CONTRIBUTING.md` in the same change.
 2. **Measure `strict_hit_rate` on real specimens in CI**, then build the grid repair against that
    baseline — same-binary A/B, per the
-   [maintenance contract](benchmarks/README.md#benchmark-maintenance-contract).
+   [maintenance contract](benchmarks/README.md#benchmark-maintenance-contract). **Built, not
+   promoted** — `strict_hit_rate` is measured in CI (ADR-0013); the grid repair shipped as
+   `synthpass_ocr::chargrid` (#331), off by default behind `SYNTHPASS_OCR_CHARGRID`. Its
+   2026-09-18 same-binary A/B was net `0` on real specimens, one fixed and one broken
+   ([reconciliation](benchmarks/chargrid-ab-reconciliation-2026-09-24.md)), so it stays off.
 3. **Pause the specimen-acquisition loop in favour of transcribing ground truth** for the corpus
    as it stands; resume once the strict-name metric and the recognizer decision are in.
 4. **Take the recognizer as its own benchmark-first ADR.** The candidate — a specialized MRZ-band

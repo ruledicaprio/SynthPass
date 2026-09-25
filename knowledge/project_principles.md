@@ -127,8 +127,9 @@ labels get the fieldless `FindingKind`. See `CONTRIBUTING.md`'s PII checklist an
 Stated so they don't get re-litigated:
 
 - **No face recognition, biometrics, or liveness detection.** ([VISION.md](VISION.md) §non-goals)
-- **No authenticity or forgery detection.** A checksum proves a faithful *read*,
-  never a genuine *document*.
+- **No authenticity or forgery detection.** A checksum-valid read is *consistent* with its
+  check digits, not proof of a faithful *read* (principle 1) — and never proof of a genuine
+  *document*.
 - **No cloud inference, ever** — including "optional" cloud fallback.
 - **No calibrated-looking confidence numbers without a reliability diagram**
   behind them (principle 2).

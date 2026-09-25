@@ -102,8 +102,9 @@ Concretely, the long arc is:
    tier — sequenced after the core is hardened (M8, [`ADR-0011`](decisions/ADR-0011-split-m6-packaging-into-m8.md)).
 
 > **Non-goals, permanently.** SynthPass crops a portrait region; it never *identifies* a
-> person — no face recognition, no biometric matching, no liveness. It proves a faithful
-> *read*; it does not judge document *authenticity* — forgery and tamper detection are out of
+> person — no face recognition, no biometric matching, no liveness. A checksum-valid MRZ is
+> *consistent* with its check digits, not proof of a byte-identical *read*; it does not judge
+> document *authenticity* — forgery and tamper detection are out of
 > scope. It does not do cloud anything. It does not train OCR or LLM models — it consumes
 > them. It processes a still image, not a live video stream. CLI and library come first; a
 > GUI is secondary. These lines do not move.

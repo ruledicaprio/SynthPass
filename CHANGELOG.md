@@ -8,6 +8,32 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
+## [1.6.1] — 2026-09-25 — mrz 0.8.1 inside: a damaged zone is recovered only when the recovery is unambiguous
+
+This release carries `mrz` 0.8.1 ([its changelog](crates/mrz/CHANGELOG.md)): four fixes. Each one
+stops a checksum-valid but wrong reading from being returned. The damaged-zone pass now returns a
+reading only when every candidate it builds is the same answer, and it never invents the format
+letter. A TD3 line-1 prefix error is refused, or repaired by issuer resolution, and a genuine
+Doc 9303 §4.4 passport code is kept. The real-specimen Tier-1 gate reads **139/151**: Bosnia
+2013's former hit was one of those manufactured readings. On synthetic data, the post-#440 clean
+headline is **370/500** (Observed locally, seed 0, 100 per format). No API or JSON shape changes.
+
+### Changed
+- **Real-specimen OCR dumps.** `provider-bench --dump-ocr --dump-ocr-hits` records asset IDs,
+  source-image SHA-256 hashes, and run details for local miss-mechanism analysis.
+
+### Fixed
+- **Bosnia and Herzegovina 2013 card back is scored as a non-conforming specimen.** Its printed
+  zone fails its own TD1 composite check digit. The benchmark previously counted it as a Tier-1
+  hit, because damaged-zone recovery invented optional-data characters that made the zone verify.
+  With that recovery fixed, the specimen has a reviewed `non_conforming` fixture, promoted from
+  the unreviewed `derived/` one. It now sits in `checksum_failed_specimen`, off the scored
+  denominator, like the other specimens whose printed zone fails its own check digits.
+- **Specimen fixture ground truth.** Corrected two transposed `optional_data_2` cells on the Belgium
+  2021 card-back specimen, which had failed its own composite check digit, and a three-cell shift
+  across zeros in the Somaliland 2023 passport specimen's personal number, which still passed every
+  check digit. Re-blessed the MRZ wire golden for those two fixture lines.
+
 ## [1.6.0] — 2026-09-24 — mrz 0.8 inside: optional data in its own slots, and only a real date is certified
 
 This release carries `mrz` 0.8.0 ([its changelog](crates/mrz/CHANGELOG.md)). Most of that

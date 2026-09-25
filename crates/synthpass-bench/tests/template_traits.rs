@@ -335,10 +335,12 @@ fn every_independently_derivable_row_is_tracked() {
 #[test]
 fn the_aggregate_is_pinned_so_a_silent_drop_cannot_pass() {
     // (td_format, optional_data_present) -> row count, measured 2026-09-22.
+    // 2026-09-24: Td1 with optional data 5 -> 6, Bosnia 2013 card back's new
+    // reviewed non-conforming fixture (#440).
     // No Td2 row exists yet; a first one must appear here deliberately.
     const EXPECTED: &[(&str, bool, usize)] = &[
         ("Td1", false, 4),
-        ("Td1", true, 5),
+        ("Td1", true, 6),
         ("Td3", false, 20),
         ("Td3", true, 34),
     ];

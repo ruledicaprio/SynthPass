@@ -1105,7 +1105,7 @@ fn td1_zone(
 /// data, and no consumer of `MrzData` could recover which one it was.
 ///
 /// It was not a hypothetical. Two tracked specimens sit on opposite sides of
-/// it: `Belgium_ID_Specimen_2021_back_mrz` carries `95202899874` in slot 2
+/// it: `Belgium_ID_Specimen_2021_back_mrz` carries `95022899874` in slot 2
 /// with slot 1 empty, and `Serbia_ID_Specimen_2008_back_with_mrz` carries
 /// `2902968000000` in slot 1 with slot 2 empty. Both surfaced as nothing but
 /// a bare `personal_number` string.
