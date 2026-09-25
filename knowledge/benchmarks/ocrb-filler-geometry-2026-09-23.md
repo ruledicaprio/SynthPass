@@ -4,8 +4,10 @@
 
 `synthpass-gen` draws every MRZ glyph from the vendored `crates/synthpass-gen/fonts/ocr-b.ttf`
 (Raisty 2019, OFL). The project has measured that the synthetic corpus does not predict real
-results for a repair class (chargrid: +30 names on synthetic, 0 on real), so a filler that is
-shaped or placed differently from the printed one is a candidate explanation. This note measures
+results for a repair class (chargrid, 2026-09-18: strict names net +30 on 500 synthetic documents,
+net 0 on 257 real specimens — one fixed, one broken;
+[reconciliation](chargrid-ab-reconciliation-2026-09-24.md)), so a filler that is shaped or placed
+differently from the printed one is a candidate explanation. This note measures
 where the filler `<` sits relative to the capitals on the same line, in the standard, in three
 independent OCR-B cuts, and on real specimens.
 

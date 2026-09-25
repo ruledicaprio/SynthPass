@@ -173,10 +173,10 @@ trees)", and appendices were reduced to one-paragraph descriptions ("Demonstrate
 Active Authentication flow...") instead of ICAO's own worked-example text. Measured against a
 direct read of the PDF text layer:
 
-- **Clause-title coverage: 175/175 (Part 11), 122/122 (Part 12), 0 missing.** The issue's own
-  count was 68 missing titles; the rebuilt files have every numbered clause heading the PDF text
-  layer has, cross-checked by running the same heading detector used to generate the Markdown
-  against the raw PDF text.
+- **Clause-title coverage: claimed 175/175 (Part 11), 122/122 (Part 12), 0 missing — see the
+  2026-09-25 correction below.** The issue's own count was 68 missing titles; the rebuilt files
+  were said to have every numbered clause heading the PDF text layer has, cross-checked by
+  running the same heading detector used to generate the Markdown against the raw PDF text.
 - **Number tokens in the Markdown absent from the PDF: 0**, both Parts.
 - **Determinism:** running the extractor twice over the same PDF produces byte-identical output
   (`diff` reports no difference).
@@ -203,6 +203,126 @@ clustering each word's on-page coordinates back into the source's true
 grid (see [`CONFORMANCE_BASIS.md`](CONFORMANCE_BASIS.md)); the same
 coordinate-clustering approach also fixed the same page's MRZ example, which
 had literal spaces where filler characters belonged.
+
+### Correction, 2026-09-25: the 175/175 and 122/122 claim above was measured with a check that could not fail
+
+What was claimed: "every numbered clause heading the PDF text layer has", cross-checked by
+running `docs9303_extract.py`'s own heading detector against the raw PDF text. What that
+measurement actually did was run `detect_heading` against the PDF, run the *same* `detect_heading`
+(re-parsed from the rendered `## N Title` line) against the Markdown, and diff the two — both
+sides of the comparison were blind to exactly the same class of heading, so a detector gap could
+never show up as a discrepancy. It was a real gap: `detect_heading` only recognised a clause
+number and its title on one physical PDF text line. ICAO indents a deep clause (5-6 numbering
+levels) far enough that PyMuPDF's `"text"` extraction mode puts the number alone on its own line
+and wraps the title onto the next — `4.4.3.3.1` / `Generic Mapping` on two separate lines, not
+one. Ten such headings in Part 11 (`4.4.3.3.1`-`.3`, `4.4.3.5.1`-`.4`, `4.4.5.2.1`-`.3`) and
+sixteen in Part 12 (`7.2.3.1`, `7.2.3.1.1`-`.7`, `7.2.3.2`, `7.2.3.2.1`-`.2`, `8.1.1.1`-`.5`) were
+missing from both Parts' Markdown, correctly rendered as body prose rather than headings, and
+invisible to the audit that was supposed to catch exactly this.
+
+The fix (`tools/docs9303_extract.py`'s `detect_split_heading` and `find_headings_in_lines`) adds a
+second detector for a clause number alone on a line immediately followed by a title-shaped line,
+gated on the number's parent clause already being a known heading found earlier in the same
+document — this is what tells a real split heading apart from Part 12 Appendix B's own reference
+table, which quotes RFC 5280's clause numbers inline the same way (`4.1.2.1`, `5.2.3`, ...)
+followed by the quoted normative prose, and additionally happens to collide with real Part 12
+clause numbers of its own (`4.1.2` is both an RFC 5280 field and a genuine Part 12 heading, "LDS2
+Signer Keys and Certificates"). A title-shape check (short, capitalised, no dangling connector
+word or RFC 2119 keyword) does the rest — every one of the 26 real split-heading titles and every
+number-alone line the RFC-quote table produces was checked by hand against the rendered PDF page
+to arrive at these rules; see the block comment above `_HEADING_NUMBER_ONLY_RE`.
+
+Corrected, measured counts after the fix, cross-checked against the PDF text layer directly (not
+through the same detector twice):
+
+- **Part 11: 174/174 clause headings, 0 missing, 0 extra** (was 164/164 before this fix — the
+  10 split headings above, now promoted).
+- **Part 12: 133 real clause headings, all present; the audit's `pdf_headings` additionally counts
+  one artefact of its own simpler, non-table-aware line reading** (was 117/117 before this fix —
+  the 16 split headings above, now promoted). Part 12's Appendix C (`Table C-1`, a Sixth Edition
+  legacy certificate profile) quotes RFC 3280's clause numbers the same way Appendix B quotes RFC
+  5280's, and one row (`SignatureValue` / `4.1.1.3` / "Value inserted here dependent on algorithm")
+  happens to satisfy every title-shape rule above, with a genuine parent (`4.1.1`) already known.
+  The real extractor never sees this as plain text at all — PyMuPDF's table-grid detector
+  successfully recognises Table C-1 as a table (unlike Appendix B's wider RFC 5280 table, which
+  the same detector fragments into 30+ spurious columns; see `MAX_TABLE_COLUMNS` above), so this
+  row is consumed as table cells during the real regeneration and never reaches
+  `detect_split_heading`. It only shows up in the audit, which reads raw per-page text without the
+  extractor's own table-clipping — confirmed by diffing the regenerated Part 12 Markdown against
+  the previously committed one, whose only differences are the 16 real heading promotions and
+  their table-of-contents entries.
+- **Diff scope, both Parts:** regenerating from the fixed extractor changes only the 26 promoted
+  heading lines (bare `N.N.N Title` becoming `##### N.N.N Title`) and their new table-of-contents
+  entries. Every other line, including every word of body prose, is byte-identical to the
+  previously committed files.
+
+**Why the audit could fail now:** `tools/audit_docs9303.py`'s `pdf_headings` uses the same
+`find_headings_in_lines` the extractor promotes headings with, so a fixed detector bug shows up in
+both places at once — no longer circular by construction, but still one detector compared against
+itself. `number_alone_candidates` is the independent check this correction adds specifically to
+close that gap: it flags every PDF line that is only a clause number followed by a capitalised
+line, using nothing from `detect_heading`/`detect_split_heading` at all. A future regression in the
+shared detector (say, a parent-hierarchy bug that silently stops recognising a real split heading)
+would make that heading disappear from `pdf_headings`' output *and* stay entirely invisible to
+`heading_diff` if it were the only check — `number_alone_candidates` would still flag the raw PDF
+line as a candidate with no matching Markdown heading, exactly as it currently flags the known Table
+C-1 residual above and Part 12 Appendix B's RFC 5280 quotes (both hand-verified as not real
+headings, both expected noise the same way the digit-token and prose-score checks already carry
+some).
+
+## Re-auditing
+
+Run [audit_docs9303.py](../../tools/audit_docs9303.py) from the repository root with
+`python tools/audit_docs9303.py --pdf-dir <local-pdf-dir>`; add `--part N` to narrow the run.
+It checks
+digit tokens, numbered clause coverage (same-line and split-across-two-lines headings, plus the
+independent number-alone-then-title check described above), tables under figure captions, and
+normalized prose 5-gram coverage against the local PDFs. It reports findings without changing
+files; the unit tests need no PDFs.
+### Parts 3 and 8 triaged, 2026-09-25: one real defect, the rest are audit-tool artefacts (#463)
+
+#427's audit tool (`audit_docs9303.py`, #464), as it stood before the split-heading fix (#466),
+flagged Part 3 with 15 clause headings "missing
+from Markdown", 8 "absent from PDF" and 7 low-coverage paragraphs, and Part 8 with 8 "invented
+numbers", 2 headings "missing", 15 "absent from PDF" and 10 low-coverage paragraphs — the two
+largest counts of any Part, and #463 named both as candidates for the Part 11/12-style rebuild.
+Checked against the rendered PDF page for every finding:
+
+- **One real defect, fixed:** Part 3's Appendix B.5.5.1 through B.5.5.14 (the fourteen
+  "Comments on Transliteration Table" clauses) are real ICAO clause headings — confirmed on
+  `9303_p3_cons_en.pdf` pages App B-9/B-10 — but were carried as bold paragraph text
+  (`**B.5.5.1 Alef with madda above**`) instead of a heading, unlike this same file's own
+  `3.9.1.1`-`3.9.1.4` and `7.3.4.1`-`7.3.4.3` clauses one level up, which are real `#####`
+  headings. Promoted to `##### B.5.5.N ...` verbatim (title text unchanged) to match.
+- **Everything else in both Parts is a false positive of the audit tool's heading detector**,
+  not a documentation defect. `_HEADING_RE` in `docs9303_extract.py` only matches a clause
+  number and title on the *same physical line*. ICAO's PDFs indent some headings (`3.9.1.1`,
+  `7.3.4.1`-`.3` in Part 3; every `4.1.1`-`4.6.2` in Part 8) far enough that PyMuPDF's `"text"`
+  extraction mode splits the number onto its own line and the title onto the next — confirmed by
+  dumping the raw per-line text of `9303_p3_cons_en.pdf` page 17 and `9303_p8_cons_en.pdf` pages
+  11-17. The same regex also matches a numbered list item or footnote marker that happens to sit
+  alone on a line with a capitalized continuation — Part 3's "`9 Mohammed`" is list item 9 of a
+  13-item name-transliteration-variant list (`9.   Mohammed`, page App B-2), and Part 8's two
+  "missing" headings are footnotes 9 and 11 (`<sup>9</sup>`, `<sup>11</sup>` in the Markdown,
+  confirmed against pages 15 and 21) — both already correctly rendered as footnotes here, not
+  headings. Part 8's 8 "invented numbers" are the Appendix B byte-dump table from the
+  coordinate-clustering fix above (each flagged value is a real hex byte, verified against the
+  rendered page 25 image, whose two hex digits print on separate physical lines in the flat text
+  layer) plus one general TD3-width fact and one byte-count in this file's own explanatory notes
+  about that fix — editorial, not ICAO text. All 17 low-coverage paragraphs across both Parts are
+  either a Table of Contents (list order, not prose), a Markdown link's embedded filename
+  inflating the paragraph's word count, or (in Part 8) this file's own editorial notes about the
+  Appendix B fix, which are correctly *not* verbatim ICAO text.
+- **No rebuild recommended for either Part.** Unlike Part 11/12's old text, which had summarized
+  tables and appendices instead of transcribing them, every substantive finding here traces to
+  the audit tool's heading-detection regex or to content the tool cannot distinguish from ICAO's
+  own prose (a list item, a footnote, an editorial note). A rebuild would not change any of that;
+  fixing `_HEADING_RE` to allow a number and title on adjacent lines, and giving the tool a marker
+  for repo-authored editorial prose (this file's own bracketed
+  `[Editorial description, not ICAO text: ...]` convention does not cover inline notes or
+  numbers), would remove most of the false positives at the source. **The first half has since
+  landed:** #466 detects a number and title on adjacent lines, and drops the Appendix B list item.
+  The Part 8 footnote markers and the editorial-prose marker remain as documented residuals.
 
 ## What does not belong here
 

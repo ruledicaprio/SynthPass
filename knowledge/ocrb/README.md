@@ -70,6 +70,63 @@ ICAO Doc 9303-3 §4.4, §4.5, §4.10, §4.11 (8th ed., 2021)
 | [`fonts-vs-standard.md`](fonts-vs-standard.md) | Six OCR-B font files measured against the nominal values |
 | [`../benchmarks/ocrb-standards-vs-priors-2026-09-24.md`](../benchmarks/ocrb-standards-vs-priors-2026-09-24.md) | The findings: the standards' numbers set against SynthPass's priors and measurements |
 
+## Template for a new distilled-facts page
+
+A note added to this tree is a page of **facts**, not a transcription — the private `ocr-b`
+repository holds the transcription this page is drawn from. Follow `glyph-dimensions.md` or
+`print-quality-iso1831.md` as worked examples; every new page has these parts, in this order:
+
+1. **Header.** Same shape as this file's own: `**Date:**`, `**MAIN:**` (the SynthPass SHA the page
+   was written against), `**DATA:**` (`n/a` for a standards-only page — no corpus was read),
+   `**Evidence:**` (one line naming the verification tags used below), `**Status:**`.
+2. **Source citation.** Standard identifier, edition and date, exactly as in this file's own
+   [Sources](#sources) table below — add a row there for a standard used for the first time.
+   Every fact in the page cites a clause and page number from that row.
+3. **Fact tables, in our own words.** Dimensions, tolerances and definitions paraphrased — never
+   the standard's own sentences beyond a short quoted phrase, and never a reproduced figure,
+   table or outline-coordinate dataset (see
+   [Copyright, and what is deliberately not here](#copyright-and-what-is-deliberately-not-here)).
+   Every value carries one of the verification tags defined under
+   [Sources](#sources) ([R]/[M]/[T]/[P]/[H]) so a reader knows how the number was obtained, not
+   just what it is.
+4. **Measured values SynthPass relies on.** The standard's nominal value next to what was actually
+   measured on a font, a specimen crop or a generator output — character pitch, stroke width, cap
+   height, filler-glyph geometry, whatever the page's clause covers. State the method (font
+   outline, page-render pixel count, generator constant) inline; a bare number with no method is
+   exactly the "constant with no measurement behind it" `benchmarks/README.md` principle 6 rules
+   out.
+5. **Used by.** Real links, not prose mentions, into the code and the ADRs the page's facts
+   constrain — for example `crates/synthpass-ocr/src/lib.rs`'s `MRZ_CHARSET`/`build_mrz`,
+   `crates/mrz`'s registries and check program, [ADR-0014](../decisions/ADR-0014-per-cell-ocrb-classification.md)
+   (per-cell OCR-B classification masks), [ADR-0015](../decisions/ADR-0015-geometric-mrz-band-location.md)
+   (the geometric locator tracked in
+   [#433](https://github.com/ruledicaprio/SynthPass/issues/433)), and
+   [ADR-0021](../decisions/ADR-0021-fixed-grid-mrz-strips.md) (the fixed-grid strip template and
+   its check-digit anchors). A page with no code or ADR to constrain has not yet cleared the 80/20
+   filter [`../README.md`](../README.md#subject-folders) states for this tree.
+6. **Add the file to [Notes in this tree](#notes-in-this-tree)** above, and update the
+   per-standard table in [`../LIBRARY.md`](../LIBRARY.md) if the new page changes a standard's
+   distillation status.
+
+## Standards awaiting source
+
+Doc 9303's own citations are covered (row above the [Sources](#sources) table has the full
+chain). These are the ones a future landing needs, per `ocr-b/standards/incoming/INVENTORY.md`'s
+survey of what the maintainer has not yet obtained. **Awaiting source — no content yet:**
+
+| Standard | Governs | Why it would matter here | State (per `ocr-b`'s inventory) |
+| --- | --- | --- | --- |
+| ISO/IEC 7501-1:2008 | ISO endorsement of Doc 9303 Part 4 (TD3/MRP) | Cross-check for the TD3 template alongside Doc 9303 itself | Not held; must-have per the maintainer's priority order |
+| ISO/IEC 30116:2016 | OCR-B print-quality testing, written for the MRZ | The modern companion to ISO 1831 — a newer measurement method for the same print-quality question `print-quality-iso1831.md` already covers from the 1980 standard | Not held; must-have |
+| ISO/IEC 7810:2019 (+Amd 1:2024) | ID-1/ID-2/ID-3 physical card sizes | The physical frame TD1/TD2/TD3's field-position tables assume; Doc 9303 Part 3 itself cites the withdrawn 2003 edition | Not held; must-have |
+| ISO/IEC 18013-1:2018 | ISO-compliant driving licence, ID-1 card with optional machine-readable technologies | Peripheral to the MRZ proper; relevant only if a future driving-licence track needs its own layout reference | Not held; "nice" priority |
+
+ISO 1073-2, ISO 1831 and ISO 2033 are **not** in this table — they already have facts distilled
+above, drawn from partial reads of a complete private transcription (see
+[Copyright, and what is deliberately not here](#copyright-and-what-is-deliberately-not-here)).
+A future, more thorough pass over those same three standards extends the existing notes; it does
+not start a new landing zone.
+
 ## Sources
 
 Page numbers are the document's own printed page numbers; for scans the PDF page follows where it
@@ -110,10 +167,15 @@ limited to short phrases. There are no page images, reproduced figures, whole ta
 outline-coordinate data.
 
 **Full transcriptions exist only locally**, outside this public repository, next to the source
-PDFs. ECMA-30 is complete; ECMA-11, ISO 1073-2, ECMA-15, ECMA-18 and ECMA-21 are in progress. The
-PDFs are cited by standard identifier, never by local path, and are never committed. This is the
-same rule [`../docs9303/`](../docs9303/README.md#what-does-not-belong-here) applies to the ICAO
-PDFs.
+PDFs, in the private `ocr-b` repository. As of that repository's own README (2026-09-24): ISO
+1073-2, ISO 1831, ISO 2033, ECMA-11, ECMA-15, ECMA-18, ECMA-21 and ECMA-30 are complete
+vision transcriptions; the code-set family (ECMA-6, ECMA-35, ECMA-43, ECMA-48) is complete for
+its born-digital editions and its 1974 ECMA-43 scan, with ECMA-19 and the older ECMA-6/ECMA-48
+scans not yet transcribed. Completing a transcription does not by itself add facts here — a fact
+is added only once it is distilled, cited and tied to SynthPass code, per the template above; see
+[`../LIBRARY.md`](../LIBRARY.md) for what each standard currently contributes. The PDFs are cited
+by standard identifier, never by local path, and are never committed. This is the same rule
+[`../docs9303/`](../docs9303/README.md#what-does-not-belong-here) applies to the ICAO PDFs.
 
 ISO 1073-2's outline-coordinate tables (informative Annexes A and B) cover only the **superseded**
 ZERO design and the **deleted** size-II digits. They contain nothing for `<` or for any letter, so

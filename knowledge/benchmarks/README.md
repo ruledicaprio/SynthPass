@@ -26,7 +26,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | Tier-1 hit rate, whole specimen corpus | 139 / 261 = 53.3% | same baseline; the gap is explained below |
 | Strict name hit rate, real specimens | **12 / 45 = 26.7%** of name-scorable scored documents (36.4% of name-scorable hits) | same baseline (CI, 2026-09-24); ADR-0013 |
 | False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 110** | same baseline (CI, 2026-09-24) |
-| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 377 / 500 = 75.4% (Derived) — TD3 78%, TD2 73%, TD1 54%, MRV-A 85%, MRV-B 87% (Observed) | Observed in CI: `bench-charts.yml` run 34831258506, 2026-09-14, MAIN `9c8f03d`, `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (generated corpus, no `samples-data` input); re-observed through the registered `mrz` provider (`provider-bench --mrz-only`, local, MAIN `c617254`) with identical per-seed outcomes — [`m6-per-format-harness-comparison-2026-09-16.md`](m6-per-format-harness-comparison-2026-09-16.md) |
+| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 370 / 500 = 74.0% (Derived) — TD3 74%, TD2 72%, TD1 52%, MRV-A 85%, MRV-B 87% (Observed, **local**). Of the 370 hits, 200 read both names exactly and **207 are wrong in at least one scored field** (report-only, #457) | Observed locally, 2026-09-25: `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (release, Windows) at MAIN `1595bf9` and at `919b5ff` (crates identical to `174366b`), identical per seed in both — [`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md). Last observed in CI: 377 / 500 (`bench-charts.yml`, 2026-09-14 at `9c8f03d`, run 34831258506; same counts at `b0337e1`, 2026-09-21). Of the −7, TD3's −3 on seeds 0–49 is #440 refusing wrong reads; the rest is unattributed |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
 | Names, browser vs native, on documents both read validly | **28 / 31 vs 11 / 31** exact on both name fields (reviewed fixtures only) — 17 browser-right/native-wrong, 0 the other way | same run — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md) |
@@ -150,9 +150,33 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   hits across the five synthetic formats, **178 carry a wrong name** — TD3 39/78, TD2 37/73,
   TD1 39/54, MRV-A 35/85, MRV-B 28/87.
 
+  **Re-measured 2026-09-25** (local, `synthpass-bench` `strict_hits`, same invocation, MAIN
+  `1595bf9` and `919b5ff`): of 370 Tier-1 hits, **170 carry a wrong name** — TD3 34/74, TD2
+  36/72, TD1 37/52, MRV-A 35/85, MRV-B 28/87 —
+  [`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md).
+
   The real-specimen strict rate becomes Observed, not Derived, once a CI-written
   `real-specimen-mrz-baseline.json` carries the `strict_names` counts (report-only — see
   ADR-0013); the row above states no real-specimen figure until then.
+- **Wrong accepts (report-only)** — `synthpass-bench`'s `Report.wrong_accepts` /
+  `wrong_accept_rate`, and per-document `results[].wrong_accept` / `wrong_fields`. `hit` proves
+  only a checksum-consistent zone whose document number matches truth. `document_type`,
+  `issuing_country`, both names, `nationality` and `sex` carry no check digit at all, and even a
+  check-digited field can still be wrong — a check digit is consistency, not proof, so two
+  compensating errors, or a damaged-pass candidate that happens to validate, can both pass it. A
+  document counts as a wrong accept when `hit` is `true` **and** at least one of the 12
+  `COMPARED_FIELDS` (excluding the diagnostic `mrz_lines` row) has CER > 0 against the
+  generator's exact ground truth — the same per-field comparison `strict_hits`/`fields` already
+  use, restricted to a hit. `wrong_accept_rate`'s denominator is `hits`, matching
+  `names_exact_among_hits`; `0.0` when `hits` is `0`, not a fabricated "every hit wrong".
+  Synthetic-only: ground truth is exact by construction there, where a real specimen's truth can
+  itself be incomplete. Added for issue
+  [#453](https://github.com/ruledicaprio/SynthPass/issues/453), which found the M4 gate's pre-#440
+  42/50 TD3 count included three checksum-valid hits that were wrong on `document_type`,
+  `issuing_country` and `surname` alike
+  ([`m4-gate-440-wrong-reads-refused-2026-09-25.md`](m4-gate-440-wrong-reads-refused-2026-09-25.md)).
+  **Report-only**: does not affect `hit`, `hit_rate`, or the `--min-hit-rate` gate — whether to
+  gate on it is a separate, not-yet-made decision.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 

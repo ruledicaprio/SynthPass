@@ -40,6 +40,29 @@ The rest of the family is not reproduced here:
 - When a transcription and the original disagree, the original wins. Correct the file and record
   the correction in its notes.
 
+## Future candidates, in priority order
+
+Not proposed for transcription in this pass — a record of what would be next, and why, drawn
+from what `ocr-b`'s private library already holds versus what is public here today. All five
+core standards Doc 9303's citation chain reaches (ECMA-11, 15, 18, 21, 30) are already
+transcribed above; what follows is the code-set family, currently cited only for the character
+repertoire (see [`../ocrb/code-positions.md`](../ocrb/code-positions.md)), never for glyph
+geometry:
+
+1. **ECMA-19** (*Coding of character sets for MICR and OCR*, 1969) — the Ecma twin of ISO 2033,
+   which `code-positions.md` already distills facts from. Publishing it would let that note cite
+   a public source instead of only the copyrighted ISO 2033. **Blocked**: `ocr-b` has not
+   transcribed it yet (PDF only, per its own README's Transcriptions table).
+2. **ECMA-6, 6th ed.** (*7-bit coded character set*, 1991, = ISO 646) — already fully transcribed
+   privately. Publishing it would let `code-positions.md` cite ECMA-6 directly for the 7-bit code
+   allocations it already discusses, instead of reasoning about ISO 646 by proxy.
+3. **ECMA-43, 3rd ed.** (*8-bit coded character set structure and rules*, 1991) — already
+   transcribed privately. Lower value now: no current note cites 8-bit code-page structure.
+4. **ECMA-35** (*Character code structure and extension techniques*, 1994) and **ECMA-48, 5th
+   ed.** (*Control functions for coded character sets*, 1991) — already transcribed privately.
+   Lowest value: [`../ocrb/README.md`](../ocrb/README.md#sources)'s own sources table marks both
+   "equivalences only", and nothing in `knowledge/ocrb/` currently draws a fact from either.
+
 ## Provenance
 
 © Ecma International. Ecma publishes its standards free of charge at
