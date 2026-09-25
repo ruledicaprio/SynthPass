@@ -196,9 +196,11 @@ not proof" case, occurring naturally on clean synthetic data.
 
 ## What this does not claim
 
-- **Not a CI measurement.** Every "now" figure is one local Windows run per arm. The published
-  row's before-figures are CI (Linux). The README row is labelled local until `bench-charts.yml`
-  re-observes it.
+- **Not a CI measurement of the arms.** Every "now" figure is one local Windows run per arm.
+  **Update, 2026-09-25:** `bench-charts.yml` [run 36111444345](https://github.com/ruledicaprio/SynthPass/actions/runs/36111444345) at `f80877b` (v1.6.1, crates equal to
+  `174366b`'s apart from the mrz version and changelog) observed the same counts on Linux, format
+  by format: TD1 52, TD2 72, TD3 74, MRV-A 85, MRV-B 87. That settles the platform question
+  raised above: the −7 is not a Windows/Linux difference. CI compares counts only, not seeds.
 - **Not that stack 451 has no effect.** It has none on these 500 generated documents. Its
   measurement is the real-specimen gate.
 - **Not an attribution of TD3 seeds 50–99 (−1), TD2 (−1) or TD1 (−2)** to any change. The
