@@ -38,6 +38,32 @@ and opens the PR. You:
 - **send nothing off this machine:** no network calls, downloads, uploads or telemetry — the
   same rule the product lives under.
 
+## Sharing the machine: the cargo slot
+
+This desktop runs several agents at once (other subagents, Codex) against one pool of RAM.
+Two release builds at once exhaust it, and a killed build looks like a random failure. When
+the brief names a slot file (for example `D:\Projects\worktrees\SynthPass\CARGO_SLOT.lock`), or
+that file exists, every cargo command goes through it:
+
+- **Hold the slot for exactly one running command.** Take it, run, release it, all in **the
+  same shell call**, so the lock cannot outlive the command. Never take it before reading or
+  editing code, never across two tool calls, and never while you think about the result.
+- **Wait in the foreground** when another owner holds it: a loop that re-checks every 30 s
+  inside one call with a generous `timeout`. Never delete, edit or "expire" someone else's
+  lock, and never kill their processes.
+- **Running an already-built binary** (`target\release\synthpass-bench.exe …`) is not a
+  cargo job and doesn't need the slot.
+
+The pattern, in Bash (`noclobber` makes taking the slot atomic):
+
+    L=/d/Projects/worktrees/SynthPass/CARGO_SLOT.lock; ME="<your-worktree-name>"
+    until ( set -o noclobber; echo "$ME $(date -Iseconds)" > "$L" ) 2>/dev/null; do sleep 30; done
+    cargo test -p mrz; EXIT=$?
+    rm -f "$L"; echo "EXIT=$EXIT"
+
+If a message from the calling session arrives while you work, act on it at once: it is how
+the orchestrator corrects a live task. Say in your report which corrections you received.
+
 ## Before the first edit
 
 1. `git branch --show-current`. If it prints `main` or nothing, stop: report "needs a feature
@@ -68,7 +94,11 @@ left out and why.
 A change under `crates/` needs a changelog fragment: `changelog.d/<branch-slug>.<category>[!].md`
 (`crates/mrz` changes go under `changelog.d/mrz/`), the bullet body only, written for someone
 upgrading — `changelog.d/README.md` has the rules; the `!` in the name is what bumps a version,
-so use it only for a real break. If users would never notice the change, write
+so use it only for a real break.
+`mrz` ships patch releases only until the user decides otherwise, and before 1.0 an `.added`
+or `!` fragment under `changelog.d/mrz/` forces a minor. Use `.fixed` where that is honest, and
+when a change is genuinely `.added` or breaking, stop and say so in the report instead of
+writing the fragment. If users would never notice the change, write
 "skip-changelog" in the report and why. When behaviour or architecture changed, update
 `knowledge/`, README and the Rust docs in the same pass: documentation is part of the
 implementation, and a doc that disagrees with the code is a bug you must not leave behind.
