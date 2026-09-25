@@ -262,6 +262,7 @@ impl FromStr for MrzDate {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde::Serialize for MrzDate {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
@@ -269,6 +270,7 @@ impl serde::Serialize for MrzDate {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde::Deserialize<'de> for MrzDate {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
@@ -277,6 +279,7 @@ impl<'de> serde::Deserialize<'de> for MrzDate {
 }
 
 #[cfg(feature = "zeroize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "zeroize")))]
 impl zeroize::Zeroize for RawDateField {
     fn zeroize(&mut self) {
         self.0.zeroize();
@@ -286,6 +289,7 @@ impl zeroize::Zeroize for RawDateField {
 /// Wipes the payload in place. The variant is left as it was: a discriminant
 /// says which kind of date was read, not the date itself.
 #[cfg(feature = "zeroize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "zeroize")))]
 impl zeroize::Zeroize for MrzDate {
     fn zeroize(&mut self) {
         match self {

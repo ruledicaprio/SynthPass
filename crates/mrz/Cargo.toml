@@ -32,6 +32,7 @@ categories = ["parser-implementations", "text-processing"]
 # Render the `serde` and `zeroize` feature surfaces on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }
