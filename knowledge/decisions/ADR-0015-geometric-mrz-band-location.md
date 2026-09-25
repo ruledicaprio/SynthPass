@@ -169,3 +169,27 @@ against a frozen detection list needs the list settled first.
 
 Independent of that: the contrast-stretch variant above is small, testable now, and should not wait
 for this ADR.
+
+## Amendment (2026-09-24) — filler-run geometry is evidence, not a guarantee
+
+[`ocrb-filler-geometry-2026-09-23.md` §5](../benchmarks/ocrb-filler-geometry-2026-09-23.md#5-band-geometry-standard-real-and-synthetic)
+measured the priors this ADR's Decision and "What an MRZ band looks like" section assume, on 16
+real TD3 crops, and several do not hold as tightly as written here:
+
+- **"Vertically adjacent at a known spacing"** does not hold as a single number: line pitch
+  ranges **1.65-2.99 cap** across the 16 specimens (nominal 2.58 cap), and TD1's nominal spacing
+  (1.72 cap) is not the same prior as TD3/TD2's. A locator needs a band of spacings per format,
+  not one constant.
+- **"A correct fit makes filler runs land on cell boundaries"** is contradicted by the same
+  measurement: filler glyphs are *centred* in their cells, not aligned to boundaries, and a
+  filler cell still carries 0.6-0.7× a letter cell's ink — a low-ink cell, not a gap. Whether a
+  given cell reads as "filler" depends on the OCR line-box height used to sample it, which that
+  note flags as still unmeasured.
+- **"Two or three long horizontal bars of near-equal height"** holds only loosely: line 2 prints
+  5-10% taller than line 1 (it carries digits).
+
+None of this changes the Decision above — it is a design note pending `mrz-locate`'s existence,
+per that benchmark's own framing ("flagged for the architect, not changed here"). The broader
+point is principle 1's: a periodic filler-run signature is *evidence* a candidate grid fit is
+correct, not a guarantee. A name that fills its entire line (Doc 9303 Part 4 allows this) prints
+no filler run at all, so a locator that requires one to accept a fit will refuse a valid MRZ.
