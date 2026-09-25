@@ -1038,7 +1038,9 @@ fn td3_prefix_verdict(line: &str) -> Td3Prefix {
 /// as TD3's. `class_sweep_pass` and `damaged_pass` share one data-driven
 /// loop across TD3/MRV-A/TD2/MRV-B (see their own `two_line` tables), so the
 /// gate has to be selected by row rather than hard-coded into the loop —
-/// every other row calls plain [`variants`] unchanged.
+/// every other row delegates to [`two_line_line1_variants_shifted`], TD3's
+/// table-verdict gate having no equivalent for a format with no closed
+/// document-code table.
 ///
 /// #461: the `Keep` arm used to call `variants(raw, width, rep1)` alone —
 /// `rep1` is always [`repair_td3_line1`] at this row, never
@@ -1064,7 +1066,7 @@ fn td3_line1_variants(
     rep1: fn(&str) -> String,
 ) -> Vec<String> {
     if width != 44 || prefixes != b"P" {
-        return variants(raw, width, rep1);
+        return two_line_line1_variants_shifted(raw, width, prefixes, rep1);
     }
     match td3_prefix_verdict(&fix_doc_code(&normalize_line(raw))) {
         Td3Prefix::Ambiguous => Vec::new(),
@@ -1097,6 +1099,70 @@ fn td3_line1_variants(
                 candidates
             }
         }
+    }
+}
+
+/// [`td3_line1_admissible`] generalized to MRV-A/TD2/MRV-B: the right width,
+/// one of the format's own first-character prefixes, and an issuing state
+/// (positions 2..5, letterized) that resolves in [`country_name`]. Unlike
+/// TD3, none of these three formats has a closed document-code table (see
+/// [`repair_td2_line1`]'s doc comment), so admissibility here can never rest
+/// on "the code is in the table" — only on the issuer resolving.
+fn two_line_line1_admissible(line1: &str, width: usize, prefixes: &[u8]) -> bool {
+    if line1.len() != width || !line1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {
+        return false;
+    }
+    let issuer: String = line1[2..5].chars().map(letterize).collect();
+    country_resolves(&issuer)
+}
+
+/// [`td3_line1_variants`]'s `Keep` arm, generalized to MRV-A/TD2/MRV-B —
+/// [`two_line_line1_admissible`]'s doc comment explains why these three
+/// formats get [`country_name`]-only admissibility rather than TD3's table
+/// check. `class_sweep_pass` and `damaged_pass` share `td3_line1_variants`
+/// across all four two-line formats (see its own doc comment), so before
+/// this function existed only TD3's shared candidates were ever chained with
+/// their `*_line1_shifted` repair — a line whose position-1 filler was
+/// dropped by the OCR retry loop reached these two passes with only the
+/// still-shifted `rep1` candidate to offer, exactly the gap #468/#469 closed
+/// for TD3 alone (#476 generalizes it).
+///
+/// Chains each format's own `repair_*_line1_shifted` variants ahead of
+/// `rep1`'s plain ones — the same "second, independent `variants()` call"
+/// shape [`unshift_line1_prefix`]'s doc comment requires — then, when at
+/// least one resulting candidate is admissible, drops the ones that are not.
+/// A genuine issuer-defined second document-code letter whose unshifted read
+/// also happens to resolve (TD2/MRV's analogue of TD3's #445 collision) is
+/// not resolved here the way TD3 resolves it: with no table to prefer the
+/// as-read line, both readings survive the filter and disagree, so
+/// [`single`]'s unanimity gate refuses rather than guessing — the correct,
+/// honest outcome per #440 when line 1 alone cannot arbitrate.
+fn two_line_line1_variants_shifted(
+    raw: &str,
+    width: usize,
+    prefixes: &[u8],
+    rep1: fn(&str) -> String,
+) -> Vec<String> {
+    let shifted: fn(&str) -> String = match (width, prefixes) {
+        (44, b"V") => repair_mrv_a_line1_shifted,
+        (36, b"V") => repair_mrv_b_line1_shifted,
+        (36, b"IAC") => repair_td2_line1_shifted,
+        _ => return variants(raw, width, rep1),
+    };
+    let candidates: Vec<String> = variants(raw, width, shifted)
+        .into_iter()
+        .chain(variants(raw, width, rep1))
+        .collect();
+    if candidates
+        .iter()
+        .any(|c| two_line_line1_admissible(c, width, prefixes))
+    {
+        candidates
+            .into_iter()
+            .filter(|c| two_line_line1_admissible(c, width, prefixes))
+            .collect()
+    } else {
+        candidates
     }
 }
 
@@ -1243,6 +1309,24 @@ fn repair_td1_line1_unshifted(l: &str) -> String {
         return repaired;
     }
     format!("{}<{}", &repaired[0..1], &repaired[1..29])
+}
+
+/// [`repair_td1_line1`]'s plain candidates chained with
+/// [`repair_td1_line1_unshifted`]'s — the ordinary TD1 scan in
+/// `find_and_parse_with` already builds exactly this chain inline;
+/// `class_sweep_pass` and `damaged_pass` share this helper so a line 1 that
+/// needs unshifting *and* whose line 2 or line 3 separately needs damaged-
+/// pass recovery isn't left with only the plain (still-shifted, checksum-
+/// failing) candidate to offer — #476's TD1 side of #468/#469's TD3
+/// generalization. No admissibility filter is needed here the way
+/// [`two_line_line1_variants_shifted`] needs one: TD1's own document-number
+/// check digit, not a country-resolution heuristic, decides which candidate
+/// (if either) is real, exactly as it already does in the ordinary scan.
+fn td1_line1_variants(raw: &str) -> Vec<String> {
+    variants(raw, 30, repair_td1_line1)
+        .into_iter()
+        .chain(variants(raw, 30, repair_td1_line1_unshifted))
+        .collect()
 }
 
 fn repair_td1_line2(l: &str) -> String {
@@ -2055,7 +2139,7 @@ fn class_sweep_pass(
                 variants(b, 30, repair_td1_line2),
             ),
             (
-                variants(a, 30, repair_td1_line1),
+                td1_line1_variants(a),
                 class_swept(b, 30, repair_td1_line2, TD1_LINE2_CD_FIELDS),
             ),
         ] {
@@ -2218,12 +2302,12 @@ fn damaged_pass(
                 variants(c, 30, repair_td1_line3),
             ),
             (
-                variants(a, 30, repair_td1_line1),
+                td1_line1_variants(a),
                 restored(b, 30, repair_td1_line2),
                 variants(c, 30, repair_td1_line3),
             ),
             (
-                variants(a, 30, repair_td1_line1),
+                td1_line1_variants(a),
                 variants(b, 30, repair_td1_line2),
                 restored(c, 30, repair_td1_line3),
             ),
@@ -2233,12 +2317,12 @@ fn damaged_pass(
                 variants(c, 30, repair_td1_line3),
             ),
             (
-                variants(a, 30, repair_td1_line1),
+                td1_line1_variants(a),
                 substituted(b, 30, repair_td1_line2),
                 variants(c, 30, repair_td1_line3),
             ),
             (
-                variants(a, 30, repair_td1_line1),
+                td1_line1_variants(a),
                 variants(b, 30, repair_td1_line2),
                 substituted(c, 30, repair_td1_line3),
             ),
@@ -2382,6 +2466,105 @@ fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #476's TD1 side of #468/#469's TD3 generalization, pinned as a
+    /// white-box unit test on [`td1_line1_variants`] rather than through
+    /// [`find_and_parse`]: TD1 and TD2 share the `I`/`A`/`C` line-1 prefix by
+    /// design, and forcing TD1's own ordinary scan to fail (the only way to
+    /// reach `damaged_pass` at all) also hands `find_and_parse`'s
+    /// unconditional TD2 scan the very same lines, whose `restored`/
+    /// `substituted` search can coincidentally produce a structurally
+    /// plausible TD2 fallback that wins before `damaged_pass` ever runs — a
+    /// pre-existing cross-format ambiguity, not this fix, and exactly why
+    /// `crates/mrz/tests/repair.rs`'s TD1 punched-hole fixtures test the
+    /// repair primitives directly instead of the full multi-format scan.
+    ///
+    /// A dropped line-1 filler leaves the plain candidate's document number
+    /// shifted by one cell, so its own check digit (positions 5..15) no
+    /// longer validates — before this fix, that was the *only* line-1
+    /// candidate `damaged_pass`'s TD1 shapes ever tried, so a document
+    /// needing damaged recovery on line 2 or line 3 *as well* was an
+    /// unrecoverable checksum failure even though the ordinary scan's own
+    /// `repair_td1_line1_unshifted` would have recovered it.
+    #[test]
+    fn td1_line1_variants_recovers_a_dropped_filler() {
+        use crate::checksum::check_digit;
+        use crate::{format_td1, Td1Fields};
+
+        // The first digit must not be one of `letterize`'s remapped digits
+        // (`0`, `1`, `2`, `5`, `6`, `8`): once the drop shifts it into
+        // `repair_td1_line1`'s hard-coded issuing-state range (positions
+        // 2..5), a remapped digit would be corrupted to a letter before
+        // `repair_td1_line1_unshifted` ever gets to move it back -- a
+        // separate, pre-existing limitation of that composition, not what
+        // this test is pinning.
+        let document_number = "345678912";
+        let mrz = format_td1(&Td1Fields {
+            document_code: "I".to_string(),
+            issuing_country: "UTO".to_string(),
+            document_number: document_number.to_string(),
+            optional_data_1: None,
+            surname: "ESKANDARI".to_string(),
+            given_names: "MAREN".to_string(),
+            nationality: "UTO".to_string(),
+            date_of_birth: MrzDate::from_field(
+                RawDateField::try_from("440101").expect("six MRZ date characters"),
+                DateRole::Birth,
+                crate::CURRENT_YY,
+            ),
+            sex: Sex::Female,
+            date_of_expiry: MrzDate::from_field(
+                RawDateField::try_from("301230").expect("six MRZ date characters"),
+                DateRole::Expiry,
+                crate::CURRENT_YY,
+            ),
+            optional_data_2: None,
+        });
+        let mut lines = mrz.lines();
+        let l1 = lines.next().expect("format_td1 emits line 1").to_string();
+        let l2 = lines.next().expect("format_td1 emits line 2");
+        let l3 = lines.next().expect("format_td1 emits line 3");
+        assert_eq!(l1.len(), 30, "sanity: a TD1 line is 30 cells");
+        assert!(
+            parse_td1_with(&l1, l2, l3, &ParseOptions::default())
+                .expect("the emitted fixture parses")
+                .valid(),
+            "sanity: the fixture must be checksum-valid before it is damaged"
+        );
+
+        let mut damaged = l1.clone();
+        damaged.remove(1);
+        assert_eq!(damaged.len(), 29, "dropping one character narrows the line");
+
+        let candidates = td1_line1_variants(&damaged);
+        assert!(
+            candidates.contains(&l1),
+            "the unshifted candidate must reconstruct the original line exactly, got {candidates:?}"
+        );
+
+        // The plain candidate `damaged_pass`'s TD1 shapes tried alone before
+        // this fix keeps the shift, so its own document-number check digit
+        // never validates -- confirming there is genuinely nothing else in
+        // `candidates` this test's `l1` match could be confused with.
+        let shifted_only: Vec<&String> = candidates.iter().filter(|c| c.as_str() != l1).collect();
+        assert!(
+            shifted_only.iter().all(|c| {
+                c.len() != 30
+                    || check_digit(&c[5..14]).ok()
+                        != c.as_bytes().get(14).and_then(|b| (*b as char).to_digit(10))
+            }),
+            "every other candidate's own document-number check digit must fail, got {candidates:?}"
+        );
+
+        // The recovered candidate parses as a genuine, fully valid TD1
+        // record when crossed against line 2/line 3 unchanged -- exactly the
+        // shape `damaged_pass`'s TD1 loop crosses each restored/substituted
+        // line 1 against.
+        let recovered = parse_td1_with(&l1, l2, l3, &ParseOptions::default())
+            .expect("the unshifted candidate parses");
+        assert_eq!(recovered.document_number, document_number);
+        assert!(recovered.valid());
+    }
 
     /// `single` treats readings as one answer only when every exposed field and
     /// the format agree. Each mutation below touches one field the gate once
