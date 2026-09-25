@@ -49,12 +49,84 @@ def heading_key(heading: extract.Heading) -> str:
     return heading.number
 
 
+# Broader than `extract.is_appendix_start`, which only matches the exact
+# two-line "Appendix A to Part 11" \n "TITLE" construct Parts 10-12 use.
+# Part 3's own appendices are printed inline instead — "APPENDIX B TO PART 3
+# — TRANSLITERATION..." all on one line — so `pdf_headings` needs a marker
+# that recognises both conventions. Case matters here: ICAO always prints
+# its own appendix heading in full caps ("APPENDIX B TO PART 3"), while a
+# body sentence that merely mentions an appendix uses sentence case
+# ("Appendix A to this Part.", "Appendix B and C.5.10 of Appendix C..."), so
+# an all-caps match is what tells a real appendix heading apart from a
+# wrapped cross-reference sentence that happens to start a physical PDF
+# line with the word "Appendix" (found in Part 3's own body text; an
+# case-insensitive first version of this regex caught it and wrongly
+# treated everything after it, including clauses 5-8, as "past the
+# appendix").
+_APPENDIX_MARKER_RE = re.compile(r"^APPENDIX\s+[A-Z]\b")
+
+
+def _is_appendix_marker_line(line: str) -> bool:
+    return extract.is_appendix_start(line) is not None or bool(
+        _APPENDIX_MARKER_RE.match(line.strip())
+    )
+
+
 def pdf_headings(lines: list[str]) -> dict[str, str]:
+    """Every clause heading `extract.find_headings_in_lines` finds in the raw
+    PDF body lines — same-line and split-across-two-lines alike, so a
+    detector fix here is automatically what the extractor itself promotes,
+    not a second opinion of it (see `number_alone_candidates` below for a
+    genuinely independent check that doesn't share this detector at all).
+
+    A bare, no-dot clause number (`9`) found after the first "Appendix X to
+    Part N" marker is dropped: ICAO's own appendices number their own
+    subsections with a letter prefix (`A.1`, `B.5.5.1`), never a bare
+    top-level integer, so one appearing there is something else entirely —
+    Part 3 Appendix B's own 16-item name-transliteration list happens to
+    number its items "1." through "16.", and item "9.   Mohammed" collides
+    with `_HEADING_RE` exactly the way a real top-level heading would.
+    Every genuine bare-integer heading in this corpus (verified across all
+    13 Parts) appears before its Part's first Appendix.
+    """
+    appendix_start = next(
+        (i for i, line in enumerate(lines) if _is_appendix_marker_line(line)),
+        None,
+    )
     found = {}
-    for line in lines:
-        heading = extract.detect_heading(line)
-        if heading is not None:
-            found.setdefault(heading_key(heading), heading.anchor_text)
+    for index, heading in extract.find_headings_in_lines(lines):
+        if appendix_start is not None and index >= appendix_start and heading.depth == 1:
+            continue
+        found.setdefault(heading_key(heading), heading.anchor_text)
+    return found
+
+
+# Deliberately independent of `extract.detect_heading` /
+# `extract.find_headings_in_lines`: a clause number alone on its own PDF
+# line, immediately followed by a line that starts with a capital letter —
+# nothing more. This exists so a bug in the shared split-heading detector
+# above (parent-hierarchy tracking, title-shape rules) does not also hide
+# itself from the audit: `heading_diff` checks the PDF against the
+# Markdown using the SAME detector on both sides, so a detector miss is, by
+# construction, invisible to it. This check's own false positives (an RFC
+# 5280 clause number quoted inline in Part 12's Appendix B, immediately
+# followed by capitalised quoted prose) are expected and require the same
+# by-hand triage against the rendered PDF page every other check here does
+# — see `knowledge/docs9303/README.md`.
+_NUMBER_ALONE_RE = re.compile(r"^(?:[A-Z]\.)?\d+(?:\.\d+){1,5}\.?$")
+
+
+def number_alone_candidates(lines: list[str]) -> list[tuple[int, str, str]]:
+    """`(line_index, number, next_line)` for every PDF line that is only a
+    clause number, immediately followed by a capitalised line."""
+    found = []
+    for i, line in enumerate(lines[:-1]):
+        number = line.strip()
+        if not _NUMBER_ALONE_RE.match(number):
+            continue
+        nxt = lines[i + 1].strip()
+        if nxt and nxt[0].isupper():
+            found.append((i, number.rstrip("."), nxt))
     return found
 
 
@@ -208,6 +280,24 @@ def audit_part(part: int, pdf_dir: Path) -> tuple[list[str], bool]:
         lines.append(f"  clause headings absent from PDF ({len(extra)}):")
         lines.extend(f"    {heading}" for heading in extra)
         bad |= bool(missing or extra)
+
+        # Independent of the check above: see `number_alone_candidates`'s
+        # own docstring for why this doesn't reuse `extract.detect_heading`.
+        markdown_numbers = set(markdown_headings(markdown))
+        unresolved_alone = [
+            (line, number, title)
+            for line, number, title in number_alone_candidates(body_lines)
+            if number not in markdown_numbers
+        ]
+        lines.append(
+            f"  number-alone-then-title PDF lines with no matching Markdown heading "
+            f"({len(unresolved_alone)}):"
+        )
+        lines.extend(
+            f"    body-line {line}: {number} | {title[:60]}"
+            for line, number, title in unresolved_alone
+        )
+        bad |= bool(unresolved_alone)
 
         table_findings = []
         for caption in figure_tables(markdown):
