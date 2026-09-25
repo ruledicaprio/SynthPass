@@ -277,16 +277,72 @@ pub(crate) fn fit_length(n: &str, target: usize) -> Vec<String> {
 /// The check digits decide which variant — if any — is the true read.
 pub(crate) fn variants(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String> {
     let n = normalize_line(raw);
+    if !is_mrz_charset(&n) {
+        return Vec::new();
+    }
+    variants_normalized(&n, target, repair)
+}
+
+/// Admit an unreadable OCR glyph only in a name field. The name has no check
+/// digit; every other cell keeps the ordinary MRZ alphabet requirement. Work
+/// in character positions before fitting, then check the final positions too:
+/// a width repair must not move an unknown into a checked or structural field.
+pub(crate) fn variants_with_unknown_name(
+    raw: &str,
+    target: usize,
+    name: core::ops::Range<usize>,
+    repair: fn(&str) -> String,
+) -> Vec<String> {
+    let Some(mapped) = normalize_with_unknown_name(raw, name.clone()) else {
+        return Vec::new();
+    };
+    variants_normalized(&mapped, target, repair)
+        .into_iter()
+        .filter(|candidate| {
+            candidate
+                .chars()
+                .enumerate()
+                .all(|(position, c)| c != '?' || name.contains(&position))
+        })
+        .collect()
+}
+
+/// Normalize an OCR line while retaining one unknown marker per unreadable
+/// name character. `None` means an unreadable character appeared elsewhere.
+pub(crate) fn normalize_with_unknown_name(
+    raw: &str,
+    name: core::ops::Range<usize>,
+) -> Option<String> {
+    let normalized = normalize_line(raw);
+    let mut mapped = String::with_capacity(normalized.len());
+    for (position, c) in normalized.chars().enumerate() {
+        if matches!(c, 'A'..='Z' | '0'..='9' | '<') {
+            mapped.push(c);
+        } else if name.contains(&position) {
+            mapped.push('?');
+        } else {
+            return None;
+        }
+    }
+    Some(mapped)
+}
+
+fn variants_normalized(n: &str, target: usize, repair: fn(&str) -> String) -> Vec<String> {
     // OCR drops trailing fillers wholesale — ocrs truncates a TD3 name line's
     // filler run by 9+ characters on low-resolution scans — so tolerate short
     // lines generously (they get padded back); hallucinated extra characters
     // are rarer. Every padded candidate still has to satisfy the check digits,
     // so a wider net costs candidates, not correctness.
-    if n.len() + 14 < target || n.len() > target + 4 || !is_mrz_charset(&n) {
+    if n.len() + 14 < target
+        || n.len() > target + 4
+        || !n
+            .chars()
+            .all(|c| matches!(c, 'A'..='Z' | '0'..='9' | '<' | '?'))
+    {
         return Vec::new();
     }
     let mut out: Vec<String> = Vec::new();
-    for fitted in fit_length(&n, target) {
+    for fitted in fit_length(n, target) {
         let repaired = repair(&fitted);
         let last_resort = aggressive_defiller(&repaired);
         for form in [repaired, fitted, last_resort] {

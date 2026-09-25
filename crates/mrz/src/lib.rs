@@ -597,10 +597,12 @@ pub struct MrzData {
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub document_number_legacy_encoding: bool,
     /// Primary identifier / surname, as printed (uppercase, `<` runs
-    /// collapsed to single spaces between components).
+    /// collapsed to single spaces between components). Empty if an unreadable
+    /// OCR cell makes this name component uncertifiable; the raw cell remains
+    /// in [`mrz_lines`](Self::mrz_lines).
     pub surname: String,
-    /// Secondary identifier / given names, as printed (same cleanup as
-    /// [`surname`](Self::surname)).
+    /// Secondary identifier / given names, as printed (same cleanup and
+    /// unreadable-cell handling as [`surname`](Self::surname)).
     pub given_names: String,
     /// Nationality (3-letter ICAO code).
     pub nationality: String,
@@ -1239,8 +1241,8 @@ mod tests {
     const TD1_L3: &str = "ERIKSSON<<ANNA<MARIA<<<<<<<<<<";
 
     #[test]
-    fn bad_character_reports_zero_based_td1_line_and_column() {
-        for (line, expected_position) in [(0, 3), (1, 7), (2, 11)] {
+    fn bad_character_reports_zero_based_td1_checked_line_and_column() {
+        for (line, expected_position) in [(0, 3), (1, 7)] {
             let mut lines = [TD1_L1.to_string(), TD1_L2.to_string(), TD1_L3.to_string()];
             lines[line].replace_range(expected_position..expected_position + 1, "?");
 

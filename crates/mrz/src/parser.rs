@@ -8,7 +8,8 @@
 
 use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,
-    is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
+    is_mrz_charset, letterize, normalize_line, normalize_with_unknown_name, repair_positions,
+    variants, variants_with_unknown_name, verify,
 };
 use crate::repair::{solve_class_sweep, FieldKind, Resolution};
 use crate::{
@@ -166,15 +167,30 @@ fn clean_name(field: &str) -> (String, String) {
             None => (trimmed, ""),
         },
     };
-    (
-        surname.replace('<', " ").trim().to_string(),
-        given.replace('<', " ").trim().to_string(),
-    )
+    (clean_name_component(surname), clean_name_component(given))
 }
 
-fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
+/// An unreadable name cell cannot certify the whole component. Keep its raw
+/// position in `mrz_lines`, but leave the decoded field empty rather than
+/// publishing `?` as if it were a character of the holder's name.
+fn clean_name_component(component: &str) -> String {
+    if component.contains('?') {
+        String::new()
+    } else {
+        component.replace('<', " ").trim().to_string()
+    }
+}
+
+/// Only name cells may hold an unknown OCR marker. Doc 9303's MRZ directories
+/// put names at TD1 line 3 positions 1–30 (Part 5 §4.2.2.3), and at line 1
+/// positions 6–44 or 6–36 for TD3/TD2/MRV-A/MRV-B (Parts 4, 6, 7).
+fn ensure_charset(
+    line: &str,
+    line_number: usize,
+    name: core::ops::Range<usize>,
+) -> Result<(), MrzError> {
     for (position, c) in line.chars().enumerate() {
-        if char_value(c).is_none() {
+        if char_value(c).is_none() && !(c == '?' && name.contains(&position)) {
             return Err(MrzError::BadCharacter {
                 character: c,
                 line: Some(line_number),
@@ -262,7 +278,11 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         if got != 44 {
             return Err(MrzError::BadLength { expected: 44, got });
         }
-        ensure_charset(line, line_number)?;
+        ensure_charset(
+            line,
+            line_number,
+            if line_number == 0 { 5..44 } else { 0..0 },
+        )?;
     }
     if !line1.starts_with('P') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
@@ -355,7 +375,11 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         if got != 36 {
             return Err(MrzError::BadLength { expected: 36, got });
         }
-        ensure_charset(line, line_number)?;
+        ensure_charset(
+            line,
+            line_number,
+            if line_number == 0 { 5..36 } else { 0..0 },
+        )?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
@@ -456,7 +480,11 @@ pub fn parse_td1_with(
         if got != 30 {
             return Err(MrzError::BadLength { expected: 30, got });
         }
-        ensure_charset(line, line_number)?;
+        ensure_charset(
+            line,
+            line_number,
+            if line_number == 2 { 0..30 } else { 0..0 },
+        )?;
     }
     let code = line1[0..2].trim_end_matches('<');
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
@@ -555,7 +583,11 @@ pub fn parse_mrv_a_with(
         if got != 44 {
             return Err(MrzError::BadLength { expected: 44, got });
         }
-        ensure_charset(line, line_number)?;
+        ensure_charset(
+            line,
+            line_number,
+            if line_number == 0 { 5..44 } else { 0..0 },
+        )?;
     }
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
@@ -638,7 +670,11 @@ pub fn parse_mrv_b_with(
         if got != 36 {
             return Err(MrzError::BadLength { expected: 36, got });
         }
-        ensure_charset(line, line_number)?;
+        ensure_charset(
+            line,
+            line_number,
+            if line_number == 0 { 5..36 } else { 0..0 },
+        )?;
     }
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
@@ -1064,16 +1100,17 @@ fn td3_line1_variants(
     rep1: fn(&str) -> String,
 ) -> Vec<String> {
     if width != 44 || prefixes != b"P" {
-        return variants(raw, width, rep1);
+        return variants_with_unknown_name(raw, width, 5..width, rep1);
     }
     match td3_prefix_verdict(&fix_doc_code(&normalize_line(raw))) {
         Td3Prefix::Ambiguous => Vec::new(),
         Td3Prefix::Repair(fixed) => vec![fixed],
         Td3Prefix::Keep => {
-            let candidates: Vec<String> = variants(raw, width, repair_td3_line1_shifted)
-                .into_iter()
-                .chain(variants(raw, width, rep1))
-                .collect();
+            let candidates: Vec<String> =
+                variants_with_unknown_name(raw, width, 5..width, repair_td3_line1_shifted)
+                    .into_iter()
+                    .chain(variants_with_unknown_name(raw, width, 5..width, rep1))
+                    .collect();
             // #469: the unshift chain above and `rep1` can each produce a
             // *distinct* 44-character line that individually passes
             // `variants`' own checksum/length gate — one the genuine,
@@ -1399,20 +1436,142 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
 /// assert!(doc.valid());
 /// ```
 pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
+    // Preserve the ordinary scanner's ordering. A checksum-valid read from
+    // existing OCR rows outranks a reading assembled from newly joined tokens;
+    // names have no check digit to arbitrate two such readings.
+    let mut conflict = false;
+    let ordinary = find_and_parse_inner(text, opts, false, &mut conflict);
+    if conflict {
+        return Err(MrzError::NotFound);
+    }
+    if ordinary
+        .as_ref()
+        .is_ok_and(|data| data.valid() && !name_has_unknown(data))
+    {
+        return ordinary;
+    }
+    let has_exact_join = text.lines().any(|line| {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        tokens
+            .windows(2)
+            .any(|pair| matches!(pair[0].len() + pair[1].len(), 30 | 36 | 44))
+    });
+    if !has_exact_join {
+        return ordinary;
+    }
+    let joined = find_and_parse_inner(text, opts, true, &mut conflict);
+    if conflict {
+        return Err(MrzError::NotFound);
+    }
+    if joined
+        .as_ref()
+        .is_ok_and(|data| data.valid() && !name_has_unknown(data))
+    {
+        return joined;
+    }
+    match ordinary {
+        Ok(data) if data.valid() => Ok(data),
+        Ok(data) => match joined {
+            Ok(candidate) if candidate.valid() => Ok(candidate),
+            _ => Ok(data),
+        },
+        Err(_) => joined,
+    }
+}
+
+fn name_has_unknown(data: &MrzData) -> bool {
+    data.mrz_lines.contains('?')
+}
+
+/// A complete reading may settle an unknown name cell only when it differs
+/// from the provisional reading at that cell alone. In particular, a second
+/// checksum-valid document number is not evidence for choosing either one.
+fn completes_unknown_name(uncertain: &MrzData, complete: &MrzData) -> bool {
+    if uncertain.mrz_lines.len() != complete.mrz_lines.len() {
+        return false;
+    }
+    let mut one_unknown = false;
+    let cells_agree = uncertain
+        .mrz_lines
+        .bytes()
+        .zip(complete.mrz_lines.bytes())
+        .all(|(a, b)| {
+            if a == b {
+                true
+            } else if a == b'?' && matches!(b, b'A'..=b'Z' | b'0'..=b'9' | b'<') {
+                one_unknown = true;
+                true
+            } else {
+                false
+            }
+        });
+    if !cells_agree || !one_unknown {
+        return false;
+    }
+    let mut uncertain = uncertain.clone();
+    let mut complete = complete.clone();
+    for data in [&mut uncertain, &mut complete] {
+        data.surname.clear();
+        data.given_names.clear();
+        data.mrz_lines.clear();
+    }
+    uncertain == complete
+}
+
+fn same_reading_except_zone(a: &MrzData, b: &MrzData) -> bool {
+    let mut a = a.clone();
+    let mut b = b.clone();
+    a.mrz_lines.clear();
+    b.mrz_lines.clear();
+    a == b
+}
+
+fn find_and_parse_inner(
+    text: &str,
+    opts: &ParseOptions,
+    join_split_rows: bool,
+    conflict: &mut bool,
+) -> Result<MrzData, MrzError> {
     // Markdown/HTML pipelines escape the filler character.
     let text = text.replace("&lt;", "<");
     // OCR often emits several MRZ lines as ONE physical line, space-separated
     // (docling renders the whole zone as a single paragraph) — treat long
     // whitespace-separated tokens as individual candidate lines.
-    let mut lines: Vec<&str> = Vec::new();
+    let mut candidate_lines: Vec<String> = Vec::new();
     for line in text.lines() {
-        let tokens: Vec<&str> = line.split_whitespace().filter(|t| t.len() >= 20).collect();
-        if tokens.len() >= 2 {
-            lines.extend(tokens);
+        if !join_split_rows {
+            let tokens: Vec<&str> = line.split_whitespace().filter(|t| t.len() >= 20).collect();
+            if tokens.len() >= 2 {
+                candidate_lines.extend(tokens.into_iter().map(str::to_string));
+            } else {
+                candidate_lines.push(line.to_string());
+            }
+            continue;
+        }
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        let long_tokens = tokens.iter().filter(|token| token.len() >= 20).count();
+        let exact_join = tokens
+            .windows(2)
+            .any(|pair| matches!(pair[0].len() + pair[1].len(), 30 | 36 | 44));
+        if long_tokens >= 2 || exact_join {
+            for (index, token) in tokens.iter().enumerate() {
+                // A space inside one OCR row can split an otherwise exact
+                // 30/36/44-cell line. Rejoin only adjacent tokens on this
+                // physical line and only at a standard MRZ width.
+                if let Some(next) = tokens.get(index + 1) {
+                    if matches!(token.len() + next.len(), 30 | 36 | 44) {
+                        candidate_lines.push(format!("{token}{next}"));
+                    }
+                }
+                if token.len() >= 20 {
+                    candidate_lines.push((*token).to_string());
+                }
+            }
         } else {
-            lines.push(line);
+            candidate_lines.push(line.to_string());
         }
     }
+    let lines: Vec<&str> = candidate_lines.iter().map(String::as_str).collect();
 
     // Best parseable-but-checksum-failed hit, reported when nothing fully
     // validates so callers can see which check digits failed and how close the
@@ -1420,8 +1579,56 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // most conservative variants first, so the first reading at a given score
     // is the one that assumed least about the OCR noise.
     let mut fallback: Option<MrzData> = None;
-    let mut consider = |data: MrzData| -> Option<MrzData> {
+    let mut uncertain_valid: Option<(usize, MrzData)> = None;
+    // Different repairs of one noisy source row are alternatives, not
+    // independent documents. A conflict discards that row's recovery group;
+    // later, clean rows must still get a chance to validate on their own.
+    let mut rejected_groups = std::collections::HashSet::new();
+    let mut consider = |data: MrzData, source: usize| -> Option<MrzData> {
+        if *conflict || rejected_groups.contains(&source) {
+            return None;
+        }
         if data.valid() {
+            if name_has_unknown(&data) {
+                // The recovery path can produce both raw and letterized
+                // readings of one noisy row. Doc 9303 Part 4 §4.2.2,
+                // line 2 positions 11–13, requires the Part 3 §5 letter code,
+                // with spaces rendered as `<`. A digit cannot be a nationality
+                // code, even when line-2 checks pass (they omit this field).
+                if !data
+                    .nationality
+                    .bytes()
+                    .all(|c| c.is_ascii_uppercase() || c == b'<')
+                {
+                    return None;
+                }
+                match &uncertain_valid {
+                    Some((previous_source, previous))
+                        if !same_reading_except_zone(previous, &data) =>
+                    {
+                        if *previous_source == source {
+                            rejected_groups.insert(source);
+                            uncertain_valid = None;
+                        } else {
+                            *conflict = true;
+                        }
+                    }
+                    None => uncertain_valid = Some((source, data)),
+                    _ => {}
+                }
+                return None;
+            }
+            if let Some((previous_source, previous)) = &uncertain_valid {
+                if !completes_unknown_name(previous, &data) {
+                    if *previous_source == source {
+                        rejected_groups.insert(source);
+                        uncertain_valid = None;
+                    } else {
+                        *conflict = true;
+                    }
+                    return None;
+                }
+            }
             return Some(data);
         }
         match &fallback {
@@ -1450,8 +1657,8 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // TD3: a line starting with 'P' followed by a candidate line — or both
     // 44-char lines merged into one ~88-char physical line.
     for i in 0..lines.len() {
-        let merged = normalize_line(lines[i]);
-        if merged.starts_with('P') && (84..=92).contains(&merged.len()) && is_mrz_charset(&merged) {
+        let merged = normalize_with_unknown_name(lines[i], 5..44).unwrap_or_default();
+        if merged.starts_with('P') && (84..=92).contains(&merged.len()) {
             let head = &merged[0..44];
             let tail = &merged[44..];
             // `head` is always exactly 44 characters by construction (the
@@ -1465,7 +1672,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 Td3Prefix::Repair(l1) => {
                     for l2 in variants(tail, 44, repair_td3_line2) {
                         if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
-                            if let Some(valid) = consider(data) {
+                            if let Some(valid) = consider(data, i) {
                                 return Ok(valid);
                             }
                         }
@@ -1479,7 +1686,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                     ] {
                         for l2 in variants(tail, 44, repair_td3_line2) {
                             if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
-                                if let Some(valid) = consider(data) {
+                                if let Some(valid) = consider(data, i) {
                                     return Ok(valid);
                                 }
                             }
@@ -1503,7 +1710,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 for l2_raw in lines.iter().skip(i + 1).take(3) {
                     for l2 in variants(l2_raw, 44, repair_td3_line2) {
                         if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
-                            if let Some(valid) = consider(data) {
+                            if let Some(valid) = consider(data, i) {
                                 return Ok(valid);
                             }
                         }
@@ -1518,9 +1725,15 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             Td3Prefix::Keep => {}
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_td3_line1_shifted)
-            .into_iter()
-            .chain(variants(lines[i], 44, repair_td3_line1));
+        let l1_candidates =
+            variants_with_unknown_name(lines[i], 44, 5..44, repair_td3_line1_shifted)
+                .into_iter()
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    44,
+                    5..44,
+                    repair_td3_line1,
+                ));
         for l1 in l1_candidates {
             if !l1.starts_with('P') {
                 continue;
@@ -1529,7 +1742,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_td3_line2) {
                     if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1546,8 +1759,8 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // format first means a genuine MRV-B line never gets loosely padded up
     // and misparsed as MRV-A before MRV-B gets a chance at its exact length.
     for i in 0..lines.len() {
-        let merged = normalize_line(lines[i]);
-        if merged.starts_with('V') && (68..=76).contains(&merged.len()) && is_mrz_charset(&merged) {
+        let merged = normalize_with_unknown_name(lines[i], 5..36).unwrap_or_default();
+        if merged.starts_with('V') && (68..=76).contains(&merged.len()) {
             let head = &merged[0..36];
             let tail = &merged[36..];
             for l1 in [
@@ -1558,7 +1771,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             ] {
                 for l2 in variants(tail, 36, repair_mrv_b_line2) {
                     if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1566,10 +1779,21 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 36, repair_mrv_b_line1_shifted)
-            .into_iter()
-            .chain(variants(lines[i], 36, repair_mrv_b_line1_unshifted))
-            .chain(variants(lines[i], 36, repair_mrv_b_line1));
+        let l1_candidates =
+            variants_with_unknown_name(lines[i], 36, 5..36, repair_mrv_b_line1_shifted)
+                .into_iter()
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    36,
+                    5..36,
+                    repair_mrv_b_line1_unshifted,
+                ))
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    36,
+                    5..36,
+                    repair_mrv_b_line1,
+                ));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
@@ -1578,7 +1802,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 36, repair_mrv_b_line2) {
                     if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1587,13 +1811,34 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
+    // An exact two-row MRV-B is stronger format evidence than the same rows
+    // padded to MRV-A width. The old early-return order supplied this guard;
+    // retaining provisional unknown-name hits requires making it explicit.
+    let intact_mrv_b_starts: Vec<usize> = (0..lines.len())
+        .filter(|&index| {
+            normalize_with_unknown_name(lines[index], 5..36)
+                .filter(|first| first.len() == 36)
+                .is_some_and(|first| {
+                    lines.iter().skip(index + 1).take(3).any(|next| {
+                        let second = normalize_line(next);
+                        second.len() == 36
+                            && is_mrz_charset(&second)
+                            && parse_mrv_b_with(&first, &second, opts).is_ok()
+                    })
+                })
+        })
+        .collect();
+
     // MRV-A: a line starting with 'V' followed by a candidate line — or both
     // 44-char lines merged into one ~84-92 char physical line. Disjoint from
     // TD3 ('P'-prefixed) and TD1/TD2 (I/A/C-prefixed), so no cannibalization
     // against those; see the MRV-B comment above for why MRV-B runs first.
     for i in 0..lines.len() {
-        let merged = normalize_line(lines[i]);
-        if merged.starts_with('V') && (84..=92).contains(&merged.len()) && is_mrz_charset(&merged) {
+        if intact_mrv_b_starts.contains(&i) {
+            continue;
+        }
+        let merged = normalize_with_unknown_name(lines[i], 5..44).unwrap_or_default();
+        if merged.starts_with('V') && (84..=92).contains(&merged.len()) {
             let head = &merged[0..44];
             let tail = &merged[44..];
             for l1 in [
@@ -1604,7 +1849,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             ] {
                 for l2 in variants(tail, 44, repair_mrv_a_line2) {
                     if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1612,10 +1857,21 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_mrv_a_line1_shifted)
-            .into_iter()
-            .chain(variants(lines[i], 44, repair_mrv_a_line1_unshifted))
-            .chain(variants(lines[i], 44, repair_mrv_a_line1));
+        let l1_candidates =
+            variants_with_unknown_name(lines[i], 44, 5..44, repair_mrv_a_line1_shifted)
+                .into_iter()
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    44,
+                    5..44,
+                    repair_mrv_a_line1_unshifted,
+                ))
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    44,
+                    5..44,
+                    repair_mrv_a_line1,
+                ));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
@@ -1624,7 +1880,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_mrv_a_line2) {
                     if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1655,10 +1911,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // this from turning into a scan of the whole page — same bound the
     // two-line formats below already use for their own gap tolerance.
     for i in 0..lines.len() {
-        let merged = normalize_line(lines[i]);
+        let merged = normalize_with_unknown_name(lines[i], 60..90).unwrap_or_default();
         if matches!(merged.as_bytes().first(), Some(b'I' | b'A' | b'C'))
             && (86..=94).contains(&merged.len())
-            && is_mrz_charset(&merged)
         {
             let head = &merged[0..30];
             let mid = &merged[30..60];
@@ -1669,9 +1924,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 head.to_string(),
             ] {
                 for l2 in [repair_td1_line2(mid), mid.to_string()] {
-                    for l3 in variants(tail, 30, repair_td1_line3) {
+                    for l3 in variants_with_unknown_name(tail, 30, 0..30, repair_td1_line3) {
                         if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
-                            if let Some(valid) = consider(data) {
+                            if let Some(valid) = consider(data, i) {
                                 return Ok(valid);
                             }
                         }
@@ -1691,9 +1946,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             for (j, l2_raw) in lines.iter().enumerate().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 30, repair_td1_line2) {
                     for l3_raw in lines.iter().skip(j + 1).take(3) {
-                        for l3 in variants(l3_raw, 30, repair_td1_line3) {
+                        for l3 in variants_with_unknown_name(l3_raw, 30, 0..30, repair_td1_line3) {
                             if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
-                                if let Some(valid) = consider(data) {
+                                if let Some(valid) = consider(data, i) {
                                     return Ok(valid);
                                 }
                             }
@@ -1704,12 +1959,32 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
+    // An intact TD1 triple carries stronger format evidence than a 36-cell
+    // reading manufactured by padding its first two 30-cell rows. Record the
+    // exact start positions so a separate genuine TD2 elsewhere in the OCR
+    // text remains eligible. Checksum failure does not erase the TD1 shape.
+    let intact_td1_starts: Vec<usize> = lines
+        .windows(3)
+        .enumerate()
+        .filter_map(|(index, rows)| {
+            let first = normalize_line(rows[0]);
+            let second = normalize_line(rows[1]);
+            let third = normalize_with_unknown_name(rows[2], 0..30)?;
+            (first.len() == 30
+                && second.len() == 30
+                && third.len() == 30
+                && is_mrz_charset(&first)
+                && is_mrz_charset(&second)
+                && parse_td1_with(&first, &second, &third, opts).is_ok())
+            .then_some(index)
+        })
+        .collect();
+
     // TD2: two 36-char lines starting with I/A/C — or both merged into one
     // ~72-char physical line.
-    for &line in &lines {
-        let merged = normalize_line(line);
+    for (i, &line) in lines.iter().enumerate() {
+        let merged = normalize_with_unknown_name(line, 5..36).unwrap_or_default();
         if (68..=76).contains(&merged.len())
-            && is_mrz_charset(&merged)
             && matches!(merged.as_bytes().first(), Some(b'I' | b'A' | b'C'))
         {
             let head = &merged[0..36];
@@ -1721,7 +1996,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             ] {
                 for l2 in variants(tail, 36, repair_td2_line2) {
                     if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
-                        if let Some(valid) = consider(data) {
+                        if let Some(valid) = consider(data, i) {
                             return Ok(valid);
                         }
                     }
@@ -1730,9 +2005,18 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
     for i in 0..lines.len().saturating_sub(1) {
-        let l1_candidates = variants(lines[i], 36, repair_td2_line1_shifted)
-            .into_iter()
-            .chain(variants(lines[i], 36, repair_td2_line1));
+        if intact_td1_starts.contains(&i) {
+            continue;
+        }
+        let l1_candidates =
+            variants_with_unknown_name(lines[i], 36, 5..36, repair_td2_line1_shifted)
+                .into_iter()
+                .chain(variants_with_unknown_name(
+                    lines[i],
+                    36,
+                    5..36,
+                    repair_td2_line1,
+                ));
         for l1 in l1_candidates {
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
@@ -1740,7 +2024,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             shape_seen.get_or_insert(Format::Td2);
             for l2 in variants(lines[i + 1], 36, repair_td2_line2) {
                 if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
-                    if let Some(valid) = consider(data) {
+                    if let Some(valid) = consider(data, i) {
                         return Ok(valid);
                     }
                 }
@@ -1748,7 +2032,11 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
-    // Nothing validated on any ordinary variant. Before giving up, try the
+    if *conflict || !rejected_groups.is_empty() {
+        return Err(MrzError::NotFound);
+    }
+
+    // Nothing fully validated on any ordinary variant. Before giving up, try the
     // damaged-capture case (see `crate::repair`): a line that arrived *narrow*
     // because the recognizer dropped a destroyed glyph instead of emitting a
     // placeholder, so every field after the damage is shifted and no amount of
@@ -1756,9 +2044,28 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // some line already matched a format's shape — a document with no MRZ at
     // all never pays for it.
     if fallback.is_some() {
-        if let Some(data) = damaged_pass(&lines, opts) {
-            return Ok(data);
+        if let Some(data) = damaged_pass(&lines, opts, &intact_td1_starts) {
+            if name_has_unknown(&data) {
+                if let Some((_, previous)) = &uncertain_valid {
+                    if !same_reading_except_zone(previous, &data) {
+                        return Err(MrzError::NotFound);
+                    }
+                } else {
+                    uncertain_valid = Some((usize::MAX, data));
+                }
+            } else if uncertain_valid
+                .as_ref()
+                .is_none_or(|(_, previous)| completes_unknown_name(previous, &data))
+            {
+                return Ok(data);
+            } else {
+                return Err(MrzError::NotFound);
+            }
         }
+    }
+
+    if let Some((_, data)) = uncertain_valid {
+        return Ok(data);
     }
 
     // A best-scoring reading that never validated *and* fails every structural
@@ -2024,7 +2331,11 @@ fn class_swept(
 ///
 /// Returns `None` unless [`ParseOptions::class_sweep`] is on, so the whole
 /// pass — and this judgement — costs nothing until the arm is measured.
-fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+fn class_sweep_pass(
+    lines: &[&str],
+    opts: &ParseOptions,
+    intact_td1_starts: &[usize],
+) -> Option<MrzData> {
     if !opts.class_sweep {
         return None;
     }
@@ -2033,7 +2344,7 @@ fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     // TD1: sweep line 1's document number, or line 2's two dates.
     for i in 0..lines.len().saturating_sub(2) {
         let (a, b, c) = (lines[i], lines[i + 1], lines[i + 2]);
-        let v3 = variants(c, 30, repair_td1_line3);
+        let v3 = variants_with_unknown_name(c, 30, 0..30, repair_td1_line3);
         for (v1, v2) in [
             (
                 class_swept(a, 30, repair_td1_line1, TD1_LINE1_CD_FIELDS),
@@ -2101,6 +2412,9 @@ fn class_sweep_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     for i in 0..lines.len().saturating_sub(1) {
         let (a, b) = (lines[i], lines[i + 1]);
         for (width, prefixes, rep1, rep2, parse, cd_fields) in two_line {
+            if width == 36 && prefixes == b"IAC" && intact_td1_starts.contains(&i) {
+                continue;
+            }
             let v1 = td3_line1_variants(a, width, prefixes, rep1);
             let v2 = class_swept(b, width, rep2, cd_fields);
             for l1 in &v1 {
@@ -2151,11 +2465,15 @@ fn accept_damaged(data: &MrzData) -> bool {
 /// different readings means the MRZ cannot distinguish them, and the honest
 /// answer is the ordinary checksum-failed fallback, not the first candidate
 /// off the list.
-fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
+fn damaged_pass(
+    lines: &[&str],
+    opts: &ParseOptions,
+    intact_td1_starts: &[usize],
+) -> Option<MrzData> {
     // Preferred over the search below when it lands -- see `class_sweep_pass`
     // for why pooling the two makes the sweep lose to the machinery it
     // complements. No-op unless the arm is on.
-    if let Some(data) = class_sweep_pass(lines, opts) {
+    if let Some(data) = class_sweep_pass(lines, opts, intact_td1_starts) {
         return Some(data);
     }
     let mut budget = MAX_DAMAGED_ATTEMPTS;
@@ -2174,12 +2492,12 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
             (
                 restored(a, 30, repair_td1_line1),
                 variants(b, 30, repair_td1_line2),
-                variants(c, 30, repair_td1_line3),
+                variants_with_unknown_name(c, 30, 0..30, repair_td1_line3),
             ),
             (
                 variants(a, 30, repair_td1_line1),
                 restored(b, 30, repair_td1_line2),
-                variants(c, 30, repair_td1_line3),
+                variants_with_unknown_name(c, 30, 0..30, repair_td1_line3),
             ),
             (
                 variants(a, 30, repair_td1_line1),
@@ -2189,12 +2507,12 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
             (
                 substituted(a, 30, repair_td1_line1),
                 variants(b, 30, repair_td1_line2),
-                variants(c, 30, repair_td1_line3),
+                variants_with_unknown_name(c, 30, 0..30, repair_td1_line3),
             ),
             (
                 variants(a, 30, repair_td1_line1),
                 substituted(b, 30, repair_td1_line2),
-                variants(c, 30, repair_td1_line3),
+                variants_with_unknown_name(c, 30, 0..30, repair_td1_line3),
             ),
             (
                 variants(a, 30, repair_td1_line1),
@@ -2252,6 +2570,9 @@ fn damaged_pass(lines: &[&str], opts: &ParseOptions) -> Option<MrzData> {
     for i in 0..lines.len().saturating_sub(1) {
         let (a, b) = (lines[i], lines[i + 1]);
         for (width, prefixes, rep1, rep2, parse) in two_line {
+            if width == 36 && prefixes == b"IAC" && intact_td1_starts.contains(&i) {
+                continue;
+            }
             for (v1, v2) in [
                 (restored(a, width, rep1), variants(b, width, rep2)),
                 (
