@@ -137,9 +137,13 @@ is a different and more expensive problem — and worth knowing before anyone pa
   currently invisible in the metrics — a readable band that our recogniser cannot read is reported
   identically to no band at all.
 - The crop handed to recognition arrives with a measured pitch and phase. That is exactly what
-  `chargrid` and any [ADR-0014](ADR-0014-per-cell-ocrb-classification.md) arm need, and the
-  2026-09-18 A/B traced 13 synthetic regressions to grid-origin error — so a locator that supplies a
-  verified origin may fix a defect in work that already exists.
+  `chargrid` and any [ADR-0014](ADR-0014-per-cell-ocrb-classification.md) arm need. The 2026-09-18
+  chargrid A/B broke the names on 13 synthetic documents it had read correctly (all 13 `repaired`,
+  8 of them MRV-A). Their cause is not attributed: grid-origin error was suspected, but #342
+  measured the synthetic origin bias at +0.126 cell with no fit reaching a whole cell, which rules
+  out a whole-cell miss ([reconciliation](../benchmarks/chargrid-ab-reconciliation-2026-09-24.md)).
+  A locator that supplies a verified origin is a hypothesis to test against those 13, not a known
+  fix.
 - One more feature-gated module, reversible by deleting it, with no new dependency.
 - If it does not work, we learn whether the residue is the detection model or our use of it.
 
