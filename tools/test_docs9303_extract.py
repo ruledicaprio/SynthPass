@@ -183,6 +183,123 @@ class HeadingDetectionTests(unittest.TestCase):
         self.assertIsNone(ex.detect_heading("4.2    (stray fragment)"))
 
 
+class SplitHeadingDetectionTests(unittest.TestCase):
+    """Every real-title fixture here is a literal line pair lifted from the
+    Part 11/12 PDF text where ICAO's own indentation put a deep clause
+    number alone on its own line and wrapped the title onto the next (see
+    `detect_split_heading`'s docstring). Every rejected fixture is a literal
+    line pair from Part 12's Appendix B, which quotes RFC 5280's own clause
+    numbering inline in a wide reference table and wraps the same way."""
+
+    def test_real_split_heading_is_detected(self):
+        h = ex.detect_split_heading("4.4.3.3.1 ", "Generic Mapping ", {"4.4.3.3"})
+        self.assertIsNotNone(h)
+        self.assertEqual(h.number, "4.4.3.3.1")
+        self.assertEqual(h.title, "Generic Mapping")
+
+    def test_real_split_heading_with_short_technical_title(self):
+        h = ex.detect_split_heading("4.4.3.5.4 ", "AES ", {"4.4.3.5"})
+        self.assertIsNotNone(h)
+        self.assertEqual(h.title, "AES")
+
+    def test_real_split_heading_with_lowercase_function_words(self):
+        h = ex.detect_split_heading("4.4.3.5.1 ", "Generation by the eMRTD chip ", {"4.4.3.5"})
+        self.assertIsNotNone(h)
+        self.assertEqual(h.title, "Generation by the eMRTD chip")
+
+    def test_nested_split_heading_needs_its_own_parent_registered(self):
+        # 7.2.3.1.1's parent is 7.2.3.1, itself only found moments earlier as
+        # a split heading (not a same-line one) -- the caller must add it to
+        # known_numbers before this call, exactly as _flush_group does.
+        h = ex.detect_split_heading("7.2.3.1.1 ", "Unsigned Integers ", {"7.2.3.1"})
+        self.assertIsNotNone(h)
+
+    def test_rejects_when_parent_not_yet_known(self):
+        self.assertIsNone(ex.detect_split_heading("4.4.3.3.1 ", "Generic Mapping ", set()))
+
+    def test_rejects_rfc_quote_number_with_sentence_ending_in_comma(self):
+        # Part 12 Appendix B, "4.1.2.1" is RFC 5280's own clause number,
+        # quoted inline; "4.1.2" happens to also be a real Part 12 heading.
+        h = ex.detect_split_heading(
+            "4.1.2.1 ",
+            "When extensions are used, as expected in this profile, ",
+            {"4.1.2"},
+        )
+        self.assertIsNone(h)
+
+    def test_rejects_rfc_quote_ending_in_dangling_connector(self):
+        h = ex.detect_split_heading(
+            "4.2.1.1 ", "The keyIdentifier field of the ", {"4.2.1"}
+        )
+        self.assertIsNone(h)
+
+    def test_rejects_rfc_quote_containing_normative_keyword(self):
+        h = ex.detect_split_heading(
+            "5.1.2.5 ", "CRL issuers conforming to this profile MUST encode ", {"5.1.2"}
+        )
+        self.assertIsNone(h)
+
+    def test_rejects_rfc_quote_too_many_words(self):
+        h = ex.detect_split_heading(
+            "4.2.1.3 ", "The usage restriction might be employed when a key ", {"4.2.1"}
+        )
+        self.assertIsNone(h)
+
+    def test_rejects_table_presence_code_as_title(self):
+        # Part 12 Appendix B's second comparison table follows a clause
+        # number with a bare mandatory/optional/excluded code ("m", "o",
+        # "x"), never a real title.
+        h = ex.detect_split_heading("4.1.2 ", "m ", {"4.1"})
+        self.assertIsNone(h)
+
+    def test_rejects_number_with_no_dot(self):
+        self.assertIsNone(ex.detect_split_heading("9 ", "Mohammed ", {"8"}))
+
+    def test_rejects_non_number_line(self):
+        self.assertIsNone(ex.detect_split_heading("Not a number", "A Title", {"4.4"}))
+
+
+class FindHeadingsInLinesTests(unittest.TestCase):
+    def test_finds_same_line_and_split_headings_together(self):
+        lines = [
+            "4.4.3.3    Encrypting and Mapping Nonces",
+            "",
+            "Body text.",
+            "",
+            "4.4.3.3.1",
+            "Generic Mapping",
+            "",
+            "More body text.",
+        ]
+        found = ex.find_headings_in_lines(lines)
+        numbers = [h.number for _, h in found]
+        self.assertEqual(numbers, ["4.4.3.3", "4.4.3.3.1"])
+
+    def test_does_not_pair_across_a_blank_line(self):
+        # A number-alone line immediately followed by a blank line (no title
+        # on the very next non-blank line within the same group) is never a
+        # split-heading candidate -- e.g. a cross-reference number that
+        # simply ends a sentence.
+        lines = ["4.4.3.3    Encrypting and Mapping Nonces", "", "4.4.3.3.1", ""]
+        found = ex.find_headings_in_lines(lines)
+        numbers = [h.number for _, h in found]
+        self.assertEqual(numbers, ["4.4.3.3"])
+
+    def test_rfc_quote_table_produces_no_split_heading(self):
+        lines = [
+            "4.1.2    LDS2 Signer Keys and Certificates",
+            "",
+            "  version",
+            "RFC 5280 –",
+            "4.1.2.1",
+            "When extensions are used, as expected in this profile,",
+            "version MUST be 3 (value is 2).",
+        ]
+        found = ex.find_headings_in_lines(lines)
+        numbers = [h.number for _, h in found]
+        self.assertEqual(numbers, ["4.1.2"])
+
+
 class HeadingLevelTests(unittest.TestCase):
     def test_depth1_is_h2(self):
         self.assertEqual(ex.heading_markdown_level(ex.Heading("1", "SCOPE")), 2)
@@ -371,6 +488,68 @@ class BuildBlocksTests(unittest.TestCase):
         self.assertEqual(blocks[0][1].appendix_letter, "A")
         self.assertEqual(blocks[0][1].heading.title, "LIFETIMES (INFORMATIVE)")
         self.assertEqual(blocks[1][1].kind, "para")
+
+    def test_split_heading_across_two_pages_is_promoted(self):
+        # Literal shape of Part 11 pages 25-26: the parent heading and a
+        # bullet list of forward-references end one page, and the deep
+        # clause number lands alone at the top of the next, with its title
+        # one line below -- the real split-heading case this fix promotes.
+        pages = [
+            (
+                25,
+                [
+                    "4.4.3.3    Encrypting and Mapping Nonces",
+                    "",
+                    "One of the following mappings SHALL be used:",
+                    "",
+                ],
+            ),
+            (
+                26,
+                [
+                    "4.4.3.3.1",
+                    "Generic Mapping",
+                    "",
+                    "ECDH",
+                    "",
+                    "The function Map is defined as follows.",
+                    "",
+                ],
+            ),
+        ]
+        blocks = ex.build_blocks(pages)
+        kinds_and_numbers = [
+            (b.kind, b.heading.number if b.kind == "heading" else None) for _, b in blocks
+        ]
+        self.assertIn(("heading", "4.4.3.3"), kinds_and_numbers)
+        self.assertIn(("heading", "4.4.3.3.1"), kinds_and_numbers)
+        split_heading = next(b for _, b in blocks if b.kind == "heading" and b.heading.number == "4.4.3.3.1")
+        self.assertEqual(split_heading.heading.title, "Generic Mapping")
+
+    def test_rfc_quoted_number_in_appendix_table_is_not_promoted(self):
+        # Literal shape of Part 12 Appendix B: RFC 5280's own clause numbers
+        # are quoted inline in a wide reference table whose "Reference"
+        # column wraps the same way a real split heading does, immediately
+        # followed by the quoted normative prose -- this must stay body
+        # text, not become a spurious "4.1.2.1" heading.
+        pages = [
+            (
+                33,
+                [
+                    "4.1.2    LDS2 Signer Keys and Certificates",
+                    "",
+                    "  version",
+                    "RFC 5280 –",
+                    "4.1.2.1",
+                    "When extensions are used, as expected in this profile,",
+                    "version MUST be 3 (value is 2).",
+                    "",
+                ],
+            )
+        ]
+        blocks = ex.build_blocks(pages)
+        heading_numbers = [b.heading.number for _, b in blocks if b.kind == "heading"]
+        self.assertEqual(heading_numbers, ["4.1.2"])
 
     def test_page_marker_inserted_once_per_page(self):
         pages = [

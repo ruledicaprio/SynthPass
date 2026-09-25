@@ -114,9 +114,25 @@ All rights reserved. No part of this publication may be reproduced, stored in a 
       - 7.2.2.6 Certificate Extensions (Authorization Extensions)
       - 7.2.2.7 Signature
     - 7.2.3 Data Objects
+      - 7.2.3.1 Encoding of Values
+        - 7.2.3.1.1 Unsigned Integers
+        - 7.2.3.1.2 Elliptic Curve Points
+        - 7.2.3.1.3 Dates
+        - 7.2.3.1.4 Character Strings
+        - 7.2.3.1.5 Octet Strings
+        - 7.2.3.1.6 Object Identifiers
+        - 7.2.3.1.7 Sequences
+      - 7.2.3.2 Encoding of Public Key Data Objects
+        - 7.2.3.2.1 RSA Public Keys
+        - 7.2.3.2.2 Elliptic Curve Public Keys
 - [8. SPOC PROTOCOL](#8-spoc-protocol)
   - 8.1 SPOC Related Structures
     - 8.1.1 Certificate Request Structure
+      - 8.1.1.1 Certificate Profile Identifier
+      - 8.1.1.2 Certification Authority Reference
+      - 8.1.1.3 Public Key
+      - 8.1.1.4 Certificate Holder Reference
+      - 8.1.1.5 Signature(s)
   - 8.2 SPOC Protocol Messages
     - 8.2.1 Request Certificate Message
     - 8.2.2 Send Certificates Message
@@ -1666,39 +1682,39 @@ Part 12.     Public Key Infrastructure for MRTDs
 
 F: fixed length (exact number of octets), V: variable length (up to number of octets).
 
-7.2.3.1 Encoding of Values
+##### 7.2.3.1 Encoding of Values
 
 The basic value types used in this specification are the following: (unsigned) integers, elliptic curve points, dates, character strings, octet strings, object identifiers, and sequences.
 
-7.2.3.1.1 Unsigned Integers
+##### 7.2.3.1.1 Unsigned Integers
 
 All integers used in this specification are unsigned integers. An unsigned integer SHALL be converted to an octet string using the binary representation of the integer in big-endian format. The minimum number of octets SHALL be used, i.e. leading octets of value 0x00 MUST NOT be used.
 
 Note.— In contrast, the ASN.1 type INTEGER is always a signed integer.
 
-7.2.3.1.2 Elliptic Curve Points
+##### 7.2.3.1.2 Elliptic Curve Points
 
 The conversion of elliptic curve points to octet strings is specified in [TR-03111]. The uncompressed format SHALL be used.
 
-7.2.3.1.3 Dates
+##### 7.2.3.1.3 Dates
 
 A date is encoded in 6 digits “d1…d6” in the format YYMMDD using timezone GMT. It is converted to an octet string “o1…o6” by encoding each digit dj to an octet oj as unpacked BCDs (1 ≤ j ≤ 6).
 
 The year YY is encoded in two digits and is to be interpreted as 20YY, i.e. the year is in the range of 2000 to 2099.
 
-7.2.3.1.4 Character Strings
+##### 7.2.3.1.4 Character Strings
 
 A character string “c1…cn” is a concatenation of n characters cj with 1 ≤ j ≤ n. It SHALL be converted to an octet string “o1…on” by converting each character cj to an octet oj using the ISO/IEC 8859-1 character set.
 
 The character codes 0x00-0x1F and 0x7F-0x9F are unassigned and MUST NOT be used. The conversion of an octet to an unassigned character SHALL result in an error.
 
-7.2.3.1.5 Octet Strings
+##### 7.2.3.1.5 Octet Strings
 
 An octet string “o1…on” is a concatenation of n octets oj with 1 ≤ j ≤ n. Every octet oj consists of 8 bits.
 
 <!-- page 52 -->
 
-7.2.3.1.6 Object Identifiers
+##### 7.2.3.1.6 Object Identifiers
 
 An object identifier “i1.i2…in” is encoded as an ordered list of n unsigned integers ij with 1 ≤ j ≤ n. It SHALL be converted to an octet string “o1…on−1” using the following procedure:
 
@@ -1712,11 +1728,11 @@ More details on the encoding can be found in [X.690].
 
 Note.— The unsigned integers are encoded as octet strings using the big-endian format as described in Doc 9303-11, however only bits 1-7 of each octet are used. Bit 8 (the leftmost bit) set to one is used to indicate that this octet is not the last octet in the string.
 
-7.2.3.1.7 Sequences
+##### 7.2.3.1.7 Sequences
 
 A sequence “D1…Dn” is an ordered list of n data objects Dj with 1 ≤ j ≤ n. The sequence SHALL be converted to a concatenated list of octet strings “O1…On” by DER encoding each data object Dj to an octet string Oj.
 
-7.2.3.2 Encoding of Public Key Data Objects
+##### 7.2.3.2 Encoding of Public Key Data Objects
 
 A public key data object contains a sequence of an object identifier and several context specific data objects:
 
@@ -1725,7 +1741,7 @@ A public key data object contains a sequence of an object identifier and several
 
 The format of public keys data objects used in this specification is described below.
 
-7.2.3.2.1 RSA Public Keys
+##### 7.2.3.2.1 RSA Public Keys
 
 The data objects contained in an RSA public key are shown in Table 15. The order of the data objects is fixed.
 
@@ -1741,7 +1757,7 @@ Table 15.    RSA Public Key
 | Composite Modulus | n | 0x81 | Unsigned Integer | m |
 | Public Exponent | e | 0x82 | Unsigned Integer | m |
 
-7.2.3.2.2 Elliptic Curve Public Keys
+##### 7.2.3.2.2 Elliptic Curve Public Keys
 
 The data objects contained in an EC public key are shown in Table 16. The order of the data objects is fixed, CONDITIONAL domain parameters MUST be either all present, except the cofactor, or all absent as follows:
 
@@ -1820,25 +1836,25 @@ Table 17.    CV Certificate Request Profile
 | Certification Authority Reference | c |
 | Signature | c |
 
-8.1.1.1 Certificate Profile Identifier
+##### 8.1.1.1 Certificate Profile Identifier
 
 The version is 1, identified by a value of 0.
 
-8.1.1.2 Certification Authority Reference
+##### 8.1.1.2 Certification Authority Reference
 
 The Certification Authority Reference SHOULD be used to inform the certification authority about the private key that is expected by the applicant to be used to sign the certificate. If the Certification Authority Reference contained in the request deviates from the Certification Authority Reference contained in the issued certificate (i.e. the issued certificate is signed by a private key that is not expected by the applicant), the corresponding certificate of the certification authority SHOULD also be provided to the applicant in response.
 
-8.1.1.3 Public Key
+##### 8.1.1.3 Public Key
 
 Certificate Requests MUST always contain domain parameters.
 
-8.1.1.4 Certificate Holder Reference
+##### 8.1.1.4 Certificate Holder Reference
 
 The Certificate Holder Reference is used to identify the public key contained in the request and the resulting certificate.
 
 <!-- page 56 -->
 
-8.1.1.5 Signature(s)
+##### 8.1.1.5 Signature(s)
 
 A certificate request may have up to two signatures; an inner signature and an outer signature:
 
