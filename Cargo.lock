@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "mrz"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "proptest",
  "serde",
