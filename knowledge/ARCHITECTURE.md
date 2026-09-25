@@ -351,8 +351,12 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
 
 ### 13.3 MRZ handling policy
 
-- A checksum-valid MRZ is **authoritative**. When visual OCR conflicts with a
-  valid MRZ, prefer the MRZ.
+- A checksum-valid MRZ is the **preferred source**, not a proven byte-identical read: it is
+  only *consistent* with its check digits, which cover some cells and not others (TD2/TD3
+  line 1 carries none at all; see [`project_principles.md`](project_principles.md) principle 1
+  and `crates/mrz/src/blindspot.rs`). When visual OCR conflicts with a valid MRZ, prefer the
+  MRZ anyway. That is a policy, and on the cells no check digit covers it is a preference,
+  not a verification.
 - A checksum failure is never silently accepted: attempt bounded repair
   (`crates/mrz` single-substitution search), record the repair's confidence,
   explain the failure in the output metadata, and never fabricate a value.

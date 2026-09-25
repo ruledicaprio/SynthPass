@@ -137,9 +137,13 @@ is a different and more expensive problem — and worth knowing before anyone pa
   currently invisible in the metrics — a readable band that our recogniser cannot read is reported
   identically to no band at all.
 - The crop handed to recognition arrives with a measured pitch and phase. That is exactly what
-  `chargrid` and any [ADR-0014](ADR-0014-per-cell-ocrb-classification.md) arm need, and the
-  2026-09-18 A/B traced 13 synthetic regressions to grid-origin error — so a locator that supplies a
-  verified origin may fix a defect in work that already exists.
+  `chargrid` and any [ADR-0014](ADR-0014-per-cell-ocrb-classification.md) arm need. The 2026-09-18
+  chargrid A/B broke the names on 13 synthetic documents it had read correctly (all 13 `repaired`,
+  8 of them MRV-A). Their cause is not attributed: grid-origin error was suspected, but #342
+  measured the synthetic origin bias at +0.126 cell with no fit reaching a whole cell, which rules
+  out a whole-cell miss ([reconciliation](../benchmarks/chargrid-ab-reconciliation-2026-09-24.md)).
+  A locator that supplies a verified origin is a hypothesis to test against those 13, not a known
+  fix.
 - One more feature-gated module, reversible by deleting it, with no new dependency.
 - If it does not work, we learn whether the residue is the detection model or our use of it.
 
@@ -165,3 +169,27 @@ against a frozen detection list needs the list settled first.
 
 Independent of that: the contrast-stretch variant above is small, testable now, and should not wait
 for this ADR.
+
+## Amendment (2026-09-24) — filler-run geometry is evidence, not a guarantee
+
+[`ocrb-filler-geometry-2026-09-23.md` §5](../benchmarks/ocrb-filler-geometry-2026-09-23.md#5-band-geometry-standard-real-and-synthetic)
+measured the priors this ADR's Decision and "What an MRZ band looks like" section assume, on 16
+real TD3 crops, and several do not hold as tightly as written here:
+
+- **"Vertically adjacent at a known spacing"** does not hold as a single number: line pitch
+  ranges **1.65-2.99 cap** across the 16 specimens (nominal 2.58 cap), and TD1's nominal spacing
+  (1.72 cap) is not the same prior as TD3/TD2's. A locator needs a band of spacings per format,
+  not one constant.
+- **"A correct fit makes filler runs land on cell boundaries"** is contradicted by the same
+  measurement: filler glyphs are *centred* in their cells, not aligned to boundaries, and a
+  filler cell still carries 0.6-0.7× a letter cell's ink — a low-ink cell, not a gap. Whether a
+  given cell reads as "filler" depends on the OCR line-box height used to sample it, which that
+  note flags as still unmeasured.
+- **"Two or three long horizontal bars of near-equal height"** holds only loosely: line 2 prints
+  5-10% taller than line 1 (it carries digits).
+
+None of this changes the Decision above — it is a design note pending `mrz-locate`'s existence,
+per that benchmark's own framing ("flagged for the architect, not changed here"). The broader
+point is principle 1's: a periodic filler-run signature is *evidence* a candidate grid fit is
+correct, not a guarantee. A name that fills its entire line (Doc 9303 Part 4 allows this) prints
+no filler run at all, so a locator that requires one to accept a fit will refuse a valid MRZ.

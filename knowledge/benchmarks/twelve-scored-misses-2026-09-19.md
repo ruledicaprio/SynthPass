@@ -349,9 +349,12 @@ broad OCR change until each group has such a case.**
 The four measurements the data now points at, each one run and no new tooling:
 
 - **A uniform single-class confusable sweep over one field and its check digit**, measured against
-  the whole corpus rather than Croatia alone. The question is not whether it fixes Croatia — it does
-  — but how many documents it silently *breaks*, which is exactly what the chargrid A/B caught when
-  a net `+33` on synthetic hid 13 real regressions. Three-arm, same-binary, real arm required.
+  the whole corpus rather than Croatia alone. The question is not whether it fixes Croatia — it
+  does — but how many documents it silently *breaks*. That is exactly what the chargrid A/B's
+  per-document 2×2 caught: on 500 synthetic documents it fixed 46 names and broke 13 (net `+33`
+  `names_exact`; strict hits net `+30`), and on 257 real specimens it fixed one and broke one (net
+  `0`) ([reconciliation](chargrid-ab-reconciliation-2026-09-24.md)). Three-arm, same-binary, real arm
+  required.
 - **A contrast-stretch preprocessing variant on France** — the one document where a named, untested
   transform is known to work on the same bytes in another stack.
 - **Why the band is not located on Germany and Russia**, which is
