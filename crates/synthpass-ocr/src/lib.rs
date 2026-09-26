@@ -1734,6 +1734,10 @@ pub struct OcrArms {
     pub chargrid: &'static str,
     /// See [`StopMode`] — `"first-valid"` (default) or `"clean"`.
     pub stop: &'static str,
+    /// `SYNTHPASS_OCR_CONFIRM_PASSES` (see [`confirm_passes`]). Recorded
+    /// under every `stop` arm, even though only `"clean"` reads it, so two
+    /// runs that differ only in this knob can never look identical.
+    pub confirm_passes: usize,
 }
 
 impl OcrArms {
@@ -1753,6 +1757,7 @@ impl OcrArms {
         skew: "default",
         chargrid: "off",
         stop: "first-valid",
+        confirm_passes: DEFAULT_CONFIRM_PASSES,
     };
 
     /// Read every `SYNTHPASS_OCR_*` measurement knob this crate defines from
@@ -1787,6 +1792,7 @@ impl OcrArms {
                 StopMode::FirstValid => "first-valid",
                 StopMode::Clean => "clean",
             },
+            confirm_passes: confirm_passes(),
         }
     }
 
@@ -2937,6 +2943,7 @@ mod tests {
             "SYNTHPASS_OCR_SKEW",
             "SYNTHPASS_OCR_CHARGRID",
             "SYNTHPASS_OCR_STOP",
+            "SYNTHPASS_OCR_CONFIRM_PASSES",
         ] {
             unsafe { std::env::remove_var(var) };
         }
@@ -2953,9 +2960,18 @@ mod tests {
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
         unsafe { std::env::set_var("SYNTHPASS_OCR_CHARGRID", "on") };
         assert!(!OcrArms::from_env().is_default());
         unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
+
+        // The confirm budget is a knob of its own: a run that moved only it
+        // is not a default run, and its report must say which budget ran.
+        unsafe { std::env::set_var("SYNTHPASS_OCR_CONFIRM_PASSES", "5") };
+        let arms = OcrArms::from_env();
+        assert_eq!(arms.confirm_passes, 5);
+        assert!(!arms.is_default());
+        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
     }
 
     #[test]
