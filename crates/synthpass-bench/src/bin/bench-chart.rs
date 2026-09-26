@@ -487,6 +487,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn undefined_rates_are_not_plotted_as_zero() {
+        let dir =
+            std::env::temp_dir().join(format!("bench-chart-null-rates-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let history = dir.join("history.jsonl");
+        let out = dir.join("trend.svg");
+        // An actual measured zero must still be drawn, while null contributes
+        // no point in any rate panel. No latency points muddy the count.
+        for (rate, expected_points) in [("null", 0), ("0.0", 3)] {
+            std::fs::write(&history, format!(
+                r#"{{"run_timestamp_unix":1,"provider_id":"mrz","documents":3,"labelled_documents":0,"read_ok_rate":{rate},"field_match_rate":{rate},"unsupported_assertion_rate":{rate}}}"#
+            )).unwrap();
+            let rows = read_history(&history).unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].read_ok_rate.is_some(), expected_points > 0);
+            run_trend(history.to_str().unwrap(), out.to_str().unwrap()).unwrap();
+            let svg = std::fs::read_to_string(&out).unwrap();
+            assert_eq!(svg.matches("<circle ").count(), expected_points);
+            let bar = resolve_bar("test", history.to_str().unwrap());
+            if expected_points == 0 {
+                assert!(bar.is_err(), "a null-only series has no bar");
+            } else {
+                assert_eq!(bar.unwrap().rate, 0.0);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn read_history_skips_malformed_lines_without_aborting() {
         let dir = std::env::temp_dir().join(format!(
             "passport-bench-chart-test-{}-{}",

@@ -1214,11 +1214,20 @@ const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-t
 /// same shape of bug [`AssertionBucket::rate`]'s `Option` and
 /// [`UnsupportedAssertion::NotApplicable`] both exist to prevent, one metric over.
 pub enum Tier1HitRate {
-    /// Computed over a `capability.deterministic` provider's `documents_detail`:
-    /// the fraction with `miss_reason.is_none()`.
+    /// Computed over a deterministic provider's nonempty scored population:
+    /// the fraction with `miss_reason.is_none()`, excluding off-denominator classes.
     Computed(f64),
-    /// Not computed. `capability.deterministic` was `false` for this provider.
+    /// Not computed: the provider is nondeterministic or the scored population is empty.
     NotApplicable { reason: &'static str },
+}
+
+impl std::fmt::Display for Tier1HitRate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Computed(rate) => write!(formatter, "{:.1}%", rate * 100.0),
+            Self::NotApplicable { reason } => write!(formatter, "n/a ({reason})"),
+        }
+    }
 }
 
 const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — this provider never \
@@ -1283,13 +1292,9 @@ pub enum StrictNameHitRate {
         name_scorable_hits: usize,
         /// `strict_hits / name_scorable_documents`.
         strict_tier1_hit_rate: f64,
-        /// `strict_hits / name_scorable_hits`. `0.0`, not fabricated,
-        /// exactly when `name_scorable_hits` is `0` (every name-scorable
-        /// document happened to miss Tier-1) — `name_scorable_documents`
-        /// being nonzero already proves this is a measured, not absent,
-        /// population, which is what keeps this `0.0` legitimate where
-        /// `NotApplicable` below is for a population that never existed.
-        names_exact_among_hits: f64,
+        /// `strict_hits / name_scorable_hits`, or `None` when there are no
+        /// name-scorable hits. Labelled misses do not populate this denominator.
+        names_exact_among_hits: Option<f64>,
     },
     /// Not computed. Either [`Tier1HitRate`] itself was `NotApplicable`
     /// (same `reason`), or no document in the scored population had ground
@@ -2427,11 +2432,13 @@ async fn run_prepped_with_dump_options(
                 .iter()
                 .filter(|d| d.miss_reason.is_none())
                 .count();
-            Tier1HitRate::Computed(if scored == 0 {
-                0.0
+            if scored == 0 {
+                Tier1HitRate::NotApplicable {
+                    reason: "no documents in the scored Tier-1 population (denominator is zero)",
+                }
             } else {
-                tier1_hits as f64 / scored as f64
-            })
+                Tier1HitRate::Computed(tier1_hits as f64 / scored as f64)
+            }
         };
 
         let strict_name_hit_rate = match &tier1_hit_rate {
@@ -2470,15 +2477,8 @@ async fn run_prepped_with_dump_options(
                         name_scorable_documents,
                         name_scorable_hits,
                         strict_tier1_hit_rate: strict_hits as f64 / name_scorable_documents as f64,
-                        // `0.0`, not fabricated, when `name_scorable_hits` is
-                        // `0` — `name_scorable_documents` above being nonzero
-                        // already proves this is a measured population, not
-                        // an absent one.
-                        names_exact_among_hits: if name_scorable_hits == 0 {
-                            0.0
-                        } else {
-                            strict_hits as f64 / name_scorable_hits as f64
-                        },
+                        names_exact_among_hits: (name_scorable_hits > 0)
+                            .then(|| strict_hits as f64 / name_scorable_hits as f64),
                     }
                 }
             }
@@ -2622,6 +2622,112 @@ mod tests {
     use super::*;
     use synthpass_core::v2::ExtractionV2;
     use synthpass_die::{FieldReader, IntelligenceProvider, ProviderError, ProviderId, Reading};
+
+    fn rate_test_page() -> BenchPage {
+        BenchPage {
+            asset_id: None,
+            source_sha256: None,
+            name: "synthetic-rate-test".into(),
+            page: OcrPage::default(),
+            ground_truth: None,
+            ground_truth_mrz: None,
+            image_path: PathBuf::from("unused-rate-test.png"),
+            mrz_found: false,
+            redacted: false,
+            mrz_expected: false,
+            printed_zone_nonconforming: false,
+            synthetic: false,
+            known_or_guessed_format: None,
+            ocr_elapsed: Duration::ZERO,
+        }
+    }
+
+    #[tokio::test]
+    async fn undefined_rates_all_documents_off_denominator() {
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(FixedReader::default()))
+            .build()
+            .unwrap();
+        // One of each exclusion, with no labelled fields and no assertions.
+        let mut redacted = rate_test_page();
+        redacted.mrz_expected = true;
+        redacted.redacted = true;
+        let mut nonconforming = rate_test_page();
+        nonconforming.mrz_expected = true;
+        nonconforming.printed_zone_nonconforming = true;
+        let pages = vec![Some(rate_test_page()), Some(redacted), Some(nonconforming)];
+        let report = run_prepped(&catalog, &pages, false, None, false)
+            .await
+            .remove(0);
+        assert!(report.tier1_hit_rate.to_string().starts_with("n/a"));
+        let json = serde_json::to_value(crate::report::ProviderRow::from(report)).unwrap();
+        assert_eq!(json["documents"], 3);
+        for pointer in [
+            "/tier1_hit_rate/rate",
+            "/strict_tier1_hit_rate/strict_tier1_hit_rate",
+            "/strict_tier1_hit_rate/names_exact_among_hits",
+        ] {
+            assert_eq!(json.pointer(pointer), Some(&serde_json::Value::Null));
+        }
+        assert_eq!(json["tier1_hit_rate"]["rate"], serde_json::Value::Null);
+        assert_eq!(
+            json["strict_tier1_hit_rate"]["strict_tier1_hit_rate"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            json["strict_tier1_hit_rate"]["names_exact_among_hits"],
+            serde_json::Value::Null
+        );
+        assert!(json["accuracy"]["field_match_rate"].is_null());
+        assert!(json["accuracy"]["mean_cer"].is_null());
+        assert!(json["accuracy"]["per_field_cer"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|field| field["mean_cer"].is_null()));
+        assert!(json["unsupported_assertion"]["overall"]["rate"].is_null());
+        assert!(json["unsupported_assertion"]["without_mrz_anchor"]["rate"].is_null());
+    }
+
+    #[tokio::test]
+    async fn undefined_rates_name_scorable_miss_has_no_hits_denominator() {
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(FixedReader::default()))
+            .build()
+            .unwrap();
+        let mut page = rate_test_page();
+        page.mrz_expected = true;
+        page.ground_truth = Some(HashMap::from([
+            (CoreField::Surname, "DOE".into()),
+            (CoreField::GivenNames, "JANE".into()),
+        ]));
+        let report = run_prepped(&catalog, &[Some(page)], false, None, false)
+            .await
+            .remove(0);
+        let json = serde_json::to_value(crate::report::ProviderRow::from(report)).unwrap();
+        assert_eq!(json["tier1_hit_rate"]["rate"], 0.0);
+        assert_eq!(json["strict_tier1_hit_rate"]["strict_tier1_hit_rate"], 0.0);
+        assert!(json["strict_tier1_hit_rate"]["names_exact_among_hits"].is_null());
+    }
+
+    #[tokio::test]
+    async fn undefined_rates_empty_provider_run_has_no_repair_denominator() {
+        let mut capability = Capability::deterministic_reader();
+        capability.deterministic = false;
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(FixedReader {
+                capability,
+                ..FixedReader::default()
+            }))
+            .build()
+            .unwrap();
+        let report = run_prepped(&catalog, &[], false, None, false)
+            .await
+            .remove(0);
+        let json = serde_json::to_value(crate::report::ProviderRow::from(report)).unwrap();
+        assert_eq!(json["json_validity"]["documents"], 0);
+        assert!(json["json_validity"]["repair_fallback_rate"].is_null());
+    }
 
     /// A fixed-answer provider for testing the harness's own comparison
     /// logic without needing a real MRZ reader or the GGUF model.
@@ -4723,7 +4829,7 @@ mod tests {
                     "only doc 1 is a hit that also read both names exactly"
                 );
                 assert_eq!(strict_tier1_hit_rate, 1.0 / 3.0);
-                assert_eq!(names_exact_among_hits, 0.5);
+                assert_eq!(names_exact_among_hits, Some(0.5));
             }
             StrictNameHitRate::NotApplicable { reason } => {
                 panic!("expected a computed strict name hit rate, got NotApplicable: {reason}")
