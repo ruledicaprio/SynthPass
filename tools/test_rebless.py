@@ -491,6 +491,22 @@ class RewriteBenchmarksReadmeStrictNameRowTests(unittest.TestCase):
         self.assertIn("same baseline (CI, 2026-09-15); ADR-0013", out)
         self.assertNotIn("not yet measured in CI", out)
 
+    def test_no_name_scorable_hits_is_na_not_zero(self):
+        # #470: an empty denominator is no measurement, not 0.0%.
+        old_flat = rb.flatten_baseline(make_baseline())
+        new_flat = rb.flatten_baseline(
+            make_baseline(
+                strict_names={"strict_hits": 0, "name_scorable_documents": 5, "name_scorable_hits": 0},
+                measured_date="2026-09-26",
+            )
+        )
+        out = rb.rewrite_benchmarks_readme_strict_name_row(
+            BENCH_README_SNIPPET_WITH_STRICT_ROW, old_flat, new_flat
+        )
+        self.assertIn("**0 / 5 = 0.0%**", out)
+        self.assertIn("n/a of name-scorable hits: there were none", out)
+        self.assertNotIn("0.0% of name-scorable hits", out)
+
     def test_rewrites_from_a_previous_number(self):
         old_flat = rb.flatten_baseline(
             make_baseline(

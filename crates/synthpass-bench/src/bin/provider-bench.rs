@@ -108,6 +108,11 @@ use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 use synthpass_pipeline::{InferBackend, NativeInferer, OcrEngine, Pipeline, RustOcrEngine};
 
+fn format_percentage(rate: Option<f64>) -> String {
+    rate.map(|value| format!("{:.1}%", value * 100.0))
+        .unwrap_or_else(|| "n/a".to_string())
+}
+
 struct Args {
     count: u64,
     seed: u64,
@@ -1403,7 +1408,7 @@ async fn main() {
                 // legible as such, not disguised as a good grade.
                 let rate = |b: &AssertionBucket| match b.rate {
                     Some(r) => format!("{:.1}%", r * 100.0),
-                    None => "no claims".to_string(),
+                    None => "n/a (no claims)".to_string(),
                 };
                 let half = |label: &str, b: &Option<AssertionBucket>| match b {
                     Some(b) => format!(", {label} {} ({} docs)", rate(b), b.documents),
@@ -1418,10 +1423,7 @@ async fn main() {
             }
             UnsupportedAssertion::NotApplicable { reason } => format!("n/a ({reason})"),
         };
-        let tier1_hit_rate = match &r.tier1_hit_rate {
-            Tier1HitRate::Computed(rate) => format!("{:.1}%", rate * 100.0),
-            Tier1HitRate::NotApplicable { reason } => format!("n/a ({reason})"),
-        };
+        let tier1_hit_rate: &Tier1HitRate = &r.tier1_hit_rate;
         println!(
             "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, field match \
              {field_match}, mean CER {mean_cer}, mean {} ms, unsupported-assertion rate \
@@ -1453,13 +1455,14 @@ async fn main() {
                     strict_tier1_hit_rate * 100.0
                 );
                 println!(
-                    "    names exact among hits: {:.1}% ({strict_hits}/{name_scorable_hits} \
+                    "    names exact among hits: {} ({strict_hits}/{name_scorable_hits} \
                      name-scorable Tier-1 hits read both names exactly)",
-                    names_exact_among_hits * 100.0
+                    format_percentage(*names_exact_among_hits)
                 );
             }
             StrictNameHitRate::NotApplicable { reason } => {
                 println!("    strict Tier-1 hit rate: n/a ({reason})");
+                println!("    names exact among hits: n/a ({reason})");
             }
         }
 
@@ -1712,6 +1715,22 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn undefined_rates_render_as_na_but_measured_zero_is_zero_percent() {
+        assert_eq!(format_percentage(None), "n/a");
+        assert_eq!(format_percentage(Some(0.0)), "0.0%");
+        assert_eq!(format_percentage(Some(0.5)), "50.0%");
+        assert_eq!(Tier1HitRate::Computed(0.0).to_string(), "0.0%");
+        assert_eq!(
+            Tier1HitRate::NotApplicable {
+                reason: "denominator is zero"
+            }
+            .to_string(),
+            "n/a (denominator is zero)"
+        );
+    }
+
     use std::time::Duration;
     use synthpass_bench::provider_bench::{
         AccuracyStats, CapabilitySnapshot, DocumentDetail, SpeedStats,
