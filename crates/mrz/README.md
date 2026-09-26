@@ -279,8 +279,14 @@ struct expressions. Future tunables go in a separate non-exhaustive companion ra
 new field on one of them.
 
 The minimum supported Rust version is **1.82**, set by `std::iter::repeat_n` and
-`Option::is_none_or`, and enforced by CI for the zero-dependency default build. The optional
-features follow their own upstream MSRVs. Raising the floor is a minor-version change.
+`Option::is_none_or`, and enforced by CI for the zero-dependency default build. The `serde`
+feature follows its own upstream MSRV, which is comfortably below 1.82. The `zeroize` feature
+would not be — `zeroize` 1.9.0 and `zeroize_derive` 1.5.0 both moved to edition 2024 and
+rust-version 1.85, which cargo 1.82 cannot even parse — so `crates/mrz/Cargo.toml` caps both to
+their last edition-2021 releases (`zeroize` `>=1.8.1, <1.9`, `zeroize_derive` `>=1.4, <1.5`).
+CI's `msrv` job checks `--all-features` on 1.82 as well as the zero-dependency build, so this
+holds by construction rather than by promise. Raising the floor is a minor-version change; the
+zeroize cap can be lifted once that floor reaches 1.85.
 
 - **[CHANGELOG](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/CHANGELOG.md)** —
   every published version, with the pull requests behind each entry.

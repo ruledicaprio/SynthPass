@@ -17,9 +17,11 @@ edition.workspace = true
 #
 # Scoped to this package deliberately: the rest of the workspace is unpublished
 # application code with heavier dependencies and no compatibility promise. The
-# optional `serde`/`zeroize` features and the dev-dependency test suite follow
-# their own upstream MSRVs, which are higher than this floor — a consumer on
-# 1.82 pins those to matching versions.
+# optional `serde` feature follows its own upstream MSRV, which is below this
+# floor (checked: `cargo +1.82.0 check -p mrz --all-features` builds it). The
+# `zeroize` feature is capped below (see the dependency comment) so that it
+# does *not* need its own exemption: `cargo check -p mrz --all-features` holds
+# to 1.82 too, and CI's `msrv` job checks both surfaces.
 rust-version = "1.82"
 description = "Zero-dependency (by default) ICAO 9303 Machine Readable Zone (MRZ) parser, emitter, and check-digit validator for TD1/TD2/TD3 and MRV-A/MRV-B (visa) documents."
 license = "MIT"
@@ -39,11 +41,28 @@ serde = { version = "1", features = ["derive"], optional = true }
 # Optional, mirrors the `serde` feature above: keeps this crate zero-dep by
 # default so it compiles cleanly to wasm32-unknown-unknown for the browser
 # demo (mrz-wasm never enables this feature).
-zeroize = { version = "1", features = ["derive"], optional = true }
+#
+# Capped below 1.9: zeroize 1.9.0 (2026-06-12) raised its own rust-version to
+# 1.85 and moved to edition 2024, which cargo 1.82 cannot even parse — so an
+# uncapped range breaks `cargo check -p mrz --all-features` on this crate's
+# declared MSRV even though the crate's own zero-dependency source never
+# changed. 1.8.2 (2025-09-29, 1.8.0 is yanked) is the newest release still on
+# edition 2021 / rust-version 1.60, so it's the newest release the range admits.
+# Lift this cap only once mrz's own `rust-version` above reaches 1.85.
+zeroize = { version = ">=1.8.1, <1.9", features = ["derive"], optional = true }
+# Not used directly by this crate's source — zeroize's own `derive` feature
+# (above) is what pulls this in and re-exports its macros as `zeroize::Zeroize`
+# / `zeroize::ZeroizeOnDrop`. Declared here anyway, purely to cap the version:
+# zeroize 1.8.2 accepts `zeroize_derive ^1.3`, and without this entry Cargo's
+# resolver picks the newest match, 1.5.0 — which has the same edition-2024 /
+# rust-version-1.85 problem as zeroize 1.9.0 above. 1.4.3 is the newest
+# edition-2021 release. Remove this entry if it ever stops being needed (e.g.
+# a future zeroize requires a version floor that already excludes 1.5.0).
+zeroize_derive = { version = ">=1.4, <1.5", optional = true }
 
 [features]
 serde = ["dep:serde"]
-zeroize = ["dep:zeroize"]
+zeroize = ["dep:zeroize", "dep:zeroize_derive"]
 
 [dev-dependencies]
 # Property-based "never panics on arbitrary input" regression suite (see

@@ -340,6 +340,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
       - name: Zero-dependency build on the declared MSRV
         run: cargo check -p mrz --no-default-features
+      # The optional `zeroize` feature is capped (crates/mrz/Cargo.toml) to a
+      # range that never resolves to an edition-2024 / rust-version-1.85
+      # release (zeroize 1.9.0+, zeroize_derive 1.5.0+), which cargo 1.82
+      # can't even parse. This step is the regression test for that cap: an
+      # uncapped or under-capped range fails here with "feature `edition2024`
+      # is required" before a single line of mrz's own source is checked.
+      - name: All-features build (serde + zeroize) on the declared MSRV
+        run: cargo check -p mrz --all-features
 
   # `#![warn(missing_docs)]` (crates/mrz/src/lib.rs) ratchets docs *coverage*;
   # nothing ratcheted their *correctness*, so nine rustdoc warnings accumulated
