@@ -21,7 +21,9 @@ regenerate.
 | 2026-09-26 | [Check-digit blind spots, exact — what the arithmetic can and cannot promise](checkdigit-blindspots-exact-2026-09-26.md) | Derived (closed form and exact integer enumeration, `crates/mrz/examples/checkdigit_blindspots_exact.rs`, with the laws pinned against the parser in `crates/mrz/tests/checkdigit_algebra.rs`; every measured input is cited to its note) plus one Observed count over the tracked fixtures (§4) | current | checkdigit-blindspots-exact-2026-09-26.md |
 | 2026-09-26 | [the #473 retry-stop A/B: `clean` loses hits because the parser never sees the loop's decision](#2026-09-26--the-473-retry-stop-ab-clean-loses-hits-because-the-parser-never-sees-the-loops-decision) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-26 | [check-digit blind spots, exact: shared-shift pairs, composite alignment, and two blind confusables](#2026-09-26--check-digit-blind-spots-exact-shared-shift-pairs-composite-alignment-and-two-blind-confusables) | Derived | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-26 | [#410's VIZ personal number moves no hit count, but TD1 churns ten seeds](#2026-09-26--410s-viz-personal-number-moves-no-hit-count-but-td1-churns-ten-seeds) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-26 | [`SYNTHPASS_OCR_STOP=clean` loses hits on both corpora, because the parser never sees the loop's decision](retry-stop-ab-2026-09-26.md) | Observed (one local release build, six A/B runs switched by env var, plus single-document verbose traces on the same binary) plus Derived (per-document and per-seed comparison) plus Hypothesized (the exact parser branch, marked where used) | current | retry-stop-ab-2026-09-26.md |
+| 2026-09-26 | [#410's VIZ personal number: no hit count moves on TD1, TD2 or MRV-B, but TD1 churns ten seeds](viz-personal-number-410-2026-09-26.md) | Observed (seven local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container: TD1, TD2 and MRV-B before and after, one repeat of the after TD1 arm, one TD1 run at `f80877b`) plus Derived (per-seed comparison of the JSON reports) plus Hypothesized (the mechanism of the TD1 churn, marked where used) | current | viz-personal-number-410-2026-09-26.md |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](#2026-09-25--440-on-the-m4-synthetic-gate-42--50--39--50-is-three-wrong-reads-refused-none-lost) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-25 | [the synthetic headline re-measured: 370 / 500, stack 451 moves no seed, and 207 of the 370 hits are wrong somewhere](#2026-09-25--the-synthetic-headline-re-measured-370--500-stack-451-moves-no-seed-and-207-of-the-370-hits-are-wrong-somewhere) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](m4-gate-440-wrong-reads-refused-2026-09-25.md) | Observed (two local release `synthpass-bench --count 50 --seed 0 --profile clean` runs, one per commit, plus single-seed re-runs of the before arm and an instrumented replay of the pre-#440 parser) plus Derived (per-seed field comparison against the generator's exact truth) | current | m4-gate-440-wrong-reads-refused-2026-09-25.md |
@@ -1123,3 +1125,27 @@ asked for.
 The tables, the proposed decision rule for a within-class tie, the report ladder and what this
 does not claim:
 [`checkdigit-blindspots-exact-2026-09-26.md`](checkdigit-blindspots-exact-2026-09-26.md).
+
+---
+
+### 2026-09-26 — #410's VIZ personal number moves no hit count, but TD1 churns ten seeds
+
+**Observed**, locally, on one Linux container: release `synthpass-bench --document-type <fmt>
+--profile clean --count 100 --seed 0` for TD1, TD2 and MRV-B at `f73fb6d` (before) and `101313e`
+(after, since rebased as `6079165`; [#410](https://github.com/ruledicaprio/SynthPass/issues/410) option 2). The change paints
+the zone's truncated personal number in the VIZ instead of the 14-character draw. MRZ lines and
+the scored truth are unchanged, so only VIZ pixels differ.
+
+- **Hits unchanged: TD1 21 → 21, TD2 52 → 52, MRV-B 68 → 68.** MRV-B is identical on every seed.
+  TD2 differs on seed 69 only, a wrong accept either way.
+- **TD1 churns:** 5 hits gained (seeds 0, 15, 39, 58, 90) and 5 lost (5, 21, 30, 50, 95). The net is
+  **−3 strict, +3 wrong accepts**. A repeat of the after arm reproduced every seed, so this is the
+  change, not noise. Hypothesized cause: TD1's personal-number row sits just above the MRZ band
+  on the smallest canvas.
+- **These absolute counts are not the headline's.** TD1 at `f80877b` reads 20 / 100 here against
+  52 / 100 in CI (run 36111444345), so the container, not `main`, is low. The note measures a
+  delta. The headline row is left as it stands until the next `bench-charts.yml` run re-measures
+  it after #410 lands.
+
+Tables, the TD2 seed, the platform control and what this does not claim:
+[`viz-personal-number-410-2026-09-26.md`](viz-personal-number-410-2026-09-26.md).
