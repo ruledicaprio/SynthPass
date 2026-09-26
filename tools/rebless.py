@@ -379,19 +379,21 @@ STRICT_NAME_PLACEHOLDER_SOURCE = "`real-specimen-mrz-baseline.json`"
 def _format_strict_name_row_cells(flat: dict) -> tuple[str, str]:
     """The Strict name hit rate row's value/source cells for a flattened
     baseline that carries `strict_names` (`REPORT_ONLY_KEYS` all present).
-    `names_exact_among_hits` is stated as `0.0`, not computed through
-    `format_rate`, exactly when `name_scorable_hits` is `0` -- the same
-    non-fabricated-zero rule `StrictNameHitRate::Computed`'s own doc states
-    (`name_scorable_documents` being nonzero already proves this is a
-    measured, not absent, population)."""
+    `names_exact_among_hits` is `n/a` exactly when `name_scorable_hits` is
+    `0`: its denominator is empty, so there is no rate to state -- the same
+    rule as `StrictNameHitRate::Computed`'s `None` (#470)."""
     strict_hits = int(flat["strict_hits"])
     name_scorable_documents = int(flat["name_scorable_documents"])
     name_scorable_hits = int(flat["name_scorable_hits"])
     rate = format_rate(strict_hits, name_scorable_documents)
-    names_exact_among_hits = format_rate(strict_hits, name_scorable_hits) if name_scorable_hits else "0.0"
+    among_hits = (
+        f"{format_rate(strict_hits, name_scorable_hits)}% of name-scorable hits"
+        if name_scorable_hits
+        else "n/a of name-scorable hits: there were none"
+    )
     value = (
         f"**{strict_hits} / {name_scorable_documents} = {rate}%** of name-scorable scored "
-        f"documents ({names_exact_among_hits}% of name-scorable hits)"
+        f"documents ({among_hits})"
     )
     source = f"same baseline (CI, {flat.get('measured_date')}); ADR-0013"
     return value, source

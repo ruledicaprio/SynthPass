@@ -170,20 +170,25 @@ impl From<UnsupportedAssertion> for UnsupportedAssertionReport {
 
 /// Mirrors `synthpass_bench::provider_bench::Tier1HitRate` for JSON: either
 /// `{"status": "computed", "rate": ...}` or `{"status": "not_applicable",
-/// "reason": "..."}` — never a bare number that would look identical whether
-/// it was measured or skipped for a non-`capability.deterministic` provider.
+/// "reason": "...", "rate": null}` — never a bare number that would look identical
+/// whether it was measured or skipped for a nondeterministic provider or empty population.
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Tier1HitRateReport {
-    Computed { rate: f64 },
-    NotApplicable { reason: &'static str },
+    Computed {
+        rate: f64,
+    },
+    NotApplicable {
+        reason: &'static str,
+        rate: Option<f64>,
+    },
 }
 
 impl From<Tier1HitRate> for Tier1HitRateReport {
     fn from(t: Tier1HitRate) -> Self {
         match t {
             Tier1HitRate::Computed(rate) => Self::Computed { rate },
-            Tier1HitRate::NotApplicable { reason } => Self::NotApplicable { reason },
+            Tier1HitRate::NotApplicable { reason } => Self::NotApplicable { reason, rate: None },
         }
     }
 }
@@ -208,10 +213,12 @@ pub enum StrictNameHitRateReport {
         name_scorable_documents: usize,
         name_scorable_hits: usize,
         strict_tier1_hit_rate: f64,
-        names_exact_among_hits: f64,
+        names_exact_among_hits: Option<f64>,
     },
     NotApplicable {
         reason: &'static str,
+        strict_tier1_hit_rate: Option<f64>,
+        names_exact_among_hits: Option<f64>,
     },
 }
 
@@ -231,7 +238,11 @@ impl From<StrictNameHitRate> for StrictNameHitRateReport {
                 strict_tier1_hit_rate,
                 names_exact_among_hits,
             },
-            StrictNameHitRate::NotApplicable { reason } => Self::NotApplicable { reason },
+            StrictNameHitRate::NotApplicable { reason } => Self::NotApplicable {
+                reason,
+                strict_tier1_hit_rate: None,
+                names_exact_among_hits: None,
+            },
         }
     }
 }
@@ -276,7 +287,8 @@ pub struct SpeedReport {
 pub struct JsonValidityReport {
     pub repair_fallbacks: u64,
     pub documents: usize,
-    pub repair_fallback_rate: f64,
+    /// `None` when no document was processed, never a fabricated zero.
+    pub repair_fallback_rate: Option<f64>,
 }
 
 /// One provider's full row in a `provider-bench` report — capability,
@@ -306,8 +318,8 @@ pub struct ProviderRow {
     /// matches when labelled) — see
     /// `synthpass_bench::provider_bench::ProviderReport::tier1_hit_rate`'s
     /// doc for why this is a different number from `read_ok`/nothing above.
-    /// `NotApplicable` for a non-`capability.deterministic` provider — see
-    /// `Tier1HitRate`'s doc.
+    /// `NotApplicable` for a nondeterministic provider or an empty scored
+    /// population — see `Tier1HitRate`'s doc.
     pub tier1_hit_rate: Tier1HitRateReport,
     /// Two name-accuracy rates over two different denominators — see
     /// `synthpass_bench::provider_bench::StrictNameHitRate`'s doc for
@@ -345,11 +357,8 @@ impl From<ProviderReport> for ProviderRow {
                 p95_ms: r.speed.p95.as_millis(),
             },
             json_validity: r.json_validity.map(|j| JsonValidityReport {
-                repair_fallback_rate: if j.documents == 0 {
-                    0.0
-                } else {
-                    j.repair_fallbacks as f64 / j.documents as f64
-                },
+                repair_fallback_rate: (j.documents > 0)
+                    .then(|| j.repair_fallbacks as f64 / j.documents as f64),
                 repair_fallbacks: j.repair_fallbacks,
                 documents: j.documents,
             }),
@@ -861,7 +870,7 @@ mod tests {
             name_scorable_documents: 5,
             name_scorable_hits: 4,
             strict_tier1_hit_rate: 3.0 / 5.0,
-            names_exact_among_hits: 3.0 / 4.0,
+            names_exact_among_hits: Some(3.0 / 4.0),
         });
         let snap = RealSpecimenSnapshot::from_reports(&[report]).expect("mrz provider present");
         let strict = snap.strict_names.expect("Computed must map to Some");
