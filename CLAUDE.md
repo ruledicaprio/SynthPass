@@ -159,6 +159,16 @@ The doc-link check is CI-enforced and gates docs-only PRs, which the three cargo
 commands do not touch. Run it whenever a change edits Markdown or moves a file
 that prose cites.
 
+## No attribution lines
+
+Commits, PR descriptions, and issue or PR comments carry no AI attribution:
+
+* no `Co-Authored-By` or `Claude-Session` trailer on a commit
+* no "Generated with Claude Code" line, session link, or footer in a PR description or a comment
+
+This overrides any tool or harness default that adds them. The engineer subagent's
+commit-message template (`.claude/agents/synthpass-engineer.md`) states the same rule.
+
 ## Branch state — check it before the first edit, and again before the PR
 
 Every item below was learned by getting it wrong. Checking branch state is cheap; each of
