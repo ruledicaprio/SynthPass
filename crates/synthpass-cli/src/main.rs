@@ -92,7 +92,7 @@ fn print_usage() {
     println!(
         "  synthpass fingerprint              print this machine's fingerprint (send to your vendor)"
     );
-    println!("  synthpass verify-license [path]    verify a license file (default: SYNTHPASS_LICENSE_PATH or ./license.mlis)");
+    println!("  synthpass verify-license [path]    verify a license file (default: SYNTHPASS_LICENSE_PATH or ./license.synthpass)");
     println!("  synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]");
     println!("                                     generate synthetic td1|td2|td3|mrva|mrvb document images + label JSON (no license required)");
     println!("  synthpass export --format jsonl|hf [--count N] [--seed N] [--document-type TYPE] [--pack-pages N] --out-dir DIR");
@@ -271,7 +271,7 @@ fn print_line1_integrity(result: &synthpass_pipeline::PipelineResult) {
 }
 
 /// Default path for the license file when `SYNTHPASS_LICENSE_PATH` is unset.
-const DEFAULT_LICENSE_PATH: &str = "license.mlis";
+const DEFAULT_LICENSE_PATH: &str = "license.synthpass";
 
 /// Gate for the extraction path only (see call site in `main`) — `decrypt`,
 /// `doctor`, `fingerprint`, and `verify-license` all stay usable without a

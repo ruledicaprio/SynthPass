@@ -318,7 +318,7 @@ fn startup_refusal(bind_addr: &str, token: &Option<String>) -> Option<String> {
 }
 
 /// Default path for the license file when `SYNTHPASS_LICENSE_PATH` is unset.
-const DEFAULT_LICENSE_PATH: &str = "license.mlis";
+const DEFAULT_LICENSE_PATH: &str = "license.synthpass";
 
 /// License startup gate: refuse to boot without a valid license, unless
 /// `SYNTHPASS_LICENSE_SKIP=1`. Pure — takes the already-computed check result
@@ -935,7 +935,7 @@ mod tests {
             expires_unix,
             tier: "enterprise".into(),
             features: vec![],
-            mlis_min_version: None,
+            synthpass_min_version: None,
             max_llm_contexts: None,
         }
     }

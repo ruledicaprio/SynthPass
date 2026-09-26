@@ -119,7 +119,7 @@ sequenceDiagram
 ## 6. Offline Cryptographic Licensing (v0.8.0)
 As of v0.8.0, the shipped `synthpass`/`synthpass-serve` binaries require a signed license to run their extraction path — Ed25519-signed license files that record capacity and entitlement for an official air-gapped enterprise build, without ever phoning home. This is metering and entitlement, not a feature gate ([`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)); no production license can be issued yet — see [§6](#6-offline-cryptographic-licensing-v080)'s threat-model paragraph and [`technical_debt.md`](technical_debt.md#the-licensing-public-key-is-still-a-placeholder). See [`crates/synthpass-license/`](../crates/synthpass-license/).
 
-* **Format:** a license file (`license.mlis`, default path — override with `SYNTHPASS_LICENSE_PATH`) is a small JSON envelope: `payload` (base64 of the *exact* signed `LicensePayload` JSON bytes) + `signature` (base64 Ed25519 signature over those same bytes). The verifier checks the signature over the literal stored bytes and only deserializes afterward — unlike a design that re-serializes the payload before verifying (which can desync signer and verifier on field-order/whitespace drift), a valid license can never fail to verify this way. Verification uses `verify_strict` (not the plain `Verifier::verify`), rejecting non-canonical/cofactored signature malleability — the conservative default per RFC 8032.
+* **Format:** a license file (`license.synthpass`, default path — override with `SYNTHPASS_LICENSE_PATH`) is a small JSON envelope: `payload` (base64 of the *exact* signed `LicensePayload` JSON bytes) + `signature` (base64 Ed25519 signature over those same bytes). The verifier checks the signature over the literal stored bytes and only deserializes afterward — unlike a design that re-serializes the payload before verifying (which can desync signer and verifier on field-order/whitespace drift), a valid license can never fail to verify this way. Verification uses `verify_strict` (not the plain `Verifier::verify`), rejecting non-canonical/cofactored signature malleability — the conservative default per RFC 8032.
 * **Embedded public key:** `crates/synthpass-license/pubkey.b64`, loaded via `include_str!` and parsed once. A public key isn't a secret, so a checked-in file is safe; rotation is a one-file swap. `SYNTHPASS_LICENSE_PUBKEY` overrides it at runtime for testing, mirroring the `SYNTHPASS_MODEL_SHA256`/`SYNTHPASS_OCR_*_SHA256` known-good-plus-override convention used elsewhere in this workspace. **The pinned key ships as a placeholder** generated during development — a real vendor deployment must run `synthpass-license-issuer keygen` and replace `pubkey.b64` before issuing real licenses.
 * **Machine fingerprint (optional binding):** `machine_fingerprint()` hashes `/etc/machine-id` (falling back to `/var/lib/dbus/machine-id`) via the same `synthpass_core::audit::sha256_hex` the audit log uses — deliberately *not* an OS-name+hostname+CPU-brand approach, since hostname is trivially changed and CPU brand is identical across thousands of same-SKU machines. An empty `hw_fingerprint` in the payload skips the check entirely (site/trial licenses).
 * **Enforcement lives in the binaries, not `synthpass-pipeline`** — the pipeline stays a clean, license-agnostic, reusable library:
@@ -171,7 +171,7 @@ The headline architectural facts worth stating in this doc specifically (build o
 
 * **Toolchain:** `cargo-zigbuild` + a pinned Zig release as `CC`/`CXX`, giving `llama-cpp-2`'s C++ build a real musl-targeting toolchain — chosen over `cross-rs`/manual `musl-gcc`. `docker/Dockerfile.builder` is the reproducible local build image.
 * **`ocr-embedded` feature:** off by default (the regular dev/CI loop keeps the fast runtime-download-and-cache path); only the musl release build turns it on, baking both `.rten` files in via `include_bytes!` after the same SHA-256 verification the runtime path uses.
-* **Fingerprint fallback:** stock Alpine ships no OS-level machine-id at all, so `synthpass-license::fingerprint` persists a `/dev/urandom`-seeded id on first run (`/var/lib/mlis/instance-id`, override `SYNTHPASS_INSTANCE_ID_PATH`) rather than every such install colliding on one placeholder — see [§6](#6-offline-cryptographic-licensing-v080)'s threat model, unchanged in kind, just more robust in this one edge case.
+* **Fingerprint fallback:** stock Alpine ships no OS-level machine-id at all, so `synthpass-license::fingerprint` persists a `/dev/urandom`-seeded id on first run (`/var/lib/synthpass/instance-id`, override `SYNTHPASS_INSTANCE_ID_PATH`) rather than every such install colliding on one placeholder — see [§6](#6-offline-cryptographic-licensing-v080)'s threat model, unchanged in kind, just more robust in this one edge case.
 * **Non-goals, explicitly:** no Tesseract-under-musl (the C dependency chain — libjpeg/libpng/libtiff/zlib — was never worth cross-building), no macOS/Windows musl target, no GGUF embedding, no hardware-attestation fingerprinting (TPM/HSM).
 
 ### v1.2.0 — "dependency diet" (shipped 2026-07-25)
@@ -238,18 +238,18 @@ flowchart LR
     BIN -->|"copy to target"| AIR["air-gapped machine"]
     GGUF["qwen2.5 GGUF<br/>(~1 GB, separate)"] -->|"copy alongside"| AIR
     AIR -->|"synthpass fingerprint"| FP["fingerprint string"]
-    FP -->|"send to vendor"| LIC["license.mlis<br/>(Ed25519-signed)"]
+    FP -->|"send to vendor"| LIC["license.synthpass<br/>(Ed25519-signed)"]
     LIC -->|"drop beside binary"| AIR
     AIR -->|"synthpass &lt;file&gt;"| OUT["JSON output"]
 ```
 
 Copy the binaries and the GGUF onto the target, run `synthpass fingerprint`, obtain a license
-bound to it, drop `license.mlis` beside the binary, and run. Toolchain rationale (why Zig over
+bound to it, drop `license.synthpass` beside the binary, and run. Toolchain rationale (why Zig over
 `cross-rs` or manual `musl-gcc`) is above in this section; known limitations are in
 [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like).
 `docker/Dockerfile.musl` packages the same binaries into a `FROM scratch` image.
 
-The `license.mlis` step above describes the mechanism, not a current offering: the verifying key
+The `license.synthpass` step above describes the mechanism, not a current offering: the verifying key
 compiled into the binary is still a placeholder
 ([`technical_debt.md`](technical_debt.md#the-licensing-public-key-is-still-a-placeholder)), so no
 production license can be issued yet, and distribution stays source-build only until it is
@@ -305,7 +305,7 @@ requires auth defeats half its purpose.
 | --- | --- | --- |
 | `SYNTHPASS_AUDIT_LOG` | *(unset)* | Append PII-free SHA-256 audit records (JSONL) |
 | `SYNTHPASS_KEY` | *(unset)* | Base64 32-byte AES-256 key → encrypt output to `<input>.json.enc` |
-| `SYNTHPASS_LICENSE_PATH` | `license.mlis` | Path to the signed license file |
+| `SYNTHPASS_LICENSE_PATH` | `license.synthpass` | Path to the signed license file |
 | `SYNTHPASS_LICENSE_SKIP` | *(unset)* | `1` bypasses license enforcement (development/CI) |
 | `SYNTHPASS_LICENSE_PUBKEY` | *(embedded)* | Override the embedded verifying key, for testing |
 

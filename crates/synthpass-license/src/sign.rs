@@ -70,7 +70,7 @@ mod tests {
             expires_unix: 4_000_000_000,
             tier: "enterprise".into(),
             features: vec![],
-            mlis_min_version: None,
+            synthpass_min_version: None,
             max_llm_contexts: None,
         };
         let signed = issue(&signing_key, &payload);

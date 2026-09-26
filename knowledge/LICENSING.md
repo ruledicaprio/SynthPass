@@ -25,8 +25,8 @@ just the CLI steps.
 
 ```powershell
 cargo run -p synthpass-cli -- fingerprint                    # send this string to your vendor
-# ...vendor emails back license.mlis...
-cargo run -p synthpass-cli -- verify-license license.mlis     # confirm it before relying on it
+# ...vendor emails back license.synthpass...
+cargo run -p synthpass-cli -- verify-license license.synthpass     # confirm it before relying on it
 ```
 
 ## Vendor flow
@@ -40,7 +40,7 @@ cargo run -p synthpass-license --features vendor --bin synthpass-license-issuer 
 $env:SYNTHPASS_LICENSE_PRIVKEY = "<private key from keygen>"
 cargo run -p synthpass-license --features vendor --bin synthpass-license-issuer -- `
   issue-license --customer "Acme Hospital" --tier enterprise --expires-in-days 365 `
-  --hw <fingerprint from the customer> --out license.mlis
+  --hw <fingerprint from the customer> --out license.synthpass
 ```
 
 An empty `--hw` issues an unbound (site/trial) license instead of a machine-locked one.
@@ -49,6 +49,6 @@ An empty `--hw` issues an unbound (site/trial) license instead of a machine-lock
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_LICENSE_PATH` | `license.mlis` | path to the signed license file |
+| `SYNTHPASS_LICENSE_PATH` | `license.synthpass` | path to the signed license file |
 | `SYNTHPASS_LICENSE_SKIP` | *(unset)* | `1` bypasses license enforcement entirely (local development/CI) |
 | `SYNTHPASS_LICENSE_PUBKEY` | *(embedded)* | override the embedded verifying key (base64), for testing |

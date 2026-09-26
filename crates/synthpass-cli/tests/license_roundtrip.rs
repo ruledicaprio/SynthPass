@@ -50,14 +50,14 @@ fn sample_payload(hw_fingerprint: &str, expires_unix: u64) -> LicensePayload {
         expires_unix,
         tier: "enterprise".into(),
         features: vec![],
-        mlis_min_version: None,
+        synthpass_min_version: None,
         max_llm_contexts: None,
     }
 }
 
 fn write_license_fixture(name: &str, signed: &SignedLicense) -> TempFileGuard {
     let path = std::env::temp_dir().join(format!(
-        "synthpass-cli-test-{name}-{}.mlis",
+        "synthpass-cli-test-{name}-{}.synthpass",
         std::process::id()
     ));
     let json = serde_json::to_string_pretty(signed).expect("SignedLicense serializes");
