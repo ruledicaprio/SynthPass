@@ -246,6 +246,10 @@ pub struct OcrArmsReport {
     pub rotate: &'static str,
     pub skew: &'static str,
     pub chargrid: &'static str,
+    /// `synthpass_ocr::OcrArms::stop` passthrough — `"first-valid"` (default)
+    /// or `"clean"`; see `synthpass_ocr::StopMode`'s doc for what the arm
+    /// changes (#473).
+    pub stop: &'static str,
 }
 
 impl From<synthpass_ocr::OcrArms> for OcrArmsReport {
@@ -256,6 +260,7 @@ impl From<synthpass_ocr::OcrArms> for OcrArmsReport {
             rotate: a.rotate,
             skew: a.skew,
             chargrid: a.chargrid,
+            stop: a.stop,
         }
     }
 }
