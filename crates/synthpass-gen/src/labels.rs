@@ -4,7 +4,7 @@
 
 use crate::layout::Rect;
 use crate::model::{DocumentType, Passport};
-use crate::mrz_line::build_mrz_lines;
+use crate::mrz_line::{build_mrz_lines, emitted_personal_number};
 
 /// One labelled field: the ground-truth text and where it was drawn.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,10 +94,10 @@ pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
         date_of_birth: FieldLabel::new(iso_date(&passport.date_of_birth), page.date_of_birth),
         sex: FieldLabel::new(passport.sex.as_mrz_char().to_string(), page.sex),
         date_of_expiry: FieldLabel::new(iso_date(&passport.date_of_expiry), page.date_of_expiry),
-        personal_number: passport
-            .personal_number
-            .as_ref()
-            .map(|v| FieldLabel::new(v.clone(), page.personal_number)),
+        // The zone's value, not the full draw: TD1, TD2 and MRV-B truncate
+        // it, and the VIZ must paint what the MRZ carries (#410).
+        personal_number: emitted_personal_number(&mrz_line_strings, doc_type)
+            .map(|v| FieldLabel::new(v, page.personal_number)),
         surname_native: passport
             .surname_native
             .as_ref()

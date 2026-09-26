@@ -203,6 +203,41 @@ pub fn build_mrz_lines(passport: &Passport, doc_type: DocumentType) -> Vec<Strin
     }
 }
 
+/// The personal number as the emitted zone carries it, read back from `lines`
+/// (as returned by [`build_mrz_lines`]) through the matching `mrz` parser.
+///
+/// [`Passport::personal_number`] is drawn 14 characters wide for every format,
+/// and `mrz::emit` truncates it to the optional-data element it lands in:
+/// TD1's second element (11), TD2's (7) and MRV-B's (8). TD3 (14) and MRV-A
+/// (16) carry it whole. The visual zone paints this read-back value rather
+/// than the full draw, so the VIZ and the MRZ agree on every format (#410).
+/// Reading it back from the zone, not re-truncating the draw, keeps the
+/// element widths in one place — the `mrz` crate.
+///
+/// `None` when the element is all filler, i.e. when the passport has no
+/// personal number.
+pub fn emitted_personal_number(lines: &[String], doc_type: DocumentType) -> Option<String> {
+    let line = |i: usize| lines.get(i).map_or("", String::as_str);
+    let mut parsed = match doc_type {
+        DocumentType::TD1 => mrz::parse_td1(line(0), line(1), line(2)),
+        DocumentType::TD2 => mrz::parse_td2(line(0), line(1)),
+        DocumentType::TD3 => mrz::parse_td3(line(0), line(1)),
+        DocumentType::MrvA => mrz::parse_mrv_a(line(0), line(1)),
+        DocumentType::MrvB => mrz::parse_mrv_b(line(0), line(1)),
+    }
+    .expect("the generator's own emitted zone always parses");
+    // The element the generator writes the personal number into: TD1's
+    // second optional-data element, every other format's only one (see the
+    // `build_*_lines` functions above and ADR-0018). `take`, not a move:
+    // `MrzData` implements `Drop` under `mrz`'s `zeroize` feature.
+    match doc_type {
+        DocumentType::TD1 => parsed.optional_data_2.take(),
+        DocumentType::TD2 | DocumentType::TD3 | DocumentType::MrvA | DocumentType::MrvB => {
+            parsed.optional_data_1.take()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

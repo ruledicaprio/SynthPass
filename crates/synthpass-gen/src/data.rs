@@ -143,10 +143,15 @@ fn random_personal_number(rng: &mut ChaCha8Rng) -> String {
     // `Passport::personal_number`'s doc comment). Only MRV-A (16) has room
     // to spare: TD1's second element is 11 wide, TD2's element 7 and MRV-B's
     // 8, and `mrz::emit`'s `field()` helper silently truncates to the width
-    // on each, so the zone carries a prefix of the painted value there
-    // (pinned in `tests/mrz_roundtrip.rs`). That truncation is safe by
-    // construction — no check digit covers an optional-data element on any
-    // format (see `mrz::emit`'s docs).
+    // on each, so the zone carries a prefix of the drawn value there. The
+    // visual zone paints what the zone carries, not the full draw: the label
+    // is read back from the emitted lines (`mrz_line::emitted_personal_number`,
+    // #410), so VIZ and MRZ agree on every format. The truncation happens
+    // before any check digit is computed, so the zone stays valid: TD1's and
+    // TD2's composite check digits do cover their optional data (see
+    // `mrz::emit`'s docs), and every check digit is over the truncated value.
+    // The draw stays 14 wide so the RNG sequence, and with it every other
+    // generated field, is unchanged.
     (0..14)
         .map(|_| ALNUM[rng.random_range(0..ALNUM.len())] as char)
         .collect()
