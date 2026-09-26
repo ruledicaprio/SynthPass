@@ -126,12 +126,19 @@ fn parse_args(args: &[String]) -> Result<ExportArgs, String> {
     })
 }
 
-/// `synthpass export` entry point. Returns `Ok(())` on a handled user error
-/// (usage already printed) so the process exit code stays 0 for
-/// "ran, told you what was wrong" — same convention as `generate`.
-pub fn export_command(args: &[String], license_ok: bool) -> Result<(), Box<dyn std::error::Error>> {
+/// `synthpass export` entry point. Exit codes (issue #492): `license_ok ==
+/// false` (the `export` license feature isn't granted) is a license refusal
+/// (3); a bad argument is a usage error (2); a `synthpass_export::run`
+/// failure — the corpus generated fine but writing the dataset didn't — is a
+/// runtime failure (1). This replaces the previous "ran, told you what was
+/// wrong" convention, which returned `Ok(())` (exit 0) in all three cases and
+/// left a caller with no way to tell success from failure.
+pub fn export_command(
+    args: &[String],
+    license_ok: bool,
+) -> Result<crate::Exit, Box<dyn std::error::Error>> {
     if !license_ok {
-        return Ok(());
+        return Ok(crate::Exit::License);
     }
 
     let parsed = match parse_args(args) {
@@ -139,7 +146,7 @@ pub fn export_command(args: &[String], license_ok: bool) -> Result<(), Box<dyn s
         Err(e) => {
             eprintln!("❌ {e}");
             usage();
-            return Ok(());
+            return Ok(crate::Exit::Usage);
         }
     };
 
@@ -165,11 +172,11 @@ pub fn export_command(args: &[String], license_ok: bool) -> Result<(), Box<dyn s
                 "   manifest: {}",
                 summary.out_dir.join("manifest.json").display()
             );
-            Ok(())
+            Ok(crate::Exit::Ok)
         }
         Err(e) => {
             eprintln!("❌ export failed: {e}");
-            Ok(())
+            Ok(crate::Exit::Failure)
         }
     }
 }

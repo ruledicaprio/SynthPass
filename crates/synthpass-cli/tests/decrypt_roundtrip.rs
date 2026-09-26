@@ -73,12 +73,63 @@ fn decrypt_fails_with_wrong_key() {
         .output()
         .expect("run `synthpass decrypt`");
 
-    // `decrypt_command` prints the error to stderr and returns Ok(()), so the
-    // exit code stays 0 — what matters is that no plaintext ever reaches stdout.
+    // A decrypt failure is a runtime failure (exit 1) — see the exit-code
+    // convention in `knowledge/ARCHITECTURE.md` §12 (issue #492). What
+    // matters most is that no plaintext ever reaches stdout either way.
     assert!(output.stdout.is_empty(), "plaintext leaked on wrong key");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "decrypt failure must exit 1, got: {output:?}"
+    );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("decrypt failed"),
         "expected a decrypt-failed message on stderr, got: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn decrypt_missing_key_is_a_usage_error() {
+    let key = random_key();
+    let plaintext = b"irrelevant, never reached";
+    let ciphertext = synthpass_core::crypt::encrypt(&key, plaintext).expect("encrypt fixture");
+    let fixture = write_fixture("missingkey", &ciphertext);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args(["decrypt", fixture.0.to_str().unwrap()])
+        .env_remove("SYNTHPASS_KEY")
+        .output()
+        .expect("run `synthpass decrypt`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "a missing SYNTHPASS_KEY is a usage/config error (2), got: {output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("SYNTHPASS_KEY"),
+        "expected a SYNTHPASS_KEY message on stderr, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn decrypt_missing_file_is_a_runtime_failure() {
+    let missing = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-does-not-exist-{}.json.enc",
+        std::process::id()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args(["decrypt", missing.to_str().unwrap()])
+        .env("SYNTHPASS_KEY", STANDARD.encode(random_key()))
+        .output()
+        .expect("run `synthpass decrypt`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a missing input file is a runtime failure (1), got: {output:?}"
     );
 }
