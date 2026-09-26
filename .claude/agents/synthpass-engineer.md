@@ -53,6 +53,12 @@ that file exists, every cargo command goes through it:
   lock, and never kill their processes.
 - **Running an already-built binary** (`target\release\synthpass-bench.exe …`) is not a
   cargo job and doesn't need the slot.
+- **Never edit while your own cargo job runs.** Cargo reads the working tree when it reaches a
+  crate, not when the command starts, so an edit made mid-build lands in that build and its
+  result describes code you never tested. Finish, or stop, the command before the next edit.
+- **Don't create worktrees or `cargo clean`.** Your tree's `target\` is warm, and a cold one
+  means a full ~25-minute build of the workspace. If you think you need a clean build, report
+  that instead.
 
 The pattern, in Bash (`noclobber` makes taking the slot atomic):
 

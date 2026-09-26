@@ -180,6 +180,14 @@ these failures is expensive to unwind, and most of them look like success at the
   nothing flags. To make progress during a long run, use **`git worktree add`**: a second
   working tree leaves the running job's tree untouched, and needs no rebuild for a docs or
   workflow change.
+* **The same goes for editing files.** An edit in a tree whose build is still running lands in
+  that build just as a branch switch would. Wait for the job to finish, then edit.
+* **Reuse a warm worktree for code work; a fresh one costs a full build.** A new worktree has
+  no `target\`, so its first cargo command compiles the whole workspace: 272 crates, about
+  25 minutes on the desktop. For the next Rust task, take a worktree whose branch has
+  already merged and start a new branch there (`git switch -c <new> origin/main`) once its
+  running jobs finish. Create a new worktree for docs or workflow changes, which never build,
+  or when no idle warm tree exists.
 * **Capture cargo's exit code directly** — `cargo clippy --workspace --all-targets; EXIT=$?`.
   Piping through `tail` or `head` makes `$?` the pager's status, so a failed gauntlet reports
   green.

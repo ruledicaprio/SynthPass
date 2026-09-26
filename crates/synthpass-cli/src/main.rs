@@ -38,14 +38,29 @@ fn box_line(text: &str) -> String {
     format!("│{}│", center(text, BOX_WIDTH))
 }
 
+/// The word the banner draws in block letters.
+const WORDMARK: &str = "SYNTHPASS";
+
+/// One 5×5 block-letter glyph per character of [`WORDMARK`]. `None` for a
+/// character with no glyph, so a future wordmark edit fails a test instead of
+/// drawing a gap.
+fn glyph(c: char) -> Option<[&'static str; 5]> {
+    Some(match c {
+        'S' => [" ████", "█    ", " ███ ", "    █", "████ "],
+        'Y' => ["█   █", " █ █ ", "  █  ", "  █  ", "  █  "],
+        'N' => ["█   █", "██  █", "█ █ █", "█  ██", "█   █"],
+        'T' => ["█████", "  █  ", "  █  ", "  █  ", "  █  "],
+        'H' => ["█   █", "█   █", "█████", "█   █", "█   █"],
+        'P' => ["████ ", "█   █", "████ ", "█    ", "█    "],
+        'A' => [" ███ ", "█   █", "█████", "█   █", "█   █"],
+        _ => return None,
+    })
+}
+
 /// Static ASCII banner in the style of a boxed CLI splash screen — printed
-/// once for `--help`/no-args, never on the hot extraction path (stdout there
-/// stays script/jq-friendly JSON).
+/// once for `--help`/no-args, never on the extraction path.
 fn banner() -> String {
-    const M: [&str; 5] = ["█   █", "██ ██", "█ █ █", "█   █", "█   █"];
-    const L: [&str; 5] = ["█    ", "█    ", "█    ", "█    ", "█████"];
-    const I: [&str; 5] = ["█████", "  █  ", "  █  ", "  █  ", "█████"];
-    const S: [&str; 5] = [" ████", "█    ", " ███ ", "    █", "████ "];
+    let glyphs: Vec<[&str; 5]> = WORDMARK.chars().filter_map(glyph).collect();
 
     let mut out = String::new();
     out.push_str(&format!("┌{}┐\n", "─".repeat(BOX_WIDTH)));
@@ -54,7 +69,7 @@ fn banner() -> String {
     out.push_str(&format!("{}\n", box_line(&"-".repeat(50))));
     out.push_str(&format!("{}\n", box_line("")));
     for row in 0..5 {
-        let line = format!("{}  {}  {}  {}", M[row], L[row], I[row], S[row]);
+        let line = glyphs.iter().map(|g| g[row]).collect::<Vec<_>>().join("  ");
         out.push_str(&format!("{}\n", box_line(&line)));
     }
     out.push_str(&format!("{}\n", box_line("")));
@@ -752,4 +767,37 @@ fn check_rust_ocr_models(ok: &mut bool) {
 fn check_rust_ocr_models(ok: &mut bool) {
     println!("❌ OCR engine 'rust' selected but this build lacks the `ocr-native-rust` feature");
     *ok = false;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_wordmark_character_has_a_glyph() {
+        for c in WORDMARK.chars() {
+            assert!(glyph(c).is_some(), "no banner glyph for {c:?}");
+        }
+    }
+
+    #[test]
+    fn every_banner_line_fills_the_box_exactly() {
+        for line in banner().lines() {
+            assert_eq!(line.chars().count(), BOX_WIDTH + 2, "misaligned: {line:?}");
+        }
+    }
+
+    #[test]
+    fn banner_draws_the_wordmark_not_the_old_name() {
+        // Row 0 of the block letters, rebuilt from the glyph table: the
+        // banner must contain it, so it spells WORDMARK and nothing else.
+        let row0 = WORDMARK
+            .chars()
+            .filter_map(glyph)
+            .map(|g| g[0])
+            .collect::<Vec<_>>()
+            .join("  ");
+        assert!(banner().contains(&row0));
+        assert_eq!(WORDMARK, "SYNTHPASS");
+    }
 }
