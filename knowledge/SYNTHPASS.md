@@ -112,15 +112,29 @@ five synthetic formats, 178 carry a wrong name.
 
 ## The CI gate
 
-`.github/workflows/ci.yml`'s `rust` job runs:
+`.github/workflows/ci.yml`'s `m4-hit-rate` job runs:
 
 ```sh
 cargo run -p synthpass-bench --release --bin synthpass-bench -- \
-  --count 50 --seed 0 --profile clean --min-hit-rate 0.30 --out bench-report.json
+  --count 50 --seed 0 --profile clean --min-hit-rate 0.30 \
+  --max-prefix-wrong-accepts @@N@@ --out bench-report.json
 ```
 
-right after the existing native-OCR smoke test steps, reusing the `.rten` models already
-downloaded earlier in the job.
+after downloading and checksum-verifying the two `.rten` OCR models itself (cached across runs).
+It is a required check. The command carries two gates, and a run that fails both reports both.
+
+**The prefix ratchet (`--max-prefix-wrong-accepts`):** a Tier-1 hit whose `document_type` or
+`issuing_country` differs from the generator's truth is a *prefix wrong accept*: the checksums
+passed, but line 1's prefix, which no check digit covers in any format, was read wrong. The run
+fails when more than the pinned number of them occur. The limit was measured by CI on the PR
+that added the flag, not chosen. The fix that earns a lower count lowers it
+([#461](https://github.com/ruledicaprio/SynthPass/issues/461) is expected to take it to zero).
+Raising it is a reviewed workflow edit that names the seeds and the mechanism. The report's
+`prefix_wrong_accept_seeds` and the failure message both list the seeds. Wrong names, optional
+data and check-digit collisions stay report-only
+([#453](https://github.com/ruledicaprio/SynthPass/issues/453);
+[ADR-0013](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)'s 2026-09-26
+amendment; the metric is defined in [`benchmarks/README.md`](benchmarks/README.md)).
 
 **Why 30% and not the M4-era measured ~55%:** the CI runner is a different machine than the one the
 number was measured on, and OCR inference involves floating-point computation whose exact results

@@ -11,7 +11,8 @@
 //!
 //! ```text
 //! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
-//!                 [--out PATH] [--min-hit-rate F] [--dump-ocr] [--escalation-report]
+//!                 [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N]
+//!                 [--dump-ocr] [--escalation-report]
 //!   --count N            number of documents to check (default: 100)
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
@@ -22,6 +23,11 @@
 //!   --out PATH           report JSON path (default: artifacts/bench-report.json)
 //!   --min-hit-rate F     exit non-zero if the measured hit rate is below F
 //!                        (e.g. 0.35); unset means "measure and report only"
+//!   --max-prefix-wrong-accepts N
+//!                        exit non-zero if more than N Tier-1 hits read
+//!                        `document_type` or `issuing_country` wrong against
+//!                        truth (issue #453's line-1 prefix ratchet); unset
+//!                        means "measure and report only"
 //!   --dump-ocr           print every document's raw OCR text (one printed
 //!                        line per detected line) before the summary — a
 //!                        small-`--count` diagnostic, not for a full run
@@ -44,6 +50,13 @@ struct Args {
     profile: ProfileChoice,
     out: String,
     min_hit_rate: Option<f64>,
+    /// `--max-prefix-wrong-accepts`: the most Tier-1 hits allowed to read the
+    /// line-1 prefix (`document_type` or `issuing_country`) wrong against
+    /// truth before the run exits non-zero. A ratchet, not a floor: the fix
+    /// that earns it lowers the pinned value, and raising it is a reviewed
+    /// workflow edit that names the seeds and the mechanism (issue #453,
+    /// ADR-0013's 2026-09-26 amendment).
+    max_prefix_wrong_accepts: Option<u64>,
     /// The ICAO 9303 MRZ format to generate — `--document-type`, never
     /// `--format`: `provider-bench --format` already means `SpecimenClass`
     /// (which `samples/` directory to read), a different axis entirely (see
@@ -82,6 +95,7 @@ impl Default for Args {
             profile: ProfileChoice::Clean,
             out: "artifacts/bench-report.json".to_string(),
             min_hit_rate: None,
+            max_prefix_wrong_accepts: None,
             document_type: DocumentType::TD3,
             dump_ocr: false,
             escalation_report: false,
@@ -92,7 +106,8 @@ impl Default for Args {
 fn usage() {
     eprintln!(
         "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
-         [--out PATH] [--min-hit-rate F] [--dump-ocr] [--escalation-report]"
+         [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N] [--dump-ocr] \
+         [--escalation-report]"
     );
     eprintln!("  --count N            number of documents to check (default: 100)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -104,6 +119,10 @@ fn usage() {
     );
     eprintln!("  --out PATH           report JSON path (default: artifacts/bench-report.json)");
     eprintln!("  --min-hit-rate F     exit non-zero if the measured hit rate is below F");
+    eprintln!(
+        "  --max-prefix-wrong-accepts N  exit non-zero if more than N Tier-1 hits read \
+         document_type or issuing_country wrong against truth"
+    );
     eprintln!(
         "  --dump-ocr           print every document's raw OCR text (one printed line per \
          detected line) before the summary — meant for a small --count diagnostic run"
@@ -169,6 +188,16 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                     v.parse::<f64>()
                         .map_err(|_| format!("--min-hit-rate: not a valid number: {v}"))?,
                 );
+                i += 2;
+            }
+            "--max-prefix-wrong-accepts" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--max-prefix-wrong-accepts requires a value".to_string())?;
+                parsed.max_prefix_wrong_accepts =
+                    Some(v.parse::<u64>().map_err(|_| {
+                        format!("--max-prefix-wrong-accepts: not a valid number: {v}")
+                    })?);
                 i += 2;
             }
             "--dump-ocr" => {
@@ -238,9 +267,16 @@ struct SeedResult {
     /// digit at all, and even a check-digited field can still be wrong — a
     /// check digit is consistency, not proof, so two compensating errors or a
     /// damaged-pass candidate that happens to validate can both pass it.
-    /// Report-only: never redefines `hit`/`hit_rate`, and no gate reads this
-    /// field. `false` when `hit` is `false` — there is no "accept" to judge.
+    /// Never redefines `hit`/`hit_rate`, and no gate reads this field — the
+    /// gate reads its line-1 prefix subset, `prefix_wrong_accept`. `false`
+    /// when `hit` is `false` — there is no "accept" to judge.
     wrong_accept: bool,
+    /// `true` iff `wrong_accept` and `wrong_fields` includes `document_type`
+    /// or `issuing_country` — the line-1 prefix, which no ICAO check digit
+    /// covers in any format. The one wrong-accept class
+    /// `--max-prefix-wrong-accepts` gates on (issue #453); names, optional
+    /// data and check-digit collisions stay report-only.
+    prefix_wrong_accept: bool,
     /// Which of the 12 scored fields differed from truth, in `COMPARED_FIELDS`
     /// order, when `wrong_accept` is `true`. Empty (and omitted from JSON)
     /// otherwise, including on every non-hit.
@@ -354,6 +390,14 @@ struct Report {
     /// least one scored field. `0.0` when `hits` is `0`, not a fabricated
     /// "every hit wrong".
     wrong_accept_rate: f64,
+    /// Wrong accepts whose `document_type` or `issuing_country` differs from
+    /// truth — the count `--max-prefix-wrong-accepts` gates on (issue #453).
+    /// A subset of `wrong_accepts`.
+    prefix_wrong_accepts: u64,
+    /// The seeds behind `prefix_wrong_accepts`, ascending — what a reviewed
+    /// raise of the pinned limit has to name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    prefix_wrong_accept_seeds: Vec<u64>,
     /// Mean CER per field (worst first), each annotated with the physical
     /// MRZ line it lives on for `document_type` — the JSON form of the
     /// stdout "mean character error rate by field" table. Empty when no
@@ -427,6 +471,7 @@ fn main() {
             let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
             let wrong_fields = wrong_scored_fields(&result.fields);
             let wrong_accept = result.hit && !wrong_fields.is_empty();
+            let prefix_wrong_accept = wrong_accept && touches_line1_prefix(&wrong_fields);
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
@@ -439,6 +484,7 @@ fn main() {
                 names_exact,
                 name_error,
                 wrong_accept,
+                prefix_wrong_accept,
                 wrong_fields,
                 fields: result
                     .fields
@@ -545,10 +591,16 @@ fn main() {
     // number match truth but at least one of the other 11 scored fields does
     // not. `wrong_accept` is computed per-document above, from the same
     // per-field CER comparison `fields`/`strict_hits` already use — see
-    // `wrong_scored_fields`. Report-only: does not affect `hit`, `hit_rate`,
-    // or `--min-hit-rate`.
+    // `wrong_scored_fields`. Does not affect `hit`, `hit_rate`, or
+    // `--min-hit-rate`; only the line-1 prefix subset below is gated.
     let wrong_accepts = results.iter().filter(|r| r.wrong_accept).count() as u64;
     let wrong_accept_rate = wrong_accepts as f64 / hits.max(1) as f64;
+    let prefix_wrong_accept_seeds: Vec<u64> = results
+        .iter()
+        .filter(|r| r.prefix_wrong_accept)
+        .map(|r| r.seed)
+        .collect();
+    let prefix_wrong_accepts = prefix_wrong_accept_seeds.len() as u64;
 
     if hits > 0 {
         println!(
@@ -577,11 +629,17 @@ fn main() {
         // document carries exact ground truth, so this is the same check
         // digit blind spot the m4-gate-440 finding measured by hand
         // (knowledge/benchmarks/m4-gate-440-wrong-reads-refused-2026-09-25.md)
-        // — report-only, never gated and never a redefinition of `hit`.
+        // — report-only as a whole, never a redefinition of `hit`. Only the
+        // line-1 prefix subset is gated, by `--max-prefix-wrong-accepts`.
         println!(
             "\nof {hits} Tier-1 hits, {wrong_accepts} ({:.1}%) are wrong on at least one of the \
-             12 scored fields — report-only (issue #453), not gated",
+             12 scored fields — report-only (issue #453)",
             wrong_accept_rate * 100.0
+        );
+        println!(
+            "  of which {prefix_wrong_accepts} read document_type or issuing_country wrong \
+             (line-1 prefix, gated by --max-prefix-wrong-accepts){}",
+            format_seed_list(&prefix_wrong_accept_seeds)
         );
     }
 
@@ -674,6 +732,8 @@ fn main() {
         names_exact_among_hits,
         wrong_accepts,
         wrong_accept_rate,
+        prefix_wrong_accepts,
+        prefix_wrong_accept_seeds: prefix_wrong_accept_seeds.clone(),
         mean_cer_by_field,
         mean_cer_by_line: mean_cer_by_line_map,
         results,
@@ -687,6 +747,9 @@ fn main() {
     std::fs::write(&parsed.out, json).expect("write report");
     println!("report written to {}", parsed.out);
 
+    // Both gates are evaluated before exiting, so one failing run reports
+    // every gate it fails rather than only the first.
+    let mut failed = false;
     if let Some(min) = parsed.min_hit_rate {
         if hit_rate < min {
             eprintln!(
@@ -694,9 +757,53 @@ fn main() {
                 hit_rate * 100.0,
                 min * 100.0
             );
-            std::process::exit(1);
+            failed = true;
         }
     }
+    if let Some(max) = parsed.max_prefix_wrong_accepts {
+        if prefix_gate_exceeded(prefix_wrong_accepts, max) {
+            eprintln!(
+                "❌ {prefix_wrong_accepts} Tier-1 hits read document_type or issuing_country \
+                 wrong, above the pinned limit of {max}{} — raising the limit is a reviewed \
+                 workflow edit that names the seeds and the mechanism (issue #453)",
+                format_seed_list(&prefix_wrong_accept_seeds)
+            );
+            failed = true;
+        }
+    }
+    if failed {
+        std::process::exit(1);
+    }
+}
+
+/// The line-1 prefix: the two fields that open every ICAO 9303 MRZ and that
+/// no check digit covers in any format. A Tier-1 hit that reads either one
+/// wrong is the wrong-accept class issue #453 gates on, as a ratchet —
+/// names, optional data and check-digit collisions stay report-only.
+const LINE1_PREFIX_FIELDS: [&str; 2] = ["document_type", "issuing_country"];
+
+/// `true` iff `wrong_fields` (a `wrong_scored_fields` result) names a
+/// line-1 prefix field.
+fn touches_line1_prefix(wrong_fields: &[&str]) -> bool {
+    wrong_fields
+        .iter()
+        .any(|field| LINE1_PREFIX_FIELDS.contains(field))
+}
+
+/// The ratchet's comparison: the limit is the most prefix wrong accepts
+/// allowed, so reaching it passes and only exceeding it fails.
+fn prefix_gate_exceeded(prefix_wrong_accepts: u64, max: u64) -> bool {
+    prefix_wrong_accepts > max
+}
+
+/// ` (seeds 7, 46)`, or empty when there are none — shared by the summary
+/// line and the gate's failure message so both name the same seeds.
+fn format_seed_list(seeds: &[u64]) -> String {
+    if seeds.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = seeds.iter().map(u64::to_string).collect();
+    format!(" (seeds {})", list.join(", "))
 }
 
 /// The four fields whose own ICAO check digit exists and passed in a
@@ -959,6 +1066,7 @@ mod tests {
             names_exact: false,
             name_error: None,
             wrong_accept: false,
+            prefix_wrong_accept: false,
             wrong_fields: Vec::new(),
         }
     }
@@ -1112,6 +1220,61 @@ mod tests {
         assert!(!wrong_scored_fields(&fields).is_empty());
         let hit = false;
         assert!(!(hit && !wrong_scored_fields(&fields).is_empty()));
+    }
+
+    /// Issue #453's gated class: a wrong `document_type` or `issuing_country`
+    /// on a hit. Seeds 7, 46 and 48 of the #440 A/B were wrong on both.
+    #[test]
+    fn a_wrong_document_type_or_issuing_country_touches_the_prefix() {
+        let fields = vec![
+            field_outcome("document_type", "P", "PG"),
+            field_outcome("issuing_country", "BRA", "BRC"),
+            field_outcome("surname", "CASTELLANO", "ASTELLANO"),
+        ];
+        assert!(touches_line1_prefix(&wrong_scored_fields(&fields)));
+        assert!(touches_line1_prefix(&["issuing_country"]));
+        assert!(touches_line1_prefix(&["document_type"]));
+    }
+
+    /// Names, optional data and check-digit collisions stay report-only: a
+    /// hit wrong only there is a wrong accept but never a prefix wrong
+    /// accept, so it can never trip `--max-prefix-wrong-accepts`.
+    #[test]
+    fn wrong_names_or_optional_data_alone_do_not_touch_the_prefix() {
+        assert!(!touches_line1_prefix(&[
+            "surname",
+            "given_names",
+            "personal_number",
+            "date_of_birth",
+            "nationality",
+        ]));
+        assert!(!touches_line1_prefix(&[]));
+    }
+
+    /// The pinned limit is inclusive: a run at the limit passes, one above it
+    /// fails. `--max-prefix-wrong-accepts 0` tolerates none.
+    #[test]
+    fn the_prefix_gate_fails_only_above_the_limit() {
+        assert!(!prefix_gate_exceeded(0, 0));
+        assert!(prefix_gate_exceeded(1, 0));
+        assert!(!prefix_gate_exceeded(3, 3));
+        assert!(prefix_gate_exceeded(4, 3));
+    }
+
+    #[test]
+    fn the_seed_list_names_every_seed_or_nothing() {
+        assert_eq!(format_seed_list(&[]), "");
+        assert_eq!(format_seed_list(&[7, 46, 48]), " (seeds 7, 46, 48)");
+    }
+
+    #[test]
+    fn max_prefix_wrong_accepts_parses_and_rejects_garbage() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let parsed = parse_args(&args(&["--max-prefix-wrong-accepts", "5"])).unwrap_or_default();
+        assert_eq!(parsed.max_prefix_wrong_accepts, Some(5));
+        assert_eq!(Args::default().max_prefix_wrong_accepts, None);
+        assert!(parse_args(&args(&["--max-prefix-wrong-accepts", "-1"])).is_err());
+        assert!(parse_args(&args(&["--max-prefix-wrong-accepts"])).is_err());
     }
 
     fn field_line_cer(field: &'static str, mean_cer: f64, line: Option<usize>) -> FieldLineCer {

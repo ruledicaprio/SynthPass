@@ -158,8 +158,9 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   The real-specimen strict rate becomes Observed, not Derived, once a CI-written
   `real-specimen-mrz-baseline.json` carries the `strict_names` counts (report-only — see
   ADR-0013); the row above states no real-specimen figure until then.
-- **Wrong accepts (report-only)** — `synthpass-bench`'s `Report.wrong_accepts` /
-  `wrong_accept_rate`, and per-document `results[].wrong_accept` / `wrong_fields`. `hit` proves
+- **Wrong accepts (report-only, except the line-1 prefix subset)** — `synthpass-bench`'s
+  `Report.wrong_accepts` / `wrong_accept_rate`, and per-document `results[].wrong_accept` /
+  `wrong_fields`. `hit` proves
   only a checksum-consistent zone whose document number matches truth. `document_type`,
   `issuing_country`, both names, `nationality` and `sex` carry no check digit at all, and even a
   check-digited field can still be wrong — a check digit is consistency, not proof, so two
@@ -168,15 +169,26 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   `COMPARED_FIELDS` (excluding the diagnostic `mrz_lines` row) has CER > 0 against the
   generator's exact ground truth — the same per-field comparison `strict_hits`/`fields` already
   use, restricted to a hit. `wrong_accept_rate`'s denominator is `hits`, matching
-  `names_exact_among_hits`; `0.0` when `hits` is `0`, not a fabricated "every hit wrong".
+  `names_exact_among_hits`. When `hits` is `0` the rate is undefined, not a measured zero:
+  [#511](https://github.com/ruledicaprio/SynthPass/pull/511) reports it as `null` in JSON and
+  `n/a` on the terminal (before #511 the report wrote `0.0`, which measured nothing).
   Synthetic-only: ground truth is exact by construction there, where a real specimen's truth can
   itself be incomplete. Added for issue
   [#453](https://github.com/ruledicaprio/SynthPass/issues/453), which found the M4 gate's pre-#440
   42/50 TD3 count included three checksum-valid hits that were wrong on `document_type`,
   `issuing_country` and `surname` alike
   ([`m4-gate-440-wrong-reads-refused-2026-09-25.md`](m4-gate-440-wrong-reads-refused-2026-09-25.md)).
-  **Report-only**: does not affect `hit`, `hit_rate`, or the `--min-hit-rate` gate — whether to
-  gate on it is a separate, not-yet-made decision.
+  None of this changes `hit`, `hit_rate`, or the `--min-hit-rate` gate.
+
+  **The gated subset — prefix wrong accepts** (`Report.prefix_wrong_accepts`,
+  `prefix_wrong_accept_seeds`, per-document `results[].prefix_wrong_accept`): a wrong accept whose
+  `wrong_fields` include `document_type` or `issuing_country`, the line-1 prefix no check digit
+  covers in any format. `synthpass-bench --max-prefix-wrong-accepts N` exits non-zero when the
+  count exceeds `N`, and the M4 job pins `N` (decided 2026-09-25 on #453;
+  [ADR-0013](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)'s 2026-09-26
+  amendment). It is a **ratchet**: the fix that earns it lowers `N`, and raising `N` is a
+  reviewed workflow edit that names the seeds and the mechanism. Names, optional data and
+  check-digit collisions stay report-only.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
