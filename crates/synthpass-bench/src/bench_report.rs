@@ -150,10 +150,18 @@ pub struct OcrArmsConfig {
     /// exactly that, not a parse failure.
     #[serde(default = "default_stop_arm")]
     pub stop: String,
+    /// `#[serde(default)]` for the same reason as `stop`: older reports have
+    /// no key, and an absent knob ran at its default.
+    #[serde(default = "default_confirm_passes")]
+    pub confirm_passes: usize,
 }
 
 fn default_stop_arm() -> String {
     "first-valid".to_string()
+}
+
+fn default_confirm_passes() -> usize {
+    synthpass_ocr::OcrArms::DEFAULT.confirm_passes
 }
 
 impl GateReport {
@@ -500,13 +508,15 @@ fn write_provenance(
     );
     let _ = writeln!(
         out,
-        "| OCR arms | texture={}, order={}, rotate={}, skew={}, chargrid={}, stop={} |",
+        "| OCR arms | texture={}, order={}, rotate={}, skew={}, chargrid={}, stop={}, \
+         confirm_passes={} |",
         mrz.ocr_arms.texture,
         mrz.ocr_arms.order,
         mrz.ocr_arms.rotate,
         mrz.ocr_arms.skew,
         mrz.ocr_arms.chargrid,
-        mrz.ocr_arms.stop
+        mrz.ocr_arms.stop,
+        mrz.ocr_arms.confirm_passes
     );
     let _ = writeln!(out, "| Candidate population | {} |", baseline.documents);
     let _ = writeln!(out, "| Scored population | {} |", baseline.scored);
