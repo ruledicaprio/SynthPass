@@ -119,9 +119,28 @@ fn print_usage() {
     println!("SYNTHPASS_LICENSE_SKIP=1 to bypass the gate for local development.");
 }
 
+/// Converts `env::args_os()` (or any `OsString` iterator) into `Vec<String>`,
+/// naming the first non-UTF-8 argument in an error instead of the panic
+/// `env::args()` gives on one — a Windows path pasted from a non-UTF-8
+/// codepage, or a non-UTF-8 locale on Unix, can produce exactly that.
+fn args_to_strings(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec<String>, String> {
+    args.enumerate()
+        .map(|(i, a)| {
+            a.into_string()
+                .map_err(|_| format!("argument {i} is not valid UTF-8"))
+        })
+        .collect()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().collect();
+    let args: Vec<String> = match args_to_strings(env::args_os()) {
+        Ok(args) => args,
+        Err(e) => {
+            eprintln!("❌ {e}");
+            return Ok(());
+        }
+    };
     if args.len() < 2 {
         print_usage();
         return Ok(());
@@ -140,7 +159,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // object per input plus a summary (M5 job queue). Stays synchronous
         // end to end (submit + wait) — only synthpass-serve exposes async job
         // endpoints; see synthpass_pipeline::jobs's module doc.
-        "batch" => return batch_command(args.get(2).map(String::as_str)).await,
+        "batch" => {
+            return batch_command(
+                args.get(2).map(String::as_str),
+                args.get(3..).unwrap_or_default(),
+            )
+            .await
+        }
         // `synthpass decrypt <file>` — decrypt an AES-256-GCM payload to stdout.
         "decrypt" => return decrypt_command(args.get(2).map(String::as_str)),
         // `synthpass generate` — synthetic passport image + label-JSON factory (M3).
@@ -188,6 +213,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if let Err(e) = reject_surplus_args(&args[2..]) {
+        eprintln!("❌ {e}");
+        return Ok(());
+    }
+
     let input = Path::new(&args[1]);
     if !input.exists() {
         eprintln!("❌ Error: File not found at {}", input.display());
@@ -213,7 +243,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     );
     println!(
-        "🔄 [Rust] Uploading and processing local file: {} (ocr: {})...",
+        "🔄 [Rust] Processing local file: {} (ocr: {})...",
         input.display(),
         pipeline.ocr_engine()
     );
@@ -239,22 +269,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         None => println!("ℹ️ [Rust] No MRZ found — using LLM extraction"),
                     }
                     print_line1_integrity(&result);
-                    print!("{}", result.sidecar_stdout);
                 }
             }
-            match result.llm_error {
-                None => println!(
-                    "🎉 [Rust] Pipeline completed via {}! JSON saved to: {}",
-                    result.method.as_str(),
-                    result.json_path.display()
-                ),
-                Some(e) => eprintln!("⚠️ [Rust] LLM extraction failed: {e}"),
-            }
+            print_completion(&result);
         }
         Err(e) => eprintln!("❌ [Rust] {e}"),
     }
 
     Ok(())
+}
+
+/// What to print on stdout to mark a document's extraction as finished, or
+/// `None` when there's nothing truthful to say there. `None` covers two
+/// cases: a Tier-2 failure (`llm_error`, already reported separately by
+/// [`print_completion`]) and a persist failure — `Pipeline::process_document`
+/// leaves `sidecar_stdout` holding its own `"warning: could not persist
+/// output: ..."` message when `write_outputs` fails, on *either* tier, and in
+/// that case `json_path` still holds its pre-write default (`<input>.json`,
+/// a file that was never created). Printing "saved to: <path>" over that
+/// would claim a save that never happened.
+fn completion_message(result: &synthpass_pipeline::PipelineResult) -> Option<String> {
+    if result.llm_error.is_some() {
+        return None;
+    }
+    if result
+        .sidecar_stdout
+        .starts_with(synthpass_pipeline::PERSIST_FAILURE_PREFIX)
+    {
+        return None;
+    }
+    Some(format!(
+        "🎉 [Rust] Pipeline completed via {}! JSON saved to: {}",
+        result.method.as_str(),
+        result.json_path.display()
+    ))
+}
+
+/// Prints a document's post-extraction status: any diagnostic note from
+/// [`PipelineResult::sidecar_stdout`] on stderr (previously printed to
+/// stdout, and only on the Tier-2 branch — a persist failure on the Tier-1
+/// branch used to go unreported), then either the "saved to" line or the
+/// LLM failure warning, per [`completion_message`].
+///
+/// [`PipelineResult::sidecar_stdout`]: synthpass_pipeline::PipelineResult::sidecar_stdout
+fn print_completion(result: &synthpass_pipeline::PipelineResult) {
+    if !result.sidecar_stdout.is_empty() {
+        eprint!("{}", result.sidecar_stdout);
+        if !result.sidecar_stdout.ends_with('\n') {
+            eprintln!();
+        }
+    }
+    match completion_message(result) {
+        Some(msg) => println!("{msg}"),
+        None => {
+            if let Some(e) = &result.llm_error {
+                eprintln!("⚠️ [Rust] LLM extraction failed: {e}");
+            }
+        }
+    }
 }
 
 /// Surface a `NeedsReview` line-1 integrity verdict in the terminal, not only in
@@ -316,50 +388,88 @@ fn check_license_feature(feature: &str) -> Result<(), String> {
     synthpass_license::check_feature(&status.payload, feature).map_err(|e| e.to_string())
 }
 
-/// File extensions the pure-Rust OCR engine can read — mirrors
-/// `synthpass_pipeline::ocr`'s own allowlist (not exported from that crate,
-/// so duplicated here rather than pulling in a new dependency just to share
-/// eight string literals).
-fn looks_like_image(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .is_some_and(|e| {
-            matches!(
-                e.as_str(),
-                "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "bmp" | "gif"
-            )
-        })
+/// Rejects extra positional arguments a shell may have added by expanding an
+/// unquoted glob before synthpass ever saw it — `synthpass batch *.jpg`
+/// becomes `batch a.jpg b.jpg c.jpg` once the shell expands `*.jpg`, and
+/// `synthpass a.jpg b.jpg` is two files where one path was expected. Both
+/// used to silently read only the first argument and drop the rest, which
+/// hides most of the input instead of erroring; this names the surplus and
+/// suggests the actual fix.
+fn reject_surplus_args(surplus: &[String]) -> Result<(), String> {
+    if surplus.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "unexpected extra argument(s): {} — if this is an unquoted glob, quote it \
+             (e.g. \"*.jpg\") so the shell doesn't expand it before synthpass sees it",
+            surplus.join(", ")
+        ))
+    }
 }
 
 /// Minimal shell-style glob matcher: `*` matches any run of characters
-/// (including none), `?` matches exactly one. No bracket/brace/double-star
-/// support — this exists only so `synthpass batch` can accept a pattern like
-/// `samples/passports/*.jpg` without pulling in a `glob` crate dependency for it.
+/// (including none), `?` matches exactly one *character* (not byte — see
+/// below). No bracket/brace/double-star support — this exists only so
+/// `synthpass batch` can accept a pattern like `samples/passports/*.jpg`
+/// without pulling in a `glob` crate dependency for it.
+///
+/// Iterative two-pointer match (the classic wildcard-matching algorithm),
+/// not the tempting recursive one: a naive `(Some(b'*'), _) =>
+/// helper(&p[1..], n) || (!n.is_empty() && helper(p, &n[1..]))` recursion is
+/// exponential in the number of `*`s against an adversarial input (e.g.
+/// `*a*a*a*a...` against a name with no trailing `a`), which turns a long
+/// pattern into an effective hang. This is `O(pattern.len() *
+/// name.len())` worst case. Matching over `chars()` rather than bytes also
+/// makes `?` consume one Unicode scalar, not one UTF-8 byte — the old
+/// byte-oriented version could match half of a multi-byte character.
 fn glob_match(pattern: &str, name: &str) -> bool {
-    fn helper(p: &[u8], n: &[u8]) -> bool {
-        match (p.first(), n.first()) {
-            (None, None) => true,
-            (Some(b'*'), _) => helper(&p[1..], n) || (!n.is_empty() && helper(p, &n[1..])),
-            (Some(b'?'), Some(_)) => helper(&p[1..], &n[1..]),
-            (Some(pc), Some(nc)) if pc == nc => helper(&p[1..], &n[1..]),
-            _ => false,
+    let p: Vec<char> = pattern.chars().collect();
+    let n: Vec<char> = name.chars().collect();
+    let (mut pi, mut ni) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut resume = 0usize;
+
+    while ni < n.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == n[ni]) {
+            pi += 1;
+            ni += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            resume = ni;
+            pi += 1;
+        } else if let Some(star_pi) = star {
+            pi = star_pi + 1;
+            resume += 1;
+            ni = resume;
+        } else {
+            return false;
         }
     }
-    helper(pattern.as_bytes(), name.as_bytes())
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 /// Recursively walks `dir`, collecting every file for which `keep` returns
 /// `true`. Used so `collect_batch_inputs` can find images nested in
 /// subdirectories (e.g. `samples/passports/`, `samples/id_cards/`) rather
 /// than only those directly inside the given directory.
+///
+/// Checks `entry.file_type()` (which reports the entry's own type without
+/// following a symlink) rather than `path.is_dir()` (which resolves through
+/// a symlink via `fs::metadata`) — a directory symlink that points back at
+/// an ancestor would otherwise recurse forever. A symlink to a *file* still
+/// gets through the `path.is_file()` check below, which is the one place
+/// this intentionally still resolves the symlink.
 fn walk_dir_files(dir: &Path, keep: &impl Fn(&Path) -> bool, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
-        if path.is_dir() {
+        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        if is_dir {
             walk_dir_files(&path, keep, out);
         } else if path.is_file() && keep(&path) {
             out.push(path);
@@ -378,7 +488,11 @@ fn collect_batch_inputs(arg: &str) -> Result<Vec<PathBuf>, String> {
     let path = Path::new(arg);
     if path.is_dir() {
         let mut files = Vec::new();
-        walk_dir_files(path, &|p| looks_like_image(p), &mut files);
+        walk_dir_files(
+            path,
+            &|p| synthpass_pipeline::is_supported_image(p),
+            &mut files,
+        );
         files.sort();
         return Ok(files);
     }
@@ -402,6 +516,7 @@ fn collect_batch_inputs(arg: &str) -> Result<Vec<PathBuf>, String> {
         .map(|entry| entry.path())
         .filter(|p| {
             p.is_file()
+                && synthpass_pipeline::is_supported_image(p)
                 && p.file_name()
                     .and_then(|n| n.to_str())
                     .is_some_and(|name| glob_match(&pattern, name))
@@ -420,11 +535,19 @@ fn collect_batch_inputs(arg: &str) -> Result<Vec<PathBuf>, String> {
 /// `.wait()`s on it, so from the operator's point of view this behaves like
 /// a simple loop over `synthpass <path>` — one JSON object printed per
 /// input, in the same order they were collected, plus a summary line.
-async fn batch_command(arg: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+async fn batch_command(
+    arg: Option<&str>,
+    surplus: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
     let Some(arg) = arg else {
         eprintln!("Usage: synthpass batch <dir|glob>");
         return Ok(());
     };
+
+    if let Err(e) = reject_surplus_args(surplus) {
+        eprintln!("❌ {e}");
+        return Ok(());
+    }
 
     if let Err(e) = check_license_feature(synthpass_license::FEATURE_BATCH) {
         eprintln!("❌ {e}");
@@ -799,5 +922,173 @@ mod tests {
             .join("  ");
         assert!(banner().contains(&row0));
         assert_eq!(WORDMARK, "SYNTHPASS");
+    }
+
+    fn sample_result(
+        sidecar_stdout: &str,
+        llm_error: Option<&str>,
+    ) -> synthpass_pipeline::PipelineResult {
+        synthpass_pipeline::PipelineResult {
+            markdown: String::new(),
+            md_path: PathBuf::from("doc.md"),
+            json_path: PathBuf::from("doc.json"),
+            extracted: None,
+            extracted_v2: None,
+            llm_error: llm_error.map(String::from),
+            sidecar_stdout: sidecar_stdout.to_string(),
+            mrz: None,
+            method: synthpass_pipeline::Method::MrzDeterministic,
+        }
+    }
+
+    #[test]
+    fn completion_message_suppressed_on_persist_failure() {
+        let result = sample_result("warning: could not persist output: disk full", None);
+        assert_eq!(
+            completion_message(&result),
+            None,
+            "a persist failure must not print a \"saved to\" line"
+        );
+    }
+
+    #[test]
+    fn completion_message_present_on_clean_tier1_success() {
+        let result = sample_result("", None);
+        let msg = completion_message(&result).expect("no persist failure, no llm_error");
+        assert!(msg.contains("saved to"));
+        assert!(msg.contains("doc.json"));
+    }
+
+    #[test]
+    fn completion_message_absent_on_llm_error() {
+        let result = sample_result("", Some("model unavailable"));
+        assert_eq!(completion_message(&result), None);
+    }
+
+    #[test]
+    fn reject_surplus_args_accepts_empty() {
+        assert!(reject_surplus_args(&[]).is_ok());
+    }
+
+    #[test]
+    fn reject_surplus_args_names_the_extras() {
+        let surplus = vec!["b.jpg".to_string(), "c.jpg".to_string()];
+        let err = reject_surplus_args(&surplus).unwrap_err();
+        assert!(err.contains("unexpected"));
+        assert!(err.contains("b.jpg"));
+        assert!(err.contains("c.jpg"));
+        assert!(err.contains("quote"));
+    }
+
+    #[test]
+    fn args_to_strings_converts_valid_utf8() {
+        let args = vec![
+            std::ffi::OsString::from("synthpass"),
+            std::ffi::OsString::from("batch"),
+        ];
+        let result = args_to_strings(args.into_iter()).expect("all valid UTF-8");
+        assert_eq!(result, vec!["synthpass".to_string(), "batch".to_string()]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn args_to_strings_reports_non_utf8_instead_of_panicking() {
+        use std::os::unix::ffi::OsStringExt;
+        let args = vec![
+            std::ffi::OsString::from("synthpass"),
+            std::ffi::OsString::from_vec(vec![0xFF, 0xFE]),
+        ];
+        let err = args_to_strings(args.into_iter()).unwrap_err();
+        assert!(err.contains("argument 1"));
+        assert!(err.contains("not valid UTF-8"));
+    }
+
+    /// Table test for [`glob_match`]: `*`/`?` semantics, a non-ASCII case
+    /// proving `?` consumes one *character* rather than one UTF-8 byte, and a
+    /// many-star pattern proving the iterative matcher doesn't blow up the
+    /// way the old recursive one did.
+    #[test]
+    fn glob_match_table() {
+        let cases: &[(&str, &str, bool)] = &[
+            ("*.jpg", "photo.jpg", true),
+            ("*.jpg", "photo.png", false),
+            ("a?c", "abc", true),
+            ("a?c", "ac", false),
+            ("a?c", "abbc", false),
+            ("*", "anything", true),
+            ("*", "", true),
+            ("", "", true),
+            ("", "x", false),
+            ("photo??.jpg", "photo42.jpg", true),
+            ("photo??.jpg", "photo4.jpg", false),
+            // `?` must match one *character*, not one UTF-8 byte: 'é' below
+            // is a single Unicode scalar encoded as 2 bytes.
+            ("a?c", "aéc", true),
+            ("*.jpg", "sub/photo.jpg", true), // no path-segment semantics: `*` crosses `/`
+        ];
+        for (pattern, name, expected) in cases {
+            assert_eq!(
+                glob_match(pattern, name),
+                *expected,
+                "glob_match({pattern:?}, {name:?})"
+            );
+        }
+    }
+
+    /// A pattern with many stars used to be exponential in the old recursive
+    /// matcher against a name with no match near the end; this just needs to
+    /// return (quickly) rather than hang.
+    #[test]
+    fn glob_match_many_stars_does_not_blow_up() {
+        let pattern = "*a".repeat(30) + "b";
+        let name = "a".repeat(40); // never matches (no trailing 'b')
+        assert!(!glob_match(&pattern, &name));
+    }
+
+    #[test]
+    fn collect_batch_inputs_glob_branch_filters_non_images() {
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass_cli_glob_filter_test_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.jpg"), b"x").unwrap();
+        std::fs::write(dir.join("a.json"), b"{}").unwrap();
+        std::fs::write(dir.join("a.md"), b"# x").unwrap();
+
+        let pattern = dir.join("*").to_string_lossy().to_string();
+        let files = collect_batch_inputs(&pattern).expect("should match at least one file");
+
+        assert_eq!(files.len(), 1, "expected only the image file: {files:?}");
+        assert_eq!(files[0].file_name().unwrap(), "a.jpg");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn walk_dir_files_does_not_follow_a_directory_symlink_loop() {
+        use std::os::unix::fs::symlink;
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass_cli_symlink_loop_test_{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.jpg"), b"x").unwrap();
+        // Symlink back to the directory itself — a real ancestor loop, since
+        // walking into it would recurse into `dir` again forever.
+        symlink(&dir, dir.join("loop")).unwrap();
+
+        let mut out = Vec::new();
+        walk_dir_files(
+            &dir,
+            &|p| synthpass_pipeline::is_supported_image(p),
+            &mut out,
+        );
+
+        assert_eq!(out.len(), 1, "expected only the real file, got: {out:?}");
+        assert_eq!(out[0].file_name().unwrap(), "a.jpg");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

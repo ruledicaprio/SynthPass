@@ -30,7 +30,7 @@ pub use jobs::{DocumentEntry, DocumentStatus, JobHandle, JobId, JobStatus};
 pub use metrics::{MetricsSnapshot, PipelineMetrics};
 #[cfg(feature = "ocr-native-rust")]
 pub use ocr::RustOcrEngine;
-pub use ocr::{BBox, OcrEngine, OcrResult};
+pub use ocr::{is_supported_image, BBox, OcrEngine, OcrResult};
 
 use serde_json::Value;
 use std::fmt;
@@ -242,6 +242,10 @@ impl Method {
         }
     }
 }
+
+/// The start of `PipelineResult::sidecar_stdout` when the result could not be written to
+/// disk. Callers match on this constant, never on a copy of the text.
+pub const PERSIST_FAILURE_PREFIX: &str = "warning: could not persist output";
 
 pub struct PipelineResult {
     /// OCR output (Markdown/plain text) from the active OCR engine.
@@ -781,7 +785,7 @@ impl Pipeline {
                 .await
             {
                 Ok(written) => json_path = written,
-                Err(e) => sidecar_stdout = format!("warning: could not persist output: {e}"),
+                Err(e) => sidecar_stdout = format!("{PERSIST_FAILURE_PREFIX}: {e}"),
             }
         }
 
@@ -868,7 +872,7 @@ impl Pipeline {
                 .await
             {
                 Ok(written) => json_path = written,
-                Err(e) => sidecar_stdout = format!("warning: could not persist output: {e}"),
+                Err(e) => sidecar_stdout = format!("{PERSIST_FAILURE_PREFIX}: {e}"),
             }
         }
 

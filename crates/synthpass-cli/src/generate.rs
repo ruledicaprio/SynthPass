@@ -50,7 +50,10 @@ fn usage() {
     );
     eprintln!("  --count N            number of documents to generate (default: 1)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
-    eprintln!("  --profile NAME       clean|mobile|scanner|worn|border-kiosk (default: clean)");
+    eprintln!(
+        "  --profile NAME       {} (default: clean)",
+        VALID_PROFILES.join("|")
+    );
     eprintln!(
         "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to generate (default: td3)"
     );
@@ -127,6 +130,21 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
             }
         }
     }
+
+    // `generate_command` computes `parsed.seed + i` for `i` in `0..parsed.count`,
+    // so the highest seed actually used is `parsed.seed + (parsed.count - 1)`.
+    // Catch an overflow here, at parse time, rather than letting the debug
+    // build panic mid-batch (or the release build silently wrap the seed of
+    // the last document or so — u64 addition never panics in release).
+    if let Some(last_index) = parsed.count.checked_sub(1) {
+        if parsed.seed.checked_add(last_index).is_none() {
+            return Err(format!(
+                "--seed {} + --count {}: the highest seed used ({} + {}) would overflow u64",
+                parsed.seed, parsed.count, parsed.seed, last_index
+            ));
+        }
+    }
+
     Ok(parsed)
 }
 
@@ -455,6 +473,47 @@ mod tests {
         let args = vec!["--profile".to_string(), "bogus".to_string()];
         let err = parse_args(&args).unwrap_err();
         assert!(err.contains("unknown profile"));
+    }
+
+    #[test]
+    fn rejects_seed_count_overflow() {
+        let args = vec![
+            "--seed".to_string(),
+            u64::MAX.to_string(),
+            "--count".to_string(),
+            "2".to_string(),
+        ];
+        let err = parse_args(&args).unwrap_err();
+        assert!(err.contains("overflow"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn seed_count_one_at_max_seed_does_not_overflow() {
+        // count == 1 only ever uses `seed + 0`, so the max seed itself is fine.
+        let args = vec![
+            "--seed".to_string(),
+            u64::MAX.to_string(),
+            "--count".to_string(),
+            "1".to_string(),
+        ];
+        assert!(parse_args(&args).is_ok());
+    }
+
+    /// `usage()`'s `--profile` line is built from `VALID_PROFILES.join("|")`
+    /// (see `usage`), so this pins that exact string rather than the
+    /// previously hand-written help text, which once omitted `damaged` even
+    /// though `VALID_PROFILES` — the list `--profile` is actually validated
+    /// against — accepted it.
+    #[test]
+    fn profile_help_list_is_built_from_valid_profiles() {
+        let joined = VALID_PROFILES.join("|");
+        for profile in VALID_PROFILES {
+            assert!(
+                joined.contains(profile),
+                "profile {profile} missing from the joined help list: {joined}"
+            );
+        }
+        assert!(joined.contains("damaged"), "joined list: {joined}");
     }
 
     #[test]
