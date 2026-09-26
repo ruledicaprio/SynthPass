@@ -25,6 +25,26 @@ use std::path::Path;
 #[cfg(not(feature = "ocr-native-rust"))]
 compile_error!("synthpass-pipeline requires the `ocr-native-rust` feature");
 
+/// True if `path`'s extension looks like a raster image this pipeline's OCR
+/// engine can read: PNG, JPEG, WebP, TIFF, BMP, GIF — whatever the `image`
+/// crate's default features decode (see this module's doc). The single
+/// source of truth for "does this path look like an image synthpass can
+/// OCR" — re-exported as `synthpass_pipeline::is_supported_image` so callers
+/// like `synthpass-cli`'s batch/glob input filters don't keep a second copy
+/// of this list to drift out of sync with the one the OCR engine actually
+/// enforces.
+pub fn is_supported_image(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| {
+            matches!(
+                e.as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "bmp" | "gif"
+            )
+        })
+}
+
 /// Axis-aligned bounding box in source-image pixel coordinates (`x`/`y` =
 /// top-left corner, `w`/`h` = extent), plain `f32`s. **Pipeline-owned, not a
 /// re-export of `synthpass_ocr::geometry::BBox`** — `synthpass-ocr` is only a
@@ -212,19 +232,6 @@ mod rust_ocr {
         }
     }
 
-    /// True if `path`'s extension looks like a raster image `ocrs` can read.
-    fn looks_like_image(path: &Path) -> bool {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|e| e.to_ascii_lowercase())
-            .is_some_and(|e| {
-                matches!(
-                    e.as_str(),
-                    "png" | "jpg" | "jpeg" | "webp" | "tif" | "tiff" | "bmp" | "gif"
-                )
-            })
-    }
-
     /// True if `path`'s extension is HEIC/HEIF — checked ahead of the general
     /// image allowlist so the rejection message names the real reason (no
     /// permissively-licensed pure-Rust decoder) instead of a generic
@@ -248,7 +255,7 @@ mod rust_ocr {
                     .into(),
             ));
         }
-        if !looks_like_image(input) {
+        if !is_supported_image(input) {
             return Err(PipelineError::Ocr(
                 "PDF input is not supported — synthpass is image-only as of v0.7.5. Convert \
                  to an image first."

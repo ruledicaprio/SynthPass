@@ -24,7 +24,7 @@ The system is a **Rust-first pipeline with a deliberately narrow, swappable boun
 
   The trait boundary itself is still earned even with one backend: it's the seam the pipeline's own tests mock against (a plain in-process `InferBackend` impl, no network server needed), and it's what let v0.6.0 swap the default from a Python sidecar to in-process inference with zero changes to `synthpass-cli`/`synthpass-serve` beyond a health-check label.
 * **Licensing (`synthpass-license` crate, introduced in v0.8.0):** Ed25519 sign/verify, machine fingerprinting, and a separate vendor-only issuer binary — see [§6](#6-offline-cryptographic-licensing-v080) for the full design.
-* **Orchestration Layer (`synthpass-cli`, binary `synthpass`):** A lightweight asynchronous Rust client handling local file system I/O, CLI argument validation, `synthpass doctor` (preflight: OCR + inferer + license, config sanity), `synthpass decrypt`, `synthpass fingerprint`, and `synthpass verify-license`.
+* **Orchestration Layer (`synthpass-cli`, binary `synthpass`):** A lightweight asynchronous Rust client handling local file system I/O, CLI argument validation, `synthpass doctor` (preflight: OCR + inferer + license, config sanity), `synthpass batch`, `synthpass generate`, `synthpass export`, `synthpass decrypt`, `synthpass fingerprint`, and `synthpass verify-license`.
 * **Web Front-End (`synthpass-serve`, axum):** Exposes the same pipeline as an upload page and a JSON API, with bearer-token auth, license enforcement, and optional rustls TLS, and forwards Tier-2 token deltas to the browser over SSE so uploads show live progress instead of a frozen status line.
 
 ## 3. Why the Inference Engine Became Pluggable
