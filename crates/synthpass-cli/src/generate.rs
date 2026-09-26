@@ -288,14 +288,18 @@ fn labels_to_json(
 /// JSON sidecars into `out_dir`. Document `i` in the batch uses seed
 /// `seed + i`, so a batch is fully reproducible and each document differs.
 ///
-/// No license required: see the module doc comment.
-pub fn generate_command(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+/// No license required: see the module doc comment. Exit codes (issue #492):
+/// a bad argument (unknown flag, invalid `--profile`/`--document-type`, a
+/// `--seed`/`--count` combination that would overflow) is a usage error (2);
+/// an I/O or encode failure partway through the batch is a runtime failure
+/// (1), via `?`.
+pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::error::Error>> {
     let parsed = match parse_args(args) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("❌ {e}");
             usage();
-            return Ok(());
+            return Ok(crate::Exit::Usage);
         }
     };
 
@@ -338,7 +342,7 @@ pub fn generate_command(args: &[String]) -> Result<(), Box<dyn std::error::Error
         );
     }
 
-    Ok(())
+    Ok(crate::Exit::Ok)
 }
 
 #[cfg(test)]
