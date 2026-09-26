@@ -297,6 +297,24 @@ fn mean_cer_by_line(rows: &[FieldLineCer]) -> BTreeMap<usize, f64> {
         .collect()
 }
 
+fn rates_among_hits(strict_hits: u64, wrong_accepts: u64, hits: u64) -> (Option<f64>, Option<f64>) {
+    if hits == 0 {
+        (None, None)
+    } else {
+        (
+            Some(strict_hits as f64 / hits as f64),
+            Some(wrong_accepts as f64 / hits as f64),
+        )
+    }
+}
+
+fn format_hit_rate(rate: Option<f64>) -> String {
+    rate.map_or_else(
+        || "n/a".to_string(),
+        |value| format!("{:.1}%", value * 100.0),
+    )
+}
+
 #[derive(Serialize)]
 struct Report {
     timestamp_unix: u64,
@@ -334,9 +352,9 @@ struct Report {
     /// `strict_hit_rate`: a document that missed Tier-1 for an unrelated
     /// reason (checksum failure, no MRZ found) never enters this ratio's
     /// denominator, so it isolates the name-read question from detection
-    /// accuracy. `0.0` when `hits` is `0` — there is no hit population to
-    /// divide by, not a measured "every hit had a wrong name".
-    names_exact_among_hits: f64,
+    /// accuracy. `None` when `hits` is `0` — there is no hit population to
+    /// divide by, so this is not a measured zero.
+    names_exact_among_hits: Option<f64>,
     /// Tier-1 hits where at least one of the 12 scored fields
     /// (`synthpass_bench::COMPARED_FIELDS`) differs from the generator's
     /// ground truth — issue #453's "wrong accept". `hit` proves only a
@@ -351,9 +369,9 @@ struct Report {
     wrong_accepts: u64,
     /// `wrong_accepts / hits`, the same denominator `names_exact_among_hits`
     /// uses — of the Tier-1 hits specifically, how many are wrong on at
-    /// least one scored field. `0.0` when `hits` is `0`, not a fabricated
-    /// "every hit wrong".
-    wrong_accept_rate: f64,
+    /// least one scored field. `None` when `hits` is `0`, since no accepted
+    /// reads exist to measure.
+    wrong_accept_rate: Option<f64>,
     /// Mean CER per field (worst first), each annotated with the physical
     /// MRZ line it lives on for `document_type` — the JSON form of the
     /// stdout "mean character error rate by field" table. Empty when no
@@ -539,7 +557,6 @@ fn main() {
     // never a redefinition of it.
     let strict_hits = results.iter().filter(|r| r.hit && r.names_exact).count() as u64;
     let strict_hit_rate = strict_hits as f64 / parsed.count.max(1) as f64;
-    let names_exact_among_hits = strict_hits as f64 / hits.max(1) as f64;
 
     // Wrong accepts (issue #453): a Tier-1 hit whose checksum and document
     // number match truth but at least one of the other 11 scored fields does
@@ -548,13 +565,14 @@ fn main() {
     // `wrong_scored_fields`. Report-only: does not affect `hit`, `hit_rate`,
     // or `--min-hit-rate`.
     let wrong_accepts = results.iter().filter(|r| r.wrong_accept).count() as u64;
-    let wrong_accept_rate = wrong_accepts as f64 / hits.max(1) as f64;
+    let (names_exact_among_hits, wrong_accept_rate) =
+        rates_among_hits(strict_hits, wrong_accepts, hits);
 
     if hits > 0 {
         println!(
-            "\nof {hits} Tier-1 hits, {strict_hits} ({:.1}%) read both names exactly — strict \
+            "\nof {hits} Tier-1 hits, {strict_hits} ({}) read both names exactly — strict \
              hit rate {strict_hits}/{} = {:.1}%",
-            names_exact_among_hits * 100.0,
+            format_hit_rate(names_exact_among_hits),
             parsed.count,
             strict_hit_rate * 100.0
         );
@@ -579,9 +597,18 @@ fn main() {
         // (knowledge/benchmarks/m4-gate-440-wrong-reads-refused-2026-09-25.md)
         // — report-only, never gated and never a redefinition of `hit`.
         println!(
-            "\nof {hits} Tier-1 hits, {wrong_accepts} ({:.1}%) are wrong on at least one of the \
+            "\nof {hits} Tier-1 hits, {wrong_accepts} ({}) are wrong on at least one of the \
              12 scored fields — report-only (issue #453), not gated",
-            wrong_accept_rate * 100.0
+            format_hit_rate(wrong_accept_rate)
+        );
+    } else {
+        println!(
+            "\nnames exact among Tier-1 hits: {}",
+            format_hit_rate(names_exact_among_hits)
+        );
+        println!(
+            "wrong-accept rate among Tier-1 hits: {}",
+            format_hit_rate(wrong_accept_rate)
         );
     }
 
@@ -918,6 +945,48 @@ fn repo_root() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synthetic_rate_report(hits: u64, strict_hits: u64, wrong_accepts: u64) -> Report {
+        let (names_exact_among_hits, wrong_accept_rate) =
+            rates_among_hits(strict_hits, wrong_accepts, hits);
+        Report {
+            timestamp_unix: 0,
+            profile: "clean",
+            document_type: "TD3",
+            count: 1,
+            seed_start: 0,
+            hits,
+            hit_rate: hits as f64,
+            strict_hits,
+            strict_hit_rate: strict_hits as f64,
+            names_exact_among_hits,
+            wrong_accepts,
+            wrong_accept_rate,
+            mean_cer_by_field: Vec::new(),
+            mean_cer_by_line: BTreeMap::new(),
+            results: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn empty_hit_rates_are_unmeasured_in_json_and_terminal() {
+        let report = synthetic_rate_report(0, 0, 0);
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert!(json["names_exact_among_hits"].is_null());
+        assert!(json["wrong_accept_rate"].is_null());
+        assert_eq!(format_hit_rate(report.names_exact_among_hits), "n/a");
+        assert_eq!(format_hit_rate(report.wrong_accept_rate), "n/a");
+    }
+
+    #[test]
+    fn zero_errors_among_existing_hits_remain_measured_zeroes() {
+        let report = synthetic_rate_report(2, 0, 0);
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["names_exact_among_hits"], 0.0);
+        assert_eq!(json["wrong_accept_rate"], 0.0);
+        assert_eq!(format_hit_rate(report.names_exact_among_hits), "0.0%");
+        assert_eq!(format_hit_rate(report.wrong_accept_rate), "0.0%");
+    }
 
     fn doc(
         miss: Option<&'static str>,
