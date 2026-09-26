@@ -365,6 +365,7 @@ impl Date {
 /// `String`, this is what keeps [`MrzData`](crate::MrzData)'s drop-time wipe
 /// covering it.
 #[cfg(feature = "zeroize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "zeroize")))]
 impl zeroize::Zeroize for Date {
     fn zeroize(&mut self) {
         self.year.zeroize();
