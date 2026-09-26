@@ -115,22 +115,26 @@ off `hit` and ungated.
   prefix has no truth-form ambiguity: it is a fixed code, so a difference is a misread, never a
   transliteration.
 - **Where it is pinned:** on the `ci.yml` `m4-hit-rate` invocation, at the value CI measured on the
-  PR that added the flag.
-- **How `N` moves:** it is a ratchet. The fix that earns a lower count lowers `N`
-  ([#461](https://github.com/ruledicaprio/SynthPass/issues/461) is expected to take it to zero).
-  Raising `N` is a reviewed workflow edit that names the seeds and the mechanism. The report's
-  `prefix_wrong_accept_seeds` and the gate's failure message list the seeds.
+  PR that added the flag. **Measured: 0.** PR #516's `m4-hit-rate` run at `7b4487a` (GitHub's Linux
+  runner) read 39/50 hits and 21 wrong accepts, none of them on the prefix. #440 had already
+  refused the three prefix misreads #453 found (seeds 7, 46 and 48 are `checksum_failed` in that
+  run). `N` is pinned at 0.
+- **How `N` moves:** it is a ratchet. A fix may only lower it, and at 0 there is nothing left to
+  lower. Raising `N` is a reviewed workflow edit that names the seeds and the mechanism. The
+  report's `prefix_wrong_accept_seeds` and the gate's failure message list the seeds.
 - **What stays report-only:** names, optional data and check-digit collisions (#457, #462). `hit`,
   `hit_rate` and `--min-hit-rate` keep their meaning, as the original decision requires.
 
-**Why a ratchet and not a zero-tolerance gate.** A gate at zero would fail every PR until #461
-lands, which would push the gate out of the required checks, not fix the reads. A pinned count
-still blocks any change that adds a prefix misread. Why not all wrong accepts: gating on names
+**Why a ratchet rather than a fixed zero.** The rule was decided before the count was measured,
+when a non-zero start was possible: a gate at zero would then have failed every PR until a fix
+landed. A ratchet pinned at the measured count blocks any change that adds a prefix misread
+either way. As measured, it starts at zero, which makes it a zero-tolerance check today. The
+ratchet rule still governs any future raise. **Why not all wrong accepts:** gating on names
 would gate on the axis this ADR scores separately. Most wrong accepts are wrong names (170 of the
 370 hits carried one on 2026-09-25, per [`benchmarks/README.md`](../benchmarks/README.md)), and
 name repair is this ADR's next step, so such a gate would move with every name-repair experiment
 rather than with regressions.
 
-**What would reverse this:** #461, or a later fix, reaching zero turns the ratchet into a
-zero-tolerance check with no further decision. A prefix misread that is unavoidable on some
-format would reopen it for that format.
+**What would reverse this:** a prefix misread that no fix can remove on the M4 corpus would
+force a raise, which must name the seeds and the mechanism. A prefix misread that is unavoidable
+on some format would reopen the rule for that format.

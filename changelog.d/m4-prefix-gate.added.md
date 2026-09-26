@@ -3,6 +3,6 @@
   accept*. No check digit covers those two fields in any ICAO format. The run exits non-zero when
   more than `N` occur. The JSON report carries `prefix_wrong_accepts` and
   `prefix_wrong_accept_seeds`, and each `results[]` entry carries `prefix_wrong_accept`. The M4 CI
-  job pins `N` as a ratchet: a fix lowers it, and raising it is a reviewed workflow edit (issue
-  #453, ADR-0013's 2026-09-26 amendment). Wrong names, optional data and check-digit collisions
+  job pins `N` at 0, the count CI measured, as a ratchet: raising it is a reviewed workflow edit
+  (issue #453, ADR-0013's 2026-09-26 amendment). Wrong names, optional data and check-digit collisions
   stay report-only, and `hit`, `hit_rate` and `--min-hit-rate` are unchanged.

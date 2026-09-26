@@ -184,7 +184,8 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   `prefix_wrong_accept_seeds`, per-document `results[].prefix_wrong_accept`): a wrong accept whose
   `wrong_fields` include `document_type` or `issuing_country`, the line-1 prefix no check digit
   covers in any format. `synthpass-bench --max-prefix-wrong-accepts N` exits non-zero when the
-  count exceeds `N`, and the M4 job pins `N` (decided 2026-09-25 on #453;
+  count exceeds `N`, and the M4 job pins `N` at **0**, the count CI measured on the PR that added
+  the flag (PR #516 at `7b4487a`: 0 of 39 hits; decided 2026-09-25 on #453;
   [ADR-0013](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)'s 2026-09-26
   amendment). It is a **ratchet**: the fix that earns it lowers `N`, and raising `N` is a
   reviewed workflow edit that names the seeds and the mechanism. Names, optional data and

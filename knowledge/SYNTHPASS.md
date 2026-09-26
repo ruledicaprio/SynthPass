@@ -117,7 +117,7 @@ five synthetic formats, 178 carry a wrong name.
 ```sh
 cargo run -p synthpass-bench --release --bin synthpass-bench -- \
   --count 50 --seed 0 --profile clean --min-hit-rate 0.30 \
-  --max-prefix-wrong-accepts @@N@@ --out bench-report.json
+  --max-prefix-wrong-accepts 0 --out bench-report.json
 ```
 
 after downloading and checksum-verifying the two `.rten` OCR models itself (cached across runs).
@@ -127,9 +127,10 @@ It is a required check. The command carries two gates, and a run that fails both
 `issuing_country` differs from the generator's truth is a *prefix wrong accept*: the checksums
 passed, but line 1's prefix, which no check digit covers in any format, was read wrong. The run
 fails when more than the pinned number of them occur. The limit was measured by CI on the PR
-that added the flag, not chosen. The fix that earns a lower count lowers it
-([#461](https://github.com/ruledicaprio/SynthPass/issues/461) is expected to take it to zero).
-Raising it is a reviewed workflow edit that names the seeds and the mechanism. The report's
+that added the flag, not chosen: PR #516 at `7b4487a` measured **0** of 39 hits (21 wrong
+accepts in all, every one on another field). #440 had already refused the three prefix misreads
+#453 found. So the ratchet starts at zero and tolerates none. Raising it is a reviewed workflow
+edit that names the seeds and the mechanism. The report's
 `prefix_wrong_accept_seeds` and the failure message both list the seeds. Wrong names, optional
 data and check-digit collisions stay report-only
 ([#453](https://github.com/ruledicaprio/SynthPass/issues/453);
