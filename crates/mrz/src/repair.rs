@@ -371,13 +371,15 @@ const MAX_SUBSTITUTION_CANDIDATES: usize = 256;
 /// that actually look alike is what keeps [`solve_substitution`]'s answers
 /// meaningfully unique instead of reproducing the whole residue class.
 ///
-/// Most rows pair a digit with letters in its own residue class, so a swap
-/// leaves the check digit unchanged and the *structural* constraint
-/// ([`FieldKind`]) is what separates the readings. `2`/`7` and `M`/`N` are the
-/// exceptions — they are genuine stroke-shape confusions (an `ocrs` measurement
-/// on real specimens: `India_..._P0_IND_2013` reads a printed `2` as `7`;
-/// `Ghana_..._P0_GHA_2019` reads the sex `M` as `N`) that *cross* residues, so
-/// there the check digit itself rejects the wrong reading. Both directions are
+/// Only two pairs in the table share a residue class, `1`/`L` and `6`/`G`, so
+/// only those swaps leave the check digit unchanged. [`FieldKind::Date`] still
+/// separates them, because a date cell must be a digit; in an alphanumeric
+/// field such as the document number nothing does. Every other pair *crosses*
+/// residues, so the check digit itself rejects a single wrong reading — among
+/// them `2`/`7` and `M`/`N`, genuine stroke-shape confusions (an `ocrs`
+/// measurement on real specimens: `India_..._P0_IND_2013` reads a printed `2`
+/// as `7`; `Ghana_..._P0_GHA_2019` reads the sex `M` as `N`). Two misreads in
+/// one field can still cancel; see [`crate::Blindspot`]. Both directions are
 /// still worth carrying: the point of the table is which glyph OCR plausibly
 /// emitted, and the arithmetic is a separate gate downstream.
 ///

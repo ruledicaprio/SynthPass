@@ -81,6 +81,11 @@ are invisible. For a 9-character document number the weights run 7,3,1,7,3,1,7,3
 so the (7,3) pairing recurs at positions (0,1), (3,4) and (6,7). This is structural,
 not a coincidence of one seed.
 
+*Amended 2026-09-26:* the pairing is wider than the three adjacent pairs above. Any
+weight-7 position (0, 3, 6) joins any weight-3 position (1, 4, 7), so two 0→O
+misreads cancel at 9 of the 36 position pairs, and a shared shift of 5 (two `2`↔`7`)
+cancels at all 36. See [`checkdigit-blindspots-exact-2026-09-26.md`](checkdigit-blindspots-exact-2026-09-26.md) §1a.
+
 Practical consequence: **the check digit is a strong filter and a weak oracle.** It
 rejects most misreads (52 of 57 in the sampled run), and what it passes is not a
 random remainder — it is specifically the set arithmetic cannot see. In the bench we

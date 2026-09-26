@@ -51,7 +51,10 @@ use crate::checksum::char_value;
 /// two O↔0 at weights 7 and 3: `24·(7+3) = 240 ≡ 0`. Separately each is caught
 /// (`24·7 ≡ 8`, `24·3 ≡ 2`); together they are invisible. In a 9-character
 /// document number the weights run 7,3,1,7,3,1,7,3,1, so that (7,3) pairing
-/// recurs at positions (0,1), (3,4) and (6,7) — structural, not a fluke.
+/// joins any of the weight-7 positions 0, 3, 6 to any of the weight-3
+/// positions 1, 4, 7: nine of the 36 position pairs — structural, not a fluke.
+/// A shared shift of 5, such as two `2`↔`7` misreads, cancels at every pair,
+/// because the sum of two odd weights is even.
 ///
 /// So read the law as *"which single swaps are safe"*, not as *"which
 /// characters are safe"*. Empirically the undetectable set is dominated by the
