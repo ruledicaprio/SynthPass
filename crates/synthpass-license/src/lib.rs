@@ -12,7 +12,7 @@
 //! tamper-proof. See [`fingerprint`] for the hardware-binding caveat
 //! specifically.
 //!
-//! Format: a license file (`license.mlis`) is a small JSON envelope
+//! Format: a license file (`license.synthpass`) is a small JSON envelope
 //! ([`SignedLicense`]) whose `payload` field is the base64 of the *exact*
 //! bytes that were signed. The verifier checks the signature over those
 //! literal bytes and only deserializes into [`LicensePayload`] afterward —
@@ -146,7 +146,7 @@ pub struct LicensePayload {
     /// issued for. [`check`] enforces this against `CARGO_PKG_VERSION` when
     /// present.
     #[serde(default)]
-    pub mlis_min_version: Option<String>,
+    pub synthpass_min_version: Option<String>,
     /// Optional cap on concurrent Tier-2 LLM contexts. The environment
     /// *asks*, the license *permits* — see [`effective_llm_contexts`].
     /// Absent ⇒ uncapped.
@@ -184,8 +184,8 @@ pub enum LicenseError {
     },
     FingerprintMismatch,
     /// The running binary's `CARGO_PKG_VERSION` doesn't satisfy the
-    /// license's `mlis_min_version`. Also raised (fail closed) when
-    /// `mlis_min_version` itself isn't a parsable `major[.minor[.patch]]`
+    /// license's `synthpass_min_version`. Also raised (fail closed) when
+    /// `synthpass_min_version` itself isn't a parsable `major[.minor[.patch]]`
     /// string — an unreadable requirement is not a satisfied one.
     MinVersionUnmet {
         required: String,
@@ -309,7 +309,7 @@ pub fn check(
     if !payload.hw_fingerprint.is_empty() && payload.hw_fingerprint != fingerprint {
         return Err(LicenseError::FingerprintMismatch);
     }
-    if let Some(required) = &payload.mlis_min_version {
+    if let Some(required) = &payload.synthpass_min_version {
         if !version_satisfies(env!("CARGO_PKG_VERSION"), required) {
             return Err(LicenseError::MinVersionUnmet {
                 required: required.clone(),
@@ -448,7 +448,7 @@ mod tests {
             expires_unix,
             tier: "enterprise".into(),
             features: vec!["extract".into()],
-            mlis_min_version: None,
+            synthpass_min_version: None,
             max_llm_contexts: None,
         }
     }
@@ -486,14 +486,14 @@ mod tests {
 
     #[test]
     fn absent_min_version_skips_the_check() {
-        let payload = sample_payload("", 4_000_000_000); // mlis_min_version: None
+        let payload = sample_payload("", 4_000_000_000); // synthpass_min_version: None
         check(&payload, 1, "").expect("no min-version requirement means nothing to enforce");
     }
 
     #[test]
     fn satisfied_min_version_passes_check() {
         let payload = LicensePayload {
-            mlis_min_version: Some("0.0.1".into()), // trivially satisfied by any real build
+            synthpass_min_version: Some("0.0.1".into()), // trivially satisfied by any real build
             ..sample_payload("", 4_000_000_000)
         };
         check(&payload, 1, "").expect("running version should satisfy a low minimum");
@@ -502,7 +502,7 @@ mod tests {
     #[test]
     fn unmet_min_version_fails_check() {
         let payload = LicensePayload {
-            mlis_min_version: Some("999.0.0".into()),
+            synthpass_min_version: Some("999.0.0".into()),
             ..sample_payload("", 4_000_000_000)
         };
         let err = check(&payload, 1, "").expect_err("must reject an unmet minimum version");
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn malformed_min_version_fails_closed() {
         let payload = LicensePayload {
-            mlis_min_version: Some("not-a-version".into()),
+            synthpass_min_version: Some("not-a-version".into()),
             ..sample_payload("", 4_000_000_000)
         };
         let err = check(&payload, 1, "").expect_err("unparsable requirement must fail closed");

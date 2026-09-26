@@ -7,7 +7,7 @@
 //! synthpass-license-issuer keygen
 //! synthpass-license-issuer issue-license --customer "Acme Hospital" --tier enterprise \
 //!     --expires-in-days 365 [--hw <fingerprint>] [--features extract,batch] \
-//!     [--max-llm-contexts 4] [--license-id lic-001] [--out license.mlis]
+//!     [--max-llm-contexts 4] [--license-id lic-001] [--out license.synthpass]
 //! ```
 //!
 //! `--features` is optional: a recognised `--tier` (`trial` / `pro` /
@@ -142,7 +142,7 @@ fn issue_license_command(args: &[String]) {
     let out_path = flags
         .get("out")
         .cloned()
-        .unwrap_or_else(|| "license.mlis".to_string());
+        .unwrap_or_else(|| "license.synthpass".to_string());
 
     let payload = LicensePayload {
         license_id,
@@ -152,7 +152,7 @@ fn issue_license_command(args: &[String]) {
         expires_unix: now + expires_in_days * 86_400,
         tier: tier.clone(),
         features,
-        mlis_min_version: flags.get("min-version").cloned(),
+        synthpass_min_version: flags.get("min-version").cloned(),
         max_llm_contexts,
     };
 

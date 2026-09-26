@@ -44,12 +44,12 @@ fn raw_identifier() -> String {
 
 /// Default location for the persisted-on-first-run fallback identifier used
 /// when no OS-level machine-id exists. Override with `SYNTHPASS_INSTANCE_ID_PATH`
-/// (used by tests, and by deployments where `/var/lib/mlis` isn't writable
+/// (used by tests, and by deployments where `/var/lib/synthpass` isn't writable
 /// or desired).
 #[cfg(target_os = "linux")]
 fn instance_id_path() -> std::path::PathBuf {
     std::env::var("SYNTHPASS_INSTANCE_ID_PATH")
-        .unwrap_or_else(|_| "/var/lib/mlis/instance-id".to_string())
+        .unwrap_or_else(|_| "/var/lib/synthpass/instance-id".to_string())
         .into()
 }
 
@@ -159,7 +159,7 @@ mod tests {
 
     // Simulates the "no /etc/machine-id" case (stock Alpine, verified
     // empirically during the v1.0.0 musl spike) by pointing the fallback at
-    // a scratch path instead of the real /var/lib/mlis — this test never
+    // a scratch path instead of the real /var/lib/synthpass — this test never
     // touches actual system state.
     #[cfg(target_os = "linux")]
     #[test]
