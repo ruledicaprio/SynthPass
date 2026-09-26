@@ -8,7 +8,7 @@ name = "mrz"
 # exhaustive, so adding a field to one of those is breaking (0.6.0). CI diffs
 # this crate against its published baseline and fails a PR whose API change
 # outruns the version below — see the `semver` job and CONTRIBUTING.md.
-version = "0.8.1"
+version = "0.8.2"
 edition.workspace = true
 # Verified floor for the zero-dependency default build, which is the whole of
 # this crate's own source: `std::iter::repeat_n` (checksum.rs) and
@@ -32,6 +32,7 @@ categories = ["parser-implementations", "text-processing"]
 # Render the `serde` and `zeroize` feature surfaces on docs.rs.
 [package.metadata.docs.rs]
 all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"], optional = true }

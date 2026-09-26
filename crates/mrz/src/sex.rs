@@ -98,6 +98,7 @@ impl FromStr for Sex {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl serde::Serialize for Sex {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
@@ -105,6 +106,7 @@ impl serde::Serialize for Sex {
 }
 
 #[cfg(feature = "serde")]
+#[cfg_attr(docsrs, doc(cfg(feature = "serde")))]
 impl<'de> serde::Deserialize<'de> for Sex {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let text = String::deserialize(deserializer)?;
@@ -115,6 +117,7 @@ impl<'de> serde::Deserialize<'de> for Sex {
 /// Overwrites the whole value. The variant itself carries M/F/<, so wiping
 /// only the payload of `NonConformant` would leave those values behind.
 #[cfg(feature = "zeroize")]
+#[cfg_attr(docsrs, doc(cfg(feature = "zeroize")))]
 impl zeroize::Zeroize for Sex {
     fn zeroize(&mut self) {
         // Best-effort: overwrite the discriminant as well as the payload.

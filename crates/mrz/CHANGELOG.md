@@ -16,6 +16,47 @@ Every entry names the pull request or commit it came from, so it traces back to 
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-09-25
+
+### Fixed
+- `country_name` now names all 42 ISO 3166-1 codes it lacked. All are dependent territories or other non-sovereign areas, such as Guernsey, Jersey, the Isle of Man, Puerto Rico, Guam, Réunion, New Caledonia and Anguilla. The names are exactly as the UN M49 list prints them. Before this, a zone whose issuer or nationality was one of these codes failed the repair passes' "the code resolves" guard, so a damaged read of it was refused rather than recovered. A test now pins every M49 ISO alpha-3 code (#425).
+- **TD3's damaged-line-pair repair no longer returns a left-shifted line 1.** When line 1's
+  position-1 filler was dropped by OCR *and* line 2 separately needed a single-substitution
+  repair to validate, the recovery pass only ever tried line 1's ordinary repair, never the
+  shift/unshift repair the ordinary TD3 scan already applies — so it silently returned the
+  wrong `document_type`/`issuing_country`/name instead of the correct, unshifted reading (#461).
+  It now tries both, exactly as the ordinary scan does; when the two disagree, the read is
+  refused rather than guessed.
+- **docs.rs shows which items need the `serde` or `zeroize` feature again, and every item has an
+  example (#428).** Built on docs.rs (`--cfg docsrs`), the crate enables `doc_cfg`, so each
+  feature-gated impl carries an "Available on crate feature … only" badge, derived impls
+  included. The attribute is inert on stable and on the 1.82 MSRV, which is why the
+  nightly-only `doc_auto_cfg` removed in 0.8.0 is not coming back. Example coverage goes from
+  85 of 89 items to 89 of 89: `Format::check_digit_applicability`, `Checks::applicable`,
+  `Checks::verified` and `Checks::failed` gain doctests.
+- **An intact TD1 zone keeps its format when its printed checks fail.** The scanner no longer
+  pads the first two rows of a three-row TD1 into a TD2 reading and prefers that reflow solely
+  because it verifies more check digits (#409).
+- **A dropped line-1 filler is now undone in the damaged-zone recovery of every format, not just
+  TD3 (#476).** When OCR drops the `<` at line-1 cell 1, line 1 shifts left: the document code
+  gains a letter, and the issuer becomes the wrong three cells. TD2 and MRV-B line 1 carries no
+  check digit, so recovery used to accept the shifted reading. #468's TD3 fix is now applied to
+  TD1, TD2, MRV-A and MRV-B in `damaged_pass` and `class_sweep_pass`:
+  - the unshifted line 1 is tried alongside the plain one;
+  - a candidate whose issuer doesn't resolve is dropped when another one does;
+  - two candidates whose issuers both resolve and disagree are refused, not guessed (#440).
+
+  TD1 recovery also tries the unshifted line 1. The ordinary scan is unchanged, so a shifted
+  line 1 whose issuer happens to be a real code (`GBR` read as `BRN`) can still be accepted
+  there.
+- **A damaged TD3 line 1's still-shifted reading no longer forces a needless refusal.** #468
+  made the damaged/class-sweep repair try both the corrected, unshifted line 1 and the original
+  left-shifted one, then refuse when they disagreed. But the left-shifted reading's document
+  code and issuing country are never real — the same test #447 already applies elsewhere — so
+  when it is the only one that fails, it is now dropped before the unanimity check instead of
+  causing a refusal. A genuine disagreement (for example two readings that both resolve to real,
+  but different, countries or names) still refuses exactly as before.
+
 ## [0.8.1] — 2026-09-25
 
 ### Fixed
