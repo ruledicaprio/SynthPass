@@ -52,7 +52,7 @@ non-conforming one).
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
-| `checksum_failed_specimen` | 20 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails |
+| `checksum_failed_specimen` | 20 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails. A checksum-**valid** read on one was built by the parser, not read off the page. `provider-bench` names each such read with a ⚠ summary line and counts them per provider as `checksum_valid_on_failed_specimen`. Report-only for now; [#443](https://github.com/ruledicaprio/SynthPass/issues/443) makes it a failure later, with a re-bless |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
 readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
