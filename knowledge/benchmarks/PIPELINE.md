@@ -89,6 +89,7 @@ differs from CI's by float rounding.
 | `crates/synthpass-ocr/examples/mrz_corpus.rs` | An older Tier-1 rate over `samples/` | `samples/` | stdout | manual | nobody — superseded by `provider-bench` (see §6) |
 | `check_sample.rs`, `visualize_mrz_band.rs`, `integrity_survey.rs`, `visual_zone_survey.rs`, `template_traits.rs`, `mine_country_vocab.rs`, `dump_variants.rs` under `crates/synthpass-ocr/examples/` | Intake smoke check; band/portrait overlays and the layout ledger; line-1 integrity and visual-zone noise surveys; template traits; vocab proposals; preprocessed-image dumps | `samples/` | `knowledge/*-survey.jsonl`, `samples/template_traits.jsonl`, dumps | manual | ADR-0008 writeups; none feed shipped logic |
 | `crates/mrz/examples/checksum_blindspots.rs` | What a valid ICAO composite provably cannot catch | none | stdout | manual | `checksum-blindspots-measured-2026-08-05.md` |
+| `crates/mrz/examples/checkdigit_blindspots_exact.rs` | Exact k-substitution pass rates per field, composite alignment, line-1 code neighbours, enumeration budgets | none; reads `mrz::CONFUSABLES`, `mrz::CLASSES`, `mrz::codes()` | stdout | manual | `checkdigit-blindspots-exact-2026-09-26.md` |
 
 ### 2.2 Metrics and their denominators
 
