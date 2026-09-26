@@ -64,8 +64,29 @@ cargo run -p synthpass-cli -- batch "samples/passports/*.jpg"   # many at once
 cargo run -p synthpass-serve                  # web app + JSON API on http://127.0.0.1:8080
 ```
 
-The subcommands (`generate`, `export`, `batch`, `doctor`, `fingerprint`, `verify-license`, `decrypt`), the
-`POST /api/extract` API, and every environment variable are in
+### Using the CLI
+
+Run `synthpass` with no arguments (or `--help`) for the command list:
+
+<img src="knowledge/img/cli-help.svg" alt="The synthpass CLI help screen: a SYNTHPASS block-letter banner, the version line, and the list of commands" width="760">
+
+*Rendered from the binary's real output by
+[`tools/render_terminal_svg.py`](tools/render_terminal_svg.py), so it can be rebuilt whenever the
+help text changes.*
+
+| To… | Run |
+| --- | --- |
+| check the install (OCR models, Tier-2 model, license, config) | `synthpass doctor` |
+| read one document | `synthpass path/to/image.jpg` |
+| read a folder, or a quoted glob | `synthpass batch "scans/*.jpg"` |
+| make synthetic documents with ground-truth labels | `synthpass generate --count 10 --seed 42 --out-dir out/` |
+| export a synthetic training corpus | `synthpass export --format jsonl --count 1000 --out-dir corpus/` |
+| get this machine's fingerprint for a license | `synthpass fingerprint` |
+| check a license file | `synthpass verify-license path/to/license` |
+| decrypt an encrypted result | `synthpass decrypt result.json.enc` (needs `SYNTHPASS_KEY`) |
+
+From a source checkout, `cargo run -p synthpass-cli -- <command>` does the same. The
+`POST /api/extract` API and every environment variable are in
 [ARCHITECTURE.md §5](knowledge/ARCHITECTURE.md#5-pipeline-execution-flow) and
 [§12](knowledge/ARCHITECTURE.md#12-configuration-reference).
 
