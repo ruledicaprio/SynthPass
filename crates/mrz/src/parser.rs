@@ -312,6 +312,12 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
+        // These functions parse a single, already-final line pair/triple —
+        // there is no search here for a reading to have been recovered
+        // *from*, so this is always `false`. `find_and_parse_with` is the
+        // only place that sets it `true`, on the specific reading its
+        // damaged-capture search returns.
+        damaged_recovery: false,
     })
 }
 
@@ -407,6 +413,12 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
+        // These functions parse a single, already-final line pair/triple —
+        // there is no search here for a reading to have been recovered
+        // *from*, so this is always `false`. `find_and_parse_with` is the
+        // only place that sets it `true`, on the specific reading its
+        // damaged-capture search returns.
+        damaged_recovery: false,
     })
 }
 
@@ -513,6 +525,12 @@ pub fn parse_td1_with(
         optional_data_2: opt_string(optional2),
         mrz_lines: format!("{line1}\n{line2}\n{line3}"),
         checks,
+        // These functions parse a single, already-final line pair/triple —
+        // there is no search here for a reading to have been recovered
+        // *from*, so this is always `false`. `find_and_parse_with` is the
+        // only place that sets it `true`, on the specific reading its
+        // damaged-capture search returns.
+        damaged_recovery: false,
     })
 }
 
@@ -596,6 +614,12 @@ pub fn parse_mrv_a_with(
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
+        // These functions parse a single, already-final line pair/triple —
+        // there is no search here for a reading to have been recovered
+        // *from*, so this is always `false`. `find_and_parse_with` is the
+        // only place that sets it `true`, on the specific reading its
+        // damaged-capture search returns.
+        damaged_recovery: false,
     })
 }
 
@@ -679,6 +703,12 @@ pub fn parse_mrv_b_with(
         optional_data_2: None,
         mrz_lines: format!("{line1}\n{line2}"),
         checks,
+        // These functions parse a single, already-final line pair/triple —
+        // there is no search here for a reading to have been recovered
+        // *from*, so this is always `false`. `find_and_parse_with` is the
+        // only place that sets it `true`, on the specific reading its
+        // damaged-capture search returns.
+        damaged_recovery: false,
     })
 }
 
@@ -1851,7 +1881,12 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // some line already matched a format's shape — a document with no MRZ at
     // all never pays for it.
     if fallback.is_some() {
-        if let Some(data) = damaged_pass(&lines, opts, &intact_td1_starts) {
+        if let Some(mut data) = damaged_pass(&lines, opts, &intact_td1_starts) {
+            // `damaged_pass` (and `class_sweep_pass`, which it tries first)
+            // is the only path a reading can take here — see
+            // `MrzData::damaged_recovery`'s doc comment for what this flags
+            // and why a caller re-reading the source image might care.
+            data.damaged_recovery = true;
             return Ok(data);
         }
     }

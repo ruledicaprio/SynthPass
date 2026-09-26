@@ -270,6 +270,29 @@ fn a_single_misread_glyph_in_the_document_number_resolves_through_find_and_parse
         "the recovered reading must checksum-verify"
     );
     assert_eq!(recovered.document_number, "AB123457");
+    // #473: `synthpass-ocr`'s retry-stop oracle needs to tell this reading
+    // apart from one the ordinary scan read cleanly -- a single-glyph
+    // confusable sweep landing on a checksum-valid answer is exactly what
+    // GitHub issue #473's seed 99 repro describes.
+    assert!(
+        recovered.damaged_recovery,
+        "this reading only exists because the damaged-capture search swept the misread glyph"
+    );
+}
+
+/// #473: the flip side of the assertion above, pinned as its own test so a
+/// regression that makes `damaged_recovery` `true` for *every* reading (not
+/// just damaged ones) still fails something.
+#[test]
+fn damaged_recovery_is_false_for_a_reading_the_ordinary_scan_read_cleanly() {
+    let (l1, l2, l3) = td1_zone();
+    let text = format!("{l1}\n{l2}\n{l3}");
+    let recovered = find_and_parse(&text).expect("an undamaged zone parses");
+    assert!(recovered.valid());
+    assert!(
+        !recovered.damaged_recovery,
+        "the ordinary scan read this zone cleanly; nothing was recovered"
+    );
 }
 
 /// The document-number field is left-justified and `<`-padded, so a reading

@@ -668,6 +668,29 @@ pub struct MrzData {
     /// Per-field check-digit verification results — see [`Checks`].
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     pub checks: Checks,
+    /// `true` when [`find_and_parse`]/[`find_and_parse_with`] only reached
+    /// this reading through the damaged-capture search (a line one character
+    /// narrower than its format, or a single-glyph substitution swept across
+    /// [`CONFUSABLES`] — see `damaged_pass` in `parser.rs`), rather than the
+    /// ordinary scan's fixed-position lookalike repairs.
+    ///
+    /// `false` for every reading the ordinary scan already returns, and
+    /// always `false` from [`parse_td1`]/[`parse_td2`]/[`parse_td3`]/
+    /// [`parse_mrv_a`]/[`parse_mrv_b`] and their `_with` siblings called
+    /// directly — they have no notion of a search, so there is nothing to
+    /// flag. `checksum_consistent()` being `true` here is not proof the
+    /// reading is correct: the damaged-capture search picks the one answer
+    /// whose check digits and calendar dates hold up, but a bare consistency
+    /// check cannot distinguish a genuine recovery from a coincidental
+    /// checksum-preserving misread. A caller re-reading the source image
+    /// (`synthpass-ocr`'s retry loop, see its module docs) can use this to
+    /// keep searching for a cleaner reading rather than stopping here.
+    ///
+    /// `#[serde(default)]`: JSON written by a release before this field
+    /// existed has no `damaged_recovery` key, and must still deserialize.
+    #[cfg_attr(feature = "zeroize", zeroize(skip))]
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub damaged_recovery: bool,
 }
 
 impl MrzData {
