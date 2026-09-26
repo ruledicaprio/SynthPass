@@ -315,6 +315,38 @@ licensing-specific subset with the customer/vendor CLI walkthroughs alongside it
 > **Windows note:** the Tier-2 backend needs CMake + LLVM/libclang + MSVC to build
 > `llama-cpp-2`'s bundled `llama.cpp`. The OCR engine needs no native toolchain at all.
 
+**Exit codes** (`synthpass` CLI, decided in #492)
+
+Every `synthpass` subcommand follows the same convention, so a script can branch on the process
+exit status alone instead of parsing stderr:
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | success |
+| 1 | runtime or extraction failure, including any failed document in a `batch` |
+| 2 | usage error (unknown option, bad/missing/surplus arguments, `generate`/`export` argument errors) |
+| 3 | license refusal (missing/invalid license, or a required feature not granted) |
+
+Notable specifics, where the bucket isn't obvious from the table alone:
+
+- `decrypt`: a missing or malformed `SYNTHPASS_KEY` is a usage/config error (2), since nothing
+  about the input file has been touched yet; a missing input file or a decrypt failure (wrong
+  key, corrupt ciphertext) is a runtime failure (1).
+- `batch`: exits 1 if *any* document in the batch failed, even when the rest succeeded — the
+  summary line still reports the per-document breakdown, but the exit code is what a script
+  actually branches on.
+- `verify-license`: a missing license *file* also exits 3, not 1 — this command's whole purpose
+  is to report license validity, so "no license to check" is itself a refusal, the same as an
+  invalid or expired one.
+- `doctor`: exits 1 if any required check failed (OCR models, Tier-2 inferer, license); each
+  failed check already printed its own diagnostic line, so the exit code carries no separate
+  message.
+- `generate`/`fingerprint` need no license and never exit 3.
+
+Implemented as one small typed `Exit` enum in `synthpass-cli/src/main.rs`, converted to
+`std::process::ExitCode` exactly once in `main` — no `std::process::exit` call exists anywhere in
+the crate.
+
 ## 13. Engineering conventions
 
 Contract-level rules that are not obvious from the code alone. Each crate's own

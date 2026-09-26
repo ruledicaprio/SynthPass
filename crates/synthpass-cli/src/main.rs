@@ -10,10 +10,53 @@ use serde_json::json;
 use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use synthpass_pipeline::Pipeline;
 
 mod export;
 mod generate;
+
+/// The CLI's exit-code convention (issue #492) — every command maps its
+/// outcome onto one of these four buckets instead of the ad hoc mix of
+/// "print an error to stderr and exit 0 anyway" this file used to have.
+/// `knowledge/ARCHITECTURE.md` §12 "Exit codes" documents the same table for
+/// readers outside the source; keep both in sync.
+///
+/// Kept as a small typed enum rather than raw `i32`/`ExitCode` values
+/// everywhere so a command's outcome is chosen once, close to the code that
+/// knows *why* it failed, and converted to a process exit status exactly
+/// once, in `main`. No `std::process::exit` call exists anywhere in this
+/// crate — every path returns its `Exit` up through `Result` to `main`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Exit {
+    /// 0 — success.
+    Ok,
+    /// 1 — a runtime or extraction failure: a pipeline error, a document that
+    /// failed inside `batch` (even when others in the same batch succeeded),
+    /// a `decrypt` failure or missing input file, or a `generate`/`export`
+    /// run failure that happens after its arguments parsed fine.
+    Failure,
+    /// 2 — a usage error: an unknown option, a missing, bad or surplus
+    /// argument, or a `generate`/`export` argument error.
+    Usage,
+    /// 3 — a license refusal: no license file, an invalid or expired
+    /// license, or a required feature (`batch`/`export`) the license doesn't
+    /// grant. `verify-license` also reports a missing license *file* under
+    /// this code, not `Failure` — the command's whole purpose is to check
+    /// license validity, and "no license to check" is itself a refusal.
+    License,
+}
+
+impl From<Exit> for ExitCode {
+    fn from(exit: Exit) -> Self {
+        match exit {
+            Exit::Ok => ExitCode::SUCCESS,
+            Exit::Failure => ExitCode::from(1),
+            Exit::Usage => ExitCode::from(2),
+            Exit::License => ExitCode::from(3),
+        }
+    }
+}
 
 /// Interior width of the banner box (character count between the two `│`
 /// border columns). Wide enough for the longest centered line (the tagline).
@@ -132,28 +175,42 @@ fn args_to_strings(args: impl Iterator<Item = std::ffi::OsString>) -> Result<Vec
         .collect()
 }
 
+/// Thin wrapper: `run` does all the work and returns the typed [`Exit`];
+/// `main` is the single place that (a) prints the message for an error that
+/// bubbled up via `?` instead of an explicit branch in `run`, and (b)
+/// converts the outcome to the [`ExitCode`] the process actually exits with.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> ExitCode {
+    run()
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("❌ {e}");
+            Exit::Failure
+        })
+        .into()
+}
+
+async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     let args: Vec<String> = match args_to_strings(env::args_os()) {
         Ok(args) => args,
         Err(e) => {
             eprintln!("❌ {e}");
-            return Ok(());
+            return Ok(Exit::Usage);
         }
     };
     if args.len() < 2 {
         print_usage();
-        return Ok(());
+        return Ok(Exit::Ok);
     }
 
     match args[1].as_str() {
         "--help" | "-h" => {
             print_usage();
-            return Ok(());
+            return Ok(Exit::Ok);
         }
         "--version" | "-V" => {
             println!("synthpass {}", env!("CARGO_PKG_VERSION"));
-            return Ok(());
+            return Ok(Exit::Ok);
         }
         // `synthpass batch <dir|glob>` — extract every matching image, one JSON
         // object per input plus a summary (M5 job queue). Stays synchronous
@@ -198,7 +255,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // by `check_license` below.
         "fingerprint" => {
             println!("{}", synthpass_license::machine_fingerprint());
-            return Ok(());
+            return Ok(Exit::Ok);
         }
         "verify-license" => return verify_license_command(args.get(2).map(String::as_str)),
         _ => {}
@@ -210,25 +267,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args[1].starts_with('-') {
         eprintln!("❌ Unknown option: {}", args[1]);
         eprintln!("   Run `synthpass --help` for usage.");
-        return Ok(());
+        return Ok(Exit::Usage);
     }
 
     if let Err(e) = reject_surplus_args(&args[2..]) {
         eprintln!("❌ {e}");
-        return Ok(());
+        return Ok(Exit::Usage);
     }
 
     let input = Path::new(&args[1]);
     if !input.exists() {
         eprintln!("❌ Error: File not found at {}", input.display());
-        return Ok(());
+        return Ok(Exit::Failure);
     }
 
     // Extraction is the one path that actually needs a valid license.
     if let Err(e) = check_license() {
         eprintln!("❌ {e}");
         eprintln!("   run `synthpass fingerprint` and contact your vendor for a license, or set SYNTHPASS_LICENSE_SKIP=1 for local development");
-        return Ok(());
+        return Ok(Exit::License);
     }
 
     let pipeline = Pipeline::from_env();
@@ -271,12 +328,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     print_line1_integrity(&result);
                 }
             }
-            print_completion(&result);
+            // A document that never actually produced usable output — a
+            // Tier-2 fallback that itself failed, or a persist failure on
+            // either tier — must not exit 0 just because `process_document`
+            // itself didn't return `Err`: see `print_completion`'s doc for
+            // exactly which cases `completion_message` treats that way.
+            if print_completion(&result) {
+                Ok(Exit::Ok)
+            } else {
+                Ok(Exit::Failure)
+            }
         }
-        Err(e) => eprintln!("❌ [Rust] {e}"),
+        Err(e) => {
+            eprintln!("❌ [Rust] {e}");
+            Ok(Exit::Failure)
+        }
     }
-
-    Ok(())
 }
 
 /// What to print on stdout to mark a document's extraction as finished, or
@@ -311,8 +378,14 @@ fn completion_message(result: &synthpass_pipeline::PipelineResult) -> Option<Str
 /// branch used to go unreported), then either the "saved to" line or the
 /// LLM failure warning, per [`completion_message`].
 ///
+/// Returns whether the "saved to" line was printed — i.e. whether
+/// [`completion_message`] found anything truthful to report — so the caller
+/// can tell a document that never actually produced usable output (a failed
+/// Tier-2 fallback, or a persist failure on either tier) apart from a real
+/// success, for the exit code (issue #492).
+///
 /// [`PipelineResult::sidecar_stdout`]: synthpass_pipeline::PipelineResult::sidecar_stdout
-fn print_completion(result: &synthpass_pipeline::PipelineResult) {
+fn print_completion(result: &synthpass_pipeline::PipelineResult) -> bool {
     if !result.sidecar_stdout.is_empty() {
         eprint!("{}", result.sidecar_stdout);
         if !result.sidecar_stdout.ends_with('\n') {
@@ -320,11 +393,15 @@ fn print_completion(result: &synthpass_pipeline::PipelineResult) {
         }
     }
     match completion_message(result) {
-        Some(msg) => println!("{msg}"),
+        Some(msg) => {
+            println!("{msg}");
+            true
+        }
         None => {
             if let Some(e) = &result.llm_error {
                 eprintln!("⚠️ [Rust] LLM extraction failed: {e}");
             }
+            false
         }
     }
 }
@@ -538,15 +615,15 @@ fn collect_batch_inputs(arg: &str) -> Result<Vec<PathBuf>, String> {
 async fn batch_command(
     arg: Option<&str>,
     surplus: &[String],
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Exit, Box<dyn std::error::Error>> {
     let Some(arg) = arg else {
         eprintln!("Usage: synthpass batch <dir|glob>");
-        return Ok(());
+        return Ok(Exit::Usage);
     };
 
     if let Err(e) = reject_surplus_args(surplus) {
         eprintln!("❌ {e}");
-        return Ok(());
+        return Ok(Exit::Usage);
     }
 
     if let Err(e) = check_license_feature(synthpass_license::FEATURE_BATCH) {
@@ -555,18 +632,24 @@ async fn batch_command(
             "   run `synthpass fingerprint` and contact your vendor for a license with the \
              'batch' feature, or set SYNTHPASS_LICENSE_SKIP=1 for local development"
         );
-        return Ok(());
+        return Ok(Exit::License);
     }
 
+    // Neither branch here is a usage error: `arg` itself may be perfectly
+    // well-formed (an existing directory with nothing in it, or a glob whose
+    // syntax is fine but that matches nothing right now) — this is the same
+    // "target doesn't resolve to anything" runtime condition a missing input
+    // file is for `decrypt`/single-document extraction, so it gets the same
+    // code (1), not the usage code (2).
     let inputs = match collect_batch_inputs(arg) {
         Ok(inputs) if inputs.is_empty() => {
             eprintln!("❌ no image files found at {arg}");
-            return Ok(());
+            return Ok(Exit::Failure);
         }
         Ok(inputs) => inputs,
         Err(e) => {
             eprintln!("❌ {e}");
-            return Ok(());
+            return Ok(Exit::Failure);
         }
     };
 
@@ -621,7 +704,14 @@ async fn batch_command(
         status.as_str()
     );
 
-    Ok(())
+    // Any failed document makes the whole batch exit 1, even when the rest
+    // succeeded — the summary line above already says how many; the exit
+    // code is what a script actually branches on (issue #492).
+    if failed > 0 {
+        Ok(Exit::Failure)
+    } else {
+        Ok(Exit::Ok)
+    }
 }
 
 /// `synthpass doctor`'s license block: required unless `SYNTHPASS_LICENSE_SKIP=1`
@@ -663,10 +753,13 @@ fn check_license_doctor(ok: &mut bool) {
 }
 
 /// `synthpass verify-license [path]` — verify a license file and print its
-/// status. `path` overrides `SYNTHPASS_LICENSE_PATH`/the default. Non-zero exit
-/// on any failure, matching `doctor`'s convention — this command's whole job
-/// is to report validity, so a meaningful exit code matters for scripting.
-fn verify_license_command(path: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+/// status. `path` overrides `SYNTHPASS_LICENSE_PATH`/the default. Exits with
+/// the license-refusal code (3), not the generic failure code (1), on *any*
+/// failure to verify — including a missing license *file* (a
+/// `synthpass_license::LicenseError::Io`): this command's whole job is to
+/// report validity, so "no license to check" is itself a refusal, the same
+/// as an invalid or expired one, not a separate runtime error.
+fn verify_license_command(path: Option<&str>) -> Result<Exit, Box<dyn std::error::Error>> {
     let path = path.map(String::from).unwrap_or_else(|| {
         env::var("SYNTHPASS_LICENSE_PATH").unwrap_or_else(|_| DEFAULT_LICENSE_PATH.into())
     });
@@ -687,42 +780,62 @@ fn verify_license_command(path: Option<&str>) -> Result<(), Box<dyn std::error::
                 }
             );
             println!("   days until expiry: {days_left}");
-            Ok(())
+            Ok(Exit::Ok)
         }
         Err(e) => {
             eprintln!("❌ License invalid ({path}): {e}");
-            Err(e.into())
+            Ok(Exit::License)
         }
     }
 }
 
 /// `synthpass decrypt <file.json.enc>` — decrypt an AES-256-GCM payload (written when
 /// `SYNTHPASS_KEY` is set) to stdout, using the same `SYNTHPASS_KEY`.
-fn decrypt_command(file: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+///
+/// Exit codes: no `SYNTHPASS_KEY` set, or one that isn't a valid base64
+/// 32-byte key, is a usage/config error (2) — nothing about the input file
+/// has been touched yet. A missing input file, and a decrypt failure once a
+/// well-formed key is in hand (wrong key, corrupt/truncated ciphertext), are
+/// both a runtime failure (1).
+fn decrypt_command(file: Option<&str>) -> Result<Exit, Box<dyn std::error::Error>> {
     let Some(file) = file else {
         eprintln!("Usage: synthpass decrypt <file.json.enc>   (reads key from SYNTHPASS_KEY)");
-        return Ok(());
+        return Ok(Exit::Usage);
     };
     let key = match env::var("SYNTHPASS_KEY") {
-        Ok(s) => synthpass_core::crypt::key_from_base64(&s)?,
+        Ok(s) => match synthpass_core::crypt::key_from_base64(&s) {
+            Ok(key) => key,
+            Err(e) => {
+                eprintln!("❌ {e}");
+                return Ok(Exit::Usage);
+            }
+        },
         Err(_) => {
             eprintln!("❌ set SYNTHPASS_KEY (base64-encoded 32-byte AES-256 key)");
-            return Ok(());
+            return Ok(Exit::Usage);
         }
     };
     let data = std::fs::read(file)?;
     match synthpass_core::crypt::decrypt(&key, &data) {
-        Ok(plain) => std::io::stdout().write_all(&plain)?,
-        Err(e) => eprintln!("❌ decrypt failed: {e}"),
+        Ok(plain) => {
+            std::io::stdout().write_all(&plain)?;
+            Ok(Exit::Ok)
+        }
+        Err(e) => {
+            eprintln!("❌ decrypt failed: {e}");
+            Ok(Exit::Failure)
+        }
     }
-    Ok(())
 }
 
 /// `synthpass doctor` — preflight checks: OCR/inferer reachability + config sanity.
 /// OCR and inferer reachability are required for the pipeline to run at all
-/// (a failure there is a non-zero exit); `SYNTHPASS_KEY`/`SYNTHPASS_AUDIT_LOG` checks are
-/// advisory since those features are optional.
-async fn doctor_command() -> Result<(), Box<dyn std::error::Error>> {
+/// (a failure there is [`Exit::Failure`] — the same code any other runtime
+/// failure gets, since `doctor`'s job is to predict whether extraction would
+/// work, not to distinguish which subsystem failed by exit code);
+/// `SYNTHPASS_KEY`/`SYNTHPASS_AUDIT_LOG` checks are advisory since those
+/// features are optional and never flip `ok`.
+async fn doctor_command() -> Result<Exit, Box<dyn std::error::Error>> {
     let mut ok = true;
 
     // `SYNTHPASS_OCR_ENGINE` no longer selects anything: `synthpass_pipeline::ocr::engine_from_env`
@@ -779,9 +892,13 @@ async fn doctor_command() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if ok {
-        Ok(())
+        Ok(Exit::Ok)
     } else {
-        Err("doctor: one or more required checks failed".into())
+        // Each failed check already printed its own `❌ ...` line above —
+        // that's the diagnostic. Nothing further is added on stderr here;
+        // the non-zero exit code is what a script or `doctor`'s own caller
+        // actually branches on.
+        Ok(Exit::Failure)
     }
 }
 

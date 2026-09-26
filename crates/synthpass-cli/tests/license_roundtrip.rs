@@ -115,14 +115,34 @@ fn verify_license_rejects_an_expired_license() {
         .output()
         .expect("run `synthpass verify-license`");
 
-    assert!(
-        !output.status.success(),
-        "expired license must exit non-zero"
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "an expired license is a license refusal (3), got: {output:?}"
     );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("expired"),
         "expected an expiry message on stderr, got: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn verify_license_missing_file_is_also_a_license_refusal() {
+    let missing = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-license-does-not-exist-{}.mlis",
+        std::process::id()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args(["verify-license", missing.to_str().unwrap()])
+        .output()
+        .expect("run `synthpass verify-license`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "a missing license file is a refusal (3), not a generic runtime failure (1), got: {output:?}"
     );
 }
 
@@ -145,9 +165,10 @@ fn verify_license_fails_closed_on_a_tampered_file() {
         .output()
         .expect("run `synthpass verify-license`");
 
-    assert!(
-        !output.status.success(),
-        "tampered license must fail closed"
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "a tampered license is a license refusal (3), got: {output:?}"
     );
     assert!(
         output.stdout.is_empty(),
@@ -181,6 +202,11 @@ fn extraction_path_refuses_expired_license_but_skip_bypasses_the_gate() {
         )
         .output()
         .expect("run `synthpass <file>`");
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "extraction refused for an expired license must exit 3, got: {output:?}"
+    );
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("license"),
         "expected a license-related refusal, got: {}",
