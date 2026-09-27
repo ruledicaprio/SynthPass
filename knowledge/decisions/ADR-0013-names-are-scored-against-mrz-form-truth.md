@@ -95,3 +95,46 @@ so the fixture is off the denominator, but a VIZ split had already entered an MR
 - **What would reverse this:** a label source that can only be had in VIZ form, and is worth more
   than a separate track, would reopen the "one form" rule. A strict rate that stays equal to the
   Tier-1 rate across formats and real specimens would make the second column redundant.
+
+## Amendment (2026-09-26) — the line-1 prefix is gated, as a ratchet; names stay report-only
+
+**Context.** Issue [#453](https://github.com/ruledicaprio/SynthPass/issues/453) found that the M4
+gate's pre-#440 TD3 count of 42/50 included three checksum-valid hits (seeds 7, 46, 48) that were
+wrong on `document_type`, `issuing_country` and `surname` together
+([`m4-gate-440-wrong-reads-refused-2026-09-25.md`](../benchmarks/m4-gate-440-wrong-reads-refused-2026-09-25.md)).
+#457 added a report-only wrong-accept count to `synthpass-bench`: a hit where any of the 12 scored
+fields differs from the generator's exact truth. It reads 23 of 39 hits on the M4 invocation, and
+207 of 370 across the five formats (#462). Most of those are wrong names, the axis this ADR keeps
+off `hit` and ungated.
+
+**Decision (maintainer, 2026-09-25).**
+
+- **Gated class:** a Tier-1 hit whose `document_type` or `issuing_country` differs from truth, a
+  *prefix wrong accept*. `synthpass-bench --max-prefix-wrong-accepts N` exits non-zero when the
+  count exceeds `N`. No ICAO check digit covers the prefix in any format. Unlike a name, the
+  prefix has no truth-form ambiguity: it is a fixed code, so a difference is a misread, never a
+  transliteration.
+- **Where it is pinned:** on the `ci.yml` `m4-hit-rate` invocation, at the value CI measured on the
+  PR that added the flag. **Measured: 0.** PR #516's `m4-hit-rate` run at `7b4487a` (GitHub's Linux
+  runner) read 39/50 hits and 21 wrong accepts, none of them on the prefix. #440 had already
+  refused the three prefix misreads #453 found (seeds 7, 46 and 48 are `checksum_failed` in that
+  run). `N` is pinned at 0.
+- **How `N` moves:** it is a ratchet. A fix may only lower it, and at 0 there is nothing left to
+  lower. Raising `N` is a reviewed workflow edit that names the seeds and the mechanism. The
+  report's `prefix_wrong_accept_seeds` and the gate's failure message list the seeds.
+- **What stays report-only:** names, optional data and check-digit collisions (#457, #462). `hit`,
+  `hit_rate` and `--min-hit-rate` keep their meaning, as the original decision requires.
+
+**Why a ratchet rather than a fixed zero.** The rule was decided before the count was measured,
+when a non-zero start was possible: a gate at zero would then have failed every PR until a fix
+landed. A ratchet pinned at the measured count blocks any change that adds a prefix misread
+either way. As measured, it starts at zero, which makes it a zero-tolerance check today. The
+ratchet rule still governs any future raise. **Why not all wrong accepts:** gating on names
+would gate on the axis this ADR scores separately. Most wrong accepts are wrong names (170 of the
+370 hits carried one on 2026-09-25, per [`benchmarks/README.md`](../benchmarks/README.md)), and
+name repair is this ADR's next step, so such a gate would move with every name-repair experiment
+rather than with regressions.
+
+**What would reverse this:** a prefix misread that no fix can remove on the M4 corpus would
+force a raise, which must name the seeds and the mechanism. A prefix misread that is unavoidable
+on some format would reopen the rule for that format.
