@@ -1719,12 +1719,20 @@ fn same_document(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
     normalize(a) == normalize(b)
 }
 
-/// This run's OCR measurement-arm configuration — every `SYNTHPASS_OCR_*`
-/// knob this crate defines, at once, for a bench report to record alongside
-/// its hit rate. Lowercase mode names, matching each knob's own env-var
-/// vocabulary (`OcrOrder::BandFirst`'s env value is `band-first`, so this
-/// carries `"band-first"`, not a Rust-identifier-shaped rendering of the
-/// variant).
+/// This run's OCR measurement-arm configuration — every measurement-arm
+/// `SYNTHPASS_OCR_*` knob this crate defines, at once, for a bench report to
+/// record alongside its hit rate. Lowercase mode names, matching each knob's
+/// own env-var vocabulary (`OcrOrder::BandFirst`'s env value is `band-first`,
+/// so this carries `"band-first"`, not a Rust-identifier-shaped rendering of
+/// the variant).
+///
+/// **Not every `SYNTHPASS_OCR_*` knob lives here.** The retry pass/time
+/// budget (`SYNTHPASS_OCR_MAX_PASSES`/`SYNTHPASS_OCR_MAX_SECONDS`, see
+/// [`max_passes`] and [`max_duration`]) sits beside this struct instead —
+/// [`config_overrides_from`] takes both as separate arguments rather than
+/// folding them in here, so [`is_default`](Self::is_default)'s baseline
+/// semantics (what a committed real-specimen baseline may describe) stay
+/// exactly what they were before issue #495 added that function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OcrArms {
     pub texture: &'static str,
@@ -1802,6 +1810,85 @@ impl OcrArms {
     pub fn is_default(&self) -> bool {
         *self == Self::DEFAULT
     }
+}
+
+/// The non-default `SYNTHPASS_OCR_*` knobs for this run — env var name to
+/// effective value, in each knob's own vocabulary (`OcrArms`'s field values
+/// verbatim; `max_passes`/`max_seconds` as their decimal string) — or empty
+/// when every knob named here is at its default (issue #495).
+///
+/// **"Non-default" means the *effective* value differs from the default**,
+/// not that the env var is set: `arms` and `max_passes`/`max_seconds` are
+/// already the parsed-and-fallen-back values ([`OcrArms::from_env`],
+/// [`max_passes`], [`max_duration`]), so `SYNTHPASS_OCR_MAX_PASSES=abc` or
+/// `=0` — both of which fall back to [`DEFAULT_MAX_PASSES`] — record
+/// nothing, and `SYNTHPASS_OCR_MAX_PASSES=7` (spelling out today's default)
+/// records nothing either. `confirm_passes` is compared and recorded under
+/// every `stop` arm, even `"first-valid"` (where it's inert) — the same
+/// reasoning [`OcrArms::DEFAULT`]'s own doc gives for carrying it at all: two
+/// runs that differ only in this knob must never look identical.
+///
+/// Pure and exhaustive over the nine knobs the issue names — no env access
+/// here, so it's unit-testable without touching the process environment (see
+/// this module's `env_lock`-guarded tests for why that matters). See
+/// [`config_overrides`] for the thin wrapper that reads the process env.
+pub fn config_overrides_from(
+    arms: OcrArms,
+    max_passes: usize,
+    max_seconds: u64,
+) -> std::collections::BTreeMap<String, String> {
+    let mut overrides = std::collections::BTreeMap::new();
+    if arms.texture != OcrArms::DEFAULT.texture {
+        overrides.insert(
+            "SYNTHPASS_OCR_TEXTURE".to_string(),
+            arms.texture.to_string(),
+        );
+    }
+    if arms.order != OcrArms::DEFAULT.order {
+        overrides.insert("SYNTHPASS_OCR_ORDER".to_string(), arms.order.to_string());
+    }
+    if arms.rotate != OcrArms::DEFAULT.rotate {
+        overrides.insert("SYNTHPASS_OCR_ROTATE".to_string(), arms.rotate.to_string());
+    }
+    if arms.skew != OcrArms::DEFAULT.skew {
+        overrides.insert("SYNTHPASS_OCR_SKEW".to_string(), arms.skew.to_string());
+    }
+    if arms.chargrid != OcrArms::DEFAULT.chargrid {
+        overrides.insert(
+            "SYNTHPASS_OCR_CHARGRID".to_string(),
+            arms.chargrid.to_string(),
+        );
+    }
+    if arms.stop != OcrArms::DEFAULT.stop {
+        overrides.insert("SYNTHPASS_OCR_STOP".to_string(), arms.stop.to_string());
+    }
+    if arms.confirm_passes != OcrArms::DEFAULT.confirm_passes {
+        overrides.insert(
+            "SYNTHPASS_OCR_CONFIRM_PASSES".to_string(),
+            arms.confirm_passes.to_string(),
+        );
+    }
+    if max_passes != DEFAULT_MAX_PASSES {
+        overrides.insert(
+            "SYNTHPASS_OCR_MAX_PASSES".to_string(),
+            max_passes.to_string(),
+        );
+    }
+    if max_seconds != DEFAULT_MAX_SECONDS {
+        overrides.insert(
+            "SYNTHPASS_OCR_MAX_SECONDS".to_string(),
+            max_seconds.to_string(),
+        );
+    }
+    overrides
+}
+
+/// [`config_overrides_from`], reading `arms`/`max_passes`/`max_seconds` from
+/// the process environment ([`OcrArms::from_env`], [`max_passes`],
+/// [`max_duration`]) instead of taking them as arguments — what a caller
+/// outside this crate (`synthpass-pipeline`'s `RustOcrEngine`) actually calls.
+pub fn config_overrides() -> std::collections::BTreeMap<String, String> {
+    config_overrides_from(OcrArms::from_env(), max_passes(), max_duration().as_secs())
 }
 
 /// A recognized line's text, its bounding box (in the coordinate space of
@@ -2972,6 +3059,79 @@ mod tests {
         assert_eq!(arms.confirm_passes, 5);
         assert!(!arms.is_default());
         unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
+    }
+
+    #[test]
+    fn config_overrides_from_is_empty_at_every_default() {
+        // No env access — `config_overrides_from` is pure, which is the
+        // whole point (issue #495): it's testable without the process-env
+        // mutation every other test in this module needs `env_lock` for.
+        assert_eq!(
+            config_overrides_from(OcrArms::DEFAULT, DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            std::collections::BTreeMap::new(),
+            "every knob at its default must report nothing"
+        );
+    }
+
+    #[test]
+    fn config_overrides_from_reports_each_non_default_arm_by_its_own_env_var() {
+        let mut arms = OcrArms::DEFAULT;
+        arms.chargrid = "on";
+        assert_eq!(
+            config_overrides_from(arms, DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_CHARGRID".to_string(),
+                "on".to_string()
+            )]),
+            "moving one arm must report exactly that arm, keyed by its own env var"
+        );
+
+        let mut arms = OcrArms::DEFAULT;
+        arms.texture = "off";
+        arms.order = "band-first";
+        arms.rotate = "legacy";
+        arms.skew = "legacy";
+        arms.stop = "clean";
+        arms.confirm_passes = 5;
+        assert_eq!(
+            config_overrides_from(arms, DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            std::collections::BTreeMap::from([
+                ("SYNTHPASS_OCR_TEXTURE".to_string(), "off".to_string()),
+                ("SYNTHPASS_OCR_ORDER".to_string(), "band-first".to_string()),
+                ("SYNTHPASS_OCR_ROTATE".to_string(), "legacy".to_string()),
+                ("SYNTHPASS_OCR_SKEW".to_string(), "legacy".to_string()),
+                ("SYNTHPASS_OCR_STOP".to_string(), "clean".to_string()),
+                ("SYNTHPASS_OCR_CONFIRM_PASSES".to_string(), "5".to_string()),
+            ]),
+            "every non-default arm reports, `chargrid` stays off and absent"
+        );
+    }
+
+    #[test]
+    fn config_overrides_from_reports_a_moved_budget_but_not_the_default_one() {
+        // Passing today's default explicitly must report nothing — the
+        // effective value is what's compared, not whether the env var
+        // happened to be set (issue #495's scope decision).
+        assert_eq!(
+            config_overrides_from(OcrArms::DEFAULT, DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            std::collections::BTreeMap::new()
+        );
+
+        assert_eq!(
+            config_overrides_from(OcrArms::DEFAULT, 1, DEFAULT_MAX_SECONDS),
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_MAX_PASSES".to_string(),
+                "1".to_string()
+            )])
+        );
+
+        assert_eq!(
+            config_overrides_from(OcrArms::DEFAULT, DEFAULT_MAX_PASSES, 10),
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_MAX_SECONDS".to_string(),
+                "10".to_string()
+            )])
+        );
     }
 
     #[test]

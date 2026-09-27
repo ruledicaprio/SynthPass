@@ -12,6 +12,8 @@
 //! changed the wire format; confirm that was deliberate and bump
 //! `schema_version` if it was breaking", not "fix the test".
 
+use std::collections::BTreeMap;
+
 use synthpass_core::v2::{
     CheckDigits, CoreField, EscalationKind, ExtractionFields, ExtractionTrace, ExtractionV2,
     FieldConfidence, MrzBlock, MrzFormat, PromptRef, Provenance, SCHEMA_VERSION_V2,
@@ -166,6 +168,7 @@ fn trace_appears_only_with_content_and_carries_no_score() {
             version: 1,
             digest: "deadbeef".into(),
         }),
+        config_overrides: BTreeMap::from([("SYNTHPASS_OCR_STOP".into(), "clean".into())]),
     });
 
     let json = to_json(&e);
@@ -175,6 +178,7 @@ fn trace_appears_only_with_content_and_carries_no_score() {
     assert_eq!(trace["escalation"], "mrz_checksum_failed");
     assert_eq!(trace["providers"][0], "mrz");
     assert_eq!(trace["prompt"]["version"], 1);
+    assert_eq!(trace["config_overrides"]["SYNTHPASS_OCR_STOP"], "clean");
 
     // The load-bearing assertion: the routing score is not here, under any
     // spelling. A spend decision may rest on an uncalibrated number; a value
@@ -206,6 +210,20 @@ fn empty_trace_serializes_to_nothing() {
         ..Default::default()
     };
     assert!(!populated.is_empty());
+
+    // `config_overrides` alone is enough to make a trace non-empty, and its
+    // key must appear on the wire once populated — the same additive-only
+    // contract every other field of this struct already has.
+    let only_config_overrides = ExtractionTrace {
+        config_overrides: BTreeMap::from([("SYNTHPASS_OCR_MAX_PASSES".into(), "1".into())]),
+        ..Default::default()
+    };
+    assert!(!only_config_overrides.is_empty());
+    let json = serde_json::to_value(&only_config_overrides).expect("serializes");
+    assert_eq!(
+        json["config_overrides"]["SYNTHPASS_OCR_MAX_PASSES"],
+        serde_json::Value::String("1".into())
+    );
 }
 
 /// v2 records must keep declaring their generation, or version-dispatching
@@ -306,6 +324,7 @@ fn extraction_v2_round_trips() {
         providers: vec!["mrz".into()],
         escalation: None,
         prompt: None,
+        config_overrides: BTreeMap::from([("SYNTHPASS_OCR_MAX_SECONDS".into(), "10".into())]),
     });
 
     let json = serde_json::to_string(&original).expect("serializes");

@@ -475,6 +475,17 @@ impl Pipeline {
         self.ocr.describe()
     }
 
+    /// Non-default `SYNTHPASS_OCR_*` configuration the active OCR engine is
+    /// running under right now — [`OcrEngine::config_overrides`], exposed
+    /// here so `synthpass-cli` can print the same values once at startup
+    /// without depending on `synthpass-ocr` itself, which only this crate's
+    /// optional `ocr-native-rust` feature does (issue #495). See
+    /// [`ExtractionTrace::config_overrides`] for the per-document version
+    /// every OCR-derived record carries.
+    pub fn ocr_config_overrides(&self) -> std::collections::BTreeMap<String, String> {
+        self.ocr.config_overrides()
+    }
+
     /// Human-readable description of the active Tier-2 inference backend.
     pub fn infer_describe(&self) -> String {
         self.infer.describe()
@@ -650,6 +661,7 @@ impl Pipeline {
                     providers: vec![reading.by.to_string()],
                     escalation: None,
                     prompt: None,
+                    config_overrides: ocr_result.config_overrides.clone(),
                 });
                 let v1 =
                     serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
@@ -740,6 +752,7 @@ impl Pipeline {
                             ],
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
+                            config_overrides: stage.ocr.config_overrides.clone(),
                         });
                         let value = serde_json::to_value(extraction_from_v2_llm(
                             &v2,
@@ -838,6 +851,7 @@ impl Pipeline {
                             ],
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
+                            config_overrides: stage.ocr.config_overrides.clone(),
                         });
                         // Derived from `v2`, not from the raw `extraction`: the v1
                         // record must agree with the v2 one it ships alongside, and
@@ -1718,6 +1732,29 @@ mod tests {
         }
     }
 
+    /// Like [`StaticOcr`], but also reports a fixed non-default
+    /// configuration — the fixture for confirming
+    /// `ExtractionTrace::config_overrides` (issue #495) actually reaches a
+    /// trace via `OcrResult`, without a real OCR engine or touching the
+    /// process environment.
+    struct KnobReportingOcr(&'static str);
+
+    #[async_trait::async_trait]
+    impl OcrEngine for KnobReportingOcr {
+        async fn to_markdown(&self, _input: &Path) -> Result<String, PipelineError> {
+            Ok(self.0.to_string())
+        }
+        fn config_overrides(&self) -> std::collections::BTreeMap<String, String> {
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_STOP".to_string(),
+                "clean".to_string(),
+            )])
+        }
+        fn describe(&self) -> String {
+            "knob-reporting".into()
+        }
+    }
+
     /// The Croatian TD3 specimen MRZ from the `mrz` crate's corpus tests —
     /// every check digit valid.
     const HRV_TD3_MARKDOWN: &str = "## PUTOVNICA\n\nP<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06\n";
@@ -1798,6 +1835,7 @@ mod tests {
                 providers: vec!["mrz".to_string()],
                 escalation: None,
                 prompt: None,
+                config_overrides: Default::default(),
             }),
             "the catalog's MrzReader is the only provider consulted on an accept"
         );
@@ -1811,6 +1849,37 @@ mod tests {
         .expect("persisted json parses");
         assert_eq!(on_disk["schema_version"], serde_json::json!(2));
         assert_eq!(on_disk["provenance"]["kind"], json_str("mrz_checksum"));
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Issue #495: a Tier-1 (accept) record carries whatever non-default
+    /// configuration the OCR engine reports for this run, keyed exactly as
+    /// the engine reported it — the pipeline never invents or renames a knob.
+    #[tokio::test]
+    async fn tier1_trace_carries_the_engines_reported_config_overrides() {
+        let (input, dir) = temp_input("tier1-knobs").await;
+        let pipeline = Pipeline::new(
+            Box::new(KnobReportingOcr(HRV_TD3_MARKDOWN)),
+            Box::new(MockBackend),
+        );
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(result.method, Method::MrzDeterministic);
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        let trace = v2
+            .trace
+            .as_ref()
+            .expect("Tier-1 accept always attaches a trace");
+        assert_eq!(
+            trace.config_overrides,
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_STOP".to_string(),
+                "clean".to_string()
+            )]),
+            "the engine's reported configuration must reach the trace unchanged"
+        );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -1920,12 +1989,57 @@ mod tests {
                 providers: vec!["mrz".to_string(), "llm".to_string()],
                 escalation: Some(EscalationKind::MrzNotFound),
                 prompt: None,
+                config_overrides: Default::default(),
             }),
             "the catalog's MrzReader is always consulted first, found nothing, \
              and the LLM was consulted next"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Issue #495: the Tier-2 reader path (`process_document`'s escalation
+    /// branch) carries the same engine-reported configuration a Tier-1
+    /// accept does — attached once, via the same OCR run, regardless of
+    /// which tier ends up producing the fields.
+    #[tokio::test]
+    async fn tier2_trace_carries_the_engines_reported_config_overrides() {
+        let (input, dir) = temp_input("tier2-knobs").await;
+        let pipeline = Pipeline::new(
+            Box::new(KnobReportingOcr("just prose — no MRZ anywhere")),
+            Box::new(MockBackend),
+        );
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(result.method, Method::Llm);
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        let trace = v2.trace.as_ref().expect("Tier-2 always attaches a trace");
+        assert_eq!(
+            trace.config_overrides,
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_STOP".to_string(),
+                "clean".to_string()
+            )]),
+            "the engine's reported configuration must reach the trace unchanged"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// Issue #495: `Pipeline::ocr_config_overrides` is what `synthpass-cli`
+    /// calls to print the startup line — it must delegate to the active
+    /// engine's own report, not require a document to have been processed.
+    #[test]
+    fn pipeline_ocr_config_overrides_delegates_to_the_engine() {
+        let pipeline = Pipeline::new(Box::new(KnobReportingOcr("unused")), Box::new(MockBackend));
+        assert_eq!(
+            pipeline.ocr_config_overrides(),
+            std::collections::BTreeMap::from([(
+                "SYNTHPASS_OCR_STOP".to_string(),
+                "clean".to_string()
+            )])
+        );
     }
 
     #[tokio::test]
@@ -2063,6 +2177,7 @@ mod tests {
                 providers: vec!["mrz".to_string(), "llm".to_string()],
                 escalation: Some(EscalationKind::MrzChecksumFailed),
                 prompt: None,
+                config_overrides: Default::default(),
             }),
             "the specific reason must be MrzChecksumFailed, not MrzNotFound — \
              the MRZ did parse, it just didn't verify"
