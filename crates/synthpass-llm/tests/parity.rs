@@ -19,6 +19,15 @@
 //! the MRZ-holdout arm, in
 //! `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`.
 //!
+//! Re-measured 2026-09-27, prompt v3 (#506), CI run 36323412121 at `39345b2`,
+//! vocabulary `b6bd1f9a5fdd108e`, `n_ctx` 2048, ~35 min: **reviewed 297/585
+//! (50.8%) over 65 documents, derived 88/159 (55.3%) over 53** — 385/744
+//! overall. Not a move from the 2026-09-05 figures above: 118 fixtures against
+//! 72 (reviewed 18 → 65), a different vocabulary, and edited fixtures in
+//! between. Paired with the v2 run on the 84 fixtures it reached before its
+//! context-window overflow, v3 flipped no field. Record:
+//! `knowledge/benchmarks/parity-prompt-v3-2026-09-27.md`.
+//!
 //! The climb, on one corpus and one model, with nothing about the model
 //! changing at any step:
 //!
@@ -28,6 +37,7 @@
 //! | 2026-09-04 | 48.1% | the harness started normalizing, as production does |
 //! | 2026-09-04 | 52.5% | `normalize::date` learned two printed forms |
 //! | 2026-09-05 | 55.6% | `normalize::country_code` learned demonyms |
+//! | 2026-09-27 | 51.7% | *(not a step on this climb — 118 fixtures, vocabulary `b6bd1f9a5fdd108e`, prompt v3; see above)* |
 //!
 //! Every number is quoted rather than replaced: a baseline that silently
 //! tracks the current figure upward stops being a baseline.
@@ -983,9 +993,12 @@ fn native_llm_field_accuracy_over_sample_set() {
     // Two floors, because the two sets ask different questions and pooling them
     // would let a large easy set hide a regression in a small hard one.
     //
-    // Both sit far below the measured baseline (58.6% / 52.5%, recorded in
-    // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`), and that
-    // distance is deliberate. These catch a *broken* prompt or a repair-JSON
+    // Both sit far below the measured baseline (58.6% / 52.5% on the 72-fixture
+    // corpus, 2026-09-05, recorded in
+    // `knowledge/benchmarks/parity-mrz-holdout-2026-09-04.md`; 50.8% / 55.3% on
+    // 118 fixtures, 2026-09-27, recorded in
+    // `knowledge/benchmarks/parity-prompt-v3-2026-09-27.md`), and that distance
+    // is deliberate. These catch a *broken* prompt or a repair-JSON
     // bug — failures that take the rate to near zero — not drift.
     // `knowledge/technical_debt.md` reached the same conclusion from the other
     // direction: "a single pass/fail at a 25% floor would not have caught
