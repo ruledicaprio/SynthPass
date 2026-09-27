@@ -161,6 +161,36 @@ pub struct OcrPage {
     /// etc.), or `"control"` (the placebo arm ran the identical pass and
     /// appended its raw reading instead of repairing).
     pub chargrid: Option<String>,
+    /// The text of the single OCR pass the native retry loop **accepted**
+    /// (`synthpass_ocr::NativeOcr::recognize_detailed`'s retry loop, see its
+    /// module docs), if any pass was accepted — `None` on `exhausted` and on
+    /// a `pass_cap`/`budget` stop with nothing held. `Some` exactly when
+    /// [`OcrPage::retry_variant_id`] is `Some`.
+    ///
+    /// #508: `text` keeps accumulating every pass's candidate lines
+    /// (general plus every retry variant, whether or not it validated),
+    /// because Tier 2's LLM prompt benefits from every line the page ever
+    /// produced. But Tier 1's `mrz::find_and_parse` does not: handed the
+    /// concatenation, `mrz`'s damaged-capture `single()` unanimity gate sees
+    /// every failed variant's disagreeing readings alongside the accepted
+    /// one and refuses on the first ambiguity, even though the retry loop
+    /// already decided which reading to trust. Tier 1 must read what the
+    /// accepting parse read — this field carries exactly that text, so a
+    /// second `find_and_parse` over it reproduces the loop's own decision
+    /// instead of re-litigating it against text the loop already rejected.
+    /// See `synthpass_ocr`'s retry loop and [`Self::tier1_text`].
+    pub accepted_mrz_text: Option<String>,
+}
+
+impl OcrPage {
+    /// The text Tier 1's MRZ parse should read: [`Self::accepted_mrz_text`]
+    /// if the retry loop accepted a single pass, [`Self::text`] (the full
+    /// concatenation) otherwise — see that field's doc comment for why the
+    /// two differ. This is the one entry point pipeline code should call
+    /// instead of reading `text` directly ahead of `mrz::find_and_parse`.
+    pub fn tier1_text(&self) -> &str {
+        self.accepted_mrz_text.as_deref().unwrap_or(&self.text)
+    }
 }
 
 /// Heuristic confidence proxy in `[0, 1]` for a recognized line's text.
@@ -492,6 +522,32 @@ mod tests {
             bbox: BBox { x, y, w, h },
             confidence: 0.0,
         }
+    }
+
+    /// #508: `tier1_text()` prefers `accepted_mrz_text` when the retry loop
+    /// accepted a single pass -- this is the whole fix, so it needs its own
+    /// pin independent of any real OCR run.
+    #[test]
+    fn tier1_text_prefers_accepted_mrz_text_when_present() {
+        let page = OcrPage {
+            text: "general\nvariant0\nvariant1".to_string(),
+            accepted_mrz_text: Some("general".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(page.tier1_text(), "general");
+    }
+
+    /// The `exhausted`/no-single-pass-accepted case (#508): with no
+    /// `accepted_mrz_text`, `tier1_text()` falls back to the full `text`
+    /// exactly as Tier 1 always read it before this fix existed.
+    #[test]
+    fn tier1_text_falls_back_to_full_text_when_nothing_was_accepted() {
+        let page = OcrPage {
+            text: "general\nvariant0\nvariant1".to_string(),
+            accepted_mrz_text: None,
+            ..Default::default()
+        };
+        assert_eq!(page.tier1_text(), "general\nvariant0\nvariant1");
     }
 
     #[test]

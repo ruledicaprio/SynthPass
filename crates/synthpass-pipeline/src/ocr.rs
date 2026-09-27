@@ -124,6 +124,12 @@ pub struct OcrResult {
     /// Empty for every engine that reports none, which is every engine but
     /// [`RustOcrEngine`].
     pub config_overrides: std::collections::BTreeMap<String, String>,
+    /// Mirrors `synthpass_ocr::geometry::OcrPage::accepted_mrz_text` — the
+    /// text of the single native retry pass the loop accepted, or `None`
+    /// when no single pass was (see that field's doc for why Tier 1 must
+    /// read this instead of `text`, #508). `None` for every engine that
+    /// doesn't run a retry loop at all, `to_markdown`-only engines included.
+    pub accepted_mrz_text: Option<String>,
 }
 
 impl OcrResult {
@@ -143,7 +149,15 @@ impl OcrResult {
             rotation: 0,
             text_sanity: None,
             config_overrides: std::collections::BTreeMap::new(),
+            accepted_mrz_text: None,
         }
+    }
+
+    /// The text Tier 1 should parse — mirrors
+    /// `synthpass_ocr::geometry::OcrPage::tier1_text`. See
+    /// [`Self::accepted_mrz_text`]'s doc for why this can differ from `text`.
+    pub fn tier1_text(&self) -> &str {
+        self.accepted_mrz_text.as_deref().unwrap_or(&self.text)
     }
 }
 
@@ -377,6 +391,7 @@ mod rust_ocr {
                 rotation: page.rotation,
                 text_sanity: page.text_sanity,
                 config_overrides,
+                accepted_mrz_text: page.accepted_mrz_text,
             })
         }
 
@@ -579,6 +594,10 @@ mod additive_trait_tests {
             result.config_overrides.is_empty(),
             "an engine that overrides neither config_overrides nor \
              recognize_detailed must report no configuration"
+        );
+        assert_eq!(
+            result.accepted_mrz_text, None,
+            "an engine with no retry loop must report None, not a guessed pass"
         );
     }
 
