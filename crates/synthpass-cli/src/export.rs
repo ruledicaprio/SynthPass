@@ -2,10 +2,14 @@
 //! training dataset on disk (JSONL / Hugging Face), in the DeepSeek-OCR 0–1000
 //! convention fixed by `knowledge/decisions/ADR-0007-dataset-export-format.md`.
 //!
-//! Unlike `generate` (a single document, free), this is **gated on the license
-//! `export` feature** — bulk dataset production is a capacity surface per
-//! `knowledge/BRANDING.md` §5. `SYNTHPASS_LICENSE_SKIP=1` bypasses it for local
-//! development, like everywhere else in the CLI.
+//! Export generates synthetic, PII-free data — it is not extraction, and it
+//! never refuses on license grounds. Like `generate`, it always runs; unlike
+//! `generate`, bulk dataset production is a capacity surface per
+//! `knowledge/BRANDING.md` §5, so a missing/invalid license, or one that
+//! lacks the `export` feature, is **metered**: `main.rs`'s dispatch prints one
+//! stderr warning and lets this module run regardless (issue #494).
+//! `SYNTHPASS_LICENSE_SKIP=1` suppresses the check (and the warning)
+//! entirely, like everywhere else in the CLI.
 
 use std::path::PathBuf;
 use synthpass_export::{DocTypeChoice, ExportConfig, ExportFormat};
@@ -33,8 +37,8 @@ fn usage() {
     eprintln!("  --profile clean       fixed at 'clean' in v1 (accepted for forward-compat)");
     eprintln!("  --out-dir DIR         output directory (required; created if absent)");
     eprintln!();
-    eprintln!("Format and schema: knowledge/EXPORTS.md. Needs the license 'export' feature");
-    eprintln!("(or SYNTHPASS_LICENSE_SKIP=1 for local development).");
+    eprintln!("Format and schema: knowledge/EXPORTS.md. Runs without a license; a license");
+    eprintln!("lacking the 'export' feature is metered with a warning, not refused.");
 }
 
 /// Hand-rolled flag parser, consistent with `generate.rs` (no clap).
@@ -126,21 +130,13 @@ fn parse_args(args: &[String]) -> Result<ExportArgs, String> {
     })
 }
 
-/// `synthpass export` entry point. Exit codes (issue #492): `license_ok ==
-/// false` (the `export` license feature isn't granted) is a license refusal
-/// (3); a bad argument is a usage error (2); a `synthpass_export::run`
-/// failure — the corpus generated fine but writing the dataset didn't — is a
-/// runtime failure (1). This replaces the previous "ran, told you what was
-/// wrong" convention, which returned `Ok(())` (exit 0) in all three cases and
-/// left a caller with no way to tell success from failure.
-pub fn export_command(
-    args: &[String],
-    license_ok: bool,
-) -> Result<crate::Exit, Box<dyn std::error::Error>> {
-    if !license_ok {
-        return Ok(crate::Exit::License);
-    }
-
+/// `synthpass export` entry point. Never returns [`crate::Exit::License`]
+/// (issue #494) — the caller in `main.rs` has already warned about a missing
+/// or unentitled license before reaching here, and export runs regardless.
+/// Exit codes (issue #492): a bad argument is a usage error (2); a
+/// `synthpass_export::run` failure — the corpus generated fine but writing
+/// the dataset didn't — is a runtime failure (1).
+pub fn export_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::error::Error>> {
     let parsed = match parse_args(args) {
         Ok(p) => p,
         Err(e) => {

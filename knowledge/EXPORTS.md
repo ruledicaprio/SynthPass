@@ -216,16 +216,16 @@ that call.
 
 ## Licensing
 
-`synthpass export` is gated on a new `FEATURE_EXPORT` constant in
-`crates/synthpass-license/src/lib.rs`, added to `Tier::Pro` and `Tier::Enterprise`
-`default_features()`. Enforced in `synthpass-cli` with `check_license_feature(FEATURE_EXPORT)`
-before the subcommand runs — the same shape as `FEATURE_BATCH` guarding `batch`
-(`crates/synthpass-cli/src/main.rs`). Rationale in ADR-0007 decision 5 and
-[`BRANDING.md §5`](BRANDING.md#5-commercial-strategy): bulk dataset production is a capacity
-surface; single-document `generate` stays free.
+`synthpass export` is metered, not gated (#494, [`BRANDING.md §5`](BRANDING.md#5-commercial-strategy)).
+The `FEATURE_EXPORT` constant in `crates/synthpass-license/src/lib.rs` is in the `Tier::Pro` and
+`Tier::Enterprise` presets. Export generates synthetic, PII-free data and is not extraction, so it
+always runs: when the license is missing, invalid or lacks `export`, `synthpass-cli`
+(`crates/synthpass-cli/src/main.rs`) prints one stderr warning naming the feature and the reason,
+then exports. The boundary itself is ADR-0007 decision 5 (amended 2026-09-27): bulk dataset
+production is a capacity surface; single-document `generate` stays free.
 
-`SYNTHPASS_LICENSE_SKIP=1` bypasses the gate for local development, consistent with the rest of
-the CLI.
+`SYNTHPASS_LICENSE_SKIP=1` skips the check, and the warning, for local development, consistent
+with the rest of the CLI.
 
 ## Capture profiles
 

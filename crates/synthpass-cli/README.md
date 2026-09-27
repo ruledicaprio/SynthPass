@@ -14,15 +14,17 @@ cargo run -p synthpass-cli -- --help
 | Command | Does | License |
 | --- | --- | --- |
 | `synthpass <image>` | extract one document | required |
-| `synthpass batch <dir\|glob>` | extract every matching image | `batch` feature |
+| `synthpass batch <dir\|glob>` | extract every matching image | required (same as above); a license missing the `batch` feature is metered — one warning, still runs |
 | `synthpass decrypt <file.json.enc>` | decrypt an encrypted result (needs `SYNTHPASS_KEY`) | none |
 | `synthpass doctor` | preflight: OCR models, Tier-2 inferer, license | none |
 | `synthpass fingerprint` | print this machine's fingerprint | none |
 | `synthpass verify-license [path]` | verify a license file | none |
 | `synthpass generate ...` | synthetic document images + label JSON | none |
-| `synthpass export ...` | synthetic corpus as a training dataset | `export` feature |
+| `synthpass export ...` | synthetic corpus as a training dataset | none required; a license missing the `export` feature (or missing/invalid entirely) is metered — one warning, still runs |
 
-`SYNTHPASS_LICENSE_SKIP=1` bypasses the license gate for local development.
+`SYNTHPASS_LICENSE_SKIP=1` bypasses the license check (and its warnings) entirely, for local
+development. A `batch`/`export` license feature is never a hard gate (issue #494,
+`knowledge/BRANDING.md` §5): it's metered with a stderr warning, never refused.
 
 ## Where the contracts live
 
