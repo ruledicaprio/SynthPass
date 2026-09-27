@@ -657,6 +657,77 @@ fn similarity_is_bounded_and_reflexive() {
     assert!(similarity("ABCDEF", "ZZZZZZ") < 0.2);
 }
 
+// ─── Content-cleanup corpus safety net (issue #506) ──────────────────────
+//
+// `synthpass_llm::prompt::build_prompt` drops two kinds of line noise before
+// the model ever sees the OCR text: non-Latin garbage (`drop_non_latin_noise`)
+// and, since #506, unbroken character runs far longer than any real line on
+// an identity document produces (`drop_long_run_noise`, added to stop one
+// fixture's guilloche microprint from blowing the prompt past the context
+// window). Both are deliberately high-precision, conservative rules — but
+// "conservative" is a claim about this corpus, not a proof, and the model-
+// dependent test below only runs by hand. This is the check that runs every
+// time: every field value and every MRZ line that appears verbatim in a
+// fixture's *unfiltered* OCR text must still appear in what `build_prompt`
+// hands the model. A value lost here is a value Tier 2 never had a chance
+// at, and a regression here would otherwise look identical to the model
+// simply answering wrong.
+
+#[test]
+fn build_prompt_keeps_every_verbatim_ground_truth_value() {
+    let fixtures = fixtures();
+    if fixtures.is_empty() {
+        println!("no fixtures on disk — skipping content-cleanup safety check");
+        return;
+    }
+
+    let mut missing = Vec::new();
+    for fixture in &fixtures {
+        let markdown = std::fs::read_to_string(&fixture.markdown).expect("markdown reads");
+        let truth: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&fixture.truth).expect("json reads"))
+                .expect("fixture is valid JSON");
+        let prompt = synthpass_llm::prompt::build_prompt(&markdown, None);
+
+        for (field, value) in truth.as_object().expect("fixture is a JSON object") {
+            if field == "extraction_method" {
+                continue;
+            }
+            let Some(value) = value.as_str() else {
+                continue;
+            };
+            if field == "mrz_line" {
+                for line in value.lines() {
+                    let line = line.trim();
+                    if !line.is_empty() && markdown.contains(line) && !prompt.contains(line) {
+                        missing.push(format!("{}: mrz_line line {line:?}", fixture.stem));
+                    }
+                }
+            } else if markdown.contains(value) && !prompt.contains(value) {
+                missing.push(format!("{}: {field} {value:?}", fixture.stem));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "build_prompt's content cleanup dropped a verbatim ground-truth value: {missing:#?}"
+    );
+}
+
+/// `SYNTHPASS_MODEL_N_CTX`, read with the same semantics
+/// `synthpass-pipeline/src/infer.rs`'s `native_choice` uses in production:
+/// parse if set and parseable, default `2048` otherwise. Reading it here
+/// rather than hardcoding the default lets this harness be pointed at the
+/// same context window a real deployment is running with, rather than
+/// silently measuring a different one (issue #506).
+fn n_ctx_from_env() -> u32 {
+    std::env::var("SYNTHPASS_MODEL_N_CTX")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2048)
+}
+
 #[test]
 #[ignore]
 fn native_llm_field_accuracy_over_sample_set() {
@@ -667,7 +738,8 @@ fn native_llm_field_accuracy_over_sample_set() {
         "model not found at {} — download it first",
         model_path.display()
     );
-    let llm = NativeLlm::load(&model_path, 2048).expect("model loads");
+    let n_ctx = n_ctx_from_env();
+    let llm = NativeLlm::load(&model_path, n_ctx).expect("model loads");
 
     let fixtures = fixtures();
     assert!(
@@ -698,7 +770,8 @@ fn native_llm_field_accuracy_over_sample_set() {
     // log from before the change fails loudly instead of silently mis-parsing.
     const PARITY_LOG_FORMAT_VERSION: u32 = 1;
     println!(
-        "normalizer vocabulary: {}   log-format: {PARITY_LOG_FORMAT_VERSION}   prompt: {} v{}   fixtures: {}",
+        "normalizer vocabulary: {}   log-format: {PARITY_LOG_FORMAT_VERSION}   prompt: {} v{}   \
+         n_ctx: {n_ctx}   fixtures: {}",
         synthpass_core::normalize::vocabulary_fingerprint(),
         synthpass_llm::prompt::PROMPT_ID,
         synthpass_llm::prompt::PROMPT_VERSION,
@@ -721,6 +794,12 @@ fn native_llm_field_accuracy_over_sample_set() {
     let mut reviewed = Tally::default();
     let mut derived = Tally::default();
     let mut legacy = Tally::default();
+    // Fixture stems where `NativeLlm::extract` itself returned `Err` (a
+    // context-window overflow, most likely — see issue #506) rather than an
+    // inaccurate `Extraction`. Recorded rather than panicking on the spot: a
+    // panic here would stop the run before printing which fixture caused it,
+    // and would abandon every fixture still queued behind it.
+    let mut extraction_failures: Vec<String> = Vec::new();
 
     // Progress accounting. This run takes tens of minutes and is routinely
     // interrupted; without a counter and an ETA the per-fixture output tells
@@ -789,18 +868,32 @@ fn native_llm_field_accuracy_over_sample_set() {
             markdown
         };
 
-        let mut actual = llm.extract(&markdown, None).expect("extraction succeeds");
-        // Both pipeline entry points call this on every Tier-2 result before
-        // anything downstream sees it (`synthpass-pipeline/src/lib.rs`), so a
-        // harness that skipped it would be scoring a value the product never
-        // emits. Measuring anything other than what ships is the one way this
-        // number can be confidently wrong.
-        synthpass_core::normalize::extraction(&mut actual);
-
-        // Field lookup goes through the v2 lift so this file holds no third
-        // copy of the `CoreField` -> struct-field mapping.
+        // A failed extraction (a context-window overflow, most likely — see
+        // issue #506) must never be silently absorbed into a lower score: it
+        // is printed by name here, scores every field for this fixture as a
+        // mismatch below (Tier 2 produced nothing, which is what the product
+        // would ship), and fails the test at the end alongside every other
+        // fixture that failed the same way.
+        let actual: Option<ExtractionV2> = match llm.extract(&markdown, None) {
+            Ok(mut actual) => {
+                // Both pipeline entry points call this on every Tier-2 result
+                // before anything downstream sees it
+                // (`synthpass-pipeline/src/lib.rs`), so a harness that skipped
+                // it would be scoring a value the product never emits.
+                // Measuring anything other than what ships is the one way
+                // this number can be confidently wrong.
+                synthpass_core::normalize::extraction(&mut actual);
+                // Field lookup goes through the v2 lift so this file holds no
+                // third copy of the `CoreField` -> struct-field mapping.
+                Some(ExtractionV2::from(&actual))
+            }
+            Err(e) => {
+                println!("  EXTRACTION FAILED {}: {e}", fixture.stem);
+                extraction_failures.push(fixture.stem.clone());
+                None
+            }
+        };
         let expected = ExtractionV2::from(&expected);
-        let actual = ExtractionV2::from(&actual);
 
         let tally = if fixture.reviewed {
             &mut reviewed
@@ -833,8 +926,11 @@ fn native_llm_field_accuracy_over_sample_set() {
         );
         for field in fixture.scored_fields() {
             let exp = expected.fields.get(field);
-            let act = actual.fields.get(field);
-            let ok = fields_match(exp, act, field);
+            let act = actual.as_ref().and_then(|a| a.fields.get(field));
+            // `actual.is_some()` first: a failed extraction must score every
+            // field as a mismatch, even one whose expected value is also
+            // absent — it must never look like agreement.
+            let ok = actual.is_some() && fields_match(exp, act, field);
             tally.record(field, ok);
             if fixture.reviewed && LEGACY_SCORED.contains(&field) {
                 legacy.record(field, ok);
@@ -871,6 +967,17 @@ fn native_llm_field_accuracy_over_sample_set() {
         } else {
             "enabled"
         }
+    );
+
+    // A hard extraction failure (as opposed to an inaccurate answer) is
+    // never something a lower match rate is allowed to paper over — assert
+    // after the tallies above have printed, so a failed run still shows
+    // everything it measured before failing.
+    assert!(
+        extraction_failures.is_empty(),
+        "extraction failed outright (not merely inaccurately) on {} fixture(s), each printed \
+         above as 'EXTRACTION FAILED': {extraction_failures:?}",
+        extraction_failures.len()
     );
 
     // Two floors, because the two sets ask different questions and pooling them

@@ -98,7 +98,10 @@ pub struct NativeLlm {
 impl NativeLlm {
     /// Load the GGUF at `model_path` and prepare a warm, reusable model.
     /// `n_ctx` is the context window size (2048 for the Qwen fine-tune this
-    /// workspace ships, matching the Python inferer).
+    /// workspace ships, matching the Python inferer). [`Self::generate`] bounds
+    /// every prompt it builds so that the prompt plus [`MAX_NEW_TOKENS`] fits
+    /// inside `n_ctx` (issue #506), so a small `n_ctx` shows up as more
+    /// aggressively trimmed input rather than as a decode-time failure.
     ///
     /// Built with `--features cuda`, every transformer layer is offloaded to
     /// the GPU (see `knowledge/decisions/ADR-0004-gpu-acceleration.md`); a
@@ -144,6 +147,13 @@ impl NativeLlm {
     /// Greedy-sample a completion for `markdown`'s ChatML prompt, stopping at
     /// `<|im_end|>`, an end-of-generation token, or [`MAX_NEW_TOKENS`].
     ///
+    /// The prompt is built by [`prompt::build_prompt_within_budget`], which
+    /// deterministically drops OCR noise and, if it is still too large,
+    /// content lines (never an MRZ-shaped one) until it plus
+    /// [`MAX_NEW_TOKENS`] fits [`Self::n_ctx`] — see that function's doc
+    /// comment for the drop policy. This can still return `Err` when even
+    /// the document's MRZ-shaped lines alone do not fit.
+    ///
     /// The returned raw text (and the prompt built internally) contain PII
     /// from the source document, and are never returned past
     /// [`extract`]/[`extract_stream`] — both wrap them in [`Zeroizing`] so
@@ -163,7 +173,18 @@ impl NativeLlm {
             .lock()
             .map_err(|_| "generation lock poisoned")?;
 
-        let prompt_text = Zeroizing::new(prompt::build_prompt(markdown, hint));
+        let prompt_text = Zeroizing::new(prompt::build_prompt_within_budget(
+            markdown,
+            hint,
+            self.n_ctx.get(),
+            MAX_NEW_TOKENS as u32,
+            |text| {
+                self.model
+                    .str_to_token(text, AddBos::Always)
+                    .map(|t| t.len())
+                    .unwrap_or(usize::MAX)
+            },
+        )?);
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(self.n_ctx))
             .with_n_batch(self.n_ctx.get());
@@ -176,9 +197,13 @@ impl NativeLlm {
             .model
             .str_to_token(&prompt_text, AddBos::Always)
             .map_err(|e| format!("tokenization failed: {e}"))?;
-        if tokens.len() as u32 >= self.n_ctx.get() {
+        // `build_prompt_within_budget` already guarantees this. Re-checked on
+        // the tokens actually decoded, so generation can never run past the
+        // context window whatever the budgeting above did.
+        if tokens.len() + MAX_NEW_TOKENS as usize > self.n_ctx.get() as usize {
             return Err(format!(
-                "prompt ({} tokens) does not fit in context window ({})",
+                "prompt ({} tokens) plus the {MAX_NEW_TOKENS}-token output budget does not fit \
+                 in context window ({})",
                 tokens.len(),
                 self.n_ctx
             ));

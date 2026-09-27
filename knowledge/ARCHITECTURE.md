@@ -283,7 +283,7 @@ cross-reference this table by hand.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SYNTHPASS_MODEL_PATH` | `./qwen2.5-1.5b-instruct-q4_k_m.gguf` | GGUF path — any GGUF works (README quickstart convention: `models/`) |
-| `SYNTHPASS_MODEL_N_CTX` | `2048` | Context window in tokens |
+| `SYNTHPASS_MODEL_N_CTX` | `2048` | Context window in tokens. The Tier-2 prompt is capped so that it plus the 500-token output budget fits (#506) |
 | `SYNTHPASS_MODEL_SHA256` / `SYNTHPASS_MODEL_SKIP_VERIFY` | *(built-in)* / *(unset)* | Re-pin or skip the integrity check |
 | `SYNTHPASS_LLM_CONTEXTS` | `1` | Concurrent Tier-2 contexts; raise only if the hardware has room |
 
