@@ -89,8 +89,9 @@ Concretely, the long arc is:
    into a build status.
 3. **Own the extraction platform.** The v2 *Atlas* redesign — a versioned extraction schema
    with per-field confidence and provenance, OCR that detects regions by geometry instead of
-   guessing, bounded concurrency and batch capacity, structured observability, enforced
-   licensing tiers, and grammar-constrained decoding for the LLM fallback.
+   guessing, bounded concurrency and batch capacity, structured observability, licensing tiers
+   as entitlement records and metering rather than a gate (`knowledge/BRANDING.md` §5), and
+   grammar-constrained decoding for the LLM fallback.
 4. **Harden the deterministic core.** All five MRZ formats (TD1/TD2/TD3, MRVA/MRVB) read
    reliably on *real* specimens, not just synthetic ones — MRZ sequence completeness,
    per-format render fidelity, and evidence-driven escalation. This is what the product is

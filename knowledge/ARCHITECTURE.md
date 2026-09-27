@@ -123,9 +123,10 @@ As of v0.8.0, the shipped `synthpass`/`synthpass-serve` binaries require a signe
 * **Embedded public key:** `crates/synthpass-license/pubkey.b64`, loaded via `include_str!` and parsed once. A public key isn't a secret, so a checked-in file is safe; rotation is a one-file swap. `SYNTHPASS_LICENSE_PUBKEY` overrides it at runtime for testing, mirroring the `SYNTHPASS_MODEL_SHA256`/`SYNTHPASS_OCR_*_SHA256` known-good-plus-override convention used elsewhere in this workspace. **The pinned key ships as a placeholder** generated during development — a real vendor deployment must run `synthpass-license-issuer keygen` and replace `pubkey.b64` before issuing real licenses.
 * **Machine fingerprint (optional binding):** `machine_fingerprint()` hashes `/etc/machine-id` (falling back to `/var/lib/dbus/machine-id`) via the same `synthpass_core::audit::sha256_hex` the audit log uses — deliberately *not* an OS-name+hostname+CPU-brand approach, since hostname is trivially changed and CPU brand is identical across thousands of same-SKU machines. An empty `hw_fingerprint` in the payload skips the check entirely (site/trial licenses).
 * **Enforcement lives in the binaries, not `synthpass-pipeline`** — the pipeline stays a clean, license-agnostic, reusable library:
-  * **`synthpass` CLI:** checked once at startup, only on the extraction path (`synthpass <file>`). `decrypt`/`doctor`/`fingerprint`/`verify-license` all stay usable without a valid license — you need `fingerprint` to obtain one in the first place.
+  * **`synthpass` CLI:** checked once at startup, only on the extraction path (`synthpass <file>`, `synthpass batch`). `decrypt`/`doctor`/`fingerprint`/`verify-license` all stay usable without a valid license — you need `fingerprint` to obtain one in the first place.
   * **`synthpass-serve`:** signature + fingerprint verified once at boot (`license_refusal()`, refuses to start on invalid/expired/mismatched, mirroring the existing `startup_refusal()` non-loopback gate); a cheap expiry-only comparison (no signature re-verification) then runs on every `/api/extract` request, so a long-running server stops serving once its license expires without paying a full re-verify cost per request.
   * **`SYNTHPASS_LICENSE_SKIP=1`** bypasses enforcement for local development/CI, mirroring `SYNTHPASS_MODEL_SKIP_VERIFY`.
+* **License features are metered, not gated (#494, [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)).** The extraction-path requirement above is unchanged: a missing, invalid, expired or fingerprint-mismatched license still refuses `synthpass <file>`, `synthpass batch` and `synthpass-serve`'s boot. A license that verifies but lacks a feature never blocks its use. `synthpass batch` and `synthpass export` print one stderr warning naming the feature, then run. `synthpass-serve`'s `POST /api/extract/batch` and `GET /metrics` serve the request, log one warning per feature per process, and count each accepted request in `synthpass_unentitled_requests_total{feature=...}` on `/metrics` (state owned by `synthpass-serve`; the pipeline stays license-agnostic). `GET /api/jobs/{id}` checks no feature. `synthpass export` is not extraction, so it needs no valid license either: a missing or invalid one only adds the same warning. `multi-context` is unchanged: it caps LLM parallelism rather than refusing.
 * **Issuance is a separate, `vendor`-feature-gated binary** (`synthpass-license-issuer`: `keygen` + `issue-license` subcommands) — never compiled into the customer-facing binaries. This is a deliberate hardening over gating issuance by an env-var check inside the *same* binary: the shipped `synthpass`/`synthpass-serve` contain no signing code, no private-key handling, and no keygen RNG dependency at all — `cargo check -p synthpass-license` (default features) builds clean without pulling in any of the `vendor`-only dependency subtree.
 * **CLI surface stays hand-rolled, not clap.** The shipped binary goes from 3 to 5 commands (`extract`/`decrypt`/`doctor` + new `fingerprint`/`verify-license`), both flag-light enough for the existing positional dispatch. The genuinely flag-heavy command (`issue-license`: `--customer`, `--tier`, `--expires-in-days`, `--hw`, `--features`, `--out`) lives entirely in the off-binary vendor issuer, where dependency weight doesn't matter.
 * **Threat model, stated plainly** (matches this project's house style of documenting limitations rather than overselling — see [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like)): the fingerprint binds to an OS *installation*, not physically to hardware — root can read/copy `machine-id`, it survives a disk clone, and expiry relies on the system clock, which an air-gapped operator can roll back. Most fundamentally, because the source is public, anyone who rebuilds from source can strip the check. **This meters and gates the official pre-built binary, deters casual license-sharing, and produces a compliance artifact — it is not DRM and is not sold as tamper-proof.** True hardware attestation would need a TPM/HSM, out of scope here.
@@ -325,16 +326,21 @@ exit status alone instead of parsing stderr:
 | 0 | success |
 | 1 | runtime or extraction failure, including any failed document in a `batch` |
 | 2 | usage error (unknown option, bad/missing/surplus arguments, `generate`/`export` argument errors) |
-| 3 | license refusal (missing/invalid license, or a required feature not granted) |
+| 3 | license refusal on the extraction path — single-document or `batch` — for a missing, invalid, expired or fingerprint-mismatched license, or a `verify-license` failure |
 
 Notable specifics, where the bucket isn't obvious from the table alone:
 
 - `decrypt`: a missing or malformed `SYNTHPASS_KEY` is a usage/config error (2), since nothing
   about the input file has been touched yet; a missing input file or a decrypt failure (wrong
   key, corrupt ciphertext) is a runtime failure (1).
-- `batch`: exits 1 if *any* document in the batch failed, even when the rest succeeded — the
-  summary line still reports the per-document breakdown, but the exit code is what a script
-  actually branches on.
+- `batch`: needs the same valid license single-document extraction does (batch is extraction,
+  §6) — that's the one exit-3 case left in this command. Exits 1 if *any* document in the batch
+  failed, even when the rest succeeded — the summary line still reports the per-document
+  breakdown, but the exit code is what a script actually branches on.
+- A license feature (`batch` for `synthpass batch`, `export` for `synthpass export`) missing from an otherwise
+  valid license is **metered, not refused** (#494, [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)): one
+  stderr warning, exit code unaffected. `export` is not extraction and never refuses on license grounds; a
+  missing or invalid license only adds the same warning.
 - `verify-license`: a missing license *file* also exits 3, not 1 — this command's whole purpose
   is to report license validity, so "no license to check" is itself a refusal, the same as an
   invalid or expired one.

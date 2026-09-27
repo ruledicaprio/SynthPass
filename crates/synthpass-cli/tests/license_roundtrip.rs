@@ -55,6 +55,22 @@ fn sample_payload(hw_fingerprint: &str, expires_unix: u64) -> LicensePayload {
     }
 }
 
+/// Like [`sample_payload`], but with an explicit (non-empty) `features`
+/// list — `sample_payload`'s empty list is *grandfathered* into every
+/// feature (`synthpass_license::features_grandfathered`), so it can never
+/// exercise the "valid license, missing this one feature" path issue #494's
+/// metering tests need.
+fn sample_payload_with_features(
+    hw_fingerprint: &str,
+    expires_unix: u64,
+    features: &[&str],
+) -> LicensePayload {
+    LicensePayload {
+        features: features.iter().map(|s| (*s).to_string()).collect(),
+        ..sample_payload(hw_fingerprint, expires_unix)
+    }
+}
+
 fn write_license_fixture(name: &str, signed: &SignedLicense) -> TempFileGuard {
     let path = std::env::temp_dir().join(format!(
         "synthpass-cli-test-{name}-{}.synthpass",
@@ -243,5 +259,190 @@ fn extraction_path_refuses_expired_license_but_skip_bypasses_the_gate() {
         !String::from_utf8_lossy(&output.stderr).contains("license check failed"),
         "SYNTHPASS_LICENSE_SKIP=1 should bypass the license gate entirely, got: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Removes the directory even if an assertion panics mid-test.
+struct TempDirGuard(PathBuf);
+
+impl Drop for TempDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+// ── issue #494: license feature refusals become metering ──
+
+/// `synthpass batch` with a license that verifies fine but simply doesn't
+/// name `batch` must not refuse (exit 3) — it warns once on stderr and
+/// runs. The batch target is an empty directory, so it still fails
+/// downstream ("no image files found", exit 1) — the point here is only
+/// that the license-feature check itself never blocks it.
+#[test]
+fn batch_with_a_valid_license_missing_batch_warns_but_does_not_refuse() {
+    let (signing_key, pubkey_b64) = keypair();
+    let signed = sign(
+        &signing_key,
+        &sample_payload_with_features("", 4_000_000_000, &["extract"]),
+    );
+    let license_fixture = write_license_fixture("batch-unentitled", &signed);
+
+    let empty_dir = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-batch-unentitled-dir-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&empty_dir).expect("create empty batch dir");
+    let _dir_guard = TempDirGuard(empty_dir.clone());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args(["batch", empty_dir.to_str().unwrap()])
+        .env("SYNTHPASS_LICENSE_PUBKEY", &pubkey_b64)
+        .env(
+            "SYNTHPASS_LICENSE_PATH",
+            license_fixture.0.to_str().unwrap(),
+        )
+        .env_remove("SYNTHPASS_LICENSE_SKIP")
+        .output()
+        .expect("run `synthpass batch <dir>`");
+
+    assert_ne!(
+        output.status.code(),
+        Some(3),
+        "a valid license merely missing 'batch' must not refuse, got: {output:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        stderr.matches('⚠').count(),
+        1,
+        "expected exactly one metering warning, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("batch") && stderr.contains("metered"),
+        "the warning must name the feature and say it's metered, got: {stderr}"
+    );
+}
+
+/// `synthpass batch` with no license present at all is still a refusal
+/// (exit 3) — batch is extraction, and extraction still needs a valid
+/// license (ARCHITECTURE §6); only the `batch` *feature* is metered.
+#[test]
+fn batch_with_no_license_still_exits_3() {
+    let missing_license = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-batch-no-license-{}.synthpass",
+        std::process::id()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args(["batch", std::env::temp_dir().to_str().unwrap()])
+        .env_remove("SYNTHPASS_LICENSE_SKIP")
+        .env("SYNTHPASS_LICENSE_PATH", missing_license.to_str().unwrap())
+        .output()
+        .expect("run `synthpass batch <dir>`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(3),
+        "batch with no license present must exit 3, got: {output:?}"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("license"),
+        "expected a license-related refusal, got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// `synthpass export` never needs a license at all — it produces synthetic,
+/// PII-free data, not extraction. A license that verifies fine but lacks
+/// `export` is metered (one stderr warning), and export still runs to
+/// completion (exit 0).
+#[test]
+fn export_with_a_license_missing_export_does_not_refuse_and_warns() {
+    let (signing_key, pubkey_b64) = keypair();
+    let signed = sign(
+        &signing_key,
+        &sample_payload_with_features("", 4_000_000_000, &["extract"]),
+    );
+    let license_fixture = write_license_fixture("export-unentitled", &signed);
+
+    let out_dir = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-export-unentitled-{}",
+        std::process::id()
+    ));
+    let _dir_guard = TempDirGuard(out_dir.clone());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args([
+            "export",
+            "--format",
+            "jsonl",
+            "--count",
+            "1",
+            "--document-type",
+            "td3",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .env("SYNTHPASS_LICENSE_PUBKEY", &pubkey_b64)
+        .env(
+            "SYNTHPASS_LICENSE_PATH",
+            license_fixture.0.to_str().unwrap(),
+        )
+        .env_remove("SYNTHPASS_LICENSE_SKIP")
+        .output()
+        .expect("run `synthpass export`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a license merely missing 'export' must not stop export from running, got: {output:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("export") && stderr.contains("metered"),
+        "the warning must name the feature and say it's metered, got: {stderr}"
+    );
+}
+
+/// `synthpass export` with no license file present at all still runs to
+/// completion (exit 0), warning once instead of refusing.
+#[test]
+fn export_with_no_license_does_not_refuse_and_warns() {
+    let missing_license = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-export-no-license-{}.synthpass",
+        std::process::id()
+    ));
+
+    let out_dir = std::env::temp_dir().join(format!(
+        "synthpass-cli-test-export-no-license-out-{}",
+        std::process::id()
+    ));
+    let _dir_guard = TempDirGuard(out_dir.clone());
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .args([
+            "export",
+            "--format",
+            "jsonl",
+            "--count",
+            "1",
+            "--document-type",
+            "td3",
+            "--out-dir",
+            out_dir.to_str().unwrap(),
+        ])
+        .env_remove("SYNTHPASS_LICENSE_SKIP")
+        .env("SYNTHPASS_LICENSE_PATH", missing_license.to_str().unwrap())
+        .output()
+        .expect("run `synthpass export`");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "a missing license must not stop export from running, got: {output:?}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no valid license") && stderr.contains("metered"),
+        "the warning must say why and that it's metered, got: {stderr}"
     );
 }

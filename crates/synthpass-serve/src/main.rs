@@ -28,7 +28,10 @@ use std::{
     convert::Infallible,
     env,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc,
+    },
 };
 use synthpass_license::{FEATURE_BATCH, FEATURE_METRICS, FEATURE_MULTI_CONTEXT as MULTI_CONTEXT};
 use synthpass_pipeline::{
@@ -60,12 +63,52 @@ struct AppState {
     /// [`synthpass_license::check_feature`] — are cheap comparisons over the
     /// already-verified payload.
     license: Option<synthpass_license::LicensePayload>,
+    /// Requests served despite the license lacking the `batch` feature —
+    /// metering, not refusal (issue #494, `knowledge/BRANDING.md` §5).
+    /// Stays at 0 when `license` is `None` (licensing skipped), because
+    /// nothing is checked then. Exposed on `/metrics` as
+    /// `synthpass_unentitled_requests_total{feature="batch"}`. Owned here,
+    /// not in `synthpass-pipeline`, which stays license-agnostic.
+    unentitled_batch: UnentitledCounter,
+    /// Same as `unentitled_batch`, for the `metrics` feature.
+    unentitled_metrics: UnentitledCounter,
 }
 
 impl AppState {
     /// The license's `expires_unix`, or `None` when licensing is skipped.
     fn license_expires_unix(&self) -> Option<u64> {
         self.license.as_ref().map(|p| p.expires_unix)
+    }
+}
+
+/// A serve-owned "served without entitlement" counter for one feature: how
+/// many requests were served despite the license lacking it, plus a
+/// process-lifetime flag so the accompanying `tracing::warn!` fires once,
+/// not on every request (issue #494). `Default` starts both at
+/// zero/unwarned, which is exactly right whether the license lacks the
+/// feature from boot or licensing is skipped entirely — the latter never
+/// calls [`record`](Self::record) at all.
+#[derive(Default)]
+struct UnentitledCounter {
+    count: AtomicU64,
+    warned: AtomicBool,
+}
+
+impl UnentitledCounter {
+    /// Bumps the count and, only the first time this is called for this
+    /// counter, logs a warning naming `feature`.
+    fn record(&self, feature: &str) {
+        self.count.fetch_add(1, Ordering::Relaxed);
+        if !self.warned.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                feature,
+                "license does not include this feature — request served anyway (metered, not refused)"
+            );
+        }
+    }
+
+    fn get(&self) -> u64 {
+        self.count.load(Ordering::Relaxed)
     }
 }
 
@@ -437,6 +480,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         token,
         max_queue_depth,
         license,
+        unentitled_batch: UnentitledCounter::default(),
+        unentitled_metrics: UnentitledCounter::default(),
     });
 
     let app = Router::new()
@@ -510,19 +555,52 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<Value> {
 /// Prometheus scrape endpoint.
 ///
 /// Sits *inside* the auth layer (unlike `/health`): operational counters are
-/// not public. Additionally gated on the `metrics` license feature — the
-/// "enhanced reporting" surface of [`BRANDING.md`] §5, which is a legitimate
-/// paid boundary because it is an integration convenience, not core
-/// capability. Refusals are `403` and name the missing feature.
+/// not public. A license lacking the `metrics` feature — the "enhanced
+/// reporting" surface of [`BRANDING.md`] §5 — never blocks the scrape
+/// (issue #494): it's counted in `synthpass_unentitled_requests_total{feature="metrics"}`
+/// below and warned about once per process, never `403`.
 ///
 /// [`BRANDING.md`]: https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/BRANDING.md
-async fn metrics(State(state): State<Arc<AppState>>) -> Result<String, ApiError> {
+async fn metrics(State(state): State<Arc<AppState>>) -> String {
     if let Some(payload) = &state.license {
-        if let Err(e) = synthpass_license::check_feature(payload, FEATURE_METRICS) {
-            return Err(api_error(StatusCode::FORBIDDEN, e));
+        if synthpass_license::check_feature(payload, FEATURE_METRICS).is_err() {
+            state.unentitled_metrics.record(FEATURE_METRICS);
         }
     }
-    Ok(metrics_text(&state.pipeline.metrics_snapshot()))
+    let mut out = metrics_text(&state.pipeline.metrics_snapshot());
+    out.push_str(&unentitled_requests_text(
+        state.unentitled_batch.get(),
+        state.unentitled_metrics.get(),
+    ));
+    out
+}
+
+/// Renders the serve-owned `synthpass_unentitled_requests_total` counter
+/// family (issue #494): requests served despite the license lacking the
+/// feature, by feature — always both series, even at 0, so a scraper never
+/// sees the metric appear or disappear across the license's lifetime
+/// (including when licensing is skipped via `SYNTHPASS_LICENSE_SKIP=1`,
+/// where nothing is ever checked and both stay 0).
+///
+/// Kept separate from [`metrics_text`] because the counters live on
+/// `AppState`, not `synthpass_pipeline::MetricsSnapshot` — the pipeline
+/// stays license-agnostic (`knowledge/ARCHITECTURE.md` §6).
+fn unentitled_requests_text(batch: u64, metrics: u64) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    out.push_str(
+        "# HELP synthpass_unentitled_requests_total Requests served although the license lacks the feature (metered, never refused), by feature.\n",
+    );
+    out.push_str("# TYPE synthpass_unentitled_requests_total counter\n");
+    let _ = writeln!(
+        out,
+        "synthpass_unentitled_requests_total{{feature=\"batch\"}} {batch}"
+    );
+    let _ = writeln!(
+        out,
+        "synthpass_unentitled_requests_total{{feature=\"metrics\"}} {metrics}"
+    );
+    out
 }
 
 async fn extract(
@@ -662,19 +740,24 @@ async fn cleanup(state: &AppState, paths: &[&PathBuf]) {
 /// batch can run far longer than one SSE connection is reasonable to hold
 /// open, so the client is expected to poll `GET /api/jobs/{id}` instead.
 ///
-/// Gated on the `batch` license feature (BRANDING §5: capacity is a
-/// legitimate paid boundary, unlike `/api/extract` itself, which stays
-/// ungated). Reuses `queue_full_error`/`api_error` so refusals are shaped
-/// identically to every other endpoint's.
+/// The `batch` license feature (BRANDING §5: capacity is a metered surface,
+/// unlike `/api/extract` itself, which stays ungated) is metered here, not
+/// gated (issue #494): a license that lacks it still gets the request
+/// served (still subject to the same queue/expiry checks below), counted in
+/// `synthpass_unentitled_requests_total{feature="batch"}` and warned about
+/// once per process. Reuses `queue_full_error`/`api_error` so the refusals
+/// that remain (queue-full, expired license) are shaped identically to
+/// every other endpoint's.
 async fn extract_batch(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
-    if let Some(payload) = &state.license {
-        if let Err(e) = synthpass_license::check_feature(payload, FEATURE_BATCH) {
-            return Err(api_error(StatusCode::FORBIDDEN, e));
-        }
-    }
+    // Counted only once the batch is accepted, below: a request refused for
+    // a full queue, an expired license or a bad body was not served.
+    let unentitled = state
+        .license
+        .as_ref()
+        .is_some_and(|payload| synthpass_license::check_feature(payload, FEATURE_BATCH).is_err());
 
     // Same overload protection as `/api/extract`: a batch's documents will
     // themselves queue behind `llm_semaphore` the moment any of them miss
@@ -760,6 +843,9 @@ async fn extract_batch(
         });
     }
 
+    if unentitled {
+        state.unentitled_batch.record(FEATURE_BATCH);
+    }
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({ "job_id": job_id.to_string(), "document_count": document_count })),
@@ -771,18 +857,16 @@ async fn extract_batch(
 /// submitted, or one that has aged out of the completed-job retention ring
 /// (`SYNTHPASS_QUEUE_CAPACITY`, see `synthpass_pipeline::jobs`).
 ///
-/// Gated on the same `batch` feature as the submit endpoint — a license that
-/// can't submit a batch has no legitimate use for its results either.
+/// No license-feature check at all (issue #494): submission is metered
+/// once, at `POST /api/extract/batch`, not re-metered on every poll — this
+/// used to also gate on `batch` on the theory that "a license that can't
+/// submit a batch has no legitimate use for its results", but that gate
+/// existed only to back the submit endpoint's 403, which no longer refuses
+/// anything.
 async fn get_job(
     State(state): State<Arc<AppState>>,
     AxumPath(raw_id): AxumPath<String>,
 ) -> Result<Json<Value>, ApiError> {
-    if let Some(payload) = &state.license {
-        if let Err(e) = synthpass_license::check_feature(payload, FEATURE_BATCH) {
-            return Err(api_error(StatusCode::FORBIDDEN, e));
-        }
-    }
-
     // `JobId` doesn't implement `serde::Deserialize` (adding `serde` as a
     // direct dependency just for that would be exactly the kind of
     // dependency creep this project avoids), so the path segment is taken
@@ -1021,6 +1105,8 @@ mod tests {
             token: None,
             max_queue_depth: 4,
             license,
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         });
         Router::new()
             .route("/metrics", get(metrics))
@@ -1057,32 +1143,57 @@ mod tests {
             "# TYPE synthpass_ocr_duration_seconds histogram",
             "synthpass_ocr_duration_seconds_bucket{le=\"+Inf\"} 0",
             "synthpass_tier2_duration_seconds_count 0",
+            // An Enterprise license grants both `batch` and `metrics`, so a
+            // licensed scrape never bumps either series — but both must
+            // still be present (issue #494: always emit both, even at 0).
+            "# TYPE synthpass_unentitled_requests_total counter",
+            "synthpass_unentitled_requests_total{feature=\"batch\"} 0",
+            "synthpass_unentitled_requests_total{feature=\"metrics\"} 0",
         ] {
             assert!(body.contains(expected), "missing {expected:?} in:\n{body}");
         }
     }
 
     #[tokio::test]
-    async fn metrics_is_403_without_the_metrics_feature() {
+    async fn metrics_is_served_and_counted_without_the_metrics_feature() {
         // Pro licenses buy capacity, not reporting — see BRANDING.md §5.
+        // Issue #494: this is metered, not refused — the scrape still
+        // succeeds, and each unentitled request is counted in
+        // `synthpass_unentitled_requests_total{feature="metrics"}`.
         let payload = synthpass_license::LicensePayload {
             features: synthpass_license::Tier::Pro.default_features(),
             ..sample_license_payload(4_000_000_000)
         };
-        let (status, body) = metrics_response(metrics_app(Some(payload))).await;
+        let app = metrics_app(Some(payload));
 
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, body) = metrics_response(app.clone()).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "an unentitled feature is metered, never refused"
+        );
         assert!(
-            body.contains(FEATURE_METRICS),
-            "the refusal must name the missing feature: {body}"
+            body.contains("synthpass_unentitled_requests_total{feature=\"metrics\"} 1"),
+            "the first unentitled scrape must be counted: {body}"
+        );
+
+        // A second scrape against the same (Arc-shared) state must keep
+        // counting, not just flip a flag.
+        let (_, body) = metrics_response(app).await;
+        assert!(
+            body.contains("synthpass_unentitled_requests_total{feature=\"metrics\"} 2"),
+            "a second unentitled scrape must increment further: {body}"
         );
     }
 
     #[tokio::test]
     async fn metrics_is_available_when_licensing_is_skipped() {
-        // SYNTHPASS_LICENSE_SKIP=1 is a full opt-out, not a bottom tier.
-        let (status, _) = metrics_response(metrics_app(None)).await;
+        // SYNTHPASS_LICENSE_SKIP=1 is a full opt-out, not a bottom tier —
+        // nothing is checked, so the unentitled counters never move.
+        let (status, body) = metrics_response(metrics_app(None)).await;
         assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("synthpass_unentitled_requests_total{feature=\"batch\"} 0"));
+        assert!(body.contains("synthpass_unentitled_requests_total{feature=\"metrics\"} 0"));
     }
 
     #[test]
@@ -1167,6 +1278,8 @@ mod tests {
             token: None,
             max_queue_depth: 0,
             license: None,
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         });
         let app = Router::new()
             .route("/api/extract", post(extract))
@@ -1201,6 +1314,8 @@ mod tests {
             token: None,
             max_queue_depth: 4,
             license: license_expiring_at(Some(0)), // expired at the Unix epoch
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         });
         let app = Router::new()
             .route("/api/extract", post(extract))
@@ -1234,6 +1349,8 @@ mod tests {
             token: None,
             max_queue_depth: 4,
             license: license_expiring_at(license_expires_unix),
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         });
         Router::new()
             .route("/health", get(health))
@@ -1287,6 +1404,8 @@ mod tests {
             token: token.map(str::to_string),
             max_queue_depth: 4,
             license: None,
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         })
     }
 
@@ -1359,6 +1478,8 @@ mod tests {
             token: None,
             max_queue_depth,
             license,
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
         })
     }
 
@@ -1366,20 +1487,86 @@ mod tests {
         Router::new()
             .route("/api/extract/batch", post(extract_batch))
             .route("/api/jobs/{id}", get(get_job))
+            // Also mounted so tests can scrape `synthpass_unentitled_requests_total`
+            // against the same (Arc-shared) state a submit/poll test used.
+            .route("/metrics", get(metrics))
             .with_state(state)
     }
 
-    async fn body_string(resp: Response) -> String {
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
-            .await
-            .unwrap();
-        String::from_utf8(bytes.to_vec()).unwrap()
+    /// A minimal but real multipart body with one file field — needed to
+    /// actually reach `202 Accepted` in `extract_batch` (an empty body, as
+    /// the other tests below send, is itself rejected by the handler's own
+    /// "no file fields" check, which would mask whether the license gate
+    /// let the request through).
+    fn one_file_multipart_body(boundary: &str) -> Body {
+        Body::from(format!(
+            "--{boundary}\r\n\
+             Content-Disposition: form-data; name=\"file\"; filename=\"a.jpg\"\r\n\
+             Content-Type: image/jpeg\r\n\r\n\
+             not a real image\r\n\
+             --{boundary}--\r\n"
+        ))
     }
 
     #[tokio::test]
-    async fn extract_batch_is_403_without_the_batch_feature() {
+    async fn extract_batch_is_served_and_counted_without_the_batch_feature() {
         // A trial license names extract/multi-context but not batch —
-        // BRANDING §5's capacity boundary.
+        // BRANDING §5's capacity boundary. Issue #494: metered, not
+        // refused — the submission still succeeds (202), and it's counted
+        // in `synthpass_unentitled_requests_total{feature="batch"}`.
+        let payload = synthpass_license::LicensePayload {
+            features: synthpass_license::Tier::Trial.default_features(),
+            ..sample_license_payload(4_000_000_000)
+        };
+        let work_dir = std::env::temp_dir().join(format!(
+            "synthpass-serve-test-batch-metering-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&work_dir).expect("create work dir");
+        let pipeline = Pipeline::new(
+            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
+        );
+        let state = Arc::new(AppState {
+            pipeline,
+            work_dir: work_dir.clone(),
+            // Keep uploads around rather than racing this test's assertions
+            // against the handler's own detached cleanup task.
+            keep_work: true,
+            token: None,
+            max_queue_depth: 4,
+            license: Some(payload),
+            unentitled_batch: UnentitledCounter::default(),
+            unentitled_metrics: UnentitledCounter::default(),
+        });
+        let app = batch_app(state);
+
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/extract/batch")
+            .header("content-type", "multipart/form-data; boundary=X-BOUNDARY-X")
+            .body(one_file_multipart_body("X-BOUNDARY-X"))
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::ACCEPTED,
+            "an unentitled feature is metered, never refused"
+        );
+
+        let (_, metrics_body) = metrics_response(app).await;
+        assert!(
+            metrics_body.contains("synthpass_unentitled_requests_total{feature=\"batch\"} 1"),
+            "the unentitled submission must be counted: {metrics_body}"
+        );
+
+        std::fs::remove_dir_all(&work_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn extract_batch_refused_for_its_body_is_not_counted() {
+        // Only an accepted batch was served, so only an accepted batch is
+        // metered: an unentitled request the handler rejects stays at 0.
         let payload = synthpass_license::LicensePayload {
             features: synthpass_license::Tier::Trial.default_features(),
             ..sample_license_payload(4_000_000_000)
@@ -1392,12 +1579,13 @@ mod tests {
             .header("content-type", "multipart/form-data; boundary=X-BOUNDARY-X")
             .body(Body::empty())
             .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
-        let body = body_string(resp).await;
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let (_, metrics_body) = metrics_response(app).await;
         assert!(
-            body.contains(FEATURE_BATCH),
-            "the refusal must name the missing feature: {body}"
+            metrics_body.contains("synthpass_unentitled_requests_total{feature=\"batch\"} 0"),
+            "a refused batch was not served, so it is not counted: {metrics_body}"
         );
     }
 
@@ -1442,7 +1630,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_job_is_403_without_the_batch_feature() {
+    async fn get_job_is_not_gated_or_counted_without_the_batch_feature() {
+        // Issue #494: submission is metered once, at `POST
+        // /api/extract/batch` — `get_job` no longer runs any license-feature
+        // check at all, so polling an unentitled license neither refuses nor
+        // adds to the counter.
         let payload = synthpass_license::LicensePayload {
             features: synthpass_license::Tier::Trial.default_features(),
             ..sample_license_payload(4_000_000_000)
@@ -1453,8 +1645,18 @@ mod tests {
             .uri("/api/jobs/1")
             .body(Body::empty())
             .unwrap();
-        let resp = app.oneshot(req).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::NOT_FOUND,
+            "id 1 was never submitted, and no license gate remains to intercept it first"
+        );
+
+        let (_, metrics_body) = metrics_response(app).await;
+        assert!(
+            metrics_body.contains("synthpass_unentitled_requests_total{feature=\"batch\"} 0"),
+            "a jobs poll must never be counted as an unentitled batch use: {metrics_body}"
+        );
     }
 
     #[tokio::test]

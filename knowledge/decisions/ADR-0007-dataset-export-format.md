@@ -1,6 +1,6 @@
 # ADR-0007 — Dataset export format: adopt the DeepSeek-OCR 0–1000 convention, JSONL first
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-09-27)
 **Date:** 2026-09-07
 
 ## Context
@@ -152,3 +152,16 @@ feature. "Hugging Face export" means the on-disk `datasets`-loadable layout and 
 **Explicitly not licensed by this decision:** exporting real-document extraction results as
 COCO/YOLO (the schema has no per-field geometry and this ADR does not add it), pushing to any
 remote dataset host, and any new heavy dependency for a columnar format.
+
+## Amendment (2026-09-27)
+
+**Decision 5's boundary stands; its enforcement is now metering, not a refusal.** On #494 the
+owner chose "Turn the refusals into metering: record and warn, never refuse, in line with
+BRANDING §5", the section that, as the 2026-09-11 citation correction above records, rejects a
+feature-gated paid tier. `FEATURE_EXPORT` is still the capacity surface the Pro and Enterprise
+presets grant. Without it, `synthpass export` no longer exits 3: it prints one stderr warning
+naming the feature and the reason (no valid license, or one that lacks `export`) and runs. Export
+therefore runs without a license, as `generate` always has. For enforcement, that adopts the
+alternative rejected above as "Leave export ungated, like `generate`"; the capacity boundary that
+alternative argued about is what this decision still records. `batch` changed the same way under
+the same issue. Decision 5's text is left as written.

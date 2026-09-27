@@ -1,7 +1,13 @@
 //! Offline cryptographic licensing: Ed25519-signed license files that record
 //! what an official `synthpass`/`synthpass-serve` build is entitled to, for
 //! air-gapped deployments, without ever phoning home. This is capacity metering
-//! and entitlement, not a feature gate (`knowledge/BRANDING.md` §5).
+//! and entitlement, not a feature gate (`knowledge/BRANDING.md` §5): a license
+//! that lacks `batch`, `export` or `metrics` never refuses the request — the
+//! CLI and `synthpass-serve` warn and meter the use instead (issue #494).
+//! Two things still act on a license: its *validity* on the extraction path
+//! (the CLI's `check_license`, `synthpass-serve`'s boot-time
+//! `license_refusal`), which refuses, and `multi-context`, which caps LLM
+//! parallelism rather than refusing.
 //!
 //! **Threat model, stated plainly (matches this project's house style of
 //! documenting limitations rather than overselling — see
@@ -33,31 +39,42 @@ use std::str::FromStr;
 pub use fingerprint::machine_fingerprint;
 
 /// Single-document extraction — the core capability. Named here for
-/// completeness (and so a preset can list it), but deliberately **never**
-/// gated in `synthpass-serve`: `knowledge/BRANDING.md` §5 draws the paid boundary
-/// at capacity, support, and enterprise-integration surfaces, never at the
-/// core.
+/// completeness (and so a preset can list it), but nothing ever calls
+/// [`check_feature`] with it: the one thing this crate's callers actually
+/// enforce for extraction is license *validity* — `check_license` in the
+/// CLI, boot-time `license_refusal` and the per-request expiry check in
+/// `synthpass-serve` — never a per-feature gate on `extract` itself.
 pub const FEATURE_EXTRACT: &str = "extract";
-/// Batch submission / job endpoints — a capacity surface.
+/// Batch submission / job endpoints — a capacity surface. A license that
+/// verifies fine but lacks this is **metered, not refused** (issue #494;
+/// `knowledge/BRANDING.md` §5, which rejects "a paid tier gated on
+/// features" outright): the CLI/`synthpass-serve` caller records the use
+/// and warns once instead of blocking it.
 pub const FEATURE_BATCH: &str = "batch";
-/// More than one concurrent LLM context — a capacity surface.
+/// More than one concurrent LLM context — a capacity **cap**, not a refusal:
+/// `synthpass-serve` checks it with [`check_feature`] and
+/// [`effective_llm_contexts`] and runs fewer contexts when the license
+/// doesn't cover the request. Unchanged by issue #494.
 pub const FEATURE_MULTI_CONTEXT: &str = "multi-context";
-/// Prometheus `/metrics` — the "enhanced reporting" surface.
+/// Prometheus `/metrics` — the "enhanced reporting" surface. Metered, not
+/// refused, on the same terms as `FEATURE_BATCH`.
 pub const FEATURE_METRICS: &str = "metrics";
 /// `synthpass export` — bulk synthetic-dataset production. A
 /// "higher-capacity generation" surface per `knowledge/BRANDING.md` §5 and
 /// `knowledge/decisions/ADR-0007-dataset-export-format.md` decision 5:
-/// single-document `generate` stays free, a corpus builder is a capacity knob.
+/// single-document `generate` stays free, a corpus builder is a capacity
+/// knob — metered, not refused, on the same terms as `FEATURE_BATCH`.
 pub const FEATURE_EXPORT: &str = "export";
 
 /// The commercial tiers of `knowledge/BRANDING.md` §5, ordered so that a higher
 /// tier is a superset of a lower one.
 ///
-/// The tier is *descriptive*: gating decisions are made per-feature by
+/// The tier is *descriptive*: entitlement decisions are made per-feature by
 /// [`check_feature`], because a license's `features` list is what the issuer
 /// actually signed. `Tier` exists so the issuer can stamp a coherent preset
 /// ([`Tier::default_features`]) in one step and so startup logging can say
-/// something meaningful.
+/// something meaningful. A missing feature is never refused (issue #494):
+/// `batch`, `export` and `metrics` are metered, and `multi-context` caps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
     Trial,
@@ -68,8 +85,8 @@ pub enum Tier {
 impl Tier {
     /// The feature set an issuer stamps for this tier: a preset for entitlement
     /// records, not a paywall — `knowledge/BRANDING.md` §5 explains why no
-    /// feature is sold behind the gate. Pro adds capacity knobs; Enterprise adds
-    /// reporting on top.
+    /// feature is sold behind a gate, and a missing one is never refused
+    /// (issue #494). Pro adds capacity knobs; Enterprise adds reporting on top.
     pub fn default_features(self) -> Vec<String> {
         let names: &[&str] = match self {
             Self::Trial => &[FEATURE_EXTRACT],

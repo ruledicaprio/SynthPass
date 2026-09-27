@@ -39,11 +39,15 @@ pub(crate) enum Exit {
     /// 2 — a usage error: an unknown option, a missing, bad or surplus
     /// argument, or a `generate`/`export` argument error.
     Usage,
-    /// 3 — a license refusal: no license file, an invalid or expired
-    /// license, or a required feature (`batch`/`export`) the license doesn't
-    /// grant. `verify-license` also reports a missing license *file* under
-    /// this code, not `Failure` — the command's whole purpose is to check
-    /// license validity, and "no license to check" is itself a refusal.
+    /// 3 — a license refusal on the extraction path (single-document or
+    /// `batch`): no license file, or an invalid, expired or
+    /// fingerprint-mismatched one. `verify-license` also reports a missing
+    /// license *file* under this code, not `Failure` — the command's whole
+    /// purpose is to check license validity, and "no license to check" is
+    /// itself a refusal. A license that verifies fine but lacks a specific
+    /// feature (`batch`/`export`) is **not** this code any more (issue
+    /// #494): those uses are metered (one stderr warning) rather than
+    /// refused, in line with `knowledge/BRANDING.md` §5.
     License,
 }
 
@@ -144,7 +148,8 @@ fn print_usage() {
     println!(
         "  synthpass batch <dir|glob>         extract every image in a directory or matching a glob"
     );
-    println!("                                     (needs the license 'batch' feature; emits one JSON per input + a summary)");
+    println!("                                     (needs a license, same as single-document extraction; a license lacking the");
+    println!("                                     'batch' feature still runs, metered with a warning — emits one JSON per input + a summary)");
     println!("  synthpass decrypt <file.json.enc>  decrypt (needs SYNTHPASS_KEY)");
     println!("  synthpass doctor                   preflight: OCR/inferer/license, config sanity");
     println!(
@@ -154,7 +159,8 @@ fn print_usage() {
     println!("  synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]");
     println!("                                     generate synthetic td1|td2|td3|mrva|mrvb document images + label JSON (no license required)");
     println!("  synthpass export --format jsonl|hf [--count N] [--seed N] [--document-type TYPE] [--pack-pages N] --out-dir DIR");
-    println!("                                     export a synthetic corpus as a training dataset (needs the license 'export' feature; see knowledge/EXPORTS.md)");
+    println!("                                     export a synthetic corpus as a training dataset (no license required to run; a license");
+    println!("                                     lacking the 'export' feature is metered with a warning — see knowledge/EXPORTS.md)");
     println!("  synthpass --help, -h               show this message");
     println!("  synthpass --version, -V            show the version");
     println!();
@@ -230,22 +236,15 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         // same as `fingerprint`/`verify-license` below.
         "generate" => return generate::generate_command(&args[2..]),
         // `synthpass export` — synthetic-corpus → training-dataset exporter
-        // (M6 expansion track, ADR-0007). Gated on the license `export`
-        // feature (bulk generation is a capacity surface, BRANDING §5) — the
-        // same shape as `batch` above; a single `generate` stays free.
+        // (M6 expansion track, ADR-0007). Export produces synthetic,
+        // PII-free data — it is not extraction, so it never refuses on
+        // license grounds. The license `export` feature (bulk generation is
+        // a capacity surface, BRANDING §5) is metered instead: a missing or
+        // invalid license, or one that lacks `export`, prints one warning
+        // and export runs anyway (issue #494).
         "export" => {
-            let license_ok = match check_license_feature(synthpass_license::FEATURE_EXPORT) {
-                Ok(()) => true,
-                Err(e) => {
-                    eprintln!("❌ {e}");
-                    eprintln!(
-                        "   run `synthpass fingerprint` and contact your vendor for a license with \
-                         the 'export' feature, or set SYNTHPASS_LICENSE_SKIP=1 for local development"
-                    );
-                    false
-                }
-            };
-            return export::export_command(&args[2..], license_ok);
+            warn_unentitled_feature(synthpass_license::FEATURE_EXPORT);
+            return export::export_command(&args[2..]);
         }
         // `synthpass doctor` — preflight checks before running the pipeline for real.
         "doctor" => return doctor_command().await,
@@ -451,18 +450,39 @@ fn check_license() -> Result<(), String> {
         .map_err(|e| format!("license check failed ({path}): {e}"))
 }
 
-/// Like [`check_license`], but for one specific license feature — used by
-/// `batch` (gated on `FEATURE_BATCH`, the same commercial boundary
-/// `synthpass-serve`'s `/api/extract/batch` enforces; BRANDING §5: capacity
-/// is a legitimate paid gate, core single-document extraction is not).
-fn check_license_feature(feature: &str) -> Result<(), String> {
+/// The reason a use of `feature` should be metered rather than refused
+/// (issue #494; `knowledge/BRANDING.md` §5: features are metered, never
+/// gated — only the extraction path's license *validity* is, via
+/// [`check_license`]): `None` when the feature is granted, or when
+/// `SYNTHPASS_LICENSE_SKIP=1` opts out of licensing altogether and every
+/// feature is unlocked. Otherwise names the feature and the reason: the
+/// license is missing/invalid, or it verified fine but doesn't list
+/// `feature`.
+fn unentitled_feature_reason(feature: &str) -> Option<String> {
     if env::var("SYNTHPASS_LICENSE_SKIP").as_deref() == Ok("1") {
-        return Ok(());
+        return None;
     }
     let path = env::var("SYNTHPASS_LICENSE_PATH").unwrap_or_else(|_| DEFAULT_LICENSE_PATH.into());
-    let status = synthpass_license::load_and_check(Path::new(&path))
-        .map_err(|e| format!("license check failed ({path}): {e}"))?;
-    synthpass_license::check_feature(&status.payload, feature).map_err(|e| e.to_string())
+    match synthpass_license::load_and_check(Path::new(&path)) {
+        Ok(status) => match synthpass_license::check_feature(&status.payload, feature) {
+            Ok(()) => None,
+            Err(_) => Some(format!("the license at {path} does not include it")),
+        },
+        Err(e) => Some(format!("no valid license at {path} ({e})")),
+    }
+}
+
+/// Prints the one stderr warning a metered-but-unentitled use of `feature`
+/// gets (issue #494) — the command runs regardless. Never touches stdout,
+/// so a caller parsing a command's stdout (#493) sees no difference.
+fn warn_unentitled_feature(feature: &str) {
+    if let Some(reason) = unentitled_feature_reason(feature) {
+        eprintln!(
+            "⚠️  '{feature}' feature: {reason}. This use is metered, not refused; run \
+             `synthpass fingerprint` and contact your vendor for a license with the \
+             '{feature}' feature"
+        );
+    }
 }
 
 /// Rejects extra positional arguments a shell may have added by expanding an
@@ -626,14 +646,20 @@ async fn batch_command(
         return Ok(Exit::Usage);
     }
 
-    if let Err(e) = check_license_feature(synthpass_license::FEATURE_BATCH) {
+    // Batch is extraction, so it needs the same valid license
+    // single-document extraction does (ARCHITECTURE §6) — this is the one
+    // refusal (exit 3) left in `batch`. A valid license that simply lacks
+    // the `batch` feature is metered, not refused (issue #494): see the
+    // `warn_unentitled_feature` call below, after this check has passed.
+    if let Err(e) = check_license() {
         eprintln!("❌ {e}");
         eprintln!(
-            "   run `synthpass fingerprint` and contact your vendor for a license with the \
-             'batch' feature, or set SYNTHPASS_LICENSE_SKIP=1 for local development"
+            "   run `synthpass fingerprint` and contact your vendor for a license, or set \
+             SYNTHPASS_LICENSE_SKIP=1 for local development"
         );
         return Ok(Exit::License);
     }
+    warn_unentitled_feature(synthpass_license::FEATURE_BATCH);
 
     // Neither branch here is a usage error: `arg` itself may be perfectly
     // well-formed (an existing directory with nothing in it, or a glob whose
