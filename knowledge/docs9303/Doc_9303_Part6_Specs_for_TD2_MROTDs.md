@@ -98,11 +98,17 @@ The dimensional specifications refer to the outer limits of the TD2. A margin of
 
 > **Figure 2. Edge margins and nominal dimensions of a TD2 Size MROTD**
 >
-> | Dimension | mm | in |
-> |---|---|---|
-> | Width | 105.0 ± 0.75 | 4.13 ± 0.03 |
-> | Height | 74.0 ± 0.75 | 2.91 ± 0.03 |
-> | Margin | 2.0 | 0.08 |
+> <img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p10.png" alt="Edge margins and nominal dimensions of a TD2 Size MROTD">
+>
+> [Editorial description, not ICAO text: Diagram showing the outer and inner rectangles of a TD2, with the overall width and height, the edge margins and the corner radius dimensioned]
+
+Labels printed on Figure 2 (not a table in the original):
+
+- 105 ± 0.75 mm (4.13 ± 0.03 in) — overall width, top dimension line
+- 74.0 ± 0.75 mm (2.91 ± 0.03 in) — overall height, right-hand dimension line
+- 2.0 mm (0.08 in) — margin, shown three times (top, left and right edges)
+- Radius = 3.18 ± 0.30 mm (0.125 ± 0.012 in) — corner radius
+- "Not to scale"; "Nominal dimensions in millimetres (inch dimensions in parentheses)"
 
 ### 2.4 Thickness
 

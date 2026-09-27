@@ -110,7 +110,7 @@ The image, as shown in Figure 1, is a positive, i.e. the black part of the image
 
 Figure 2 shows the RECOMMENDED dimensions of the symbol as it is to appear on an eMRP cover or data page, or on an electronic TD2.
 
-A smaller size of \(4.2 \times 7.2 \text{mm}\) (0.17 \(\times\) 0.28 in), scaled in proportion, is RECOMMENDED for use on an electronic TD1.
+A smaller size of 4.2 × 7.2 mm (0.17 × 0.28 in), scaled in proportion, is RECOMMENDED for use on an electronic TD1.
 
 The symbol MAY be scaled in proportion for use in, for example, background designs.
 
@@ -273,7 +273,7 @@ A high-capacity contactless IC SHALL be the electronic storage medium specified 
 
 #### Contactless IC and encoding
 
-The contactless ICs used in eMRTDs SHALL conform to ISO/IEC 14443 Type A or Type B and ISO/IEC 7816-4. The LDS SHALL be encoded according to the Random Access method. The read range (achieved by a combination of the eMRTD and the reader) typically is up to \(10cm\) as noted in ISO/IEC 14443. An ISO/IEC 14443 application profile for MRTDs is provided in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md).
+The contactless ICs used in eMRTDs SHALL conform to ISO/IEC 14443 Type A or Type B and ISO/IEC 7816-4. The LDS SHALL be encoded according to the Random Access method. The read range (achieved by a combination of the eMRTD and the reader) typically is up to 10 cm as noted in ISO/IEC 14443. An ISO/IEC 14443 application profile for MRTDs is provided in [Doc 9303-10](Doc_9303_Part10_LDS_for_Storage_of_Biometrics_and_Other_Data_in_the_Contactless_IC.md).
 
 #### Data storage capacity of the contactless IC
 

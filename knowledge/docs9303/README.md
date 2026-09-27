@@ -335,6 +335,258 @@ Checked against the rendered PDF page for every finding:
   landed:** #466 detects a number and title on adjacent lines, and drops the Appendix B list item.
   The Part 8 footnote markers and the editorial-prose marker remain as documented residuals.
 
+### All 13 Parts confirmed against the fixed tool, 2026-09-27 (#463)
+
+Scope extended mid-pass to cover every Part, not just the seven #463 originally listed as
+untriaged: Parts 1, 2, 4–7 and 9 are newly triaged below; Parts 3 and 8 are re-confirmed against
+the 2026-09-25 section above; Parts 10, 12 and 13 are re-confirmed against the 2026-09-25
+rebuild section; Part 11 (its PDF arrived after this pass started) is re-confirmed too,
+including the 174/174-headings count in the 2026-09-25 correction above. All 13 runs
+used the post-#466 tool (split headings on adjacent lines) rather than the pre-fix counts quoted
+in the issue body or in the 2026-09-25 sections' own opening paragraphs.
+
+| Part | Invented numbers | Headings (missing/absent) | Number-alone | Tables under figure | Low-coverage paragraphs | Real defects fixed | Key residuals |
+|---|---|---|---|---|---|---|---|
+| 1 | 0 | 0 / 0 | 0 | 0 | 3 | 0 | TOC (2), link-filename (1) |
+| 2 | 0 | 0 / 1 | 5 | 0 | 43 | 0 (1 reported, not fixed) | TOC (3), link-filename (1), heading tool-gap (1), date-in-GUI (5), **table-as-prose (39, pervasive — reported)** |
+| 3 | 0 | 0 / 1 | 0 | 0 | 7 → 6 | 1 | TOC (2), link-filename (1), table-row-label repeats in PDF (2), Arabic-glyph tokenization (1), heading tool-gap (1) |
+| 4 | 0 | 0 / 0 | 1 | 0 | 4 | 0 | TOC (3), link-filename (1), date-in-GUI (1) |
+| 5 | 0 | 0 / 0 | 0 | 0 | 4 | 0 | TOC (3), link-filename (1) — confirms #466 fixed the 4.2.3.4/4.2.3.5 false positive |
+| 6 | 2 (+3 new) | 0 / 0 | 0 | 1 | 4 | 1 | TOC (3), link-filename (1), MRZ-split (2), **non-extractable vector label (3, new residual)** |
+| 7 | 4 | 0 / 1 | 1 | 0 | 11 | 0 | TOC (8), link-filename (3), MRZ-split (4), date-in-GUI (1), heading tool-gap (1) |
+| 8 | 8 | 2 / 0 | 1 | 0 | 10 | 0 | confirmed unchanged from 2026-09-25: hex-dump (5), editorial note (3), footnote-marker heading tool-gap (2); + date-in-GUI (1, newly named class) |
+| 9 | 2 | 0 / 0 | 0 | 0 | 7 → 6 | 2 | TOC (2), link-filename (2), editorial note (1), list-item (1 + the 2 invented numbers) |
+| 10 | 0 | 0 / 0 | 0 | 0 | 3 | 0 | link-filename (2), hex-dump (1) |
+| 11 | 0 | 0 / 0 | 0 | 0 | 3 | 0 | value-PDF-splits-token (1), ASN.1 code (1), flattened figure (1, extractor: follow-up 5) — confirms 174/174 headings, 0 missing, 0 extra |
+| 12 | 0 | 1 / 0 | 23 | 0 | 4 | 0 | confirmed unchanged from 2026-09-25: Table C-1 heading artefact (1), RFC 5280/3280 quotes (23); + wide-table plain-text fallback (2), ASN.1 code (1), flattened figure (1, extractor: follow-up 5) |
+| 13 | 0 | 0 / 0 | 0 | 0 | 4 | 0 | TOC (1), link-filename (1), disclosed editorial list (1), verbatim formula (1) |
+
+Counts are the fresh run's own totals before any fix in this pass; the "→" in low-coverage shows
+the count after this pass's fixes. Per-Part detail follows, grouped the same way the table above
+runs. Parts 1, 2 and 4–7 were re-run against the fixed tool (#466, split headings on adjacent
+lines) rather than the pre-fix table quoted in the issue body:
+
+- **Part 1: 3 low-coverage paragraphs, nothing else flagged.** All three (Markdown lines 36, 49,
+  70) are the Table of Contents — its numbered entries (`1. FOREWORD`, linked to a heading anchor)
+  don't start with `-`, so the paragraph detector reads them as prose — combined at lines 49 and 70 with a
+  Markdown link's destination filename inflating the paragraph's own word count. No real defect.
+- **Part 2: 1 heading "absent from PDF", 5 number-alone candidates, 43 low-coverage paragraphs.**
+  - The "absent" heading, **A.5.3.2** (PDF page App A-9 = page 29), is already correctly rendered
+    (`##### A.5.3.2 Anti-copy protection methods`). It's split across two PDF lines like the
+    #466 split-heading fix handles, but with a letter-prefixed appendix number
+    (`A.5.3.2` vs `4.4.3.3.1`) — `docs9303_extract.py`'s `_HEADING_NUMBER_ONLY_RE` only matches a
+    bare numeric clause number, so the split-heading detector never fires here even though the
+    heading is real and already correct. Tool gap, not a document defect (see follow-up below).
+  - The 5 number-alone candidates (PDF pages 78, 81, 84, 86 — Appendix C's exemplary border-control
+    GUI screenshots, Figures C-11 through C-14) are all a holder's date of birth or document expiry
+    date (`17.11.19`, `05.02.85`) printed inside a GUI mock-up, immediately followed by a
+    capitalised field label (`Sex:`, `Machine readable zone (MRZ)`) — matches the split-heading
+    shape by coincidence. Tool artefact, a new subclass of the number-alone check's own documented
+    false-positive class.
+  - Of the 43 low-coverage paragraphs: 3 (lines 38, 44, 51) are Table of Contents entries, 1
+    (line 565) is a Markdown link's filename inflating a real, faithful sentence, and the
+    remaining **39 (lines 813–841, 919–1221, 1631, 2187) are Appendix B and Appendix C tables that
+    the conversion rendered as run-on prose instead of a Markdown table** — confirmed real tables
+    against the PDF: Table A-1 "Summary of security recommendations" (PDF page 33), the
+    machine-authentication tables under B.3.1.1 through B.3.6 (PDF pages 39 onward — `find_tables()`
+    detects a real grid on page 39), and the usage-scenario matrix under Appendix C.4/C.5 (PDF
+    pages 62, 92–94). **Not fixed — reported.** This is pervasive across most of Part 2's two
+    largest appendices, not an isolated table; converting a few dozen multi-row, some
+    multi-header ICAO tables into Markdown by hand risks the same transcription error a rebuild is
+    meant to avoid. This is the Part 11/12-style call named in the task's own instructions to stop
+    and report rather than hand-fix; it needs a maintainer decision on whether to rebuild Part 2's
+    Appendices B and C with `tools/docs9303_extract.py` (which already has a table pass via
+    `page.find_tables()`).
+- **Part 4: 1 number-alone candidate, 4 low-coverage paragraphs.** The number-alone candidate
+  (PDF page 35, Appendix A Figure A-2's Cyrillic-language worked passport example) is the holder's
+  date of birth (`12.08.1974`) printed in the figure, immediately followed by the capitalised label
+  "Пол/ Sex" — same GUI/worked-example-date artefact as Part 2's. The 4 low-coverage paragraphs are
+  3 Table of Contents entries plus 1 link-filename-inflated sentence (line 452), same as Part 1.
+  No real defect.
+- **Part 5: 4 low-coverage paragraphs, nothing else.** Same shape as Part 1/4: 3 Table of Contents
+  entries, 1 link-filename-inflated sentence (line 359). Confirms the split-heading fix: the 2
+  headings #463 originally reported missing here (4.2.3.4, 4.2.3.5) are present and correctly
+  rendered (`##### 4.2.3.4 Names that contain multiple components`, `##### 4.2.3.5 No secondary
+  identifier`) and no longer flagged.
+- **Part 6: 2 invented numbers, 1 table under a figure, 4 low-coverage paragraphs.**
+  - **Real defect, fixed:** Figure 2 ("Edge margins and nominal dimensions of a TD2 Size MROTD",
+    PDF page 10) had an invented three-row Markdown table (`Width | 105.0 ± 0.75 | 4.13 ± 0.03`,
+    etc.) with no `<img>` reference to the page's own render, the same "invented table under a
+    figure" pattern the 2026-09-24 audit found and fixed in Parts 4 and 5 but missed here. Checked
+    against a 400 dpi render of PDF page 10: the values are real (printed directly on the diagram,
+    not in a table), plus a Radius label the invented table had dropped entirely. Replaced with the
+    established `<img src="./figures/Doc_9303_Part6_Specs_for_TD2_MROTDs_p10.png">` +
+    `[Editorial description, not ICAO text: ...]` + "Labels printed on Figure 2 (not a table in the
+    original):" bullet-list convention Parts 4 and 5 already use, reusing the existing page-10
+    figure (Figure 1 is on the same PDF page and already uses that file).
+  - The 2 invented numbers (`740812`, `120415`, PDF page 29 = App B-3, the worked TD2 MRZ example)
+    are the known "MRZ strings with no word boundaries" class: the annotation correctly decomposes
+    the PDF's own contiguous digit run (`7408122`, `1204159`) into a 6-digit date plus its trailing
+    check digit for readability; the split values never occur as their own token in the PDF.
+  - The 4 low-coverage paragraphs are 3 Table of Contents entries plus 1 link-filename-inflated
+    sentence, as above.
+  - **Residual introduced by the fix, expected:** re-auditing after the Figure 2 fix now flags 3
+    new "invented numbers" (`30`, `125`, `012`, from "Radius = 3.18 ± 0.30 mm (0.125 ± 0.012 in)").
+    Confirmed by direct 400 dpi render that Figure 2 really does print this radius value, but
+    unlike the width/height values (which are repeated as real extractable text on Figures 3, 4, 6,
+    7 and 8 elsewhere in this same Part), the radius label on this PDF page is not present in
+    PyMuPDF's extractable text at all (`page.get_text("words")` returns nothing for it) — a
+    property of how this specific diagram was authored in the source PDF, not an error. Parts 4
+    and 5's own equivalent Radius bullets happen not to hit this because their PDFs' diagrams do
+    carry it as extractable text. This is a new, documented residual a re-audit will keep flagging.
+- **Part 7: 4 invented numbers, 1 heading absent from PDF, 1 number-alone candidate, 11
+  low-coverage paragraphs.**
+  - The 4 invented numbers (`690806`, `940623`, each twice — PDF pages 57–58, Appendix B's MRV-A
+    and MRV-B worked MRZ examples) are the same MRZ-annotation-splits-a-contiguous-digit-run
+    artefact as Part 6's.
+  - The "absent" heading, **7.1.1.1 Visual inspection zone — Data element directory** (PDF page
+    31), is already correctly rendered. Its PDF line carries a single leading space
+    (`' 7.1.1.1    Visual inspection zone...'`) that its sibling heading on page 13 (`4.1.1.1`,
+    no leading space) doesn't; `docs9303_extract.py`'s `_HEADING_RE` anchors at the start of the
+    line with no leading-whitespace tolerance, so this one instance is invisible to the detector
+    even though the heading is real and already correct. Tool gap, not a document defect.
+  - The number-alone candidate (PDF page 64, Appendix E Figure E-1's exemplary Visible Digital
+    Seal GUI) is a signing date (`13.06.2020`) printed in the mock-up, immediately followed by the
+    capitalised label "Signing Certificate" — same class as Part 2's and Part 4's.
+  - The 11 low-coverage paragraphs are 8 Table of Contents entries plus 3 link-filename-inflated
+    sentences (lines 306, 868, 1007).
+- **Part 9: 2 invented numbers, 7 low-coverage paragraphs, plus 2 real defects found by direct
+  inspection that the automated checks didn't isolate on their own.**
+  - **Real defects, fixed:** two sentences had ICAO's plain text rewritten into LaTeX math markup
+    that ICAO's PDF does not contain. PDF page 10 (§2.3, Chip Inside Symbol) prints "A smaller
+    size of 4.2 × 7.2 mm (0.17 × 0.28 in)..."; the Markdown had
+    `\(4.2 \times 7.2 \text{mm}\) (0.17 \(\times\) 0.28 in)`. PDF page 17 (§5.1, Characteristics of
+    the Contactless IC) prints "...typically is up to 10 cm..."; the Markdown had `\(10cm\)`. Both
+    replaced with ICAO's own plain wording (line 113 was flagged low-coverage at 0.500 by the
+    prose check; line 276's LaTeX was found while checking line 113's neighbourhood against the
+    PDF, not by the automated check itself, since its surrounding paragraph still scored above the
+    0.8 threshold).
+  - The 2 invented numbers (`13`, `14`, PDF page 23's Figure A-2, the eMRTD reading-process
+    flowchart) are the ordered-list markers of this file's own **repo-authored editorial**
+    reconstruction of that flowchart as a numbered list (documented in-file, immediately above the
+    list, as "not ICAO text") — confirmed neither token occurs anywhere in Part 9's PDF text at all.
+  - Of the 7 low-coverage paragraphs (now 6, after the LaTeX fix removed line 113): 2 (lines 53,
+    60) are Table of Contents entries, 2 (lines 292, 310) are link-filename-inflated sentences,
+    line 404 is this file's own editorial note about the flowchart reconstruction, and line 410 is
+    the reconstructed flowchart's first list item (same list-item-numbers-as-prose shape as Part
+    9's own invented-number residual above).
+
+Parts 3, 8, 10, 12 and 13 were re-run to confirm the 2026-09-25 sections above still hold against
+the fixed tool, and so was Part 11.
+
+- **Part 3: confirmed, plus one new real defect the 2026-09-25 pass didn't reach.** The 15
+  "missing from Markdown" and 8 "absent from PDF" headings the 2026-09-25 section describes are
+  gone (0 and 1 respectively) — the 1 remaining "absent" heading, **B.3.2 Transcription schemes**
+  (PDF page 60, "App B-4" in the running header, Appendix B), is already correctly rendered
+  (`#### B.3.2 Transcription schemes`). Its PDF line has only a **single** space between the
+  clause number and the title (`'B.3.2 Transcription schemes '`), not the 2+ spaces `_HEADING_RE`
+  requires — a third tool-gap shape, distinct from Part 2's letter-prefix gap and Part 7's
+  leading-space gap. Of the 7 low-coverage paragraphs: 2 (lines 40, 64) are Table of Contents
+  entries, 1 (line 1029) is a link-filename-inflated sentence, 2 (lines 1275, 1374, Appendix A
+  Examples 3 and 5's "Step 2" sums) are real, verified-correct check-digit arithmetic that the
+  PDF's own layout repeats the row label "Step 2 (sum of products)" between each digit group — the
+  Markdown correctly consolidates this once, so its word order no longer lines up with the PDF's
+  repeated-label order (new instance of "tables the extractor reads differently"), and 1 (line
+  1672) is correct Arabic-script content scored low by the word-tokenizer, not a defect (verified
+  verbatim against PDF page 64). **Real defect, fixed:** footnote 3 (PDF page 38, "30" in the
+  running header, main-body §6.C "Transliteration of Arabic Script", "Shadda denotes doubling...")
+  was missing both of its Arabic worked examples entirely (`e.g. becomes EBBAS; becomes
+  FXDZDZXAH` — the two Arabic words that should precede "becomes" were dropped) and had
+  transcribed the second transliteration wrong (`FXDZDZXAH` instead of `FXDZXDZXAH` — missing an
+  `X`, breaking the shadda-doubling pattern the footnote itself describes). Restored both Arabic
+  words and the correct transliteration from a 2400 dpi render of the footnote.
+- **Part 8: confirmed, no change.** All counts (8 invented numbers, 2 headings missing, 0 absent,
+  10 low-coverage) and their classification stand exactly as the 2026-09-25 section describes —
+  the Appendix B hex-dump table, the two footnote-marker pseudo-headings (now correctly reported
+  as "missing from Markdown" rather than "absent from PDF", since #466 only touches the
+  split-heading path, not this same-line footnote-marker false positive), and the editorial notes
+  about the Appendix B fix. One number-alone candidate not enumerated in 2026-09-25 (that check
+  was added by the same #466 commit, after the Parts 3/8 triage ran): PDF page 25's Appendix B
+  Figure showing the exemplary Visible Digital Seal — a signing-certificate date, same
+  date-in-GUI-mockup class as Parts 2, 4 and 7 (Part 8's own copy of that figure, dated
+  `13.06.2026` here vs Part 7's `13.06.2020`).
+- **Part 10: confirmed, no new findings.** 0 invented numbers, 0 heading discrepancies, 3
+  low-coverage paragraphs — 2 link-filename-inflated sentences, 1 a hex/tag-value dump (page 102's
+  DG1 worked example) matching the corpus's existing hex-dump class. No real defect.
+- **Part 11: confirmed (PDF arrived mid-pass).** **174/174 clause headings, 0 missing, 0 extra**
+  — the 2026-09-25 correction's claim holds exactly on a direct re-run, not through the same
+  detector twice. 0 invented numbers, 0 number-alone candidates. Of the 3 low-coverage
+  paragraphs: 1 (line 1039) is a verbatim citation `[ISO/IEC 9796-2]` that the PDF itself
+  line-wraps mid-token (`9796-\n2]`), 1 (line 1928) is a verbatim ASN.1 type definition (code,
+  not prose — matches Part 10's and Part 12's own ASN.1 residuals), and 1 (line 2418) is
+  Figure 6's label run. **Residual, left for the tool:** Figure 6 ("Computation of an SM response
+  APDU for even INS Byte", PDF page 75) is a two-branch flowchart (Build DO '87' / Build DO '99'
+  converging on a shared checksum step) that the extractor flattened into a single run-on line
+  with no branch structure — unlike Figure 5 immediately above it on the same page, whose similar
+  diagram happened to land inside a (still imperfect, but gridded) Markdown table. Part 11 is
+  `tools/docs9303_extract.py` output, and fixes to it go in the tool, not by hand into its output
+  (see "Parts 11-12 rebuilt" above), or the next re-run silently drops them: tool follow-up 5.
+- **Part 12: confirmed, plus one new residual.** The Table C-1 heading artefact (`4.1.1.3
+  Value inserted here dependent on algorithm`, 1 "missing from Markdown") and the RFC 5280/3280
+  quote residuals (23 number-alone candidates, Appendix B and Appendix C) are exactly as the
+  2026-09-25 correction describes. Of the 4 low-coverage paragraphs: 2 (lines 1188, 1206)
+  are the already-documented Table 6 "Certificate Extensions Profile" plain-text fallback (the
+  grid detector fragments its header into 30+ spurious columns, so the tool falls back to
+  un-tabulated reading-order text there), 1 (line 1332) is a verbatim ASN.1 OID definition, and
+  1 (line 913) is Figure 4's label run. **Residual, left for the tool:** Figure 4 ("Bar Code
+  Validation", PDF page 32) is an architecture diagram whose labels ("Smartphone", "Bar Code
+  Reader", "Bar Code Validation Software", "Publication Point", "Bar Code Signer Certificate",
+  etc.) the extractor scrambled into a single run-on line with letters transposed between words
+  (`Bar ode eader R` for "Bar Code Reader"). Part 12 is extractor output, like Part 11, so the fix
+  belongs in the tool, not in the Markdown: tool follow-up 5. The diagram is not in the curated
+  `figures/` set either (Part 12 predates that curation).
+- **Part 13: confirmed, no new findings.** 0 invented numbers, 0 heading discrepancies, 4
+  low-coverage paragraphs — 1 Table of Contents entry, 1 link-filename-inflated sentence, 1 an
+  already-disclosed editorial reconstruction of Appendix A's Figure A.1 as a numbered list
+  (bracketed `[Editorial description, not ICAO text: ...]` immediately above it, same convention
+  as Part 9's flowchart), and 1 a verbatim decoding formula (`V16 = (I1 * 256) + I2`, PDF page 16
+  — confirmed the PDF itself prints `V16`, not the `I16` the preceding sentence names; ICAO's own
+  inconsistency, not a transcription error). No real defect.
+
+**Only one Part needed a `tools/docs9303_extract.py` rebuild decision** — Part 2's Appendix B/C
+tables, reported above, not fixed. Every other finding across all 13 Parts was either an
+isolated, verified real defect (4 in this pass, all fixed: Part 3 ×1, Part 6 ×1, Part 9 ×2), a
+figure the extractor flattens in the generated Parts 11 and 12 (2, left for the tool: follow-up
+5), or one of this tree's
+already-documented audit-tool artefact classes, plus three newly observed subclasses of existing
+classes: a date inside a GUI-mockup or worked-example figure misread as a split clause heading
+(Parts 2, 4, 7, 8), a figure's own dimension label rendered as non-extractable vector/image text
+rather than real PDF text (Part 6, post-fix), and a PDF table whose own layout repeats a row
+label between each of its cell groups, which a faithfully-consolidated Markdown rendering then
+reads as out of word-order (Part 3).
+
+**Tool follow-ups proposed, not made** (this triage does not edit `tools/`):
+
+1. `docs9303_extract.py`'s `_HEADING_NUMBER_ONLY_RE` only matches a bare numeric clause number
+   (`\d+(?:\.\d+){1,5}`), so `detect_split_heading` never fires for a letter-prefixed appendix
+   number split across two PDF lines (Part 2's `A.5.3.2`) — unlike `audit_docs9303.py`'s own
+   independent `_NUMBER_ALONE_RE`, which already accepts an optional `(?:[A-Z]\.)?` prefix for
+   exactly this shape. Extending `_HEADING_NUMBER_ONLY_RE` the same way would close this gap.
+2. `docs9303_extract.py`'s `_HEADING_RE` anchors at the literal start of the line with no
+   leading-whitespace tolerance, so a heading whose PDF line carries a stray leading space (Part
+   7's `7.1.1.1`) is invisible to `pdf_headings` even when the heading is real and already
+   correctly rendered. Stripping each line (or anchoring on `^\s*`) before matching would close
+   this gap.
+3. `audit_docs9303.py`'s `number_alone_candidates` now has a second confirmed false-positive
+   shape beyond the RFC-quote table already documented for Part 12: a `DD.MM.YY`/`DD.MM.YYYY` date
+   printed inside a GUI mock-up or worked-example figure, immediately followed by a capitalised
+   field label. Seen 8 times across Parts 2, 4, 7 and 8 in this pass alone. Worth its own exclusion
+   (a date-shaped candidate is a poor match for a clause number, which never has a 2- or 4-digit
+   final segment paired with 2-digit day/month segments) or at least its own documented class here.
+4. `docs9303_extract.py`'s `_HEADING_RE` requires a 2+ space gap between the clause number and its
+   title on the same line (deliberately, to tell a heading apart from a wrapped sentence — see the
+   comment above `_HEADING_RE`). Part 3's `B.3.2 Transcription schemes` (PDF page 60) has only a
+   single space there, so it's invisible to `pdf_headings` even though it's a real heading and
+   already correctly rendered — a third tool-gap shape alongside the letter-prefix gap (#1) and the
+   leading-whitespace gap (#2), all three affecting only the audit's own PDF-side detection, not
+   any committed Markdown.
+5. `docs9303_extract.py` has no figure pass: a diagram's labels come out as one run-on line in
+   reading order with no structure (Part 11's Figure 6, PDF page 75), and where the PDF's text
+   layer interleaves glyphs, with letters transposed between words (Part 12's Figure 4, PDF page
+   32). Parts 11 and 12 are this tool's output, so the fix belongs in the tool: for example, emit
+   a figure's text as a "Labels printed on Figure N" list, the convention the hand-converted
+   Parts use, then regenerate both Parts.
+
 ## What does not belong here
 
 PDFs. The point of this tree is that it is greppable, diffable text a model
