@@ -952,7 +952,7 @@ The following tables contain the most commonly used national characters of the L
 | 06D2 | ے | yeh barree | XYB |
 | 06D3 | ۓ | yeh barree with hamza above | XBE |
 
-³ *Shadda denotes doubling: Latin character or sequence is repeated e.g. becomes EBBAS; becomes FXDZDZXAH.*
+³ *Shadda denotes doubling: Latin character or sequence is repeated e.g. عبّاس becomes EBBAS; فضّة becomes FXDZXDZXAH.*
 
 ---
 
