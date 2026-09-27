@@ -9,9 +9,10 @@ use synthpass_gen::{data::generate_passport, generate, DocumentType, GeneratorCo
 /// personal number for every format (`data::random_personal_number`), so on
 /// the formats whose optional-data slot is narrower than 14 the zone holds a
 /// prefix of the label — TD1's second element (11), TD2's element (7),
-/// MRV-B's (8). TD3 (14) and MRV-A (16) carry it whole. Pinned as a fact
-/// about the generator, not fixed here: shortening the value would change
-/// every generated corpus and export.
+/// MRV-B's (8). TD3 (14) and MRV-A (16) carry it whole. The draw stays 14
+/// wide (shortening it would change the RNG sequence and every generated
+/// corpus); the visual zone and the label paint the truncated value instead
+/// (#410, pinned by `viz_personal_number_agrees_with_the_zone`).
 fn as_emitted(value: Option<&str>, width: usize) -> Option<String> {
     value.map(|v| v.chars().take(width).collect())
 }
@@ -208,6 +209,48 @@ fn generated_mrvb_mrz_round_trips() {
     }
 }
 
+/// #410: the painted VIZ personal number is exactly what the zone carries,
+/// on every format — the truncated prefix on TD1 (11), TD2 (7) and MRV-B (8),
+/// the whole 14-character draw on TD3 and MRV-A.
+#[test]
+fn viz_personal_number_agrees_with_the_zone() {
+    for (doc_type, width) in [
+        (DocumentType::TD1, 11),
+        (DocumentType::TD2, 7),
+        (DocumentType::TD3, 14),
+        (DocumentType::MrvA, 16),
+        (DocumentType::MrvB, 8),
+    ] {
+        for seed in 0..50u64 {
+            let cfg = GeneratorConfig::with_document_type(seed, doc_type);
+            let passport = generate_passport(&cfg);
+            let (_image, labels) = generate(&passport, &cfg);
+
+            let lines = &labels.mrz_lines;
+            let mut parsed = match doc_type {
+                DocumentType::TD1 => mrz::parse_td1(&lines[0], &lines[1], &lines[2]),
+                DocumentType::TD2 => mrz::parse_td2(&lines[0], &lines[1]),
+                DocumentType::TD3 => mrz::parse_td3(&lines[0], &lines[1]),
+                DocumentType::MrvA => mrz::parse_mrv_a(&lines[0], &lines[1]),
+                DocumentType::MrvB => mrz::parse_mrv_b(&lines[0], &lines[1]),
+            }
+            .unwrap_or_else(|e| panic!("{doc_type:?} seed {seed}: {e}"));
+            let in_zone = match doc_type {
+                DocumentType::TD1 => parsed.optional_data_2.take(),
+                _ => parsed.optional_data_1.take(),
+            };
+
+            let painted = labels.personal_number.as_ref().map(|l| l.value.clone());
+            assert_eq!(painted, in_zone, "{doc_type:?} seed {seed}");
+            assert_eq!(
+                painted,
+                as_emitted(passport.personal_number.as_deref(), width),
+                "{doc_type:?} seed {seed}"
+            );
+        }
+    }
+}
+
 #[test]
 fn generated_mrz_round_trips_without_personal_number() {
     let cfg = GeneratorConfig {
@@ -224,6 +267,7 @@ fn generated_mrz_round_trips_without_personal_number() {
     assert!(parsed.valid(), "checks: {:?}", parsed.checks);
     assert_eq!(parsed.personal_number(), None);
     assert_eq!(parsed.optional_data_1, None);
+    assert!(labels.personal_number.is_none());
 }
 
 /// Cyrillic-script identities: the generator draws a native-script name, stores

@@ -133,7 +133,13 @@ block.
 
 **Value forms.** `date_of_birth` / `date_of_expiry` are ISO `YYYY-MM-DD` (as in `Labels`); the
 MRZ strings carry the `YYMMDD` forms. `sex` is one character. Values are the generator's ground
-truth verbatim — never re-derived from the image.
+truth verbatim — never re-derived from the image. `personal_number` is the value the zone
+carries, which is also what the VIZ paints: the generator draws 14 characters for every format,
+and the optional-data element it lands in truncates that to 11 on TD1 (the second element), 7 on
+TD2 and 8 on MRV-B, while TD3 (14) and MRV-A (16) hold it whole. The label is read back from the
+emitted MRZ, so on every format it equals that element's content with filler trimmed (#410;
+before it, TD1, TD2 and MRV-B painted and exported the full 14 characters while the zone held a
+prefix).
 
 **Blocks with no geometry.** Every VIZ field and every MRZ line has a real `Rect` in `Labels`
 today, so `box` is always present in v1. Do not emit a block for a field the document does not
@@ -248,7 +254,7 @@ annotate. Shipping them needs, in order:
    glyph-ink bounding box the codebase does not compute anywhere today.
 3. **Invent the class taxonomy.** COCO/YOLO need an integer category set. `CoreField::ALL` is
    a natural 10-class basis, but `mrz_line` (2–3 boxes), the MRZ band, and `personal_number`
-   (optional, TD3-only) complicate a fixed list, and the five formats have different layouts.
+   (optional, and a different width per format) complicate a fixed list, and the five formats have different layouts.
 4. **Thread the degrade transform out** so degraded profiles can be exported with boxes that
    match the pixels (also unblocks non-`clean` JSONL export).
 5. **Per-format writers.** COCO: one `images[]` + `annotations[]` + `categories[]` JSON.

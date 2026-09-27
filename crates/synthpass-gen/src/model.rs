@@ -66,6 +66,11 @@ pub struct Passport {
     /// structural role. `None` when left blank (an all-filler field is a
     /// legitimate, checksum-valid MRZ for every one of these formats — see
     /// `mrz::parser`).
+    ///
+    /// This is the full 14-character draw. The zone truncates it on TD1 (11),
+    /// TD2 (7) and MRV-B (8), and the painted VIZ value and the exported
+    /// `personal_number` label are the zone's truncated value, not this one
+    /// (`Labels::personal_number`, #410).
     pub personal_number: Option<String>,
 }
 
