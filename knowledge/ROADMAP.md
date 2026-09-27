@@ -483,6 +483,12 @@ The named documents are in [`benchmarks/README.md`](benchmarks/README.md#post-m6
   candidate-selection guard was rejected, and the 7 checksum-valid anchors are each
   attributable to native OCR on a low-resolution guilloché scan rather than to `mrz`. Any
   further gain here is an OCR-quality problem, not a parser one.
+- Per-document benchmark archive ([#420](https://github.com/ruledicaprio/SynthPass/issues/420),
+  [`ADR-0024`](decisions/ADR-0024-per-document-benchmark-archive.md)) — every `provider-bench` and
+  `synthpass-bench` run keeps one record per document (raw OCR text, the zone after repair, the
+  outcome, run metadata) in a local archive outside the working tree, on by default; the private
+  track only as text-free records. Publishing to `bench-data` stays parked until the private
+  track's exclusion is enforced in code.
 
 **Known debt** — tracked in full in [`technical_debt.md`](technical_debt.md); not duplicated
 here. HIGH: OCR confidence is a character-plausibility proxy, not a model score. MEDIUM: three
