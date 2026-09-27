@@ -247,7 +247,7 @@ proptest! {
     }
 
     /// ICAO 9303 Part 4's normative truncation rules
-    /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407`, the Data Element
+    /// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:426`, the Data Element
     /// Directory row §4.2.3 cross-references), asserted end-to-end through
     /// emit -> parse.
     ///
