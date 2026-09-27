@@ -52,3 +52,4 @@ the record.
 | [0019](ADR-0019-typed-values-on-mrzdata.md) | Typed dates and sex on `MrzData` | Accepted (2026-09-23, Option D) |
 | [0020](ADR-0020-mrz-value-wire-contract.md) | The wire form of `MrzDate` and `Sex`: `Display`, serde and the zone agree | Accepted |
 | [0021](ADR-0021-fixed-grid-mrz-strips.md) | Fixed-grid MRZ strips: check-anchor alignment with an explicit ambiguity outcome | Proposed |
+| [0022](ADR-0022-declarative-layout-plugins.md) | Declarative layout plugins: a closed, geometry-only schema, checked at load time | Proposed |
