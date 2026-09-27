@@ -16,6 +16,35 @@ Every entry names the pull request or commit it came from, so it traces back to 
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-09-26
+
+### Added
+- `examples/checkdigit_blindspots_exact.rs`, which prints the exact share of k-misread patterns
+  each field's check digit passes, where the composite digit is a second equation and where it
+  repeats a field's own, and how many patterns an exhaustive per-field check needs, all from the
+  crate's own tables (#513).
+- **`MrzData` reports whether a reading needed damaged-capture recovery.** The new
+  `damaged_recovery: bool` field is `true` when `find_and_parse`/`find_and_parse_with` only
+  reached a checksum-valid reading through the damaged-capture search (a line one character
+  narrower than its format, or a single-glyph substitution swept across `CONFUSABLES`), rather
+  than the ordinary scan's fixed-position lookalike repairs. `false` for every other reading,
+  including `parse_td1`/`parse_td2`/`parse_td3`/`parse_mrv_a`/`parse_mrv_b` and their `_with`
+  siblings called directly. A checksum-consistent reading was never proof it is correct — this
+  lets a caller (`synthpass-ocr`'s retry loop, issue #473) tell the weaker kind of evidence apart
+  from the ordinary one instead of trusting both equally (#488).
+
+### Fixed
+- **The docs no longer overstate which misreads a check digit misses.** `CONFUSABLES` said most of
+  its pairs share a residue class. Only `1`/`L` and `6`/`G` do; every other pair crosses residues,
+  so a check digit rejects a single such misread. `Blindspot` said a weight-7/weight-3 pair
+  cancels at three document-number positions. It is nine of the 36 position pairs, and a shared
+  shift of 5 (two `2`↔`7` misreads) cancels at all 36. No behaviour changes (#513).
+- **`cargo check -p mrz --all-features` builds again on the declared MSRV (1.82).** The optional
+  `zeroize` feature now caps `zeroize` to `>=1.8.1, <1.9` and `zeroize_derive` to `>=1.4, <1.5`:
+  `zeroize` 1.9.0 and `zeroize_derive` 1.5.0 both moved to edition 2024 / rust-version 1.85, which
+  cargo 1.82 cannot even parse. If you already pin `zeroize` yourself, make sure it resolves to
+  1.8.x while depending on `mrz`'s `zeroize` feature on a pre-1.85 toolchain (#487).
+
 ## [0.8.2] — 2026-09-25
 
 ### Fixed

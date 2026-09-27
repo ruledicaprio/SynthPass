@@ -233,10 +233,18 @@ jobs:
       # runtime bounded (sequential by design — see synthpass-bench.rs's
       # module docs for why parallelizing these checks corrupts the
       # measurement instead of just speeding it up).
+      #
+      # --max-prefix-wrong-accepts is a ratchet (issue #453, ADR-0013's
+      # 2026-09-26 amendment): the most Tier-1 hits allowed to read
+      # document_type or issuing_country wrong against the generator's truth.
+      # Pinned at the value CI measured on the PR that added it, PR #516 on
+      # 7b4487a: 0 of 39 hits. A fix may only lower it. Raising it is a
+      # reviewed edit to this line that names the seeds and the mechanism.
       - name: M4 Tier-1 hit-rate gate (synthpass-bench, clean profile)
         run: |
           cargo run -p synthpass-bench --release --bin synthpass-bench -- \
-            --count 50 --seed 0 --profile clean --min-hit-rate 0.30 --out bench-report.json
+            --count 50 --seed 0 --profile clean --min-hit-rate 0.30 \
+            --max-prefix-wrong-accepts 0 --out bench-report.json
 
   # The changelog contract, enforced rather than trusted. Until now a PR could
   # merge with no fragment at all, a malformed one, or a version bump that did

@@ -97,6 +97,51 @@ impl CellSpec {
     }
 }
 
+/// The reason a passing parse gives (or withholds) evidence about a cell's
+/// printed content — the coverage map's classification (GitHub issue #421).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CellClass {
+    /// Feeds a local check, the composite, or is a check-digit cell itself:
+    /// [`CellSpec::local`], `composite_weight` or `compared_against` is `Some`.
+    CheckCovered,
+    /// Line 1's very first cell — the one content check every direct
+    /// `parse_*` function makes outside the check digits: `P` for TD3, `V`
+    /// for MRV-A/B, or one of `I`/`A`/`C` for TD1/TD2 (Part 4 §4.2.2.1 / Part
+    /// 5 §4.2.2.1 / Part 6 §4.2.2.1 / Part 7 §4.2.2.1/§7.2.2.1 respectively —
+    /// see `parser::parse_td3` and its TD1/TD2/MRV-A/MRV-B siblings'
+    /// `starts_with`/`as_bytes().first()` checks). The *second*
+    /// document-code cell is not checked at all: see [`Unverifiable`](Self::Unverifiable).
+    Structural,
+    /// Accepted exactly as printed. Nothing in a direct parser's return value
+    /// depends on this cell beyond the blanket MRZ-charset check every
+    /// printed character passes through (`parser::ensure_charset`): the
+    /// second document-code character, the issuing country and nationality
+    /// (no registry lookup here — that is a `find_and_parse` repair-time
+    /// guard, per [`crate::Blindspot`]'s doc), the name, and the sex cell
+    /// (`Sex::from_zone` keeps a non-conformant character verbatim rather
+    /// than rejecting it). A date cell that *is* check-covered is not here
+    /// even though its calendar plausibility is unenforced — its check digit
+    /// still is, so it counts as [`CheckCovered`](Self::CheckCovered).
+    Unverifiable,
+}
+
+impl CellSpec {
+    /// Classify this cell for the coverage map: which of the three kinds a
+    /// mutation here should provoke. Total by construction — every value
+    /// this type can hold maps to exactly one variant, with no fourth case
+    /// and no panic. `cell_class_map_is_total_and_names_the_only_structural_cell`
+    /// pins that a direct parser enforces exactly one such cell per format.
+    fn class(self) -> CellClass {
+        if !self.unchecked_data() {
+            CellClass::CheckCovered
+        } else if self.line == 0 && self.column == 0 {
+            CellClass::Structural
+        } else {
+            CellClass::Unverifiable
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum OverflowEncoding {
     Spec,
@@ -394,7 +439,10 @@ fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
 mod tests {
     use super::*;
     use crate::repair::FieldKind;
-    use crate::{parse_mrv_a, parse_mrv_b, parse_td1, parse_td2, parse_td3, Checks, MrzData};
+    use crate::{
+        parse_mrv_a, parse_mrv_b, parse_td1, parse_td2, parse_td3, Checks, MrzData, MrzError,
+        CONFUSABLES,
+    };
 
     #[test]
     fn class_sweep_fields_match_ordinary_strip_check_program() {
@@ -462,6 +510,18 @@ mod tests {
         }
     }
 
+    // Character ranges and check-digit positions below are each format's own
+    // Doc 9303 check-digit clause, zero-based (the published tables are
+    // one-based, so every number here is the table's minus one). Part 3
+    // §4.9 is the shared 7-3-1 algorithm; these are its positions:
+    //   TD1    Part 5 §4.2.4  (document number, birth, expiry, composite)
+    //   TD2    Part 6 §4.2.4  (document number, birth, expiry, composite)
+    //   TD3    Part 4 §4.2.4  (document number, birth, expiry, personal
+    //                          number, composite)
+    //   MRV-A  Part 7 §4.2.2.2 (document number, birth, expiry — no
+    //                           personal number or composite digit)
+    //   MRV-B  Part 7 §7.2.2.2 (the same three digits as MRV-A)
+    //
     // Deliberately independent of `CellSpec`, `WEIGHTS`, and the production
     // checksum helper. These are parser/Doc 9303 coordinates, not a second
     // traversal of the candidate program under test.
@@ -743,6 +803,39 @@ mod tests {
             mutated[index] = if original[index] == b'0' { b'1' } else { b'0' };
             let text = std::str::from_utf8(&mutated).unwrap();
             let parsed = parse(format, text);
+            // The static cell class describes the *ordinary* layout only: an
+            // overflow mode's `for_lines` clears `local`/`compared_against` on
+            // its relocated marker and remainder cells, which would misread
+            // as `Unverifiable` here even though changing them selects a
+            // different mode entirely — that case is still caught below, via
+            // `mutant_template`, just not by this stricter, named check.
+            if expected_mode == LayoutMode::Ordinary {
+                match template.cells[index].class() {
+                    CellClass::Structural => {
+                        assert!(
+                            matches!(parsed, Err(MrzError::BadDocumentCode(_))),
+                            "{format:?} cell {index}: structural cell must reject a broken \
+                             document code, got {parsed:?}"
+                        );
+                        continue;
+                    }
+                    CellClass::Unverifiable => {
+                        let parsed = parsed.unwrap_or_else(|err| {
+                            panic!(
+                                "{format:?} cell {index}: unverifiable cell must be accepted \
+                                 as read, got {err:?}"
+                            )
+                        });
+                        assert_eq!(
+                            parsed.checks, baseline.checks,
+                            "{format:?} cell {index}: unverifiable cell must leave every check \
+                             unchanged"
+                        );
+                        continue;
+                    }
+                    CellClass::CheckCovered => {}
+                }
+            }
             let Ok(parsed) = parsed else {
                 // Direct parsers reject a changed document-code first cell.
                 assert_eq!(
@@ -805,49 +898,48 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ordinary_program_matches_all_five_direct_parsers_cell_by_cell() {
-        assert_agreement(
-            Format::Td1,
-            &[
+    /// The ICAO specimen (Utopia / Anna Maria Eriksson), laid out for each
+    /// format's ordinary (non-overflow) grid. Shared by every test below that
+    /// needs a checksum-consistent starting point rather than its own.
+    fn ordinary_fixture(format: Format) -> Vec<&'static str> {
+        match format {
+            Format::Td1 => vec![
                 "I<UTOD231458907<<<<<<<<<<<<<<<",
                 "7408122F1204159UTO<<<<<<<<<<<6",
                 "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
             ],
-            LayoutMode::Ordinary,
-        );
-        assert_agreement(
-            Format::Td2,
-            &[
+            Format::Td2 => vec![
                 "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
                 "D231458907UTO7408122F1204159<<<<<<<6",
             ],
-            LayoutMode::Ordinary,
-        );
-        assert_agreement(
-            Format::Td3,
-            &[
+            Format::Td3 => vec![
                 "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
                 "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
             ],
-            LayoutMode::Ordinary,
-        );
-        assert_agreement(
-            Format::MrvA,
-            &[
+            Format::MrvA => vec![
                 "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
                 "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
             ],
-            LayoutMode::Ordinary,
-        );
-        assert_agreement(
-            Format::MrvB,
-            &[
+            Format::MrvB => vec![
                 "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
                 "L898902C<3UTO6908061F9406236ZE184226",
             ],
-            LayoutMode::Ordinary,
-        );
+        }
+    }
+
+    const ALL_FORMATS: [Format; 5] = [
+        Format::Td1,
+        Format::Td2,
+        Format::Td3,
+        Format::MrvA,
+        Format::MrvB,
+    ];
+
+    #[test]
+    fn ordinary_program_matches_all_five_direct_parsers_cell_by_cell() {
+        for format in ALL_FORMATS {
+            assert_agreement(format, &ordinary_fixture(format), LayoutMode::Ordinary);
+        }
     }
 
     fn overflow_lower(format: Format, legacy: bool) -> String {
@@ -921,5 +1013,267 @@ mod tests {
         let parsed = parse_td3(line1, &mutated).unwrap();
         assert_eq!(parsed.checks.document_number, Some(true));
         assert_eq!(parsed.checks.composite, Some(true));
+    }
+
+    #[test]
+    fn cell_class_map_is_total_and_names_the_only_structural_cell() {
+        for format in ALL_FORMATS {
+            let cells: &[CellSpec] = match format {
+                Format::Td1 => &TD1,
+                Format::Td2 => &TD2,
+                Format::Td3 => &TD3,
+                Format::MrvA => &MRV_A,
+                Format::MrvB => &MRV_B,
+            };
+            let (mut structural, mut covered, mut unverifiable) = (0, 0, 0);
+            for (index, cell) in cells.iter().enumerate() {
+                match cell.class() {
+                    CellClass::CheckCovered => covered += 1,
+                    CellClass::Structural => {
+                        structural += 1;
+                        assert_eq!(
+                            index, 0,
+                            "{format:?}: a structural cell can only be line 1's first position"
+                        );
+                    }
+                    CellClass::Unverifiable => unverifiable += 1,
+                }
+            }
+            assert_eq!(
+                structural, 1,
+                "{format:?}: exactly one structural cell — the document code"
+            );
+            assert_eq!(
+                structural + covered + unverifiable,
+                cells.len(),
+                "{format:?}: the map classifies every cell exactly once"
+            );
+        }
+    }
+
+    #[test]
+    fn structural_document_code_cell_accepts_any_admissible_code_letter() {
+        // TD3/MRV-A/MRV-B each admit exactly one first letter, so there is no
+        // alternate to swap in without changing format; TD1/TD2 admit three.
+        for format in [Format::Td1, Format::Td2] {
+            let lines = ordinary_fixture(format);
+            for code in [b'I', b'A', b'C'] {
+                let mut first = lines[0].as_bytes().to_vec();
+                first[0] = code;
+                let first = String::from_utf8(first).unwrap();
+                let mut rebuilt = lines.clone();
+                rebuilt[0] = first.as_str();
+                let result = parse(format, &rebuilt.concat());
+                assert!(
+                    result.is_ok(),
+                    "{format:?}: document code {:?} is admissible and must still parse",
+                    code as char
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn composite_alignment_matches_each_fields_own_phase_or_not() {
+        // TD1/TD2's optional data feeds only the composite: no local check
+        // covers it at all (Part 5 §4.2.4 / Part 6 §4.2.4 name no such digit).
+        for &(cells, ranges) in &[
+            (&TD1[..], [(15, 30), (48, 59)].as_slice()),
+            (&TD2[..], [(64, 71)].as_slice()),
+        ] {
+            for &(start, end) in ranges {
+                for cell in &cells[start..end] {
+                    assert!(
+                        cell.local.is_none(),
+                        "composite-only optional data must carry no local check"
+                    );
+                    assert!(
+                        cell.composite_weight.is_some(),
+                        "composite-only optional data must still feed the composite"
+                    );
+                }
+            }
+        }
+        // Document number (and, on TD3, personal number) sit at a composite
+        // index divisible by three: the composite repeats their own 7-3-1
+        // equation. Dates never do — a misread there needs its own check and
+        // the composite to agree independently (`two_misreads_in_a_date_meet_an_independent_composite`
+        // in `tests/checkdigit_algebra.rs` demonstrates the consequence on TD3).
+        for format in [Format::Td1, Format::Td2, Format::Td3] {
+            let entries = spans(format);
+            let composite = entries
+                .iter()
+                .find(|(check, _, _)| *check == Check::Composite)
+                .map(|(_, ranges, _)| {
+                    ranges
+                        .iter()
+                        .flat_map(|&(s, e)| s..e)
+                        .collect::<Vec<usize>>()
+                })
+                .expect("TD1/TD2/TD3 all print a composite");
+            for (check, ranges, _) in &entries {
+                if *check == Check::Composite {
+                    continue;
+                }
+                let first = ranges[0].0;
+                let phase = composite
+                    .iter()
+                    .position(|&p| p == first)
+                    .map(|i| i % 3 == 0);
+                match check {
+                    Check::Birth | Check::Expiry => assert_eq!(
+                        phase,
+                        Some(false),
+                        "{format:?} {check:?}: dates are misaligned with the composite"
+                    ),
+                    Check::DocumentNumber | Check::Personal => assert_eq!(
+                        phase,
+                        Some(true),
+                        "{format:?} {check:?}: repeats its own phase under the composite"
+                    ),
+                    Check::Composite => unreachable!(),
+                }
+            }
+        }
+    }
+
+    /// Every character [`CONFUSABLES`] lists as a plausible misread of `c`,
+    /// in both directions. Reimplemented rather than calling
+    /// `repair::confusable_alternatives`, which is private to that module —
+    /// deliberately independent all the same, same spirit as `spans`/
+    /// `reference_program` above.
+    fn confusable_alts(c: char) -> Vec<char> {
+        let mut alts = Vec::new();
+        for &(key, group) in CONFUSABLES {
+            if c == key {
+                for g in group.chars() {
+                    if g != c && !alts.contains(&g) {
+                        alts.push(g);
+                    }
+                }
+            } else if group.contains(c) && key != c && !alts.contains(&key) {
+                alts.push(key);
+            }
+        }
+        alts
+    }
+
+    /// Σ wᵢΔᵢ (mod 10), Doc 9303 Part 3 §4.9's law, for a pattern of
+    /// same-field substitutions against `data`'s own weight cycle. The
+    /// check-digit cell itself is never part of `pattern` here, so Δ of the
+    /// check digit is always 0 and drops out of the formula.
+    fn predicted_pass(data: &[usize], original: &[u8], pattern: &[(usize, char)]) -> bool {
+        let shift: i32 = pattern
+            .iter()
+            .map(|&(pos, new_char)| {
+                let i = data
+                    .iter()
+                    .position(|&p| p == pos)
+                    .expect("pattern position belongs to this field");
+                let delta =
+                    reference_value(new_char as u8) as i32 - reference_value(original[pos]) as i32;
+                delta * i32::from(WEIGHTS[i % 3])
+            })
+            .sum();
+        shift.rem_euclid(10) == 0
+    }
+
+    fn assert_confusable_pattern(
+        format: Format,
+        original: &[u8],
+        pattern: &[(usize, char)],
+        check: Check,
+        data: &[usize],
+        composite: Option<&Vec<usize>>,
+    ) {
+        let mut mutated = original.to_vec();
+        for &(pos, c) in pattern {
+            mutated[pos] = c as u8;
+        }
+        let text = std::str::from_utf8(&mutated).unwrap();
+        let parsed = parse(format, text)
+            .expect("a CONFUSABLES pattern never touches the document code or the charset");
+        let own_pass = predicted_pass(data, original, pattern);
+        assert_eq!(
+            state(&parsed.checks, check),
+            Some(own_pass),
+            "{format:?} {check:?}: pattern {pattern:?}"
+        );
+        if let Some(composite_data) = composite {
+            let composite_pass = predicted_pass(composite_data, original, pattern);
+            assert_eq!(
+                state(&parsed.checks, Check::Composite),
+                Some(composite_pass),
+                "{format:?} composite: pattern {pattern:?}"
+            );
+        }
+        // The only two `CONFUSABLES` pairs sharing a residue class — a single
+        // swap between them shifts nothing, so it must predict acceptance,
+        // never a rejection (`only_1_l_and_6_g_among_the_confusables_share_a_residue`
+        // in `tests/checkdigit_algebra.rs` establishes there are no others).
+        if let [(pos, alt)] = pattern {
+            if matches!(
+                (original[*pos] as char, *alt),
+                ('1', 'L') | ('L', '1') | ('6', 'G') | ('G', '6')
+            ) {
+                assert!(
+                    own_pass,
+                    "{format:?} {check:?}: blind pair {:?}->{alt:?} must predict acceptance",
+                    original[*pos] as char
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn confusable_misreads_match_the_weighted_prediction_for_every_check_covered_field() {
+        for format in ALL_FORMATS {
+            let lines = ordinary_fixture(format);
+            let original = lines.concat().into_bytes();
+            let baseline =
+                parse(format, std::str::from_utf8(&original).unwrap()).expect("fixture parses");
+            assert!(
+                baseline.valid(),
+                "{format:?}: fixture must start checksum-consistent"
+            );
+            let program = reference_program(format, &original, LayoutMode::Ordinary);
+            let composite = program
+                .iter()
+                .find(|(check, _, _)| *check == Check::Composite)
+                .map(|(_, data, _)| data.clone());
+            for (check, data, _operand) in &program {
+                if *check == Check::Composite {
+                    continue;
+                }
+                for i in 0..data.len() {
+                    let alts_i = confusable_alts(original[data[i]] as char);
+                    for &alt_i in &alts_i {
+                        assert_confusable_pattern(
+                            format,
+                            &original,
+                            &[(data[i], alt_i)],
+                            *check,
+                            data,
+                            composite.as_ref(),
+                        );
+                    }
+                    for j in (i + 1)..data.len() {
+                        let alts_j = confusable_alts(original[data[j]] as char);
+                        for &alt_i in &alts_i {
+                            for &alt_j in &alts_j {
+                                assert_confusable_pattern(
+                                    format,
+                                    &original,
+                                    &[(data[i], alt_i), (data[j], alt_j)],
+                                    *check,
+                                    data,
+                                    composite.as_ref(),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
