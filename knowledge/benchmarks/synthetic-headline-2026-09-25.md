@@ -1,6 +1,6 @@
 # The synthetic headline is 370 / 500 today, stack 451 moves no seed, and 207 of the 370 hits are wrong somewhere
 
-**Date:** 2026-09-25 · **MAIN:** `1595bf9` and `919b5ff` (crates identical to `174366b`), each plus the report-only counter of #457 · **DATA:** none (generated corpus, no `samples-data` input) · **Evidence:** Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs, five formats × two builds) plus Derived (per-seed field comparison against the generator's exact truth, check-digit arithmetic, generator and emitter code) · **Status:** current
+**Date:** 2026-09-25 · **MAIN:** `1595bf9` and `919b5ff` (crates identical to `174366b`), each plus the report-only counter of #457 · **DATA:** none (generated corpus, no `samples-data` input) · **Evidence:** Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs, five formats × two builds) plus Derived (per-seed field comparison against the generator's exact truth, check-digit arithmetic, generator and emitter code) · **Status:** superseded by [`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md)
 
 **2026-09-25, runs 06:16–07:45 UTC, one machine, sequential.** This re-measures the published
 synthetic row in [`README.md`](README.md#current-headline-numbers), last observed in CI on
