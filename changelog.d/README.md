@@ -53,6 +53,11 @@ The file body is the changelog bullet(s) exactly as they should appear, `-` and 
 no blank framing lines. Write it for someone upgrading, not for someone reading the diff:
 say what changed, and if it breaks something, say what to do about it.
 
+A breaking fragment (`!`) also owes its entry in [`MIGRATION.md`](../MIGRATION.md), under
+**Unreleased**, in the same PR: the fragment names the break, the guide walks an upgrader through it.
+`scripts/check-changelog.sh` (check 5) fails a PR that adds a `!` fragment without changing
+`MIGRATION.md`. The release PR renames **Unreleased** to the versions it ships.
+
 ```markdown
 - **Batch extraction API.** `POST /api/extract/batch` accepts N documents and returns a job id;
   poll `GET /api/jobs/{id}` for per-document results. Gated on the `batch` license feature.
