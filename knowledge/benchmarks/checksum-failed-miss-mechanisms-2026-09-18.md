@@ -37,6 +37,10 @@ Two facts about ICAO 9303 do most of the work in the entries below, and both are
 
 ## Czech identity-card specimen
 
+*(Corrected 2026-09-27: the asset is the Czechia 2005 passport, `P0_CZE_2005`, a TD3 book, not an
+identity card. What defeats its repair is in
+[`m6-six-misses-repair-mechanisms-2026-09-27.md`](m6-six-misses-repair-mechanisms-2026-09-27.md).)*
+
 **Observed:** TD3, `failing_checks = [personal_number, composite]`, band score 0.772. Line 2 differs in **2 positions, 33 and 41**, both inside the personal-number field (28–41). Line 1 differs in 1 position (29, inside the name field). All lines are full length. Whole-zone mismatch: 3 characters.
 
 **Mechanism:** Two isolated substitutions inside the personal number. **There is no shift:** a displaced run would misalign every position downstream, and positions 34–40 are correct. The dump does not determine which print feature caused either substitution.

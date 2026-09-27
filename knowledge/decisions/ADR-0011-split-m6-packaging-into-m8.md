@@ -1,6 +1,6 @@
 # ADR-0011 — Split M6: the deterministic core keeps the number, packaging becomes M8
 
-**Status:** Accepted (amended 2026-09-16, 2026-09-17)
+**Status:** Accepted (amended 2026-09-16, 2026-09-17, 2026-09-27)
 **Date:** 2026-09-13
 
 ## Context
@@ -316,3 +316,66 @@ but a milestone whose target recedes is not a milestone; M8's commercial deliver
 **Rejected: freezing the corpus itself.** Freezing the Definition of Done costs nothing the
 project wants; freezing the corpus would stop the ground-truth work and the fixture PRs that make
 every future delta attributable.
+
+## Amendment (2026-09-27)
+
+**M6 is closed.** Each of the fourteen documents the 2026-09-17 amendment froze is accounted for
+on the current committed baseline, and the other three criteria hold.
+
+**Two left the scored population** once inspection showed they carry no machine-readable zone,
+each relabelled `_no_mrz` on `samples-data` with the baseline re-blessed in the same PR: the San
+Marino 2017 card back, a blank filler template (#324), and Moldova `PA_MDA_2014`, whose lower zone
+is a decorative line that is not ICAO 9303 in any format (#349;
+[`detection-misses-2026-09-18.md`](../benchmarks/detection-misses-2026-09-18.md)). Moldova's
+`_mrz_wide` asset is a different document and plays no part here.
+
+**Twelve remain scored misses, each attributed:**
+
+- France 2020 card back — a preprocessing variant gap: the band is located, no native variant
+  resolves it, and another OCR stack reads the same bytes after a contrast stretch
+  ([`detection-misses-2026-09-18.md`](../benchmarks/detection-misses-2026-09-18.md),
+  [`twelve-scored-misses-2026-09-19.md`](../benchmarks/twelve-scored-misses-2026-09-19.md) §1).
+- Italy 2022 card back — a FACSIMILE watermark across the band (same two records).
+- Russian Federation 2019 — the line extractor splits and truncates the rows of a photographed
+  booklet, so no band is scored and a TD1 is parsed out of a TD3
+  ([`russia-mrz-segmentation-2026-09-19.md`](../benchmarks/russia-mrz-segmentation-2026-09-19.md)).
+- Croatia 2021 card back — one confusion class across the whole document number and its check
+  digit, beyond the one-substitution repair (`twelve-scored-misses-2026-09-19.md` §3a).
+- Belgium 2021 and Sweden 2022 card backs — attempt selection: the provider input holds a better
+  line 2 than the one returned
+  ([`mrz-strip-phase0-results-2026-09-24.md`](../benchmarks/mrz-strip-phase0-results-2026-09-24.md)).
+- Afghanistan 2016, Czechia 2005, Germany 2024, Hong Kong 2007, Hong Kong 2019 and Romania PE
+  2024 — a replay of the shipped parser over each document's recorded OCR input
+  ([`m6-six-misses-repair-mechanisms-2026-09-27.md`](../benchmarks/m6-six-misses-repair-mechanisms-2026-09-27.md)).
+  On Afghanistan the repair recovers the correct line 2, but a second single substitution at a
+  same-weight cell also verifies every check digit, and the parser refuses to choose. Czechia's
+  printed date of birth names no calendar day, so the damaged-zone pass can accept no repaired
+  reading. Germany, Romania and Hong Kong 2019 misread a glyph pair that is not in `CONFUSABLES`,
+  and Hong Kong 2007 misreads at least four document-number cells against a cap of one. No OCR
+  attempt on any of the six verifies as read.
+
+**What counts as a mechanism.** A cell position and a failing check digit describe a miss; they
+do not name what defeats it. `checksum-failed-miss-mechanisms-2026-09-18.md` called its
+position-level entries mechanisms; `twelve-scored-misses-2026-09-19.md` §2 and §5 later ruled
+that shape is descriptive, not diagnostic. The later reading governs, and it is the one this
+close was held to.
+
+**The Tier-1 HIT count is one lower than the snapshot, and that is not a regression.** #440
+refused a hit that damaged-zone recovery had manufactured on the Bosnia 2013 card back, whose
+printed zone fails its own composite digit, and moved the document off the denominator with the
+re-bless in the same PR. Every PR since the freeze that moved an outcome re-blessed in the same
+PR (#324, #349, #440).
+
+**Formats and dependencies.** The formats criterion closed on 2026-09-16 (above). No OCR engine
+was replaced and no vision provider enabled; `ocrs`/`rten` moved one minor version with no outcome
+change (#390). The direct dependencies added under M6 — `base64` and `sha2` in `synthpass-bench`,
+two `rten` dev-dependencies in `synthpass-ocr`, a `zeroize_derive` version cap in `mrz` — were
+all already in the lockfile and are justified in their manifests. New transitive crates arrived
+only with version bumps of existing dependencies: `rten-parallel` with #390, and `core_detect`,
+`multiversion`, `multiversion-macros`, `multiversion_no_op` and `scopeguard` with `encoding_rs`
+0.8.41 in dependabot group #293.
+
+**What closing does not do.** The twelve are still misses. They, and any scored miss a later
+cohort adds, are the post-M6 residual in
+[`benchmarks/README.md`](../benchmarks/README.md#post-m6-residual): backlog, not a second
+milestone, so M8 remains the one open milestone. M8 opens.
