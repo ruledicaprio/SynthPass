@@ -7,9 +7,10 @@
 //! These tests spawn the built `synthpass` binary (patterned on
 //! `exit_codes.rs`/`license_roundtrip.rs`), with `SYNTHPASS_LICENSE_SKIP=1`
 //! so the license gate never enters into it, and — critically — an *empty*
-//! `SYNTHPASS_OCR_MODEL_DIR` with `SYNTHPASS_OCR_AUTO_DOWNLOAD=0`, the same
-//! trick `license_roundtrip.rs` uses to get a fast, deterministic, network-free
-//! failure out of the OCR stage: no real `.rten` model is required (this
+//! `SYNTHPASS_OCR_MODEL_DIR`, the same trick `license_roundtrip.rs` uses to get
+//! a fast, deterministic, network-free failure out of the OCR stage (the
+//! extraction path never downloads a model, issue #491, so a missing one fails
+//! at once): no real `.rten` model is required (this
 //! workspace's real models are gitignored and not present in a fresh CI
 //! checkout), and — unlike a real recognition pass, which the ignored
 //! `native_ocr_e2e`/`rust_ocr_smoke` tests measure at minutes in debug mode —
@@ -44,10 +45,10 @@ impl Drop for TempDirGuard {
 }
 
 /// An empty, real directory with no `.rten` files in it — `SYNTHPASS_OCR_MODEL_DIR`
-/// pointed here plus `SYNTHPASS_OCR_AUTO_DOWNLOAD=0` makes the OCR stage fail
-/// fast (missing-file, not a network fetch or a real inference pass) and
-/// deterministically, the same way `license_roundtrip.rs` gets a downstream
-/// failure without staging real models.
+/// pointed here makes the OCR stage fail fast (a missing file, never a network
+/// fetch or a real inference pass: the extraction path never downloads, issue
+/// #491) and deterministically, the same way `license_roundtrip.rs` gets a
+/// downstream failure without staging real models.
 fn empty_model_dir(label: &str) -> (PathBuf, TempDirGuard) {
     let dir = std::env::temp_dir().join(format!(
         "synthpass-cli-test-json-contract-{label}-{}",
@@ -61,7 +62,6 @@ fn empty_model_dir(label: &str) -> (PathBuf, TempDirGuard) {
 fn base_cmd(model_dir: &std::path::Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_synthpass"));
     cmd.env("SYNTHPASS_LICENSE_SKIP", "1")
-        .env("SYNTHPASS_OCR_AUTO_DOWNLOAD", "0")
         .env("SYNTHPASS_OCR_MODEL_DIR", model_dir);
     cmd
 }
