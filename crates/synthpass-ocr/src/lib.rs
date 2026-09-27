@@ -38,7 +38,13 @@
 //! variant that validates (see [`StopMode`] for the one exception).
 //! Retries are additive-only — the general pass's
 //! text is never replaced — so Tier-2 input can only gain candidate lines,
-//! and a checksum gate upstream decides what is trusted.
+//! and a checksum gate upstream decides what is trusted. **Tier 1 does not
+//! read that accumulation.** [`OcrPage::accepted_mrz_text`] carries only the
+//! text of the one pass this loop accepted, and Tier 1's own `MrzReader`
+//! parses that instead — handed every pass's lines, `mrz`'s damaged-capture
+//! `single()` unanimity gate sees a failed variant's disagreeing readings
+//! alongside the accepted one and refuses, even though the loop already
+//! decided which reading to trust (#508).
 //!
 //! # Retry-stop oracle (measurement arm)
 //!
@@ -273,8 +279,12 @@ impl NativeOcr {
     }
 
     /// Run OCR on the image at `image_path`, returning all recognized text as
-    /// a single string — exactly what Tier 1's MRZ pattern search and the
-    /// Tier-2 LLM prompt both need; no requirement for structured layout.
+    /// a single string — exactly what the Tier-2 LLM prompt needs; no
+    /// requirement for structured layout. **Not** what Tier 1's MRZ pattern
+    /// search should read once the retry loop has run more than one pass —
+    /// see [`Self::recognize_detailed`] and [`OcrPage::accepted_mrz_text`]/
+    /// [`OcrPage::tier1_text`] for the field this plain-`String` wrapper
+    /// cannot expose (#508).
     ///
     /// If the general pass's text lacks a checksum-valid MRZ, the constrained
     /// retry passes run (see the module docs) and their MRZ-shaped lines are
@@ -460,6 +470,12 @@ impl NativeOcr {
         // The page turn of the pass `pending` came from (0 for the general
         // pass), applied to `rotation` if the loop ends by accepting it.
         let mut pending_turn = 0;
+        // #508: the text of the pass `pending` came from — carried
+        // alongside it so a `repair_unconfirmed`/`pass_cap`/`budget` stop
+        // that accepts a held reading can hand Tier 1 that reading's own
+        // text instead of the full multi-pass concatenation. Set together
+        // with `pending`, never read before it.
+        let mut pending_text: Option<String> = None;
         if let Some(data) = mrz::find_and_parse(&text).ok().filter(|d| d.valid()) {
             if stop_mode == StopMode::FirstValid || !data.damaged_recovery {
                 // #473 measurement: reported unconditionally (not gated on
@@ -480,6 +496,10 @@ impl NativeOcr {
                     apply_chargrid(chargrid_mode, &self.mrz_engine, &image, &mut text, verbose)
                 };
                 let text_sanity = page_sanity(&text);
+                // #508: the general pass is the only pass that has run, so
+                // its text and the accumulated `text` are identical here —
+                // this is the `general_valid` case where nothing moves.
+                let accepted_mrz_text = Some(text.clone());
                 return Ok(OcrPage {
                     text,
                     lines,
@@ -492,6 +512,7 @@ impl NativeOcr {
                     retry_budget_hit: false,
                     retry_stop: Some("general_valid".to_string()),
                     chargrid: chargrid_arm,
+                    accepted_mrz_text,
                 });
             }
             if verbose {
@@ -502,6 +523,7 @@ impl NativeOcr {
             }
             pending = Some(data);
             pending_pass_id = Some("general".to_string());
+            pending_text = Some(text.clone());
         } else if verbose {
             eprintln!("[synthpass-ocr] Tier-1 miss on general pass; MRZ-band candidate lines:");
             for line in mrz_shaped_lines(&text).lines() {
@@ -521,6 +543,15 @@ impl NativeOcr {
         // assembly's doc comment for what an exhausted/budget-capped loop
         // does instead.
         let mut winning_variant_image: Option<RgbImage> = None;
+        // #508: the text of the accepted pass, set in lockstep with
+        // `retry_variant_id` everywhere in this loop (and its post-loop
+        // fallback) that variable is set from a fresh pass or from
+        // `pending_text` -- becomes `OcrPage::accepted_mrz_text`. `Some` iff
+        // `retry_variant_id` is `Some` -- checked against every real specimen
+        // by `tests/native_ocr_e2e.rs`'s
+        // `native_ocr_508_accepted_mrz_text_matches_the_retry_loops_own_decision`
+        // (real models, `#[ignore]`d).
+        let mut accepted_text: Option<String> = None;
 
         // `passes_run` counts total passes including the general one above
         // (seeded at 1) — a `zip` counter rather than a manually incremented
@@ -658,6 +689,7 @@ impl NativeOcr {
                 retry_stop = Some("pass_cap".to_string());
                 if pending.is_some() {
                     retry_variant_id = pending_pass_id.clone();
+                    accepted_text = pending_text.clone();
                 }
                 if verbose {
                     eprintln!(
@@ -671,6 +703,7 @@ impl NativeOcr {
                 retry_stop = Some("budget".to_string());
                 if pending.is_some() {
                     retry_variant_id = pending_pass_id.clone();
+                    accepted_text = pending_text.clone();
                 }
                 if verbose {
                     eprintln!(
@@ -687,6 +720,7 @@ impl NativeOcr {
             if pending.is_some() && passes_run > pending_set_at_pass + confirm_budget {
                 retry_stop = Some("repair_unconfirmed".to_string());
                 retry_variant_id = pending_pass_id.clone();
+                accepted_text = pending_text.clone();
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] confirm-pass budget ({confirm_budget}) exhausted before \
@@ -780,6 +814,9 @@ impl NativeOcr {
                     } else {
                         "variant_valid".to_string()
                     });
+                    // #508: this pass's own candidate lines, not the
+                    // accumulated `text` -- see `OcrPage::accepted_mrz_text`.
+                    accepted_text = Some(candidates.clone());
                     // Move, not clone: `variant` is not read again after this
                     // point in the loop, and this branch always `break`s.
                     winning_variant_image = Some(variant);
@@ -795,6 +832,7 @@ impl NativeOcr {
                     pending_pass_id = Some(pass_id.clone());
                     pending_set_at_pass = passes_run;
                     pending_turn = turn;
+                    pending_text = Some(candidates.clone());
                 }
                 if verbose {
                     let left = (pending_set_at_pass + confirm_budget).saturating_sub(passes_run);
@@ -820,6 +858,7 @@ impl NativeOcr {
             );
             if pending.is_some() {
                 retry_variant_id = pending_pass_id.clone();
+                accepted_text = pending_text.clone();
             }
         }
         // #473: the loop accepted the held reading rather than a variant it
@@ -843,11 +882,23 @@ impl NativeOcr {
         // into a valid MRZ across two different variants -- that combination
         // has no single source image, so repair is skipped rather than
         // guessed at.
+        // #508: chargrid re-parses and repairs `accepted_text` (this winning
+        // variant's own candidate lines), not the full accumulated `text` --
+        // the latter is exactly what the retry loop's own damaged-capture
+        // `single()` unanimity gate may already have refused on, and it
+        // mismatches `image`, which is this one pass's source. `accepted_text`
+        // is always `Some` here: it is set in the same branch that sets
+        // `winning_variant_image`, above. The repair lands only in
+        // `accepted_text` (what Tier 1 reads) -- `text` (what Tier 2 and the
+        // markdown file read) is intentionally left as the full concatenation.
         let chargrid_arm = match (chargrid_mode, &winning_variant_image) {
             (ChargridMode::Off, _) => None,
-            (_, Some(image)) => {
-                apply_chargrid(chargrid_mode, &self.mrz_engine, image, &mut text, verbose)
-            }
+            (_, Some(image)) => match accepted_text.as_mut() {
+                Some(accepted) => {
+                    apply_chargrid(chargrid_mode, &self.mrz_engine, image, accepted, verbose)
+                }
+                None => Some("skipped:no_source_image".to_string()),
+            },
             (_, None) if has_valid_mrz(&text) => Some("skipped:no_source_image".to_string()),
             (_, None) => Some("skipped:no_valid_mrz".to_string()),
         };
@@ -864,6 +915,7 @@ impl NativeOcr {
             retry_budget_hit,
             retry_stop,
             chargrid: chargrid_arm,
+            accepted_mrz_text: accepted_text,
         })
     }
 }
