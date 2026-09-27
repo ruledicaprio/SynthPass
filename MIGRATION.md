@@ -1,4 +1,30 @@
-# Migration guide: `mrz` 0.7 → 0.8, SynthPass 1.5 → 1.6
+# Migration guide
+
+Newest release first. A pull request that makes a breaking change (a `!` changelog fragment) adds its
+entry under **Unreleased** in that same pull request, and the release pull request renames the section
+to the versions it ships (see [`changelog.d/README.md`](changelog.d/README.md)).
+
+## Unreleased
+
+### `mrz` 0.8 → 0.9
+
+#### 1. `parse_*` refuses a document number whose first cell is the filler ([#536](https://github.com/ruledicaprio/SynthPass/issues/536))
+
+`parse_td1`, `parse_td2`, `parse_td3`, `parse_mrv_a` and `parse_mrv_b`, their `_with` forms, and so
+`find_and_parse`, now return `Err(MrzError::LeadingFiller { field: Field::DocumentNumber, line, position })`
+when the document number's first cell is `<`, including an all-filler field. Doc 9303 enters data from
+the left-hand position of each field, and the check-digit arithmetic cannot see a `0`, `A`, `K` or `U`
+read as `<`, so such a reading used to verify.
+
+- **If you build zones in tests** from a default `Td3Fields`, `Td1Fields` and so on, the document number
+  is `""`, which formats as an all-filler field. Set one; the zone no longer parses.
+- **If you match on `MrzError`**, no code change is needed: it is `#[non_exhaustive]`, so a wildcard arm
+  already covers the new variant. Treat it like `BadDocumentCode`: the input is not a conforming zone.
+- **`find_and_parse`** reports `LeadingFiller`, not `IncompleteSequence`, when a refused candidate was the
+  best it found. A validating reading or a checksum-failed fallback still wins.
+- `Checks` and `valid()` are unchanged: they still mean checksum consistency only (ADR-0017).
+
+## Migration guide: `mrz` 0.7 → 0.8, SynthPass 1.5 → 1.6
 
 This release has two audiences, and the most important thing this guide does is keep them apart:
 
@@ -11,9 +37,9 @@ This release has two audiences, and the most important thing this guide does is 
 SynthPass 1.6.0 is a minor release by maintainer decision, even though two of its JSON changes are
 breaking for a strict consumer. Both are listed below.
 
-## Part 1: the `mrz` crate, 0.7 → 0.8
+### Part 1: the `mrz` crate, 0.7 → 0.8
 
-### 1. `Checks` distinguishes "absent" from "verified" ([ADR-0017](knowledge/decisions/ADR-0017-checks-distinguish-absent-from-verified.md))
+#### 1. `Checks` distinguishes "absent" from "verified" ([ADR-0017](knowledge/decisions/ADR-0017-checks-distinguish-absent-from-verified.md))
 
 Every `Checks` field is now `Option<bool>`:
 
@@ -34,7 +60,7 @@ In JSON an absent check serialises as an explicit `null`; the key is never omitt
 ranking compares the fraction of *applicable* checks that verify, per format, so a layout that
 prints fewer check digits is no longer scored as if the missing ones passed.
 
-### 2. Optional data is named for what it holds ([ADR-0018](knowledge/decisions/ADR-0018-optional-data-named-for-what-it-holds.md))
+#### 2. Optional data is named for what it holds ([ADR-0018](knowledge/decisions/ADR-0018-optional-data-named-for-what-it-holds.md))
 
 The `personal_number` field is gone. The optional-data regions keep their own slots:
 
@@ -57,7 +83,7 @@ The serde keys follow the fields: `personal_number` is gone, and `optional_data_
 `optional_data_2` take its place. `Field::PersonalNumber` and `Checks::personal_number` keep their
 names, because they name the TD3 check digit, which is unchanged.
 
-### 3. `MrzError::BadCharacter` says where
+#### 3. `MrzError::BadCharacter` says where
 
 It is a struct variant now: `BadCharacter { character, line, position }`. `line` is zero-based
 and `None` when the error did not come from parsing a zone (for example the standalone
@@ -80,7 +106,7 @@ Two more `MrzError` payloads changed. Both matter only if you match on the value
   the trailing filler (`"Z"`), while TD3, MRV-A and MRV-B did not (`"Z<"`). In 0.8 all five
   formats report `"Z<"`.
 
-### 4. `ParseOptions`, `Date` and `DateValidity` are `#[non_exhaustive]`
+#### 4. `ParseOptions`, `Date` and `DateValidity` are `#[non_exhaustive]`
 
 Only `ParseOptions` needs a caller change. Build it with the builder, because a struct literal is
 rejected from another crate, and so is functional-update syntax (`E0639`):
@@ -95,7 +121,7 @@ let opts = ParseOptions::default().with_pivot_yy(30);
 With the `serde` feature, `ParseOptions` JSON written by 0.7 (`{"pivot_yy":30}`) still
 deserializes. The new `class_sweep` field defaults to `false`.
 
-### 5. Dates and sex are typed ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), [ADR-0020](knowledge/decisions/ADR-0020-mrz-value-wire-contract.md))
+#### 5. Dates and sex are typed ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md), [ADR-0020](knowledge/decisions/ADR-0020-mrz-value-wire-contract.md))
 
 `MrzData::date_of_birth` and `date_of_expiry` are `MrzDate`, and `MrzData::sex` is `Sex`.
 `date_of_birth_completeness` is removed, because the date carries its own kind.
@@ -136,7 +162,7 @@ let day: Option<Date> = data.date_of_birth.calendar();   // Some only for a real
 - Under the `zeroize` feature, `MrzDate` clears its payload and keeps its variant; `Sex` is
   overwritten whole.
 
-### 6. The emitters take typed sex and dates ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md))
+#### 6. The emitters take typed sex and dates ([ADR-0019](knowledge/decisions/ADR-0019-typed-values-on-mrzdata.md))
 
 `Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields` and `MrvBFields` take `MrzDate` for
 `date_of_birth` and `date_of_expiry`, and `Sex` for `sex`, the same types `MrzData` returns.
@@ -173,7 +199,7 @@ let fields = Td3Fields {
   them. A `RawDateField` is exactly six MRZ characters, so such input now has to be fixed before
   it reaches the emitter.
 
-### Behaviour changes you may notice (no code change needed)
+#### Behaviour changes you may notice (no code change needed)
 
 - **A legal `K` in a document code survives the damaged-capture repair.** 0.7 turned any `K` in
   the second cell of the document code into `<`. That destroyed a legal code: ICAO lets the
@@ -182,13 +208,13 @@ let fields = Td3Fields {
 - **`country_name`'s scope.** It covers a documented subset of the Part 3 §5
   registry, not all of it. `UNK` now returns ICAO's full name.
 
-## Part 2: SynthPass JSON, 1.5 → 1.6
+### Part 2: SynthPass JSON, 1.5 → 1.6
 
 The product schema (`extracted`, `extracted_v2`, the exports, the benchmark reports) is shielded
 from most of Part 1. One mapping (`synthpass_core::mrz_product::sex`) decides the product's sex
 vocabulary, and the date promotion gates decide which dates are certified. Two changes do reach you:
 
-### A. Optional data has its own slots (breaking for a strict consumer)
+#### A. Optional data has its own slots (breaking for a strict consumer)
 
 - `personal_number` is `null` off TD3.
 - On TD1, TD2, MRV-A and MRV-B, the value that used to arrive under `personal_number` now
@@ -199,14 +225,14 @@ vocabulary, and the date promotion gates decide which dates are certified. Two c
 - Benchmark reports score the two new columns, so every mean-over-fields CER changes with no
   change in accuracy. That is a discontinuity, not an improvement.
 
-### B. The pass-through `mrz` object follows the 0.8 wire (breaking for a strict consumer)
+#### B. The pass-through `mrz` object follows the 0.8 wire (breaking for a strict consumer)
 
 This affects the browser demo's `parse_mrz_text` result, and the `mrz` key in `synthpass-serve`'s
 streamed `done` event and document-status responses. They show the crate's own wire (Part 1 §5):
 no `date_of_birth_completeness`, and `sex` as the zone character. The demo's copied JSON and its
 check-in form keep `M`/`F`/`X`.
 
-### Behaviour fixes you may notice (not breaking)
+#### Behaviour fixes you may notice (not breaking)
 
 - **A misread sex cell is unknown, not `"X"`.** A non-conformant cell (`1`, `0`, `S`) now leaves
   the product's `sex` `null` instead of asserting `X`. Fusion no longer reports it as contradicting

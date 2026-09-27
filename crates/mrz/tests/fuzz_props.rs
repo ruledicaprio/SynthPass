@@ -282,6 +282,11 @@ proptest! {
             surname: surname.clone(),
             given_names: given_names.clone(),
             issuing_country: "UTO".to_string(),
+            // Non-empty and non-`<`-led: an empty document number formats
+            // to an all-filler field, which `parse_td3` now refuses outright
+            // (#536) -- irrelevant to what this property tests (the name
+            // field), so give it an ordinary fabricated number instead.
+            document_number: "SPEC1234".to_string(),
             ..Td3Fields::default()
         };
         let mrz = format_td3(&fields);
@@ -314,6 +319,7 @@ proptest! {
             surname: parsed.surname.clone(),
             given_names: parsed.given_names.clone(),
             issuing_country: "UTO".to_string(),
+            document_number: "SPEC1234".to_string(),
             ..Td3Fields::default()
         });
         prop_assert_eq!(reemitted.split_once('\n').unwrap().0, l1, "not a fixpoint");

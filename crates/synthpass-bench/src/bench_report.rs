@@ -278,6 +278,7 @@ const KNOWN_BUCKET_ORDER: &[&str] = &[
     "ocr_error",
     "document_number_mismatch",
     "false_positive_mrz",
+    "document_number_leading_filler",
     "redacted_mrz",
     "no_mrz_expected",
     "checksum_failed_specimen",
@@ -305,6 +306,11 @@ fn bucket_description(key: &str) -> Option<(&'static str, bool)> {
         )),
         "false_positive_mrz" => Some((
             "A checksum-valid MRZ returned for a document that carries none",
+            true,
+        )),
+        "document_number_leading_filler" => Some((
+            "Document number's first cell is the filler — refused outright, not merely a failed \
+             check digit",
             true,
         )),
         "redacted_mrz" => Some((

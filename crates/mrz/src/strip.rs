@@ -104,13 +104,24 @@ enum CellClass {
     /// Feeds a local check, the composite, or is a check-digit cell itself:
     /// [`CellSpec::local`], `composite_weight` or `compared_against` is `Some`.
     CheckCovered,
-    /// Line 1's very first cell — the one content check every direct
-    /// `parse_*` function makes outside the check digits: `P` for TD3, `V`
+    /// Line 1's very first cell — one of two content checks a direct
+    /// `parse_*` function makes outside the check digits (the other is the
+    /// document number's own leading cell, described below): `P` for TD3, `V`
     /// for MRV-A/B, or one of `I`/`A`/`C` for TD1/TD2 (Part 4 §4.2.2.1 / Part
     /// 5 §4.2.2.1 / Part 6 §4.2.2.1 / Part 7 §4.2.2.1/§7.2.2.1 respectively —
     /// see `parser::parse_td3` and its TD1/TD2/MRV-A/MRV-B siblings'
     /// `starts_with`/`as_bytes().first()` checks). The *second*
     /// document-code cell is not checked at all: see [`Unverifiable`](Self::Unverifiable).
+    ///
+    /// A document-number field's first cell is *also* content-checked
+    /// outside the check digits (`parser::ensure_document_number_leads`
+    /// refuses a leading filler, [`MrzError::LeadingFiller`](crate::MrzError::LeadingFiller))
+    /// -- but that cell is not `Structural` here: it already feeds
+    /// [`CheckCovered`](Self::CheckCovered) (`local` is the document-number
+    /// check), so the two classifications coexist on the same cell rather
+    /// than competing for it. `Structural` stays reserved for the one cell
+    /// this coverage map's `unchecked_data` test can otherwise see no check
+    /// on at all.
     Structural,
     /// Accepted exactly as printed. Nothing in a direct parser's return value
     /// depends on this cell beyond the blanket MRZ-charset check every
@@ -1047,6 +1058,23 @@ mod tests {
                 structural + covered + unverifiable,
                 cells.len(),
                 "{format:?}: the map classifies every cell exactly once"
+            );
+
+            // #536: `parser::ensure_document_number_leads` is a second content
+            // check outside the check digits, on the document number's own
+            // first cell -- but that cell already feeds the document-number
+            // check (`local` is `Some`), so it classifies `CheckCovered` here,
+            // same as before this crate refused a leading filler. It never
+            // becomes a second `Structural` cell: the map above still counts
+            // exactly one.
+            let doc_number_leads = cells
+                .iter()
+                .find(|cell| cell.field == Field::DocumentNumber)
+                .unwrap_or_else(|| panic!("{format:?}: every format has a document-number cell"));
+            assert_eq!(
+                doc_number_leads.class(),
+                CellClass::CheckCovered,
+                "{format:?}: the document number's first cell"
             );
         }
     }

@@ -444,6 +444,13 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
 - The five MRZ formats are tried in a fixed priority order (TD3 → MRV-B → MRV-A →
   TD1 → TD2) to avoid cross-format cannibalization; every candidate is
   check-digit-verified before it is accepted.
+- A document-number field whose first cell is a filler is refused outright, whatever its check
+  digits say. The arithmetic cannot see a `0`, `A`, `K` or `U` read as `<` (all share residue 0
+  with the filler; see `mrz::Blindspot`), and Doc 9303 enters data from the left-hand position of
+  each field (Part 3; Part 4 for TD3). `mrz`'s `parse_*` functions return
+  `MrzError::LeadingFiller`, a structural error like `BadDocumentCode`, so `Checks` and `valid()`
+  still mean checksum consistency only. Interior fillers (Part 4 §4.2.2.2) and the long-number
+  overflow filler in the check-digit cell stay legal. The rule covers the document number only.
 
 ### 13.4 `#[non_exhaustive]` policy for the published `mrz` crate
 
