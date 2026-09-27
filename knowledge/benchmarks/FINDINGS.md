@@ -21,8 +21,11 @@ regenerate.
 | 2026-09-27 | [six M6 misses attributed: one correct reading refused, three missing pairs, one cap, one date gate](#2026-09-27--six-m6-misses-attributed-one-correct-reading-refused-three-missing-pairs-one-cap-one-date-gate) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [the synthetic headline re-measured: 368 / 500, and the −2 hides 14 more correct reads](#2026-09-27--the-synthetic-headline-re-measured-368--500-and-the-2-hides-14-more-correct-reads) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118](#2026-09-27--prompt-v3-moves-no-parity-field-on-the-84-fixtures-v2-reached-and-completes-all-118) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-27 | [the #508 A/B at `first-valid`: only `variant_valid` documents move, real 139 → 138, and no synthetic mover becomes correct](#2026-09-27--the-508-ab-at-first-valid-only-variant_valid-documents-move-real-139--138-and-no-synthetic-mover-becomes-correct) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [Why `mrz` did not recover six M6 misses: one correct reading refused, three missing pairs, one cap, one date gate](m6-six-misses-repair-mechanisms-2026-09-27.md) | Observed (release `provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults, 0 outcome changes against the committed ledger; the recorded provider input of six assets replayed through an instrumented copy of the shipped parser, reproducing the dumped zone on all six) plus Derived (counterfactual replays on the same copy with one gate lifted at a time; check-digit arithmetic) | current | m6-six-misses-repair-mechanisms-2026-09-27.md |
 | 2026-09-27 | [Prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118: 50.8% reviewed, 55.3% derived](parity-prompt-v3-2026-09-27.md) | Observed (two CI `native-llm` job logs, same pinned GGUF, greedy decoding) plus Derived (per-fixture, per-field pairing of the two logs; a Python mirror of the prompt's content cleanup over the 118 tracked fixtures) | current | parity-prompt-v3-2026-09-27.md |
+| 2026-09-27 | [#508 A/B at `first-valid`: only `variant_valid` documents move, and the accepted pass is a worse witness than the concatenation](retry-handoff-ab-2026-09-27.md) | Observed (two local release builds, six full-population runs, ten single-seed traces; CI `real-specimen-gate.yml` run 36331797441 on `65c7944`) plus Derived (per-document and per-seed comparison) plus Hypothesized (the #536 outcome, marked where used); the private specimen is Observed locally, class only | current | retry-handoff-ab-2026-09-27.md |
+| 2026-09-27 | [#508 replay: `single()` refuses, the damaged-pass budget is never close](retry-handoff-replay-2026-09-27.md) | Observed (one local release build, single-seed and stride-26 traces per arm, plus a replay of every dumped `text` through an instrumented copy of `mrz`) | current | retry-handoff-replay-2026-09-27.md |
 | 2026-09-27 | [The synthetic headline is 368 / 500 on `main`: #468/#471 and #483 fix 15 wrong reads, and #521 costs TD1 four hits](synthetic-headline-2026-09-27.md) | Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) | current | synthetic-headline-2026-09-27.md |
 | 2026-09-26 | [Check-digit blind spots, exact — what the arithmetic can and cannot promise](checkdigit-blindspots-exact-2026-09-26.md) | Derived (closed form and exact integer enumeration, `crates/mrz/examples/checkdigit_blindspots_exact.rs`, with the laws pinned against the parser in `crates/mrz/tests/checkdigit_algebra.rs`; every measured input is cited to its note) plus one Observed count over the tracked fixtures (§4) | current | checkdigit-blindspots-exact-2026-09-26.md |
 | 2026-09-26 | [the #473 retry-stop A/B: `clean` loses hits because the parser never sees the loop's decision](#2026-09-26--the-473-retry-stop-ab-clean-loses-hits-because-the-parser-never-sees-the-loops-decision) | Observed | current | FINDINGS.md (Weak-spot findings) |
@@ -1235,3 +1238,50 @@ The v3 run (36323412121, `39345b2`, PR #533) completed all 118 and passed.
 
 Tables, the mirror, the 34 fixtures v2 never reached and what this does not claim:
 [`parity-prompt-v3-2026-09-27.md`](parity-prompt-v3-2026-09-27.md).
+
+---
+
+### 2026-09-27 — the #508 A/B at `first-valid`: only `variant_valid` documents move, real 139 → 138, and no synthetic mover becomes correct
+
+**Observed**, locally, on two release builds: `9a639c6` (A, unpatched) and `0a8f7ff` (B, #508,
+since rebased as `65c7944`). Every OCR arm was at its default (`first-valid`, confirm budget 2).
+The arms take the same retry path on all 411 documents, and the dumped OCR text is byte-identical
+on all 170 dumped real documents, so the movers come from the parse, not from `rten` noise. Arm A
+matches the committed CI ledger on all 261 outcomes. CI run 36331797441 on `65c7944` reproduces
+B's real counts exactly.
+
+| Population | A | B |
+| :-- | --: | --: |
+| Real specimens, scored | 139 / 151 = 92.1% | 138 / 151 = 91.4% |
+| Real specimens, whole corpus | 139 / 261 = 53.3% | 138 / 261 = 52.9% |
+| Real `document_number_mismatch` / strict names | 0 / 12 of 45 | 1 / 14 of 45 |
+| Synthetic TD3 ×100: hits / correct / wrong accepts / valid misses | 75 / 39 / 36 / 3 | 77 / 38 / 39 / 5 |
+| M4 set ×50: hits / correct / wrong accepts / valid misses | 39 / 18 / 21 / 1 | 39 / 17 / 22 / 2 |
+
+- **Every mover is `variant_valid`, on the same pass in both arms.** This confirms the architect's
+  expectation. No `general_valid` or `exhausted` document moved.
+- **Real specimens.** Cyprus `P0_CYP_2010` went from hit to `document_number_mismatch`. pass-02
+  alone reads `<00000220`, and `K` (value 20) and `<` (value 0) give the same check digit. The
+  names of India `P0_IND_2022`, Slovakia `P0_SVK_2005` and Somalia `P0_SOM_2023` became exact.
+  Cyprus `P0_CYP_2020` lost its names and now parses as TD2 from a truncated pass-03.
+  `false_positive_mrz` stayed at 0.
+- **Synthetic.** Under A, four `variant_valid` seeds (40, 50, 88 and 98) scored
+  `checksum_failed`: the parse over the concatenation refused a reading the loop had accepted.
+  Under B, Tier 1 agrees with the loop on all four, and the loop was wrong on all four. Two are
+  wrong accepts (50, 88) and two are checksum-valid wrong document numbers (40, 98). Seed 20 went
+  from correct to wrong on `given_names`.
+- **Mechanism (Derived).** The concatenation let the ordinary scan pair lines across passes, and
+  it let `single()` refuse when passes disagreed. On a variant stop, B removes both. The first
+  cost three real name reads and bought back Cyprus 2010 and Cyprus 2020. The second was
+  refusing four wrong synthetic reads.
+- **Gate:** B fails at `tolerance: 0` (`tier1_hits` 138 < 139, `document_number_mismatch` 1 > 0).
+
+**Decision input:** the owner reverted #535, so `main` returns to arm A, which matches the
+committed ledger, and the gate passes with no re-bless. #536 (refuse a document number that starts
+with `<`) still lands, because the loop accepted that reading before #535 too. #537 (`K` read as
+`<`) tracks the recognition cause. The handoff comes back only with a stronger acceptance for a
+variant stop, measured by the #473 `clean` A/B re-run with `damaged_recovery` recorded per
+document. A private TD1 card (class only) points the same way: Tier 1 refused it before #535, and
+with #535 it was a checksum-valid hit with the wrong sex and wrong names. Tables, the per-document
+reasons, invocations and what this does not claim:
+[`retry-handoff-ab-2026-09-27.md`](retry-handoff-ab-2026-09-27.md).
