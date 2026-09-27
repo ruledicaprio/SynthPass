@@ -855,10 +855,15 @@ fn decrypt_command(file: Option<&str>) -> Result<Exit, Box<dyn std::error::Error
 }
 
 /// `synthpass doctor` — preflight checks: OCR/inferer reachability + config sanity.
-/// OCR and inferer reachability are required for the pipeline to run at all
-/// (a failure there is [`Exit::Failure`] — the same code any other runtime
-/// failure gets, since `doctor`'s job is to predict whether extraction would
-/// work, not to distinguish which subsystem failed by exit code);
+/// OCR reachability is required for the pipeline to run at all (a failure
+/// there is [`Exit::Failure`] — the same code any other runtime failure gets,
+/// since `doctor`'s job is to predict whether extraction would work, not to
+/// distinguish which subsystem failed by exit code).
+///
+/// Tier 2 (the GGUF inferer) is optional (issue #496): a failed Tier-2 check
+/// fails `doctor` only when `SYNTHPASS_MODEL_PATH` is set. See
+/// [`tier2_failure`].
+///
 /// `SYNTHPASS_KEY`/`SYNTHPASS_AUDIT_LOG` checks are advisory since those
 /// features are optional and never flip `ok`.
 async fn doctor_command() -> Result<Exit, Box<dyn std::error::Error>> {
@@ -884,12 +889,19 @@ async fn doctor_command() -> Result<Exit, Box<dyn std::error::Error>> {
 
     let pipeline = Pipeline::from_env();
     let infer_desc = pipeline.infer_describe();
+    let model_path_explicit = env::var("SYNTHPASS_MODEL_PATH").is_ok();
     match pipeline.infer_health().await {
         Ok(status) => println!("✅ Tier-2 inferer ({infer_desc}): {status}"),
-        Err(e) => {
-            println!("❌ Tier-2 inferer ({infer_desc}) NOT healthy: {e}");
-            ok = false;
-        }
+        Err(e) => match tier2_failure(model_path_explicit) {
+            Tier2Failure::Fail => {
+                println!("❌ Tier-2 inferer ({infer_desc}) NOT healthy: {e}");
+                ok = false;
+            }
+            Tier2Failure::Advisory => println!(
+                "⚠️  Tier-2 inferer ({infer_desc}) not available: {e}. Tier 1 still works; set \
+                 SYNTHPASS_MODEL_PATH to a GGUF file to enable Tier 2"
+            ),
+        },
     }
 
     check_license_doctor(&mut ok);
@@ -925,6 +937,26 @@ async fn doctor_command() -> Result<Exit, Box<dyn std::error::Error>> {
         // the non-zero exit code is what a script or `doctor`'s own caller
         // actually branches on.
         Ok(Exit::Failure)
+    }
+}
+
+/// How [`doctor_command`] reports a failed Tier-2 health check (issue #496).
+/// A missing and an unloadable GGUF are treated alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Tier2Failure {
+    /// `SYNTHPASS_MODEL_PATH` unset: a Tier-1-only install is supported, so
+    /// `doctor` prints a `⚠️` line and its exit code is unaffected.
+    Advisory,
+    /// `SYNTHPASS_MODEL_PATH` set: the user asked for that model, so a missing
+    /// or unloadable one fails `doctor`.
+    Fail,
+}
+
+fn tier2_failure(model_path_explicit: bool) -> Tier2Failure {
+    if model_path_explicit {
+        Tier2Failure::Fail
+    } else {
+        Tier2Failure::Advisory
     }
 }
 
@@ -1082,6 +1114,16 @@ mod tests {
             mrz: None,
             method: synthpass_pipeline::Method::MrzDeterministic,
         }
+    }
+
+    #[test]
+    fn a_failed_tier2_check_is_advisory_without_an_explicit_model_path() {
+        assert_eq!(tier2_failure(false), Tier2Failure::Advisory);
+    }
+
+    #[test]
+    fn a_failed_tier2_check_fails_doctor_when_the_model_path_is_set() {
+        assert_eq!(tier2_failure(true), Tier2Failure::Fail);
     }
 
     #[test]

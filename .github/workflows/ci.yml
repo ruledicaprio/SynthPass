@@ -591,17 +591,16 @@ jobs:
           file target/x86_64-unknown-linux-musl/release/synthpass | grep -q 'statically linked'
           file target/x86_64-unknown-linux-musl/release/synthpass-serve | grep -q 'statically linked'
 
-      # `synthpass doctor`'s exit code also gates on the Tier-2 GGUF model, which
-      # this job deliberately doesn't download (that ~1GB fetch is the
-      # separate opt-in `native-llm` job's concern, not this one's) — so
-      # assert on the OCR-specific success line rather than doctor's overall
-      # exit code, which correctly stays non-zero here regardless.
+      # No Tier-2 GGUF here (that ~1 GB fetch is the opt-in `native-llm` job's)
+      # and no `SYNTHPASS_MODEL_PATH`, so `doctor` reports Tier 2 as advisory
+      # and exits 0 (#496). The grep still pins what this job exists for: the
+      # embedded OCR models load under musl.
       - name: Smoke test in a minimal Alpine container (musl libc parity)
         run: |
           docker run --rm -v "$PWD/target/x86_64-unknown-linux-musl/release:/bin2:ro" alpine:3.20 sh -c "
             set -e
             /bin2/synthpass fingerprint
-            SYNTHPASS_LICENSE_SKIP=1 /bin2/synthpass doctor || true
+            SYNTHPASS_LICENSE_SKIP=1 /bin2/synthpass doctor
           " | tee /tmp/doctor-output.txt
           grep -q 'OCR (rust) detection+recognition models embedded in binary' /tmp/doctor-output.txt
 

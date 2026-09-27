@@ -104,7 +104,7 @@ sequenceDiagram
 4. **Persistence:** the Markdown is written to disk.
 5. **Tier 2 (if triggered):** `NativeInferer` runs, serialized behind `Pipeline`'s semaphore.
 6. **JSON generation:** the backend returns a typed `Extraction`; the pipeline writes a `.json` (or encrypted `.json.enc`) adjacent to the source and appends an audit record.
-7. **`synthpass doctor`:** preflight — checks the `rust` OCR engine's two `.rten` model files (or, under `ocr-embedded`, the baked-in bytes): present, SHA-256-verified (skippable via `SYNTHPASS_OCR_MODEL_SKIP_VERIFY=1`), and — unlike a byte check — actually **loadable** by this build's `rten`, since a format this `rten` version can no longer parse still has the correct hash. `SYNTHPASS_OCR_ENGINE` no longer selects an engine (the Tesseract-based `native` engine was retired in v1.2.0; the pipeline always runs `rust`), so `doctor` warns and checks `rust` regardless of its value. Calls `Pipeline::infer_health()`, which confirms the GGUF file exists and SHA-256-verifies it (or reports the skip). Also verifies the configured license (or reports the skip).
+7. **`synthpass doctor`:** preflight — checks the `rust` OCR engine's two `.rten` model files (or, under `ocr-embedded`, the baked-in bytes): present, SHA-256-verified (skippable via `SYNTHPASS_OCR_MODEL_SKIP_VERIFY=1`), and — unlike a byte check — actually **loadable** by this build's `rten`, since a format this `rten` version can no longer parse still has the correct hash. `SYNTHPASS_OCR_ENGINE` no longer selects an engine (the Tesseract-based `native` engine was retired in v1.2.0; the pipeline always runs `rust`), so `doctor` warns and checks `rust` regardless of its value. Calls `Pipeline::infer_health()`, which confirms the GGUF file exists and SHA-256-verifies it (or reports the skip). A failed Tier-2 check fails `doctor` only when `SYNTHPASS_MODEL_PATH` is set; otherwise it prints a `⚠️` line, because a Tier-1-only install is supported (#496). Also verifies the configured license (or reports the skip).
 
 ### Web App (`synthpass-serve`)
 1. **GET /** serves an embedded, dependency-free upload page.
@@ -344,9 +344,10 @@ Notable specifics, where the bucket isn't obvious from the table alone:
 - `verify-license`: a missing license *file* also exits 3, not 1 — this command's whole purpose
   is to report license validity, so "no license to check" is itself a refusal, the same as an
   invalid or expired one.
-- `doctor`: exits 1 if any required check failed (OCR models, Tier-2 inferer, license); each
-  failed check already printed its own diagnostic line, so the exit code carries no separate
-  message.
+- `doctor`: exits 1 if any required check failed (OCR models, license); each failed check
+  already printed its own diagnostic line, so the exit code carries no separate message. The
+  Tier-2 model is required only when `SYNTHPASS_MODEL_PATH` is set (#496); otherwise a failed
+  Tier-2 check prints a `⚠️` line and leaves the exit code alone.
 - `generate`/`fingerprint` need no license and never exit 3.
 
 Implemented as one small typed `Exit` enum in `synthpass-cli/src/main.rs`, converted to

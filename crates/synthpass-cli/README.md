@@ -16,7 +16,7 @@ cargo run -p synthpass-cli -- --help
 | `synthpass <image>` | extract one document | required |
 | `synthpass batch <dir\|glob>` | extract every matching image | required (same as above); a license missing the `batch` feature is metered — one warning, still runs |
 | `synthpass decrypt <file.json.enc>` | decrypt an encrypted result (needs `SYNTHPASS_KEY`) | none |
-| `synthpass doctor` | preflight: OCR models, Tier-2 inferer, license | none |
+| `synthpass doctor` | preflight: OCR models, license, config; the Tier-2 model is optional unless `SYNTHPASS_MODEL_PATH` is set | none |
 | `synthpass fingerprint` | print this machine's fingerprint | none |
 | `synthpass verify-license [path]` | verify a license file | none |
 | `synthpass generate ...` | synthetic document images + label JSON | none |

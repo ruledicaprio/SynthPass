@@ -76,7 +76,7 @@ help text changes.*
 
 | To… | Run |
 | --- | --- |
-| check the install (OCR models, Tier-2 model, license, config) | `synthpass doctor` |
+| check the install (OCR models, license, config; the Tier-2 model is optional) | `synthpass doctor` |
 | read one document | `synthpass path/to/image.jpg` |
 | read a folder, or a quoted glob | `synthpass batch "scans/*.jpg"` |
 | make synthetic documents with ground-truth labels | `synthpass generate --count 10 --seed 42 --out-dir out/` |
