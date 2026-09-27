@@ -1574,6 +1574,27 @@ async fn main() {
                 );
             }
 
+            // Issue #443, report-only: a `checksum_failed_specimen` document
+            // is filed there because its *printed* zone fails its own check
+            // digits, whatever OCR returned — so a checksum-valid read on one
+            // can never surface as `false_positive_mrz`, and the outcome
+            // ledger (bucket only) never sees it. A read that verifies on a
+            // zone that cannot verify was built by the parser. Named here and
+            // counted in the JSON (`checksum_valid_on_failed_specimen`); the
+            // failing step, with its re-bless, is a later change.
+            let manufactured = synthpass_bench::report::checksum_valid_reads_on_failed_specimens(
+                &r.documents_detail,
+            );
+            if !manufactured.is_empty() {
+                println!(
+                    "    ⚠ {} checksum_failed_specimen document(s) read a checksum-VALID MRZ off a \
+                     printed zone that fails its own check digits — the read was manufactured, \
+                     not read (issue #443; report-only, not gated): {}",
+                    manufactured.len(),
+                    manufactured.join(", ")
+                );
+            }
+
             // Loud on purpose, and phrased as a defect rather than a count: a
             // checksum-valid MRZ off a document that has none is either a
             // hallucinated record or a mislabelled corpus file, and both need
