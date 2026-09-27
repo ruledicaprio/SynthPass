@@ -578,6 +578,11 @@ pub const REGRESSION_BUCKETS: &[&str] = &[
     "ocr_error",
     "document_number_mismatch",
     "false_positive_mrz",
+    // A document number whose first cell is the filler is refused outright
+    // (`mrz::MrzError::LeadingFiller`, #536) rather than merely failing its
+    // check digit — a distinct, genuine miss, so its growth is a regression
+    // exactly like `checksum_failed`'s.
+    "document_number_leading_filler",
 ];
 
 /// The ADR-0013 strict-name counts for one real-specimen run: `strict_hits`

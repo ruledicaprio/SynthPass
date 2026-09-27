@@ -2515,6 +2515,32 @@ mod tests {
         assert!(!has_valid_mrz("just some regular text\nwith two lines"));
     }
 
+    /// #536: a document number whose first cell is the filler is a structural
+    /// refusal (`mrz::MrzError::LeadingFiller`), not a checksum-valid read —
+    /// `find_and_parse` returns `Err`, so `has_valid_mrz`'s `is_ok_and` is
+    /// `false` with no special-casing needed here. This test is the "no code
+    /// change required, but pin it" half of the fix: nothing about the retry
+    /// loop's stop test may special-case this error, or a refused reading
+    /// could start looking like a stop signal by accident later.
+    #[test]
+    fn has_valid_mrz_rejects_a_leading_filler_document_number() {
+        // TD3 specimen with the document number's first cell replaced by `<`
+        // (fabricated text, not a real specimen): the check digits are
+        // irrelevant here since `ensure_document_number_leads` refuses before
+        // they are ever evaluated.
+        let refused = "P<UTOSPECIMEN<<TEST<<<<<<<<<<<<<<<<<<<<<<<<<\n\
+                        <2345670<3UTO7408122F1204159<<<<<<<<<<<<<<<9";
+        assert_eq!(
+            mrz::find_and_parse(refused),
+            Err(mrz::MrzError::LeadingFiller {
+                field: mrz::Field::DocumentNumber,
+                line: 1,
+                position: 0,
+            })
+        );
+        assert!(!has_valid_mrz(refused));
+    }
+
     // ---- chargrid wiring: pure helpers (no OCR engine needed) -------------
 
     #[test]

@@ -1438,6 +1438,15 @@ struct BenchPage {
     /// nothing to be right about — which is what
     /// [`UnsupportedAssertion`]'s split exists to measure separately.
     mrz_found: bool,
+    /// `mrz::find_and_parse`/`find_and_parse_with` refused every candidate
+    /// because its document number's first cell was the filler
+    /// (`mrz::MrzError::LeadingFiller`, #536), rather than finding nothing
+    /// MRZ-shaped at all. Captured alongside `mrz_found` (both come from the
+    /// same call, which `mrz_found` collapses to `.is_ok()`) so
+    /// [`run_prepped`]'s miss classification can report
+    /// `MissReason::DocumentNumberLeadingFiller` instead of the generic
+    /// `MissReason::NoMrzFound`. Always `false` when `mrz_found` is `true`.
+    document_number_leading_filler: bool,
     /// The specimen's MRZ zone is redacted in the image (the `*_redacted_mrz`
     /// filename tag). Whatever OCR read there comes from the redaction bar, not
     /// a real zone — classified `MissReason::Redacted` and excluded from the
@@ -1546,8 +1555,10 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             // what this run's OCR pass actually recovered, which is what a
             // provider had to work with. A generated document always *has*
             // an MRZ, but a degraded capture can leave none of it legible.
-            let mrz_found =
-                mrz::find_and_parse_with(&page.text, &synthpass_die::mrz_parse_options()).is_ok();
+            let found = mrz::find_and_parse_with(&page.text, &synthpass_die::mrz_parse_options());
+            let mrz_found = found.is_ok();
+            let document_number_leading_filler =
+                matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
             Some(BenchPage {
                 name: doc.seed.to_string(),
                 asset_id: None,
@@ -1557,6 +1568,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 ground_truth_mrz: None,
                 image_path,
                 mrz_found,
+                document_number_leading_filler,
                 redacted: false,
                 // `synthpass-gen` drew the MRZ, so there is always one to find.
                 mrz_expected: true,
@@ -1603,7 +1615,10 @@ fn prep_specimens(
                 !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
                     .is_ok_and(|d| d.valid())
             });
-            let mrz_found = mrz::find_and_parse(&page.text).is_ok();
+            let found = mrz::find_and_parse(&page.text);
+            let mrz_found = found.is_ok();
+            let document_number_leading_filler =
+                matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
             // Derived from the filename, the same way the corpus manifest
             // generator records `mrz.redacted` (`corpus_manifest.rs`). The
             // bench never reads `samples/corpus.jsonl` — it walks the image
@@ -1629,6 +1644,7 @@ fn prep_specimens(
                 ground_truth_mrz,
                 image_path,
                 mrz_found,
+                document_number_leading_filler,
                 redacted,
                 // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
                 // time — unlike `redacted`, which the stem can carry on its own.
@@ -2119,6 +2135,11 @@ async fn run_prepped_with_dump_options(
                         .unwrap_or_default(),
                     specimen_nonconforming: true,
                 })
+            } else if bench_page.document_number_leading_filler {
+                // A structural refusal (#536), not "nothing MRZ-shaped was
+                // found" — its own bucket rather than folding into the
+                // `NoMrzFound` rung below.
+                Some(MissReason::DocumentNumberLeadingFiller)
             } else if !bench_page.mrz_found {
                 Some(MissReason::NoMrzFound(String::new()))
             } else if !reading.evidence.mrz_checksums_valid {
@@ -2156,9 +2177,11 @@ async fn run_prepped_with_dump_options(
             };
 
             let dump_miss_kind = match &miss_reason {
-                Some(r @ (MissReason::ChecksumFailed { .. } | MissReason::NoMrzFound(_))) => {
-                    Some(miss_kind(r))
-                }
+                Some(
+                    r @ (MissReason::ChecksumFailed { .. }
+                    | MissReason::NoMrzFound(_)
+                    | MissReason::DocumentNumberLeadingFiller),
+                ) => Some(miss_kind(r)),
                 _ => None,
             };
             let dump_hit = dump_ocr_hits && miss_reason.is_none();
@@ -2633,6 +2656,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("unused-rate-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: false,
             printed_zone_nonconforming: false,
@@ -2932,6 +2956,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
                 mrz_found: false,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -2951,6 +2976,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: false,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -2993,6 +3019,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3037,6 +3064,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3116,6 +3144,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: true,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3229,6 +3258,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3310,6 +3340,7 @@ mod tests {
             ground_truth_mrz: Some(recovered.mrz_lines.clone()),
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: true,
@@ -3379,6 +3410,7 @@ mod tests {
             ground_truth_mrz: Some(true_zone.to_string()),
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3473,6 +3505,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            document_number_leading_filler: false,
             redacted: true,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3527,6 +3560,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("unused.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: true,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -3575,6 +3609,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("unused.png"),
                 mrz_found: true,
+                document_number_leading_filler: false,
                 redacted,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -3638,6 +3673,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("unused.png"),
                 mrz_found,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected,
                 printed_zone_nonconforming: false,
@@ -3703,6 +3739,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("unused.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: false,
             printed_zone_nonconforming: false,
@@ -3756,6 +3793,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("unused.png"),
             mrz_found: true,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: false,
             printed_zone_nonconforming: false,
@@ -4463,6 +4501,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -4511,6 +4550,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -4565,6 +4605,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -4613,6 +4654,7 @@ mod tests {
             ground_truth_mrz: None,
             image_path: PathBuf::from("does-not-need-to-exist-for-this-test.png"),
             mrz_found: false,
+            document_number_leading_filler: false,
             redacted: false,
             mrz_expected: true,
             printed_zone_nonconforming: false,
@@ -4684,6 +4726,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-1.png"),
                 mrz_found: true,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -4702,6 +4745,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-2.png"),
                 mrz_found: true,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -4720,6 +4764,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-3.png"),
                 mrz_found: false,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -4738,6 +4783,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-4.png"),
                 mrz_found: true,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: true,
                 printed_zone_nonconforming: false,
@@ -4759,6 +4805,7 @@ mod tests {
                 ground_truth_mrz: None,
                 image_path: PathBuf::from("does-not-need-to-exist-for-this-test-5.png"),
                 mrz_found: false,
+                document_number_leading_filler: false,
                 redacted: false,
                 mrz_expected: false,
                 printed_zone_nonconforming: false,

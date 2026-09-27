@@ -828,6 +828,16 @@ pub enum MissReason {
     /// Reported as `false_positive_mrz`, inside the denominator, and a
     /// regression bucket: growth here must fail the gate.
     FalsePositiveMrz,
+    /// `find_and_parse_with` refused every candidate because its document
+    /// number's first cell was the filler (`mrz::MrzError::LeadingFiller`,
+    /// #536) — a structural refusal, not a mere checksum failure, and the OCR
+    /// retry loop's damaged-pass gate still ran (see
+    /// `mrz::find_and_parse_with`'s doc). Reported as
+    /// `document_number_leading_filler`, inside the denominator, and a
+    /// regression bucket like [`Self::ChecksumFailed`]: this crate's own
+    /// generator never emits a leading-filler document number, so any count
+    /// here is the OCR pipeline reading one in.
+    DocumentNumberLeadingFiller,
 }
 
 impl std::fmt::Display for MissReason {
@@ -869,6 +879,10 @@ impl std::fmt::Display for MissReason {
                 f,
                 "FALSE POSITIVE: checksum-valid MRZ read off a document that carries none"
             ),
+            Self::DocumentNumberLeadingFiller => write!(
+                f,
+                "document number begins with a filler (mrz::MrzError::LeadingFiller)"
+            ),
         }
     }
 }
@@ -890,6 +904,7 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
         MissReason::Redacted => "redacted_mrz",
         MissReason::NoMrzExpected => "no_mrz_expected",
         MissReason::FalsePositiveMrz => "false_positive_mrz",
+        MissReason::DocumentNumberLeadingFiller => "document_number_leading_filler",
     }
 }
 
@@ -1246,6 +1261,21 @@ fn run_check(
 
     let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
         Ok(decoded) => decoded,
+        // #536: a structural refusal, not "nothing MRZ-shaped was found" —
+        // give it its own miss bucket rather than folding it into
+        // `NoMrzFound`.
+        Err(mrz::MrzError::LeadingFiller { .. }) => {
+            return (
+                Some(MissReason::DocumentNumberLeadingFiller),
+                total_loss(&truth),
+                None,
+                Some(text),
+                false,
+                None,
+                None,
+                retry_stop,
+            )
+        }
         Err(e) => {
             return (
                 Some(MissReason::NoMrzFound(format!("{e:?}"))),
@@ -1813,6 +1843,20 @@ mod tests {
             specimen_nonconforming: true,
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
+    }
+
+    /// #536: `run_check` maps `mrz::MrzError::LeadingFiller` to its own miss
+    /// bucket rather than folding it into `NoMrzFound` — pin `miss_kind` and
+    /// `Display` the same way `checksum_failed_names_the_failing_fields` pins
+    /// `ChecksumFailed`'s.
+    #[test]
+    fn leading_filler_reports_its_own_miss_kind() {
+        let reason = MissReason::DocumentNumberLeadingFiller;
+        assert_eq!(miss_kind(&reason), "document_number_leading_filler");
+        assert_eq!(
+            reason.to_string(),
+            "document number begins with a filler (mrz::MrzError::LeadingFiller)"
+        );
     }
 
     /// A document whose MRZ never parsed must count as a total loss in every

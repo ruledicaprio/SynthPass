@@ -70,6 +70,10 @@ fn typed_fields_serialise_as_their_text_form() {
 
     let zone = mrz::format_td3(&mrz::Td3Fields {
         sex: mrz::Sex::Unspecified,
+        // Non-empty and non-`<`-led: an empty document number formats to an
+        // all-filler field, which the parsers now refuse outright (#536),
+        // irrelevant to what this test checks (the sex cell's JSON form).
+        document_number: "K12345670".to_string(),
         ..Default::default()
     });
     let (l1, l2) = zone.split_once('\n').unwrap();

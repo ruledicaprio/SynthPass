@@ -639,6 +639,12 @@ impl Fmt {
         let (lines, parsed) = match self {
             Fmt::Td1 => {
                 let out = format_td1(&Td1Fields {
+                    // Non-empty and non-`<`-led: an empty document number
+                    // formats to an all-filler field, which the parsers now
+                    // refuse outright (#536) -- irrelevant to what this test
+                    // checks (name-field truncation), so give it an ordinary
+                    // fabricated number instead.
+                    document_number: "K12345670".into(),
                     surname: surname.into(),
                     given_names: given_names.into(),
                     ..Default::default()
@@ -651,6 +657,7 @@ impl Fmt {
                 let out = format_td2(&Td2Fields {
                     document_code: "I".into(),
                     issuing_country: "UTO".into(),
+                    document_number: "K12345670".into(),
                     surname: surname.into(),
                     given_names: given_names.into(),
                     ..Default::default()
@@ -663,6 +670,7 @@ impl Fmt {
                 let out = format_td3(&Td3Fields {
                     document_code: "PP".into(),
                     issuing_country: "UTO".into(),
+                    document_number: "K12345670".into(),
                     surname: surname.into(),
                     given_names: given_names.into(),
                     ..Default::default()
@@ -674,6 +682,7 @@ impl Fmt {
             Fmt::MrvA => {
                 let out = format_mrv_a(&MrvAFields {
                     issuing_country: "UTO".into(),
+                    document_number: "K12345670".into(),
                     surname: surname.into(),
                     given_names: given_names.into(),
                     ..Default::default()
@@ -685,6 +694,7 @@ impl Fmt {
             Fmt::MrvB => {
                 let out = format_mrv_b(&MrvBFields {
                     issuing_country: "UTO".into(),
+                    document_number: "K12345670".into(),
                     surname: surname.into(),
                     given_names: given_names.into(),
                     ..Default::default()
