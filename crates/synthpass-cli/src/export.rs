@@ -180,3 +180,209 @@ pub fn export_command(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use synthpass_gen::DocumentType;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn parse(v: &[&str]) -> Result<ExportArgs, String> {
+        parse_args(&args(v))
+    }
+
+    fn parse_err(v: &[&str]) -> String {
+        match parse(v) {
+            Ok(a) => panic!("expected an error for {v:?}, got {a:?}"),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn required_flags_only_takes_documented_defaults() {
+        let a = parse(&["--format", "jsonl", "--out-dir", "out"]).expect("valid args");
+        assert_eq!(a.format, ExportFormat::Jsonl);
+        assert_eq!(a.count, 100);
+        assert_eq!(a.seed, 0);
+        assert_eq!(a.document_type, DocTypeChoice::One(DocumentType::TD3));
+        assert_eq!(a.pack_pages, 1);
+        assert_eq!(a.out_dir, PathBuf::from("out"));
+    }
+
+    #[test]
+    fn every_flag_is_applied_in_any_order() {
+        let a = parse(&[
+            "--out-dir",
+            "ds",
+            "--pack-pages",
+            "4",
+            "--document-type",
+            "mrvb",
+            "--seed",
+            "18446744073709551615",
+            "--count",
+            "7",
+            "--profile",
+            "clean",
+            "--format",
+            "hf",
+        ])
+        .expect("valid args");
+        assert_eq!(a.format, ExportFormat::Hf);
+        assert_eq!(a.count, 7);
+        assert_eq!(a.seed, u64::MAX);
+        assert_eq!(a.document_type, DocTypeChoice::One(DocumentType::MrvB));
+        assert_eq!(a.pack_pages, 4);
+        assert_eq!(a.out_dir, PathBuf::from("ds"));
+    }
+
+    #[test]
+    fn values_are_case_insensitive() {
+        let a = parse(&[
+            "--format",
+            "JSONL",
+            "--document-type",
+            "ALL",
+            "--profile",
+            "Clean",
+            "--out-dir",
+            "out",
+        ])
+        .expect("valid args");
+        assert_eq!(a.format, ExportFormat::Jsonl);
+        assert_eq!(a.document_type, DocTypeChoice::All);
+    }
+
+    #[test]
+    fn a_repeated_flag_keeps_the_last_value() {
+        let a = parse(&[
+            "--format",
+            "jsonl",
+            "--count",
+            "5",
+            "--count",
+            "9",
+            "--out-dir",
+            "a",
+            "--out-dir",
+            "b",
+        ])
+        .expect("valid args");
+        assert_eq!(a.count, 9);
+        assert_eq!(a.out_dir, PathBuf::from("b"));
+    }
+
+    #[test]
+    fn missing_required_flags_are_named() {
+        assert_eq!(
+            parse_err(&["--out-dir", "out"]),
+            "--format is required (jsonl | hf)"
+        );
+        assert_eq!(parse_err(&["--format", "jsonl"]), "--out-dir is required");
+        // With neither, --format is reported first.
+        assert_eq!(parse_err(&[]), "--format is required (jsonl | hf)");
+    }
+
+    #[test]
+    fn a_trailing_flag_without_its_value_is_named() {
+        for flag in [
+            "--format",
+            "--count",
+            "--seed",
+            "--document-type",
+            "--pack-pages",
+            "--profile",
+            "--out-dir",
+        ] {
+            assert_eq!(
+                parse_err(&[flag]),
+                format!("{flag} requires a value"),
+                "flag {flag}"
+            );
+        }
+    }
+
+    #[test]
+    fn numeric_flags_reject_non_u64_values() {
+        for (flag, bad) in [
+            ("--count", "ten"),
+            ("--count", "-1"),
+            ("--count", "18446744073709551616"),
+            ("--seed", "1.5"),
+            ("--seed", ""),
+        ] {
+            assert_eq!(
+                parse_err(&["--format", "jsonl", "--out-dir", "o", flag, bad]),
+                format!("{flag}: not a valid number: {bad}")
+            );
+        }
+    }
+
+    #[test]
+    fn pack_pages_rejects_zero_and_non_u32_values() {
+        assert_eq!(
+            parse_err(&["--format", "jsonl", "--out-dir", "o", "--pack-pages", "0"]),
+            "--pack-pages must be at least 1"
+        );
+        assert_eq!(
+            parse_err(&[
+                "--format",
+                "jsonl",
+                "--out-dir",
+                "o",
+                "--pack-pages",
+                "4294967296"
+            ]),
+            "--pack-pages: not a valid number: 4294967296"
+        );
+    }
+
+    #[test]
+    fn unknown_and_deferred_formats_are_rejected() {
+        let e = parse_err(&["--format", "csv", "--out-dir", "o"]);
+        assert!(e.contains("unknown format 'csv'"), "{e}");
+        // coco/yolo are on the roadmap, so they read as "not yet", not "unknown".
+        for f in ["coco", "yolo"] {
+            let e = parse_err(&["--format", f, "--out-dir", "o"]);
+            assert!(e.contains("not implemented yet"), "{e}");
+        }
+    }
+
+    #[test]
+    fn a_bad_document_type_is_prefixed_with_its_flag() {
+        let e = parse_err(&[
+            "--format",
+            "jsonl",
+            "--out-dir",
+            "o",
+            "--document-type",
+            "td4",
+        ]);
+        assert!(e.starts_with("--document-type: "), "{e}");
+        assert!(e.contains("td4"), "{e}");
+    }
+
+    #[test]
+    fn a_profile_other_than_clean_is_rejected() {
+        let e = parse_err(&["--format", "jsonl", "--out-dir", "o", "--profile", "mobile"]);
+        assert!(
+            e.starts_with("--profile: only 'clean' is supported in v1 (got 'mobile')"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn unknown_flags_and_positionals_are_rejected() {
+        assert_eq!(
+            parse_err(&["--format", "jsonl", "--out-dir", "o", "--verbose"]),
+            "unknown argument: --verbose"
+        );
+        assert_eq!(
+            parse_err(&["dataset", "--format", "jsonl", "--out-dir", "o"]),
+            "unknown argument: dataset"
+        );
+    }
+}

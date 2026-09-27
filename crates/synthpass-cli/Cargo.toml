@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 # Application code, never published: `mrz` is the only crate on crates.io.
 publish = false
+description = "The `synthpass` command-line binary: offline passport/MRZ extraction, license tools, and the synthetic-corpus generate/export commands."
 
 [[bin]]
 name = "synthpass"
