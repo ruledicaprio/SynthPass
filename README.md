@@ -78,7 +78,9 @@ help text changes.*
 | --- | --- |
 | check the install (OCR models, license, config; the Tier-2 model is optional) | `synthpass doctor` |
 | read one document | `synthpass path/to/image.jpg` |
+| read one document as JSON, for scripting (one compact line, the v2 schema) | `synthpass path/to/image.jpg --json` |
 | read a folder, or a quoted glob | `synthpass batch "scans/*.jpg"` |
+| read a folder as JSON Lines, for scripting | `synthpass batch "scans/*.jpg" --json` |
 | make synthetic documents with ground-truth labels | `synthpass generate --count 10 --seed 42 --out-dir out/` |
 | export a synthetic training corpus | `synthpass export --format jsonl --count 1000 --out-dir corpus/` |
 | get this machine's fingerprint for a license | `synthpass fingerprint` |
