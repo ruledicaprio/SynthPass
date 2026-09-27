@@ -33,7 +33,7 @@ struct Overflow {
 }
 
 /// Decode the ICAO 9303 long-document-number overflow encoding: TD1 note j
-/// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:368`) and its
+/// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:373`) and its
 /// §4.2.4 check-digit table (`:464-469`), TD2 note j
 /// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:340`).
 ///
