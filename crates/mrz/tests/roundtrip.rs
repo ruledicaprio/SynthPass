@@ -284,7 +284,7 @@ proptest! {
 
 // Official ICAO 9303 part 6 (TD2) specimen (Utopia / Anna Maria Eriksson),
 // published verbatim as text
-// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:487-488`) —
+// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:493-494`) —
 // same constants as the ones pinned in `src/lib.rs`'s test module.
 const TD2_L1: &str = "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<";
 const TD2_L2: &str = "D231458907UTO7408122F1204159<<<<<<<6";

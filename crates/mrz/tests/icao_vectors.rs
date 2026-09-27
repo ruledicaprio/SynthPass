@@ -46,7 +46,7 @@ const VECTORS: &[(&str, u32, &str)] = &[
     // These two ARE corroborated, though from Part 6 rather than Part 4: the
     // TD2 specimen's line 2 survived as literal text and carries the same
     // date of birth and date of expiry, with the same check digits.
-    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`
+    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:494`
     ("740812", 2, "9303 pt6 TD2 specimen date of birth"),
     ("120415", 9, "9303 pt6 TD2 specimen date of expiry"),
 ];
@@ -82,7 +82,7 @@ fn verify_accepts_the_published_digit_and_rejects_others() {
 /// The composite input is *not* the human-readable MRZ line ICAO prints: it
 /// excludes nationality and sex (TD2/TD3), and for TD1 it excludes the
 /// entire third line (name field) as well
-/// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:478-479`).
+/// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:483-484`).
 /// Each entry below reconstructs the composite input from the format's
 /// published MRZ line(s) using the crate's own composite ranges
 /// (`src/parser.rs` `parse_td3`/`parse_td2`/`parse_td1`) and asserts both
@@ -120,7 +120,7 @@ const COMPOSITE_VECTORS: &[CompositeVector] = &[
     // Example 4 — TD1, upper line (30) + middle line positions 1-29.
     // Composite = line1[5..30] + line2[0..7] + line2[8..15] + line2[18..29]
     // (parser.rs:278-287) — the entire third (name) line is excluded, per
-    // Doc_9303_Part5_Specs_for_TD1_MROTDs.md:478-479.
+    // Doc_9303_Part5_Specs_for_TD1_MROTDs.md:483-484.
     // ICAO sum of products = 392 -> 392 % 10 = 2.
     CompositeVector {
         source: "9303 pt3 Example 4 (TD1 composite)",
@@ -169,7 +169,7 @@ fn composite_check_digit_matches_icao_worked_examples() {
 }
 
 /// §4.2.3.1's worked VIZ→MRZ name examples
-/// (`knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-533`),
+/// (`knowledge/docs9303/Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:498-552`),
 /// transcribed verbatim as string literals. Every TD3 upper line, name field
 /// included, is a fixed 44 characters (`PPUTO` document code/country
 /// prefix + 39-character name field); ICAO's own examples must therefore
@@ -244,7 +244,7 @@ fn section_4_2_3_1_examples_are_44_characters() {
 /// Each entry is `(VIZ, expected full MRZ name line)`, transcribed verbatim
 /// from the corpus (never retyped from memory — see the citations on each
 /// table). The test below splits `VIZ` on the *first* comma into primary and
-/// secondary identifiers (`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495`),
+/// secondary identifiers (`Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:523-527`),
 /// feeds them to the real `format_*` emitter as `surname`/`given_names`, and
 /// asserts the emitted name-bearing line matches the expected line
 /// byte-for-byte. This exercises `crate::emit::clean_name_half` (hyphen,
@@ -254,7 +254,7 @@ fn section_4_2_3_1_examples_are_44_characters() {
 /// Only ICAO examples that **fit** their field without truncation are
 /// pinned here. Truncation (§4.2.3.2/§4.2.3.3-family examples, and Part 7's
 /// equivalents) is issuer-discretionary per Part 4 §4.2.3
-/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`) — this crate
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:482-606`) — this crate
 /// picks one conformant strategy (`emit::truncate_name_components`'s doc
 /// comment) rather than ICAO's specific worked truncations, so those
 /// examples are deliberately not asserted against here. See
@@ -265,7 +265,7 @@ fn section_4_2_3_1_examples_are_44_characters() {
 /// are never pinned here at all (see above) because truncation strategy is
 /// issuer-discretionary, not because of a length defect — also recorded in
 /// `CONFORMANCE_BASIS.md`:
-/// - `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:576` (§4.2.3.3c): was
+/// - `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:595` (§4.2.3.3c): was
 ///   45 characters on a 44-character TD3 line due to a corpus transcription
 ///   error (an extra `M`); fixed in the corpus (now a clean 44 characters),
 ///   but still excluded here as a truncation example, not a defect.
@@ -285,57 +285,57 @@ struct NameVector {
     expected_line: &'static str,
 }
 
-/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:479-584`. Prefix `PPUTO`
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:498-603`. Prefix `PPUTO`
 /// (5 chars: document code `PP` + issuing country `UTO`), name field 39
 /// chars, upper line 44 chars total.
 const TD3_NAME_VECTORS: &[NameVector] = &[
     NameVector {
-        source: "9303 pt4 §4.2.3.1(a):480",
+        source: "9303 pt4 §4.2.3.1(a):499",
         viz: "ERIKSSON, ANNA MARIA",
         expected_line: "PPUTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(b):488",
+        source: "9303 pt4 §4.2.3.1(b):507",
         viz: "HENG, DEBORAH MING LO",
         expected_line: "PPUTOHENG<<DEBORAH<MING<LO<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(c):496",
+        source: "9303 pt4 §4.2.3.1(c):515",
         viz: "SMITH-JONES, SUSIE MARGARET",
         expected_line: "PPUTOSMITH<JONES<<SUSIE<MARGARET<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(d):504 — the O'CONNOR case",
+        source: "9303 pt4 §4.2.3.1(d):523 — the O'CONNOR case",
         viz: "O'CONNOR, ENYA SIOBHAN",
         expected_line: "PPUTOOCONNOR<<ENYA<SIOBHAN<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(e) van der Muellen:512",
+        source: "9303 pt4 §4.2.3.1(e) van der Muellen:531",
         viz: "VAN DER MUELLEN, MARTIN",
         expected_line: "PPUTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(e) Al-Basri:516",
+        source: "9303 pt4 §4.2.3.1(e) Al-Basri:535",
         viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
         expected_line: "PPUTOAL<BASRI<<HUDA<MUHAMMAD<JAWAD<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(e) Vilarchao Fernandez:520",
+        source: "9303 pt4 §4.2.3.1(e) Vilarchao Fernandez:539",
         viz: "VILARCHAO FERNANDEZ, JOSE RAMON",
         expected_line: "PPUTOVILARCHAO<FERNANDEZ<<JOSE<RAMON<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(f) Arkfreith:528",
+        source: "9303 pt4 §4.2.3.1(f) Arkfreith:547",
         viz: "ARKFREITH",
         expected_line: "PPUTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.1(f) Satriya Sudarpa:532",
+        source: "9303 pt4 §4.2.3.1(f) Satriya Sudarpa:551",
         viz: "SATRIYA SUDARPA",
         expected_line: "PPUTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.4 Papandropoulous:584 — fits exactly, \
+        source: "9303 pt4 §4.2.3.4 Papandropoulous:603 — fits exactly, \
                   NOT truncated (see :585-587's note)",
         viz: "PAPANDROPOULOUS, JONATHON WARREN TREVOR",
         expected_line: "PPUTOPAPANDROPOULOUS<<JONATHON<WARREN<TREVOR",
@@ -344,17 +344,17 @@ const TD3_NAME_VECTORS: &[NameVector] = &[
     // only the width-39 examples are pinned as equality: ICAO's narrow-field
     // illustrations contradict each other, these do not.
     NameVector {
-        source: "9303 pt4 §4.2.3.2(a):542 — secondary truncated to an initial",
+        source: "9303 pt4 §4.2.3.2(a):561 — secondary truncated to an initial",
         viz: "NILAVADHANANANDA, CHAYAPA DEJTHAMRONG KRASUANG",
         expected_line: "PPUTONILAVADHANANANDA<<CHAYAPA<DEJTHAMRONG<K",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.2(b):550 — secondary's last component cut short",
+        source: "9303 pt4 §4.2.3.2(b):569 — secondary's last component cut short",
         viz: "NILAVADHANANANDA, ARNPOL PETCH CHARONGUANG",
         expected_line: "PPUTONILAVADHANANANDA<<ARNPOL<PETCH<CHARONGU",
     },
     NameVector {
-        source: "9303 pt4 §4.2.3.3(b):568 — PRIMARY truncated so `<<` plus the \
+        source: "9303 pt4 §4.2.3.3(b):587 — PRIMARY truncated so `<<` plus the \
                   secondary survive. The regression this whole change exists \
                   for: before the fix this emitted \
                   `PPUTOBENNELONG<WOOLOOMOOLOO<WARRANDYTE<WARNA` — no `<<`, \
@@ -365,66 +365,66 @@ const TD3_NAME_VECTORS: &[NameVector] = &[
     },
 ];
 
-/// `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:427-457`. Bare 30-character name
+/// `Doc_9303_Part5_Specs_for_TD1_MROTDs.md:432-462`. Bare 30-character name
 /// line (the TD1 third line), no document-code/country prefix.
 const TD1_NAME_VECTORS: &[NameVector] = &[
     NameVector {
-        source: "9303 pt5 §4.2.3.3:427",
+        source: "9303 pt5 §4.2.3.3:432",
         viz: "PAPANDROPOULOUS, JONATHON ALEC",
         expected_line: "PAPANDROPOULOUS<<JONATHON<ALEC",
     },
     NameVector {
-        source: "9303 pt5 §4.2.3.4 van der Muellen:437",
+        source: "9303 pt5 §4.2.3.4 van der Muellen:442",
         viz: "VAN DER MUELLEN, MARTIN",
         expected_line: "VAN<DER<MUELLEN<<MARTIN<<<<<<<",
     },
     NameVector {
-        source: "9303 pt5 §4.2.3.4 Al-Basri:441",
+        source: "9303 pt5 §4.2.3.4 Al-Basri:446",
         viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
         expected_line: "AL<BASRI<<HUDA<MUHAMMAD<JAWAD<",
     },
     NameVector {
-        source: "9303 pt5 §4.2.3.5 Arkfreith:453",
+        source: "9303 pt5 §4.2.3.5 Arkfreith:458",
         viz: "ARKFREITH",
         expected_line: "ARKFREITH<<<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt5 §4.2.3.5 Satriya Sudarpa:457",
+        source: "9303 pt5 §4.2.3.5 Satriya Sudarpa:462",
         viz: "SATRIYA SUDARPA",
         expected_line: "SATRIYA<SUDARPA<<<<<<<<<<<<<<<",
     },
 ];
 
-/// `Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`. Prefix `I<UTO` (5
+/// `Doc_9303_Part6_Specs_for_TD2_MROTDs.md:405-435`. Prefix `I<UTO` (5
 /// chars), name field 31 chars, upper line 36 chars total.
 const TD2_NAME_VECTORS: &[NameVector] = &[
     NameVector {
-        source: "9303 pt6 §4.2.3.3:399",
+        source: "9303 pt6 §4.2.3.3:405",
         viz: "PAPANDROPOULOUS, JONATHOON ALEC",
         expected_line: "I<UTOPAPANDROPOULOUS<<JONATHOON<ALEC",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 van der Muellen:409",
+        source: "9303 pt6 §4.2.3.4 van der Muellen:415",
         viz: "VAN DER MUELLEN, MARTIN",
         expected_line: "I<UTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 Al-Basri:413",
+        source: "9303 pt6 §4.2.3.4 Al-Basri:419",
         viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
         expected_line: "I<UTOAL<BASRI<<HUDA<MUHAMMAD<JAWAD<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 Vilarchao Fernandez:417",
+        source: "9303 pt6 §4.2.3.4 Vilarchao Fernandez:423",
         viz: "VILARCHAO FERNANDEZ, JOSE RAMON",
         expected_line: "I<UTOVILARCHAO<FERNANDEZ<<JOSE<RAMON",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.5 Arkfreith:425",
+        source: "9303 pt6 §4.2.3.5 Arkfreith:431",
         viz: "ARKFREITH",
         expected_line: "I<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.5 Satriya Sudarpa:429",
+        source: "9303 pt6 §4.2.3.5 Satriya Sudarpa:435",
         viz: "SATRIYA SUDARPA",
         expected_line: "I<UTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<",
     },
@@ -524,7 +524,7 @@ const MRV_B_NAME_VECTORS: &[NameVector] = &[
 ];
 
 /// Split a `VIZ` name on the *first* comma into (primary, secondary),
-/// trimming the whitespace `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:495`
+/// trimming the whitespace `Doc_9303_Part3_Specs_Common_to_all_MRTDs.md:523-527`
 /// puts around the comma. No comma means no secondary identifier.
 fn split_viz(viz: &str) -> (&str, &str) {
     match viz.split_once(',') {
@@ -713,7 +713,7 @@ impl Fmt {
 /// §7.2.3.2(b) shows `<<DINGO`, at the same width 31).
 ///
 /// So this table asserts the four *normative* rules from
-/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407` rather than string
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:426` rather than string
 /// equality. The width-39 cases that ICAO does pin unambiguously are checked
 /// for equality too, by `name_encoding_matches_icao_worked_examples` above.
 const TRUNCATION_CASES: &[(&str, Fmt, &str)] = &[

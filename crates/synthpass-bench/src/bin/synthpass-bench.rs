@@ -236,6 +236,15 @@ struct SeedResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     check_states: Option<BTreeMap<&'static str, Option<bool>>>,
     elapsed_ms: u128,
+    /// `synthpass_bench::HitResult::retry_stop` passthrough — why the native
+    /// OCR retry loop stopped for this document (`"general_valid"`,
+    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`). `None`
+    /// only when OCR itself failed (`miss_kind == Some("ocr_error")`), same
+    /// as `raw_text`'s absence in `--dump-ocr`. The per-document counterpart
+    /// to `Report::ocr_arms` — see that field's doc (#498's provider-bench
+    /// parity, issue #510).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    retry_stop: Option<String>,
     /// Per-field character error rates, keyed by field name. Reported for
     /// every document that produced a parseable MRZ *and* for those that did
     /// not (as a total loss), so a mean over this is not biased by dropping
@@ -362,6 +371,14 @@ struct Report {
     document_type: &'static str,
     count: u64,
     seed_start: u64,
+    /// This run's `SYNTHPASS_OCR_*` measurement-arm configuration
+    /// (`synthpass_ocr::OcrArms::from_env`), read once for the whole run —
+    /// process-global env state, so it is the same for every document.
+    /// Carried on the report for the same reason `provider-bench`'s
+    /// `ProviderRow::ocr_arms` (#498) is: this synthetic report never
+    /// recorded it before, so a retry-arm question about `td1`/`td2`/…
+    /// history had no run-level record of which arm produced it (#510).
+    ocr_arms: synthpass_bench::report::OcrArmsReport,
     hits: u64,
     hit_rate: f64,
     /// Tier-1 hits that *also* read both name fields exactly right (`hit &&
@@ -498,6 +515,7 @@ fn main() {
                 check_states,
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
+                retry_stop: result.retry_stop,
                 line1_flagged,
                 names_exact,
                 name_error,
@@ -752,6 +770,7 @@ fn main() {
         document_type: parsed.document_type.as_str(),
         count: parsed.count,
         seed_start: parsed.seed,
+        ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::from_env()),
         hits,
         hit_rate,
         strict_hits,
@@ -1062,6 +1081,7 @@ mod tests {
             document_type: "TD3",
             count: 1,
             seed_start: 0,
+            ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::DEFAULT),
             hits,
             hit_rate: hits as f64,
             strict_hits,
@@ -1097,6 +1117,45 @@ mod tests {
         assert_eq!(format_hit_rate(report.wrong_accept_rate), "0.0%");
     }
 
+    /// Issue #510: the synthetic report never carried `ocr_arms` (run-level)
+    /// or `retry_stop` (per-document) before this — `provider-bench`'s
+    /// reports gained both in #498, and nothing kept this report in sync.
+    /// Pins the exact keys/shape so a future refactor of either struct trips
+    /// a test here rather than silently dropping them again.
+    #[test]
+    fn report_carries_ocr_arms_and_per_document_retry_stop() {
+        let mut report = synthetic_rate_report(1, 1, 0);
+        report.results = vec![doc(None, &[], &[])];
+        report.results[0].retry_stop = Some("general_valid".to_string());
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+
+        assert_eq!(json["ocr_arms"]["texture"], "on");
+        assert_eq!(json["ocr_arms"]["order"], "default");
+        assert_eq!(json["ocr_arms"]["rotate"], "default");
+        assert_eq!(json["ocr_arms"]["skew"], "default");
+        assert_eq!(json["ocr_arms"]["chargrid"], "off");
+        assert_eq!(json["ocr_arms"]["stop"], "first-valid");
+        assert_eq!(json["ocr_arms"]["confirm_passes"], 2);
+
+        assert_eq!(json["results"][0]["retry_stop"], "general_valid");
+    }
+
+    /// `retry_stop` is `#[serde(skip_serializing_if = "Option::is_none")]`,
+    /// same discipline as `provider-bench`'s `DocumentDetailReport` — an
+    /// OCR-error document (no OCR pass to have a stop reason at all) must
+    /// omit the key, not serialize a fabricated `null` that would look
+    /// measured.
+    #[test]
+    fn retry_stop_is_omitted_not_null_when_absent() {
+        let d = doc(Some("ocr_error"), &[], &[]);
+        assert_eq!(d.retry_stop, None);
+        let json = serde_json::to_value(&d).expect("serialize SeedResult");
+        assert!(
+            json.get("retry_stop").is_none(),
+            "an absent retry_stop must not round-trip back in: {json}"
+        );
+    }
+
     fn doc(
         miss: Option<&'static str>,
         failing: &[&'static str],
@@ -1124,6 +1183,7 @@ mod tests {
                 ),
             },
             elapsed_ms: 0,
+            retry_stop: None,
             fields: fields
                 .iter()
                 .map(|(field, cer)| FieldReport {
