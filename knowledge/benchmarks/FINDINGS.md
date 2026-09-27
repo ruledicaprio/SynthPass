@@ -19,17 +19,19 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-27 | [six M6 misses attributed: one correct reading refused, three missing pairs, one cap, one date gate](#2026-09-27--six-m6-misses-attributed-one-correct-reading-refused-three-missing-pairs-one-cap-one-date-gate) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-27 | [the synthetic headline re-measured: 368 / 500, and the −2 hides 14 more correct reads](#2026-09-27--the-synthetic-headline-re-measured-368--500-and-the-2-hides-14-more-correct-reads) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [Why `mrz` did not recover six M6 misses: one correct reading refused, three missing pairs, one cap, one date gate](m6-six-misses-repair-mechanisms-2026-09-27.md) | Observed (release `provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults, 0 outcome changes against the committed ledger; the recorded provider input of six assets replayed through an instrumented copy of the shipped parser, reproducing the dumped zone on all six) plus Derived (counterfactual replays on the same copy with one gate lifted at a time; check-digit arithmetic) | current | m6-six-misses-repair-mechanisms-2026-09-27.md |
+| 2026-09-27 | [The synthetic headline is 368 / 500 on `main`: #468/#471 and #483 fix 15 wrong reads, and #521 costs TD1 four hits](synthetic-headline-2026-09-27.md) | Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) | current | synthetic-headline-2026-09-27.md |
 | 2026-09-26 | [Check-digit blind spots, exact — what the arithmetic can and cannot promise](checkdigit-blindspots-exact-2026-09-26.md) | Derived (closed form and exact integer enumeration, `crates/mrz/examples/checkdigit_blindspots_exact.rs`, with the laws pinned against the parser in `crates/mrz/tests/checkdigit_algebra.rs`; every measured input is cited to its note) plus one Observed count over the tracked fixtures (§4) | current | checkdigit-blindspots-exact-2026-09-26.md |
 | 2026-09-26 | [the #473 retry-stop A/B: `clean` loses hits because the parser never sees the loop's decision](#2026-09-26--the-473-retry-stop-ab-clean-loses-hits-because-the-parser-never-sees-the-loops-decision) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-26 | [check-digit blind spots, exact: shared-shift pairs, composite alignment, and two blind confusables](#2026-09-26--check-digit-blind-spots-exact-shared-shift-pairs-composite-alignment-and-two-blind-confusables) | Derived | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-26 | [#410's VIZ personal number moves no hit count, but TD1 churns ten seeds](#2026-09-26--410s-viz-personal-number-moves-no-hit-count-but-td1-churns-ten-seeds) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-26 | [`SYNTHPASS_OCR_STOP=clean` loses hits on both corpora, because the parser never sees the loop's decision](retry-stop-ab-2026-09-26.md) | Observed (one local release build, six A/B runs switched by env var, plus single-document verbose traces on the same binary) plus Derived (per-document and per-seed comparison) plus Hypothesized (the exact parser branch, marked where used) | current | retry-stop-ab-2026-09-26.md |
-| 2026-09-26 | [#410's VIZ personal number: no hit count moves on TD1, TD2 or MRV-B, but TD1 churns ten seeds](viz-personal-number-410-2026-09-26.md) | Observed (seven local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container: TD1, TD2 and MRV-B before and after, one repeat of the after TD1 arm, one TD1 run at `f80877b`) plus Derived (per-seed comparison of the JSON reports) plus Hypothesized (the mechanism of the TD1 churn, marked where used) | current | viz-personal-number-410-2026-09-26.md |
+| 2026-09-26 | [#410's VIZ personal number: no hit count moves on TD1, TD2 or MRV-B, but TD1 churns ten seeds](viz-personal-number-410-2026-09-26.md) | Observed (seven local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container: TD1, TD2 and MRV-B before and after, one repeat of the after TD1 arm, one TD1 run at `f80877b`) plus Derived (per-seed comparison of the JSON reports) plus Hypothesized (the mechanism of the TD1 churn, marked where used) | superseded by [`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md) | viz-personal-number-410-2026-09-26.md |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](#2026-09-25--440-on-the-m4-synthetic-gate-42--50--39--50-is-three-wrong-reads-refused-none-lost) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-25 | [the synthetic headline re-measured: 370 / 500, stack 451 moves no seed, and 207 of the 370 hits are wrong somewhere](#2026-09-25--the-synthetic-headline-re-measured-370--500-stack-451-moves-no-seed-and-207-of-the-370-hits-are-wrong-somewhere) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-25 | [#440 on the M4 synthetic gate: 42 / 50 → 39 / 50 is three wrong reads refused, none lost](m4-gate-440-wrong-reads-refused-2026-09-25.md) | Observed (two local release `synthpass-bench --count 50 --seed 0 --profile clean` runs, one per commit, plus single-seed re-runs of the before arm and an instrumented replay of the pre-#440 parser) plus Derived (per-seed field comparison against the generator's exact truth) | current | m4-gate-440-wrong-reads-refused-2026-09-25.md |
-| 2026-09-25 | [The synthetic headline is 370 / 500 today, stack 451 moves no seed, and 207 of the 370 hits are wrong somewhere](synthetic-headline-2026-09-25.md) | Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs, five formats × two builds) plus Derived (per-seed field comparison against the generator's exact truth, check-digit arithmetic, generator and emitter code) | current | synthetic-headline-2026-09-25.md |
+| 2026-09-25 | [The synthetic headline is 370 / 500 today, stack 451 moves no seed, and 207 of the 370 hits are wrong somewhere](synthetic-headline-2026-09-25.md) | Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs, five formats × two builds) plus Derived (per-seed field comparison against the generator's exact truth, check-digit arithmetic, generator and emitter code) | superseded by [`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md) | synthetic-headline-2026-09-25.md |
 | 2026-09-24 | [The chargrid A/B, reconciled: +30 and +33 are two metrics of one run, and all 13 regressions were synthetic](chargrid-ab-reconciliation-2026-09-24.md) | Observed (per-document transitions re-derived from the 30 retained A/B reports; no cargo, no benchmark run) | current | chargrid-ab-reconciliation-2026-09-24.md |
 | 2026-09-24 | [ADR-0021 Phase 0: class (C) meets K1 only in the line-1 prefix, and two fixtures are wrong](#2026-09-24--adr-0021-phase-0-class-c-meets-k1-only-in-the-line-1-prefix-and-two-fixtures-are-wrong) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-24 | [a manufactured hit refused: Bosnia 2013 card back leaves Tier-1, 140 / 152 → 139 / 151](#2026-09-24--a-manufactured-hit-refused-bosnia-2013-card-back-leaves-tier-1-140--152--139--151) | Observed | current | FINDINGS.md (Weak-spot findings) |
@@ -1184,3 +1186,26 @@ on all six. These are the six the ADR-0011 frozen Definition of Done still lacke
 
 Tables, the per-document traces, the counterfactual arms and the invocation:
 [`m6-six-misses-repair-mechanisms-2026-09-27.md`](m6-six-misses-repair-mechanisms-2026-09-27.md).
+
+---
+
+### 2026-09-27 — the synthetic headline re-measured: 368 / 500, and the −2 hides 14 more correct reads
+
+**Observed**, local: release `synthpass-bench --document-type <fmt> --profile clean --count 100
+--seed 0` on one Linux container at `main` `739279c`, against a before arm built at `d052ae2`
+(`f80877b` + #457's counter) that re-reads the 2026-09-25 table exactly. Hits are **TD3 75, TD2
+73, TD1 48, MRV-A 85, MRV-B 87 = 368 / 500**. Both names exact rose 200 → 216, wrong accepts fell
+207 → 191, and hits right on all twelve scored fields rose 163 → 177.
+
+- **Every moved seed is attributed by a per-seed bisect.** #468 + #471 turn five TD3 wrong reads
+  correct and add one wrong accept (seed 85, a #473 repro). #483 turns ten TD2 wrong reads correct
+  and nets 0 on TD1. #521 (#410's VIZ personal number) is the whole TD1 −4 and TD2 +1. MRV-A is
+  identical on every seed.
+- **The 2026-09-26 #410 entry above is superseded.** On the full retry path #410 moves TD1 by −4.
+  That entry's "no hit count moves", and its TD1 20 / 100 "container is low", were most likely
+  measured with `SYNTHPASS_OCR_MAX_PASSES=1` exported (inferred: this container reads TD1 52 at
+  `d052ae2` with the variable unset).
+- **Not yet CI-confirmed:** `bench-charts.yml` has not measured `main` since 2026-09-25.
+
+Tables, the bisect, the two remaining prefix wrong accepts and what this does not claim:
+[`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md).

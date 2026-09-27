@@ -84,6 +84,11 @@
 //!                      measurement arm is at its default — a baseline is only
 //!                      valid for the default provider configuration.
 //! ```
+//!
+//! Called with no arguments at all, this prints usage and exits `2` rather
+//! than falling through to `Args::default()` — that default is a
+//! 20-document synthetic run that also loads and runs the `llm` provider,
+//! never what a bare invocation was meant to start (issue #510).
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -307,6 +312,14 @@ fn usage() {
          committed baseline at PATH; exit non-zero on a regression or an outcome-ledger sha \
          mismatch (missing PATH is written and passes)"
     );
+}
+
+/// `true` iff `main` should print usage and exit rather than parse `args` at
+/// all — currently just "no arguments", the one case `Args::default()` would
+/// otherwise silently accept and turn into a real (and, with the `llm`
+/// provider, expensive) run (issue #510).
+fn requires_usage(args: &[String]) -> bool {
+    args.is_empty()
 }
 
 /// Hand-rolled flag parser, consistent with `synthpass-bench`'s own binary
@@ -1211,6 +1224,17 @@ fn iso_date(unix_secs: u64) -> String {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // No arguments is never a real invocation on purpose: every default
+    // (`Args::default()`) starts a 20-document synthetic run that also loads
+    // and runs the ~1 GB `llm` provider (issue #510) — expensive, and never
+    // what a bare `provider-bench` was meant to ask for. `2` is this
+    // workspace's usage-error convention (see e.g. `examples/check_sample.rs`),
+    // distinct from `1` below for an argument that was actually given and
+    // rejected.
+    if requires_usage(&args) {
+        usage();
+        std::process::exit(2);
+    }
     let parsed = match parse_args(&args) {
         Ok(p) => p,
         Err(e) => {
@@ -1829,6 +1853,19 @@ mod tests {
         let parsed = parse_args(&args).expect("valid combination");
         assert_eq!(parsed.format, Some(SpecimenClass::Passport));
         assert!(parsed.real_specimens);
+    }
+
+    /// Issue #510: no arguments must never fall through to `Args::default()`
+    /// — that default silently starts a 20-document synthetic run including
+    /// the `llm` provider, which no bare invocation was ever meant to ask
+    /// for. Any argument at all, valid or not, is `parse_args`'s job instead.
+    #[test]
+    fn no_arguments_requires_usage() {
+        assert!(requires_usage(&[]));
+        let one_arg: Vec<String> = vec!["--real-specimens".to_string()];
+        assert!(!requires_usage(&one_arg));
+        let bogus_arg: Vec<String> = vec!["--not-a-real-flag".to_string()];
+        assert!(!requires_usage(&bogus_arg));
     }
 
     #[test]
