@@ -185,6 +185,27 @@ fn ensure_charset(line: &str, line_number: usize) -> Result<(), MrzError> {
     Ok(())
 }
 
+/// Refuse a document-number field whose first cell is the filler `<`,
+/// including an all-filler field. Doc 9303 enters data from the left-hand
+/// position of each field (Part 3 PDF p.28; Part 4 PDF p.25 for TD3), so a
+/// leading filler is not representable data the way an *interior* one is
+/// (Part 4 §4.2.2.2 permits those). Called after the charset and
+/// document-code checks, before the field's own check digit is evaluated —
+/// the ICAO 7-3-1 arithmetic gives `<` the same residue-0 value as `0`, `A`,
+/// `K` and `U` (see [`crate::Blindspot`]), so a misread first cell can still
+/// verify. `field` is the field's text, `position` its zero-based first `char`
+/// column and `line` its zero-based line within the zone.
+fn ensure_document_number_leads(field: &str, line: usize, position: usize) -> Result<(), MrzError> {
+    if field.starts_with('<') {
+        return Err(MrzError::LeadingFiller {
+            field: crate::Field::DocumentNumber,
+            line,
+            position,
+        });
+    }
+    Ok(())
+}
+
 /// Read the six-character date field at `line[start..start + 6]`.
 ///
 /// Every caller has vetted the line and its length. The error arm maps an
@@ -267,6 +288,7 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
     if !line1.starts_with('P') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
+    ensure_document_number_leads(&line2[0..9], 1, 0)?;
 
     let (surname, given_names) = clean_name(&line1[5..44]);
 
@@ -367,6 +389,7 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
+    ensure_document_number_leads(&line2[0..9], 1, 0)?;
 
     let (surname, given_names) = clean_name(&line1[5..36]);
 
@@ -474,6 +497,7 @@ pub fn parse_td1_with(
     if !matches!(code.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
+    ensure_document_number_leads(&line1[5..14], 0, 5)?;
 
     let (surname, given_names) = clean_name(line3);
 
@@ -578,6 +602,7 @@ pub fn parse_mrv_a_with(
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
+    ensure_document_number_leads(&line2[0..9], 1, 0)?;
 
     let (surname, given_names) = clean_name(&line1[5..44]);
 
@@ -667,6 +692,7 @@ pub fn parse_mrv_b_with(
     if !line1.starts_with('V') {
         return Err(MrzError::BadDocumentCode(line1[0..2].to_string()));
     }
+    ensure_document_number_leads(&line2[0..9], 1, 0)?;
 
     let (surname, given_names) = clean_name(&line1[5..36]);
 
@@ -1476,11 +1502,15 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// Otherwise the fallback ranks by verified/applicable check-digit fraction,
 /// then applicable count, and returns the best reading with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
-/// escalate. [`MrzError::NotFound`] means nothing MRZ-shaped was found at all —
-/// or that the best-scoring candidate fails every structural signal at once
-/// (unrecognized issuing state *and* nationality *and* a non-numeric date of
-/// birth), which is OCR that matched MRZ-shaped visual-zone text rather than a
-/// real MRZ read too badly to verify.
+/// escalate. When nothing validates and nothing falls back either, but some
+/// candidate's document number began with a filler, [`MrzError::LeadingFiller`]
+/// is returned instead of a bare [`MrzError::IncompleteSequence`] — it says
+/// *why* nothing here parsed, which "incomplete" does not. [`MrzError::NotFound`]
+/// means nothing MRZ-shaped was found at all — or that the best-scoring
+/// candidate fails every structural signal at once (unrecognized issuing state
+/// *and* nationality *and* a non-numeric date of birth), which is OCR that
+/// matched MRZ-shaped visual-zone text rather than a real MRZ read too badly
+/// to verify.
 ///
 /// ```
 /// let text = "## PASSPORT\n\nsome OCR noise\n\n\
@@ -1546,6 +1576,26 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         None
     };
 
+    // The first structural refusal any candidate line pair/triple hit — today
+    // only `LeadingFiller`, from a document-number field whose first cell is
+    // the filler. Kept like `fallback` (first one wins: the repair pipeline
+    // tries its most conservative variants first), and consulted only in the
+    // final precedence below, after a validating reading and a
+    // checksum-failed `fallback` — see its use there for why a refused
+    // candidate outranks `IncompleteSequence`/`NotFound` but never a reading
+    // that actually parsed.
+    let mut refused: Option<MrzError> = None;
+    let mut note_refusal = |result: Result<MrzData, MrzError>| -> Option<MrzData> {
+        match result {
+            Ok(data) => Some(data),
+            Err(e @ MrzError::LeadingFiller { .. }) => {
+                refused.get_or_insert(e);
+                None
+            }
+            Err(_) => None,
+        }
+    };
+
     // The first format whose line-1 document-code prefix was recognized
     // among the *split-line* candidates below, even though no companion line
     // ever combined with it into a full parse — kept only from the
@@ -1578,7 +1628,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 Td3Prefix::Ambiguous => {}
                 Td3Prefix::Repair(l1) => {
                     for l2 in variants(tail, 44, repair_td3_line2) {
-                        if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                        if let Some(data) = note_refusal(parse_td3_with(&l1, &l2, opts)) {
                             if let Some(valid) = consider(data) {
                                 return Ok(valid);
                             }
@@ -1592,7 +1642,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                         head.to_string(),
                     ] {
                         for l2 in variants(tail, 44, repair_td3_line2) {
-                            if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                            if let Some(data) = note_refusal(parse_td3_with(&l1, &l2, opts)) {
                                 if let Some(valid) = consider(data) {
                                     return Ok(valid);
                                 }
@@ -1616,7 +1666,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 shape_seen.get_or_insert(Format::Td3);
                 for l2_raw in lines.iter().skip(i + 1).take(3) {
                     for l2 in variants(l2_raw, 44, repair_td3_line2) {
-                        if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                        if let Some(data) = note_refusal(parse_td3_with(&l1, &l2, opts)) {
                             if let Some(valid) = consider(data) {
                                 return Ok(valid);
                             }
@@ -1642,7 +1692,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             shape_seen.get_or_insert(Format::Td3);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_td3_line2) {
-                    if let Ok(data) = parse_td3_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_td3_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1671,7 +1721,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 head.to_string(),
             ] {
                 for l2 in variants(tail, 36, repair_mrv_b_line2) {
-                    if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_mrv_b_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1691,7 +1741,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             shape_seen.get_or_insert(Format::MrvB);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 36, repair_mrv_b_line2) {
-                    if let Ok(data) = parse_mrv_b_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_mrv_b_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1717,7 +1767,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 head.to_string(),
             ] {
                 for l2 in variants(tail, 44, repair_mrv_a_line2) {
-                    if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_mrv_a_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1737,7 +1787,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             shape_seen.get_or_insert(Format::MrvA);
             for l2_raw in lines.iter().skip(i + 1).take(3) {
                 for l2 in variants(l2_raw, 44, repair_mrv_a_line2) {
-                    if let Ok(data) = parse_mrv_a_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_mrv_a_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1784,7 +1834,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             ] {
                 for l2 in [repair_td1_line2(mid), mid.to_string()] {
                     for l3 in variants(tail, 30, repair_td1_line3) {
-                        if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
+                        if let Some(data) = note_refusal(parse_td1_with(&l1, &l2, &l3, opts)) {
                             if let Some(valid) = consider(data) {
                                 return Ok(valid);
                             }
@@ -1806,7 +1856,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 for l2 in variants(l2_raw, 30, repair_td1_line2) {
                     for l3_raw in lines.iter().skip(j + 1).take(3) {
                         for l3 in variants(l3_raw, 30, repair_td1_line3) {
-                            if let Ok(data) = parse_td1_with(&l1, &l2, &l3, opts) {
+                            if let Some(data) = note_refusal(parse_td1_with(&l1, &l2, &l3, opts)) {
                                 if let Some(valid) = consider(data) {
                                     return Ok(valid);
                                 }
@@ -1842,7 +1892,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
                 head.to_string(),
             ] {
                 for l2 in variants(tail, 36, repair_td2_line2) {
-                    if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
+                    if let Some(data) = note_refusal(parse_td2_with(&l1, &l2, opts)) {
                         if let Some(valid) = consider(data) {
                             return Ok(valid);
                         }
@@ -1864,7 +1914,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
             shape_seen.get_or_insert(Format::Td2);
             for l2 in variants(lines[i + 1], 36, repair_td2_line2) {
-                if let Ok(data) = parse_td2_with(&l1, &l2, opts) {
+                if let Some(data) = note_refusal(parse_td2_with(&l1, &l2, opts)) {
                     if let Some(valid) = consider(data) {
                         return Ok(valid);
                     }
@@ -1878,9 +1928,13 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // because the recognizer dropped a destroyed glyph instead of emitting a
     // placeholder, so every field after the damage is shifted and no amount of
     // lookalike repair can help. Runs only here, at the end, and only when
-    // some line already matched a format's shape — a document with no MRZ at
-    // all never pays for it.
-    if fallback.is_some() {
+    // some line already matched a format's shape, checksum-failed, *or* a
+    // structural refusal — a document with no MRZ at all never pays for it.
+    // The `refused.is_some()` half of this gate matters: a TD3 whose only
+    // candidate hit `LeadingFiller` never sets `fallback` (its `Err` skips
+    // `consider` entirely), so without it a refused reading would fall
+    // through to `IncompleteSequence` instead of getting a chance at repair.
+    if fallback.is_some() || refused.is_some() {
         if let Some(mut data) = damaged_pass(&lines, opts, &intact_td1_starts) {
             // `damaged_pass` (and `class_sweep_pass`, which it tries first)
             // is the only path a reading can take here — see
@@ -1902,14 +1956,23 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         }
     }
 
-    fallback.ok_or_else(|| match shape_seen {
-        Some(format) => MrzError::IncompleteSequence {
-            format,
-            lines_found: 1,
-            lines_expected: expected_lines(format),
-        },
-        None => MrzError::NotFound,
-    })
+    // Precedence among what is left: a validating reading already returned
+    // above; next best is a checksum-failed `fallback` (a caller can see how
+    // close the read came); next is the first structural refusal any
+    // candidate hit (still more informative than "not found" — it says
+    // *why* nothing here parsed); only then the shape-based
+    // `IncompleteSequence`/bare `NotFound`.
+    match fallback {
+        Some(data) => Ok(data),
+        None => Err(refused.unwrap_or_else(|| match shape_seen {
+            Some(format) => MrzError::IncompleteSequence {
+                format,
+                lines_found: 1,
+                lines_expected: expected_lines(format),
+            },
+            None => MrzError::NotFound,
+        })),
+    }
 }
 
 /// How many MRZ lines `format` requires — the one place that count lives,
@@ -2262,9 +2325,13 @@ fn class_sweep_pass(
 
 /// Start indices of every three consecutive rows that are exactly a TD1 zone:
 /// three 30-cell rows in the MRZ charset that `parse_td1_with` accepts as a
-/// layout, whether or not their check digits verify (#409). The TD2 paths
-/// skip a pair starting at one of these rows, so an intact TD1 is never padded
-/// into a TD2 reading.
+/// layout, whether or not their check digits verify (#409) — and whether or
+/// not its document number is refused for a leading filler, which is a
+/// structural error but not evidence *against* the TD1 shape (a corrupted
+/// document number does not un-TD1 the other two lines). Treating only
+/// `Ok` as intact would pad a refused TD1 into a TD2 reading, reopening
+/// #409 for this specific new refusal. The TD2 paths skip a pair starting at
+/// one of these rows, so an intact TD1 is never padded into a TD2 reading.
 fn intact_td1_starts(lines: &[&str], opts: &ParseOptions) -> Vec<usize> {
     lines
         .windows(3)
@@ -2274,7 +2341,12 @@ fn intact_td1_starts(lines: &[&str], opts: &ParseOptions) -> Vec<usize> {
             let shaped = [&first, &second, &third]
                 .iter()
                 .all(|row| row.len() == 30 && is_mrz_charset(row));
-            (shaped && parse_td1_with(&first, &second, &third, opts).is_ok()).then_some(index)
+            let intact = shaped
+                && matches!(
+                    parse_td1_with(&first, &second, &third, opts),
+                    Ok(_) | Err(MrzError::LeadingFiller { .. })
+                );
+            intact.then_some(index)
         })
         .collect()
 }

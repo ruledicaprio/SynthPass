@@ -2207,6 +2207,42 @@ mod tests {
         assert!(err.iter().any(|m| m.contains("`no_mrz_found` grew")));
     }
 
+    /// #536: a baseline written before `document_number_leading_filler` existed
+    /// carries no key for it at all — `check_baseline`'s
+    /// `.get(bucket).copied().unwrap_or(0)` must read that absence as zero, so
+    /// adding the bucket alone never fails the gate, and a run that now
+    /// produces a few such misses is still caught as a genuine regression from
+    /// that implied zero.
+    #[test]
+    fn baseline_missing_the_leading_filler_bucket_reads_as_zero() {
+        let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        let b = baseline_with_tolerance(&base, 0);
+        assert!(!b
+            .by_miss_kind
+            .contains_key("document_number_leading_filler"));
+
+        // No leading-filler misses: passes clean, exactly as before the
+        // bucket was added.
+        let clean = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);
+        assert_eq!(check_baseline(&clean, &b), Ok(vec![]));
+
+        // HITs flat at 120 (same total documents, 229): 3 moved from
+        // `no_mrz_found` to the new bucket. The missing baseline key defaults
+        // to zero, so this growth must still fail the gate.
+        let regressed = snap(
+            120,
+            &[
+                ("checksum_failed", 24),
+                ("no_mrz_found", 82),
+                ("document_number_leading_filler", 3),
+            ],
+        );
+        let err = check_baseline(&regressed, &b).expect_err("leading-filler misses grew from zero");
+        assert!(err
+            .iter()
+            .any(|m| m.contains("`document_number_leading_filler` grew: 0 -> 3")));
+    }
+
     #[test]
     fn baseline_passes_a_genuine_improvement() {
         let base = snap(120, &[("checksum_failed", 24), ("no_mrz_found", 85)]);

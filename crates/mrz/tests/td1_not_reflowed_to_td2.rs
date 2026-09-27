@@ -37,7 +37,13 @@ fn intact_td1_does_not_hide_a_separate_valid_td2() {
     ))
     .expect("the tracked OCR fixture is JSON");
     let td1 = fixture["mrz_line"].as_str().expect("fixture has an MRZ");
-    let td2 = format_td2(&Td2Fields::default());
+    // Non-empty and non-`<`-led document number: an all-filler field is now
+    // refused outright (#536) rather than validating, which would sink this
+    // synthetic TD2's own check digits and defeat the point of the test.
+    let td2 = format_td2(&Td2Fields {
+        document_number: "K1234567".to_string(),
+        ..Td2Fields::default()
+    });
     let detected = find_and_parse(&format!("{td1}\n{td2}"))
         .expect("the separate validating zone remains eligible");
     assert_eq!(detected.format, Format::Td2);

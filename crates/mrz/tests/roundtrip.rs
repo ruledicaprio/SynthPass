@@ -143,35 +143,48 @@ proptest! {
             let parsed = match format {
                 0 => {
                     let zone = format_td3(&Td3Fields {
-                        date_of_birth, sex, date_of_expiry, ..Td3Fields::default()
+                        date_of_birth, sex, date_of_expiry,
+                        // Non-empty and non-`<`-led: an empty document
+                        // number formats to an all-filler field, which the
+                        // parsers now refuse outright (#536).
+                        document_number: "K12345670".to_string(),
+                        ..Td3Fields::default()
                     });
                     let (l1, l2) = zone.split_once('\n').unwrap();
                     parse_td3(l1, l2).unwrap()
                 }
                 1 => {
                     let zone = format_td2(&Td2Fields {
-                        date_of_birth, sex, date_of_expiry, ..Td2Fields::default()
+                        date_of_birth, sex, date_of_expiry,
+                        document_number: "K12345670".to_string(),
+                        ..Td2Fields::default()
                     });
                     let (l1, l2) = zone.split_once('\n').unwrap();
                     parse_td2(l1, l2).unwrap()
                 }
                 2 => {
                     let zone = format_td1(&Td1Fields {
-                        date_of_birth, sex, date_of_expiry, ..Td1Fields::default()
+                        date_of_birth, sex, date_of_expiry,
+                        document_number: "K12345670".to_string(),
+                        ..Td1Fields::default()
                     });
                     let mut lines = zone.split('\n');
                     parse_td1(lines.next().unwrap(), lines.next().unwrap(), lines.next().unwrap()).unwrap()
                 }
                 3 => {
                     let zone = format_mrv_a(&MrvAFields {
-                        date_of_birth, sex, date_of_expiry, ..MrvAFields::default()
+                        date_of_birth, sex, date_of_expiry,
+                        document_number: "K12345670".to_string(),
+                        ..MrvAFields::default()
                     });
                     let (l1, l2) = zone.split_once('\n').unwrap();
                     parse_mrv_a(l1, l2).unwrap()
                 }
                 _ => {
                     let zone = format_mrv_b(&MrvBFields {
-                        date_of_birth, sex, date_of_expiry, ..MrvBFields::default()
+                        date_of_birth, sex, date_of_expiry,
+                        document_number: "K12345670".to_string(),
+                        ..MrvBFields::default()
                     });
                     let (l1, l2) = zone.split_once('\n').unwrap();
                     parse_mrv_b(l1, l2).unwrap()
@@ -197,12 +210,16 @@ proptest! {
         let sex = Sex::NonConformant(c);
         let written = if matches!(c, 'A'..='Z' | '0'..='9' | '<') { c } else { '<' };
         let expected = Sex::from_zone(written);
+        // Non-empty and non-`<`-led: an empty document number formats to an
+        // all-filler field, which the parsers now refuse outright (#536),
+        // irrelevant to what this property tests (the sex cell).
+        let doc_number = "K12345670".to_string();
         let zones = [
-            (format_td3(&Td3Fields { sex, ..Td3Fields::default() }), 44),
-            (format_td2(&Td2Fields { sex, ..Td2Fields::default() }), 36),
-            (format_td1(&Td1Fields { sex, ..Td1Fields::default() }), 30),
-            (format_mrv_a(&MrvAFields { sex, ..MrvAFields::default() }), 44),
-            (format_mrv_b(&MrvBFields { sex, ..MrvBFields::default() }), 36),
+            (format_td3(&Td3Fields { sex, document_number: doc_number.clone(), ..Td3Fields::default() }), 44),
+            (format_td2(&Td2Fields { sex, document_number: doc_number.clone(), ..Td2Fields::default() }), 36),
+            (format_td1(&Td1Fields { sex, document_number: doc_number.clone(), ..Td1Fields::default() }), 30),
+            (format_mrv_a(&MrvAFields { sex, document_number: doc_number.clone(), ..MrvAFields::default() }), 44),
+            (format_mrv_b(&MrvBFields { sex, document_number: doc_number, ..MrvBFields::default() }), 36),
         ];
         for (i, (zone, width)) in zones.iter().enumerate() {
             for line in zone.split('\n') {

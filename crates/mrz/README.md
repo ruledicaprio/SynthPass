@@ -221,7 +221,12 @@ single swaps are safe", never as "which characters are safe".
 
 That is why the crate layers structural checks on top of the arithmetic — recognized country
 country-code recognition and date plausibility in `find_and_parse` repair
-gates. Direct `parse_*` calls do not apply these structural guards. The full derivation and the corpus numbers are on
+gates, plus one guard every direct `parse_*` call applies on its own: a document number whose
+first cell is the filler `<` (including an all-filler field) is refused outright as
+[`MrzError::LeadingFiller`](https://docs.rs/mrz/latest/mrz/enum.MrzError.html), never merely a
+failed check digit — Doc 9303 enters data from each field's left-hand position, so nothing was
+printed to the left of it. Beyond that one field, direct `parse_*` calls do not apply the
+country-registry or date-plausibility guards below. The full derivation and the corpus numbers are on
 [`Blindspot`](https://docs.rs/mrz/latest/mrz/enum.Blindspot.html), and
 `cargo run -p mrz --example checksum_blindspots` demonstrates the law against the real parser.
 
@@ -232,16 +237,18 @@ passing `parse_*` call means something different for each:
 
 | | Guarantees | Does not guarantee |
 | --- | --- | --- |
-| **Check-digit-covered** — the document number, date of birth and date of expiry on every format, and TD3's personal number, each under its own digit; TD1 and TD2 optional data, under the composite alone; and the composite itself (TD1, TD2, TD3) | The printed digit agrees with the 7-3-1 weighted sum of the cells it covers (Part 3 §4.9) — internally consistent, field by field. | Byte-identity with what was issued. `1`↔`L` and `6`↔`G` are the *only* `CONFUSABLES` pairs sharing a residue class, so they are the only single-cell misreads no check digit anywhere can catch; every other listed confusable is caught individually, though two can still cancel in combination (see [above](#what-a-check-digit-cannot-prove)). Nor that a date names a real calendar day: `MrzDate::OutOfCalendar` is a valid, checksum-consistent outcome for a month of `13`, a `30`th of February, or the `000000` placeholder some specimens print. |
-| **Structural** — line 1's first cell, on every format | It matches its format's admissible document-code table: `P` (TD3), `V` (MRV-A/B), or one of `I`/`A`/`C` (TD1/TD2) — the one content check a direct `parse_*` call makes outside the check digits. | Nothing about the document code's *second* cell, which is accepted exactly as printed with no check at all. |
+| **Check-digit-covered** — the document number, date of birth and date of expiry on every format, and TD3's personal number, each under its own digit; TD1 and TD2 optional data, under the composite alone; and the composite itself (TD1, TD2, TD3) | The printed digit agrees with the 7-3-1 weighted sum of the cells it covers (Part 3 §4.9) — internally consistent, field by field. The document number's own first cell also carries a content check beyond that arithmetic: a leading filler is refused outright (`MrzError::LeadingFiller`) rather than merely failing its check digit. | Byte-identity with what was issued. `1`↔`L` and `6`↔`G` are the *only* `CONFUSABLES` pairs sharing a residue class, so they are the only single-cell misreads no check digit anywhere can catch; every other listed confusable is caught individually, though two can still cancel in combination (see [above](#what-a-check-digit-cannot-prove)). Nor that a date names a real calendar day: `MrzDate::OutOfCalendar` is a valid, checksum-consistent outcome for a month of `13`, a `30`th of February, or the `000000` placeholder some specimens print. |
+| **Structural** — line 1's first cell, on every format | It matches its format's admissible document-code table: `P` (TD3), `V` (MRV-A/B), or one of `I`/`A`/`C` (TD1/TD2) — one of two content checks a direct `parse_*` call makes outside the check digits (the other is the document number's leading cell, in the row above). | Nothing about the document code's *second* cell, which is accepted exactly as printed with no check at all. |
 | **Unverifiable** — everything else: the document code's second cell, issuer, name, nationality, sex, and MRV-A/MRV-B optional data, since visas print no composite | Membership in the MRZ alphabet (`0`-`9`, `A`-`Z`, `<`) — anything else is `BadCharacter`. | That the issuing country or nationality is a real ICAO-registered code (no registry lookup here — that is a `find_and_parse` repair-time guard), or that the sex cell is `M`, `F` or `<` (anything else survives as `Sex::NonConformant`, never rejected). |
 
 **No check digit covers the document code, issuer, name, nationality or sex on any of the five
 formats**, so there is no arithmetic anywhere to hold them to. On TD2, TD3 and both visas that is
 all of line 1; TD1's line 1 also carries the document number with its check digit, and optional
 data the composite covers. Direct `parse_*` calls never apply the country-registry or
-date-plausibility guards that `find_and_parse`'s repair gates do. A direct parse reports what the
-check digits establish, which is consistency, and leaves plausibility to those gates.
+date-plausibility guards that `find_and_parse`'s repair gates do — the one content check they do
+make on their own, beyond the check digits, is refusing a document number whose first cell is the
+filler. A direct parse reports what the check digits establish, which is consistency, plus that one
+structural refusal, and leaves plausibility to those repair-time gates.
 
 ## Conformance
 

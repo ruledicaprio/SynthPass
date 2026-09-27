@@ -859,7 +859,11 @@ impl MrzData {
     /// use mrz::{format_td3, parse_td3, PassportType, Td3Fields};
     ///
     /// // A diplomatic passport carries the secondary code `PD`.
-    /// let zone = format_td3(&Td3Fields { document_code: "PD".into(), ..Default::default() });
+    /// let zone = format_td3(&Td3Fields {
+    ///     document_code: "PD".into(),
+    ///     document_number: "K12345670".into(),
+    ///     ..Default::default()
+    /// });
     /// let (l1, l2) = zone.split_once('\n').unwrap();
     /// assert_eq!(parse_td3(l1, l2).unwrap().passport_type(), Some(PassportType::Diplomatic));
     ///
@@ -1065,8 +1069,9 @@ impl Checks {
 /// digit, which `parse_*` reports through [`Checks`] instead of an error.
 ///
 /// ```
-/// use mrz::{find_and_parse, parse_td3, MrzError};
+/// use mrz::{find_and_parse, parse_td3, Field, MrzError};
 ///
+/// const L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
 /// const L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
 ///
 /// // Structural failures are errors ...
@@ -1078,6 +1083,15 @@ impl Checks {
 /// assert_eq!(
 ///     find_and_parse("just a regular paragraph\nwith two lines"),
 ///     Err(MrzError::NotFound),
+/// );
+///
+/// // ... and so is a document number whose first cell is the filler,
+/// // whatever its check digits say -- Doc 9303 enters data from the
+/// // left-hand position of each field, so nothing was printed left of `<`.
+/// let leading_filler_l2 = format!("<{}", &L2[1..]);
+/// assert_eq!(
+///     parse_td3(L1, &leading_filler_l2),
+///     Err(MrzError::LeadingFiller { field: Field::DocumentNumber, line: 1, position: 0 }),
 /// );
 ///
 /// // ... a failed check digit is not: the zone still parses, and says which.
@@ -1135,6 +1149,26 @@ pub enum MrzError {
         /// Byte offset of the check digit within the field's line.
         position: usize,
     },
+    /// A document-number field's first cell is the filler `<` — including a
+    /// field that is all filler. Doc 9303 enters data from the left-hand
+    /// position of each field (Part 3 PDF p.28; Part 4 PDF p.25 for TD3), so a
+    /// leading filler represents no printed character at all, unlike an
+    /// *interior* filler (Part 4 §4.2.2.2), which stays legal. This is a
+    /// structural parse error, like [`Self::BadDocumentCode`] — not a
+    /// [`Checks`] failure — because the ICAO 7-3-1 check-digit arithmetic
+    /// gives `<` the same residue-0 value as several ordinary letters and
+    /// digits (see [`Blindspot`]), so a misread first cell can still verify;
+    /// `field` is always [`Field::DocumentNumber`] today, but the variant does
+    /// not assume that will always be true.
+    LeadingFiller {
+        /// The field whose first cell is a filler. Always
+        /// [`Field::DocumentNumber`] today.
+        field: Field,
+        /// Zero-based line within the MRZ zone.
+        line: usize,
+        /// Zero-based `char` column within the line.
+        position: usize,
+    },
     /// [`find_and_parse`]/[`find_and_parse_with`] only: a line matching one
     /// format's document-code prefix and charset was found, but no companion
     /// line ever combined with it into a full parse — distinct from
@@ -1183,6 +1217,14 @@ impl core::fmt::Display for MrzError {
             Self::BadChecksum { field, position } => {
                 write!(f, "check digit failed for {field} at position {position}")
             }
+            Self::LeadingFiller {
+                field,
+                line,
+                position,
+            } => write!(
+                f,
+                "{field} begins with a filler at line {line}, column {position}"
+            ),
             Self::IncompleteSequence {
                 format,
                 lines_found,
@@ -1937,9 +1979,26 @@ mod tests {
             parse_td2(TD2_L1, TD2_L2).unwrap().document_number_full,
             None
         );
-        // Empty document-number field is a blank field, not an overflow.
+    }
+
+    #[test]
+    fn blank_document_number_is_refused_not_read_as_overflow() {
+        // An all-filler document-number field's first cell is itself a
+        // filler, so `ensure_document_number_leads` refuses it before
+        // `read_overflow` ever runs -- see
+        // `crates/mrz/tests/leading_filler.rs` for the fuller table of this
+        // refusal. This test only pins that the overflow bookkeeping never
+        // gets a chance to call an empty field a "blank, not an overflow"
+        // read anymore, per #536.
         let blank = "<<<<<<<<<<UTO7408122F1204159<<<<<<<<<<<<<<02";
-        assert_eq!(parse_td3(TD3_L1, blank).unwrap().document_number_full, None);
+        assert_eq!(
+            parse_td3(TD3_L1, blank),
+            Err(MrzError::LeadingFiller {
+                field: Field::DocumentNumber,
+                line: 1,
+                position: 0,
+            })
+        );
     }
 
     fn parse_td3_str(mrz: &str) -> MrzData {

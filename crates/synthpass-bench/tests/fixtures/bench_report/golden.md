@@ -41,6 +41,7 @@ Every outcome bucket the baseline records, zero included — a bucket that never
 | `ocr_error` | 0 | yes | The OCR engine itself failed before parsing could be attempted |
 | `document_number_mismatch` | 0 | yes | Checksum-valid MRZ read, but the document number does not match ground truth |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document that carries none |
+| `document_number_leading_filler` | 0 | yes | Document number's first cell is the filler — refused outright, not merely a failed check digit |
 | `redacted_mrz` | 1 | no | Zone blacked out by whoever published the specimen — excluded from the Tier-1 denominator, not an OCR miss |
 | `no_mrz_expected` | 1 | no | Document carries no MRZ at all; none was read — a correct refusal, excluded from the Tier-1 denominator |
 | `checksum_failed_specimen` | 1 | no | The printed zone fails its own ICAO check digits — a byte-perfect read still fails, excluded from the Tier-1 denominator |
