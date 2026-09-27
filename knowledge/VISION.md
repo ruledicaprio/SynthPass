@@ -95,7 +95,9 @@ Concretely, the long arc is:
 4. **Harden the deterministic core.** All five MRZ formats (TD1/TD2/TD3, MRVA/MRVB) read
    reliably on *real* specimens, not just synthetic ones — MRZ sequence completeness,
    per-format render fidelity, and evidence-driven escalation. This is what the product is
-   sold on, and it leads M6 ([`decisions/ADR-0006-m6-accuracy-first.md`](decisions/ADR-0006-m6-accuracy-first.md)).
+   sold on, and it was M6, closed on 2026-09-27
+   ([`decisions/ADR-0006-m6-accuracy-first.md`](decisions/ADR-0006-m6-accuracy-first.md),
+   [`decisions/ADR-0011-split-m6-packaging-into-m8.md`](decisions/ADR-0011-split-m6-packaging-into-m8.md)).
 5. **Expand the surface.** Declarative document layouts, dataset exports
    (COCO / YOLO / JSONL / Hugging Face), an air-gapped deployment guide, and a first
    commercial engagement on the terms of [`BRANDING.md` §5](BRANDING.md#5-commercial-strategy)

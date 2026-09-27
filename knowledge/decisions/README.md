@@ -41,7 +41,7 @@ the record.
 | [0008](ADR-0008-mrz-detection-track.md) | MRZ detection succeeds sequence completeness as M6's accuracy track | Accepted |
 | [0009](ADR-0009-generator-as-a-service.md) | Generator-as-a-service: what it would cost the non-goals | Accepted (2026-09-17, as the pricing) |
 | [0010](ADR-0010-benchmark-cost-split-by-role.md) | Split the real-specimen benchmark by role, not by random sample | Accepted (2026-09-17, measured) |
-| [0011](ADR-0011-split-m6-packaging-into-m8.md) | Split M6: the deterministic core keeps the number, packaging becomes M8 | Accepted (amended 2026-09-16, 2026-09-17) |
+| [0011](ADR-0011-split-m6-packaging-into-m8.md) | Split M6: the deterministic core keeps the number, packaging becomes M8 | Accepted (amended 2026-09-16, 2026-09-17, 2026-09-27) |
 | [0012](ADR-0012-cover-only-specimens-are-a-labelled-class.md) | Cover-only specimens are a labelled class, not a drop | Accepted (amended 2026-09-15) |
 | [0013](ADR-0013-names-are-scored-against-mrz-form-truth.md) | Name accuracy is a separate axis, scored only against MRZ-form truth | Accepted |
 | [0014](ADR-0014-per-cell-ocrb-classification.md) | `mrz-cell`: per-cell OCR-B classification for the MRZ band, as a benchmark-first prototype | Proposed |

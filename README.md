@@ -180,9 +180,9 @@ MRZ whose document number matches hand-verified ground truth.
 **TD1 vs. TD2 vs. TD3**, each track's latest run:
 ![Tier-1 hit rate by MRZ format](knowledge/img/format-comparison.svg)
 
-M1–M5 and M7 are complete; M6 (the deterministic core — Tier-1 real-document accuracy against a
-named residual; all five MRZ formats already read through the registered provider) is in progress,
-with packaging and enterprise readiness split out as M8 — [knowledge/ROADMAP.md](knowledge/ROADMAP.md).
+M1–M7 are complete. M6 — the deterministic core: Tier-1 real-document accuracy against a named
+residual, and all five MRZ formats read through the registered provider — closed on 2026-09-27.
+M8, packaging and enterprise readiness, is in progress — [knowledge/ROADMAP.md](knowledge/ROADMAP.md).
 
 ## Documentation
 

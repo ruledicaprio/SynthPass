@@ -26,7 +26,7 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 | Tier-1 hit rate, whole specimen corpus | 139 / 261 = 53.3% | same baseline; the gap is explained below |
 | Strict name hit rate, real specimens | **12 / 45 = 26.7%** of name-scorable scored documents (36.4% of name-scorable hits) | same baseline (CI, 2026-09-24); ADR-0013 |
 | False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 110** | same baseline (CI, 2026-09-24) |
-| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 370 / 500 = 74.0% (Derived) — TD3 74%, TD2 72%, TD1 52%, MRV-A 85%, MRV-B 87% (Observed, local **and CI**). Of the 370 hits, 200 read both names exactly and **207 are wrong in at least one scored field** (report-only, #457) | Observed locally, 2026-09-25: `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (release, Windows) at MAIN `1595bf9` and at `919b5ff` (crates identical to `174366b`), identical per seed in both — [`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md). **Confirmed in CI**, same counts per format: `bench-charts.yml` [run 36111444345](https://github.com/ruledicaprio/SynthPass/actions/runs/36111444345), 2026-09-25 at `f80877b` (v1.6.1, whose crates equal `174366b`'s apart from the mrz version and changelog). Previously observed in CI: 377 / 500 (2026-09-14 at `9c8f03d`, run 34831258506; same counts at `b0337e1`, 2026-09-21). Of the −7, TD3's −3 on seeds 0–49 is #440 refusing wrong reads; the rest is unattributed |
+| Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 370 / 500 = 74.0% (Derived) — TD3 74%, TD2 72%, TD1 52%, MRV-A 85%, MRV-B 87% (Observed, local **and CI**). Of the 370 hits, 200 read both names exactly and **207 are wrong in at least one scored field** (report-only, #457) | Observed locally, 2026-09-25: `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (release, Windows) at MAIN `1595bf9` and at `919b5ff` (crates identical to `174366b`), identical per seed in both — [`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md). The registered-provider path, `provider-bench --mrz-only --document-type <fmt>`, read identically per seed to this harness when the two were compared at `9c8f03d` ([comparison](m6-per-format-harness-comparison-2026-09-16.md)). **Confirmed in CI**, same counts per format: `bench-charts.yml` [run 36111444345](https://github.com/ruledicaprio/SynthPass/actions/runs/36111444345), 2026-09-25 at `f80877b` (v1.6.1, whose crates equal `174366b`'s apart from the mrz version and changelog). Previously observed in CI: 377 / 500 (2026-09-14 at `9c8f03d`, run 34831258506; same counts at `b0337e1`, 2026-09-21). Of the −7, TD3's −3 on seeds 0–49 is #440 refusing wrong reads; the rest is unattributed |
 | Tier-2 per-field exact match, 72-fixture parity corpus | 55.6% overall (58.6% reviewed / 52.5% derived) | `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
 | Names, browser vs native, on documents both read validly | **28 / 31 vs 11 / 31** exact on both name fields (reviewed fixtures only) — 17 browser-right/native-wrong, 0 the other way | same run — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md) |
@@ -48,7 +48,7 @@ non-conforming one).
 | --- | --- | --- | --- |
 | **Tier-1 HIT** | **139** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 2 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13; two real detection targets since the San Marino template (2026-09-17) and Moldova PA 2014 (2026-09-19) left the bucket, each reclassified as carrying no zone |
-| `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13, and 3.3× the other since the c03/c07/c09 cohort |
+| `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13 |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
@@ -73,13 +73,35 @@ is a blank San Marino template with nothing printed in its zone to find; see the
 
 The c03/c07/c09 cohort then took `checksum_failed` 7 → **10** later the same day, every one of the
 three from a newly ingested book (Germany `P0_D00_2024`, Hong Kong `P0_HKG_2019` and `P0_HKG_2007`)
-and none from a document already in the corpus. Fourteen scored misses stood until the San Marino relabel; thirteen do now, **10 recognition
-against 4 detection**, of which 3 are real detection targets — and none of the three new
-recognition misses has a hand-transcribed fixture, so whether their printed zones conform is
-unmeasured. See the second 2026-09-14 entry.
+and none from a document already in the corpus. Fourteen scored misses stood at the v1.5.0 freeze.
+The San Marino template (2026-09-17) and Moldova `PA_MDA_2014` (2026-09-19) have since left the
+denominator, and every one of the twelve left carries a reviewed fixture
+([`twelve-scored-misses-2026-09-19.md`](twelve-scored-misses-2026-09-19.md)); they are the
+[post-M6 residual](#post-m6-residual). The cohort itself is the second 2026-09-14 entry.
 
 What that means for the track is in
 [`ADR-0008`](../decisions/ADR-0008-mrz-detection-track.md)'s 2026-09-12 amendment.
+
+### Post-M6 residual
+
+**Opened 2026-09-27**, when M6 closed
+([ADR-0011](../decisions/ADR-0011-split-m6-packaging-into-m8.md)'s amendment of that date). It holds
+the scored misses M6 attributed rather than fixed, plus any a later cohort adds, and it is worked as
+backlog, not as a milestone. An entry leaves when it becomes a hit or leaves the denominator, in
+the PR that re-blesses the baseline. Mechanisms:
+[`detection-misses-2026-09-18.md`](detection-misses-2026-09-18.md),
+[`twelve-scored-misses-2026-09-19.md`](twelve-scored-misses-2026-09-19.md),
+[`russia-mrz-segmentation-2026-09-19.md`](russia-mrz-segmentation-2026-09-19.md),
+[`mrz-strip-phase0-results-2026-09-24.md`](mrz-strip-phase0-results-2026-09-24.md) and
+[`m6-six-misses-repair-mechanisms-2026-09-27.md`](m6-six-misses-repair-mechanisms-2026-09-27.md).
+Outcomes: [`real-specimen-outcomes.jsonl`](real-specimen-outcomes.jsonl).
+
+- `no_mrz_found`: France ID 2020 back, Italy ID 2022 back.
+- `checksum_failed`: Afghanistan `P0_AFG_2016`, Belgium ID 2021 back, Croatia ID 2021 back,
+  Czechia `P0_CZE_2005`, Germany `P0_D00_2024`, Hong Kong `P0_HKG_2007` and `P0_HKG_2019`, Romania
+  `PE_ROU_2024`, Russian Federation `P0_RUS_2019` (a segmentation failure, scored here), Sweden ID
+  2022 back.
+- Added by a post-freeze cohort: none yet.
 
 **The browser-vs-native row replaces ADR-0008's "64.2% vs 59.5%"**, neither side of which was
 current: the browser figure was the first of four measurements in `WEB_OCR_BASELINE.md` and had

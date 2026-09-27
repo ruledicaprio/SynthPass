@@ -56,6 +56,12 @@ the two no-MRZ rows have no parsed dates at all. Thus the date clause excludes o
 misses from every current and future `damaged_pass` repair path, while the sweep itself has only that
 same one-document ceiling.
 
+*(Corrected 2026-09-27: the date clause excludes two of the twelve, not one. Czechia `P0_CZE_2005`,
+a TD3 row recorded above as well-formed, prints a date of birth that names no calendar day, so
+`accept_damaged` refuses its correct reading too
+([`m6-six-misses-repair-mechanisms-2026-09-27.md`](m6-six-misses-repair-mechanisms-2026-09-27.md)).
+The sweep's one-document ceiling is unaffected, because Czechia is not sweepable.)*
+
 Removing the date clause would be a bad trade if it admitted a second candidate without the sweep's
 coverage, uniformity, and two-occurrence evidence: the measured ceiling is one, so weakening a guard
 that rejects ambiguous damaged reads would buy no additional scored document on this corpus while
