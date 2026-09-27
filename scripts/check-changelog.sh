@@ -5,7 +5,7 @@
 #   scripts/check-changelog.sh --base origin/main
 #                                              ...and apply the PR-scoped rules
 #
-# Four checks. The first runs anywhere; the rest need a base ref to diff against
+# Five checks. The first runs anywhere; the rest need a base ref to diff against
 # and are what CI runs on a pull request.
 #
 #   1. Every fragment is named <id>.<category>[!].md with a real category, and
@@ -22,6 +22,9 @@
 #      version must equal what the pending fragments imply. This is the
 #      discriminator: the number and the diff have to agree, checked rather
 #      than trusted.
+#   5. A PR that adds a breaking (`!`) fragment also changes MIGRATION.md: its
+#      entry goes under the Unreleased section in the same PR, so the upgrade
+#      steps are written with the change, not reconstructed at release time.
 #
 # Check 4 is the one worth being careful about. It does not verify the change is
 # *correctly categorised* -- only that the version follows from how it was
@@ -290,6 +293,19 @@ compute_implied() { # <scope> <current> <fragment-dir>
 
 check_scope workspace Cargo.toml '[workspace.package]'
 check_scope mrz crates/mrz/Cargo.toml '[package]'
+
+# ------------------------------------------------------------------ check 5
+echo "==> a breaking change carries a migration entry"
+breaking_added="$(added_matching '^changelog\.d/(mrz/)?[^/]+!\.md$')"
+if [ -z "$breaking_added" ]; then
+    echo "    skipped: no breaking (!) fragment added"
+elif printf '%s\n' "$changed_files" | grep -qx 'MIGRATION\.md'; then
+    echo "    ok: MIGRATION.md changed alongside the breaking fragment(s)"
+else
+    fail "this PR adds a breaking (!) fragment but does not change MIGRATION.md:"
+    printf '%s\n' "$breaking_added" | sed 's/^/        /' >&2
+    fail "  add its entry under MIGRATION.md's Unreleased section (see changelog.d/README.md)"
+fi
 
 if [ "$status" -ne 0 ]; then
     echo >&2
