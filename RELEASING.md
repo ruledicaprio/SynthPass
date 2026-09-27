@@ -167,6 +167,8 @@ covers `mrz` — which is the crate where getting it wrong reaches other people.
    `--write` inserts into the topmost `## ` section. Add the new
    `## [X.Y.Z] — YYYY-MM-DD — <title>` heading yourself first if you want a titled release;
    the recent ones carry a title and a lead paragraph, the older ones do not.
+   If `MIGRATION.md` has an **Unreleased** section, rename it to the versions this release
+   ships; breaking PRs filled it as they merged (`changelog.d/README.md`).
 
 3. **Bump `[workspace.package] version` in `Cargo.toml`**, then `cargo check --workspace` to
    refresh `Cargo.lock`.
@@ -185,7 +187,8 @@ Same shape, with three differences.
 - Fragments live in [`changelog.d/mrz/`](changelog.d/mrz/README.md) and assemble into
   `crates/mrz/CHANGELOG.md`, not the root one. `--write` inserts into the topmost section, which
   is `## [Unreleased]`; rename it to `## [X.Y.Z] — YYYY-MM-DD` and open a fresh
-  `## [Unreleased]` above it. The fragments that PR deletes are its entries, so
+  `## [Unreleased]` above it, and do the same with `MIGRATION.md`'s **Unreleased** section,
+  which each breaking PR has filled. The fragments that PR deletes are its entries, so
   `check-changelog.sh` accepts the `crates/mrz/CHANGELOG.md` edit in place of a new fragment.
 - **A breaking change bumps in the PR that makes it**, not in a separate release PR. CI's
   `semver` job derives the permitted bump from `crates/mrz/Cargo.toml` and diffs against
