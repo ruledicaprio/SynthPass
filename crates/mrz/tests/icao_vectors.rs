@@ -46,7 +46,7 @@ const VECTORS: &[(&str, u32, &str)] = &[
     // These two ARE corroborated, though from Part 6 rather than Part 4: the
     // TD2 specimen's line 2 survived as literal text and carries the same
     // date of birth and date of expiry, with the same check digits.
-    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:488`
+    // `knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:494`
     ("740812", 2, "9303 pt6 TD2 specimen date of birth"),
     ("120415", 9, "9303 pt6 TD2 specimen date of expiry"),
 ];
@@ -395,36 +395,36 @@ const TD1_NAME_VECTORS: &[NameVector] = &[
     },
 ];
 
-/// `Doc_9303_Part6_Specs_for_TD2_MROTDs.md:399-429`. Prefix `I<UTO` (5
+/// `Doc_9303_Part6_Specs_for_TD2_MROTDs.md:405-435`. Prefix `I<UTO` (5
 /// chars), name field 31 chars, upper line 36 chars total.
 const TD2_NAME_VECTORS: &[NameVector] = &[
     NameVector {
-        source: "9303 pt6 §4.2.3.3:399",
+        source: "9303 pt6 §4.2.3.3:405",
         viz: "PAPANDROPOULOUS, JONATHOON ALEC",
         expected_line: "I<UTOPAPANDROPOULOUS<<JONATHOON<ALEC",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 van der Muellen:409",
+        source: "9303 pt6 §4.2.3.4 van der Muellen:415",
         viz: "VAN DER MUELLEN, MARTIN",
         expected_line: "I<UTOVAN<DER<MUELLEN<<MARTIN<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 Al-Basri:413",
+        source: "9303 pt6 §4.2.3.4 Al-Basri:419",
         viz: "AL-BASRI, HUDA MUHAMMAD JAWAD",
         expected_line: "I<UTOAL<BASRI<<HUDA<MUHAMMAD<JAWAD<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.4 Vilarchao Fernandez:417",
+        source: "9303 pt6 §4.2.3.4 Vilarchao Fernandez:423",
         viz: "VILARCHAO FERNANDEZ, JOSE RAMON",
         expected_line: "I<UTOVILARCHAO<FERNANDEZ<<JOSE<RAMON",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.5 Arkfreith:425",
+        source: "9303 pt6 §4.2.3.5 Arkfreith:431",
         viz: "ARKFREITH",
         expected_line: "I<UTOARKFREITH<<<<<<<<<<<<<<<<<<<<<<",
     },
     NameVector {
-        source: "9303 pt6 §4.2.3.5 Satriya Sudarpa:429",
+        source: "9303 pt6 §4.2.3.5 Satriya Sudarpa:435",
         viz: "SATRIYA SUDARPA",
         expected_line: "I<UTOSATRIYA<SUDARPA<<<<<<<<<<<<<<<<",
     },

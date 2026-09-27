@@ -35,7 +35,7 @@ struct Overflow {
 /// Decode the ICAO 9303 long-document-number overflow encoding: TD1 note j
 /// (`knowledge/docs9303/Doc_9303_Part5_Specs_for_TD1_MROTDs.md:373`) and its
 /// §4.2.4 check-digit table (`:464-469`), TD2 note j
-/// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:340`).
+/// (`knowledge/docs9303/Doc_9303_Part6_Specs_for_TD2_MROTDs.md:346`).
 ///
 /// **Part 4 defines no overflow encoding for TD3 at all** — nothing in the
 /// corpus states a "more than 9 characters" rule for TD3; that language
