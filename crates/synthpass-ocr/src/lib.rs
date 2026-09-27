@@ -460,6 +460,16 @@ impl NativeOcr {
         // The page turn of the pass `pending` came from (0 for the general
         // pass), applied to `rotation` if the loop ends by accepting it.
         let mut pending_turn = 0;
+        // #508 / ADR-0025: `text` exactly as it stood the moment `pending`
+        // was first held -- set in lockstep with `pending`/`pending_pass_id`
+        // at both hold sites below (the general pass here, a variant pass
+        // further down). This is what `select_tier1_mrz_text` hands Tier 1
+        // on `repair_unconfirmed` or a `pass_cap`/`budget` stop that accepts
+        // the held reading: the text `first-valid` would have handed Tier 1
+        // had it stopped on this same pass instead of holding out for
+        // confirmation. Always `None` under `StopMode::FirstValid`, which
+        // never holds anything.
+        let mut pending_text: Option<String> = None;
         if let Some(data) = mrz::find_and_parse(&text).ok().filter(|d| d.valid()) {
             if stop_mode == StopMode::FirstValid || !data.damaged_recovery {
                 // #473 measurement: reported unconditionally (not gated on
@@ -493,6 +503,15 @@ impl NativeOcr {
                     retry_budget_hit: false,
                     retry_stop: Some("general_valid".to_string()),
                     chargrid: chargrid_arm,
+                    // #508 / ADR-0025: `general_valid` always reads the full
+                    // concatenation -- at this point in the call `text` *is*
+                    // the general pass's own text, so the two are already
+                    // identical, but `select_tier1_mrz_text` still returns
+                    // `None` here rather than `Some(text.clone())`: an
+                    // explicit `None` is what every other unnarrowed stop
+                    // returns too, and it is what keeps this stop out of
+                    // `select_tier1_mrz_text`'s match arms entirely.
+                    tier1_mrz_text: None,
                 });
             }
             if verbose {
@@ -503,6 +522,11 @@ impl NativeOcr {
             }
             pending = Some(data);
             pending_pass_id = Some("general".to_string());
+            // #508 / ADR-0025: the general pass hasn't appended anything to
+            // `text` yet at this point in the call, so this snapshot equals
+            // the general pass's own output -- the hold site's contract
+            // (`pending_text`'s doc comment above) holds trivially here.
+            pending_text = Some(text.clone());
         } else if verbose {
             eprintln!("[synthpass-ocr] Tier-1 miss on general pass; MRZ-band candidate lines:");
             for line in mrz_shaped_lines(&text).lines() {
@@ -527,6 +551,14 @@ impl NativeOcr {
         // assembly's doc comment for what an exhausted/budget-capped loop
         // does instead.
         let mut winning_variant_image: Option<RgbImage> = None;
+        // #508 / ADR-0025: the confirming pass's own candidate lines, set
+        // only in the `variant_valid_confirmed` branch below -- `Some` iff
+        // `retry_stop == Some("variant_valid_confirmed")`. This is what
+        // `select_tier1_mrz_text` hands Tier 1 on that stop: two independent
+        // passes already agreed field for field, so this single pass is a
+        // confirmed witness on its own. Always `None` under
+        // `StopMode::FirstValid`, which never confirms anything.
+        let mut confirming_lines: Option<String> = None;
 
         // `passes_run` counts total passes including the general one above
         // (seeded at 1) — a `zip` counter rather than a manually incremented
@@ -786,6 +818,11 @@ impl NativeOcr {
                     retry_variant_id = Some(pass_id);
                     retry_damaged_recovery = Some(data.damaged_recovery);
                     retry_stop = Some(if confirmed_agreement {
+                        // #508 / ADR-0025: this pass's own candidate lines,
+                        // not the accumulated `text` -- see
+                        // `select_tier1_mrz_text` and `confirming_lines`'s
+                        // doc comment above.
+                        confirming_lines = Some(candidates.clone());
                         "variant_valid_confirmed".to_string()
                     } else {
                         "variant_valid".to_string()
@@ -805,6 +842,12 @@ impl NativeOcr {
                     pending_pass_id = Some(pass_id.clone());
                     pending_set_at_pass = passes_run;
                     pending_turn = turn;
+                    // #508 / ADR-0025: `text` already carries this pass's own
+                    // candidates (pushed above, before this `find_and_parse`
+                    // call), so this snapshot is exactly `text` as it stood
+                    // the moment `pending` was first held here -- the hold
+                    // site's contract (`pending_text`'s doc comment above).
+                    pending_text = Some(text.clone());
                 }
                 if verbose {
                     let left = (pending_set_at_pass + confirm_budget).saturating_sub(passes_run);
@@ -854,11 +897,34 @@ impl NativeOcr {
         // into a valid MRZ across two different variants -- that combination
         // has no single source image, so repair is skipped rather than
         // guessed at.
+        //
+        // #508 / ADR-0025: the text Tier 1's `MrzReader` should parse instead
+        // of the full concatenation, once the loop's stop reason is known --
+        // see `select_tier1_mrz_text`'s doc comment for which stops narrow it
+        // and why. `mut` because chargrid (below) repairs whichever text
+        // Tier 1 actually reads: this snapshot when it is `Some`, `text`
+        // itself when it is `None`.
+        let mut tier1_mrz_text = select_tier1_mrz_text(
+            retry_stop.as_deref().unwrap_or(""),
+            confirming_lines.as_deref(),
+            pending_text.as_deref(),
+        );
+        // #508 / ADR-0025: chargrid repairs `tier1_mrz_text` (the confirming
+        // pass's lines, or the held snapshot), not the full accumulated
+        // `text`, when the retry loop narrowed Tier 1's input at all -- the
+        // latter is exactly what `mrz`'s damaged-capture unanimity gate may
+        // already have refused on. When `tier1_mrz_text` is `None`, that is `text`,
+        // exactly as before this field existed: the loop never narrowed
+        // anything, so chargrid keeps repairing the same accumulation Tier 1
+        // itself falls back to.
         let chargrid_arm = match (chargrid_mode, &winning_variant_image) {
             (ChargridMode::Off, _) => None,
-            (_, Some(image)) => {
-                apply_chargrid(chargrid_mode, &self.mrz_engine, image, &mut text, verbose)
-            }
+            (_, Some(image)) => match tier1_mrz_text.as_mut() {
+                Some(accepted) => {
+                    apply_chargrid(chargrid_mode, &self.mrz_engine, image, accepted, verbose)
+                }
+                None => apply_chargrid(chargrid_mode, &self.mrz_engine, image, &mut text, verbose),
+            },
             (_, None) if has_valid_mrz(&text) => Some("skipped:no_source_image".to_string()),
             (_, None) => Some("skipped:no_valid_mrz".to_string()),
         };
@@ -876,6 +942,7 @@ impl NativeOcr {
             retry_budget_hit,
             retry_stop,
             chargrid: chargrid_arm,
+            tier1_mrz_text,
         })
     }
 }
@@ -1650,6 +1717,13 @@ enum StopMode {
     /// unchanged, and the default. Fast, and right on every specimen whose
     /// first checksum-valid pass is also a correct one; #473's two repros are
     /// the cases where it is not.
+    ///
+    /// **What Tier 1 reads (#508 / [ADR-0025](../../../knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md)).**
+    /// Nothing is ever held under this mode and a variant is never confirmed
+    /// by a second pass (both require [`Clean`](Self::Clean)), so
+    /// `OcrPage::tier1_mrz_text` is always `None` and
+    /// `OcrPage::tier1_text()` always returns the full `text`
+    /// concatenation — byte-identical to before this field existed.
     FirstValid,
     /// A damaged-capture hit (`MrzData::damaged_recovery`) does not stop the
     /// loop by itself. It is held (see `recognize_detailed`'s `pending`) and
@@ -1673,6 +1747,18 @@ enum StopMode {
     /// on the minority of documents where the first hit was already the
     /// weaker kind of evidence, instead of taxing every document to protect
     /// against a failure mode only some of them can have.
+    ///
+    /// **What Tier 1 reads (#508 / [ADR-0025](../../../knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md)).**
+    /// This mode is the only one where `OcrPage::tier1_mrz_text` can be
+    /// `Some`, in exactly two cases: a `variant_valid_confirmed` stop hands
+    /// Tier 1 the confirming pass's own candidate lines (two passes already
+    /// agreed field for field, so one pass is a confirmed witness); a
+    /// `repair_unconfirmed` stop, or a `pass_cap`/`budget` stop with a
+    /// reading still held, hands Tier 1 `text` exactly as it stood when that
+    /// reading was first held — the text `FirstValid` would have handed Tier
+    /// 1 had it stopped there instead of holding out for confirmation. Every
+    /// other stop under this mode (`general_valid`, `variant_valid`,
+    /// `exhausted`) reads the full concatenation, same as `FirstValid`.
     Clean,
 }
 
@@ -1729,6 +1815,47 @@ fn same_document(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
         d
     };
     normalize(a) == normalize(b)
+}
+
+/// #508 / [ADR-0025](../../../knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md):
+/// picks `OcrPage::tier1_mrz_text` from `recognize_detailed`'s retry-loop stop
+/// reason and the two snapshots the loop may have collected along the way.
+/// Pure and total, so it is tested here without any `.rten` model:
+///
+/// - **`variant_valid_confirmed`**: `confirming_lines`, the confirming pass's
+///   own candidate lines. Two independent passes agreed field for field
+///   ([`same_document`]) before the loop stopped, so a single pass is a
+///   confirmed witness — reading `text`'s full accumulation would let the
+///   ordinary scan pair one of its lines with an unrelated pass's, or let
+///   `mrz`'s damaged-capture unanimity gate refuse on a disagreement the loop
+///   already resolved.
+/// - **`repair_unconfirmed`, or `pass_cap`/`budget` while a reading is
+///   held**: `held_snapshot`, `text` exactly as it stood when that reading
+///   was first held — precisely the text `SYNTHPASS_OCR_STOP=first-valid`
+///   would have handed Tier 1 had it stopped there instead of holding out for
+///   confirmation, so an unconfirmed accept scores exactly as it does under
+///   `first-valid`.
+/// - **every other stop** (`general_valid`, `variant_valid`, `exhausted`, or
+///   `pass_cap`/`budget` with nothing held): `None`, so
+///   [`OcrPage::tier1_text`] falls back to the full concatenation — exactly
+///   what `main` reads today.
+///
+/// Under the default `StopMode::FirstValid`, `pending` is never held (see the
+/// comment on `pending` in `recognize_detailed`) and `confirmed_agreement` is
+/// never true (it requires `StopMode::Clean`), so `held_snapshot` and
+/// `confirming_lines` are always `None` at every call site below, `stop` is
+/// never `"variant_valid_confirmed"`, and this function always returns
+/// `None` — the key property this ADR rests on.
+fn select_tier1_mrz_text(
+    stop: &str,
+    confirming_lines: Option<&str>,
+    held_snapshot: Option<&str>,
+) -> Option<String> {
+    match stop {
+        "variant_valid_confirmed" => confirming_lines.map(str::to_string),
+        "repair_unconfirmed" | "pass_cap" | "budget" => held_snapshot.map(str::to_string),
+        _ => None,
+    }
 }
 
 /// This run's OCR measurement-arm configuration — every measurement-arm
@@ -3197,6 +3324,118 @@ mod tests {
         }
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
+    }
+
+    // ── #508 / ADR-0025: `select_tier1_mrz_text`, one case per stop reason ──
+
+    #[test]
+    fn select_tier1_mrz_text_variant_valid_confirmed_reads_the_confirming_pass() {
+        assert_eq!(
+            select_tier1_mrz_text(
+                "variant_valid_confirmed",
+                Some("confirming pass's own lines"),
+                Some("held snapshot, must not be read here"),
+            ),
+            Some("confirming pass's own lines".to_string())
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_repair_unconfirmed_reads_the_held_snapshot() {
+        assert_eq!(
+            select_tier1_mrz_text("repair_unconfirmed", None, Some("held snapshot")),
+            Some("held snapshot".to_string())
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_pass_cap_reads_the_held_snapshot_when_one_was_held() {
+        assert_eq!(
+            select_tier1_mrz_text("pass_cap", None, Some("held snapshot")),
+            Some("held snapshot".to_string())
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_pass_cap_is_none_when_nothing_was_held() {
+        assert_eq!(select_tier1_mrz_text("pass_cap", None, None), None);
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_budget_reads_the_held_snapshot_when_one_was_held() {
+        assert_eq!(
+            select_tier1_mrz_text("budget", None, Some("held snapshot")),
+            Some("held snapshot".to_string())
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_budget_is_none_when_nothing_was_held() {
+        assert_eq!(select_tier1_mrz_text("budget", None, None), None);
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_general_valid_is_always_none() {
+        assert_eq!(
+            select_tier1_mrz_text(
+                "general_valid",
+                Some("must be ignored"),
+                Some("must be ignored")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_variant_valid_unconfirmed_is_always_none() {
+        assert_eq!(
+            select_tier1_mrz_text(
+                "variant_valid",
+                Some("must be ignored"),
+                Some("must be ignored")
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn select_tier1_mrz_text_exhausted_is_always_none() {
+        assert_eq!(
+            select_tier1_mrz_text(
+                "exhausted",
+                Some("must be ignored"),
+                Some("must be ignored")
+            ),
+            None
+        );
+    }
+
+    /// The key property ADR-0025 rests on: under the default
+    /// `StopMode::FirstValid`, `confirmed_agreement` is never true (it
+    /// requires `StopMode::Clean`) and `pending` is never held, so every real
+    /// call site passes `(stop, None, None)` for whichever `stop` the loop
+    /// produces — and every stop this function knows how to narrow returns
+    /// `None` on that input, same as every stop it doesn't. `first-valid`'s
+    /// `tier1_mrz_text` is therefore always `None`, whatever the loop's `stop`
+    /// happened to be.
+    #[test]
+    fn select_tier1_mrz_text_is_always_none_at_first_valid_for_every_stop() {
+        for stop in [
+            "general_valid",
+            "variant_valid",
+            "variant_valid_confirmed",
+            "repair_unconfirmed",
+            "pass_cap",
+            "budget",
+            "exhausted",
+        ] {
+            assert_eq!(
+                select_tier1_mrz_text(stop, None, None),
+                None,
+                "stop={stop:?} must be None when nothing was confirmed or held, \
+                 which is every case under StopMode::FirstValid"
+            );
+        }
     }
 
     #[test]

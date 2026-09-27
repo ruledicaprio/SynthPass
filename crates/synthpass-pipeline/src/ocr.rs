@@ -124,6 +124,13 @@ pub struct OcrResult {
     /// Empty for every engine that reports none, which is every engine but
     /// [`RustOcrEngine`].
     pub config_overrides: std::collections::BTreeMap<String, String>,
+    /// Mirrors `synthpass_ocr::geometry::OcrPage::tier1_mrz_text` — the text
+    /// Tier 1's `MrzReader` should parse instead of the full [`Self::text`]
+    /// concatenation, when the native retry loop's stop reason gives it a
+    /// better witness (#508, [ADR-0025](https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md)).
+    /// `None` for every engine that doesn't run a retry loop at all,
+    /// `to_markdown`-only engines included — see [`Self::tier1_text`].
+    pub tier1_mrz_text: Option<String>,
 }
 
 impl OcrResult {
@@ -143,7 +150,15 @@ impl OcrResult {
             rotation: 0,
             text_sanity: None,
             config_overrides: std::collections::BTreeMap::new(),
+            tier1_mrz_text: None,
         }
+    }
+
+    /// The text Tier 1 should parse — mirrors
+    /// `synthpass_ocr::geometry::OcrPage::tier1_text`. See
+    /// [`Self::tier1_mrz_text`]'s doc for why this can differ from `text`.
+    pub fn tier1_text(&self) -> &str {
+        self.tier1_mrz_text.as_deref().unwrap_or(&self.text)
     }
 }
 
@@ -377,6 +392,7 @@ mod rust_ocr {
                 rotation: page.rotation,
                 text_sanity: page.text_sanity,
                 config_overrides,
+                tier1_mrz_text: page.tier1_mrz_text,
             })
         }
 
@@ -580,6 +596,10 @@ mod additive_trait_tests {
             "an engine that overrides neither config_overrides nor \
              recognize_detailed must report no configuration"
         );
+        assert_eq!(
+            result.tier1_mrz_text, None,
+            "an engine with no retry loop must report None, not a guessed narrowing"
+        );
     }
 
     /// `None` and `Some(0.0)` mean different things and must stay
@@ -589,5 +609,21 @@ mod additive_trait_tests {
         let r = OcrResult::from_text("something".into());
         assert!(r.text_sanity.is_none());
         assert!(r.mrz_band_score.is_none());
+    }
+
+    /// #508 / ADR-0025: `tier1_text()` prefers `tier1_mrz_text` when the
+    /// retry loop narrowed Tier 1's input, and falls back to `text` when it
+    /// didn't (the `from_text` case above, and every other unnarrowed stop).
+    #[test]
+    fn tier1_text_prefers_tier1_mrz_text_when_present() {
+        let mut r = OcrResult::from_text("full concatenation".into());
+        r.tier1_mrz_text = Some("narrowed reading".into());
+        assert_eq!(r.tier1_text(), "narrowed reading");
+    }
+
+    #[test]
+    fn tier1_text_falls_back_to_text_when_tier1_mrz_text_is_none() {
+        let r = OcrResult::from_text("full concatenation".into());
+        assert_eq!(r.tier1_text(), "full concatenation");
     }
 }

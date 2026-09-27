@@ -1937,20 +1937,35 @@ async fn run_prepped_with_dump_options(
 
         for (doc_index, bench_page) in prepped.iter().flatten().enumerate() {
             // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
-            // `mrz::find_and_parse(&markdown)` — a *read* of this provider's
-            // OCR text, not any ground-truth labels: the hint must reflect
-            // what this run's OCR pass actually recovered, including a
-            // checksum-partial read, the same as production. `mrz_hint`
-            // itself is a no-op unless `SYNTHPASS_LLM_MRZ_HINT=1` is set, so
-            // this harness measures exactly the same gate the pipeline does.
-            let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
+            // `mrz::find_and_parse(ocr_result.tier1_text())` — a *read* of
+            // this provider's OCR text, not any ground-truth labels: the hint
+            // must reflect what this run's OCR pass actually recovered,
+            // including a checksum-partial read, the same as production.
+            // `tier1_text()`, not `page.text`: on some retry-loop stops
+            // `mrz`'s damaged-capture `single()` unanimity gate refuses the
+            // full concatenation even though the loop already accepted (or
+            // held) one reading (#508, ADR-0025) — the same reason
+            // production reads it. `mrz_hint` itself is a no-op unless
+            // `SYNTHPASS_LLM_MRZ_HINT=1` is set, so this harness measures
+            // exactly the same gate the pipeline does.
+            let read_mrz = mrz::find_and_parse(bench_page.page.tier1_text()).ok();
             let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
             // vision-provider comparison — see this file's top doc comment.
-            let mut ctx = DocumentContext::from_text(&bench_page.page.text)
-                .with_image(&bench_page.image_path);
+            //
+            // #508 / ADR-0025: a deterministic reader (the MRZ provider
+            // itself) must see the same `tier1_text()` production hands it;
+            // a non-deterministic (LLM) reader keeps the full `page.text` it
+            // always read, since Tier 2's context is explicitly out of scope
+            // for this fix (Tier 2 always reads the full concatenation).
+            let ctx_text = if capability.deterministic {
+                bench_page.page.tier1_text()
+            } else {
+                bench_page.page.text.as_str()
+            };
+            let mut ctx = DocumentContext::from_text(ctx_text).with_image(&bench_page.image_path);
             if let Some(hint) = &hint {
                 ctx = ctx.with_mrz_hint(hint);
             }

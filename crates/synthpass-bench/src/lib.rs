@@ -1264,6 +1264,12 @@ fn run_check(
             )
         }
     };
+    // #508 / ADR-0025: the decode below must read the same text production's
+    // Tier 1 does — the pass the retry loop accepted or held, not every
+    // pass's accumulated candidate lines (see `OcrPage::tier1_mrz_text`'s
+    // doc). Computed before `page.text` is moved out below, since
+    // `tier1_text()` borrows it when `tier1_mrz_text` is `None`.
+    let tier1_text = page.tier1_text().to_string();
     let text = page.text;
     let retry_stop = page.retry_stop;
     let retry_variant_id = page.retry_variant_id;
@@ -1298,7 +1304,7 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
+    let decoded = match mrz::find_and_parse_with(&tier1_text, &synthpass_die::mrz_parse_options()) {
         Ok(decoded) => decoded,
         // #536: a structural refusal, not "nothing MRZ-shaped was found" —
         // give it its own miss bucket rather than folding it into

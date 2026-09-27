@@ -168,6 +168,28 @@ pub struct OcrPage {
     /// etc.), or `"control"` (the placebo arm ran the identical pass and
     /// appended its raw reading instead of repairing).
     pub chargrid: Option<String>,
+    /// The text Tier 1's `MrzReader` should parse instead of the full
+    /// [`Self::text`] concatenation, when the retry loop's own stop reason
+    /// gives it a better witness than the whole accumulation — see
+    /// [`Self::tier1_text`] and
+    /// [ADR-0025](../../../knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md)
+    /// for which stops set it and why. `None` on `general_valid`,
+    /// `variant_valid`, `exhausted`, and a `pass_cap`/`budget` stop with
+    /// nothing held — which is every stop `text` can produce under the
+    /// default `SYNTHPASS_OCR_STOP=first-valid`, so `tier1_mrz_text` is
+    /// always `None` there and [`Self::tier1_text`] always returns `text`.
+    pub tier1_mrz_text: Option<String>,
+}
+
+impl OcrPage {
+    /// The text Tier 1's MRZ parse should read: [`Self::tier1_mrz_text`] if
+    /// the retry loop set one, [`Self::text`] (the full concatenation)
+    /// otherwise. The one entry point pipeline/bench code should call ahead
+    /// of `mrz::find_and_parse` — see [`Self::tier1_mrz_text`]'s doc comment
+    /// for which stop reasons narrow it.
+    pub fn tier1_text(&self) -> &str {
+        self.tier1_mrz_text.as_deref().unwrap_or(&self.text)
+    }
 }
 
 /// Heuristic confidence proxy in `[0, 1]` for a recognized line's text.
@@ -499,6 +521,28 @@ mod tests {
             bbox: BBox { x, y, w, h },
             confidence: 0.0,
         }
+    }
+
+    // ── #508 (ADR-0025): `tier1_text()` selects `tier1_mrz_text` over `text` ──
+
+    #[test]
+    fn tier1_text_prefers_tier1_mrz_text_when_present() {
+        let page = OcrPage {
+            text: "general\nvariant0\nvariant1".to_string(),
+            tier1_mrz_text: Some("general".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(page.tier1_text(), "general");
+    }
+
+    #[test]
+    fn tier1_text_falls_back_to_full_text_when_tier1_mrz_text_is_none() {
+        let page = OcrPage {
+            text: "general\nvariant0\nvariant1".to_string(),
+            tier1_mrz_text: None,
+            ..Default::default()
+        };
+        assert_eq!(page.tier1_text(), "general\nvariant0\nvariant1");
     }
 
     #[test]

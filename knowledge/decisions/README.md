@@ -54,3 +54,4 @@ the record.
 | [0021](ADR-0021-fixed-grid-mrz-strips.md) | Fixed-grid MRZ strips: check-anchor alignment with an explicit ambiguity outcome | Proposed |
 | [0023](ADR-0023-cli-output-contract.md) | The CLI's output contract: `--json`, and stdout/stderr for everything else | Accepted (2026-09-26) |
 | [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27) |
+| [0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) | Tier 1 reads a single OCR pass only when two passes agree | Proposed |

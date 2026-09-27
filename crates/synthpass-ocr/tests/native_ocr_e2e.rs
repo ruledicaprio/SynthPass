@@ -8,6 +8,10 @@
 use std::path::{Path, PathBuf};
 use synthpass_ocr::NativeOcr;
 
+/// Extensions treated as corpus images — the same list
+/// `examples/corpus_manifest.rs` uses for the same walk.
+const IMAGE_EXTENSIONS: [&str; 5] = ["jpg", "jpeg", "png", "webp", "gif"];
+
 fn require_models() -> (PathBuf, PathBuf) {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let detection_path = repo_root.join("text-detection.rten");
@@ -41,6 +45,49 @@ fn find_sample(name: &str) -> PathBuf {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     search(&repo_root.join("samples"), name)
         .unwrap_or_else(|| panic!("sample file not found anywhere under samples/: {name}"))
+}
+
+/// Every image file under `samples/`, recursively — whatever subset of the
+/// full `samples-data` corpus happens to be checked out locally (a fresh
+/// clone carries only the small tracked fixture set under
+/// `samples/passports/`; CI's real-specimen job syncs the rest). Never
+/// empty in CI or after `scripts/sync-samples.ps1`.
+///
+/// **Any path component containing `private` (case-insensitive) is skipped**,
+/// the same rule as `synthpass_bench`'s real-specimen walk: `samples/private/`
+/// and `_Private_`-tagged names are real identity documents a user keeps for
+/// local benchmarking, and a test must never OCR them, let alone print what
+/// it read.
+fn walk_sample_images() -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_private = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_ascii_lowercase().contains("private"));
+            if is_private {
+                continue;
+            }
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.to_ascii_lowercase())
+                .is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()))
+            {
+                out.push(path);
+            }
+        }
+    }
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut out = Vec::new();
+    walk(&repo_root.join("samples"), &mut out);
+    out
 }
 
 #[test]
@@ -103,4 +150,50 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
         "expected the tie-break to report a 180° correction, got {}",
         page.rotation
     );
+}
+
+/// #508 / [ADR-0025](https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/decisions/ADR-0025-tier1-reads-one-pass-only-when-two-agree.md)'s
+/// key property, checked against the real retry loop over every image under
+/// `samples/` (whatever subset is checked out locally — CI's real-specimen
+/// job syncs the full corpus; a fresh clone still has the small tracked
+/// `samples/passports/` set, which is never empty): under the default stop
+/// mode, `first-valid`, `OcrPage::tier1_text()` must equal `text`, for every
+/// document. Nothing is ever held under `first-valid` and a variant is never
+/// confirmed by a second pass (both require `SYNTHPASS_OCR_STOP=clean`), so
+/// `tier1_mrz_text` must always be `None` and `tier1_text()` must always fall
+/// back to the full concatenation — see `select_tier1_mrz_text`'s own unit
+/// tests for the same claim checked without the real models.
+#[test]
+#[ignore]
+fn native_ocr_tier1_text_equals_text_at_first_valid_for_every_document() {
+    // This test's whole point is the default arm's behaviour, regardless of
+    // what the invoking shell happens to have set.
+    unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
+
+    let (detection_path, recognition_path) = require_models();
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect("models load");
+
+    let images = walk_sample_images();
+    assert!(
+        !images.is_empty(),
+        "no sample images found under samples/ — a fresh clone should still have \
+         samples/passports/"
+    );
+
+    for path in &images {
+        let name = path.display().to_string();
+        let page = ocr
+            .recognize_detailed(path)
+            .unwrap_or_else(|e| panic!("{name}: recognition failed: {e}"));
+
+        // Asserted on `tier1_mrz_text` rather than by comparing the two texts,
+        // so a failure names the document and its stop reason without
+        // printing what OCR read from it.
+        assert!(
+            page.tier1_mrz_text.is_none(),
+            "{name}: tier1_mrz_text must be None under first-valid, so that \
+             tier1_text() is text (retry_stop={:?})",
+            page.retry_stop
+        );
+    }
 }
