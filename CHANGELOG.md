@@ -8,6 +8,91 @@ All notable changes to this project are documented here. The format is based on
 [`changelog.d/`](changelog.d/) instead — see that directory's README. Fragments are assembled
 into the section below at release time by `scripts/assemble-changelog.sh --write`.
 
+## [1.7.0] — 2026-09-26 — mrz 0.8.3 inside: exit codes that mean something, and a hardened CLI
+
+This release carries `mrz` 0.8.3 ([its changelog](crates/mrz/CHANGELOG.md)) and, with it, 0.8.2,
+which no workspace release had shipped. 0.8.2 changes what extraction returns from a zone whose
+check digits fail: a dropped line-1 filler is undone in every format's damaged-zone recovery, not
+only TD3's, an intact TD1 zone is never re-flowed into TD2, and `country_name` names 42 more
+ISO 3166-1 codes. 0.8.3 adds `MrzData::damaged_recovery`, so `synthpass-serve`'s pass-through
+`mrz` object gains that one key.
+
+The exit-code convention is the change most likely to need action. Most failures used to exit 0;
+they now exit 1, 2 or 3, so a script that only checked for 0 must handle them. The rest of the CLI
+work stops it reading only part of what it was given, or claiming a save that failed, and the
+licence file takes the SynthPass name (no issued licence is affected). On the measurement side,
+the M4 synthetic gate reports wrong accepts, and a rate with an empty denominator reads `n/a`
+(`null` in JSON), not `0.0`, in both `provider-bench` and `synthpass-bench`. `SYNTHPASS_OCR_STOP=clean` is a new opt-in retry-stop
+arm. The default is unchanged, and [its first A/B](knowledge/benchmarks/retry-stop-ab-2026-09-26.md)
+found it loses Tier-1 hits on every population measured.
+
+### Added
+- **`synthpass-bench`'s M4 synthetic gate reports `wrong_accepts`.** A Tier-1 `hit` proves only a
+  checksum-consistent zone whose document number matches truth. `document_type`,
+  `issuing_country`, both names, `nationality` and `sex` carry no check digit at all, and even a
+  check-digited field can still be wrong — a check digit is consistency, not proof — so a hit can
+  still be a wrong read on any of the 12 scored fields (issue #453). The JSON report now
+  carries `wrong_accepts`/`wrong_accept_rate` alongside `strict_hits`, and each `results[]` entry
+  carries `wrong_accept`/`wrong_fields` naming which of the 12 scored fields diverged. The stdout
+  summary prints the count next to the strict-hit-rate line. Report-only: `hit`, `hit_rate` and the
+  `--min-hit-rate` gate are unchanged.
+- **Bench reports record the retry-stop confirm budget.** `synthpass_ocr::OcrArms` gains
+  `confirm_passes` (`SYNTHPASS_OCR_CONFIRM_PASSES`, default 2), and bench reports print it next to
+  `stop`. Two `SYNTHPASS_OCR_STOP=clean` runs with different budgets used to produce identical
+  provenance. A moved budget also makes a run non-default, so it cannot write a baseline.
+- **`synthpass-ocr`: an opt-in retry-stop oracle that does not trust a repaired reading as much as
+  a clean one.** The native OCR retry loop used to stop the instant any pass's text contained a
+  checksum-valid MRZ, even when that reading only existed because `mrz`'s damaged-capture search
+  repaired it — a checksum-consistent reading is not proof it is correct (issue #473). Setting
+  `SYNTHPASS_OCR_STOP=clean` (default stays `first-valid`, byte-identical to today) holds a
+  damaged-capture hit instead of stopping on it, and keeps searching for up to
+  `SYNTHPASS_OCR_CONFIRM_PASSES` (default 2) more passes, stopping early on the first clean read
+  or on a second, independent damaged-capture reading that agrees with the held one on every
+  field. If neither arrives, the held reading is accepted unconfirmed once the confirm budget (or
+  the existing pass/time budget) runs out. `synthpass_ocr::OcrArms` records the arm as `stop` for
+  bench reports.
+
+### Changed
+- **`synthpass` exit codes now mean something.** Every command follows one convention: 0
+  success, 1 a runtime or extraction failure (including any failed document inside `batch`), 2
+  a usage error (unknown option, bad/missing/surplus arguments, `generate`/`export` argument
+  errors), 3 a license refusal. Previously most failures — an unknown option, a missing input
+  file, a refused license, a `batch` run where some documents failed, a `decrypt`/`generate`/
+  `export` argument or run error — printed their `❌` message but still exited 0. A script that
+  only checked the exit code saw success on all of these; it now sees the matching non-zero
+  code and must handle it. See `knowledge/ARCHITECTURE.md` §12 "Exit codes" for the full table.
+- **Licence files use the SynthPass name.** The default licence path is `license.synthpass`
+  (was `license.mlis`) in `synthpass`, `synthpass-serve` and `synthpass-license-issuer`. The
+  payload field is `synthpass_min_version` (was `mlis_min_version`), and the Linux fingerprint
+  fallback id lives at `/var/lib/synthpass/instance-id` (was `/var/lib/mlis/instance-id`).
+  `SYNTHPASS_LICENSE_PATH` and `SYNTHPASS_INSTANCE_ID_PATH` still override both paths. No
+  licence has been issued (the verifying key is still a placeholder), so no existing file is
+  affected.
+
+### Fixed
+- **Undefined provider-bench rates are absent measurements.** Zero denominators report
+  `n/a` in terminal summaries and `null` in JSON, including Tier-1 hits, names among hits,
+  and JSON-repair fallbacks. Charts skip null points while preserving measured zeroes.
+- **The `synthpass` help banner spells SYNTHPASS.** Its block letters still drew the pre-rename
+  name, MLIS, under a `[ SYNTHPASS ]` title. The glyphs now come from one `WORDMARK` constant,
+  and tests check that every letter has a glyph and every line fits the box.
+- **CLI input handling hardened.** `synthpass`/`synthpass batch` now reject surplus positional
+  arguments (an unquoted shell glob expanding to several files used to silently read only the
+  first) instead of dropping the rest; a `synthpass batch` glob no longer submits non-image
+  files it happens to match; a non-UTF-8 argument reports an error instead of panicking; and
+  `synthpass batch <dir>` no longer follows a directory symlink into an infinite loop.
+- **No more false "saved to" after a persist failure.** A JSON write failure now suppresses the
+  "Pipeline completed... JSON saved to" line (for both the Tier-1 and Tier-2 extraction paths)
+  and reports the failure on stderr instead of claiming a save that never happened.
+- **`--seed`/`--count` overflow rejected up front.** `synthpass generate` now errors at argument
+  parsing time instead of overflowing `u64` partway through a batch.
+- **`synthpass generate --help`'s profile list** now always matches the profiles actually
+  accepted (it had drifted and omitted `damaged`); the extraction banner also no longer claims
+  to be "uploading" a local file this fully offline tool never sends anywhere.
+- **Synthetic benchmark rates with no Tier-1 hits are unmeasured.** Names exact among hits and
+  wrong-accept rate now print `n/a` and serialize as `null` when the hit count is zero. Measured
+  zeroes with a nonempty hit population remain `0.0`.
+
 ## [1.6.1] — 2026-09-25 — mrz 0.8.1 inside: a damaged zone is recovered only when the recovery is unambiguous
 
 This release carries `mrz` 0.8.1 ([its changelog](crates/mrz/CHANGELOG.md)): four fixes. Each one
