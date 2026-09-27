@@ -1096,13 +1096,28 @@ pub struct HitResult {
     pub raw_text: Option<String>,
     /// `synthpass_imageprep::OcrPage::retry_stop` passthrough — why the
     /// native retry loop stopped for this document (`"general_valid"`,
-    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`), whenever
-    /// OCR itself succeeded. `None` only on `MissReason::OcrError`, same as
-    /// `raw_text`. Added for parity with `provider-bench`'s
-    /// `DocumentDetail::retry_stop` (#498) — this synthetic report never
-    /// carried it, so a retry-arm question about the synthetic corpus had no
-    /// per-document evidence to answer it with (issue #510).
+    /// `"variant_valid"`, `"variant_valid_confirmed"`, `"repair_unconfirmed"`,
+    /// `"budget"`, `"pass_cap"`, `"exhausted"`), whenever OCR itself
+    /// succeeded. `None` only on `MissReason::OcrError`, same as `raw_text`.
+    /// Added for parity with `provider-bench`'s `DocumentDetail::retry_stop`
+    /// (#498) — this synthetic report never carried it, so a retry-arm
+    /// question about the synthetic corpus had no per-document evidence to
+    /// answer it with (issue #510).
     pub retry_stop: Option<String>,
+    /// `OcrPage::retry_variant_id` passthrough — missing from this report
+    /// before #473 even though `provider-bench`'s `DocumentDetail`
+    /// already carried it.
+    pub retry_variant_id: Option<String>,
+    /// `OcrPage::retry_damaged_recovery` passthrough — `MrzData::damaged_recovery`
+    /// of the reading the native retry loop accepted or held. `Some` exactly
+    /// when `retry_variant_id` is `Some`.
+    pub retry_damaged_recovery: Option<bool>,
+    /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
+    /// independent of `retry_damaged_recovery`, which describes the reading
+    /// the native OCR retry loop accepted or held, not this crate's own
+    /// `mrz::find_and_parse_with` of the final OCR text. `None` when Tier 1
+    /// found no MRZ at all.
+    pub tier1_damaged_recovery: Option<bool>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -1128,6 +1143,9 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         name_error,
         check_states,
         retry_stop,
+        retry_variant_id,
+        retry_damaged_recovery,
+        tier1_damaged_recovery,
     ) = run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
@@ -1142,6 +1160,9 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         name_error,
         raw_text,
         retry_stop,
+        retry_variant_id,
+        retry_damaged_recovery,
+        tier1_damaged_recovery,
     }
 }
 
@@ -1152,9 +1173,13 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
 /// Structured so the breakdown survives a miss: the old version returned
 /// early on a checksum failure, which threw away the read it had just
 /// obtained — precisely the read that says *which field* broke the checksum.
-/// The trailing `Option<String>` is `OcrPage::retry_stop` — `None` only when
+/// The 8th element is `OcrPage::retry_stop` — `None` only when
 /// `write_result`/`ocr.recognize_detailed` themselves failed (no OCR pass
-/// ever ran), same as `raw_text`.
+/// ever ran), same as `raw_text`. The last three (#473) are
+/// `OcrPage::retry_variant_id`, `OcrPage::retry_damaged_recovery` (`Some`
+/// exactly when `retry_variant_id` is `Some`) and this call's own Tier-1
+/// parse's `MrzData::damaged_recovery` (`None` when Tier 1 found no MRZ,
+/// including every early return above).
 type CheckOutcome = (
     Option<MissReason>,
     Vec<FieldOutcome>,
@@ -1164,6 +1189,9 @@ type CheckOutcome = (
     Option<NameError>,
     Option<BTreeMap<&'static str, Option<bool>>>,
     Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<bool>,
 );
 
 /// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
@@ -1208,6 +1236,9 @@ fn run_check(
             None,
             None,
             None,
+            None,
+            None,
+            None,
         );
     }
 
@@ -1227,11 +1258,16 @@ fn run_check(
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
             )
         }
     };
     let text = page.text;
     let retry_stop = page.retry_stop;
+    let retry_variant_id = page.retry_variant_id;
+    let retry_damaged_recovery = page.retry_damaged_recovery;
 
     // Ground truth is the generator's own MRZ lines parsed back through the
     // matching per-format parser (see `parse_ground_truth_mrz`). Comparing
@@ -1255,6 +1291,9 @@ fn run_check(
                 None,
                 None,
                 retry_stop,
+                retry_variant_id,
+                retry_damaged_recovery,
+                None,
             )
         }
     };
@@ -1274,6 +1313,9 @@ fn run_check(
                 None,
                 None,
                 retry_stop,
+                retry_variant_id,
+                retry_damaged_recovery,
+                None,
             )
         }
         Err(e) => {
@@ -1286,9 +1328,13 @@ fn run_check(
                 None,
                 None,
                 retry_stop,
+                retry_variant_id,
+                retry_damaged_recovery,
+                None,
             )
         }
     };
+    let tier1_damaged_recovery = Some(decoded.damaged_recovery);
 
     let fields = compare_fields(&truth, &decoded);
     let line1_integrity = Some(synthpass_core::fusion::check_line1_integrity(&decoded));
@@ -1321,6 +1367,9 @@ fn run_check(
             name_error,
             Some(parsed_check_states),
             retry_stop,
+            retry_variant_id,
+            retry_damaged_recovery,
+            tier1_damaged_recovery,
         );
     }
     if decoded.document_number != truth.document_number {
@@ -1336,6 +1385,9 @@ fn run_check(
             name_error,
             Some(parsed_check_states),
             retry_stop,
+            retry_variant_id,
+            retry_damaged_recovery,
+            tier1_damaged_recovery,
         );
     }
     (
@@ -1347,6 +1399,9 @@ fn run_check(
         name_error,
         Some(parsed_check_states),
         retry_stop,
+        retry_variant_id,
+        retry_damaged_recovery,
+        tier1_damaged_recovery,
     )
 }
 
