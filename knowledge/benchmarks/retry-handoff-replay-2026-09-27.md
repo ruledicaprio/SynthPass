@@ -2,6 +2,11 @@
 
 **Date:** 2026-09-27 · **MAIN:** `9a639c6` · **DATA:** samples present in the worktree at 2026-09-27 07:34 (sha not recorded: no `samples-data` checkout metadata in this container); none for the synthetic seeds (generated corpus) · **Evidence:** Observed (one local release build, single-seed and stride-26 traces per arm, plus a replay of every dumped `text` through an instrumented copy of `mrz`) · **Status:** current
 
+**Superseded in part (2026-09-27):** the handoff this replay motivated shipped as #535 and was
+reverted the same day. At the default `first-valid` stop mode the accepted pass is a worse witness
+than the concatenation: see [`retry-handoff-ab-2026-09-27.md`](retry-handoff-ab-2026-09-27.md).
+The replay's own findings below stand.
+
 **2026-09-27.** This is the replay the owner's decision on
 [#508](https://github.com/ruledicaprio/SynthPass/issues/508) asked for first. It feeds each
 dumped `text` through an instrumented `find_and_parse` and prints the hit count and the remaining

@@ -1215,12 +1215,6 @@ fn run_check(
             )
         }
     };
-    // #508: the decode below must read the same text production's Tier 1
-    // does — the pass the retry loop accepted, not every pass's accumulated
-    // candidate lines (see `OcrPage::accepted_mrz_text`'s doc). Computed
-    // before `page.text` is moved out below, since `tier1_text()` may borrow
-    // it.
-    let tier1_text = page.tier1_text().to_string();
     let text = page.text;
     let retry_stop = page.retry_stop;
 
@@ -1250,7 +1244,7 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse_with(&tier1_text, &synthpass_die::mrz_parse_options()) {
+    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
         Ok(decoded) => decoded,
         Err(e) => {
             return (

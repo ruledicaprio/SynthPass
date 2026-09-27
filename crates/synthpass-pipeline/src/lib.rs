@@ -618,16 +618,7 @@ impl Pipeline {
         // read is consistent with the printed zone — no LLM needed. `mrz_data` is parsed directly (not read back off
         // `reading`, which carries no raw `mrz::MrzData`) because it's still
         // needed for `PipelineResult.mrz` and the v1 `Extraction` shape below.
-        //
-        // #508: parsed from `tier1_text()`, not the full `markdown` — the
-        // native retry loop's `text` keeps every pass's candidate lines
-        // (what Tier 2 needs), but `mrz::find_and_parse`'s damaged-capture
-        // `single()` unanimity gate sees every failed variant's disagreeing
-        // readings in that concatenation and refuses, even when the retry
-        // loop already accepted one specific reading. `tier1_text()` is that
-        // accepted reading's own text (or `markdown`, unchanged, when no
-        // single pass was accepted) — see `OcrResult::accepted_mrz_text`.
-        let mrz_data = mrz::find_and_parse(ocr_result.tier1_text()).ok();
+        let mrz_data = mrz::find_and_parse(&markdown).ok();
 
         let mut recognition = Recognition::from_text(markdown.clone());
         recognition.mrz_band_score = ocr_result.mrz_band_score;
@@ -643,13 +634,7 @@ impl Pipeline {
         // `input` is sitting right here on disk — the M6 plan's "the Tier-1
         // context must carry pixels" gap, and the same fix `extract_via_inferer`'s
         // Tier-2 `ctx` already applies via `.with_image(input)` below.
-        // #508: same `tier1_text()` source as `mrz_data` above, so Tier 1's
-        // `MrzReader` (a pure function of the text it's handed) parses the
-        // identical text `mrz_data` was already proven valid against —
-        // otherwise `extraction_from_mrz(m)` above stays correct while this
-        // context silently falls back to the concatenation's own (possibly
-        // unparseable) reading.
-        let ctx = DocumentContext::from_text(ocr_result.tier1_text())
+        let ctx = DocumentContext::from_text(&markdown)
             .with_recognition(&recognition)
             .with_image(input);
         let reader = self
@@ -1895,96 +1880,6 @@ mod tests {
             )]),
             "the engine's reported configuration must reach the trace unchanged"
         );
-
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    // ── #508: Tier 1 reads the accepted pass, not the full concatenation ──
-
-    /// An `OcrEngine` whose `recognize_detailed` mirrors what `synthpass-ocr`'s
-    /// native retry loop produces once several disagreeing passes have
-    /// appended their own candidate lines (#508): `text` is checksum-invalid
-    /// noise with no parseable MRZ at all, but `accepted_mrz_text` carries the
-    /// one reading the loop accepted — here, the genuine, checksum-valid HRV
-    /// specimen. `to_markdown` (used only by callers that don't ask for the
-    /// richer `recognize_detailed`) returns the same noise, unchanged.
-    struct AcceptedTextOnlyOcr;
-
-    #[async_trait::async_trait]
-    impl OcrEngine for AcceptedTextOnlyOcr {
-        async fn to_markdown(&self, _input: &Path) -> Result<String, PipelineError> {
-            Ok("no parseable MRZ anywhere in this noise\njust some other page text\n".to_string())
-        }
-        async fn recognize_detailed(&self, input: &Path) -> Result<OcrResult, PipelineError> {
-            let mut result = OcrResult::from_text(self.to_markdown(input).await?);
-            result.accepted_mrz_text = Some(HRV_TD3_MARKDOWN.to_string());
-            Ok(result)
-        }
-        fn describe(&self) -> String {
-            "accepted-text-only test double".into()
-        }
-    }
-
-    /// The fix's whole point: a `text` that alone doesn't parse to any MRZ
-    /// must not stop Tier 1 from accepting the reading the (simulated) retry
-    /// loop already settled on. Before #508, `mrz_data` and the Tier-1
-    /// `DocumentContext` were both built from `text`, so this would either
-    /// escalate to Tier 2 or (worse) panic on `Decision::Accept`'s
-    /// `mrz_data.expect(..)` if `MrzReader` alone found the MRZ via some other
-    /// route while `mrz_data` stayed `None`.
-    #[tokio::test]
-    async fn tier1_accepts_the_retry_loops_chosen_reading_over_unparseable_noise() {
-        let (input, dir) = temp_input("508-accepted-text").await;
-        let pipeline = Pipeline::new(Box::new(AcceptedTextOnlyOcr), Box::new(MockBackend));
-
-        let result = pipeline
-            .process_document(&input)
-            .await
-            .expect("process (must not panic on a None mrz_data)");
-
-        assert_eq!(
-            result.method,
-            Method::MrzDeterministic,
-            "the accepted pass's own MRZ must still produce a Tier-1 hit"
-        );
-        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
-        assert_eq!(v2.fields.document_number.as_deref(), Some("007007007"));
-        let mrz = v2.mrz.as_ref().expect("MRZ block present on Tier 1");
-        assert!(mrz.checks.all_valid());
-        assert!(mrz.lines.contains("SPECIMEN"));
-
-        // The full noise `text`, not the accepted MRZ, is what Tier 2 and the
-        // on-disk markdown see — unchanged by this fix.
-        let markdown = tokio::fs::read_to_string(&result.md_path)
-            .await
-            .expect("read persisted markdown");
-        assert!(markdown.contains("no parseable MRZ anywhere in this noise"));
-        assert!(
-            !markdown.contains("SPECIMEN"),
-            "the accepted MRZ must not leak into the Tier-2/markdown text"
-        );
-
-        let _ = tokio::fs::remove_dir_all(&dir).await;
-    }
-
-    /// The `None` fallback (#508): an engine that reports no accepted pass at
-    /// all (the ordinary case, and every engine that predates this field)
-    /// must still parse Tier 1's MRZ from the full `text`, exactly as before
-    /// this field existed. `StaticOcr`'s default `recognize_detailed` body
-    /// (`OcrResult::from_text`) sets `accepted_mrz_text: None`, so this is the
-    /// same engine `tier1_produces_proven_v2_extraction` already uses —
-    /// pinned here under its own name so the None-fallback path has an
-    /// intentional regression test, not an incidental one.
-    #[tokio::test]
-    async fn tier1_falls_back_to_full_text_when_no_pass_was_accepted() {
-        let (input, dir) = temp_input("508-no-accepted-text").await;
-        let pipeline = Pipeline::new(Box::new(StaticOcr(HRV_TD3_MARKDOWN)), Box::new(MockBackend));
-
-        let result = pipeline.process_document(&input).await.expect("process");
-
-        assert_eq!(result.method, Method::MrzDeterministic);
-        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
-        assert_eq!(v2.fields.document_number.as_deref(), Some("007007007"));
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
