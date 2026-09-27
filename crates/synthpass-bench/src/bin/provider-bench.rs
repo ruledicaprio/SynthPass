@@ -1282,7 +1282,7 @@ async fn main() {
         // A second OCR engine handle purely to satisfy `Pipeline::new`'s
         // constructor — never actually invoked. Every document in this harness
         // is OCR'd once via `ocr` above and shared across every reader.
-        let pipeline_ocr: Box<dyn OcrEngine> = Box::new(RustOcrEngine::new(&root, false));
+        let pipeline_ocr: Box<dyn OcrEngine> = Box::new(RustOcrEngine::new(&root));
         let infer: Box<dyn InferBackend> = Box::new(NativeInferer::new(model_path(), n_ctx()));
         pipeline = Pipeline::new(pipeline_ocr, infer);
         pipeline.catalog()

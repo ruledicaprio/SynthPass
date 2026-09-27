@@ -119,8 +119,8 @@ this ADR does not make.
   reason `native_ocr_e2e`/`rust_ocr_smoke` are `#[ignore]`d and run in release mode as separate CI
   steps. So the content contract (item 1/2 of #497's ask) is pinned against a constructed
   `ExtractionV2`/`DocumentStatus`, and the stream-split contract (item 3) against a real subprocess
-  whose OCR stage is made to fail fast and deterministically (an empty model directory,
-  `SYNTHPASS_OCR_AUTO_DOWNLOAD=0`) rather than run real inference. See
+  whose OCR stage is made to fail fast and deterministically (an empty model directory; the
+  extraction path never downloads a model, #491) rather than run real inference. See
   `crates/synthpass-cli/tests/json_contract.rs`'s module doc and the `src/main.rs` unit tests it
   points to for the split in full.
 

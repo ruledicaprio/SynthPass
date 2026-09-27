@@ -17,6 +17,7 @@ cargo run -p synthpass-cli -- --help
 | `synthpass batch <dir\|glob> [--json]` | extract every matching image | required (same as above); a license missing the `batch` feature is metered — one warning, still runs |
 | `synthpass decrypt <file.json.enc>` | decrypt an encrypted result (needs `SYNTHPASS_KEY`) | none |
 | `synthpass doctor` | preflight: OCR models, license, config; the Tier-2 model is optional unless `SYNTHPASS_MODEL_PATH` is set | none |
+| `synthpass fetch-models` | stage the OCR `.rten` models — the only place they're ever fetched (issue #491); prints URL + SHA-256 by default, downloads + verifies with the non-default `download` cargo feature | none |
 | `synthpass fingerprint` | print this machine's fingerprint | none |
 | `synthpass verify-license [path]` | verify a license file | none |
 | `synthpass generate ...` | synthetic document images + label JSON | none |

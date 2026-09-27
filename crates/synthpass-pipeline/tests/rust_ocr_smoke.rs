@@ -79,7 +79,7 @@ impl InferBackend for StubInferer {
             from https://ocrs-models.s3-accelerate.amazonaws.com/"]
 async fn rust_ocr_engine_reaches_a_terminal_pipeline_result() {
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let ocr = RustOcrEngine::new(repo_root.clone(), false);
+    let ocr = RustOcrEngine::new(repo_root.clone());
     let pipeline = Pipeline::new(Box::new(ocr), Box::new(StubInferer));
 
     // Copy the sample into a scratch dir so this test's `.md`/`.json` output
@@ -129,7 +129,7 @@ async fn rust_ocr_engine_handles_common_phone_image_formats() {
         (image::ImageFormat::Png, "png"),
         (image::ImageFormat::WebP, "webp"),
     ] {
-        let ocr = RustOcrEngine::new(repo_root.clone(), false);
+        let ocr = RustOcrEngine::new(repo_root.clone());
         let pipeline = Pipeline::new(Box::new(ocr), Box::new(StubInferer));
 
         let dst = std::env::temp_dir().join(format!(

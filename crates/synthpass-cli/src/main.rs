@@ -178,6 +178,8 @@ fn print_usage() {
     println!("                                     lines go to stderr either way — see crates/synthpass-cli/README.md");
     println!("  synthpass decrypt <file.json.enc>  decrypt (needs SYNTHPASS_KEY)");
     println!("  synthpass doctor                   preflight: OCR/inferer/license, config sanity");
+    println!("  synthpass fetch-models             stage the OCR models: prints URL + SHA-256 to fetch manually, or");
+    println!("                                     downloads + verifies them into SYNTHPASS_OCR_MODEL_DIR (`download` feature build)");
     println!(
         "  synthpass fingerprint              print this machine's fingerprint (send to your vendor)"
     );
@@ -274,6 +276,19 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         }
         // `synthpass doctor` — preflight checks before running the pipeline for real.
         "doctor" => return doctor_command().await,
+        // `synthpass fetch-models` — the only place a `.rten` OCR model file
+        // is ever fetched (issue #491): the extraction path never downloads.
+        // No license required — same reasoning as `fingerprint`/`generate`
+        // below, this is setup, not extraction. Runs on the blocking pool: a
+        // `download` build fetches with `reqwest::blocking`, which panics when
+        // called on an async worker thread.
+        "fetch-models" => {
+            return tokio::task::spawn_blocking(|| {
+                fetch_models_command().map_err(|e| e.to_string())
+            })
+            .await?
+            .map_err(Into::into)
+        }
         // `synthpass fingerprint` / `synthpass verify-license` — diagnostic/recovery
         // commands that must work WITHOUT a valid license (you need
         // `fingerprint` to obtain one in the first place), so neither is gated
@@ -984,6 +999,92 @@ fn decrypt_command(file: Option<&str>) -> Result<Exit, Box<dyn std::error::Error
     }
 }
 
+/// `synthpass fetch-models` — the only place a `.rten` OCR model file is ever
+/// fetched (issue #491: the extraction path never downloads). No license
+/// required — same reasoning as `fingerprint`/`generate`: this is setup, not
+/// extraction.
+///
+/// Default build (no `download` cargo feature, so `reqwest` isn't even linked
+/// in — see `crates/synthpass-ocr/Cargo.toml`): prints each model's pinned
+/// URL and expected SHA-256 plus the target directory, so an operator can
+/// fetch and verify manually (e.g. `curl` + `sha256sum`).
+///
+/// `download`-feature build: actually downloads into that directory and
+/// verifies each file's SHA-256 — skipping the network call and just
+/// re-verifying a file that's already there, mirroring ci.yml's own "download
+/// only if missing, verify either way" fetch step. On a mismatch (freshly
+/// downloaded or already staged) the bad file is deleted and the command
+/// fails (see `synthpass_ocr::download::fetch_and_verify`).
+#[cfg(feature = "ocr-native-rust")]
+fn fetch_models_command() -> Result<Exit, Box<dyn std::error::Error>> {
+    let model_dir = env::var("SYNTHPASS_OCR_MODEL_DIR").unwrap_or_else(|_| ".".into());
+    let dir = Path::new(&model_dir);
+    println!(
+        "OCR model directory (SYNTHPASS_OCR_MODEL_DIR): {}",
+        dir.display()
+    );
+    fetch_models_for_dir(dir)
+}
+
+#[cfg(all(feature = "ocr-native-rust", feature = "download"))]
+fn fetch_models_for_dir(dir: &Path) -> Result<Exit, Box<dyn std::error::Error>> {
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        eprintln!("❌ could not create {}: {e}", dir.display());
+        return Ok(Exit::Failure);
+    }
+    let mut ok = true;
+    for spec in synthpass_ocr::download::model_specs() {
+        match synthpass_ocr::download::fetch_and_verify(&spec, dir) {
+            Ok((path, synthpass_ocr::download::FetchOutcome::Downloaded)) => println!(
+                "✅ {}: downloaded and sha256-verified at {}",
+                spec.filename,
+                path.display()
+            ),
+            Ok((path, synthpass_ocr::download::FetchOutcome::AlreadyPresentAndVerified)) => {
+                println!(
+                    "✅ {}: already present and sha256-verified at {}",
+                    spec.filename,
+                    path.display()
+                )
+            }
+            Err(e) => {
+                eprintln!("❌ {}: {e}", spec.filename);
+                ok = false;
+            }
+        }
+    }
+    Ok(if ok { Exit::Ok } else { Exit::Failure })
+}
+
+#[cfg(all(feature = "ocr-native-rust", not(feature = "download")))]
+fn fetch_models_for_dir(dir: &Path) -> Result<Exit, Box<dyn std::error::Error>> {
+    println!(
+        "This build cannot download models — the `download` cargo feature is off, so `reqwest` \
+         isn't even linked in (principle 5: no runtime downloads on the extraction path, \
+         enforced at compile time here)."
+    );
+    println!();
+    println!("Fetch each file yourself and verify its SHA-256, e.g.:");
+    println!();
+    for spec in synthpass_ocr::download::model_specs() {
+        let target = dir.join(spec.filename);
+        println!("  curl -fL -o {} {}", target.display(), spec.url);
+        println!(
+            "  echo \"{}  {}\" | sha256sum -c -",
+            (spec.expected_sha256)(),
+            target.display()
+        );
+        println!();
+    }
+    Ok(Exit::Ok)
+}
+
+#[cfg(not(feature = "ocr-native-rust"))]
+fn fetch_models_command() -> Result<Exit, Box<dyn std::error::Error>> {
+    eprintln!("❌ this build lacks the `ocr-native-rust` feature — no OCR models to fetch");
+    Ok(Exit::Failure)
+}
+
 /// `synthpass doctor` — preflight checks: OCR/inferer reachability + config sanity.
 /// OCR reachability is required for the pipeline to run at all (a failure
 /// there is [`Exit::Failure`] — the same code any other runtime failure gets,
@@ -1153,7 +1254,11 @@ fn check_rust_ocr_models(ok: &mut bool) {
     let mut both_present = true;
     for (label, path, verify_fn) in checks {
         if !path.exists() {
-            println!("❌ OCR (rust) {label} model missing at {}", path.display());
+            println!(
+                "❌ OCR (rust) {label} model missing at {} — run `synthpass fetch-models` to \
+                 stage it",
+                path.display()
+            );
             *ok = false;
             both_present = false;
         } else if skip {

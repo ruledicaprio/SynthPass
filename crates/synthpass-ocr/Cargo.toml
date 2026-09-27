@@ -17,7 +17,7 @@ mrz = { path = "../mrz" }
 ocrs = "0.13.1"
 rten = "0.26.0"
 image = { workspace = true }
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"], optional = true }
 
 [build-dependencies]
 sha2 = "0.11"
@@ -59,6 +59,14 @@ rten-tensor = "0.26.0"
 # musl release build turns this on for a true air-gapped single-file binary
 # (see knowledge/ARCHITECTURE.md §10).
 embedded-models = []
+
+# Real network fetch for `synthpass fetch-models` (issue #491) — off by
+# default, so a default build has no `reqwest` in its dependency graph at all
+# and cannot download anything, on the extraction path or off it. Without
+# this feature, `download::model_specs()` still works (prints the pinned
+# URL/SHA-256 for a manual curl + sha256sum fetch); `download::fetch_and_verify`
+# only exists when this is on. See src/download.rs's module doc.
+download = ["dep:reqwest"]
 
 # Keep the manifest cache regression tests in the default workspace test suite.
 [[example]]
