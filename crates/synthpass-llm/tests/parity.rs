@@ -38,6 +38,7 @@
 //! | 2026-09-04 | 52.5% | `normalize::date` learned two printed forms |
 //! | 2026-09-05 | 55.6% | `normalize::country_code` learned demonyms |
 //! | 2026-09-27 | 51.7% | *(not a step on this climb — 118 fixtures, vocabulary `b6bd1f9a5fdd108e`, prompt v3; see above)* |
+//! | 2026-09-27 | 56.9% | `normalize::country_code` learned 19 demonyms and `mrz::code_for_name` 9 alternate names (#539; same 118 fixtures, prompt v3, vocabulary `8feb315a58cdae3e`) |
 //!
 //! Every number is quoted rather than replaced: a baseline that silently
 //! tracks the current figure upward stops being a baseline.

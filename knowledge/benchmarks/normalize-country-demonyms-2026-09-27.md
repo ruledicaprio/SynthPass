@@ -1,11 +1,31 @@
 # Country demonyms and alternate names, round two: 28 forms recover 38 fields, zero regressions
 
-**Date:** 2026-09-27 · **MAIN:** `ac5327a` (branch `claude/539-normalizer-demonyms`) · **DATA:** none (fixtures unchanged; source is a CI log, not `samples/`) · **Evidence:** Observed (a captured CI job log, re-scored by `vocab_replay`, not a fresh model run) · **Status:** current
+**Date:** 2026-09-27 · **MAIN:** `1988bbc` (branch `claude/539-normalizer-demonyms`) · **DATA:** none (fixtures unchanged; source is a CI log, not `samples/`) · **Evidence:** Observed (CI `native-llm` run 36342651928 on `1988bbc`, the real parity harness) and Derived (the same captured CI log re-scored by `vocab_replay` first; it predicted the run exactly) · **Status:** current
 
 **19 demonym entries and 9 alternate-name entries recover 38 Tier-2 fields: 385/744 → 423/744,
 51.7% → 56.9%, zero regressions.** No prompt change, no `PROMPT_VERSION` bump, no model run —
 the same `vocab_replay` technique the 2026-09-05 table was proved with, replayed against a newer
 log (issue #539).
+
+## Observed in CI
+
+The real parity harness, not a replay: `ci.yml` workflow_dispatch run
+[36342651928](https://github.com/ruledicaprio/SynthPass/actions/runs/36342651928), `native-llm` job,
+on this branch at `1988bbc`, with prompt v3, the same 118 fixtures and vocabulary `8feb315a58cdae3e`
+(v3's was `b6bd1f9a5fdd108e`).
+
+| Population | prompt v3 (run 36323412121) | this branch (run 36342651928) |
+| :-- | --: | --: |
+| Reviewed fixtures, all nine fields | 297 / 585 = 50.8% | **335 / 585 = 57.3%** |
+| `issuing_country` (reviewed) | 41 / 65 | **53 / 65** |
+| `nationality` (reviewed) | 25 / 65 | **51 / 65** |
+| Derived fixtures, check-digited fields | 88 / 159 = 55.3% | 88 / 159 = 55.3% |
+| Overall | 385 / 744 = 51.7% | **423 / 744 = 56.9%** |
+| Legacy seven-field rate (reviewed) | 219 / 455 = 48.1% | 245 / 455 = 53.8% |
+
+- **The replay's projection held exactly:** +38 / −0 overall, `issuing_country` +12,
+  `nationality` +26.
+- **No other field moved.** Every other per-field line in the two job logs is identical.
 
 ## Where the evidence came from
 
