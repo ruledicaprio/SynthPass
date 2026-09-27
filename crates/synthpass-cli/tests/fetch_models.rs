@@ -1,16 +1,17 @@
-//! Black-box coverage of `synthpass fetch-models` (issue #491) in the
-//! *default* build, i.e. without the `download` cargo feature — the shape
-//! `cargo test --workspace` actually exercises. This is the only place a
-//! `.rten` OCR model file may be fetched at all; the extraction path never
-//! downloads.
+//! Black-box coverage of `synthpass fetch-models` (issue #491), the only
+//! place a `.rten` OCR model file may be fetched at all; the extraction path
+//! never downloads.
 //!
-//! A `--features download` build's actual-fetch behaviour needs network
-//! access, so it isn't covered here — see `crates/synthpass-ocr/src/download.rs`'s
-//! `fetch_and_verify` unit tests for the verification logic that path shares
-//! with this one, exercised without any network call.
+//! The default build (no `download` cargo feature, the shape
+//! `cargo test --workspace` exercises) only prints instructions. In a
+//! `--features download` build, a successful fetch needs network access, so
+//! it isn't covered here; its failure path is, offline, and so is the
+//! verification logic, in `crates/synthpass-ocr/src/download.rs`'s
+//! `fetch_and_verify` unit tests.
 
 use std::process::Command;
 
+#[cfg(not(feature = "download"))]
 #[test]
 fn fetch_models_prints_urls_and_hashes_and_exits_ok_without_the_download_feature() {
     let dir = std::env::temp_dir().join(format!(
@@ -62,4 +63,45 @@ fn fetch_models_prints_urls_and_hashes_and_exits_ok_without_the_download_feature
     );
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A `download` build's fetch must fail cleanly (exit 1, one line per
+/// model) when the source can't be reached, never panic. Called on the async
+/// runtime, `reqwest::blocking` panicked (exit 101) before a byte moved, on
+/// every run. A loopback proxy on port 1 refuses at once, so this runs
+/// offline.
+#[cfg(feature = "download")]
+#[test]
+fn fetch_models_in_a_download_build_fails_cleanly_when_the_source_is_unreachable() {
+    let dir = std::env::temp_dir().join(format!(
+        "synthpass-cli-fetch-models-download-{}",
+        std::process::id()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_synthpass"))
+        .arg("fetch-models")
+        .env("SYNTHPASS_OCR_MODEL_DIR", &dir)
+        .env("HTTPS_PROXY", "http://127.0.0.1:1")
+        .env("https_proxy", "http://127.0.0.1:1")
+        .env_remove("NO_PROXY")
+        .env_remove("no_proxy")
+        .output()
+        .expect("run `synthpass fetch-models`");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(
+        !stderr.contains("panicked"),
+        "fetch-models must fail cleanly, not panic, got:\n{stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "an unreachable source is a failed fetch (exit 1), got: {output:?}"
+    );
+    assert!(
+        stderr.contains("text-detection.rten") && stderr.contains("text-recognition.rten"),
+        "each model that failed must be named, got:\n{stderr}"
+    );
 }

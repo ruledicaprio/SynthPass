@@ -279,8 +279,16 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         // `synthpass fetch-models` — the only place a `.rten` OCR model file
         // is ever fetched (issue #491): the extraction path never downloads.
         // No license required — same reasoning as `fingerprint`/`generate`
-        // below, this is setup, not extraction.
-        "fetch-models" => return fetch_models_command(),
+        // below, this is setup, not extraction. Runs on the blocking pool: a
+        // `download` build fetches with `reqwest::blocking`, which panics when
+        // called on an async worker thread.
+        "fetch-models" => {
+            return tokio::task::spawn_blocking(|| {
+                fetch_models_command().map_err(|e| e.to_string())
+            })
+            .await?
+            .map_err(Into::into)
+        }
         // `synthpass fingerprint` / `synthpass verify-license` — diagnostic/recovery
         // commands that must work WITHOUT a valid license (you need
         // `fingerprint` to obtain one in the first place), so neither is gated
