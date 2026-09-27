@@ -90,6 +90,11 @@ samples/ocr_fixtures/derived/*
 # a stray manual `git add -A` inside the samples-data worktree is exactly the
 # accident this guards against.
 samples/**/*Private*
+# The corpus walk treats any path component containing "private", in any case, as the private
+# track (crates/synthpass-bench/src/lib.rs). The line above matches only "Private", and a
+# case-sensitive checkout (Linux, CI, a cloud container) does not fold case, so it misses
+# samples/private/. Match every case explicitly.
+samples/**/*[Pp][Rr][Ii][Vv][Aa][Tt][Ee]*
 
 # The local-only track: specimens usable on this machine whose source does not
 # allow redistribution (samples/README.md). sync-samples.ps1 mirrors a fixed
