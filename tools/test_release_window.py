@@ -93,6 +93,7 @@ class ReleaseWindowTest(unittest.TestCase):
         self.set_mrz_version("0.8.0")
         self.write("crates/mrz/src/lib.rs", "pub fn a(x: u8) {}\n")
         self.write("changelog.d/mrz/first-break.changed!.md", "- a breaking change.\n")
+        self.write("MIGRATION.md", "# Migration guide\n\n## Unreleased\n\n- a() takes a u8.\n")
         self.commit_all("open the 0.8.0 window")
 
     # ------------------------------------------------- must refuse / must not over-bump
@@ -103,6 +104,8 @@ class ReleaseWindowTest(unittest.TestCase):
         self.set_mrz_version("0.9.0")
         self.write("crates/mrz/src/lib.rs", "pub fn a(x: u16) {}\n")
         self.write("changelog.d/mrz/second-break.changed!.md", "- another breaking change.\n")
+        # Its migration entry too, so the only failure left is the one under test (check 4).
+        self.write("MIGRATION.md", "# Migration guide\n\n## Unreleased\n\n- a() takes a u16.\n")
         self.commit_all("bump again inside the window")
 
         r = self.run_script("check-changelog.sh", "--base", "main")
@@ -122,6 +125,8 @@ class ReleaseWindowTest(unittest.TestCase):
         self.set_mrz_version("0.8.0")
         self.write("crates/mrz/src/lib.rs", "pub fn a(x: u8) {}\n")
         self.write("changelog.d/mrz/first-break.changed!.md", "- a breaking change.\n")
+        # A breaking fragment owes its MIGRATION.md entry in the same PR (check 5).
+        self.write("MIGRATION.md", "# Migration guide\n\n## Unreleased\n\n- a() takes a u8.\n")
         self.commit_all("first breaking change")
 
         r = self.run_script("check-changelog.sh", "--base", "main")
@@ -133,6 +138,8 @@ class ReleaseWindowTest(unittest.TestCase):
         self.git("checkout", "-qb", "more-work", "main")
         self.write("crates/mrz/src/lib.rs", "pub fn a(x: u8) {}\npub fn b() {}\n")
         self.write("changelog.d/mrz/more.changed!.md", "- a second breaking change, same window.\n")
+        self.write("MIGRATION.md",
+                   "# Migration guide\n\n## Unreleased\n\n- a() takes a u8.\n- b() is new and required.\n")
         self.commit_all("more breaking work, no bump")
 
         r = self.run_script("check-changelog.sh", "--base", "main")

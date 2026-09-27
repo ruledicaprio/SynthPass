@@ -249,6 +249,52 @@ class CheckChangelogTest(unittest.TestCase):
         self.assertIn("skipped: mrz changes are test-only or documentation", r.stdout)
         self.assertNotIn("skipped: no crates/mrz/ changes", r.stdout)
 
+    # ------------------------------------- check 5: a breaking change's migration entry
+
+    def add_breaking_mrz_change(self, name: str):
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
+            f.write("fn renamed() {}\n")
+        (self.tmp / "changelog.d" / "mrz" / f"{name}.changed!.md").write_text(
+            "- rename a public function.\n", encoding="utf-8"
+        )
+
+    def test_breaking_fragment_without_migration_entry_fails(self):
+        self.branch("feature-breaking-no-migration")
+        self.add_breaking_mrz_change("feature-breaking-no-migration")
+        self.commit_all("breaking mrz change, no migration entry")
+
+        r = self.run_check("--base", "main")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("adds a breaking (!) fragment but does not change MIGRATION.md", r.stderr)
+        self.assertIn("changelog.d/mrz/feature-breaking-no-migration.changed!.md", r.stderr)
+
+    def test_breaking_fragment_with_migration_entry_passes_check_5(self):
+        self.branch("feature-breaking-with-migration")
+        self.add_breaking_mrz_change("feature-breaking-with-migration")
+        (self.tmp / "MIGRATION.md").write_text(
+            "# Migration guide\n\n## Unreleased\n\n- renamed() replaces helper().\n",
+            encoding="utf-8",
+        )
+        self.commit_all("breaking mrz change with its migration entry")
+
+        r = self.run_check("--base", "main")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("ok: MIGRATION.md changed alongside the breaking fragment(s)", r.stdout)
+        self.assertNotIn("does not change MIGRATION.md", r.stderr)
+
+    def test_non_breaking_fragment_owes_no_migration_entry(self):
+        self.branch("feature-additive")
+        with open(self.tmp / "crates" / "mrz" / "src" / "lib.rs", "a", encoding="utf-8") as f:
+            f.write("fn extra() {}\n")
+        (self.tmp / "changelog.d" / "mrz" / "feature-additive.added.md").write_text(
+            "- add a helper.\n", encoding="utf-8"
+        )
+        self.commit_all("additive mrz change")
+
+        r = self.run_check("--base", "main")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("skipped: no breaking (!) fragment added", r.stdout)
+
 
 if __name__ == "__main__":
     sys.exit(unittest.main())
