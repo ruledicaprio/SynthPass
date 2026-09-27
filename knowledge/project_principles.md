@@ -121,8 +121,9 @@ Given an output, it must be possible to say which provider produced each value,
 on what evidence, and why anything more expensive was or wasn't run.
 
 **Enforced by:** `v2::Provenance`, `v2::ExtractionTrace` (providers consulted,
-escalation reason, prompt version), and `line1_integrity` carrying the specific
-`Finding`s rather than a bare boolean.
+escalation reason, prompt version, non-default OCR configuration knobs — issue
+#495), and `line1_integrity` carrying the specific `Finding`s rather than a bare
+boolean.
 
 **Boundary:** explainability is owed to the *operator*, not the log stream.
 Findings carry PII and stay inside the zeroized document JSON; logs and metric

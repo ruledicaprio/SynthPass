@@ -342,6 +342,7 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
             env::var("SYNTHPASS_LICENSE_PATH").unwrap_or_else(|_| DEFAULT_LICENSE_PATH.into())
         }
     );
+    print_non_default_ocr_knobs(&pipeline);
     eprintln!(
         "🔄 [Rust] Processing local file: {} (ocr: {})...",
         input.display(),
@@ -495,6 +496,29 @@ fn print_line1_integrity(result: &synthpass_pipeline::PipelineResult) {
     for reason in reasons {
         eprintln!("[Rust]   • {reason:?}");
     }
+}
+
+/// Prints the run's non-default `SYNTHPASS_OCR_*` configuration to stderr —
+/// one sorted, space-separated, copy-pasteable-into-a-shell `NAME=value`
+/// line — or nothing at all when every knob is at its default (issue #495).
+/// Shared by `synthpass <file>` (once per document, right after the config
+/// echo) and `synthpass batch` (once, before any document is processed):
+/// both read the same [`Pipeline::ocr_config_overrides`], so they can never
+/// disagree on what "non-default" means.
+///
+/// `BTreeMap`'s iteration order is already the env-var-name sort order this
+/// needs, so no separate sort is required.
+fn print_non_default_ocr_knobs(pipeline: &Pipeline) {
+    let overrides = pipeline.ocr_config_overrides();
+    if overrides.is_empty() {
+        return;
+    }
+    let knobs = overrides
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    eprintln!("⚙️  [Rust] non-default OCR knobs: {knobs}");
 }
 
 /// Splits an (optionally present) `--json` flag out of `args`, returning
@@ -812,6 +836,7 @@ async fn batch_command(
     );
 
     let pipeline = Pipeline::from_env();
+    print_non_default_ocr_knobs(&pipeline);
     let handle = pipeline.submit(inputs.clone());
     let status = handle.wait().await;
 

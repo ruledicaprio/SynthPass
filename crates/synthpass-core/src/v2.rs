@@ -21,6 +21,8 @@
 //! same caveats as v1 apply: `serde_json`'s intermediate copies are not wiped
 //! (see `knowledge/ARCHITECTURE.md` §7).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -815,14 +817,33 @@ pub struct ExtractionTrace {
     /// paths, which use no prompt.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<PromptRef>,
+    /// Non-default configuration a producer ran under, env var name →
+    /// effective value. General across producers — this is not OCR-only
+    /// vocabulary, `synthpass-core` holds none of it, and a future provider
+    /// could fill it with its own knobs — though today only the OCR engine
+    /// does (`synthpass_pipeline::OcrEngine::config_overrides`,
+    /// issue #495). **Configuration only**: a per-run observation about
+    /// *this* document — e.g. that a retry pass, not the first, produced the
+    /// accepted read — never belongs here, only settings that hold for
+    /// every document this process reads for as long as they're set. Lists
+    /// only the knobs whose effective value differs from its own default, so
+    /// an all-default run is indistinguishable from one that reports none at
+    /// all, and is keyed by env var name so an operator can re-run under the
+    /// same configuration. See principles 3 and 7.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub config_overrides: BTreeMap<String, String>,
 }
 
 impl ExtractionTrace {
-    /// Nothing worth recording — no providers, no escalation, no prompt.
-    /// Callers use this to decide whether to attach a trace at all, keeping
-    /// the key off records that would carry an empty object.
+    /// Nothing worth recording — no providers, no escalation, no prompt, no
+    /// non-default configuration. Callers use this to decide whether to
+    /// attach a trace at all, keeping the key off records that would carry
+    /// an empty object.
     pub fn is_empty(&self) -> bool {
-        self.providers.is_empty() && self.escalation.is_none() && self.prompt.is_none()
+        self.providers.is_empty()
+            && self.escalation.is_none()
+            && self.prompt.is_none()
+            && self.config_overrides.is_empty()
     }
 }
 

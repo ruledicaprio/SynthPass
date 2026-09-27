@@ -116,6 +116,14 @@ pub struct OcrResult {
     ///
     /// `None` when nothing was recognized, or when the engine doesn't score.
     pub text_sanity: Option<f32>,
+    /// Snapshot of [`OcrEngine::config_overrides`] taken for this call —
+    /// this document's own OCR run, not a later re-query of the engine
+    /// (issue #495). The trace-attaching call sites in `synthpass-pipeline`'s
+    /// `lib.rs` read this field rather than calling the engine again, so a
+    /// record always describes the configuration that actually produced it.
+    /// Empty for every engine that reports none, which is every engine but
+    /// [`RustOcrEngine`].
+    pub config_overrides: std::collections::BTreeMap<String, String>,
 }
 
 impl OcrResult {
@@ -134,6 +142,7 @@ impl OcrResult {
             portrait: None,
             rotation: 0,
             text_sanity: None,
+            config_overrides: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -146,13 +155,32 @@ pub trait OcrEngine: Send + Sync {
     /// [`to_markdown`](Self::to_markdown)'s richer sibling: same text, plus
     /// layout geometry when the engine can produce it. **Additive, not
     /// breaking**: the default body just wraps `to_markdown`'s output with
-    /// [`OcrResult::from_text`], so every existing [`OcrEngine`] impl —
-    /// in-tree or out-of-tree — keeps compiling and behaving exactly as
-    /// before without touching a line. Only [`RustOcrEngine`] overrides this;
-    /// see its impl for where `synthpass_ocr::geometry::BBox` gets converted
-    /// to this crate's own [`BBox`].
+    /// [`OcrResult::from_text`], stamped with [`config_overrides`]'s report,
+    /// so every existing [`OcrEngine`] impl — in-tree or out-of-tree — keeps
+    /// compiling and behaving exactly as before without touching a line.
+    /// Only [`RustOcrEngine`] overrides this; see its impl for where
+    /// `synthpass_ocr::geometry::BBox` gets converted to this crate's own
+    /// [`BBox`]; it takes the same [`config_overrides`] snapshot before its
+    /// own OCR call.
+    ///
+    /// [`config_overrides`]: Self::config_overrides
     async fn recognize_detailed(&self, input: &Path) -> Result<OcrResult, PipelineError> {
-        Ok(OcrResult::from_text(self.to_markdown(input).await?))
+        // Snapshotted before the OCR call, the configuration this read ran under.
+        let config_overrides = self.config_overrides();
+        let mut result = OcrResult::from_text(self.to_markdown(input).await?);
+        result.config_overrides = config_overrides;
+        Ok(result)
+    }
+
+    /// Non-default configuration this engine is running under right now —
+    /// env var name to effective value, in the vocabulary
+    /// `ExtractionTrace::config_overrides` (`synthpass-core`) documents.
+    /// Empty for every engine that reads no such knob, which is the default
+    /// body and every engine but [`RustOcrEngine`] (issue #495). **Additive**,
+    /// like [`recognize_detailed`](Self::recognize_detailed): an existing
+    /// out-of-tree impl compiles unchanged and simply reports nothing.
+    fn config_overrides(&self) -> std::collections::BTreeMap<String, String> {
+        std::collections::BTreeMap::new()
     }
 
     /// Short human-readable identity for logs.
@@ -332,6 +360,9 @@ mod rust_ocr {
 
         async fn recognize_detailed(&self, input: &Path) -> Result<OcrResult, PipelineError> {
             reject_unsupported_input(input)?;
+            // Snapshotted before the OCR call, as the default body does: the
+            // configuration this document's read ran under.
+            let config_overrides = self.config_overrides();
             let ocr = self.get_or_load().await.map_err(PipelineError::Ocr)?;
             let path = input.to_path_buf();
             let page = tokio::task::spawn_blocking(move || ocr.recognize_detailed(&path))
@@ -345,7 +376,18 @@ mod rust_ocr {
                 portrait: page.portrait.map(convert_bbox),
                 rotation: page.rotation,
                 text_sanity: page.text_sanity,
+                config_overrides,
             })
+        }
+
+        /// The nine `SYNTHPASS_OCR_*` knobs issue #495 names — the seven
+        /// `synthpass_ocr::OcrArms` measurement arms plus the retry pass/time
+        /// budget — via `synthpass_ocr::config_overrides`, which shares
+        /// `OcrArms` (and its `DEFAULT`/`is_default`) with `synthpass-bench`'s
+        /// own baseline-refusal check, so the two can never disagree on what
+        /// "default" means.
+        fn config_overrides(&self) -> std::collections::BTreeMap<String, String> {
+            synthpass_ocr::config_overrides()
         }
 
         fn describe(&self) -> String {
@@ -532,6 +574,11 @@ mod additive_trait_tests {
         assert_eq!(
             result.text_sanity, None,
             "an engine that scores no text must report None, not 0.0"
+        );
+        assert!(
+            result.config_overrides.is_empty(),
+            "an engine that overrides neither config_overrides nor \
+             recognize_detailed must report no configuration"
         );
     }
 

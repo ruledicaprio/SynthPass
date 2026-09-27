@@ -273,9 +273,27 @@ cross-reference this table by hand.
 | `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`); also where `synthpass fetch-models` stages them |
 | `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
 | `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
-| `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `7` / `45` | Bound the MRZ retry loop |
+| `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `14` / `52` | Bound the MRZ retry loop |
+| `SYNTHPASS_OCR_TEXTURE` | `on` | Trailing MRZ-band texture-suppression (median filter) passes after every other retry variant — `off`/`on`/`control`; see `synthpass-ocr`'s `TextureMode` doc comment |
+| `SYNTHPASS_OCR_ORDER` | `default` | Retry-variant ordering — `default`/`band-first`/`control`; see `synthpass-ocr`'s `OcrOrder` doc comment |
+| `SYNTHPASS_OCR_ROTATE` | `default` | Page-rotation detection — `default`/`legacy`/`off`; see `synthpass-ocr`'s `RotateMode` doc comment |
+| `SYNTHPASS_OCR_SKEW` | `default` | Deskew correction — `default`/`legacy`; see `synthpass-ocr::preprocess`'s `SkewMode` doc comment |
+| `SYNTHPASS_OCR_CHARGRID` | `off` | Post-hit repair of the MRZ name line's missing fillers on a fixed-pitch character grid — `off`/`on`/`control`; see `synthpass-ocr`'s `ChargridMode` doc comment |
+| `SYNTHPASS_OCR_STOP` | `first-valid` | Whether a checksum-valid reading that only `mrz`'s damaged-capture search recovered ends the retry loop (`first-valid`) or is held for confirmation (`clean`); see `synthpass-ocr`'s `StopMode` doc comment |
+| `SYNTHPASS_OCR_CONFIRM_PASSES` | `2` | Extra retry passes `SYNTHPASS_OCR_STOP=clean` spends trying to confirm a held damaged-capture reading before accepting it unconfirmed; inert under `first-valid` |
+| `SYNTHPASS_OCR_THREADS` | host cores − 1, floored at 1 | OCR-stage concurrency cap (`synthpass-pipeline`'s `env_ocr_threads`) |
 | `SYNTHPASS_OCR_VERBOSE` | *(unset)* | `1` logs per-pass timing and region counts |
+| `SYNTHPASS_OCR_DUMP_VARIANTS` | *(unset)* | Diagnostic: writes every preprocessed image the recognizer actually saw (general pass and each retry variant) as a PNG under this directory |
 | `SYNTHPASS_OCR_ENGINE` | `rust` | Only `rust` since v1.2.0; any other value warns and falls back |
+
+The seven measurement-arm knobs above plus `SYNTHPASS_OCR_MAX_PASSES`/`SYNTHPASS_OCR_MAX_SECONDS` — nine
+in total — are behaviour-changing: the same binary on the same image can read differently depending on
+them, and nothing else in the output says why (issue #495). Whichever of the nine hold a
+non-default *effective* value are recorded in each OCR-derived record's `trace.config_overrides`
+(`synthpass-core`'s `ExtractionTrace`, §13.1) and echoed once on stderr by `synthpass`/
+`synthpass batch` (`⚙️  [Rust] non-default OCR knobs: NAME=value …`) — `SYNTHPASS_OCR_THREADS` and
+`SYNTHPASS_OCR_DUMP_VARIANTS` are concurrency/diagnostics, not measurement arms, and are not part of
+either.
 
 `SYNTHPASS_OCR_AUTO_DOWNLOAD` is gone (issue #491): the extraction path never downloads
 models, full stop — a missing `.rten` file fails with an actionable message naming
@@ -383,7 +401,7 @@ section records the cross-crate policies.
 
 | Crate | Responsibility |
 | --- | --- |
-| `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer. The JSON key set is locked by `tests/schema_keys.rs`. |
+| `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer. `ExtractionTrace::config_overrides` carries a producer's own non-default configuration (env var name → effective value) — today only `synthpass-pipeline`'s OCR engine fills it (issue #495) — general across producers, and never a per-run observation about one document. The JSON key set is locked by `tests/schema_keys.rs`. |
 | `mrz` | Zero-dependency ICAO 9303 MRZ parser / emitter / check-digit validator (TD1/TD2/TD3, MRV-A/MRV-B). Published standalone and consumed outside this workspace, so it must stay dependency-free and `wasm32`-clean. |
 | `mrz-wasm` | `wasm-bindgen` wrapper around `mrz` **and `synthpass-imageprep`** for the GitHub Pages demo — the parser and the preprocessing the browser runs. |
 | `synthpass-imageprep` | Deterministic MRZ preprocessing (band crop, contrast stretch, Otsu/local threshold, deskew, upscale, and median texture suppression for the security printing under the glyphs — see [`research/document-pipeline-stage-taxonomy.md`](research/document-pipeline-stage-taxonomy.md)) and layout geometry (`BBox`, MRZ-band and portrait scoring). One dependency (`image`, no default features), no OCR engine, and **must keep compiling for `wasm32-unknown-unknown`** — that constraint is what lets the browser demo run this exact code instead of a JavaScript port of it. |
