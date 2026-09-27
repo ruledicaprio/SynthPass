@@ -7,12 +7,18 @@
 //! when a Tier-2 LLM read prints the full name ("CROATIA") instead of the
 //! MRZ code (`HRV`) and a downstream normalizer wants the canonical code.
 //!
-//! Both functions read the same [`CODES`] table — single-sourced, so the two
+//! Both functions read the same `CODES` table — single-sourced, so the two
 //! directions can never drift apart — which holds every ISO 3166-1 alpha-3
 //! code in the UN M49 list as of 2026-09-25, plus the ICAO 9303 codes: stateless/refugee/
 //! organization codes, `GBR` nationality subvariants, and specimen code `UTO`.
 //! ISO 3166-1 changes over time, so an unlisted code can still be legitimate. Zero dependencies, just `&'static str`
 //! literals, so it compiles for native and wasm alike.
+//!
+//! [`code_for_name`] also falls back to `ALTERNATE_NAMES` — former official
+//! names, alternate UN long/short forms, and diacritic-dropped spellings —
+//! once `CODES` itself declines. See that table's doc comment for what
+//! belongs there and what belongs in `synthpass-core::normalize::DEMONYMS`
+//! instead.
 
 /// `(code, name)` pairs, in the same order as the original per-region match
 /// arms. Order matters for [`code_for_name`]: a couple of names have more
@@ -330,6 +336,46 @@ const CODES: &[(&str, &str)] = &[
     ("WLF", "Wallis and Futuna Islands"),
 ];
 
+/// Alternate country **names** [`code_for_name`] resolves after `CODES`
+/// itself has declined — a former official English name (`Czechia` was
+/// `Czech Republic` until 2016; `Türkiye` was `Turkey` until its 2022 UN
+/// notification), an ICAO/UN long-form name distinct from `CODES`'s short
+/// one (`Korea (Republic of)` vs `Republic of Korea`; `United Kingdom` vs its
+/// full `United Kingdom of Great Britain and Northern Ireland`), or the same
+/// name with `CODES`'s diacritic dropped (`Türkiye` -> `Turkiye`,
+/// `Azərbaycan` -> `Azerbaycan`) — exactly the shapes a document's visual
+/// zone prints and OCR/Tier-2 reproduces, instead of the MRZ code.
+///
+/// **Not demonyms.** `CANADIAN`, `SERBIAN`, `ESPAÑOLA` — adjectives
+/// describing a *person's* nationality, not a country's name — have no place
+/// in this table and live in `synthpass-core::normalize::DEMONYMS` instead.
+/// That table is this one's deliberate mirror: same
+/// one-entry-per-observed-form discipline, same accept rule
+/// (`vocab_replay`, `>=1` miss flipped to hit and `0` flipped the other
+/// way), different vocabulary — a country can be named in a hundred
+/// languages, but only [`code_for_name`]'s caller (a country/nationality
+/// field, never a free-text one) ever needs any of them resolved.
+///
+/// Checked only after `CODES` itself has declined, so it can never reorder
+/// or override that table's own alias resolution (Germany's `D`/`DEU`,
+/// Kosovo's `XKX`/`RKS`).
+///
+/// **Every entry here was observed in the prompt-v3 parity corpus, and the
+/// table as a whole is proved by a measurement**: flips real Tier-2 answers
+/// from miss to hit against `crates/synthpass-llm/tests/parity.rs`'s logged
+/// run (issue #539, CI run 36323412121), with zero regressions. See
+/// `knowledge/benchmarks/normalize-country-demonyms-2026-09-27.md`.
+#[rustfmt::skip]
+const ALTERNATE_NAMES: &[(&str, &str)] = &[
+    ("Turkiye", "TUR"), ("Turkey", "TUR"), ("Republic of Turkey", "TUR"),
+    ("Republic of Korea", "KOR"),
+    ("Czech Republic", "CZE"),
+    ("United Kingdom of Great Britain and Northern Ireland", "GBR"),
+    ("Islamic Republic of Afghanistan", "AFG"),
+    ("Azerbaycan", "AZE"),
+    ("Polska", "POL"),
+];
+
 /// Map an ICAO/ISO 3166-1 code (usually three letters; ICAO `D` is one) to a country or entity name.
 /// Returns `None` for codes not in the table.
 ///
@@ -361,15 +407,27 @@ pub fn country_name(code: &str) -> Option<&'static str> {
 /// more than one legitimate code (Kosovo, Germany — see `CODES`'s doc
 /// comment), the first code in table order wins (`XKX` for Kosovo, `DEU` for Germany).
 ///
+/// Falls back to `ALTERNATE_NAMES` when `CODES` itself declines — a
+/// former official name, a long/short UN form, or the same name with a
+/// diacritic dropped (see that table's doc comment) — so it can never
+/// override `CODES`'s own alias resolution for Germany or Kosovo.
+///
 /// ```
 /// assert_eq!(mrz::code_for_name("Germany"), Some("DEU"));
 /// assert_eq!(mrz::code_for_name("CROATIA"), mrz::code_for_name("Croatia"));
+/// assert_eq!(mrz::code_for_name("Turkey"), Some("TUR")); // pre-2022 English name
 /// ```
 pub fn code_for_name(name: &str) -> Option<&'static str> {
     CODES
         .iter()
         .find(|&&(_, n)| n.eq_ignore_ascii_case(name))
         .map(|&(c, _)| c)
+        .or_else(|| {
+            ALTERNATE_NAMES
+                .iter()
+                .find(|&&(n, _)| n.eq_ignore_ascii_case(name))
+                .map(|&(_, c)| c)
+        })
 }
 
 /// Every `(code, name)` pair [`country_name`] and [`code_for_name`] are built
@@ -386,6 +444,22 @@ pub fn code_for_name(name: &str) -> Option<&'static str> {
 /// ```
 pub fn codes() -> &'static [(&'static str, &'static str)] {
     CODES
+}
+
+/// Every `(name, code)` pair `ALTERNATE_NAMES` holds, in table order —
+/// [`codes`]'s sibling accessor for the fallback table [`code_for_name`]
+/// consults after `CODES` itself declines.
+///
+/// Exists for the same reason [`codes`] does: a caller one layer up —
+/// `synthpass_core::normalize::vocabulary_fingerprint` — hashes every table a
+/// country/nationality lookup can resolve through, and this table is exactly
+/// as capable of moving that resolution as `CODES` itself.
+///
+/// ```
+/// assert!(mrz::alternate_names().contains(&("Turkey", "TUR")));
+/// ```
+pub fn alternate_names() -> &'static [(&'static str, &'static str)] {
+    ALTERNATE_NAMES
 }
 
 /// Whether two ICAO/ISO 3166-1 codes name the same country or entity.
@@ -568,5 +642,52 @@ mod tests {
             let reverse = code_for_name(name).expect("name should resolve back to a code");
             assert_eq!(country_name(reverse), Some(name));
         }
+    }
+
+    // ── ALTERNATE_NAMES ──
+
+    /// Every case here is a real Tier-2 `actual=` value from the prompt-v3
+    /// parity run reviewed in issue #539 (CI run 36323412121) that
+    /// `code_for_name` passed through unresolved. See
+    /// `knowledge/benchmarks/normalize-country-demonyms-2026-09-27.md`.
+    #[test]
+    fn code_for_name_resolves_an_alternate_name_after_codes_declines() {
+        assert_eq!(code_for_name("Turkiye"), Some("TUR"));
+        assert_eq!(code_for_name("TURKEY"), Some("TUR"));
+        assert_eq!(code_for_name("Republic of Turkey"), Some("TUR"));
+        assert_eq!(code_for_name("REPUBLIC OF KOREA"), Some("KOR"));
+        assert_eq!(code_for_name("Czech Republic"), Some("CZE"));
+        assert_eq!(
+            code_for_name("United Kingdom of Great Britain and Northern Ireland"),
+            Some("GBR")
+        );
+        assert_eq!(
+            code_for_name("Islamic Republic of Afghanistan"),
+            Some("AFG")
+        );
+        assert_eq!(code_for_name("Azerbaycan"), Some("AZE"));
+        assert_eq!(code_for_name("Polska"), Some("POL"));
+    }
+
+    #[test]
+    fn alternate_names_do_not_shadow_the_primary_table() {
+        // Each entry must resolve something `CODES` itself cannot, or it is
+        // dead weight nobody would notice going stale.
+        for &(name, code) in ALTERNATE_NAMES {
+            assert!(
+                !CODES.iter().any(|&(_, n)| n.eq_ignore_ascii_case(name)),
+                "{name:?} is already resolved by CODES — drop it from ALTERNATE_NAMES"
+            );
+            assert!(
+                country_name(code).is_some(),
+                "{name:?} maps to {code:?}, which is not a code CODES knows"
+            );
+        }
+    }
+
+    #[test]
+    fn alternate_names_accessor_matches_the_table() {
+        assert_eq!(alternate_names(), ALTERNATE_NAMES);
+        assert!(alternate_names().contains(&("Turkey", "TUR")));
     }
 }
