@@ -5,6 +5,29 @@
 //! ```powershell
 //! cargo run -p synthpass-cli -- samples/passports/Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg
 //! ```
+//!
+//! ## The output contract (issue #493)
+//!
+//! stdout is human-readable by default; it becomes a script-parseable contract only under an
+//! explicit `--json`. In **every** mode — default or `--json` — progress and diagnostics
+//! (the config echo, "Processing local file...", "OCR successful!", batch's per-run summary
+//! line, every line carrying an emoji) go to stderr, never stdout; only extraction *content*
+//! is ever printed to stdout.
+//!
+//! - **Default:** unchanged from before this issue. `synthpass <image>` prints the legacy
+//!   pretty-printed v1 `extracted` JSON to stdout for a Tier-1 (deterministic MRZ) result (Tier-2
+//!   results print nothing to stdout, matching prior behavior); `synthpass batch <dir|glob>`
+//!   prints one pretty-printed per-document record (including a failed document's error) per line.
+//! - **`--json`:** `synthpass <image> --json` prints exactly one line of compact JSON — the v2
+//!   [`ExtractionV2`](synthpass_core::v2::ExtractionV2) object (`PipelineResult::extracted_v2`) —
+//!   to stdout when extraction produced a usable result, and nothing to stdout otherwise (the
+//!   error still goes to stderr). `synthpass batch <dir|glob> --json` prints the same shape as
+//!   [JSON Lines](https://jsonlines.org/): one compact `ExtractionV2` object per line, one line
+//!   per successfully extracted document, in the same deterministic input order the non-`--json`
+//!   output uses — a document that failed extraction writes no stdout line, only a stderr error.
+//! - Exit codes are unaffected by `--json` (`knowledge/ARCHITECTURE.md` §12), and the `<input>.json`
+//!   sidecar file extraction writes to disk is unchanged either way — `--json` only changes what
+//!   this process prints to its own stdout.
 
 use serde_json::json;
 use std::env;
@@ -144,12 +167,15 @@ fn print_usage() {
     println!("{}", "-".repeat(BOX_WIDTH + 2));
     println!();
     println!("Commands");
-    println!("  synthpass <path_to_image>          extract (needs a license — see below)");
+    println!("  synthpass <path_to_image> [--json] extract (needs a license — see below)");
     println!(
-        "  synthpass batch <dir|glob>         extract every image in a directory or matching a glob"
+        "  synthpass batch <dir|glob> [--json] extract every image in a directory or matching a glob"
     );
     println!("                                     (needs a license, same as single-document extraction; a license lacking the");
     println!("                                     'batch' feature still runs, metered with a warning — emits one JSON per input + a summary)");
+    println!("                                     --json: print the v2 extraction object as compact JSON to stdout instead of the default");
+    println!("                                     human-readable output (JSON Lines, one per document, for batch); all progress/diagnostic");
+    println!("                                     lines go to stderr either way — see crates/synthpass-cli/README.md");
     println!("  synthpass decrypt <file.json.enc>  decrypt (needs SYNTHPASS_KEY)");
     println!("  synthpass doctor                   preflight: OCR/inferer/license, config sanity");
     println!(
@@ -269,7 +295,8 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
         return Ok(Exit::Usage);
     }
 
-    if let Err(e) = reject_surplus_args(&args[2..]) {
+    let (json_mode, surplus) = split_json_flag(&args[2..]);
+    if let Err(e) = reject_surplus_args(&surplus) {
         eprintln!("❌ {e}");
         return Ok(Exit::Usage);
     }
@@ -288,7 +315,9 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     }
 
     let pipeline = Pipeline::from_env();
-    println!(
+    // Config echo and progress lines are diagnostics, not content — stderr in
+    // every mode, `--json` or not (issue #493).
+    eprintln!(
         "⚙️  [Rust] config: ocr={}, inferer={}, license={}",
         pipeline.ocr_engine(),
         pipeline.infer_describe(),
@@ -298,7 +327,7 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
             env::var("SYNTHPASS_LICENSE_PATH").unwrap_or_else(|_| DEFAULT_LICENSE_PATH.into())
         }
     );
-    println!(
+    eprintln!(
         "🔄 [Rust] Processing local file: {} (ocr: {})...",
         input.display(),
         pipeline.ocr_engine()
@@ -306,23 +335,30 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
 
     match pipeline.process_document(input).await {
         Ok(result) => {
-            println!("✅ [Rust] OCR successful!");
-            println!("💾 [Rust] Saved Markdown to: {}", result.md_path.display());
+            eprintln!("✅ [Rust] OCR successful!");
+            eprintln!("💾 [Rust] Saved Markdown to: {}", result.md_path.display());
             match result.method {
                 synthpass_pipeline::Method::MrzDeterministic => {
-                    println!("🔐 [Rust] ICAO 9303 checksums valid — deterministic MRZ extraction (LLM skipped)");
+                    eprintln!("🔐 [Rust] ICAO 9303 checksums valid — deterministic MRZ extraction (LLM skipped)");
                     print_line1_integrity(&result);
-                    if let Some(extracted) = &result.extracted {
-                        println!("{}", serde_json::to_string_pretty(extracted)?);
+                    // `--json` prints the v2 object instead, below, once
+                    // `print_completion` has decided the document actually
+                    // succeeded — this legacy pretty-print is default mode's
+                    // stdout content only (issue #493: additive, not a
+                    // replacement of today's default-mode output).
+                    if !json_mode {
+                        if let Some(extracted) = &result.extracted {
+                            println!("{}", serde_json::to_string_pretty(extracted)?);
+                        }
                     }
                 }
                 synthpass_pipeline::Method::Llm => {
                     match &result.mrz {
-                        Some(m) => println!(
+                        Some(m) => eprintln!(
                             "⚠️ [Rust] MRZ found but checksums failed ({:?}) — falling back to LLM",
                             m.checks
                         ),
-                        None => println!("ℹ️ [Rust] No MRZ found — using LLM extraction"),
+                        None => eprintln!("ℹ️ [Rust] No MRZ found — using LLM extraction"),
                     }
                     print_line1_integrity(&result);
                 }
@@ -331,8 +367,18 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
             // Tier-2 fallback that itself failed, or a persist failure on
             // either tier — must not exit 0 just because `process_document`
             // itself didn't return `Err`: see `print_completion`'s doc for
-            // exactly which cases `completion_message` treats that way.
-            if print_completion(&result) {
+            // exactly which cases `completion_message` treats that way. The
+            // same condition gates `--json`'s stdout line (issue #493): a
+            // document that failed to actually produce usable output prints
+            // nothing to stdout, only the diagnostics `print_completion`
+            // already sent to stderr.
+            let succeeded = print_completion(&result);
+            if json_mode && succeeded {
+                if let Some(v2) = &result.extracted_v2 {
+                    print_json_line(v2)?;
+                }
+            }
+            if succeeded {
                 Ok(Exit::Ok)
             } else {
                 Ok(Exit::Failure)
@@ -345,8 +391,8 @@ async fn run() -> Result<Exit, Box<dyn std::error::Error>> {
     }
 }
 
-/// What to print on stdout to mark a document's extraction as finished, or
-/// `None` when there's nothing truthful to say there. `None` covers two
+/// What to report to mark a document's extraction as finished, or `None`
+/// when there's nothing truthful to say there. `None` covers two
 /// cases: a Tier-2 failure (`llm_error`, already reported separately by
 /// [`print_completion`]) and a persist failure — `Pipeline::process_document`
 /// leaves `sidecar_stdout` holding its own `"warning: could not persist
@@ -371,17 +417,19 @@ fn completion_message(result: &synthpass_pipeline::PipelineResult) -> Option<Str
     ))
 }
 
-/// Prints a document's post-extraction status: any diagnostic note from
-/// [`PipelineResult::sidecar_stdout`] on stderr (previously printed to
-/// stdout, and only on the Tier-2 branch — a persist failure on the Tier-1
-/// branch used to go unreported), then either the "saved to" line or the
-/// LLM failure warning, per [`completion_message`].
+/// Prints a document's post-extraction status — entirely to stderr, in every
+/// mode (issue #493: this is diagnostics, never stdout content): any
+/// diagnostic note from [`PipelineResult::sidecar_stdout`] (previously
+/// printed to stdout, and only on the Tier-2 branch — a persist failure on
+/// the Tier-1 branch used to go unreported), then either the "saved to" line
+/// or the LLM failure warning, per [`completion_message`].
 ///
 /// Returns whether the "saved to" line was printed — i.e. whether
 /// [`completion_message`] found anything truthful to report — so the caller
 /// can tell a document that never actually produced usable output (a failed
 /// Tier-2 fallback, or a persist failure on either tier) apart from a real
-/// success, for the exit code (issue #492).
+/// success, both for the exit code (issue #492) and for whether `--json`
+/// prints anything to stdout for this document (issue #493).
 ///
 /// [`PipelineResult::sidecar_stdout`]: synthpass_pipeline::PipelineResult::sidecar_stdout
 fn print_completion(result: &synthpass_pipeline::PipelineResult) -> bool {
@@ -393,7 +441,7 @@ fn print_completion(result: &synthpass_pipeline::PipelineResult) -> bool {
     }
     match completion_message(result) {
         Some(msg) => {
-            println!("{msg}");
+            eprintln!("{msg}");
             true
         }
         None => {
@@ -406,7 +454,8 @@ fn print_completion(result: &synthpass_pipeline::PipelineResult) -> bool {
 }
 
 /// Surface a `NeedsReview` line-1 integrity verdict in the terminal, not only in
-/// the JSON.
+/// the JSON. Stderr, not stdout, in every mode (issue #493) — this is a
+/// diagnostic warning, not extraction content.
 ///
 /// The check digits cover `document_number`, the two dates and
 /// `personal_number` — not `document_type`, `issuing_country`, `nationality` or
@@ -424,13 +473,68 @@ fn print_line1_integrity(result: &synthpass_pipeline::PipelineResult) {
     else {
         return;
     };
-    println!(
+    eprintln!(
         "⚠️ [Rust] {} line-1 field(s) carry no check digit and look wrong — review before trusting:",
         reasons.len()
     );
     for reason in reasons {
-        println!("[Rust]   • {reason:?}");
+        eprintln!("[Rust]   • {reason:?}");
     }
+}
+
+/// Splits an (optionally present) `--json` flag out of `args`, returning
+/// whether it was found and the remaining arguments with it removed — so the
+/// existing surplus-argument check (`reject_surplus_args`) still catches any
+/// other unexpected token. Shared by the single-document and `batch` argument
+/// handling (issue #493) rather than hand-rolled twice. `--json` may appear
+/// anywhere in `args` (not only immediately after the positional argument);
+/// a repeated `--json` is accepted, same as a repeated flag elsewhere in this
+/// CLI (see `export`'s `parse_args`).
+fn split_json_flag(args: &[String]) -> (bool, Vec<String>) {
+    let mut json = false;
+    let mut rest = Vec::with_capacity(args.len());
+    for arg in args {
+        if arg == "--json" {
+            json = true;
+        } else {
+            rest.push(arg.clone());
+        }
+    }
+    (json, rest)
+}
+
+/// The `ExtractionV2` a document contributes to `batch --json`'s stdout, if
+/// any (issue #493): `None` for a genuine batch failure (`Failed`/`Pending`)
+/// or for a `Done` result whose Tier-2 fallback itself failed (`llm_error`
+/// set, so `extracted_v2` is `None`) — either way, that document writes no
+/// stdout line, only a stderr error, so a script reading stdout as JSON
+/// Lines never sees a non-JSON or partial line. Factored out of
+/// `batch_command`'s loop so this selection can be pinned by a test without
+/// running the pipeline for real.
+fn batch_json_value(
+    status: &synthpass_pipeline::DocumentStatus,
+) -> Option<&synthpass_core::v2::ExtractionV2> {
+    match status {
+        synthpass_pipeline::DocumentStatus::Done(result) => result.extracted_v2.as_ref(),
+        synthpass_pipeline::DocumentStatus::Failed(_)
+        | synthpass_pipeline::DocumentStatus::Pending => None,
+    }
+}
+
+/// Compact (single-line) JSON for `value` — the one framing both the
+/// single-document and `batch --json` (JSON Lines) paths share (issue #493),
+/// factored out from [`print_json_line`] so a test can pin the exact bytes
+/// without capturing this process's real stdout.
+fn json_line(value: &synthpass_core::v2::ExtractionV2) -> Result<String, serde_json::Error> {
+    serde_json::to_string(value)
+}
+
+/// Prints [`json_line`]'s output to stdout, terminated by `\n` (`println!`
+/// already appends it) — so a caller parsing stdout line-by-line never has
+/// to special-case which command produced a given line.
+fn print_json_line(value: &synthpass_core::v2::ExtractionV2) -> Result<(), serde_json::Error> {
+    println!("{}", json_line(value)?);
+    Ok(())
 }
 
 /// Default path for the license file when `SYNTHPASS_LICENSE_PATH` is unset.
@@ -626,22 +730,30 @@ fn collect_batch_inputs(arg: &str) -> Result<Vec<PathBuf>, String> {
     Ok(files)
 }
 
-/// `synthpass batch <dir|glob>` — extract every matching image. Submits the
-/// whole batch as one job via `Pipeline::submit` (exercising the same job
-/// abstraction `synthpass-serve`'s async endpoints use) and immediately
-/// `.wait()`s on it, so from the operator's point of view this behaves like
-/// a simple loop over `synthpass <path>` — one JSON object printed per
-/// input, in the same order they were collected, plus a summary line.
+/// `synthpass batch <dir|glob> [--json]` — extract every matching image.
+/// Submits the whole batch as one job via `Pipeline::submit` (exercising the
+/// same job abstraction `synthpass-serve`'s async endpoints use) and
+/// immediately `.wait()`s on it, so from the operator's point of view this
+/// behaves like a simple loop over `synthpass <path>` — one record per input,
+/// in the same order they were collected, plus a summary line (stderr, like
+/// every other progress line — issue #493). Without `--json`, that record is
+/// the pretty-printed JSON this command has always printed, one per document
+/// including a failed one's error. With `--json`, it is [JSON
+/// Lines](https://jsonlines.org/): one compact `ExtractionV2` object per
+/// stdout line, one line per document that actually produced one — a failed
+/// document (or a `Done` one whose Tier-2 fallback itself failed) writes no
+/// stdout line at all, only a stderr error.
 async fn batch_command(
     arg: Option<&str>,
-    surplus: &[String],
+    rest: &[String],
 ) -> Result<Exit, Box<dyn std::error::Error>> {
     let Some(arg) = arg else {
-        eprintln!("Usage: synthpass batch <dir|glob>");
+        eprintln!("Usage: synthpass batch <dir|glob> [--json]");
         return Ok(Exit::Usage);
     };
 
-    if let Err(e) = reject_surplus_args(surplus) {
+    let (json_mode, surplus) = split_json_flag(rest);
+    if let Err(e) = reject_surplus_args(&surplus) {
         eprintln!("❌ {e}");
         return Ok(Exit::Usage);
     }
@@ -679,7 +791,7 @@ async fn batch_command(
         }
     };
 
-    println!(
+    eprintln!(
         "🔄 [Rust] submitting {} document(s) from {arg} for batch extraction...",
         inputs.len()
     );
@@ -693,6 +805,10 @@ async fn batch_command(
     let mut failed = 0usize;
 
     for (input, entry) in inputs.iter().zip(handle.documents().iter()) {
+        // `record` and the tier1/tier2/failed counters are exactly what this
+        // loop computed before `--json` existed — issue #493 only changes
+        // *which* of `record`'s renderings reaches stdout, never these
+        // counts or the default-mode (pretty-printed record) output.
         let record = match &entry.status {
             synthpass_pipeline::DocumentStatus::Done(result) => {
                 match result.method {
@@ -722,10 +838,24 @@ async fn batch_command(
                 })
             }
         };
-        println!("{}", serde_json::to_string_pretty(&record)?);
+
+        if json_mode {
+            match batch_json_value(&entry.status) {
+                Some(v2) => print_json_line(v2)?,
+                None => {
+                    let reason = record
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("extraction failed");
+                    eprintln!("❌ [Rust] {}: {reason}", input.display());
+                }
+            }
+        } else {
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        }
     }
 
-    println!(
+    eprintln!(
         "🎉 [Rust] batch complete ({}): {tier1} via Tier 1, {tier2} via Tier 2, {failed} failed",
         status.as_str()
     );
@@ -1163,6 +1293,223 @@ mod tests {
         assert!(err.contains("b.jpg"));
         assert!(err.contains("c.jpg"));
         assert!(err.contains("quote"));
+    }
+
+    // ── issue #493: the `--json` output contract ──────────────────────
+
+    #[test]
+    fn split_json_flag_finds_the_flag_anywhere_and_leaves_the_rest() {
+        let (json, rest) = split_json_flag(&["a.jpg".to_string(), "--json".to_string()]);
+        assert!(json);
+        assert_eq!(rest, vec!["a.jpg".to_string()]);
+
+        let (json, rest) = split_json_flag(&["--json".to_string(), "a.jpg".to_string()]);
+        assert!(json);
+        assert_eq!(rest, vec!["a.jpg".to_string()]);
+    }
+
+    #[test]
+    fn split_json_flag_absent_leaves_args_untouched() {
+        let (json, rest) = split_json_flag(&["a.jpg".to_string(), "b.jpg".to_string()]);
+        assert!(!json);
+        assert_eq!(rest, vec!["a.jpg".to_string(), "b.jpg".to_string()]);
+    }
+
+    #[test]
+    fn split_json_flag_repeated_is_still_just_json_mode() {
+        let (json, rest) = split_json_flag(&["--json".to_string(), "--json".to_string()]);
+        assert!(json);
+        assert!(rest.is_empty());
+    }
+
+    /// A deterministic `ExtractionV2` fixture — every field that would carry
+    /// real PII is a fixed placeholder, never a sample document. Used only to
+    /// pin the wire shape of `--json`'s stdout line, not to test extraction
+    /// itself (that needs real OCR/MRZ models — out of scope for a fast,
+    /// network-free unit test; see `tests/json_contract.rs`'s module doc).
+    fn sample_v2(
+        extraction_method: &str,
+        document_number: &str,
+    ) -> synthpass_core::v2::ExtractionV2 {
+        let mut v2 = synthpass_core::v2::ExtractionV2::default();
+        v2.extraction_method = extraction_method.to_string();
+        v2.fields.document_number = Some(document_number.to_string());
+        v2
+    }
+
+    /// Pins `--json`'s stdout line to an exact byte sequence (issue #493):
+    /// one line, compact (no embedded newlines/indentation), and it parses
+    /// back to the same `ExtractionV2`. A real end-to-end extraction isn't
+    /// exercised here — see this module's doc for why — so this test's job
+    /// is narrower but load-bearing: prove `json_line`/`print_json_line`
+    /// serialize `ExtractionV2` as one compact JSON line and nothing else,
+    /// which is the part `main`'s own logic controls.
+    #[test]
+    fn json_line_is_one_compact_line_that_round_trips() {
+        let v2 = sample_v2("mrz-deterministic", "L898902C3");
+        let line = json_line(&v2).expect("ExtractionV2 always serializes");
+
+        // The golden itself: byte-for-byte, so a change to field order, a
+        // renamed key, or a newly-`Some`/non-empty default (which would
+        // silently start serializing an `mrz`/`validity`/`trace`/`barcodes`
+        // key this fixture omits) fails here even though it wouldn't fail
+        // the round-trip check below.
+        assert_eq!(
+            line,
+            r#"{"schema_version":2,"document":{"kind":"other"},"fields":{"document_type":null,"issuing_country":null,"document_number":"L898902C3","surname":null,"given_names":null,"nationality":null,"date_of_birth":null,"sex":null,"date_of_expiry":null,"personal_number":null,"optional_data_1":null,"optional_data_2":null},"confidence":{"document_type":0.0,"issuing_country":0.0,"document_number":0.0,"surname":0.0,"given_names":0.0,"nationality":0.0,"date_of_birth":0.0,"sex":0.0,"date_of_expiry":0.0,"personal_number":0.0,"optional_data_1":0.0,"optional_data_2":0.0},"provenance":{"kind":"mrz_checksum"},"extraction_method":"mrz-deterministic"}"#
+        );
+        assert_eq!(
+            line.lines().count(),
+            1,
+            "must be exactly one line, got: {line:?}"
+        );
+        assert!(
+            !line.contains("  ") && !line.contains('\n'),
+            "must be compact JSON, not pretty-printed: {line:?}"
+        );
+
+        let parsed: synthpass_core::v2::ExtractionV2 =
+            serde_json::from_str(&line).expect("must parse back as ExtractionV2");
+        assert_eq!(parsed, v2, "must round-trip losslessly");
+
+        let value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let obj = value.as_object().expect("top level is a JSON object");
+        for key in [
+            "schema_version",
+            "document",
+            "fields",
+            "confidence",
+            "provenance",
+            "extraction_method",
+        ] {
+            assert!(
+                obj.contains_key(key),
+                "missing top-level key {key:?}: {line}"
+            );
+        }
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["extraction_method"], "mrz-deterministic");
+        assert_eq!(value["fields"]["document_number"], "L898902C3");
+    }
+
+    fn sample_result_with_v2(
+        v2: synthpass_core::v2::ExtractionV2,
+        method: synthpass_pipeline::Method,
+    ) -> synthpass_pipeline::PipelineResult {
+        synthpass_pipeline::PipelineResult {
+            markdown: String::new(),
+            md_path: PathBuf::from("doc.md"),
+            json_path: PathBuf::from("doc.json"),
+            extracted: None,
+            extracted_v2: Some(v2),
+            llm_error: None,
+            sidecar_stdout: String::new(),
+            mrz: None,
+            method,
+        }
+    }
+
+    #[test]
+    fn batch_json_value_is_some_only_for_a_document_that_actually_extracted() {
+        let done_ok = synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+            sample_v2("mrz-deterministic", "A"),
+            synthpass_pipeline::Method::MrzDeterministic,
+        )));
+        assert!(batch_json_value(&done_ok).is_some());
+
+        // `Done` but Tier-2 itself failed: `extracted_v2` is `None`, exactly
+        // like a real `llm_error` result — no stdout line, only stderr.
+        let mut done_failed =
+            sample_result_with_v2(sample_v2("llm", "B"), synthpass_pipeline::Method::Llm);
+        done_failed.extracted_v2 = None;
+        done_failed.llm_error = Some("model unavailable".to_string());
+        let done_failed = synthpass_pipeline::DocumentStatus::Done(Box::new(done_failed));
+        assert!(batch_json_value(&done_failed).is_none());
+
+        let failed = synthpass_pipeline::DocumentStatus::Failed("ocr error".to_string());
+        assert!(batch_json_value(&failed).is_none());
+
+        let pending = synthpass_pipeline::DocumentStatus::Pending;
+        assert!(batch_json_value(&pending).is_none());
+    }
+
+    /// The batch-`--json` golden: N documents, all of which actually
+    /// extracted, give exactly N JSON Lines in the same order as the inputs —
+    /// pinned against the real per-document selection logic
+    /// (`batch_json_value`) rather than re-implemented in the test, so a
+    /// change to that logic is what this test would actually catch.
+    #[test]
+    fn batch_json_all_successful_documents_yield_one_line_each_in_order() {
+        let statuses = [
+            synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+                sample_v2("mrz-deterministic", "DOC-A"),
+                synthpass_pipeline::Method::MrzDeterministic,
+            ))),
+            synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+                sample_v2("mrz-deterministic", "DOC-B"),
+                synthpass_pipeline::Method::MrzDeterministic,
+            ))),
+            synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+                sample_v2("llm", "DOC-C"),
+                synthpass_pipeline::Method::Llm,
+            ))),
+        ];
+
+        let lines: Vec<String> = statuses
+            .iter()
+            .map(|status| {
+                let v2 = batch_json_value(status).expect("every status here extracted");
+                json_line(v2).expect("ExtractionV2 always serializes")
+            })
+            .collect();
+
+        assert_eq!(lines.len(), statuses.len());
+        let document_numbers: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                let value: serde_json::Value = serde_json::from_str(line).unwrap();
+                value["fields"]["document_number"]
+                    .as_str()
+                    .unwrap()
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(document_numbers, vec!["DOC-A", "DOC-B", "DOC-C"]);
+    }
+
+    /// A batch mixing a genuine failure among successes: the failed document
+    /// contributes no line, and the successful ones keep their input order
+    /// around it (issue #493's "a document that fails extraction writes no
+    /// stdout line").
+    #[test]
+    fn batch_json_a_failed_document_contributes_no_line_but_does_not_shift_the_others() {
+        let statuses = [
+            synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+                sample_v2("mrz-deterministic", "DOC-A"),
+                synthpass_pipeline::Method::MrzDeterministic,
+            ))),
+            synthpass_pipeline::DocumentStatus::Failed("ocr error".to_string()),
+            synthpass_pipeline::DocumentStatus::Done(Box::new(sample_result_with_v2(
+                sample_v2("mrz-deterministic", "DOC-C"),
+                synthpass_pipeline::Method::MrzDeterministic,
+            ))),
+        ];
+
+        let lines: Vec<String> = statuses
+            .iter()
+            .filter_map(|status| batch_json_value(status))
+            .map(|v2| json_line(v2).expect("ExtractionV2 always serializes"))
+            .collect();
+
+        assert_eq!(
+            lines.len(),
+            2,
+            "the failed document must not appear: {lines:?}"
+        );
+        let value_a: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+        let value_c: serde_json::Value = serde_json::from_str(&lines[1]).unwrap();
+        assert_eq!(value_a["fields"]["document_number"], "DOC-A");
+        assert_eq!(value_c["fields"]["document_number"], "DOC-C");
     }
 
     #[test]
