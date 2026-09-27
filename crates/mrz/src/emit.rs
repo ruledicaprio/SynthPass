@@ -52,7 +52,7 @@
 //! [`clean_name_half`] for the full rule set. Every other field
 //! (`document_number`, `personal_number`/`optional_data`) keeps the blanket
 //! [`clean`] behavior, per that same Part 3 passage read together with
-//! `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:415`, which specifies
+//! `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:434`, which specifies
 //! those fields as flat alphanumeric-or-filler, with no name-style
 //! punctuation carve-out.
 
@@ -324,7 +324,7 @@ fn clean_name_half(s: &str) -> String {
 /// through [`clean_name_half`]) to fit exactly `width` characters, when
 /// their combined length exceeds it.
 ///
-/// ICAO 9303 Part 4 §4.2.3 (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:463-587`)
+/// ICAO 9303 Part 4 §4.2.3 (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:482-606`)
 /// illustrates several truncation strategies; Parts 5 and 6 §4.2.3
 /// explicitly allow issuer discretion —
 /// truncating trailing components to initials, truncating components to a
@@ -334,7 +334,7 @@ fn clean_name_half(s: &str) -> String {
 ///
 /// **What is not a choice** is the `shall` in the Data Element Directory row
 /// that §4.2.3 itself cross-references
-/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:407`, repeated verbatim
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:426`, repeated verbatim
 /// in Part 5:346, Part 6:299, Part 7:282 and Part 7:640):
 ///
 /// > "Characters **shall** be removed from one or more components of the
@@ -377,14 +377,14 @@ fn clean_name_half(s: &str) -> String {
 /// §7.2.3.2(b) shows `<<DINGO`), so they are drawings of the discretion in
 /// rule 3's "further truncation may", not an algorithm to match.
 ///
-/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:585-587` documents that
+/// `Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:604-606` documents that
 /// this ambiguity runs both ways:
 /// a name that happens to fill the field exactly, with no truncation at
 /// all, is indistinguishable from a truncated one by the same rule — "this
 /// name has not been truncated but it must be assumed that it has been
 /// truncated". That is spec-documented ambiguity to design around, not a
 /// bug to fix later; ICAO's own `PAPANDROPOULOUS` example
-/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:584`) is exactly this
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:603`) is exactly this
 /// case, and is pinned as a non-truncating golden vector in
 /// `tests/icao_vectors.rs` for that reason.
 fn truncate_name_components(primary: &str, secondary: &str, width: usize) -> String {
@@ -492,7 +492,7 @@ fn fill_components(pairs: &[(&str, &str)], width: usize) -> String {
 /// `<`-separated, always ending on a letter.
 ///
 /// Reproduces ICAO 9303 Part 4 §4.2.3.3(b)
-/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:559-566`) byte-for-byte,
+/// (`Doc_9303_Part4_Specs_for_MRPs_and_TD3_MRTDs.md:582-588`) byte-for-byte,
 /// the width-39 example that truncates the primary unevenly and pins
 /// per-component lengths. Those lengths are what fix the strategy below; they are not
 /// derivable from the prose:
