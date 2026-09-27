@@ -44,6 +44,12 @@ const VALID_PROFILES: &[&str] = &[
 
 const VALID_DOCUMENT_TYPES: &[&str] = &["td1", "td2", "td3", "mrva", "mrvb"];
 
+/// The generator's ground-truth sidecar is `<stem>.labels.json`, never
+/// `<stem>.json`: extraction writes its result to `<input>.json` next to the
+/// input (`synthpass-pipeline`'s `process_document`), so reading a generated
+/// PNG back would overwrite a `<stem>.json` label file (issue #514).
+const LABELS_SUFFIX: &str = "labels.json";
+
 fn usage() {
     eprintln!(
         "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]"
@@ -284,9 +290,10 @@ fn labels_to_json(
 }
 
 /// `synthpass generate [--count N] [--seed N] [--profile NAME] [--out-dir DIR]` —
-/// generates `count` synthetic passport images (PNG) + ground-truth label
-/// JSON sidecars into `out_dir`. Document `i` in the batch uses seed
-/// `seed + i`, so a batch is fully reproducible and each document differs.
+/// generates `count` synthetic passport images (PNG) + ground-truth
+/// `<stem>.labels.json` sidecars into `out_dir`. Document `i` in the batch
+/// uses seed `seed + i`, so a batch is fully reproducible and each document
+/// differs.
 ///
 /// No license required: see the module doc comment. Exit codes (issue #492):
 /// a bad argument (unknown flag, invalid `--profile`/`--document-type`, a
@@ -323,7 +330,7 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
             other => format!("synthpass_{seed}_{}", other.as_str().to_lowercase()),
         };
         let png_path = Path::new(&parsed.out_dir).join(format!("{stem}.png"));
-        let json_path = Path::new(&parsed.out_dir).join(format!("{stem}.json"));
+        let json_path = Path::new(&parsed.out_dir).join(format!("{stem}.{LABELS_SUFFIX}"));
 
         image.save(&png_path)?;
 
@@ -350,8 +357,8 @@ mod tests {
     use super::*;
 
     /// Runs the full generate command against a temp directory and checks
-    /// the expected PNG/JSON pairs exist and the sidecar's ground truth is
-    /// sane (non-empty document number, two 44-char MRZ lines).
+    /// the expected PNG/`.labels.json` pairs exist and the sidecar's ground
+    /// truth is sane (non-empty document number, two 44-char MRZ lines).
     #[test]
     fn generate_batch_produces_valid_outputs() {
         let out_dir =
@@ -374,9 +381,14 @@ mod tests {
         for i in 0..3u64 {
             let seed = 42 + i;
             let png_path = out_dir.join(format!("synthpass_{seed}.png"));
-            let json_path = out_dir.join(format!("synthpass_{seed}.json"));
+            let json_path = out_dir.join(format!("synthpass_{seed}.{LABELS_SUFFIX}"));
             assert!(png_path.exists(), "missing PNG for seed {seed}");
             assert!(json_path.exists(), "missing JSON sidecar for seed {seed}");
+            // Issue #514: `<stem>.json` is extraction's output name.
+            assert!(
+                !out_dir.join(format!("synthpass_{seed}.json")).exists(),
+                "generate must not write a bare <stem>.json for seed {seed}"
+            );
 
             let json_str = std::fs::read_to_string(&json_path).expect("read sidecar");
             let value: serde_json::Value =
@@ -398,6 +410,47 @@ mod tests {
             assert_eq!(value["seed"].as_u64(), Some(seed));
             assert_eq!(value["profile"].as_str(), Some("mobile"));
         }
+
+        std::fs::remove_dir_all(&out_dir).ok();
+    }
+
+    /// Pins the fix for issue #514: extraction's own output path for a
+    /// generated PNG must never collide with the generator's own label
+    /// sidecar path, so reading a generated pass back through extraction
+    /// cannot overwrite the ground truth the read is graded against.
+    ///
+    /// `synthpass_pipeline::Pipeline::process_document` has no standalone
+    /// path function reachable without a live OCR engine (it needs one to
+    /// even start), so rather than reimplement its logic, this copies its
+    /// exact computation verbatim: `md_path = input.with_extension("md")`,
+    /// then `json_path = stage.md_path.with_extension("json")`
+    /// (`crates/synthpass-pipeline/src/lib.rs`, `process_document`).
+    #[test]
+    fn generator_label_path_differs_from_extractions_output_path() {
+        let out_dir = std::env::temp_dir().join(format!(
+            "synthpass_generate_path_collision_{}",
+            std::process::id()
+        ));
+        let out_dir_str = out_dir.to_string_lossy().to_string();
+
+        let args = vec![
+            "--seed".to_string(),
+            "42".to_string(),
+            "--out-dir".to_string(),
+            out_dir_str,
+        ];
+        generate_command(&args).expect("generate_command should succeed");
+
+        let png_path = out_dir.join("synthpass_42.png");
+        let generator_labels_path = out_dir.join(format!("synthpass_42.{LABELS_SUFFIX}"));
+        // Verbatim copy of process_document's own path computation.
+        let extraction_output_path = png_path.with_extension("md").with_extension("json");
+
+        assert_ne!(
+            generator_labels_path, extraction_output_path,
+            "extraction's output path must never collide with the generator's own labels"
+        );
+        assert!(generator_labels_path.exists());
 
         std::fs::remove_dir_all(&out_dir).ok();
     }
@@ -431,13 +484,13 @@ mod tests {
             ];
             generate_command(&args).expect("generate_command should succeed");
 
-            // TD3 keeps the plain `synthpass_{seed}.json` shape; TD1/TD2 get
-            // a format suffix so co-located outputs at the same seed don't
-            // collide (see `generate_command`).
+            // TD3 keeps the plain `synthpass_{seed}.labels.json` shape;
+            // TD1/TD2 get a format suffix so co-located outputs at the same
+            // seed don't collide (see `generate_command`).
             let json_name = if flag == "td3" {
-                "synthpass_7.json".to_string()
+                format!("synthpass_7.{LABELS_SUFFIX}")
             } else {
-                format!("synthpass_7_{flag}.json")
+                format!("synthpass_7_{flag}.{LABELS_SUFFIX}")
             };
             let json_path = out_dir.join(json_name);
             let json_str = std::fs::read_to_string(&json_path).expect("read sidecar");
