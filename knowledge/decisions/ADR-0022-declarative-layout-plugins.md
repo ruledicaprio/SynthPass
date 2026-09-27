@@ -52,7 +52,8 @@ or variables.
 **2. The schema cannot express art or content.** It has no key for an image, emblem, background,
 font, colour, caption, title or any text that reaches the page, and none for a field's value.
 Issuing state and every value come from the seeded generator. Captions or a title, if ever
-added, come from a closed vocabulary the generator owns, by amendment to this ADR.
+added, come from a closed vocabulary the generator owns, by amendment to this ADR. None is
+planned for M8.
 
 **3. The engine owns the canvas, frame, watermark and machine-readable zone, per format.** They
 are exactly what the built-ins define today. A layout cannot move or resize zone VII and has no
@@ -87,12 +88,15 @@ byte-identical pixels. A layout does not change which identity a seed produces.
 
 **8. First-cut surfaces:** `synthpass generate --layout FILE`, then `synthpass export --layout
 FILE`, local files only. `synthpass-serve` takes no layouts. `synthpass-bench` and the M4 gate
-stay on the built-ins.
+stay on the built-ins. For M8's criterion, a third-party layout is a file written from the schema
+reference alone, with no Rust change, and committed as an example.
 
-**9. Distance to real specimens is a CI tripwire, not enforcement.** Where CI fetches the pinned
-corpus, a test compares renders of the built-ins, the example layouts and random accepted
-layouts with each specimen of the same format, using a margin calibrated from distances between
-editions of the same state. It ships only if that calibration shows it separates the two.
+**9. Distance to real specimens is a CI tripwire, not enforcement.** In its own advisory
+workflow, which fetches the pinned corpus and runs on generator and layout changes, a test
+compares renders of the built-ins, the example layouts and random accepted layouts with each
+specimen of the same format, using a margin calibrated from distances between editions of the
+same state. It ships only if that calibration shows it separates the two; otherwise the
+calibration is recorded and the check is rejected.
 
 ## Alternatives rejected
 
