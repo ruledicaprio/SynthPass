@@ -48,6 +48,20 @@
 # skipped, with a message, on the baseline committed today, which has
 # neither field yet.
 #
+# Checks 17-18 (#543) are the synthetic-clean row's turn: until #543 the only
+# thing this script checked about it was check 13 (a retired figure must not
+# resurface). No CI-written baseline backs this row yet, so check 17 verifies
+# the row's own arithmetic instead -- its per-format percentages (100 docs per
+# format) must sum to the stated numerator, the denominator must be 100 times
+# the number of formats listed, and numerator/denominator must equal the
+# stated rate. Check 18 compares the row against the dated note it names in
+# its own source column (falling back to the newest committed
+# `synthetic-headline-*.md` only when the row names none), on both the
+# headline numerator/denominator and any per-format figures the note states
+# in a parseable way. The row went stale once already (#510) with nothing
+# catching it -- these two checks are what #543 adds so it can't happen
+# silently again.
+#
 # Pure bash + a JSON field grep. Nothing to install.
 set -euo pipefail
 
@@ -368,6 +382,118 @@ if [ -n "$refusal_population" ]; then
     fi
 else
     echo "refusal_population not yet in the baseline -- check 16 skipped"
+fi
+
+# 17-18. The synthetic-clean row (#543): unlike the real-specimen figures
+#     above, no CI-written baseline exists for it yet, so these two checks
+#     read $bench_readme's own row and, where it names one, the dated note it
+#     cites, the gap the stale row in #510 went undetected through.
+synthetic_row="$(grep -E 'Tier-1 hit rate, synthetic clean' "$bench_readme" || true)"
+if [ -z "$synthetic_row" ]; then
+    fail "$bench_readme has no 'Tier-1 hit rate, synthetic clean' row to check."
+fi
+
+# Every "<FMT> <N>%" pair in the row, e.g. "TD3 75%" or "MRV-A 85%" -- format
+# labels are read from the row itself, not assumed, so a sixth format or a
+# renamed one is still counted correctly.
+mapfile -t syn_pairs < <(printf '%s' "$synthetic_row" | grep -oE '[A-Z][A-Z0-9]{1,3}(-[A-Z])?[[:space:]]+[0-9]{1,3}%' 2>/dev/null || true)
+syn_format_count=${#syn_pairs[@]}
+declare -A syn_row_vals=()
+syn_sum=0
+for pair in "${syn_pairs[@]:-}"; do
+    [ -n "$pair" ] || continue
+    syn_value="${pair##* }"
+    syn_value="${syn_value%\%}"
+    syn_row_vals["${pair% *}"]="$syn_value"
+    syn_sum=$((syn_sum + syn_value))
+done
+
+syn_stated="$(printf '%s' "$synthetic_row" | grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+[[:space:]]*=[[:space:]]*[0-9.]+%' | head -1 || true)"
+syn_numerator="$(printf '%s' "$syn_stated" | grep -oE '^[0-9]+' || true)"
+syn_denominator="$(printf '%s' "$syn_stated" | grep -oE '/[[:space:]]*[0-9]+' | grep -oE '[0-9]+' || true)"
+syn_rate="$(printf '%s' "$syn_stated" | grep -oE '[0-9]+\.[0-9]+' | head -1 || true)"
+
+# 17. The row's own arithmetic: at 100 documents per format, the per-format
+#     percentages must sum to the stated numerator, the denominator must be
+#     100 times the number of formats listed, and numerator/denominator must
+#     equal the stated rate at the precision printed.
+if [ -n "$synthetic_row" ]; then
+    if [ "$syn_format_count" -eq 0 ]; then
+        fail "$bench_readme's synthetic row states no per-format '<FMT> <N>%' figures."
+    elif [ -z "$syn_numerator" ] || [ -z "$syn_denominator" ] || [ -z "$syn_rate" ]; then
+        fail "$bench_readme's synthetic row does not state '<hits> / <docs> = <rate>%'."
+    else
+        syn_expected_denominator=$((100 * syn_format_count))
+        if [ "$syn_sum" -ne "$syn_numerator" ]; then
+            fail "$bench_readme's synthetic row's per-format percentages sum to ${syn_sum}; the row states the numerator as ${syn_numerator}."
+        fi
+        if [ "$syn_denominator" -ne "$syn_expected_denominator" ]; then
+            fail "$bench_readme's synthetic row denominator is ${syn_denominator}; 100 x the ${syn_format_count} formats listed is ${syn_expected_denominator}."
+        fi
+        syn_computed_rate="$(awk -v h="$syn_numerator" -v d="$syn_denominator" 'BEGIN { printf "%.1f", (h * 100.0) / d }')"
+        if [ "$syn_rate" != "$syn_computed_rate" ]; then
+            fail "$bench_readme's synthetic row states ${syn_numerator} / ${syn_denominator} = ${syn_rate}%; that computes to ${syn_computed_rate}%."
+        fi
+    fi
+fi
+
+# 18. The row against the dated note it cites as its source. Until a
+#     CI-written synthetic figure exists (there is none yet), this is the only
+#     check on the numbers' provenance. The row's own source column is
+#     preferred over globbing for the newest note -- a row can cite an older
+#     note deliberately, and a newer, unrelated note must not silence a real
+#     mismatch.
+if [ -n "$synthetic_row" ]; then
+    syn_source_col="$(printf '%s' "$synthetic_row" | awk -F'|' '{print $4}')"
+    # Anchored on the em dash that introduces the row's own citation (the
+    # source column also links older notes in prose, e.g. "Last confirmed in
+    # CI: ... ([`synthetic-headline-2026-09-25.md`]...)" -- an unanchored
+    # search for any dated-note link in the column would pick up one of those
+    # instead of the row's actual source once the primary citation is gone.
+    syn_note_name="$(printf '%s' "$syn_source_col" | grep -oE '—[[:space:]]*\[[^]]*\]\(synthetic-headline-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md\)' | head -1 | grep -oE 'synthetic-headline-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md' | tail -1 || true)"
+    # The directory is its own variable, not inlined into the glob below, so
+    # scripts/check-doc-links.sh's "knowledge/ paths cited in prose" check
+    # (which matches a run of path characters right after "knowledge/") lands
+    # on this real, existing directory instead of a truncated citation ending
+    # mid-filename, right before the glob's `*`.
+    syn_notes_dir="knowledge/benchmarks"
+    if [ -z "$syn_note_name" ]; then
+        syn_note_name="$(basename "$(ls -1 "$syn_notes_dir"/synthetic-headline-*.md 2>/dev/null | sort | tail -1)" 2>/dev/null || true)"
+    fi
+
+    if [ -z "$syn_note_name" ]; then
+        fail "$bench_readme's synthetic row names no source note, and no ${syn_notes_dir}/synthetic-headline-*.md exists to fall back to."
+    else
+        syn_note="knowledge/benchmarks/${syn_note_name}"
+        if [ ! -f "$syn_note" ]; then
+            fail "$bench_readme's synthetic row cites ${syn_note_name}, which does not exist at ${syn_note}."
+        else
+            # The first "**Observed:** <hits> / <docs>" bullet in the note --
+            # every dated synthetic note states its headline this way, though
+            # the wording around it (e.g. "on `main`" vs a bare period) is not
+            # standardized across dates, so the pattern does not require it.
+            syn_note_line="$(grep -E '\*\*Observed:\*\*[[:space:]]*[0-9]+[[:space:]]*/[[:space:]]*[0-9]+' "$syn_note" | head -1 || true)"
+            if [ -z "$syn_note_line" ]; then
+                fail "$syn_note does not state '**Observed:** <hits> / <docs>' in a parseable form -- cannot compare it to $bench_readme's row."
+            else
+                syn_note_numerator="$(printf '%s' "$syn_note_line" | grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+' | head -1 | grep -oE '^[0-9]+')"
+                syn_note_denominator="$(printf '%s' "$syn_note_line" | grep -oE '[0-9]+[[:space:]]*/[[:space:]]*[0-9]+' | head -1 | grep -oE '/[[:space:]]*[0-9]+' | grep -oE '[0-9]+')"
+                if [ -n "$syn_numerator" ] && { [ "$syn_note_numerator" != "$syn_numerator" ] || [ "$syn_note_denominator" != "$syn_denominator" ]; }; then
+                    fail "$bench_readme's synthetic row states ${syn_numerator} / ${syn_denominator}; ${syn_note} states ${syn_note_numerator} / ${syn_note_denominator}."
+                fi
+                mapfile -t syn_note_pairs < <(printf '%s' "$syn_note_line" | grep -oE '[A-Z][A-Z0-9]{1,3}(-[A-Z])?[[:space:]]+[0-9]{1,3}' 2>/dev/null || true)
+                for note_pair in "${syn_note_pairs[@]:-}"; do
+                    [ -n "$note_pair" ] || continue
+                    note_label="${note_pair% *}"
+                    note_value="${note_pair##* }"
+                    row_value="${syn_row_vals[$note_label]:-}"
+                    if [ -n "$row_value" ] && [ "$row_value" != "$note_value" ]; then
+                        fail "$bench_readme's synthetic row states ${note_label} ${row_value}%; ${syn_note} states ${note_label} ${note_value}."
+                    fi
+                done
+            fi
+        fi
+    fi
 fi
 
 if [ "$status" -eq 0 ]; then
