@@ -1,7 +1,7 @@
 # Visual inspection zone → Tier 2
 
-**Status: mostly design, partly shipped.** No `PROMPT_VERSION` has moved and no schema field
-has been added. Two pieces did land: §2.1's candidate signal was measured and **refuted**, and
+**Status: mostly design, partly shipped.** Nothing in this design has moved `PROMPT_VERSION`
+(v3 is #506's input bound, not this design) or added a schema field. Two pieces did land: §2.1's candidate signal was measured and **refuted**, and
 §5.3's holdout measurement shipped as the `SYNTHPASS_PARITY_HOLDOUT` mode in
 `crates/synthpass-llm/tests/parity.rs`. Everything else here — §2.2, §2.3, §2.4 and the rest of
 §5 — remains unbuilt design. Live numbers for anything measured here are in

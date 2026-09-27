@@ -20,7 +20,9 @@ regenerate.
 | --- | --- | --- | --- | --- |
 | 2026-09-27 | [six M6 misses attributed: one correct reading refused, three missing pairs, one cap, one date gate](#2026-09-27--six-m6-misses-attributed-one-correct-reading-refused-three-missing-pairs-one-cap-one-date-gate) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [the synthetic headline re-measured: 368 / 500, and the −2 hides 14 more correct reads](#2026-09-27--the-synthetic-headline-re-measured-368--500-and-the-2-hides-14-more-correct-reads) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-27 | [prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118](#2026-09-27--prompt-v3-moves-no-parity-field-on-the-84-fixtures-v2-reached-and-completes-all-118) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [Why `mrz` did not recover six M6 misses: one correct reading refused, three missing pairs, one cap, one date gate](m6-six-misses-repair-mechanisms-2026-09-27.md) | Observed (release `provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults, 0 outcome changes against the committed ledger; the recorded provider input of six assets replayed through an instrumented copy of the shipped parser, reproducing the dumped zone on all six) plus Derived (counterfactual replays on the same copy with one gate lifted at a time; check-digit arithmetic) | current | m6-six-misses-repair-mechanisms-2026-09-27.md |
+| 2026-09-27 | [Prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118: 50.8% reviewed, 55.3% derived](parity-prompt-v3-2026-09-27.md) | Observed (two CI `native-llm` job logs, same pinned GGUF, greedy decoding) plus Derived (per-fixture, per-field pairing of the two logs; a Python mirror of the prompt's content cleanup over the 118 tracked fixtures) | current | parity-prompt-v3-2026-09-27.md |
 | 2026-09-27 | [The synthetic headline is 368 / 500 on `main`: #468/#471 and #483 fix 15 wrong reads, and #521 costs TD1 four hits](synthetic-headline-2026-09-27.md) | Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) | current | synthetic-headline-2026-09-27.md |
 | 2026-09-26 | [Check-digit blind spots, exact — what the arithmetic can and cannot promise](checkdigit-blindspots-exact-2026-09-26.md) | Derived (closed form and exact integer enumeration, `crates/mrz/examples/checkdigit_blindspots_exact.rs`, with the laws pinned against the parser in `crates/mrz/tests/checkdigit_algebra.rs`; every measured input is cited to its note) plus one Observed count over the tracked fixtures (§4) | current | checkdigit-blindspots-exact-2026-09-26.md |
 | 2026-09-26 | [the #473 retry-stop A/B: `clean` loses hits because the parser never sees the loop's decision](#2026-09-26--the-473-retry-stop-ab-clean-loses-hits-because-the-parser-never-sees-the-loops-decision) | Observed | current | FINDINGS.md (Weak-spot findings) |
@@ -1209,3 +1211,27 @@ Tables, the per-document traces, the counterfactual arms and the invocation:
 
 Tables, the bisect, the two remaining prefix wrong accepts and what this does not claim:
 [`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md).
+
+---
+
+### 2026-09-27 — prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118
+
+**Observed**, CI: two `ci.yml` `native-llm` runs of `crates/synthpass-llm/tests/parity.rs`, same
+pinned GGUF (`6a1a2eb6…`), greedy decoding, vocabulary `b6bd1f9a5fdd108e`. The v2 run (36252511121,
+`f1072c4`) panicked on fixture 85 of 118, Romania `PE_ROU_2024`, on a 2 257-token prompt (#506).
+The v3 run (36323412121, `39345b2`, PR #533) completed all 118 and passed.
+
+- **Paired on fixtures 1–84, zero field verdicts flip:** 281 / 522 OK in both arms (reviewed
+  218 / 405, derived 63 / 117). Two values changed, wrong to a different wrong, on Germany 2018 and
+  Portugal ID 2024 back, both fixtures whose prompt v3 shortened.
+- **No run-to-run noise:** on the 81 fixtures whose prompt v3 leaves byte-identical (Derived, from
+  a Python mirror of the content cleanup), all 501 scored `actual=` values are byte-identical.
+  Only 5 of 118 prompts change under v3: Czechia 2005, Germany 2018, Portugal ID 2024 back,
+  Romania `PE_ROU_2024` and Switzerland ID 2023 back.
+- **v3 headline:** reviewed **297 / 585 = 50.8%** over 65 documents, derived **88 / 159 = 55.3%**
+  over 53, 51.7% overall; both 15% floors clear by 35–40 points. Romania scores 3 / 9.
+- **Not comparable to the 2026-09-05 58.6% / 52.5%:** 72 → 118 fixtures, reviewed 18 → 65, a
+  different vocabulary (`74aee114001a9ed2`), and edited fixtures.
+
+Tables, the mirror, the 34 fixtures v2 never reached and what this does not claim:
+[`parity-prompt-v3-2026-09-27.md`](parity-prompt-v3-2026-09-27.md).
