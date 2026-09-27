@@ -1079,6 +1079,15 @@ pub struct HitResult {
     /// this exists (the M6 TD1 root-cause diagnosis: nothing could show what
     /// OCR actually returned before the MRZ scanner ate it).
     pub raw_text: Option<String>,
+    /// `synthpass_imageprep::OcrPage::retry_stop` passthrough — why the
+    /// native retry loop stopped for this document (`"general_valid"`,
+    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`), whenever
+    /// OCR itself succeeded. `None` only on `MissReason::OcrError`, same as
+    /// `raw_text`. Added for parity with `provider-bench`'s
+    /// `DocumentDetail::retry_stop` (#498) — this synthetic report never
+    /// carried it, so a retry-arm question about the synthetic corpus had no
+    /// per-document evidence to answer it with (issue #510).
+    pub retry_stop: Option<String>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -1095,8 +1104,16 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         fastrand_seed()
     ));
     let write_result = image.save(&path);
-    let (reason, fields, line1_integrity, raw_text, names_exact, name_error, check_states) =
-        run_check(&path, write_result, ocr, expected);
+    let (
+        reason,
+        fields,
+        line1_integrity,
+        raw_text,
+        names_exact,
+        name_error,
+        check_states,
+        retry_stop,
+    ) = run_check(&path, write_result, ocr, expected);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -1109,6 +1126,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         names_exact,
         name_error,
         raw_text,
+        retry_stop,
     }
 }
 
@@ -1119,6 +1137,9 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
 /// Structured so the breakdown survives a miss: the old version returned
 /// early on a checksum failure, which threw away the read it had just
 /// obtained — precisely the read that says *which field* broke the checksum.
+/// The trailing `Option<String>` is `OcrPage::retry_stop` — `None` only when
+/// `write_result`/`ocr.recognize_detailed` themselves failed (no OCR pass
+/// ever ran), same as `raw_text`.
 type CheckOutcome = (
     Option<MissReason>,
     Vec<FieldOutcome>,
@@ -1127,6 +1148,7 @@ type CheckOutcome = (
     bool,
     Option<NameError>,
     Option<BTreeMap<&'static str, Option<bool>>>,
+    Option<String>,
 );
 
 /// Parses `expected.mrz_lines` back through the [`mrz`] parser that matches
@@ -1170,11 +1192,16 @@ fn run_check(
             false,
             None,
             None,
+            None,
         );
     }
 
-    let text = match ocr.recognize(path) {
-        Ok(text) => text,
+    // `recognize_detailed` rather than `recognize`: the latter is already a
+    // thin wrapper over the former that discards everything but `text` (see
+    // `NativeOcr::recognize`'s doc comment), so this call does no extra OCR
+    // work — it just keeps `retry_stop` this report now carries (issue #510).
+    let page = match ocr.recognize_detailed(path) {
+        Ok(page) => page,
         Err(e) => {
             return (
                 Some(MissReason::OcrError(e)),
@@ -1184,9 +1211,12 @@ fn run_check(
                 false,
                 None,
                 None,
+                None,
             )
         }
     };
+    let text = page.text;
+    let retry_stop = page.retry_stop;
 
     // Ground truth is the generator's own MRZ lines parsed back through the
     // matching per-format parser (see `parse_ground_truth_mrz`). Comparing
@@ -1209,6 +1239,7 @@ fn run_check(
                 false,
                 None,
                 None,
+                retry_stop,
             )
         }
     };
@@ -1224,6 +1255,7 @@ fn run_check(
                 false,
                 None,
                 None,
+                retry_stop,
             )
         }
     };
@@ -1258,6 +1290,7 @@ fn run_check(
             names_exact,
             name_error,
             Some(parsed_check_states),
+            retry_stop,
         );
     }
     if decoded.document_number != truth.document_number {
@@ -1272,6 +1305,7 @@ fn run_check(
             names_exact,
             name_error,
             Some(parsed_check_states),
+            retry_stop,
         );
     }
     (
@@ -1282,6 +1316,7 @@ fn run_check(
         names_exact,
         name_error,
         Some(parsed_check_states),
+        retry_stop,
     )
 }
 

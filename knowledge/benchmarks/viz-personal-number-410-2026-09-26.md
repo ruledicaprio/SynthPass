@@ -1,6 +1,14 @@
 # #410's VIZ personal number: no hit count moves on TD1, TD2 or MRV-B, but TD1 churns ten seeds
 
-**Date:** 2026-09-26 · **MAIN:** `f73fb6d` (before) and `101313e` (after: #410's generator commit on `f73fb6d`, since rebased onto `8efda99` as `6079165`; the commits in between change `synthpass-bench`'s reporting and gates (#511, #516) and `mrz`'s unwired `strip` module, but not `synthpass-gen`, the OCR path or the definition of `hit`); `f80877b` for the platform control · **DATA:** none (generated corpus, no `samples-data` input) · **Evidence:** Observed (seven local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container: TD1, TD2 and MRV-B before and after, one repeat of the after TD1 arm, one TD1 run at `f80877b`) plus Derived (per-seed comparison of the JSON reports) plus Hypothesized (the mechanism of the TD1 churn, marked where used) · **Status:** current
+**Date:** 2026-09-26 · **MAIN:** `f73fb6d` (before) and `101313e` (after: #410's generator commit on `f73fb6d`, since rebased onto `8efda99` as `6079165`; the commits in between change `synthpass-bench`'s reporting and gates (#511, #516) and `mrz`'s unwired `strip` module, but not `synthpass-gen`, the OCR path or the definition of `hit`); `f80877b` for the platform control · **DATA:** none (generated corpus, no `samples-data` input) · **Evidence:** Observed (seven local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container: TD1, TD2 and MRV-B before and after, one repeat of the after TD1 arm, one TD1 run at `f80877b`) plus Derived (per-seed comparison of the JSON reports) plus Hypothesized (the mechanism of the TD1 churn, marked where used) · **Status:** superseded by [`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md)
+
+**Correction, 2026-09-27** ([`synthetic-headline-2026-09-27.md`](synthetic-headline-2026-09-27.md)): on the
+full OCR retry path #410 does move hits. Its commit ([#521](https://github.com/ruledicaprio/SynthPass/pull/521))
+is the whole TD1 −4 (52 → 48) and TD2 +1 (72 → 73) between `1ef7426` and `739279c`, observed per
+seed. The no-move result below and its TD1 20 / 100 "the container is low" reading were most
+likely measured with `SYNTHPASS_OCR_MAX_PASSES=1` exported, which caps OCR at one pass (inferred
+from the ~1 s per document reported below; the same class of container reads TD1 52 / 100 at
+`d052ae2` with the variable unset).
 
 **2026-09-26, one cloud Linux container (4 vCPU, Intel Xeon @ 2.10 GHz), sequential runs, release
 builds sharing one target directory.** [#410](https://github.com/ruledicaprio/SynthPass/issues/410)
