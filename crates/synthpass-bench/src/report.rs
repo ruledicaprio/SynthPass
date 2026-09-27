@@ -331,10 +331,43 @@ pub struct ProviderRow {
     /// `synthpass_bench::provider_bench::ProviderReport::ocr_arms`
     /// passthrough — this run's `SYNTHPASS_OCR_*` configuration.
     pub ocr_arms: OcrArmsReport,
+    /// How many `checksum_failed_specimen` documents this provider read a
+    /// checksum-**valid** MRZ off — see
+    /// [`checksum_valid_reads_on_failed_specimens`]. The printed zone fails
+    /// its own check digits, so a read that verifies was manufactured by the
+    /// parser (issue #443). **Report-only**: the document stays in its
+    /// off-denominator bucket and no gate reads this count yet.
+    pub checksum_valid_on_failed_specimen: usize,
+}
+
+/// The `checksum_failed_specimen` documents whose read nonetheless passed
+/// every ICAO check digit, by name, in corpus order.
+///
+/// A specimen lands in `checksum_failed_specimen` because its *printed* zone
+/// fails its own check digits (`specimen_nonconforming`), and that rung files
+/// it there whatever OCR returned. So a checksum-valid read cannot become
+/// `false_positive_mrz` and the outcome ledger, which compares only the
+/// bucket, never sees it. A read that verifies on a zone that cannot verify
+/// was built by the parser, not read off the page: Argentina 2026's
+/// `damaged_pass` inserted a `V` at cell 0 and turned a TD3 passport into a
+/// weaker-checked MRV-A visa zone (#443's step 1). This is the real-specimen
+/// twin of `synthpass-bench`'s wrong accepts (#453). Report-only for now; the
+/// failing step and its re-bless come in a later change.
+pub fn checksum_valid_reads_on_failed_specimens(details: &[DocumentDetail]) -> Vec<&str> {
+    details
+        .iter()
+        .filter(|d| {
+            d.mrz_checksums_valid
+                && d.miss_reason.as_ref().map(miss_kind) == Some("checksum_failed_specimen")
+        })
+        .map(|d| d.name.as_str())
+        .collect()
 }
 
 impl From<ProviderReport> for ProviderRow {
     fn from(r: ProviderReport) -> Self {
+        let checksum_valid_on_failed_specimen =
+            checksum_valid_reads_on_failed_specimens(&r.documents_detail).len();
         Self {
             provider_id: r.provider_id,
             documents: r.documents,
@@ -395,6 +428,7 @@ impl From<ProviderReport> for ProviderRow {
             tier1_hit_rate: r.tier1_hit_rate.into(),
             strict_tier1_hit_rate: r.strict_tier1_hit_rate.into(),
             ocr_arms: r.ocr_arms.into(),
+            checksum_valid_on_failed_specimen,
         }
     }
 }
@@ -918,6 +952,58 @@ mod tests {
             retry_stop: None,
             chargrid: None,
         }
+    }
+
+    fn nonconforming_specimen() -> Option<MissReason> {
+        Some(MissReason::ChecksumFailed {
+            check_states: BTreeMap::new(),
+            specimen_nonconforming: true,
+        })
+    }
+
+    /// Issue #443: a `checksum_failed_specimen` document whose read verified
+    /// is named; one whose read failed its checksums, as the printed zone
+    /// does, is not. An ordinary `checksum_failed` miss and a `redacted_mrz`
+    /// read are other buckets with their own handling, never counted here.
+    #[test]
+    fn only_a_checksum_valid_read_on_a_nonconforming_specimen_is_counted() {
+        let mut manufactured = detail("Argentina_2026", None, nonconforming_specimen());
+        manufactured.mrz_checksums_valid = true;
+        let honest = detail("Bosnia_2013", None, nonconforming_specimen());
+        let mut ordinary = detail(
+            "Ordinary",
+            None,
+            Some(MissReason::ChecksumFailed {
+                check_states: BTreeMap::new(),
+                specimen_nonconforming: false,
+            }),
+        );
+        ordinary.mrz_checksums_valid = true;
+        let mut redacted = detail("Redacted", None, Some(MissReason::Redacted));
+        redacted.mrz_checksums_valid = true;
+        let hit = detail("Hit", None, None);
+
+        let details = vec![manufactured, honest, ordinary, redacted, hit];
+        assert_eq!(
+            checksum_valid_reads_on_failed_specimens(&details),
+            vec!["Argentina_2026"]
+        );
+
+        let row = ProviderRow::from(mrz_report_with_details(details));
+        assert_eq!(row.checksum_valid_on_failed_specimen, 1);
+        let json = serde_json::to_value(&row).expect("serialize row");
+        assert_eq!(json["checksum_valid_on_failed_specimen"], 1);
+    }
+
+    /// No such read is a measured zero in the JSON, not an absent key — the
+    /// later failing step needs the field present on every run.
+    #[test]
+    fn no_checksum_valid_read_on_a_nonconforming_specimen_reports_zero() {
+        let details = vec![detail("Bosnia_2013", None, nonconforming_specimen())];
+        assert!(checksum_valid_reads_on_failed_specimens(&details).is_empty());
+        let json = serde_json::to_value(ProviderRow::from(mrz_report_with_details(details)))
+            .expect("serialize row");
+        assert_eq!(json["checksum_valid_on_failed_specimen"], 0);
     }
 
     /// A minimal `mrz`-provider [`ProviderReport`] carrying real
