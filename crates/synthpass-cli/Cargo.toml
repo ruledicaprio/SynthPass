@@ -36,6 +36,11 @@ ocr-native-rust = ["dep:synthpass-ocr"]
 # synthpass-pipeline/synthpass-ocr and knowledge/ARCHITECTURE.md §10. Only used by the musl
 # release build.
 ocr-embedded = ["synthpass-pipeline/ocr-embedded"]
+# `synthpass fetch-models` actually downloads (issue #491) instead of only
+# printing the pinned URL/SHA-256 for a manual fetch — off by default, so the
+# default binary has no `reqwest` in its dependency graph and cannot download
+# anything, ever. See crates/synthpass-ocr/src/download.rs's module doc.
+download = ["synthpass-ocr?/download", "synthpass-pipeline/download"]
 
 [dev-dependencies]
 base64 = "0.23"

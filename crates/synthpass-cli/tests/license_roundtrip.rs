@@ -231,9 +231,11 @@ fn extraction_path_refuses_expired_license_but_skip_bypasses_the_gate() {
 
     // With SYNTHPASS_LICENSE_SKIP=1: the gate is bypassed. It will still fail
     // downstream (no real OCR models staged in this test environment), but
-    // that failure must not be the license message — and must stay local
-    // (no network), so point the OCR engine at an empty dir with
-    // auto-download off rather than let it try to fetch real models.
+    // that failure must not be the license message. The extraction path
+    // never downloads models (issue #491) — there is no auto-download flag
+    // to disable any more — so pointing the OCR engine at an empty dir is
+    // already guaranteed to stay local (no network) and fail with a named,
+    // actionable error rather than a bare I/O failure.
     let empty_model_dir = std::env::temp_dir().join(format!(
         "synthpass-cli-test-empty-model-dir-{}",
         std::process::id()
@@ -248,17 +250,28 @@ fn extraction_path_refuses_expired_license_but_skip_bypasses_the_gate() {
             license_fixture.0.to_str().unwrap(),
         )
         .env("SYNTHPASS_LICENSE_SKIP", "1")
-        .env("SYNTHPASS_OCR_AUTO_DOWNLOAD", "0")
         .env("SYNTHPASS_OCR_MODEL_DIR", &empty_model_dir)
         .output()
         .expect("run `synthpass <file>` with SYNTHPASS_LICENSE_SKIP=1");
 
     std::fs::remove_dir_all(&empty_model_dir).ok();
 
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        !String::from_utf8_lossy(&output.stderr).contains("license check failed"),
-        "SYNTHPASS_LICENSE_SKIP=1 should bypass the license gate entirely, got: {}",
-        String::from_utf8_lossy(&output.stderr)
+        !stderr.contains("license check failed"),
+        "SYNTHPASS_LICENSE_SKIP=1 should bypass the license gate entirely, got: {stderr}"
+    );
+    // Pins issue #491's contract: a missing model is a runtime/extraction
+    // failure (exit 1, ARCHITECTURE §12), and the message names the one
+    // command allowed to stage the model rather than a bare "no such file".
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "extraction with no OCR models staged must exit 1 (runtime failure), got: {output:?}"
+    );
+    assert!(
+        stderr.contains("synthpass fetch-models"),
+        "expected the missing-model error to name `synthpass fetch-models`, got: {stderr}"
     );
 }
 

@@ -48,13 +48,19 @@ Tier-2 inference to an NVIDIA GPU (~2.5×), CPU-only otherwise.
 git clone https://github.com/ruledicaprio/SynthPass.git
 cd SynthPass
 
-# Tier-2 model (~1 GB, gitignored). The two OCR .rten weights (~12 MB) download and
-# SHA-256-verify on first run.
+# Tier-2 model (~1 GB, gitignored).
 mkdir models
 curl -L -o models/qwen2.5-1.5b-instruct-q4_k_m.gguf `
   https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
 $env:SYNTHPASS_MODEL_PATH = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 $env:SYNTHPASS_OCR_MODEL_DIR = "models"
+
+# The two OCR .rten weights (~12 MB) are never downloaded implicitly (no runtime downloads
+# on the extraction path — see knowledge/project_principles.md #5). `fetch-models` prints
+# the exact curl + sha256sum commands to stage them yourself; a build with the non-default
+# `download` cargo feature (`cargo run -p synthpass-cli --features download -- fetch-models`)
+# fetches and verifies them itself instead.
+cargo run -p synthpass-cli -- fetch-models
 
 cargo run -p synthpass-cli -- doctor          # preflight: OCR, inferer, license, config
 
@@ -77,6 +83,7 @@ help text changes.*
 | To… | Run |
 | --- | --- |
 | check the install (OCR models, license, config; the Tier-2 model is optional) | `synthpass doctor` |
+| stage the OCR models (never fetched implicitly) | `synthpass fetch-models` |
 | read one document | `synthpass path/to/image.jpg` |
 | read a folder, or a quoted glob | `synthpass batch "scans/*.jpg"` |
 | make synthetic documents with ground-truth labels | `synthpass generate --count 10 --seed 42 --out-dir out/` |

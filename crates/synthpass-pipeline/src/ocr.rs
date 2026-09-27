@@ -10,6 +10,15 @@
 //! only, C library chain) was retired once the pure-Rust engine's corpus-
 //! measured Tier-1 hit rate reached 100% in v1.1.0 — see CHANGELOG.
 //!
+//! **This module never downloads anything (issue #491).** Model files
+//! (`ocr-embedded` off) must already exist under `SYNTHPASS_OCR_MODEL_DIR`
+//! before extraction runs; if either is missing, [`RustOcrEngine`] fails with
+//! a message naming `synthpass fetch-models` rather than fetching them
+//! lazily. That command — not this module, and not anything on the
+//! extraction path — is the only place a `.rten` file is ever downloaded, and
+//! only in a build with the `download` cargo feature; see
+//! `synthpass_ocr::download`'s module doc.
+//!
 //! Supported input: JPEG, PNG, WebP, TIFF, BMP, GIF (whatever the `image`
 //! crate's default features decode). Not supported: PDF (see above) and
 //! HEIC/HEIF (Apple's default photo format) — no permissively-licensed
@@ -163,18 +172,13 @@ mod rust_ocr {
 
     pub struct RustOcrEngine {
         model_dir: PathBuf,
-        // Only read on the non-`ocr-embedded` load path (see `get_or_load`
-        // below) — genuinely unused when models are compiled in instead.
-        #[cfg_attr(feature = "ocr-embedded", allow(dead_code))]
-        auto_download: bool,
         inner: OnceCell<Arc<synthpass_ocr::NativeOcr>>,
     }
 
     impl RustOcrEngine {
-        pub fn new(model_dir: impl Into<PathBuf>, auto_download: bool) -> Self {
+        pub fn new(model_dir: impl Into<PathBuf>) -> Self {
             Self {
                 model_dir: model_dir.into(),
-                auto_download,
                 inner: OnceCell::new(),
             }
         }
@@ -200,20 +204,24 @@ mod rust_ocr {
                     #[cfg(not(feature = "ocr-embedded"))]
                     {
                         let model_dir = self.model_dir.clone();
-                        let auto_download = self.auto_download;
                         tokio::task::spawn_blocking(move || {
-                            let (detection, recognition) = if auto_download {
-                                synthpass_ocr::download::ensure_models(&model_dir)?
-                            } else {
-                                (
-                                    model_dir.join(synthpass_ocr::download::DETECTION_FILENAME),
-                                    model_dir.join(synthpass_ocr::download::RECOGNITION_FILENAME),
-                                )
-                            };
+                            let detection =
+                                model_dir.join(synthpass_ocr::download::DETECTION_FILENAME);
+                            let recognition =
+                                model_dir.join(synthpass_ocr::download::RECOGNITION_FILENAME);
+                            // Never fetched here (issue #491) — a missing file
+                            // fails closed with a message naming the one
+                            // command that is allowed to fetch it, instead of
+                            // a generic "could not read file" from the sha256
+                            // check below.
+                            if let Some(msg) =
+                                missing_models_message(&model_dir, &detection, &recognition)
+                            {
+                                return Err(msg);
+                            }
                             // Verify on the actual load path, not just in `synthpass doctor` —
-                            // a tampered or corrupted-but-complete download (whether
-                            // fetched just now or cached from a previous run) must fail
-                            // closed before it's ever loaded into the OCR engine.
+                            // a tampered or corrupted-but-complete file (however it got onto
+                            // disk) must fail closed before it's ever loaded into the OCR engine.
                             if !synthpass_ocr::verify::skip_verify() {
                                 synthpass_ocr::verify::verify_detection_model(&detection)
                                     .map_err(|e| e.to_string())?;
@@ -230,6 +238,37 @@ mod rust_ocr {
                 .await
                 .cloned()
         }
+    }
+
+    /// `None` when both `.rten` files are present; otherwise an actionable
+    /// message naming `synthpass fetch-models` and the missing path(s) —
+    /// never a bare "no such file or directory" from the sha256 check that
+    /// would otherwise run next. Split out as a pure function so the
+    /// "what does a missing model say" question is unit-testable without
+    /// driving the whole async load path.
+    #[cfg(not(feature = "ocr-embedded"))]
+    fn missing_models_message(
+        model_dir: &Path,
+        detection: &Path,
+        recognition: &Path,
+    ) -> Option<String> {
+        let mut missing = Vec::new();
+        if !detection.exists() {
+            missing.push(detection.display().to_string());
+        }
+        if !recognition.exists() {
+            missing.push(recognition.display().to_string());
+        }
+        if missing.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "OCR model file(s) not found: {} — run `synthpass fetch-models` to fetch and \
+             verify them (or, in a build without the `download` feature, follow the URLs and \
+             SHA-256 hashes it prints) into {}",
+            missing.join(", "),
+            model_dir.display()
+        ))
     }
 
     /// True if `path`'s extension is HEIC/HEIF — checked ahead of the general
@@ -322,9 +361,60 @@ mod rust_ocr {
         // extension check, before `get_or_load()` ever runs — the path need
         // not even exist.
 
+        /// Pins the missing-model error's shape (issue #491): names
+        /// `synthpass fetch-models`, not a bare "no such file or directory".
+        /// This is the same check `RustOcrEngine::get_or_load` runs before
+        /// ever touching the sha256 verifier, so an empty model directory
+        /// fails with this message end to end — see
+        /// `crates/synthpass-cli/tests/doctor_ocr_models.rs` for the
+        /// process-level version of the same guarantee.
+        #[cfg(not(feature = "ocr-embedded"))]
+        #[test]
+        fn missing_models_message_names_fetch_models_command() {
+            let dir = std::env::temp_dir().join(format!(
+                "synthpass-pipeline-missing-models-{}",
+                std::process::id()
+            ));
+            let detection = dir.join("text-detection.rten");
+            let recognition = dir.join("text-recognition.rten");
+
+            let msg = missing_models_message(&dir, &detection, &recognition)
+                .expect("both files missing must produce a message");
+            assert!(
+                msg.contains("synthpass fetch-models"),
+                "message should name the command: {msg}"
+            );
+            assert!(
+                msg.contains("text-detection.rten") && msg.contains("text-recognition.rten"),
+                "message should name both missing files: {msg}"
+            );
+        }
+
+        #[cfg(not(feature = "ocr-embedded"))]
+        #[test]
+        fn missing_models_message_is_none_when_both_files_exist() {
+            let dir = std::env::temp_dir().join(format!(
+                "synthpass-pipeline-present-models-{}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let detection = dir.join("text-detection.rten");
+            let recognition = dir.join("text-recognition.rten");
+            std::fs::write(&detection, b"x").unwrap();
+            std::fs::write(&recognition, b"x").unwrap();
+
+            let result = missing_models_message(&dir, &detection, &recognition);
+
+            std::fs::remove_dir_all(&dir).ok();
+            assert!(
+                result.is_none(),
+                "both files present must not be flagged as missing"
+            );
+        }
+
         #[tokio::test]
         async fn rejects_pdf_with_an_actionable_message() {
-            let engine = RustOcrEngine::new(".", false);
+            let engine = RustOcrEngine::new(".");
             let err = engine
                 .to_markdown(Path::new("document.pdf"))
                 .await
@@ -341,7 +431,7 @@ mod rust_ocr {
 
         #[tokio::test]
         async fn rejects_heic_with_an_actionable_message() {
-            let engine = RustOcrEngine::new(".", false);
+            let engine = RustOcrEngine::new(".");
             for ext in ["heic", "heif", "HEIC"] {
                 let err = engine
                     .to_markdown(Path::new(&format!("photo.{ext}")))
@@ -379,10 +469,19 @@ pub fn engine_from_env() -> Box<dyn OcrEngine> {
              retired in v1.2.0) — using the pure-Rust engine"
         );
     }
+    // `SYNTHPASS_OCR_AUTO_DOWNLOAD` is gone (issue #491: the extraction path
+    // never downloads, full stop) — warn once rather than silently ignore it,
+    // so a config left over from before this change is visibly stale instead
+    // of quietly doing nothing.
+    if std::env::var("SYNTHPASS_OCR_AUTO_DOWNLOAD").is_ok() {
+        tracing::warn!(
+            "SYNTHPASS_OCR_AUTO_DOWNLOAD is set but no longer has any effect — the extraction \
+             path never downloads OCR models (issue #491); run `synthpass fetch-models` instead"
+        );
+    }
     let model_dir =
         std::env::var("SYNTHPASS_OCR_MODEL_DIR").unwrap_or_else(|_| DEFAULT_OCR_MODEL_DIR.into());
-    let auto_download = std::env::var("SYNTHPASS_OCR_AUTO_DOWNLOAD").as_deref() != Ok("0");
-    Box::new(RustOcrEngine::new(model_dir, auto_download))
+    Box::new(RustOcrEngine::new(model_dir))
 }
 
 #[cfg(test)]

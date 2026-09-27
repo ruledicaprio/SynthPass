@@ -16,7 +16,7 @@ The system is a **Rust-first pipeline with a deliberately narrow, swappable boun
 * **Deterministic MRZ Core (`mrz` crate, zero deps):** ICAO 9303 TD1/TD2/TD3 parsing with full 7-3-1 check-digit validation and checksum-verified OCR repair. Zero runtime dependencies, so the identical code compiles natively for the pipeline and to WebAssembly for the public browser demo.
 * **Pipeline Core (`synthpass-pipeline` crate):** Owns the end-to-end sequence — OCR → Markdown persistence → Tier 1 MRZ validation → Tier 2 `InferBackend` fallback → JSON — behind a single `process_document()` entry point. Both binaries are thin wrappers around it. Concurrency control (a single-flight semaphore + an observable queue-depth counter) lives *here*, not in the backend, so the "one concurrent Tier-2 call" invariant holds. Deliberately license-agnostic — see [§6](#6-offline-cryptographic-licensing-v080) for where enforcement actually lives.
 * **OCR Engine (pluggable behind a trait — introduced in v0.7.0):** An `OcrEngine` trait ([`crates/synthpass-pipeline/src/ocr.rs`](../crates/synthpass-pipeline/src/ocr.rs)) abstracts text extraction. One implementation exists since v1.2.0:
-  * **`RustOcrEngine`** (feature `ocr-native-rust`, **default and only**) — the [`synthpass-ocr`](../crates/synthpass-ocr/) crate loads two `.rten` weight files (text detection + recognition) via [`ocrs`](https://crates.io/crates/ocrs)/[`rten`](https://crates.io/crates/rten), fetching and SHA-256-verifying them automatically on first use, and keeps the engine warm in-process. Zero C/C++ dependencies, works unchanged on Windows. The Tesseract-based `ocr-daemon` fallback (`NativeEngine`, Linux/WSL only) was retired in v1.2.0: its justification was accuracy parity doubt about the then-new `ocrs` engine, and v1.1.0's measured 6/6 (100%) Tier-1 hit rate on the v1.1.0 six-document corpus — achieved by absorbing `ocr-daemon`'s own preprocessing techniques into `synthpass-ocr` — closed that question.
+  * **`RustOcrEngine`** (feature `ocr-native-rust`, **default and only**) — the [`synthpass-ocr`](../crates/synthpass-ocr/) crate loads two `.rten` weight files (text detection + recognition) via [`ocrs`](https://crates.io/crates/ocrs)/[`rten`](https://crates.io/crates/rten) from `SYNTHPASS_OCR_MODEL_DIR`, SHA-256-verifying them on load, and keeps the engine warm in-process. **Never fetches them itself** (issue #491): a missing file fails closed with a message naming `synthpass fetch-models`, the one command allowed to stage them — see [§12](#12-configuration-reference)'s OCR table. Zero C/C++ dependencies, works unchanged on Windows. The Tesseract-based `ocr-daemon` fallback (`NativeEngine`, Linux/WSL only) was retired in v1.2.0: its justification was accuracy parity doubt about the then-new `ocrs` engine, and v1.1.0's measured 6/6 (100%) Tier-1 hit rate on the v1.1.0 six-document corpus — achieved by absorbing `ocr-daemon`'s own preprocessing techniques into `synthpass-ocr` — closed that question.
 
   The engine is image-only. **Supported input formats:** JPEG, PNG, WebP, TIFF, BMP, GIF (whatever the `image` crate's default features decode) — covers Android's default camera formats and general use. **Not supported:** PDF (no OCR engine parses it as of v0.7.5 — see below) and HEIC/HEIF, Apple's default photo format since iOS 11 (no permissively-licensed pure-Rust decoder exists; the two that do are AGPL-3.0, which would force this MIT-licensed, commercially-offline-licensed binary to AGPL too — see [§8](#8-known-limitations--what-tier-2-accuracy-actually-looks-like)). Both are rejected with a clear, actionable error rather than a silent or generic failure. In practice this is less limiting than it sounds: many iOS share/export flows already convert HEIC to JPEG automatically.
 * **Inference Engine (pluggable behind a trait — introduced in v0.6.0):** An `InferBackend` trait ([`crates/synthpass-pipeline/src/infer.rs`](../crates/synthpass-pipeline/src/infer.rs)) abstracts *how* Tier 2 turns OCR Markdown into a structured `Extraction`. One implementation exists today:
@@ -24,7 +24,7 @@ The system is a **Rust-first pipeline with a deliberately narrow, swappable boun
 
   The trait boundary itself is still earned even with one backend: it's the seam the pipeline's own tests mock against (a plain in-process `InferBackend` impl, no network server needed), and it's what let v0.6.0 swap the default from a Python sidecar to in-process inference with zero changes to `synthpass-cli`/`synthpass-serve` beyond a health-check label.
 * **Licensing (`synthpass-license` crate, introduced in v0.8.0):** Ed25519 sign/verify, machine fingerprinting, and a separate vendor-only issuer binary — see [§6](#6-offline-cryptographic-licensing-v080) for the full design.
-* **Orchestration Layer (`synthpass-cli`, binary `synthpass`):** A lightweight asynchronous Rust client handling local file system I/O, CLI argument validation, `synthpass doctor` (preflight: OCR + inferer + license, config sanity), `synthpass batch`, `synthpass generate`, `synthpass export`, `synthpass decrypt`, `synthpass fingerprint`, and `synthpass verify-license`.
+* **Orchestration Layer (`synthpass-cli`, binary `synthpass`):** A lightweight asynchronous Rust client handling local file system I/O, CLI argument validation, `synthpass doctor` (preflight: OCR + inferer + license, config sanity), `synthpass fetch-models` (the only place an OCR model is ever fetched, issue #491), `synthpass batch`, `synthpass generate`, `synthpass export`, `synthpass decrypt`, `synthpass fingerprint`, and `synthpass verify-license`.
 * **Web Front-End (`synthpass-serve`, axum):** Exposes the same pipeline as an upload page and a JSON API, with bearer-token auth, license enforcement, and optional rustls TLS, and forwards Tier-2 token deltas to the browser over SSE so uploads show live progress instead of a frozen status line.
 
 ## 3. Why the Inference Engine Became Pluggable
@@ -269,13 +269,23 @@ cross-reference this table by hand.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`) |
-| `SYNTHPASS_OCR_AUTO_DOWNLOAD` | `1` | Fetch missing `.rten` files automatically; `0` requires pre-staged files |
+| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`); also where `synthpass fetch-models` stages them |
 | `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
 | `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
 | `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `7` / `45` | Bound the MRZ retry loop |
 | `SYNTHPASS_OCR_VERBOSE` | *(unset)* | `1` logs per-pass timing and region counts |
 | `SYNTHPASS_OCR_ENGINE` | `rust` | Only `rust` since v1.2.0; any other value warns and falls back |
+
+`SYNTHPASS_OCR_AUTO_DOWNLOAD` is gone (issue #491): the extraction path never downloads
+models, full stop — a missing `.rten` file fails with an actionable message naming
+`synthpass fetch-models` (exit 1, the runtime/extraction-failure bucket below) instead of
+fetching one lazily. If the variable is still set, `synthpass` logs one warning that it no
+longer has any effect. `synthpass fetch-models` is the only place a model file is ever
+fetched: a default build prints each model's pinned URL and SHA-256 (and the target
+directory) for a manual `curl` + `sha256sum`; a build with the non-default `download` cargo
+feature (propagated from `synthpass-ocr` through `synthpass-pipeline` to `synthpass-cli`, so
+a default binary has no `reqwest` in its dependency graph at all) downloads and verifies them
+itself, deleting and failing on a checksum mismatch.
 
 **Tier-2 model**
 
@@ -348,7 +358,13 @@ Notable specifics, where the bucket isn't obvious from the table alone:
   already printed its own diagnostic line, so the exit code carries no separate message. The
   Tier-2 model is required only when `SYNTHPASS_MODEL_PATH` is set (#496); otherwise a failed
   Tier-2 check prints a `⚠️` line and leaves the exit code alone.
-- `generate`/`fingerprint` need no license and never exit 3.
+- `generate`/`fingerprint`/`fetch-models` need no license and never exit 3.
+- extraction (single-document or `batch`) with a missing OCR model file exits 1, the same
+  runtime/extraction-failure bucket any other pipeline error uses — not a separate code, since
+  the model was never fetched implicitly and this is exactly the "the pipeline could not run"
+  case that bucket already covers (issue #491). `synthpass fetch-models`'s own exit code
+  follows the same table: 0 once every model is present and verified (whether freshly fetched
+  or already staged), 1 if any fetch or verification fails.
 
 Implemented as one small typed `Exit` enum in `synthpass-cli/src/main.rs`, converted to
 `std::process::ExitCode` exactly once in `main` — no `std::process::exit` call exists anywhere in

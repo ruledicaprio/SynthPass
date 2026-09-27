@@ -1095,7 +1095,7 @@ mod tests {
 
     fn metrics_app(license: Option<synthpass_license::LicensePayload>) -> Router {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let state = Arc::new(AppState {
@@ -1199,7 +1199,7 @@ mod tests {
     #[test]
     fn metrics_text_histogram_buckets_are_monotonic_and_end_at_inf() {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let body = metrics_text(&pipeline.metrics_snapshot());
@@ -1220,7 +1220,7 @@ mod tests {
     #[test]
     fn metrics_text_never_contains_a_dynamic_label() {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let body = metrics_text(&pipeline.metrics_snapshot());
@@ -1266,7 +1266,7 @@ mod tests {
     #[tokio::test]
     async fn extract_rejects_with_503_when_queue_is_full() {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         // max_queue_depth: 0 means "full" even with zero in-flight requests —
@@ -1304,7 +1304,7 @@ mod tests {
     #[tokio::test]
     async fn extract_rejects_with_503_when_license_expired() {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let state = Arc::new(AppState {
@@ -1339,7 +1339,7 @@ mod tests {
 
     fn health_app(license_expires_unix: Option<u64>) -> Router {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let state = Arc::new(AppState {
@@ -1394,7 +1394,7 @@ mod tests {
     /// middleware itself).
     fn state_with_token(token: Option<&str>) -> Arc<AppState> {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         Arc::new(AppState {
@@ -1468,7 +1468,7 @@ mod tests {
         max_queue_depth: usize,
     ) -> Arc<AppState> {
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         Arc::new(AppState {
@@ -1524,7 +1524,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&work_dir).expect("create work dir");
         let pipeline = Pipeline::new(
-            Box::new(RustOcrEngine::new(".", false)),
+            Box::new(RustOcrEngine::new(".")),
             Box::new(NativeInferer::new("nonexistent.gguf", 2048)),
         );
         let state = Arc::new(AppState {

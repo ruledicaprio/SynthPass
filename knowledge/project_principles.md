@@ -91,6 +91,15 @@ baking `.rten` weights in via `include_bytes!`; prompts compiled in via
 `include_str!` with no runtime override. A feature that requires a network call
 at extraction time is out of scope by definition.
 
+The OCR model fetch used to be the one exception: `synthpass-pipeline`'s OCR call fetched a
+missing `.rten` file lazily by default (`SYNTHPASS_OCR_AUTO_DOWNLOAD`), so a first run on a
+fresh install made a network call unless that variable was explicitly set to `0` — a runtime
+default, not a compile-time guarantee. Issue #491 closed it: `reqwest` moved behind a
+non-default `download` cargo feature (`crates/synthpass-ocr/Cargo.toml`, propagated through
+`synthpass-pipeline`/`synthpass-cli`), so a default binary has no HTTP client in its
+dependency graph at all, and the only place a model is ever fetched is the explicit
+`synthpass fetch-models` command — never the extraction path.
+
 ---
 
 ## 6. Benchmark everything. Never trust anecdotes.
