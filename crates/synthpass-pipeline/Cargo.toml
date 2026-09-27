@@ -29,6 +29,15 @@ inferer-native = ["dep:synthpass-llm"]
 # Bake the .rten OCR models into the binary at compile time (off by default —
 # only the musl release build turns this on; see knowledge/ARCHITECTURE.md §10).
 ocr-embedded = ["ocr-native-rust", "synthpass-ocr/embedded-models"]
+# Forwards to `synthpass-ocr/download` (issue #491) — off by default, so a
+# default build never links `reqwest`. `synthpass-pipeline` itself never calls
+# any network code (the extraction path never downloads); this feature exists
+# so `synthpass-cli`'s `fetch-models` command can request it through the same
+# feature name at the top of the dependency graph. The weak `?` means turning
+# this on doesn't also turn on `ocr-native-rust` — it only takes effect if
+# that's on too, which is the only configuration where `synthpass-ocr` is even
+# compiled.
+download = ["synthpass-ocr?/download"]
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net"] }

@@ -32,7 +32,6 @@ fn run_doctor(model_dir: &std::path::Path, extra_env: &[(&str, &str)]) -> std::p
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_synthpass"));
     cmd.arg("doctor")
         .env("SYNTHPASS_LICENSE_SKIP", "1")
-        .env("SYNTHPASS_OCR_AUTO_DOWNLOAD", "0")
         .env("SYNTHPASS_OCR_MODEL_DIR", model_dir);
     for (k, v) in extra_env {
         cmd.env(k, v);
@@ -110,6 +109,32 @@ fn doctor_warns_and_still_checks_ocr_models_when_engine_var_is_native() {
     assert!(
         stdout.contains("OCR (rust)"),
         "expected the real (rust) OCR engine to still be checked, got:\n{stdout}"
+    );
+    assert!(
+        !output.status.success(),
+        "the model dir is empty, so doctor must still fail overall, got:\n{stdout}"
+    );
+}
+
+/// Issue #491: a missing OCR model must be advised, in `doctor`'s own output,
+/// with the one command that can stage it — not left as a bare "missing"
+/// with no next step, and never advising the retired
+/// `SYNTHPASS_OCR_AUTO_DOWNLOAD` flag.
+#[test]
+fn doctor_missing_model_advice_names_fetch_models() {
+    let dir = std::env::temp_dir().join(format!(
+        "synthpass-cli-doctor-missing-model-advice-{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&dir).expect("create empty model dir");
+    let _guard = TempDirGuard(dir.clone());
+
+    let output = run_doctor(&dir, &[]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("synthpass fetch-models"),
+        "expected the missing-model line to name `synthpass fetch-models`, got:\n{stdout}"
     );
     assert!(
         !output.status.success(),
