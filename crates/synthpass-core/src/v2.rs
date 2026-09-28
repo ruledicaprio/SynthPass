@@ -128,6 +128,20 @@ pub struct ExtractionV2 {
     /// model does not make the zone unreadable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub line1_integrity: Option<crate::fusion::Verdict>,
+    /// ICAO fields the image showed covered — a uniform fill or blur over
+    /// one or more MRZ cells (ADR-0026). Sorted and deduplicated; omitted
+    /// when empty, so a record with no occlusion serializes
+    /// byte-identically to one from before this field existed.
+    ///
+    /// A field named here is `null` in [`fields`](Self::fields) and
+    /// [`FieldConfidence::OCCLUDED`] in [`confidence`](Self::confidence).
+    /// That keeps three states apart, all otherwise indistinguishable on
+    /// the wire: covered (`null`, listed here), read as nothing (`""`), and
+    /// simply not read (`null`, unlisted). v1 — which has no status
+    /// vocabulary — carries only the `null`; see `knowledge/V2-DESIGN.md`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[zeroize(skip)]
+    pub occluded: Vec<CoreField>,
     /// Date-plausibility summary — unchanged semantics from v1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[zeroize(skip)]
@@ -174,6 +188,7 @@ impl Default for ExtractionV2 {
             provenance: Provenance::default(),
             mrz: None,
             line1_integrity: None,
+            occluded: Vec::new(),
             validity: None,
             portrait: None,
             barcodes: Vec::new(),
@@ -510,7 +525,32 @@ impl FieldConfidence {
     /// carries — the field can be promoted to full confidence even though
     /// the rest of the record stays at its heuristic score.
     pub fn prove(&mut self, field: CoreField) {
-        let slot = match field {
+        *self.slot_mut(field) = PROVEN;
+    }
+
+    /// Nothing is asserted: the field's value was withheld because the
+    /// image showed the covering cell(s) occluded (ADR-0026), not because
+    /// nothing was read. Deliberately the lowest band — below
+    /// [`IMPLAUSIBLE`] — because an implausible value is still a claim the
+    /// model made; an occluded field makes no claim at all. Callers pair
+    /// this with listing `field` in [`ExtractionV2::occluded`] and setting
+    /// it to `None` in [`ExtractionFields`], which is what actually removes
+    /// the value — this method only ever touches the confidence score.
+    pub const OCCLUDED: f32 = 0.0;
+
+    /// Set a single field to [`Self::OCCLUDED`] — [`Self::prove`]'s opposite
+    /// number. See [`Self::OCCLUDED`]'s own doc comment for what else a
+    /// caller must do alongside this.
+    pub fn occlude(&mut self, field: CoreField) {
+        *self.slot_mut(field) = Self::OCCLUDED;
+    }
+
+    /// The mutable slot for `field` — the write-side counterpart to
+    /// [`Self::score`], and the one place [`Self::prove`] and
+    /// [`Self::occlude`] both reach into so the field ↔ slot mapping can
+    /// never drift between the two.
+    fn slot_mut(&mut self, field: CoreField) -> &mut f32 {
+        match field {
             CoreField::DocumentType => &mut self.document_type,
             CoreField::IssuingCountry => &mut self.issuing_country,
             CoreField::DocumentNumber => &mut self.document_number,
@@ -523,8 +563,7 @@ impl FieldConfidence {
             CoreField::PersonalNumber => &mut self.personal_number,
             CoreField::OptionalData1 => &mut self.optional_data_1,
             CoreField::OptionalData2 => &mut self.optional_data_2,
-        };
-        *slot = PROVEN;
+        }
     }
 }
 
@@ -767,6 +806,13 @@ pub enum EscalationKind {
     Line1Flagged,
     /// The recognized text fell below the plausibility floor.
     OcrBelowSanityFloor,
+    /// A mask derived from the image covered a cell an ICAO check digit
+    /// verifies (or the format's one structural cell), so the zone was
+    /// refused rather than read (ADR-0026, decision 7:
+    /// `mrz::MrzError::OccludedCheckedCell`). Distinct from
+    /// [`Self::MrzChecksumFailed`]: nothing failed to verify here — the
+    /// value the check digit would verify was never reported at all.
+    MrzOccluded,
 }
 
 /// Which prompt produced a model-generated record.
@@ -787,6 +833,51 @@ pub struct PromptRef {
     pub version: u32,
     /// First 8 hex characters of `sha256(body)`.
     pub digest: String,
+}
+
+/// Kind of image-derived occlusion over one or more MRZ cells (ADR-0026).
+/// Describes what the pixels show, never who covered them or why — see
+/// `knowledge/V2-DESIGN.md`'s occlusion section and
+/// [`VISION.md`](https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/VISION.md)'s
+/// permanent non-goal against any authenticity or tamper judgement.
+///
+/// `#[non_exhaustive]`: a later detector (mosaic, textured patch — see
+/// ADR-0026's Consequences) is an additive variant, not a wire break for a
+/// consumer that already matches `Fill`/`Blur` and falls through otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum OcclusionKind {
+    /// A uniform fill of any tone — black, white or grey.
+    Fill,
+    /// Blur, measured against the zone's own verified line.
+    Blur,
+}
+
+/// One contiguous run of covered cells on one line of an MRZ zone, as the
+/// image showed it — never the covered text itself, so a span stays
+/// PII-free by construction (ADR-0026, decision 5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OcclusionSpan {
+    /// Zero-based line index within the MRZ zone, matching
+    /// [`mrz::MrzError::OccludedCheckedCell`]'s own `line` and
+    /// [`MrzBlock::lines`]'s line order.
+    pub line: u8,
+    /// Zero-based column of the first covered cell in `line`, inclusive.
+    pub first: u8,
+    /// Zero-based column of the last covered cell in `line`, inclusive.
+    pub last: u8,
+    pub kind: OcclusionKind,
+}
+
+/// Positions the image showed covered inside one MRZ zone (ADR-0026) — the
+/// per-document observation [`ExtractionTrace::mrz_occlusion`] carries.
+/// Never the covered text itself: only cell positions and a fill/blur
+/// classification, so this stays PII-free even though it always accompanies
+/// a PII-bearing record.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MrzOcclusion {
+    pub spans: Vec<OcclusionSpan>,
 }
 
 /// How a record was produced: which providers were consulted, why anything
@@ -832,18 +923,28 @@ pub struct ExtractionTrace {
     /// same configuration. See principles 3 and 7.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub config_overrides: BTreeMap<String, String>,
+    /// Which MRZ cells the image showed covered (ADR-0026), when detection
+    /// ran and found any. A **per-document observation**, not configuration —
+    /// it sits beside [`escalation`](Self::escalation), never inside
+    /// [`config_overrides`](Self::config_overrides), which is configuration
+    /// only. `None` when no occlusion detector ran, or one ran and found
+    /// nothing to report — both indistinguishable on the wire, matching
+    /// every other `Option` field here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mrz_occlusion: Option<MrzOcclusion>,
 }
 
 impl ExtractionTrace {
     /// Nothing worth recording — no providers, no escalation, no prompt, no
-    /// non-default configuration. Callers use this to decide whether to
-    /// attach a trace at all, keeping the key off records that would carry
-    /// an empty object.
+    /// non-default configuration, no occlusion. Callers use this to decide
+    /// whether to attach a trace at all, keeping the key off records that
+    /// would carry an empty object.
     pub fn is_empty(&self) -> bool {
         self.providers.is_empty()
             && self.escalation.is_none()
             && self.prompt.is_none()
             && self.config_overrides.is_empty()
+            && self.mrz_occlusion.is_none()
     }
 }
 
@@ -1095,6 +1196,11 @@ impl From<&Extraction> for ExtractionV2 {
             // (`extraction_v2_from_mrz`) has the real value and sets it
             // directly.
             line1_integrity: None,
+            // v1 carries no occlusion vocabulary at all (ADR-0026; `null` is
+            // the only state it can express), so the lift cannot recover
+            // which fields, if any, were covered — see
+            // `lift_never_recovers_occlusion_v1_has_no_vocabulary_for` below.
+            occluded: Vec::new(),
             validity: v1.validity,
             portrait: None,
             barcodes: Vec::new(),
@@ -1379,7 +1485,14 @@ mod tests {
         let v2 = ExtractionV2::from(v1);
         let obj = serde_json::to_value(&v2).unwrap();
         let obj = obj.as_object().unwrap();
-        for key in ["mrz", "validity", "portrait", "barcodes", "documents"] {
+        for key in [
+            "mrz",
+            "validity",
+            "portrait",
+            "barcodes",
+            "documents",
+            "occluded",
+        ] {
             assert!(!obj.contains_key(key), "empty slot leaked: {key}");
         }
         for key in [
@@ -1406,5 +1519,129 @@ mod tests {
         assert_eq!(confidence.sex, IMPLAUSIBLE);
         // An unrelated field must survive at its prior score, untouched.
         assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
+    }
+
+    // ── ADR-0026: occlusion ──
+
+    #[test]
+    fn a_record_with_no_occlusion_serializes_byte_identically_to_before_it_existed() {
+        // The exact JSON this crate produced before `occluded` existed,
+        // captured from `v2_json_shape_snapshot_croatian_specimen` above —
+        // pinned as a literal string, not re-derived, so a stray key can't
+        // sneak past a structural `Value` comparison.
+        let before = serde_json::json!({
+            "schema_version": 2,
+            "document": { "kind": "passport", "mrz_format": "td3" },
+            "fields": {
+                "document_type": "P",
+                "issuing_country": "HRV",
+                "issuing_country_name": "Croatia",
+                "document_number": "007007007",
+                "surname": "SPECIMEN",
+                "given_names": "SPECIMEN",
+                "nationality": "HRV",
+                "nationality_name": "Croatia",
+                "date_of_birth": "1982-12-25",
+                "sex": "F",
+                "date_of_expiry": "2014-07-01",
+                "personal_number": null,
+                "optional_data_1": null,
+                "optional_data_2": null
+            },
+            "confidence": {
+                "document_type": MRZ_STRUCTURAL,
+                "issuing_country": MRZ_STRUCTURAL,
+                "document_number": 1.0,
+                "surname": MRZ_STRUCTURAL,
+                "given_names": MRZ_STRUCTURAL,
+                "nationality": MRZ_STRUCTURAL,
+                "date_of_birth": 1.0,
+                "sex": MRZ_STRUCTURAL,
+                "date_of_expiry": 1.0,
+                "personal_number": 1.0,
+                "optional_data_1": MRZ_STRUCTURAL,
+                "optional_data_2": MRZ_STRUCTURAL
+            },
+            "provenance": { "kind": "mrz_checksum" },
+            "mrz": {
+                "lines": "P<HRVSPECIMEN<<SPECIMEN<<<<<<<<<<<<<<<<<<<<<\n0070070071HRV8212258F1407019<<<<<<<<<<<<<<06",
+                "format": "td3",
+                "checks": {
+                    "document_number": true,
+                    "date_of_birth": true,
+                    "date_of_expiry": true,
+                    "personal_number": true,
+                    "composite": true
+                }
+            },
+            "extraction_method": "mrz-deterministic"
+        });
+        let got = serde_json::to_value(ExtractionV2::from(croatian_specimen_v1())).unwrap();
+        assert_eq!(
+            got, before,
+            "no producer sets `occluded`/`mrz_occlusion` yet — a record \
+             without them must be indistinguishable from one built before \
+             either field existed, including the absence of the keys"
+        );
+    }
+
+    #[test]
+    fn occluded_field_is_null_and_at_the_occluded_confidence_band() {
+        let mut v2 = ExtractionV2::from(croatian_specimen_v1());
+        v2.fields.set(CoreField::GivenNames, None);
+        v2.confidence.occlude(CoreField::GivenNames);
+        v2.occluded = vec![CoreField::GivenNames];
+
+        let json = serde_json::to_value(&v2).unwrap();
+        assert_eq!(json["fields"]["given_names"], serde_json::Value::Null);
+        assert_eq!(json["confidence"]["given_names"], 0.0);
+        assert_eq!(json["occluded"], serde_json::json!(["given_names"]));
+        // A field this crate never touched keeps reading its own value —
+        // occlusion of one field must not blank another.
+        assert_eq!(json["fields"]["surname"], "SPECIMEN");
+    }
+
+    #[test]
+    fn occluded_list_is_sorted_and_deduplicated_on_the_wire() {
+        let mut v2 = ExtractionV2::from(croatian_specimen_v1());
+        // Deliberately out of `CoreField::ALL` order and with a duplicate —
+        // a caller (`synthpass-die`'s occlusion wiring) must never rely on
+        // getting a clean list from upstream.
+        v2.occluded = vec![
+            CoreField::GivenNames,
+            CoreField::Surname,
+            CoreField::GivenNames,
+        ];
+        v2.occluded.sort();
+        v2.occluded.dedup();
+        assert_eq!(v2.occluded, vec![CoreField::Surname, CoreField::GivenNames]);
+        let json = serde_json::to_value(&v2).unwrap();
+        assert_eq!(
+            json["occluded"],
+            serde_json::json!(["surname", "given_names"])
+        );
+    }
+
+    /// v1 has no way to say "this field was covered" — a `None` there is
+    /// indistinguishable from "never read". The lift is honest about that:
+    /// it cannot invent an `occluded` list v1 never carried, so lifting a
+    /// record that (by construction, from a hypothetical occluded read)
+    /// carries `None` for a field produces a v2 record with that field
+    /// `None` and **not** listed in `occluded` — the known limitation
+    /// `knowledge/V2-DESIGN.md` documents.
+    #[test]
+    fn lift_never_recovers_occlusion_v1_has_no_vocabulary_for() {
+        let mut v1 = croatian_specimen_v1();
+        // Stand in for what a Tier-1 occluded read would have left in v1:
+        // the field is simply absent, exactly like a field that was never
+        // read at all.
+        v1.given_names = None;
+        let v2 = ExtractionV2::from(v1);
+        assert_eq!(v2.fields.given_names, None);
+        assert!(
+            v2.occluded.is_empty(),
+            "the lift must not guess that an absent v1 field was occluded \
+             rather than simply missing — v1 cannot distinguish the two"
+        );
     }
 }

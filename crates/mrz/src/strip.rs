@@ -24,8 +24,12 @@ const VISA_CODE: u64 = glyph(b'V');
 const ID_CODE: u64 = glyph(b'I') | glyph(b'A') | glyph(b'C');
 const WEIGHTS: [u8; 3] = [7, 3, 1];
 
+/// Which printed field a cell belongs to. Crate-private: `apply_occlusion`
+/// (`occlusion.rs`) reads it to decide which [`crate::ZoneField`] an
+/// unverifiable masked cell withholds; a public API for this vocabulary
+/// needs its own ADR (#551, #421).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Field {
+pub(crate) enum Field {
     DocumentCode,
     Issuer,
     Name,
@@ -69,10 +73,14 @@ struct WeightedCheck {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct CellSpec {
-    line: u8,
-    column: u8,
-    field: Field,
+pub(crate) struct CellSpec {
+    /// Zero-based line within the zone. Crate-private visibility, read by
+    /// `occlusion.rs` to match a masked [`crate::CellMask`] position.
+    pub(crate) line: u8,
+    /// Zero-based column within `line`.
+    pub(crate) column: u8,
+    /// Which printed field this cell belongs to.
+    pub(crate) field: Field,
     allowed: u64,
     local: Option<WeightedCheck>,
     composite_weight: Option<u8>,
@@ -99,8 +107,9 @@ impl CellSpec {
 
 /// The reason a passing parse gives (or withholds) evidence about a cell's
 /// printed content — the coverage map's classification (GitHub issue #421).
+/// Crate-private; `occlusion.rs` is its first production reader (#565).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CellClass {
+pub(crate) enum CellClass {
     /// Feeds a local check, the composite, or is a check-digit cell itself:
     /// [`CellSpec::local`], `composite_weight` or `compared_against` is `Some`.
     CheckCovered,
@@ -142,7 +151,7 @@ impl CellSpec {
     /// this type can hold maps to exactly one variant, with no fourth case
     /// and no panic. `cell_class_map_is_total_and_names_the_only_structural_cell`
     /// pins that a direct parser enforces exactly one such cell per format.
-    fn class(self) -> CellClass {
+    pub(crate) fn class(self) -> CellClass {
         if !self.unchecked_data() {
             CellClass::CheckCovered
         } else if self.line == 0 && self.column == 0 {
@@ -154,13 +163,18 @@ impl CellSpec {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum OverflowEncoding {
+pub(crate) enum OverflowEncoding {
     Spec,
     Legacy,
 }
 
+/// Which of the four layouts `for_lines` resolved. Crate-private:
+/// `occlusion.rs` only ever compares a whole value against `Ordinary`, since
+/// #519 left the three overflow variants outside this coverage map's
+/// guarantees (`apply_occlusion` refuses any masked cell outside the name
+/// field whenever `mode != Ordinary`, regardless of the cell's own class).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LayoutMode {
+pub(crate) enum LayoutMode {
     Ordinary,
     Td1Overflow(OverflowEncoding),
     Td2Overflow(OverflowEncoding),
@@ -168,12 +182,21 @@ enum LayoutMode {
 }
 
 #[derive(Debug)]
-struct Template {
+pub(crate) struct Template {
+    // Read only by this module's own `#[cfg(test)]` assertions
+    // (`assert_agreement`'s shape checks), not by `occlusion.rs`: it derives
+    // a cell's line/column, and the name field's bounds, from `cells`
+    // itself instead of recomputing them from these.
+    #[allow(dead_code)]
     format: Format,
-    mode: LayoutMode,
+    /// Which layout this zone resolved to. See [`LayoutMode`].
+    pub(crate) mode: LayoutMode,
+    #[allow(dead_code)]
     line_width: usize,
+    #[allow(dead_code)]
     line_count: usize,
-    cells: Vec<CellSpec>,
+    /// Every cell of the zone's grid, in row-major (line, column) order.
+    pub(crate) cells: Vec<CellSpec>,
 }
 
 const fn profile(field: Field) -> (u64, EditPolicy) {
@@ -345,7 +368,12 @@ const MRV_B: [CellSpec; 72] = two_line::<72>(36, false, true);
 /// Resolve the parser's conditional layout. TD3's overflow is a crate extension
 /// by analogy with Parts 5/6; Part 4 defines no such encoding. Visas never
 /// select overflow. Legacy mode reflects this crate's pre-0.6 emission only.
-fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
+///
+/// Crate-private: `occlusion.rs`'s `apply_occlusion` (#565) is this
+/// function's first production caller, re-deriving the template from a zone
+/// that has already parsed, where cell *k* is line position *k* by
+/// construction. A public API for this map needs its own ADR (#551, #421).
+pub(crate) fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
     let (width, count, base): (usize, usize, &[CellSpec]) = match format {
         Format::Td1 => (30, 3, &TD1),
         Format::Td2 => (36, 2, &TD2),
