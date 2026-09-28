@@ -700,11 +700,13 @@ fn run_synthetic_origin_probe(
             }
             // Ground truth, exact by construction: `layout::mrz_char_rect_for_line`
             // (the renderer's own per-cell placement) uses `line.x` as cell 0's
-            // left edge and `line.width / mrz_chars` (integer division) as the
-            // pitch — this mirrors that arithmetic exactly rather than
-            // approximating it.
+            // left edge and its own cell width as the pitch — read straight
+            // from that function rather than recomputing it, so this cannot
+            // drift from the renderer again (#411).
             let true_origin_px = f64::from(line_rect.x);
-            let true_pitch_px = f64::from(line_rect.width / page.mrz_chars);
+            let true_pitch_px = f64::from(
+                synthpass_gen::layout::mrz_char_rect_for_line(line_rect, page.mrz_chars, 0).width,
+            );
 
             let Some(raw_name_line) = labels.mrz_lines.get(name_idx) else {
                 fit_failed += 1;

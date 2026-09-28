@@ -163,7 +163,7 @@ fn draw_glyph_text(
 }
 
 /// Draws one MRZ character per fixed-width cell from
-/// [`layout::mrz_char_rect`], centering each glyph within its own cell
+/// [`layout::mrz_char_rect_for_line`], centering each glyph within its own cell
 /// instead of flowing by the font's natural advance. MRZ text is checksum-
 /// validated after OCR, so cross-character drift from an advance/cell-width
 /// mismatch (which compounds over all 44 columns) must not be allowed to

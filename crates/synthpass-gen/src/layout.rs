@@ -92,7 +92,7 @@ pub const WATERMARK: Rect = Rect::new(60, 470, 1080, 60);
 
 /// TD3's own two MRZ lines, bottom-anchored.
 fn td3_mrz_lines() -> Vec<Rect> {
-    let mrz_width = 1080;
+    let mrz_width = TD3_MRZ_CHARS * MRZ_CELL_WIDTH;
     let start_y = 720;
     vec![
         Rect::new(60, start_y, mrz_width, MRZ_LINE_HEIGHT),
@@ -117,6 +117,23 @@ pub const MRVB_MRZ_CHARS: u32 = 36;
 /// consistent regardless of which card the line sits on.
 pub const MRZ_LINE_HEIGHT: u32 = 50;
 pub const MRZ_LINE_SPACING: u32 = 5;
+
+/// The MRZ character pitch, in pixels, shared by every format's MRZ cells —
+/// one physical constant instead of each line rect's width divided by its
+/// character count.
+///
+/// **Derivation** (`knowledge/ocrb/line-and-pitch.md`,
+/// [#411](https://github.com/ruledicaprio/SynthPass/issues/411)):
+/// ICAO's fixed MRZ pitch is 2.54 mm (Doc 9303-3 §4.4 / ISO 1073-2 §3.8)
+/// against OCR-B's 2.46 mm nominal capital height, a ratio of 1.033 cap.
+/// `render.rs` rasterizes the vendored font at `px_scale = MRZ_LINE_HEIGHT as
+/// f32 * 0.8 = 40` px, where 1 font unit = `40 / 1651` px (`hhea` ascender
+/// 1319 minus descender −332); at the font's 885-unit flat-capital median
+/// that is a rendered cap of 21.44 px. 2.54 / 2.46 × 21.44 px = 22.15 px, and
+/// the nearest integer cell is **22 px = 1.026 cap** — inside ISO 1831's
+/// 0.935 cap pitch floor and the measured real-TD3 range, and closer to
+/// nominal than the next integer up (23 px = 1.073 cap).
+pub const MRZ_CELL_WIDTH: u32 = 22;
 
 // ---------------------------------------------------------------------
 // Per-format page geometry.
@@ -214,7 +231,12 @@ fn td2_layout() -> PageLayout {
     let row_h = 32;
     let row_y = |i: u32| MARGIN + i * 42;
 
-    let mrz_width = WIDTH - 2 * MARGIN;
+    // `band_width` and `mrz_width` used to be one shared local
+    // (`WIDTH - 2 * MARGIN`) until #411 narrowed the MRZ cell pitch. Kept
+    // split so the watermark band — an ethics guardrail, see `render.rs`'s
+    // module doc comment — never shrinks with the MRZ.
+    let band_width = WIDTH - 2 * MARGIN;
+    let mrz_width = TD2_MRZ_CHARS * MRZ_CELL_WIDTH;
     let mrz_height = 2 * MRZ_LINE_HEIGHT + MRZ_LINE_SPACING;
     let mrz_start_y = HEIGHT - MARGIN - mrz_height;
 
@@ -232,7 +254,7 @@ fn td2_layout() -> PageLayout {
         sex: Rect::new(viz_x + 390, row_y(4), 70, row_h),
         date_of_expiry: Rect::new(viz_x, row_y(5), 200, row_h),
         personal_number: Rect::new(viz_x, row_y(6), 400, row_h),
-        watermark: Rect::new(MARGIN, 360, mrz_width, 50),
+        watermark: Rect::new(MARGIN, 360, band_width, 50),
         mrz_lines: vec![
             Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
             Rect::new(
@@ -280,7 +302,11 @@ fn td1_layout() -> PageLayout {
     // watermark band must start at or after this, same as it always has.
     let viz_bottom = row_y(6) + row_h;
 
-    let mrz_width = WIDTH - 2 * MARGIN;
+    // Split per #411, same reasoning as `td2_layout`'s: `band_width` keeps
+    // the watermark at its full, unchanged width; `mrz_width` is the
+    // narrower MRZ cell width.
+    let band_width = WIDTH - 2 * MARGIN;
+    let mrz_width = TD1_MRZ_CHARS * MRZ_CELL_WIDTH;
     let mrz_height = 3 * MRZ_LINE_HEIGHT + 2 * MRZ_LINE_SPACING;
     let mrz_start_y = HEIGHT - MRZ_BOTTOM_MARGIN - mrz_height;
 
@@ -306,7 +332,7 @@ fn td1_layout() -> PageLayout {
         sex: Rect::new(viz_x + 310, row_y(4), 60, row_h),
         date_of_expiry: Rect::new(viz_x, row_y(5), 170, row_h),
         personal_number: Rect::new(viz_x, row_y(6), 320, row_h),
-        watermark: Rect::new(MARGIN, watermark_y, mrz_width, WATERMARK_HEIGHT),
+        watermark: Rect::new(MARGIN, watermark_y, band_width, WATERMARK_HEIGHT),
         mrz_lines: vec![
             Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
             Rect::new(
@@ -345,7 +371,11 @@ fn mrva_layout() -> PageLayout {
     let row_h = 34;
     let row_y = |i: u32| MARGIN + i * 46;
 
-    let mrz_width = WIDTH - 2 * MARGIN;
+    // Split per #411, same reasoning as `td2_layout`'s: `band_width` keeps
+    // the watermark at its full, unchanged width; `mrz_width` is the
+    // narrower MRZ cell width.
+    let band_width = WIDTH - 2 * MARGIN;
+    let mrz_width = MRVA_MRZ_CHARS * MRZ_CELL_WIDTH;
     let mrz_height = 2 * MRZ_LINE_HEIGHT + MRZ_LINE_SPACING;
     let mrz_start_y = HEIGHT - MARGIN - mrz_height;
 
@@ -363,7 +393,7 @@ fn mrva_layout() -> PageLayout {
         sex: Rect::new(viz_x + 410, row_y(4), 75, row_h),
         date_of_expiry: Rect::new(viz_x, row_y(5), 210, row_h),
         personal_number: Rect::new(viz_x, row_y(6), 420, row_h),
-        watermark: Rect::new(MARGIN, row_y(7), mrz_width, 50),
+        watermark: Rect::new(MARGIN, row_y(7), band_width, 50),
         mrz_lines: vec![
             Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
             Rect::new(
@@ -398,7 +428,11 @@ fn mrvb_layout() -> PageLayout {
     let row_h = 32;
     let row_y = |i: u32| MARGIN + i * 42;
 
-    let mrz_width = WIDTH - 2 * MARGIN;
+    // Split per #411, same reasoning as `td2_layout`'s: `band_width` keeps
+    // the watermark at its full, unchanged width; `mrz_width` is the
+    // narrower MRZ cell width.
+    let band_width = WIDTH - 2 * MARGIN;
+    let mrz_width = MRVB_MRZ_CHARS * MRZ_CELL_WIDTH;
     let mrz_height = 2 * MRZ_LINE_HEIGHT + MRZ_LINE_SPACING;
     let mrz_start_y = HEIGHT - MARGIN - mrz_height;
 
@@ -416,7 +450,7 @@ fn mrvb_layout() -> PageLayout {
         sex: Rect::new(viz_x + 390, row_y(4), 70, row_h),
         date_of_expiry: Rect::new(viz_x, row_y(5), 200, row_h),
         personal_number: Rect::new(viz_x, row_y(6), 400, row_h),
-        watermark: Rect::new(MARGIN, 360, mrz_width, 50),
+        watermark: Rect::new(MARGIN, 360, band_width, 50),
         mrz_lines: vec![
             Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
             Rect::new(
@@ -430,11 +464,16 @@ fn mrvb_layout() -> PageLayout {
     }
 }
 
-/// Get MRZ character rectangle for a specific line and index.
+/// Get MRZ character rectangle for a specific line and index, one
+/// [`MRZ_CELL_WIDTH`]-px cell at `index`'s position along the line.
 pub fn mrz_char_rect_for_line(line: Rect, mrz_chars: u32, index: u32) -> Rect {
     debug_assert!(index < mrz_chars);
-    let cell_width = line.width / mrz_chars;
-    Rect::new(line.x + index * cell_width, line.y, cell_width, line.height)
+    Rect::new(
+        line.x + index * MRZ_CELL_WIDTH,
+        line.y,
+        MRZ_CELL_WIDTH,
+        line.height,
+    )
 }
 
 #[cfg(test)]
@@ -589,6 +628,77 @@ mod tests {
                 for_format(DocumentType::MrvB).height
             ),
             (1008, 710)
+        );
+    }
+
+    /// The #411 trap, pinned: `TD2`, `TD1`, `MRV-A` and `MRV-B`'s watermark
+    /// rects are built from `band_width`, a local split off from the MRZ
+    /// line width so that narrowing [`MRZ_CELL_WIDTH`] cannot narrow the
+    /// watermark along with it (`render.rs`'s module doc comment marks the
+    /// watermark as an unconditional ethics guardrail). TD3's `WATERMARK` was
+    /// never on that shared local, but is pinned here too so all five
+    /// formats are covered by one test. Every value is the same one
+    /// `for_format` returned before #411's pitch change — this test would
+    /// fail if the split were ever missed or undone.
+    #[test]
+    fn watermark_rect_is_unchanged_by_the_mrz_pitch_split() {
+        assert_eq!(
+            for_format(DocumentType::TD3).watermark,
+            Rect::new(60, 470, 1080, 60)
+        );
+        assert_eq!(
+            for_format(DocumentType::TD2).watermark,
+            Rect::new(50, 360, 908, 50)
+        );
+        assert_eq!(
+            for_format(DocumentType::TD1).watermark,
+            Rect::new(40, 291, 742, 32)
+        );
+        assert_eq!(
+            for_format(DocumentType::MrvA).watermark,
+            Rect::new(50, 372, 1052, 50)
+        );
+        assert_eq!(
+            for_format(DocumentType::MrvB).watermark,
+            Rect::new(50, 360, 908, 50)
+        );
+    }
+
+    /// [`MRZ_CELL_WIDTH`]'s doc comment derives 22px as 1.026 cap by hand;
+    /// this test checks that arithmetic against the *actual* rendered glyph
+    /// instead of trusting the comment. It reads `H`'s outline bounds, in the
+    /// real vendored font's own design units, and scales them by the exact
+    /// factor `render.rs::draw_mrz_glyphs` and `ab_glyph` itself use
+    /// (`px_scale / height_unscaled()`, see `ScaleFont::v_scale_factor`) —
+    /// not a rasterized `OutlinedGlyph::px_bounds`, whose pixel-grid rounding
+    /// would round a 21.44px cap up to a 22px bounding box and make this
+    /// test vacuously pass at exactly `MRZ_CELL_WIDTH`.
+    #[cfg(feature = "embedded-fonts")]
+    #[test]
+    fn mrz_cell_width_is_1_02_to_1_04_of_the_rendered_cap_height() {
+        use ab_glyph::Font;
+
+        let fonts = crate::fonts::load_fonts()
+            .expect("embedded-fonts is on by default and vendors both fonts");
+        let font = &fonts.mrz;
+
+        // Mirrors `render.rs::draw_mrz_glyphs`'s own px_scale derivation.
+        let px_scale = MRZ_LINE_HEIGHT as f32 * 0.8;
+        let outline = font
+            .outline(font.glyph_id('H'))
+            .expect("'H' must have an outline in the vendored OCR-B font");
+        // `Outline::bounds` uses ab_glyph's y-down rasterizer convention
+        // (`min.y` holds the font's own `y_max`), so its signed `height()`
+        // is negative; the magnitude is the cap height.
+        let cap_units = outline.bounds.height().abs();
+        let cap_px = cap_units * px_scale / font.height_unscaled();
+
+        let ratio = MRZ_CELL_WIDTH as f32 / cap_px;
+        assert!(
+            (1.02..=1.04).contains(&ratio),
+            "MRZ_CELL_WIDTH ({MRZ_CELL_WIDTH}) / rendered cap ({cap_px} px) = {ratio}, \
+             expected within [1.02, 1.04] per the ISO 1073-2/1831 pitch-to-cap \
+             derivation in MRZ_CELL_WIDTH's doc comment"
         );
     }
 }

@@ -4,10 +4,12 @@ name: Bench data collection
 # synthpass-gen's degrade parameters. This workflow does NOT tune anything —
 # it only runs the existing M4 `synthpass-bench` corpus runner against a
 # fresh, never-before-seen seed range each day and appends the per-document
-# (seed, profile, hit/miss, reason) outcomes to a growing dataset. Because
-# generation is fully deterministic from `seed`, that's enough for a future
-# training/tuning loop to reconstruct the exact document and its degrade
-# parameters on demand — no need to persist parameters redundantly here.
+# (seed, profile, hit/miss, reason) outcomes to a growing dataset. Generation is
+# fully deterministic from `seed` at a given commit, so each row's `(seed,
+# git_sha)` is enough for a future training/tuning loop to rebuild that commit
+# and reconstruct the exact document and its degrade parameters on demand. A
+# generator change (#411's MRZ geometry, for one) renders a different document
+# for the same seed on either side of it.
 #
 # Writes to a dedicated `bench-data` branch (not `main`, which is protected —
 # see CONTRIBUTING.md) so this can push automatically without a PR per run.
