@@ -43,6 +43,19 @@ kind: nothing downstream can tell it from a correct one (#473, PR #471's seed 99
 
 A report written before #457 has no `wrong_accept`. For those reports, a hit
 is classed from its `fields` CER, the same rule `wrong_scored_fields` uses.
+
+## Retry breakdown
+
+Every moved seed is also tagged with the *after* report's
+`retry_stop`/`retry_damaged_recovery` -- e.g. `variant_valid_confirmed/true`
+for a mover whose accepted reading came from `mrz`'s damaged-capture search,
+`general_valid/false` for one the ordinary scan read cleanly. A key entirely
+absent from a report (one written before #473 added `retry_damaged_recovery`,
+or before #510 added `retry_stop`) renders as `unknown` -- never confused with
+a present `null`, which means "no native OCR telemetry for this document" and
+renders as the literal string `null`. One exception: `synthpass-bench` omits
+`retry_stop` rather than writing `null` when OCR itself failed, so `unknown`
+in the `retry_stop` half also covers an `ocr_error` document.
 """
 from __future__ import annotations
 
@@ -78,6 +91,28 @@ def state(doc: dict) -> str:
     return "wrong" if wrong_fields(doc) else "correct"
 
 
+def retry_cell(doc: dict, key: str) -> str:
+    """One field's contribution to `retry_key`: `"unknown"` when `key` is
+    entirely absent from `doc` (a report from before the key existed),
+    `"null"` for a present-but-`None` value (native OCR telemetry ran but has
+    nothing for this document), else the value itself, lowercased so a bool
+    reads `true`/`false` rather than Python's `True`/`False`.
+    """
+    if key not in doc:
+        return "unknown"
+    value = doc[key]
+    if value is None:
+        return "null"
+    return str(value).lower() if isinstance(value, bool) else str(value)
+
+
+def retry_key(doc: dict) -> str:
+    """`"<retry_stop>/<retry_damaged_recovery>"` for the movers-by-retry
+    breakdown — see this module's "Retry breakdown" doc section.
+    """
+    return f"{retry_cell(doc, 'retry_stop')}/{retry_cell(doc, 'retry_damaged_recovery')}"
+
+
 def field_changes(before: dict, after: dict) -> list[dict]:
     """Fields whose (expected, got) differs between the two reads."""
     def by_name(doc):
@@ -111,7 +146,7 @@ def compare(before: dict, after: dict) -> dict:
     if set(rb) != set(ra):
         problems.append(f"seed sets differ: {len(set(rb) ^ set(ra))} seeds in only one report")
 
-    moved, classes = [], Counter()
+    moved, classes, by_retry = [], Counter(), Counter()
     for seed in sorted(set(rb) & set(ra)):
         sb, sa = state(rb[seed]), state(ra[seed])
         changes = field_changes(rb[seed], ra[seed])
@@ -119,7 +154,18 @@ def compare(before: dict, after: dict) -> dict:
             continue
         cls = f"{sb} -> {sa}"
         classes[cls] += 1
-        moved.append({"seed": seed, "class": cls, "changes": changes})
+        # The *after* report's retry state: what the retry loop actually did
+        # to produce this seed's new outcome, since that is the question an
+        # A/B investigating a retry-loop change is asking.
+        retry = retry_key(ra[seed])
+        by_retry[retry] += 1
+        moved.append({
+            "seed": seed,
+            "class": cls,
+            "changes": changes,
+            "retry_before": retry_key(rb[seed]),
+            "retry_after": retry,
+        })
 
     def totals(r):
         docs = r.get("results", [])
@@ -136,6 +182,7 @@ def compare(before: dict, after: dict) -> dict:
         "before": totals(before),
         "after": totals(after),
         "classes": dict(sorted(classes.items())),
+        "by_retry": dict(sorted(by_retry.items())),
         "moved": moved,
     }
 
@@ -150,8 +197,12 @@ def render(result: dict) -> str:
                  f"valid misses {b['valid_misses']} -> {a['valid_misses']}   (of {a['count']})")
     for cls, n in result["classes"].items():
         lines.append(f"  {n:3d}  {cls}")
+    if result["by_retry"]:
+        lines.append("by retry_stop/retry_damaged_recovery (after):")
+        for retry, n in result["by_retry"].items():
+            lines.append(f"  {n:3d}  {retry}")
     for m in result["moved"]:
-        lines.append(f"seed {m['seed']}: {m['class']}")
+        lines.append(f"seed {m['seed']}: {m['class']}  (retry {m['retry_before']} -> {m['retry_after']})")
         for c in m["changes"]:
             lines.append(f"    {c['field']:<16} expected {c['expected']!r:<20} "
                          f"before {c['before']!r:<20} after {c['after']!r}")

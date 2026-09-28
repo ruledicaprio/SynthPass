@@ -489,6 +489,7 @@ impl NativeOcr {
                     rotation,
                     text_sanity,
                     retry_variant_id: Some("general".to_string()),
+                    retry_damaged_recovery: Some(data.damaged_recovery),
                     retry_budget_hit: false,
                     retry_stop: Some("general_valid".to_string()),
                     chargrid: chargrid_arm,
@@ -512,6 +513,11 @@ impl NativeOcr {
         let max_passes = max_passes();
         let max_duration = max_duration();
         let mut retry_variant_id = None;
+        // #473: `MrzData::damaged_recovery` from whichever reading
+        // `retry_variant_id` ends up naming -- the accepted variant, or the
+        // held `pending` reading if the loop accepts that instead. `Some`
+        // exactly when `retry_variant_id` is `Some`; see `OcrPage`'s doc.
+        let mut retry_damaged_recovery: Option<bool> = None;
         let mut retry_budget_hit = false;
         let mut retry_stop = None;
         // PR-1.4: the image the winning retry variant actually read, moved
@@ -658,6 +664,7 @@ impl NativeOcr {
                 retry_stop = Some("pass_cap".to_string());
                 if pending.is_some() {
                     retry_variant_id = pending_pass_id.clone();
+                    retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
                 }
                 if verbose {
                     eprintln!(
@@ -671,6 +678,7 @@ impl NativeOcr {
                 retry_stop = Some("budget".to_string());
                 if pending.is_some() {
                     retry_variant_id = pending_pass_id.clone();
+                    retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
                 }
                 if verbose {
                     eprintln!(
@@ -687,6 +695,7 @@ impl NativeOcr {
             if pending.is_some() && passes_run > pending_set_at_pass + confirm_budget {
                 retry_stop = Some("repair_unconfirmed".to_string());
                 retry_variant_id = pending_pass_id.clone();
+                retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] confirm-pass budget ({confirm_budget}) exhausted before \
@@ -775,6 +784,7 @@ impl NativeOcr {
                         }
                     }
                     retry_variant_id = Some(pass_id);
+                    retry_damaged_recovery = Some(data.damaged_recovery);
                     retry_stop = Some(if confirmed_agreement {
                         "variant_valid_confirmed".to_string()
                     } else {
@@ -820,6 +830,7 @@ impl NativeOcr {
             );
             if pending.is_some() {
                 retry_variant_id = pending_pass_id.clone();
+                retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
             }
         }
         // #473: the loop accepted the held reading rather than a variant it
@@ -861,6 +872,7 @@ impl NativeOcr {
             rotation,
             text_sanity,
             retry_variant_id,
+            retry_damaged_recovery,
             retry_budget_hit,
             retry_stop,
             chargrid: chargrid_arm,

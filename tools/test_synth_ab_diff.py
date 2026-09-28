@@ -11,10 +11,18 @@ def field(name, cer=0.0, expected=None, got=None):
     return f
 
 
-def doc(seed, hit, wrong=None, fields=()):
+def doc(seed, hit, wrong=None, fields=(), retry_stop="unset", retry_damaged_recovery="unset"):
     out = {"seed": seed, "hit": hit, "fields": list(fields)}
     if wrong is not None:
         out["wrong_accept"] = wrong
+    # "unset" (the default) leaves the key entirely absent, matching a report
+    # written before #473 added `retry_damaged_recovery` (or before #510
+    # added `retry_stop` to every document) — the `retry_key`/`retry_cell`
+    # "unknown" case. Pass `None` explicitly for a present-but-null value.
+    if retry_stop != "unset":
+        out["retry_stop"] = retry_stop
+    if retry_damaged_recovery != "unset":
+        out["retry_damaged_recovery"] = retry_damaged_recovery
     return out
 
 
@@ -87,6 +95,51 @@ class Compare(unittest.TestCase):
         text = d.render(d.compare(before, after))
         self.assertIn("seed 18: wrong -> refused", text)
         self.assertIn("hits 1 -> 0", text)
+
+
+class RetryKey(unittest.TestCase):
+    def test_absent_key_is_unknown(self):
+        self.assertEqual(d.retry_cell({}, "retry_stop"), "unknown")
+        self.assertEqual(d.retry_key({}), "unknown/unknown")
+
+    def test_present_null_is_the_string_null_not_unknown(self):
+        row = {"retry_stop": None, "retry_damaged_recovery": None}
+        self.assertEqual(d.retry_cell(row, "retry_stop"), "null")
+        self.assertEqual(d.retry_key(row), "null/null")
+
+    def test_bool_renders_lowercase(self):
+        row = {"retry_stop": "variant_valid_confirmed", "retry_damaged_recovery": True}
+        self.assertEqual(d.retry_key(row), "variant_valid_confirmed/true")
+        row["retry_damaged_recovery"] = False
+        self.assertEqual(d.retry_key(row), "variant_valid_confirmed/false")
+
+
+class ByRetryBreakdown(unittest.TestCase):
+    def test_moved_seeds_are_tagged_and_counted_by_after_retry_state(self):
+        before = report(
+            doc(18, True, True, PREFIX_WRONG, retry_stop="general_valid",
+                retry_damaged_recovery=False),
+            doc(19, False, retry_stop="pass_cap", retry_damaged_recovery=None),
+        )
+        after = report(
+            doc(18, True, False, [field("surname")], retry_stop="variant_valid_confirmed",
+                retry_damaged_recovery=True),
+            doc(19, True, False, [field("surname")], retry_stop="variant_valid_confirmed",
+                retry_damaged_recovery=True),
+        )
+        r = d.compare(before, after)
+        self.assertEqual(r["by_retry"], {"variant_valid_confirmed/true": 2})
+        moved18 = next(m for m in r["moved"] if m["seed"] == 18)
+        self.assertEqual(moved18["retry_before"], "general_valid/false")
+        self.assertEqual(moved18["retry_after"], "variant_valid_confirmed/true")
+
+    def test_old_report_with_no_retry_keys_at_all_is_unknown_not_a_crash(self):
+        before = report(doc(0, True, True, PREFIX_WRONG))
+        after = report(doc(0, False))
+        r = d.compare(before, after)
+        self.assertEqual(r["by_retry"], {"unknown/unknown": 1})
+        text = d.render(r)
+        self.assertIn("unknown/unknown", text)
 
 
 if __name__ == "__main__":

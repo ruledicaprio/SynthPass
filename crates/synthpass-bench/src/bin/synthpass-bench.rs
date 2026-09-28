@@ -238,13 +238,30 @@ struct SeedResult {
     elapsed_ms: u128,
     /// `synthpass_bench::HitResult::retry_stop` passthrough — why the native
     /// OCR retry loop stopped for this document (`"general_valid"`,
-    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`). `None`
-    /// only when OCR itself failed (`miss_kind == Some("ocr_error")`), same
-    /// as `raw_text`'s absence in `--dump-ocr`. The per-document counterpart
-    /// to `Report::ocr_arms` — see that field's doc (#498's provider-bench
+    /// `"variant_valid"`, `"variant_valid_confirmed"`, `"repair_unconfirmed"`,
+    /// `"budget"`, `"pass_cap"`, `"exhausted"`). `None` only when OCR itself
+    /// failed (`miss_kind == Some("ocr_error")`), same as `raw_text`'s
+    /// absence in `--dump-ocr`. The per-document counterpart to
+    /// `Report::ocr_arms` — see that field's doc (#498's provider-bench
     /// parity, issue #510).
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_stop: Option<String>,
+    /// `synthpass_bench::HitResult::retry_variant_id` passthrough — the
+    /// native OCR retry pass selected for this document, when available
+    /// (`pass-NN`, or `"general"`). **Always serialized**, `null` when
+    /// `None` — never omitted — so the #473 A/B diff
+    /// (`tools/synth_ab_diff.py`) can rely on the key being present.
+    retry_variant_id: Option<String>,
+    /// `synthpass_bench::HitResult::retry_damaged_recovery` passthrough —
+    /// `MrzData::damaged_recovery` of the reading the native retry loop
+    /// accepted or held. `Some` exactly when `retry_variant_id` is `Some`.
+    /// Always serialized, same discipline as `retry_variant_id` above.
+    retry_damaged_recovery: Option<bool>,
+    /// `synthpass_bench::HitResult::tier1_damaged_recovery` passthrough —
+    /// this document's own Tier-1 parse's `MrzData::damaged_recovery`,
+    /// independent of `retry_damaged_recovery`. `None` when Tier 1 found no
+    /// MRZ. Always serialized, same discipline as `retry_variant_id` above.
+    tier1_damaged_recovery: Option<bool>,
     /// Per-field character error rates, keyed by field name. Reported for
     /// every document that produced a parseable MRZ *and* for those that did
     /// not (as a total loss), so a mean over this is not biased by dropping
@@ -516,6 +533,9 @@ fn main() {
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
                 retry_stop: result.retry_stop,
+                retry_variant_id: result.retry_variant_id,
+                retry_damaged_recovery: result.retry_damaged_recovery,
+                tier1_damaged_recovery: result.tier1_damaged_recovery,
                 line1_flagged,
                 names_exact,
                 name_error,
@@ -1156,6 +1176,44 @@ mod tests {
         );
     }
 
+    /// #473: unlike `retry_stop`, these three keys are **always**
+    /// serialized — `null` when `None`, never omitted — so the #473 A/B
+    /// diff (`tools/synth_ab_diff.py`) can rely on the columns being stable
+    /// across every row, whether or not native OCR telemetry exists for it.
+    #[test]
+    fn damaged_recovery_keys_are_always_present_null_or_set() {
+        let absent = doc(Some("ocr_error"), &[], &[]);
+        let json = serde_json::to_value(&absent).expect("serialize SeedResult");
+        assert_eq!(json["retry_variant_id"], serde_json::Value::Null);
+        assert_eq!(json["retry_damaged_recovery"], serde_json::Value::Null);
+        assert_eq!(json["tier1_damaged_recovery"], serde_json::Value::Null);
+        assert!(
+            json.as_object().unwrap().contains_key("retry_variant_id"),
+            "retry_variant_id must be present as null, not omitted: {json}"
+        );
+        assert!(
+            json.as_object()
+                .unwrap()
+                .contains_key("retry_damaged_recovery"),
+            "retry_damaged_recovery must be present as null, not omitted: {json}"
+        );
+        assert!(
+            json.as_object()
+                .unwrap()
+                .contains_key("tier1_damaged_recovery"),
+            "tier1_damaged_recovery must be present as null, not omitted: {json}"
+        );
+
+        let mut set = doc(None, &[], &[]);
+        set.retry_variant_id = Some("pass-01".to_string());
+        set.retry_damaged_recovery = Some(true);
+        set.tier1_damaged_recovery = Some(false);
+        let json = serde_json::to_value(&set).expect("serialize SeedResult");
+        assert_eq!(json["retry_variant_id"], "pass-01");
+        assert_eq!(json["retry_damaged_recovery"], true);
+        assert_eq!(json["tier1_damaged_recovery"], false);
+    }
+
     fn doc(
         miss: Option<&'static str>,
         failing: &[&'static str],
@@ -1184,6 +1242,9 @@ mod tests {
             },
             elapsed_ms: 0,
             retry_stop: None,
+            retry_variant_id: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
             fields: fields
                 .iter()
                 .map(|(field, cer)| FieldReport {

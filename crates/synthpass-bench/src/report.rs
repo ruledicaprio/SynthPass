@@ -132,6 +132,11 @@ pub struct DocumentDetailReport {
     pub ocr_ms: u128,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_variant_id: Option<String>,
+    /// `DocumentDetail::retry_damaged_recovery` passthrough. **Always
+    /// serialized** — `null` when `None`, never omitted — so the #473 A/B
+    /// diff (`tools/synth_ab_diff.py`) can rely on the key being present in
+    /// every report this PR produces, whether or not it has a value.
+    pub retry_damaged_recovery: Option<bool>,
     pub retry_budget_hit: bool,
     pub retry_stop: Option<String>,
     /// `DocumentDetail::chargrid` passthrough — `null` whenever
@@ -139,6 +144,9 @@ pub struct DocumentDetailReport {
     /// matching every other unset-arm field on this struct.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chargrid: Option<String>,
+    /// `DocumentDetail::tier1_damaged_recovery` passthrough. **Always
+    /// serialized**, same reasoning as `retry_damaged_recovery` above.
+    pub tier1_damaged_recovery: Option<bool>,
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -420,9 +428,11 @@ impl From<ProviderReport> for ProviderRow {
                     name_error: d.name_error,
                     ocr_ms: d.ocr_elapsed.as_millis(),
                     retry_variant_id: d.retry_variant_id,
+                    retry_damaged_recovery: d.retry_damaged_recovery,
                     retry_budget_hit: d.retry_budget_hit,
                     retry_stop: d.retry_stop,
                     chargrid: d.chargrid,
+                    tier1_damaged_recovery: d.tier1_damaged_recovery,
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),
@@ -844,6 +854,65 @@ mod tests {
         );
     }
 
+    /// #473: unlike `retry_variant_id`/`retry_stop`/`chargrid`, these two
+    /// keys are **always** serialized — `null` when `None`, never omitted —
+    /// so the #473 A/B diff (`tools/synth_ab_diff.py`) can rely on the
+    /// columns being stable across every row, whether or not native OCR
+    /// telemetry exists for it.
+    #[test]
+    fn damaged_recovery_keys_are_always_present_null_or_set() {
+        fn detail(name: &str) -> DocumentDetailReport {
+            DocumentDetailReport {
+                name: name.to_string(),
+                asset_id: None,
+                mrz_found: true,
+                mrz_format: Some("TD3"),
+                read_ok: true,
+                mrz_checksums_valid: true,
+                miss_reason: None,
+                check_states: None,
+                assertions_total: 0,
+                assertions_unsupported: 0,
+                unsupported_fields: Vec::new(),
+                names_exact: None,
+                name_error: None,
+                ocr_ms: 0,
+                retry_variant_id: None,
+                retry_damaged_recovery: None,
+                retry_budget_hit: false,
+                retry_stop: None,
+                chargrid: None,
+                tier1_damaged_recovery: None,
+            }
+        }
+
+        let absent = detail("absent");
+        let json = serde_json::to_value(&absent).expect("serialize");
+        assert_eq!(json["retry_damaged_recovery"], serde_json::Value::Null);
+        assert_eq!(json["tier1_damaged_recovery"], serde_json::Value::Null);
+        assert!(
+            json.as_object()
+                .unwrap()
+                .contains_key("retry_damaged_recovery"),
+            "retry_damaged_recovery must be present as null, not omitted: {json}"
+        );
+        assert!(
+            json.as_object()
+                .unwrap()
+                .contains_key("tier1_damaged_recovery"),
+            "tier1_damaged_recovery must be present as null, not omitted: {json}"
+        );
+
+        let mut set = detail("set");
+        set.retry_variant_id = Some("pass-01".to_string());
+        set.retry_damaged_recovery = Some(true);
+        set.tier1_damaged_recovery = Some(false);
+        let json = serde_json::to_value(&set).expect("serialize");
+        assert_eq!(json["retry_variant_id"], "pass-01");
+        assert_eq!(json["retry_damaged_recovery"], true);
+        assert_eq!(json["tier1_damaged_recovery"], false);
+    }
+
     #[test]
     fn outcome_row_serializes_as_one_line_with_fixed_key_order_and_null_for_absent_fields() {
         let row = OutcomeRow {
@@ -953,9 +1022,11 @@ mod tests {
             name_error: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
+            retry_damaged_recovery: None,
             retry_budget_hit: false,
             retry_stop: None,
             chargrid: None,
+            tier1_damaged_recovery: None,
         }
     }
 

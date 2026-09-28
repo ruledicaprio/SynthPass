@@ -142,10 +142,17 @@ pub struct OcrPage {
     pub text_sanity: Option<f32>,
     /// Identifier for the final native OCR pass selected by the retry loop (`pass-NN`); the number depends on retry configuration.
     pub retry_variant_id: Option<String>,
+    /// `mrz::MrzData::damaged_recovery` from the reading the retry loop
+    /// accepted or held — the same reading `retry_variant_id` identifies.
+    /// `Some` exactly when `retry_variant_id` is `Some`; `None` whenever the
+    /// loop ended with no such reading at all (pass cap, time budget or
+    /// variant list exhausted with nothing pending).
+    pub retry_damaged_recovery: Option<bool>,
     /// Whether the native retry loop stopped because its wall-clock budget elapsed.
     pub retry_budget_hit: bool,
-    /// Why the native retry loop stopped: general_valid, variant_valid,
-    /// budget, pass_cap, or exhausted.
+    /// Why the native retry loop stopped: `general_valid`, `variant_valid`,
+    /// `variant_valid_confirmed`, `repair_unconfirmed`, `budget`, `pass_cap`,
+    /// or `exhausted`.
     pub retry_stop: Option<String>,
     /// Outcome of `synthpass_ocr`'s post-hit chargrid name-line repair
     /// (`SYNTHPASS_OCR_CHARGRID`), if that measurement arm ran at all.

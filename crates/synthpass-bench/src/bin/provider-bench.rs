@@ -2516,9 +2516,11 @@ mod tests {
             name_error: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
+            retry_damaged_recovery: None,
             retry_budget_hit: false,
             retry_stop: None,
             chargrid: None,
+            tier1_damaged_recovery: None,
         }
     }
 

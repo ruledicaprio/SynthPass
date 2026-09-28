@@ -1058,6 +1058,10 @@ pub struct DocumentDetail {
     pub ocr_elapsed: Duration,
     /// Native OCR retry pass selected for this asset, when available (`pass-NN`; its number depends on retry configuration).
     pub retry_variant_id: Option<String>,
+    /// `OcrPage::retry_damaged_recovery` passthrough — `MrzData::damaged_recovery`
+    /// of the reading the native retry loop accepted or held. `Some` exactly
+    /// when `retry_variant_id` is `Some`.
+    pub retry_damaged_recovery: Option<bool>,
     /// Whether the native retry loop hit its wall-clock budget.
     pub retry_budget_hit: bool,
     /// Why the native retry loop stopped, when native OCR telemetry exists.
@@ -1067,6 +1071,12 @@ pub struct DocumentDetail {
     /// exists and `SYNTHPASS_OCR_CHARGRID` was not `off`. See that field's
     /// doc for the possible values.
     pub chargrid: Option<String>,
+    /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
+    /// independent of `retry_damaged_recovery`, which describes the reading
+    /// the *native OCR retry loop* accepted or held, not this harness's own
+    /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
+    /// `None` when Tier 1 found no MRZ at all.
+    pub tier1_damaged_recovery: Option<bool>,
 }
 
 pub struct CapabilitySnapshot {
@@ -1997,9 +2007,11 @@ async fn run_prepped_with_dump_options(
                         name_error: None,
                         ocr_elapsed: bench_page.ocr_elapsed,
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
+                        retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
                         retry_budget_hit: bench_page.page.retry_budget_hit,
                         retry_stop: bench_page.page.retry_stop.clone(),
                         chargrid: bench_page.page.chargrid.clone(),
+                        tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
                     });
                     if progress {
                         eprintln!(
@@ -2373,9 +2385,11 @@ async fn run_prepped_with_dump_options(
                 name_error,
                 ocr_elapsed: bench_page.ocr_elapsed,
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
+                retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
                 retry_budget_hit: bench_page.page.retry_budget_hit,
                 retry_stop: bench_page.page.retry_stop.clone(),
                 chargrid: bench_page.page.chargrid.clone(),
+                tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
             });
         }
 
