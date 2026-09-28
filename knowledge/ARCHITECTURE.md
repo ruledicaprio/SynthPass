@@ -270,7 +270,7 @@ cross-reference this table by hand.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`); also where `synthpass fetch-models` stages them |
+| `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`); also where `synthpass fetch-models` stages them. Also honoured by both `synthpass-bench` and `provider-bench` (issue #541); their fallback when it is unset is the build tree's own repo root (`crates/synthpass-bench`'s grandparent directory), not `.` |
 | `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
 | `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
 | `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `14` / `52` | Bound the MRZ retry loop |
