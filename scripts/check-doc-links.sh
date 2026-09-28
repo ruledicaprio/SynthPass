@@ -65,7 +65,9 @@ self="scripts/check-doc-links.sh"
 #   knowledge/architecture/*, knowledge/benchmarking/methodology.md
 #     Aspirational paths in KNOWLEDGE.md's original proposal, which was adopted
 #     with variations: `architecture/` was folded into ARCHITECTURE.md plus
-#     `decisions/`, and `benchmarking/` shipped as `benchmarks/`. The doc is
+#     `decisions/`, and `benchmarking/` shipped as `benchmarks/`. (A real
+#     `knowledge/architecture/` has held ARCHITECTURE.md's topic pages since
+#     2026-09-28; these two proposed files were never written.) The doc is
 #     kept in the author's voice with an editor's note pointing at ADR-0001;
 #     rewriting the paths would misrepresent what was proposed.
 #
