@@ -11,27 +11,26 @@
 //! The line this test pins is printed *before* that OCR failure (right after
 //! the config echo / at the start of `batch`), so it appears regardless.
 //!
-//! Every test here starts from `env_remove`-ing all nine knobs the issue
+//! Every test here starts from `env_remove`-ing all seven knobs the issue
 //! names, on the spawned command only — never `std::env::set_var` on this
 //! test process itself, which would race every other test in the binary.
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-/// The exact nine `SYNTHPASS_OCR_*` knobs issue #495 records — the seven
+/// The exact seven `SYNTHPASS_OCR_*` knobs issue #495 records — the five
 /// `synthpass_ocr::OcrArms` measurement arms plus the retry pass/time budget.
 /// Not on this list, deliberately: `VERBOSE`, `DUMP_VARIANTS`, `THREADS`,
-/// `ENGINE`, `AUTO_DOWNLOAD`, `MODEL_DIR`, `*_SHA256`, `MODEL_SKIP_VERIFY` —
-/// logging, diagnostics, concurrency, engine selection, a retired variable,
-/// and model location and integrity, none of them in the nine #495 names.
+/// `ENGINE`, `AUTO_DOWNLOAD`, `MODEL_DIR`, `*_SHA256`, `MODEL_SKIP_VERIFY`,
+/// `STOP`, `CONFIRM_PASSES` — logging, diagnostics, concurrency, engine
+/// selection, and retired variables (issues #491 and #473), none of them in
+/// the seven #495 names.
 const ALL_KNOBS: &[&str] = &[
     "SYNTHPASS_OCR_TEXTURE",
     "SYNTHPASS_OCR_ORDER",
     "SYNTHPASS_OCR_ROTATE",
     "SYNTHPASS_OCR_SKEW",
     "SYNTHPASS_OCR_CHARGRID",
-    "SYNTHPASS_OCR_STOP",
-    "SYNTHPASS_OCR_CONFIRM_PASSES",
     "SYNTHPASS_OCR_MAX_PASSES",
     "SYNTHPASS_OCR_MAX_SECONDS",
 ];
@@ -141,7 +140,7 @@ fn single_document_sorts_multiple_non_default_knobs_by_env_var_name() {
     // Set in reverse alphabetical order on the command line to prove the
     // printed line is sorted, not "insertion order" or "argument order".
     let output = base_cmd(&model_dir)
-        .env("SYNTHPASS_OCR_STOP", "clean")
+        .env("SYNTHPASS_OCR_TEXTURE", "off")
         .env("SYNTHPASS_OCR_MAX_PASSES", "1")
         .arg(input.to_str().unwrap())
         .output()
@@ -151,7 +150,7 @@ fn single_document_sorts_multiple_non_default_knobs_by_env_var_name() {
     let stderr = stderr_of(&output);
     assert!(
         stderr.contains(
-            "⚙️  [Rust] non-default OCR knobs: SYNTHPASS_OCR_MAX_PASSES=1 SYNTHPASS_OCR_STOP=clean"
+            "⚙️  [Rust] non-default OCR knobs: SYNTHPASS_OCR_MAX_PASSES=1 SYNTHPASS_OCR_TEXTURE=off"
         ),
         "expected both knobs, sorted by env var name, got: {stderr}"
     );
@@ -181,7 +180,7 @@ fn batch_echoes_one_non_default_knob_once_on_stderr_only() {
     std::fs::write(dir.join("doc.jpg"), b"not a real image").expect("write dummy batch input");
 
     let output = base_cmd(&dir)
-        .env("SYNTHPASS_OCR_STOP", "clean")
+        .env("SYNTHPASS_OCR_TEXTURE", "off")
         .args(["batch", dir.to_str().unwrap()])
         .output()
         .expect("run `synthpass batch <dir>`");
@@ -193,8 +192,36 @@ fn batch_echoes_one_non_default_knob_once_on_stderr_only() {
         "batch prints the line once, at the start, not per document: {stderr}"
     );
     assert!(
-        stderr.contains("⚙️  [Rust] non-default OCR knobs: SYNTHPASS_OCR_STOP=clean"),
+        stderr.contains("⚙️  [Rust] non-default OCR knobs: SYNTHPASS_OCR_TEXTURE=off"),
         "expected the exact copy-pasteable line, got: {stderr}"
     );
     assert!(!stdout_of(&output).contains("non-default OCR knobs"));
+}
+
+/// Issue #473: `SYNTHPASS_OCR_STOP`/`SYNTHPASS_OCR_CONFIRM_PASSES` named the
+/// removed `clean` retry-stop arm, not a knob this build still reads — a
+/// leftover value must never be echoed as if it were a live measurement arm,
+/// which would tell an operator it still did something. It gets its own
+/// stderr warning instead, printed when the models load (`synthpass-ocr`'s
+/// `removed_knobs_set` unit test covers which knobs it names; this only proves
+/// the removed knobs stay out of *this* line).
+#[test]
+fn single_document_never_echoes_the_removed_retry_stop_knobs() {
+    let (model_dir, _guard) = empty_model_dir("single-removed-knobs");
+    let input = dummy_input("single-removed-knobs");
+
+    let output = base_cmd(&model_dir)
+        .env("SYNTHPASS_OCR_STOP", "clean")
+        .env("SYNTHPASS_OCR_CONFIRM_PASSES", "5")
+        .arg(input.to_str().unwrap())
+        .output()
+        .expect("run `synthpass <file>`");
+    std::fs::remove_file(&input).ok();
+
+    let stderr = stderr_of(&output);
+    assert!(
+        !stderr.contains("non-default OCR knobs"),
+        "neither removed knob is a knob this build reads, so the line must be \
+         absent entirely, got: {stderr}"
+    );
 }

@@ -1096,9 +1096,9 @@ pub struct HitResult {
     pub raw_text: Option<String>,
     /// `synthpass_imageprep::OcrPage::retry_stop` passthrough — why the
     /// native retry loop stopped for this document (`"general_valid"`,
-    /// `"variant_valid"`, `"variant_valid_confirmed"`, `"repair_unconfirmed"`,
-    /// `"budget"`, `"pass_cap"`, `"exhausted"`), whenever OCR itself
-    /// succeeded. `None` only on `MissReason::OcrError`, same as `raw_text`.
+    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`), whenever
+    /// OCR itself succeeded. `None` only on `MissReason::OcrError`, same as
+    /// `raw_text`.
     /// Added for parity with `provider-bench`'s `DocumentDetail::retry_stop`
     /// (#498) — this synthetic report never carried it, so a retry-arm
     /// question about the synthetic corpus had no per-document evidence to
@@ -1109,12 +1109,12 @@ pub struct HitResult {
     /// already carried it.
     pub retry_variant_id: Option<String>,
     /// `OcrPage::retry_damaged_recovery` passthrough — `MrzData::damaged_recovery`
-    /// of the reading the native retry loop accepted or held. `Some` exactly
+    /// of the reading the native retry loop accepted. `Some` exactly
     /// when `retry_variant_id` is `Some`.
     pub retry_damaged_recovery: Option<bool>,
     /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
     /// independent of `retry_damaged_recovery`, which describes the reading
-    /// the native OCR retry loop accepted or held, not this crate's own
+    /// the native OCR retry loop accepted, not this crate's own
     /// `mrz::find_and_parse_with` of the final OCR text. `None` when Tier 1
     /// found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,

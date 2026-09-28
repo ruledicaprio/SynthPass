@@ -1,6 +1,10 @@
 # `SYNTHPASS_OCR_STOP=clean` loses hits on both corpora, because the parser never sees the loop's decision
 
-**Date:** 2026-09-26 · **MAIN:** `405b4f0` · **DATA:** `396b22f` (real arm); none for the synthetic arms (generated corpus) · **Evidence:** Observed (one local release build, six A/B runs switched by env var, plus single-document verbose traces on the same binary) plus Derived (per-document and per-seed comparison) plus Hypothesized (the exact parser branch, marked where used) · **Status:** current
+**Date:** 2026-09-26 · **MAIN:** `405b4f0` · **DATA:** `396b22f` (real arm); none for the synthetic arms (generated corpus) · **Evidence:** Observed (one local release build, six A/B runs switched by env var, plus single-document verbose traces on the same binary) plus Derived (per-document and per-seed comparison) plus Hypothesized (the exact parser branch, marked where used) · **Status:** superseded by [`retry-stop-rerun-2026-09-27.md`](retry-stop-rerun-2026-09-27.md)
+
+**Amended 2026-09-28:** the arm this note measured is gone. The re-run on a build with the narrowed
+handoff ([`retry-stop-rerun-2026-09-27.md`](retry-stop-rerun-2026-09-27.md)) found `clean` no longer
+loses a hit but gains nothing real, and the owner removed it (issue #473).
 
 **2026-09-26.** The same-binary A/B that
 [#473](https://github.com/ruledicaprio/SynthPass/issues/473) asked for, on the arm PR

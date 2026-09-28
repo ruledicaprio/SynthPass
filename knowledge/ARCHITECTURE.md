@@ -279,16 +279,14 @@ cross-reference this table by hand.
 | `SYNTHPASS_OCR_ROTATE` | `default` | Page-rotation detection — `default`/`legacy`/`off`; see `synthpass-ocr`'s `RotateMode` doc comment |
 | `SYNTHPASS_OCR_SKEW` | `default` | Deskew correction — `default`/`legacy`; see `synthpass-ocr::preprocess`'s `SkewMode` doc comment |
 | `SYNTHPASS_OCR_CHARGRID` | `off` | Post-hit repair of the MRZ name line's missing fillers on a fixed-pitch character grid — `off`/`on`/`control`; see `synthpass-ocr`'s `ChargridMode` doc comment |
-| `SYNTHPASS_OCR_STOP` | `first-valid` | Whether a checksum-valid reading that only `mrz`'s damaged-capture search recovered ends the retry loop (`first-valid`) or is held for confirmation (`clean`); see `synthpass-ocr`'s `StopMode` doc comment |
-| `SYNTHPASS_OCR_CONFIRM_PASSES` | `2` | Extra retry passes `SYNTHPASS_OCR_STOP=clean` spends trying to confirm a held damaged-capture reading before accepting it unconfirmed; inert under `first-valid` |
 | `SYNTHPASS_OCR_THREADS` | host cores − 1, floored at 1 | OCR-stage concurrency cap (`synthpass-pipeline`'s `env_ocr_threads`) |
 | `SYNTHPASS_OCR_VERBOSE` | *(unset)* | `1` logs per-pass timing and region counts |
 | `SYNTHPASS_OCR_DUMP_VARIANTS` | *(unset)* | Diagnostic: writes every preprocessed image the recognizer actually saw (general pass and each retry variant) as a PNG under this directory |
 | `SYNTHPASS_OCR_ENGINE` | `rust` | Only `rust` since v1.2.0; any other value warns and falls back |
 
-The seven measurement-arm knobs above plus `SYNTHPASS_OCR_MAX_PASSES`/`SYNTHPASS_OCR_MAX_SECONDS` — nine
+The five measurement-arm knobs above plus `SYNTHPASS_OCR_MAX_PASSES`/`SYNTHPASS_OCR_MAX_SECONDS` — seven
 in total — are behaviour-changing: the same binary on the same image can read differently depending on
-them, and nothing else in the output says why (issue #495). Whichever of the nine hold a
+them, and nothing else in the output says why (issue #495). Whichever of the seven hold a
 non-default *effective* value are recorded in each OCR-derived record's `trace.config_overrides`
 (`synthpass-core`'s `ExtractionTrace`, §13.1) and echoed once on stderr by `synthpass`/
 `synthpass batch` (`⚙️  [Rust] non-default OCR knobs: NAME=value …`) — `SYNTHPASS_OCR_THREADS` and
@@ -305,6 +303,13 @@ directory) for a manual `curl` + `sha256sum`; a build with the non-default `down
 feature (propagated from `synthpass-ocr` through `synthpass-pipeline` to `synthpass-cli`, so
 a default binary has no `reqwest` in its dependency graph at all) downloads and verifies them
 itself, deleting and failing on a checksum mismatch.
+
+`SYNTHPASS_OCR_STOP` and `SYNTHPASS_OCR_CONFIRM_PASSES` are gone (issue #473): the `clean`
+retry-stop arm they configured changed no real outcome, cost one real name read and gained 1 of
+500 synthetic seeds ([re-run](benchmarks/retry-stop-rerun-2026-09-27.md)), so it was removed
+rather than promoted. The retry loop always stops on the first checksum-valid reading, the only
+default it ever had. If either variable is still set, loading the OCR models prints one stderr
+line per variable saying it no longer has any effect, in every binary.
 
 **Tier-2 model**
 

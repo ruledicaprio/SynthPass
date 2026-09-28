@@ -1059,7 +1059,7 @@ pub struct DocumentDetail {
     /// Native OCR retry pass selected for this asset, when available (`pass-NN`; its number depends on retry configuration).
     pub retry_variant_id: Option<String>,
     /// `OcrPage::retry_damaged_recovery` passthrough — `MrzData::damaged_recovery`
-    /// of the reading the native retry loop accepted or held. `Some` exactly
+    /// of the reading the native retry loop accepted. `Some` exactly
     /// when `retry_variant_id` is `Some`.
     pub retry_damaged_recovery: Option<bool>,
     /// Whether the native retry loop hit its wall-clock budget.
@@ -1073,7 +1073,7 @@ pub struct DocumentDetail {
     pub chargrid: Option<String>,
     /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
     /// independent of `retry_damaged_recovery`, which describes the reading
-    /// the *native OCR retry loop* accepted or held, not this harness's own
+    /// the *native OCR retry loop* accepted, not this harness's own
     /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
     /// `None` when Tier 1 found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,

@@ -47,7 +47,7 @@ is classed from its `fields` CER, the same rule `wrong_scored_fields` uses.
 ## Retry breakdown
 
 Every moved seed is also tagged with the *after* report's
-`retry_stop`/`retry_damaged_recovery` -- e.g. `variant_valid_confirmed/true`
+`retry_stop`/`retry_damaged_recovery` -- e.g. `variant_valid/true`
 for a mover whose accepted reading came from `mrz`'s damaged-capture search,
 `general_valid/false` for one the ordinary scan read cleanly. A key entirely
 absent from a report (one written before #473 added `retry_damaged_recovery`,

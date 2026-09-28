@@ -1746,8 +1746,8 @@ mod tests {
         }
         fn config_overrides(&self) -> std::collections::BTreeMap<String, String> {
             std::collections::BTreeMap::from([(
-                "SYNTHPASS_OCR_STOP".to_string(),
-                "clean".to_string(),
+                "SYNTHPASS_OCR_TEXTURE".to_string(),
+                "off".to_string(),
             )])
         }
         fn describe(&self) -> String {
@@ -1875,8 +1875,8 @@ mod tests {
         assert_eq!(
             trace.config_overrides,
             std::collections::BTreeMap::from([(
-                "SYNTHPASS_OCR_STOP".to_string(),
-                "clean".to_string()
+                "SYNTHPASS_OCR_TEXTURE".to_string(),
+                "off".to_string()
             )]),
             "the engine's reported configuration must reach the trace unchanged"
         );
@@ -2018,8 +2018,8 @@ mod tests {
         assert_eq!(
             trace.config_overrides,
             std::collections::BTreeMap::from([(
-                "SYNTHPASS_OCR_STOP".to_string(),
-                "clean".to_string()
+                "SYNTHPASS_OCR_TEXTURE".to_string(),
+                "off".to_string()
             )]),
             "the engine's reported configuration must reach the trace unchanged"
         );
@@ -2036,8 +2036,8 @@ mod tests {
         assert_eq!(
             pipeline.ocr_config_overrides(),
             std::collections::BTreeMap::from([(
-                "SYNTHPASS_OCR_STOP".to_string(),
-                "clean".to_string()
+                "SYNTHPASS_OCR_TEXTURE".to_string(),
+                "off".to_string()
             )])
         );
     }

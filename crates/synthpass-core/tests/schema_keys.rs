@@ -168,7 +168,7 @@ fn trace_appears_only_with_content_and_carries_no_score() {
             version: 1,
             digest: "deadbeef".into(),
         }),
-        config_overrides: BTreeMap::from([("SYNTHPASS_OCR_STOP".into(), "clean".into())]),
+        config_overrides: BTreeMap::from([("SYNTHPASS_OCR_TEXTURE".into(), "off".into())]),
     });
 
     let json = to_json(&e);
@@ -178,7 +178,7 @@ fn trace_appears_only_with_content_and_carries_no_score() {
     assert_eq!(trace["escalation"], "mrz_checksum_failed");
     assert_eq!(trace["providers"][0], "mrz");
     assert_eq!(trace["prompt"]["version"], 1);
-    assert_eq!(trace["config_overrides"]["SYNTHPASS_OCR_STOP"], "clean");
+    assert_eq!(trace["config_overrides"]["SYNTHPASS_OCR_TEXTURE"], "off");
 
     // The load-bearing assertion: the routing score is not here, under any
     // spelling. A spend decision may rest on an uncalibrated number; a value
