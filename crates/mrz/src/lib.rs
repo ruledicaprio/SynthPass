@@ -126,10 +126,10 @@ mod dates;
 mod doccode;
 mod emit;
 mod mrz_date;
+mod occlusion;
 mod parser;
 mod repair;
 mod sex;
-#[allow(dead_code)] // Phase 0 check program; parser wiring is a later, measured change.
 mod strip;
 mod translit;
 
@@ -146,6 +146,7 @@ pub use emit::{
     MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
 };
 pub use mrz_date::{DateRole, InvalidRawDateField, MrzDate, ParseMrzDateError, RawDateField};
+pub use occlusion::{apply_occlusion, CellMask, Occluded, ZoneField};
 pub use parser::{
     find_and_parse, find_and_parse_with, parse_mrv_a, parse_mrv_a_with, parse_mrv_b,
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
@@ -1189,6 +1190,23 @@ pub enum MrzError {
     },
     /// No plausible MRZ found in the supplied text.
     NotFound,
+    /// [`apply_occlusion`] only: the [`CellMask`] covers a cell this crate's
+    /// crate-private coverage map (#519) says a `parse_*` call already used
+    /// as evidence — check-covered or structural, in that map's own
+    /// vocabulary — or, on an overflow layout (`Td1Overflow`, `Td2Overflow`,
+    /// `Td3Extension`), any masked cell outside the name field, since #519's
+    /// map does not cover an overflow layout's relocated document-number
+    /// cells closely enough to trust here. Either way this fails closed
+    /// rather than reporting a value the check-digit arithmetic — or the
+    /// image — cannot back up: a covered check-digit-bearing cell is never
+    /// rebuilt from the arithmetic, even where it could be solved for
+    /// uniquely (ADR-0026, decision 7).
+    OccludedCheckedCell {
+        /// Zero-based line within the MRZ zone.
+        line: usize,
+        /// Zero-based `char` column within the line.
+        position: usize,
+    },
 }
 
 impl core::fmt::Display for MrzError {
@@ -1236,6 +1254,10 @@ impl core::fmt::Display for MrzError {
                 )
             }
             Self::NotFound => write!(f, "no MRZ found in text"),
+            Self::OccludedCheckedCell { line, position } => write!(
+                f,
+                "occluded cell at line {line}, column {position} cannot be withheld safely"
+            ),
         }
     }
 }
