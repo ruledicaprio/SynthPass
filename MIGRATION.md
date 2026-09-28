@@ -6,6 +6,8 @@ to the versions it ships (see [`changelog.d/README.md`](changelog.d/README.md)).
 
 ## Unreleased
 
+## Migration guide: `mrz` 0.8 → 0.9
+
 ### `mrz` 0.8 → 0.9
 
 #### 1. `parse_*` refuses a document number whose first cell is the filler ([#536](https://github.com/ruledicaprio/SynthPass/issues/536))
