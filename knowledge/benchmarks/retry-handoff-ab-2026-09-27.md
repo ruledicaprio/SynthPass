@@ -109,8 +109,14 @@ text is `None` and it falls back to the full text. Under `first-valid` nothing i
   on `names_exact` for all 261. Four documents took a different retry path locally, and none of
   them changed its outcome:
   - France ID 2020 back and front: `budget` in CI, `exhausted` locally.
-  - Argentina `P0_ARG_2026`: `variant_valid` pass-09 in CI, `exhausted` locally.
-  - Kuwait `P0_KWT_2023`: `variant_valid` pass-03 in CI, `general_valid` locally.
+  - Argentina `P0_ARG_2026`: `variant_valid` pass-09 in CI, `exhausted` locally. *(Corrected
+    2026-09-28: issue #557 found that CI now reproduces this local path. #448 (`3bf1466`)
+    fits better than float rounding — its message describes this document's pass-09 reading
+    with a `V` inserted at cell 0, turning TD3 into MRV-A. Inferred.)*
+  - Kuwait `P0_KWT_2023`: `variant_valid` pass-03 in CI, `general_valid` locally. *(Corrected
+    2026-09-28: issue #557 found that CI now reproduces this local path. A change in
+    `69d5dac..9a639c6`, probably the damaged-recovery series #468, #471 and #483, fits better
+    than float rounding. Hypothesized.)*
 
   This is the local-versus-CI `rten` float rounding and runner speed the README describes.
 - **Observed: the arms differ only in the parse.** `retry_stop` and `retry_variant_id` are equal

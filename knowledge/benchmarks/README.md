@@ -305,12 +305,23 @@ a reliable first-pass check for more of the same; the per-document
 
 A second, unrelated finding from the same data: 4 *correctly-placed*
 `id_card` specimens (Italy CIE 2022, two Switzerland ID crops, one unlabelled
-Bosnia-format card) resolve to **TD2**/**MRV-B** — ICAO formats no ID card
-should parse as — rather than the ID-card-shaped TD1, and all four fail
-checksum. This is a genuine cross-format-confusion weak spot in the
-deterministic pipeline, not a corpus placement error, and is a candidate for
-the "weak-spot findings" writeup once all four real-specimen tracks have a
-current `tier1_hit_rate` run.
+Bosnia-format card) resolved to **TD2**/**MRV-B** — ICAO formats no ID card
+should parse as — rather than the ID-card-shaped TD1, and all four failed
+checksum at the time. This is a genuine cross-format-confusion weak spot in
+the deterministic pipeline, not a corpus placement error, and is a candidate
+for the "weak-spot findings" writeup once all four real-specimen tracks have
+a current `tier1_hit_rate` run.
+
+*Checked against the committed ledger, 2026-09-28:* this "4 of 4 fail
+checksum" count is stale and needs re-verification, not re-citation. Only
+`Switzerland_ID_Specimen_2003_back_mrz.jpg` (one of the two Switzerland
+crops) still carries `mrz_format: MRVB` there, and it no longer fails
+checksum — it reads `mrz_checksums_valid: true`, `outcome: hit`. That is not
+a genuine MRV-B specimen: it is the same TD1 card, and the checksum-valid
+reading was stitched from two retry passes' name-line reads, not a correct
+parse ([#560](https://github.com/ruledicaprio/SynthPass/issues/560)). Italy
+CIE 2022 back and the Bosnia-Herzegovina ID card back are both labelled
+`TD1` in the current ledger, not `TD2`/`MRV-B`.
 
 **Synthetic tracks: `td1`, `td2`, `td3` (M6), `mrva`, `mrvb` (MRV-A/MRV-B
 visas, added alongside M6's own generation/extraction coverage).** A
