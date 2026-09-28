@@ -39,7 +39,7 @@ The mechanics are enforced, not remembered. Each change drops a fragment in
 `!` marks a break). CI checks the version bump against the fragments
 (`scripts/check-changelog.sh`) and against the published API (`cargo-semver-checks`).
 
-## Where it stands — 0.8.0 (released 2026-09-24)
+## Where it stands — 0.9.0 (released 2026-09-28)
 
 Delivered:
 
@@ -53,8 +53,10 @@ Delivered:
 - The check-digit blind-spot atlas (`Blindspot`, `CLASSES`).
 - CI gates for the MSRV, semver and rustdoc warnings. Every public item is documented, and
   every item docs.rs counts carries a runnable example.
+- A structural refusal of a document number whose first cell is the filler (0.9.0, #536), and a
+  per-cell coverage map of the five direct parsers, pinned by tests (#421).
 
-## Patch track — 0.8.x
+## Patch track — 0.9.x
 
 Additive work and fixes that break nothing. None of it is ordered or scheduled.
 
@@ -94,7 +96,7 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
   needs is an audit of the `std::` paths and of the `serde` feature's `alloc` configuration.
 
-## The breaking window — 0.8.0 (closed)
+## The breaking window — 0.8.0 (closed; reopened once for 0.9.0)
 
 Pre-1.0 is the cheap time to break, and the plan is to break **once**: collect every change
 below into a single release rather than spreading them across several minors. Each is a
@@ -142,8 +144,10 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 
 ## 0.9.0 — release candidate
 
-- Nothing breaks after 0.8.0. The 0.9 line exists to prove that: real downstream use runs on it
-  for at least one full release cycle without needing a breaking fix.
+- 0.9.0 reopened the breaking window once, for a correctness refusal: a document number whose
+  first cell is the filler is no longer accepted (#536). So the clock restarts there. Nothing
+  breaks after 0.9.0, and the 0.9 line exists to prove that: real downstream use runs on it for
+  at least one full release cycle without needing a breaking fix.
 - The `serde` representation — field names, enum tagging — is documented as API and pinned by
   a round-trip test per type. From 1.0, renaming a JSON field is a major change.
 - The 1.x MSRV and semver policy is written into this file.
@@ -152,7 +156,8 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 
 1.0 ships when all of these hold:
 
-- [ ] The 0.8.0 breaking window has closed, and a 0.9.x line shipped with no further break.
+- [ ] The breaking window, reopened for 0.9.0, has closed, and the 0.9.x line shipped with no
+      further break.
 - [x] Every public item is documented, and every item docs.rs counts carries a runnable example.
 - [x] Every Doc 9303 worked example the crate relies on is pinned as a test vector
       ([`CONFORMANCE_BASIS.md`](../../knowledge/docs9303/CONFORMANCE_BASIS.md)).

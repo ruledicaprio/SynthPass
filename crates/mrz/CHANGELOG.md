@@ -16,6 +16,51 @@ Every entry names the pull request or commit it came from, so it traces back to 
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-28
+
+**Upgrading from 0.8:** this is a breaking release for one input. A document number whose first
+cell is the filler `<` is now refused (`MrzError::LeadingFiller`). The
+[migration guide](https://github.com/ruledicaprio/SynthPass/blob/main/MIGRATION.md#mrz-08--09)
+has what to change.
+
+### Added
+- **README table: what a passing `parse_*` call guarantees, and what it does not.** Apart from the
+  MRZ alphabet, only line 1's first cell (the document code) is checked outside the check digits.
+  The second document-code character, issuing country, nationality, sex vocabulary and calendar
+  plausibility are accepted exactly as printed by every direct `parse_td1`/`parse_td2`/
+  `parse_td3`/`parse_mrv_a`/`parse_mrv_b` call — those guards live only in `find_and_parse`'s
+  repair gates. `1`/`L` and `6`/`G` are the only `CONFUSABLES` pairs a check digit cannot
+  separate, and no check digit covers the document code, issuer, name, nationality or sex on any
+  of the five formats. No behaviour changes (#421).
+- **`code_for_name` now resolves 9 alternate country names.** A former official English name
+  (`Turkey`, `Czech Republic`), a UN long/short form (`Republic of Korea`, `United Kingdom of
+  Great Britain and Northern Ireland`, `Islamic Republic of Afghanistan`, `Republic of Turkey`),
+  or the country's own name in another language, ASCII-transliterated (`Turkiye`, `Azerbaycan`,
+  `Polska`), all now resolve to their code, checked in the new `alternate_names()` table only
+  after the primary name table itself declines. Additive; no existing lookup changes. See
+  `knowledge/benchmarks/normalize-country-demonyms-2026-09-27.md` (#539).
+
+### Changed
+- **`parse_td1`/`parse_td2`/`parse_td3`/`parse_mrv_a`/`parse_mrv_b` now refuse a document number
+  whose first cell is the filler `<`, including an all-filler field.** Doc 9303 enters data from
+  the left-hand position of each field (Part 3; Part 4 for TD3), so a leading filler is not
+  representable data — unlike an *interior* filler (Part 4 §4.2.2.2) or the long-number overflow
+  filler in the check-digit cell, both of which stay legal. The check-digit arithmetic cannot
+  see `0`, `A`, `K` or `U` read as `<` (all share residue 0 with the filler — see `Blindspot`),
+  so a misread first cell used to still verify. The refusal is a new structural error,
+  `MrzError::LeadingFiller { field, line, position }`, like `BadDocumentCode` — not a `Checks`
+  state, so `valid()` still means checksum consistency only. Input this crate used to accept
+  (an all-filler or otherwise leading-filler document number) is now an `Err`, hence the breaking
+  release (#536).
+
+### Fixed
+- **The rustdoc's Doc 9303 line citations land on the text they cite again.** Restructuring the
+  `knowledge/docs9303` transcription (#418, #526) shifted the lines below each edit, so 45
+  pointers in the crate's documentation and test labels had drifted onto the wrong text. The
+  clause numbers and claims were right; only the line numbers moved. They are re-pointed, and a
+  new test pins a prefix of every cited line's text so a later docs edit cannot move them
+  silently. No behaviour changes (#528).
+
 ## [0.8.3] — 2026-09-26
 
 ### Added
