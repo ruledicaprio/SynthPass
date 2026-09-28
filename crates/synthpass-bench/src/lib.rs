@@ -39,6 +39,35 @@ pub fn check_states(checks: &mrz::Checks) -> BTreeMap<&'static str, Option<bool>
     .collect()
 }
 
+/// Resolves the directory `synthpass-bench` and `provider-bench` load
+/// `text-detection.rten`/`text-recognition.rten` from: `SYNTHPASS_OCR_MODEL_DIR`
+/// if set, otherwise `fallback` (each binary's own build-tree `repo_root()`,
+/// today's behaviour) — issue #541. Both binaries previously called
+/// `NativeOcr::load` against `repo_root()` unconditionally, so a copy of
+/// either binary elsewhere silently read whatever `.rten` files happened to
+/// sit in its build tree instead of the models the rest of the pipeline
+/// (`synthpass-cli`, `synthpass-pipeline::ocr::engine_from_env`,
+/// `ground_truth.rs`'s `load_ocr`) already resolves via the variable.
+///
+/// Mirrors `ground_truth.rs`'s `load_ocr`: when the variable is set, it is
+/// used exactly as given, with no further search or existence check — that
+/// check happens later, inside `NativeOcr::load` itself.
+///
+/// `get` is the environment lookup, taken as a parameter rather than read
+/// directly from `std::env::var_os`, so a test can supply a fake environment
+/// without mutating the real process environment — the same shape as
+/// `synthpass_ocr::removed_knobs_set`'s `is_set: impl Fn(&str) -> bool`
+/// parameter (#550), which is how that crate tests env-driven resolution
+/// without `std::env::set_var`.
+pub fn resolve_model_dir(
+    fallback: &Path,
+    get: impl Fn(&str) -> Option<std::ffi::OsString>,
+) -> PathBuf {
+    get("SYNTHPASS_OCR_MODEL_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| fallback.to_path_buf())
+}
+
 /// Which capture profile to generate a corpus under. Shared between
 /// `synthpass-bench`'s Tier-1 hit-rate CLI and `provider-bench`'s
 /// multi-provider harness so both draw from the same corpus-generation code
@@ -1651,6 +1680,33 @@ fn fastrand_seed() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    /// Issue #541: unset falls back to the given directory (each binary's
+    /// build-tree `repo_root()`), the same fallback both binaries used
+    /// unconditionally before this fix.
+    #[test]
+    fn resolve_model_dir_falls_back_when_unset() {
+        let fallback = std::path::Path::new("/build/tree/repo/root");
+        assert_eq!(
+            super::resolve_model_dir(fallback, |_| None),
+            fallback.to_path_buf()
+        );
+    }
+
+    /// Set overrides the fallback entirely, used exactly as given — mirrors
+    /// `ground_truth.rs`'s `load_ocr`, which does the same with no further
+    /// search when the variable is present.
+    #[test]
+    fn resolve_model_dir_uses_the_variable_when_set() {
+        let fallback = std::path::Path::new("/build/tree/repo/root");
+        let given = std::path::Path::new("/opt/synthpass/models");
+        assert_eq!(
+            super::resolve_model_dir(fallback, |key| {
+                (key == "SYNTHPASS_OCR_MODEL_DIR").then(|| given.as_os_str().to_owned())
+            }),
+            given.to_path_buf()
+        );
+    }
+
     #[test]
     fn specimen_asset_identity_rejects_invalid_paths() {
         let root = std::path::Path::new("samples");
