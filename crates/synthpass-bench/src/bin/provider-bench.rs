@@ -102,7 +102,7 @@ use synthpass_bench::provider_bench::{
     StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::report::{
-    OutcomeRow, ProviderRow, RealSpecimenBaseline, RealSpecimenSnapshot, Report,
+    ModelPathsReport, OutcomeRow, ProviderRow, RealSpecimenBaseline, RealSpecimenSnapshot, Report,
     OFF_DENOMINATOR_KINDS, REGRESSION_BUCKETS,
 };
 use synthpass_bench::{
@@ -1260,11 +1260,19 @@ async fn main() {
     let show_progress = parsed.progress || std::io::stderr().is_terminal();
 
     let root = repo_root();
-    let ocr = NativeOcr::load(
-        &root.join("text-detection.rten"),
-        &root.join("text-recognition.rten"),
-    )
-    .expect("failed to load OCR models — run from the repo root");
+    // `SYNTHPASS_OCR_MODEL_DIR` if set, otherwise this binary's own
+    // build-tree repo root (today's behaviour, unchanged) — issue #541.
+    let model_dir = synthpass_bench::resolve_model_dir(&root, |k| std::env::var_os(k));
+    let detection_path = model_dir.join("text-detection.rten");
+    let recognition_path = model_dir.join("text-recognition.rten");
+    eprintln!(
+        "OCR models: detection={} recognition={}",
+        detection_path.display(),
+        recognition_path.display()
+    );
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect(
+        "failed to load OCR models — run from the repo root, or set SYNTHPASS_OCR_MODEL_DIR",
+    );
 
     // The full M7 catalog is `mrz` + the Tier-2 `LlmFieldReader`, and the only
     // way to reach the latter's registered instance is through a `Pipeline`
@@ -1726,6 +1734,7 @@ async fn main() {
         count,
         seed_start,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
+        model_paths: ModelPathsReport::resolve(&detection_path, &recognition_path),
         providers: reports.into_iter().map(ProviderRow::from).collect(),
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
