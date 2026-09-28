@@ -169,6 +169,13 @@ the committed ledger, so the gate passes with no re-bless. See [What next](#what
   - That A/B needs the reports to record `damaged_recovery` per document. Neither harness
     records it today, so it is unknown which of the five were damaged-capture accepts.
 
+**Amended 2026-09-27: the #473 re-run ran.** It ran on `55f4c0c`, which carries #548's
+per-document damaged flags and ADR-0025's narrowed handoff. The list above is kept as written
+before the run. Seeds 40, 50, 88 and 98 are damaged-capture accepts, and seed 20 is not.
+Cyprus 2010 stays a hit with #536: the loop runs on to pass-04. Under `clean`, no hit is lost,
+one synthetic read is gained and one real name is lost. See
+[`retry-stop-rerun-2026-09-27.md`](retry-stop-rerun-2026-09-27.md).
+
 ## A private specimen (class only)
 
 One more real case points the same way. It is a private TD1 identity card, back side, with one

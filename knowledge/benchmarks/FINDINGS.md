@@ -22,10 +22,13 @@ regenerate.
 | 2026-09-27 | [the synthetic headline re-measured: 368 / 500, and the −2 hides 14 more correct reads](#2026-09-27--the-synthetic-headline-re-measured-368--500-and-the-2-hides-14-more-correct-reads) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118](#2026-09-27--prompt-v3-moves-no-parity-field-on-the-84-fixtures-v2-reached-and-completes-all-118) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [the #508 A/B at `first-valid`: only `variant_valid` documents move, real 139 → 138, and no synthetic mover becomes correct](#2026-09-27--the-508-ab-at-first-valid-only-variant_valid-documents-move-real-139--138-and-no-synthetic-mover-becomes-correct) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-27 | [the #473 re-run on ADR-0025's handoff: `clean` no longer loses a hit, gains one synthetic read in 500, and costs one real name](#2026-09-27--the-473-re-run-on-adr-0025s-handoff-clean-no-longer-loses-a-hit-gains-one-synthetic-read-in-500-and-costs-one-real-name) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-27 | [Why `mrz` did not recover six M6 misses: one correct reading refused, three missing pairs, one cap, one date gate](m6-six-misses-repair-mechanisms-2026-09-27.md) | Observed (release `provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits`, all OCR arms at their defaults, 0 outcome changes against the committed ledger; the recorded provider input of six assets replayed through an instrumented copy of the shipped parser, reproducing the dumped zone on all six) plus Derived (counterfactual replays on the same copy with one gate lifted at a time; check-digit arithmetic) | current | m6-six-misses-repair-mechanisms-2026-09-27.md |
+| 2026-09-27 | [Country demonyms and alternate names, round two: 28 forms recover 38 fields, zero regressions](normalize-country-demonyms-2026-09-27.md) | Observed (CI `native-llm` run 36342651928 on `1988bbc`, the real parity harness) and Derived (the same captured CI log re-scored by `vocab_replay` first; it predicted the run exactly) | current | normalize-country-demonyms-2026-09-27.md |
 | 2026-09-27 | [Prompt v3 moves no parity field on the 84 fixtures v2 reached, and completes all 118: 50.8% reviewed, 55.3% derived](parity-prompt-v3-2026-09-27.md) | Observed (two CI `native-llm` job logs, same pinned GGUF, greedy decoding) plus Derived (per-fixture, per-field pairing of the two logs; a Python mirror of the prompt's content cleanup over the 118 tracked fixtures) | current | parity-prompt-v3-2026-09-27.md |
 | 2026-09-27 | [#508 A/B at `first-valid`: only `variant_valid` documents move, and the accepted pass is a worse witness than the concatenation](retry-handoff-ab-2026-09-27.md) | Observed (two local release builds, six full-population runs, ten single-seed traces; CI `real-specimen-gate.yml` run 36331797441 on `65c7944`) plus Derived (per-document and per-seed comparison) plus Hypothesized (the #536 outcome, marked where used); the private specimen is Observed locally, class only | current | retry-handoff-ab-2026-09-27.md |
 | 2026-09-27 | [#508 replay: `single()` refuses, the damaged-pass budget is never close](retry-handoff-replay-2026-09-27.md) | Observed (one local release build, single-seed and stride-26 traces per arm, plus a replay of every dumped `text` through an instrumented copy of `mrz`) | current | retry-handoff-replay-2026-09-27.md |
+| 2026-09-27 | [#473 re-run on ADR-0025's narrowed handoff: `clean` no longer loses a hit, gains one synthetic read in 500, and costs one real name](retry-stop-rerun-2026-09-27.md) | Observed (one local release build, twelve runs switched by env var) plus Derived (per-document and per-seed comparison, the accept-rule arithmetic, the timing split) plus Hypothesized (one untested lever, marked where used) | current | retry-stop-rerun-2026-09-27.md |
 | 2026-09-27 | [The synthetic headline is 368 / 500 on `main`: #468/#471 and #483 fix 15 wrong reads, and #521 costs TD1 four hits](synthetic-headline-2026-09-27.md) | Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) | current | synthetic-headline-2026-09-27.md |
 | 2026-09-26 | [Check-digit blind spots, exact — what the arithmetic can and cannot promise](checkdigit-blindspots-exact-2026-09-26.md) | Derived (closed form and exact integer enumeration, `crates/mrz/examples/checkdigit_blindspots_exact.rs`, with the laws pinned against the parser in `crates/mrz/tests/checkdigit_algebra.rs`; every measured input is cited to its note) plus one Observed count over the tracked fixtures (§4) | current | checkdigit-blindspots-exact-2026-09-26.md |
 | 2026-09-26 | [the #473 retry-stop A/B: `clean` loses hits because the parser never sees the loop's decision](#2026-09-26--the-473-retry-stop-ab-clean-loses-hits-because-the-parser-never-sees-the-loops-decision) | Observed | current | FINDINGS.md (Weak-spot findings) |
@@ -1285,3 +1288,48 @@ document. A private TD1 card (class only) points the same way: Tier 1 refused it
 with #535 it was a checksum-valid hit with the wrong sex and wrong names. Tables, the per-document
 reasons, invocations and what this does not claim:
 [`retry-handoff-ab-2026-09-27.md`](retry-handoff-ab-2026-09-27.md).
+
+---
+
+### 2026-09-27 — the #473 re-run on ADR-0025's handoff: `clean` no longer loses a hit, gains one synthetic read in 500, and costs one real name
+
+**Observed**, locally, on one release build of `55f4c0c`. That is branch
+`claude/508-narrowed-handoff`, not merged: `b5c1b55`, plus PR #548's per-document damaged flags,
+plus the narrowed handoff with ADR-0025 at Proposed. The arms were switched by env var:
+`SYNTHPASS_OCR_STOP=first-valid` against `clean`, with the confirm budget at 2. Real
+`first-valid` matches the committed CI ledger on all 261 outcomes. Synthetic TD3 `first-valid`
+matches #508 A/B arm A on all 100 seeds.
+
+| Population | `first-valid` | `clean` |
+| :-- | --: | --: |
+| Real specimens, scored | 139 / 151 = 92.1% | 139 / 151 = 92.1% |
+| Real specimens, whole corpus | 139 / 261 = 53.3% | 139 / 261 = 53.3% |
+| Real strict names | 12 / 45 | 11 / 45 |
+| Synthetic, five formats ×100: hits / correct / wrong accepts / valid misses | 368 / 177 / 191 / 21 | 370 / 178 / 192 / 20 |
+
+- **The #473 handoff defect is gone.** All 46 `repair_unconfirmed` stops (5 real, 41 synthetic)
+  score exactly as under `first-valid`, as ADR-0025's rule 2 predicts. The seeds that failed on
+  2026-09-26 (22, 43, 66 and 72) and the real Azerbaijan 2013 and Kuwait 2023 all score as
+  under `first-valid`.
+- **The arm touches only damaged-capture accepts.** It changed the retry path of exactly the
+  documents whose `first-valid` accept was a damaged-capture reading: 8 of 8 real, 53 of 53
+  synthetic.
+- **One gain, from rule 1.** TD1 seed 50 goes from `checksum_failed` to correct. pass-02 confirmed
+  the held reading, and Tier 1 read that pass alone. It is 1 of 9 `variant_valid_confirmed` stops.
+  None occurred on real specimens.
+- **Two other moves, both from rule 3,** where a later clean reading superseded the held repair:
+  - Azerbaijan `PC_AZE_2022` black-and-white loses its exact names, as it did on 2026-09-26.
+  - MRV-B seed 95 goes from a valid miss to a wrong accept. The document number becomes right,
+    the names stay wrong, and hits go 87 → 88 without a correct read.
+- **Smoke, single seeds:** TD3 seeds 40, 50, 88 and 98 are damaged-capture accepts, and seed 20
+  is not.
+- **Latency (Derived):** the arm costs about +9.6 s on 1 505 s of real OCR (modelled), and about
+  +0.8 s per exercised synthetic seed. Untouched documents moved ±0.5%.
+
+**Decision input:** `clean` passes the pre-registered accept rule as written. The rule does not
+count the real strict-name loss (report-only under ADR-0013), nor the MRV-B reclassification,
+because wrong accepts plus valid misses stay at 44. ADR-0021's K3, applied by analogy, reads that
+seed as new or as inherited. The note sets out both options for the owner: remove `clean` with
+rules (1) and (2) and keep #548, or promote it. It also marks an unmeasured middle lever. Tables,
+the per-rule breakdown, invocations and what this does not claim:
+[`retry-stop-rerun-2026-09-27.md`](retry-stop-rerun-2026-09-27.md).
