@@ -247,13 +247,13 @@ section records the cross-crate policies.
 
 | Crate | Responsibility |
 | --- | --- |
-| `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer, plus the deterministic normalizers, evidence fusion (`fusion::Support`), audit hashing and output encryption. `ExtractionTrace::config_overrides` carries a producer's own non-default configuration (env var name → effective value) — today only `synthpass-pipeline`'s OCR engine fills it (issue #495) — general across producers, and never a per-run observation about one document. The JSON key set is locked by `tests/schema_keys.rs`. Why the schema has the slots it has: [`V2-DESIGN.md`](V2-DESIGN.md). |
+| `synthpass-core` | Canonical `ExtractionV2` schema (`CoreField`, `ProviderId`, `EscalationKind`, `PromptRef`, `ExtractionTrace`) shared by every producer and consumer, plus the deterministic normalizers, evidence fusion (`fusion::Support`), audit hashing and output encryption. `ExtractionTrace::config_overrides` carries a producer's own non-default configuration (env var name → effective value) — today only `synthpass-pipeline`'s OCR engine fills it (issue #495) — general across producers, and never a per-run observation about one document. A per-document observation goes in its own slot instead: `ExtractionTrace::mrz_occlusion` records which MRZ cells the image showed covered (fill or blur), beside `escalation` ([ADR-0026](decisions/ADR-0026-covered-cells-are-occluded.md)), and `ExtractionV2::occluded` lists the `CoreField`s withheld because of it. The JSON key set is locked by `tests/schema_keys.rs`. Why the schema has the slots it has: [`V2-DESIGN.md`](V2-DESIGN.md). |
 | `mrz` | Zero-dependency ICAO 9303 MRZ parser / emitter / check-digit validator (TD1/TD2/TD3, MRV-A/MRV-B). Published standalone and consumed outside this workspace, so it must stay dependency-free and `wasm32`-clean. |
 | `mrz-wasm` | `wasm-bindgen` wrapper around `mrz` **and `synthpass-imageprep`** for the GitHub Pages demo — the parser and the preprocessing the browser runs. |
 | `synthpass-imageprep` | Deterministic MRZ preprocessing (band crop, contrast stretch, Otsu/local threshold, deskew, upscale, and median texture suppression for the security printing under the glyphs — see [`research/document-pipeline-stage-taxonomy.md`](research/document-pipeline-stage-taxonomy.md)) and layout geometry (`BBox`, MRZ-band and portrait scoring). One dependency (`image`, no default features), no OCR engine, and **must keep compiling for `wasm32-unknown-unknown`** — that constraint is what lets the browser demo run this exact code instead of a JavaScript port of it. |
 | `synthpass-ocr` | In-process pure-Rust OCR (`ocrs`/`rten`). Emits raw observations (text + confidence + position); does not interpret fields semantically. Re-exports `synthpass-imageprep`'s `preprocess`/`geometry` at their original paths. |
 | `synthpass-llm` | In-process `llama.cpp` (Qwen2.5-1.5B GGUF via `llama-cpp-2`). Tier 2 only — repairs / normalizes; never invents data absent from the input. |
-| `synthpass-die` | Document Intelligence Engine: provider contract, capability model, catalog, `RoutingPolicy`. See 13.2. |
+| `synthpass-die` | Document Intelligence Engine: provider contract, capability model, catalog, `RoutingPolicy`, and `occlusion::apply`, which maps an image-derived occlusion onto the wire's `CoreField`s through `mrz::apply_occlusion`. See 13.2. |
 | `synthpass-pipeline` | Orchestrates OCR → Tier 1 MRZ validation → Tier 2 fallback → structured JSON. A checksum-valid MRZ skips Tier 2 entirely. Tier 2 has two assembly paths, `process_document` and `process_document_stream`; a Tier-2 change lands on both ([`architecture/pipeline.md`](architecture/pipeline.md#two-tier-2-paths)). |
 | `synthpass-gen` | Deterministic synthetic document factory (TD1/TD2/TD3 + MRV-A/MRV-B) with per-field ground truth. |
 | `synthpass-export` | Turns a `synthpass-gen` corpus into a training dataset on disk (JSONL / Hugging Face, DeepSeek-OCR 0–1000 coordinate convention) — spec in [`EXPORTS.md`](EXPORTS.md), format decisions in [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md). |
@@ -300,6 +300,15 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
   `MrzError::LeadingFiller`, a structural error like `BadDocumentCode`, so `Checks` and `valid()`
   still mean checksum consistency only. Interior fillers (Part 4 §4.2.2.2) and the long-number
   overflow filler in the check-digit cell stay legal. The rule covers the document number only.
+- A cell the image shows covered — a uniform fill of any tone, or blur measured against the
+  zone's own verified line — is reported `occluded`, never as text: `mrz::apply_occlusion` blanks
+  the field and `synthpass-die`'s `occlusion::apply` maps it onto the wire's `CoreField`
+  vocabulary. A covered cell that feeds a check digit, or the format's one structural cell,
+  refuses the whole zone (`MrzError::OccludedCheckedCell`) rather than reporting a value the
+  arithmetic cannot back up, and it is **never reconstructed** from the check-digit arithmetic
+  even where a solver could recover it uniquely ([ADR-0026](decisions/ADR-0026-covered-cells-are-occluded.md),
+  decisions 2 and 7). No detector produces an occlusion yet; ADR-0026 decision 8 sets detection
+  default-off until it is measured.
 
 ### 13.4 `#[non_exhaustive]` policy for the published `mrz` crate
 

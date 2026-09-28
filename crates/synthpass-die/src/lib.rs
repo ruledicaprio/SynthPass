@@ -56,10 +56,13 @@
 //! - [`mrz_reader`] — the deterministic ICAO 9303 provider.
 //! - [`routing`] — turns [`Evidence`] into a spend decision, consulted by
 //!   `synthpass-pipeline`'s Tier-1 gate.
+//! - [`occlusion`] — applies an image-derived occlusion observation to an
+//!   already-parsed MRZ zone (ADR-0026), wrapping `mrz::apply_occlusion`.
 
 pub mod catalog;
 pub mod evidence;
 pub mod mrz_reader;
+pub mod occlusion;
 pub mod provider;
 pub mod routing;
 
@@ -102,6 +105,7 @@ pub fn mrz_parse_options() -> mrz::ParseOptions {
 pub use catalog::{CatalogError, ProviderCatalog, ProviderCatalogBuilder};
 pub use evidence::Evidence;
 pub use mrz_reader::{MrzReader, MRZ_PROVIDER_ID};
+pub use occlusion::Refused as OcclusionRefused;
 pub use provider::{
     Capability, CostClass, DocumentContext, FieldReader, IntelligenceProvider, ProviderError,
     Reading, Recognition, Recognizer,

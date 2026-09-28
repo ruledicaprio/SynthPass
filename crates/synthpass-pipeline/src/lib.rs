@@ -662,6 +662,9 @@ impl Pipeline {
                     escalation: None,
                     prompt: None,
                     config_overrides: ocr_result.config_overrides.clone(),
+                    // No occlusion detector runs in this pipeline yet (#565
+                    // PR 6 wires `synthpass-ocr`'s detector through here).
+                    mrz_occlusion: None,
                 });
                 let v1 =
                     serde_json::to_value(extraction_from_mrz(m)).expect("Extraction serializes");
@@ -753,6 +756,9 @@ impl Pipeline {
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
                             config_overrides: stage.ocr.config_overrides.clone(),
+                            // No occlusion detector runs in this pipeline yet
+                            // (#565 PR 6).
+                            mrz_occlusion: None,
                         });
                         let value = serde_json::to_value(extraction_from_v2_llm(
                             &v2,
@@ -852,6 +858,9 @@ impl Pipeline {
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
                             config_overrides: stage.ocr.config_overrides.clone(),
+                            // No occlusion detector runs in this pipeline yet
+                            // (#565 PR 6).
+                            mrz_occlusion: None,
                         });
                         // Derived from `v2`, not from the raw `extraction`: the v1
                         // record must agree with the v2 one it ships alongside, and
@@ -1836,6 +1845,7 @@ mod tests {
                 escalation: None,
                 prompt: None,
                 config_overrides: Default::default(),
+                mrz_occlusion: None,
             }),
             "the catalog's MrzReader is the only provider consulted on an accept"
         );
@@ -1990,6 +2000,7 @@ mod tests {
                 escalation: Some(EscalationKind::MrzNotFound),
                 prompt: None,
                 config_overrides: Default::default(),
+                mrz_occlusion: None,
             }),
             "the catalog's MrzReader is always consulted first, found nothing, \
              and the LLM was consulted next"
@@ -2178,6 +2189,7 @@ mod tests {
                 escalation: Some(EscalationKind::MrzChecksumFailed),
                 prompt: None,
                 config_overrides: Default::default(),
+                mrz_occlusion: None,
             }),
             "the specific reason must be MrzChecksumFailed, not MrzNotFound — \
              the MRZ did parse, it just didn't verify"
