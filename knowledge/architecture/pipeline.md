@@ -18,28 +18,27 @@ own. License checks happen in the front-end before this sequence starts
 ```mermaid
 sequenceDiagram
     autonumber
-    participant F as synthpass-cli / synthpass-serve
+    participant F as synthpass-cli /<br/>synthpass-serve
     participant P as synthpass-pipeline
-    participant O as OcrEngine (synthpass-ocr)
-    participant C as ProviderCatalog (synthpass-die)
-    participant L as LlmFieldReader → InferBackend (synthpass-llm)
+    participant O as OcrEngine<br/>(synthpass-ocr)
+    participant R as Readers via<br/>ProviderCatalog
 
     F->>P: process_document(path)
     P->>O: recognize_detailed(image)
-    O-->>P: text + layout geometry (general pass, then MRZ retry passes)
+    O-->>P: text + geometry
     Note right of P: writes <input>.md
-    P->>C: deterministic reader (MrzReader) reads the text
-    C-->>P: Reading + Evidence
-    Note right of P: RoutingPolicy::decide(evidence)
-    alt Accept — checksum-valid MRZ
-        Note right of P: builds ExtractionV2 from the MRZ, Tier 2 skipped
+    P->>R: MrzReader reads the text
+    R-->>P: Reading + Evidence
+    Note right of P: RoutingPolicy::decide
+    alt Accept: checksum-valid MRZ
+        Note right of P: ExtractionV2 from<br/>the MRZ, no Tier 2
     else Escalate { reason, budget }
-        Note right of P: acquires an llm_semaphore permit (queue depth +1)
-        P->>L: read(markdown, optional MRZ hint)
-        L-->>P: Extraction (already normalized)
-        Note right of P: releases the permit (queue depth −1),<br/>then apply_deterministic_mrz overwrites the model's<br/>fields with the check-verified MRZ ones
+        Note right of P: takes an<br/>llm_semaphore permit
+        P->>R: LlmFieldReader reads<br/>markdown + MRZ hint
+        R-->>P: normalized Extraction
+        Note right of P: releases the permit,<br/>apply_deterministic_mrz<br/>writes the verified MRZ<br/>fields over the model's
     end
-    Note right of P: writes <input>.json (or .json.enc),<br/>then appends the audit record
+    Note right of P: writes <input>.json<br/>(or .json.enc) and<br/>the audit record
     P-->>F: PipelineResult
 ```
 
@@ -47,19 +46,20 @@ sequenceDiagram
 
 *How does an image become `Accept` or `Escalate`?* OCR runs a general full-page pass.
 When that pass holds no checksum-valid MRZ, a second recognizer, constrained to the MRZ
-character set, re-reads preprocessed crops of the image until one validates or the pass
-and time budgets run out. The retry loop, its variants and its budgets are documented in
+character set, re-reads preprocessed crops of the image until one validates, the pass budget
+(`SYNTHPASS_OCR_MAX_PASSES`) or the time budget (`SYNTHPASS_OCR_MAX_SECONDS`) runs out,
+or no variant is left. The retry loop, its variants and its budgets are documented in
 `synthpass-ocr`'s crate docs. The preprocessing is `synthpass-imageprep`.
 
 ```mermaid
 flowchart TD
-    IMG["Image"] --> GEN["General OCR pass<br/>(OcrEngine::recognize_detailed)"] --> CHK{"Checksum-valid<br/>MRZ in this pass?"}
-    CHK -- "yes" --> TEXT["OCR text (markdown)"]
-    CHK -- "no" --> RETRY["MRZ-charset retry loop over preprocessed crops<br/>— stops on: a crop validates; the pass budget<br/>(SYNTHPASS_OCR_MAX_PASSES); the time budget<br/>(SYNTHPASS_OCR_MAX_SECONDS); or variants exhausted"]
-    RETRY --> TEXT
-    TEXT --> READER["MrzReader<br/>(synthpass-die)"] --> PARSE["mrz::find_and_parse"] --> DECIDE{"RoutingPolicy::decide"}
-    DECIDE -- "MRZ found, checksums valid" --> ACCEPT["Accept — Tier 2 skipped"]
-    DECIDE -- "not found, or a check digit failed" --> ESCALATE["Escalate { reason, budget }"]
+    GEN["General OCR pass<br/>OcrEngine::recognize_detailed"]
+    GEN -- "no checksum-valid MRZ" --> RETRY["MRZ-charset retry passes<br/>over preprocessed crops"]
+    GEN -- "checksum-valid MRZ" --> READ
+    RETRY -- "a crop validates, a budget<br/>runs out, or no variant is left" --> READ["MrzReader reads the text<br/>with mrz::find_and_parse"]
+    READ --> DECIDE["RoutingPolicy::decide"]
+    DECIDE -- "MRZ found,<br/>checksums valid" --> ACCEPT["Accept<br/>Tier 2 skipped"]
+    DECIDE -- "not found, or a<br/>check digit failed" --> ESC["Escalate<br/>{ reason, budget }"]
 ```
 
 **Sources:** `crates/synthpass-pipeline/src/lib.rs` `Pipeline::ocr_and_tier1`; `crates/synthpass-ocr/src/lib.rs` `NativeOcr::recognize_detailed`, `SYNTHPASS_OCR_MAX_PASSES`, `SYNTHPASS_OCR_MAX_SECONDS`; `crates/synthpass-die/src/mrz_reader.rs` `MrzReader::read`; `crates/synthpass-die/src/routing.rs` `RoutingPolicy::decide`, `Decision`; `crates/synthpass-core/src/v2.rs` `EscalationKind`.
@@ -89,17 +89,17 @@ Tier 2 is assembled on two paths:
   `POST /api/extract` uses it.
 
 ```mermaid
-flowchart LR
-    subgraph "Unary — process_document"
-        PD["process_document"] --> CAT["ProviderCatalog::find_reader"] --> LFR["LlmFieldReader::read"] --> EXT["InferBackend::extract"]
+flowchart TB
+    subgraph U["Unary"]
+        PD["process_document<br/>(CLI, batch jobs)"] --> CAT["ProviderCatalog::find_reader"] --> LFR["LlmFieldReader::read"] --> EXT["InferBackend::extract"]
     end
-    subgraph "Streaming — process_document_stream"
-        PDS["process_document_stream"] --> EXTS["InferBackend::extract_stream"]
-        EXTS -. "token deltas, in-flight<br/>(ProcessEvent::Delta)" .-> SSE["SSE 'delta' events<br/>(synthpass-serve)"]
+    subgraph S["Streaming"]
+        PDS["process_document_stream<br/>(POST /api/extract)"] --> EXTS["InferBackend::extract_stream"]
     end
-    EXT --> NORM["normalize<br/>(synthpass_core::normalize::extraction)"]
+    EXTS -. "token deltas<br/>(ProcessEvent::Delta)" .-> SSE["SSE 'delta' events"]
+    EXT --> NORM["normalize::extraction"]
     EXTS --> NORM
-    NORM --> MRZFIX["apply_deterministic_mrz"] --> OUT["outputs<br/>(&lt;input&gt;.json, or the SSE 'result' event)"]
+    NORM --> MRZFIX["apply_deterministic_mrz"] --> OUT["&lt;input&gt;.json, or the<br/>SSE 'result' event"]
 ```
 
 **Sources:** `crates/synthpass-pipeline/src/lib.rs` `Pipeline::process_document`, `Pipeline::process_document_stream`, `run_tier2`, `Pipeline::extract_via_inferer_stream`, `apply_deterministic_mrz`; `crates/synthpass-pipeline/src/llm_reader.rs` `LlmFieldReader::read`; `crates/synthpass-pipeline/src/infer.rs` `InferBackend`; `crates/synthpass-core/src/normalize.rs` `extraction`; `crates/synthpass-serve/src/main.rs` (the `delta`/`result` SSE events); `crates/synthpass-pipeline/src/jobs.rs` (batch jobs call `process_document`).

@@ -61,24 +61,22 @@ Everything on the extraction path is Rust, in one process: no sidecar, no Python
 container. *Which crates make up the extraction path, and which depends on which?*
 
 ```mermaid
-flowchart LR
-    subgraph "Front-ends"
+flowchart TB
+    subgraph FE["Front-ends"]
         CLI["synthpass-cli"]
         SERVE["synthpass-serve"]
     end
-    subgraph "Orchestration"
-        PIPE["synthpass-pipeline"]
-    end
-    subgraph "Stages"
+    PIPE["synthpass-pipeline"]
+    subgraph ST["Stages"]
         OCR["synthpass-ocr"]
         DIE["synthpass-die"]
         LLM["synthpass-llm"]
     end
-    subgraph "Leaf crates"
-        CORE["synthpass-core"]
+    LIC["synthpass-license"]
+    subgraph SH["Shared crates"]
         PREP["synthpass-imageprep"]
+        CORE["synthpass-core"]
         MRZ["mrz"]
-        LIC["synthpass-license"]
     end
 
     CLI --> PIPE
@@ -86,16 +84,16 @@ flowchart LR
     CLI -. "doctor" .-> OCR
     CLI -. "license" .-> LIC
     SERVE -. "license" .-> LIC
-    PIPE --> DIE
     PIPE --> OCR
+    PIPE --> DIE
     PIPE --> LLM
     PIPE --> CORE
     PIPE --> MRZ
-    DIE --> CORE
-    DIE --> MRZ
     OCR --> PREP
     OCR --> CORE
     OCR --> MRZ
+    DIE --> CORE
+    DIE --> MRZ
     LLM --> CORE
     LIC --> CORE
     CORE --> MRZ
