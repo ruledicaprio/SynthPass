@@ -1,7 +1,7 @@
 # The extraction pipeline
 
 How one document moves from an image to JSON, and what runs where. Checked against the tree at
-v1.7.0 (`e33b177`, 2026-09-28). This is [`ARCHITECTURE.md`](../ARCHITECTURE.md) §5.
+v1.7.0 (`86987fe`, 2026-09-28). This is [`ARCHITECTURE.md`](../ARCHITECTURE.md) §5.
 
 Each crate's rustdoc is the source of truth for its API. This page is the map between them.
 It carries no measured numbers; those are in
@@ -9,10 +9,10 @@ It carries no measured numbers; those are in
 
 ## The sequence
 
-`Pipeline::process_document` and its streaming twin, `process_document_stream`
-(`crates/synthpass-pipeline/src/lib.rs`), run every step. The CLI and the web server call
-them; neither holds extraction logic of its own. License
-checks happen in the front-end before this sequence starts
+*Who calls whom for one document, in order?* `Pipeline::process_document` and its
+streaming twin, `process_document_stream` (`crates/synthpass-pipeline/src/lib.rs`), run
+every step. The CLI and the web server call them; neither holds extraction logic of its
+own. License checks happen in the front-end before this sequence starts
 ([`LICENSING.md`](../LICENSING.md#design)).
 
 ```mermaid
@@ -27,30 +27,42 @@ sequenceDiagram
     F->>P: process_document(path)
     P->>O: recognize_detailed(image)
     O-->>P: text + layout geometry (general pass, then MRZ retry passes)
-    P->>P: write <input>.md
+    Note right of P: writes <input>.md
     P->>C: deterministic reader (MrzReader) reads the text
     C-->>P: Reading + Evidence
-    P->>P: RoutingPolicy::decide(evidence)
+    Note right of P: RoutingPolicy::decide(evidence)
     alt Accept — checksum-valid MRZ
-        P->>P: ExtractionV2 from the MRZ, Tier 2 skipped
+        Note right of P: builds ExtractionV2 from the MRZ, Tier 2 skipped
     else Escalate { reason, budget }
-        P->>P: acquire an llm_semaphore permit (queue depth +1)
+        Note right of P: acquires an llm_semaphore permit (queue depth +1)
         P->>L: read(markdown, optional MRZ hint)
-        L-->>P: Extraction
-        P->>P: release the permit (queue depth −1)
-        P->>P: apply_deterministic_mrz: check-verified MRZ fields replace the model's
+        L-->>P: Extraction (already normalized)
+        Note right of P: releases the permit (queue depth −1),<br/>then apply_deterministic_mrz overwrites the model's<br/>fields with the check-verified MRZ ones
     end
-    P->>P: normalize, write <input>.json (or .json.enc), append the audit record
+    Note right of P: writes <input>.json (or .json.enc),<br/>then appends the audit record
     P-->>F: PipelineResult
 ```
 
 ## The Tier-1 gate
 
-OCR runs a general full-page pass. When that pass holds no checksum-valid MRZ, a second
-recognizer, constrained to the MRZ character set, re-reads preprocessed crops of the image
-until one validates or the pass and time budgets run out. The retry loop, its variants and
-its budgets are documented in `synthpass-ocr`'s crate docs. The preprocessing is
-`synthpass-imageprep`.
+*How does an image become `Accept` or `Escalate`?* OCR runs a general full-page pass.
+When that pass holds no checksum-valid MRZ, a second recognizer, constrained to the MRZ
+character set, re-reads preprocessed crops of the image until one validates or the pass
+and time budgets run out. The retry loop, its variants and its budgets are documented in
+`synthpass-ocr`'s crate docs. The preprocessing is `synthpass-imageprep`.
+
+```mermaid
+flowchart TD
+    IMG["Image"] --> GEN["General OCR pass<br/>(OcrEngine::recognize_detailed)"] --> CHK{"Checksum-valid<br/>MRZ in this pass?"}
+    CHK -- "yes" --> TEXT["OCR text (markdown)"]
+    CHK -- "no" --> RETRY["MRZ-charset retry loop over preprocessed crops<br/>— stops on: a crop validates; the pass budget<br/>(SYNTHPASS_OCR_MAX_PASSES); the time budget<br/>(SYNTHPASS_OCR_MAX_SECONDS); or variants exhausted"]
+    RETRY --> TEXT
+    TEXT --> READER["MrzReader<br/>(synthpass-die)"] --> PARSE["mrz::find_and_parse"] --> DECIDE{"RoutingPolicy::decide"}
+    DECIDE -- "MRZ found, checksums valid" --> ACCEPT["Accept — Tier 2 skipped"]
+    DECIDE -- "not found, or a check digit failed" --> ESCALATE["Escalate { reason, budget }"]
+```
+
+**Sources:** `crates/synthpass-pipeline/src/lib.rs` `Pipeline::ocr_and_tier1`; `crates/synthpass-ocr/src/lib.rs` `NativeOcr::recognize_detailed`, `SYNTHPASS_OCR_MAX_PASSES`, `SYNTHPASS_OCR_MAX_SECONDS`; `crates/synthpass-die/src/mrz_reader.rs` `MrzReader::read`; `crates/synthpass-die/src/routing.rs` `RoutingPolicy::decide`, `Decision`; `crates/synthpass-core/src/v2.rs` `EscalationKind`.
 
 The pipeline then asks the catalog for its free, deterministic reader, `MrzReader`. It calls
 `mrz::find_and_parse`, which tries the five formats in the fixed order
@@ -60,8 +72,14 @@ The pipeline then asks the catalog for its free, deterministic reader, `MrzReade
 and Tier 2 is not run at all. `Evidence` and `Reading` never reach the output JSON
 ([§13.2](../ARCHITECTURE.md#132-synthpass-die-dependency-boundary)).
 
+`EscalationKind` has five variants, checked in this order: `MrzNotFound`, `MrzChecksumFailed`,
+`Line1Flagged`, `OcrBelowSanityFloor`, `FieldsMissing`. Only the first two are reachable under
+the default policy above — the rest are opt-in signals `RoutingPolicy::default()` leaves off.
+
 ## Two Tier-2 paths
 
+*Where do the unary and streaming paths split and rejoin? (Dashed: the streaming path's
+token-delta side channel, sent while it runs, not instead of its final `Extraction`.)*
 Tier 2 is assembled on two paths:
 
 - **`process_document`** — the unary path. It goes through the catalog to `LlmFieldReader`.
@@ -70,10 +88,28 @@ Tier 2 is assembled on two paths:
   `InferBackend::extract_stream` directly and forwards token deltas as they arrive.
   `POST /api/extract` uses it.
 
-**A Tier-2 change lands on both paths.** A fix applied to one path once missed the other,
-and every single-document web upload kept the bug. `apply_deterministic_mrz` is the step both paths share,
-and `both_tier2_paths_produce_the_same_extraction` asserts that they agree. Why streaming
-sits outside the provider contract is in
+```mermaid
+flowchart LR
+    subgraph "Unary — process_document"
+        PD["process_document"] --> CAT["ProviderCatalog::find_reader"] --> LFR["LlmFieldReader::read"] --> EXT["InferBackend::extract"]
+    end
+    subgraph "Streaming — process_document_stream"
+        PDS["process_document_stream"] --> EXTS["InferBackend::extract_stream"]
+        EXTS -. "token deltas, in-flight<br/>(ProcessEvent::Delta)" .-> SSE["SSE 'delta' events<br/>(synthpass-serve)"]
+    end
+    EXT --> NORM["normalize<br/>(synthpass_core::normalize::extraction)"]
+    EXTS --> NORM
+    NORM --> MRZFIX["apply_deterministic_mrz"] --> OUT["outputs<br/>(&lt;input&gt;.json, or the SSE 'result' event)"]
+```
+
+**Sources:** `crates/synthpass-pipeline/src/lib.rs` `Pipeline::process_document`, `Pipeline::process_document_stream`, `run_tier2`, `Pipeline::extract_via_inferer_stream`, `apply_deterministic_mrz`; `crates/synthpass-pipeline/src/llm_reader.rs` `LlmFieldReader::read`; `crates/synthpass-pipeline/src/infer.rs` `InferBackend`; `crates/synthpass-core/src/normalize.rs` `extraction`; `crates/synthpass-serve/src/main.rs` (the `delta`/`result` SSE events); `crates/synthpass-pipeline/src/jobs.rs` (batch jobs call `process_document`).
+
+**A Tier-2 change lands on both paths.** A fix applied to one path once missed the other, and
+every single-document web upload kept the bug. `apply_deterministic_mrz` is the step both paths
+share, and `both_tier2_paths_produce_the_same_extraction` (a pipeline test) asserts that they
+agree. Both paths normalize the raw `Extraction` *before* `apply_deterministic_mrz` runs — not
+after, which would let the model's own formatting overwrite a field the MRZ read had just fixed.
+Why streaming sits outside the provider contract is in
 [`technical_debt.md`](../technical_debt.md#streaming-bypasses-the-provider-contract).
 
 `NativeInferer` runs `llama.cpp` generation inside `spawn_blocking`, because it is CPU-bound

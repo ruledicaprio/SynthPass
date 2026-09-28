@@ -58,19 +58,58 @@ training data.
 ## 2. Components
 
 Everything on the extraction path is Rust, in one process: no sidecar, no Python, no
-container. The crates it runs through:
+container. *Which crates make up the extraction path, and which depends on which?*
 
 ```mermaid
 flowchart LR
-    CLI["synthpass-cli"] --> PIPE["synthpass-pipeline"]
-    SERVE["synthpass-serve"] --> PIPE
-    CLI -. license .-> LIC["synthpass-license"]
-    SERVE -. license .-> LIC
-    PIPE --> OCR["synthpass-ocr"] --> PREP["synthpass-imageprep"]
-    PIPE --> DIE["synthpass-die"] --> MRZ["mrz"]
-    PIPE --> LLM["synthpass-llm"]
-    PIPE --> CORE["synthpass-core"]
+    subgraph "Front-ends"
+        CLI["synthpass-cli"]
+        SERVE["synthpass-serve"]
+    end
+    subgraph "Orchestration"
+        PIPE["synthpass-pipeline"]
+    end
+    subgraph "Stages"
+        OCR["synthpass-ocr"]
+        DIE["synthpass-die"]
+        LLM["synthpass-llm"]
+    end
+    subgraph "Leaf crates"
+        CORE["synthpass-core"]
+        PREP["synthpass-imageprep"]
+        MRZ["mrz"]
+        LIC["synthpass-license"]
+    end
+
+    CLI --> PIPE
+    SERVE --> PIPE
+    CLI -. "doctor" .-> OCR
+    CLI -. "license" .-> LIC
+    SERVE -. "license" .-> LIC
+    PIPE --> DIE
+    PIPE --> OCR
+    PIPE --> LLM
+    PIPE --> CORE
+    PIPE --> MRZ
+    DIE --> CORE
+    DIE --> MRZ
+    OCR --> PREP
+    OCR --> CORE
+    OCR --> MRZ
+    LLM --> CORE
+    LIC --> CORE
+    CORE --> MRZ
 ```
+
+Solid edges are on the extraction path itself. The two dashed edges to `synthpass-license`
+are license enforcement, which lives beside extraction rather than on it — the front-ends
+check license state before calling into `synthpass-pipeline`, and no extraction crate ever
+calls `synthpass-license`. The dashed `synthpass-cli` → `synthpass-ocr` edge is
+feature-gated (`ocr-native-rust`, on by default) but also off the extraction path: it is
+`synthpass doctor`'s model-file/checksum check, not an extraction call — extraction always
+goes through `synthpass-pipeline`. The CLI also depends directly on `synthpass-core` (output
+types, `decrypt`) and on `synthpass-gen` and `synthpass-export` for its other commands; the
+map leaves those edges out.
 
 `mrz-wasm` runs `mrz` and `synthpass-imageprep` in the browser demo. `synthpass-gen`,
 `synthpass-bench` and `synthpass-export` sit beside the extraction path. Every crate's
