@@ -94,12 +94,15 @@ provided the zone still reads in B900
 **Bears on SynthPass:**
 
 - **TD1 is packed as tightly as the OCR standard permits.** Its lines sit 4.23 mm apart, which is
-  1.72 cap at the nominal capital height and 1.63 cap if the digit height is taken as the line
-  height. Each printing zone is only 2.95 mm tall, 0.35 mm more than a digit.
-- A TD1 prior therefore has almost no vertical slack: each line may drift about ±0.17 mm inside
-  its zone.
-- The TD3 printing zones (4.3 mm around a 2.66 mm digit) permit a line pitch of 4.65-8.05 mm.
-  Under ISO 1831 the pitch can never fall below 4.20 mm.
+  1.72 cap at the nominal capital height and 1.59 cap if the constant-strokewidth digit height
+  (2.66 mm, [`glyph-dimensions.md`](glyph-dimensions.md)) is taken as the line height. Each
+  printing zone is only 2.95 mm tall, 0.29 mm more than a digit.
+- A TD1 prior therefore has almost no vertical slack: each line may drift about ±0.15 mm inside
+  its zone, so a conforming TD1 prints its lines 4.20-4.52 mm apart (1.71-1.84 cap).
+- The TD3 printing zones (4.3 mm around a 2.66 mm digit) permit a line pitch of 4.71-7.99 mm
+  (1.91-3.25 cap). Under ISO 1831 the pitch can never fall below 4.20 mm.
+- *Corrected 2026-09-28:* these bullets first used ECMA-11's letterpress digit (2.60 mm), which
+  gave 1.63 cap, 0.35 mm, ±0.17 mm and 4.65-8.05 mm.
 - **Neither format's spacing prior can be one number.** TD3 has a wide band. TD1 is a different,
   much tighter value (see the findings file).
 

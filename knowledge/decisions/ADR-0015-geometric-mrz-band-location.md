@@ -1,6 +1,6 @@
 # ADR-0015 — `mrz-locate`: find the MRZ band by geometry, before recognition
 
-**Status:** Proposed
+**Status:** Proposed (amended 2026-09-24 and 2026-09-28)
 **Date:** 2026-09-18
 
 ## Context
@@ -83,8 +83,10 @@ variable. Nothing enters the default path before the go/no-go below is met.
      and plausible aspect.
    - Fit pitch and phase per candidate with `chargrid`'s existing ink-profile machinery, and score
      how well a fixed pitch of 30 / 36 / 44 cells explains it.
-   - Prefer candidates whose gaps show the periodic filler signature, which is the self-check: a
-     correct fit makes filler runs land on cell boundaries.
+   - Prefer candidates whose cells show the periodic filler signature, which is the self-check: a
+     correct fit puts every cell boundary in a clear gap between glyphs, and filler runs show as
+     low-ink cells centred on the grid, not as gaps (corrected 2026-09-28; see the amendments
+     below).
    - Return the band, the format hypothesis, the orientation, and the grid — so the crop that
      follows arrives with its pitch already measured rather than re-derived.
 4. **Arms.** Cargo feature `mrz-locate`, off by default, and `SYNTHPASS_OCR_MRZ_LOCATE=off|on|control`,
@@ -193,3 +195,45 @@ per that benchmark's own framing ("flagged for the architect, not changed here")
 point is principle 1's: a periodic filler-run signature is *evidence* a candidate grid fit is
 correct, not a guarantee. A name that fills its entire line (Doc 9303 Part 4 allows this) prints
 no filler run at all, so a locator that requires one to accept a fit will refuse a valid MRZ.
+
+## Amendment (2026-09-28) — what the OCR standards fix: spacing bands per format, and where fillers sit
+
+The 2026-09-24 amendment above tested this ADR's shape priors against 16 measured TD3 crops. The
+standards Doc 9303 delegates to — ISO 1073-2 for the glyphs, ISO 1831 for the print — are now
+distilled in [`../ocrb/`](../ocrb/README.md), and
+[`ocrb-standards-vs-priors-2026-09-24.md`](../benchmarks/ocrb-standards-vs-priors-2026-09-24.md)
+sets their values against these priors. Four consequences for `mrz-locate` follow. None changes the
+Decision, the arms or the go/no-go, and no code carried the old wording: `mrz-locate` does not
+exist yet.
+
+- **The line-spacing prior is one band per format, not one number.** The figures are derived in
+  [`line-and-pitch.md`](../ocrb/line-and-pitch.md#against-doc-9303s-per-format-nominal-values), which
+  wins where this summary and that page disagree.
+  - **TD1 is nearly fixed.** Doc 9303-5 Figure 6 sets its lines 4.23 mm apart. That is the densest
+    packing ISO 1831 permits (line spacing at least 4.20 mm, §6.13; Annex D.4). Its 2.95 mm
+    printing zones leave each line very little drift: about 1.71-1.84 cap.
+  - **TD3 and MRV have a wide band.** The nominal spacing is 6.35 mm (Doc 9303-4 Figure 3), but
+    the 4.3 mm printing zones let a conforming document print anywhere from about 1.9 to 3.25 cap.
+  - **TD2 has no recorded band.** [`../docs9303/`](../docs9303/README.md) does not transcribe a line
+    spacing for Doc 9303-6 Figure 6. A locator measures TD2 before assuming TD3's band.
+  - **A band is evidence for a candidate, not a gate.** One real TD3 specimen, the 2026-09-23
+    note's Brazil 2015, prints its lines 1.65 cap apart. That is below ISO 1831's floor of 1.71 cap
+    if its cap height is nominal (inferred). A locator that rejected candidates on spacing alone
+    would refuse a zone Tier 1 can read.
+- **Bar heights are near-equal only to about ±15%.** Line 2 carries digits. ISO 1073-2 Table 1
+  sets constant-strokewidth digits 8.1% taller than capitals, and round digits overshoot further.
+  A tighter near-equal test rejects conforming print.
+- **Fillers sit at cell centres; the boundaries are the gaps.**
+  - A glyph is placed within its pitch by a reference line (ISO 1073-2 §11.4.1). The offset depends
+    on the glyph, up to about 0.07 pitch (ISO 1831 Annex D.8's `J` example).
+  - Adjacent glyphs are separated by a clear gap at least one stroke wide (ISO 1831 §6.7.1).
+  - A correct fit therefore puts every boundary on background, and every glyph, `<` included, near
+    its cell's centre. Decision step 3's self-check is corrected in place to say so.
+  - `chargrid::grid_origin_from_ink` already scores an origin this way, by how little ink its
+    boundaries cross.
+- **Whether a filler cell reads as low-ink depends on how tall a band is sampled.**
+  - The standards note's model puts chargrid's `DEFAULT_INK_FLOOR` closest to a conforming filler on
+    a band one full TD3 line pitch tall.
+  - [#411](https://github.com/ruledicaprio/SynthPass/issues/411) logs the `ocrs` line-box height
+    beside chargrid's reads, so that margin is measured on real documents.
+  - A locator's filler test waits for that measurement.
