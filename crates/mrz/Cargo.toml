@@ -58,7 +58,7 @@ zeroize = { version = ">=1.8.1, <1.9", features = ["derive"], optional = true }
 # rust-version-1.85 problem as zeroize 1.9.0 above. 1.4.3 is the newest
 # edition-2021 release. Remove this entry if it ever stops being needed (e.g.
 # a future zeroize requires a version floor that already excludes 1.5.0).
-zeroize_derive = { version = ">=1.4, <1.5", optional = true }
+zeroize_derive = { version = ">=1.4, <1.6", optional = true }
 
 [features]
 serde = ["dep:serde"]
