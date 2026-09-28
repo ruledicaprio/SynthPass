@@ -212,6 +212,20 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   amendment). It is a **ratchet**: the fix that earns it lowers `N`, and raising `N` is a
   reviewed workflow edit that names the seeds and the mechanism. Names, optional data and
   check-digit collisions stay report-only.
+
+  **The report-only sibling — prefix wrong accepted reads** (`Report.accepted_reads`,
+  `prefix_wrong_accepted_reads`, `prefix_wrong_accepted_read_seeds`, per-document
+  `results[].prefix_wrong_accepted_read`): an *accepted read* is a Tier-1 hit **or** a
+  `document_number_mismatch` miss, and it counts here when `document_type` or `issuing_country`
+  has CER > 0 against truth. `accepted_reads` (hits plus `document_number_mismatch` misses) is
+  the denominator; the other miss kinds (`ocr_error`, `no_mrz_found`, `checksum_failed`,
+  `checksum_failed_specimen`, `document_number_leading_filler`, …) are never accepted reads.
+  It is a count, so there is no rate. It is **not gated**: `hit` excludes a
+  `document_number_mismatch` read, so the gated hits-only count above misses it, yet the router
+  accepts it, because its check digits verified. Widening what `--max-prefix-wrong-accepts`
+  counts would be a reviewed workflow edit, like raising `N`
+  ([#574](https://github.com/ruledicaprio/SynthPass/issues/574)). `hit`, `wrong_accept`,
+  `prefix_wrong_accept` and the gate do not read it.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
