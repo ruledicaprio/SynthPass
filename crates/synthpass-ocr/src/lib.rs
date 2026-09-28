@@ -462,7 +462,8 @@ impl NativeOcr {
                 general_started.elapsed()
             );
         }
-        if let Some(data) = mrz::find_and_parse(&text).ok().filter(|d| d.valid()) {
+        let general_parsed = mrz::find_and_parse(&text);
+        if let Some(data) = general_parsed.as_ref().ok().filter(|d| d.valid()) {
             if verbose {
                 eprintln!(
                     "[synthpass-ocr] general pass: stopping, damaged_recovery={}",
@@ -492,7 +493,10 @@ impl NativeOcr {
                 chargrid: chargrid_arm,
             });
         } else if verbose {
-            eprintln!("[synthpass-ocr] Tier-1 miss on general pass; MRZ-band candidate lines:");
+            eprintln!(
+                "[synthpass-ocr] Tier-1 miss on general pass ({}); MRZ-band candidate lines:",
+                describe_unaccepted_mrz(&general_parsed)
+            );
             for line in mrz_shaped_lines(&text).lines() {
                 eprintln!("[synthpass-ocr]   {line}");
             }
@@ -707,7 +711,8 @@ impl NativeOcr {
             text.push_str(&candidates);
             // Check just this pass's lines: a valid MRZ appended means Tier 1
             // will find it — later (costlier) variants have nothing to add.
-            if let Some(data) = mrz::find_and_parse(&candidates).ok().filter(|d| d.valid()) {
+            let variant_parsed = mrz::find_and_parse(&candidates);
+            if let Some(data) = variant_parsed.as_ref().ok().filter(|d| d.valid()) {
                 // The reported rotation has to describe the buffer this MRZ was
                 // actually read off, or `OcrPage.rotation` stops being usable
                 // evidence for anything downstream.
@@ -738,7 +743,19 @@ impl NativeOcr {
                 winning_variant_image = Some(variant);
                 break;
             } else if verbose {
-                eprintln!("[synthpass-ocr] variant {i}: MRZ-shaped but checksum-invalid lines:");
+                // No checksum-valid reading was accepted for this pass --
+                // that covers a genuinely checksum-invalid zone *and* a
+                // damaged pass whose checksum-valid readings `mrz`'s
+                // unanimity gate (`single()`) refused, which also falls back
+                // to this ordinary `Ok`-but-not-`valid()` shape. The caller
+                // cannot tell those two apart from here, so the checks named
+                // below belong only to the fallback reading, not necessarily
+                // to every line this pass produced.
+                eprintln!(
+                    "[synthpass-ocr] variant {i}: no checksum-valid reading accepted ({}); \
+                     MRZ-shaped lines:",
+                    describe_unaccepted_mrz(&variant_parsed)
+                );
                 for line in candidates.lines() {
                     eprintln!("[synthpass-ocr]   {line}");
                 }
@@ -1254,6 +1271,46 @@ fn run_pass(engine: &OcrsEngine, image: &RgbImage) -> Result<String, String> {
 /// numbers.
 fn has_valid_mrz(text: &str) -> bool {
     mrz::find_and_parse(text).is_ok_and(|d| d.valid())
+}
+
+/// Describes what an unaccepted `mrz::find_and_parse` result actually was,
+/// for `SYNTHPASS_OCR_VERBOSE` logging at both the general-pass and
+/// retry-variant call sites (#540). "Unaccepted" covers three different
+/// outcomes that a caller filtering on `.ok().filter(|d| d.valid())` cannot
+/// otherwise distinguish in its log line:
+///
+/// - `Err`: `find_and_parse` never produced a reading at all (no MRZ-shaped
+///   text, or a structural parse failure) -- this returns `no reading: `
+///   followed by the `MrzError`'s `Display`.
+/// - `Ok` that is not [`mrz::MrzData::valid`]: a zone parsed but one or more
+///   printed check digits disagreed -- this names the fallback reading's
+///   failing fields via [`mrz::Checks::failed`].
+/// - `Ok` that is not `valid()` for a *damaged* pass whose checksum-valid
+///   readings `mrz`'s unanimity gate (`single()`) refused: `find_and_parse`
+///   falls back to an ordinary checksum-invalid reading in that case too, so
+///   it is indistinguishable from the previous case from here. Callers must
+///   not claim the failing checks below belong to every reading the pass
+///   produced -- see the call sites' own wording.
+fn describe_unaccepted_mrz(parsed: &Result<mrz::MrzData, mrz::MrzError>) -> String {
+    match parsed {
+        Err(e) => format!("no reading: {e}"),
+        Ok(data) => {
+            let failed = data.checks.failed();
+            if failed.is_empty() {
+                // Not `valid()` yet nothing in `failed()`: per
+                // `Checks::all_valid`, the only way there is zero applicable
+                // check digits -- no check-digit evidence to name.
+                "fallback reading has no applicable check digits".to_string()
+            } else {
+                let names = failed
+                    .into_iter()
+                    .map(mrz::Field::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("fallback reading fails checks: {names}")
+            }
+        }
+    }
 }
 
 /// Is `SYNTHPASS_OCR_VERBOSE=1` set? Gates the per-pass diagnostic logging
@@ -2324,6 +2381,127 @@ mod tests {
             })
         );
         assert!(!has_valid_mrz(refused));
+    }
+
+    // ---- #540: describe_unaccepted_mrz -------------------------------------
+
+    /// `Err`: the pure function must carry the `MrzError`'s own `Display`,
+    /// not a paraphrase of it, and must not call it a fallback reading.
+    #[test]
+    fn describe_unaccepted_mrz_reports_the_error_display_for_a_parse_failure() {
+        let text = "just a regular paragraph\nwith two lines";
+        let parsed = mrz::find_and_parse(text);
+        assert_eq!(parsed, Err(mrz::MrzError::NotFound));
+        assert_eq!(
+            describe_unaccepted_mrz(&parsed),
+            format!("no reading: {}", parsed.unwrap_err())
+        );
+    }
+
+    /// `Ok` that isn't `valid()`: a well-known valid TD3 zone (the Doc 9303
+    /// worked example, also used by `mrz::Checks::failed`'s own doc test) with
+    /// the date-of-birth check digit altered from `2` to `3`. That flips only
+    /// `date_of_birth` and the `composite` check, which depends on it -- the
+    /// same two fields `mrz::Checks::failed`'s doc comment pins for this exact
+    /// specimen. The description must name both, and only those two.
+    #[test]
+    fn describe_unaccepted_mrz_names_the_failing_fields_for_a_bad_check_digit() {
+        let line1 = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+        let tampered_line2 = "L898902C36UTO7408123F1204159ZE184226B<<<<<10";
+        let text = format!("{line1}\n{tampered_line2}");
+        let parsed = mrz::find_and_parse(&text);
+        let data = parsed.as_ref().expect("the zone still parses");
+        assert!(!data.valid(), "sanity: the altered check digit must fail");
+        assert_eq!(
+            data.checks.failed(),
+            vec![mrz::Field::DateOfBirth, mrz::Field::Composite]
+        );
+        assert_eq!(
+            describe_unaccepted_mrz(&parsed),
+            "fallback reading fails checks: date_of_birth, composite"
+        );
+    }
+
+    /// A refused-damaged-pass case, built without inventing data: this is
+    /// `crates/mrz/tests/damaged_td3_line1_shift.rs`'s
+    /// `two_admissible_same_country_readings_that_disagree_on_name_still_refuse`
+    /// fixture, reproduced with the same public `mrz` API calls (`format_td3`,
+    /// `MrzDate::from_field`) and the same field values -- not a new specimen.
+    /// That test already establishes that `find_and_parse` returns an `Ok`
+    /// here (a damaged pass whose two admissible, checksum-valid readings
+    /// disagree on `given_names`, so `single()`'s unanimity gate refuses and
+    /// `find_and_parse` falls back to the checksum-invalid candidate). This
+    /// test only adds that `describe_unaccepted_mrz` names that fallback
+    /// reading's own failing checks, exactly as the previous test's simpler
+    /// single-error case does.
+    #[test]
+    fn describe_unaccepted_mrz_names_the_fallback_checks_for_a_refused_damaged_pass() {
+        use mrz::{format_td3, DateRole, MrzDate, RawDateField, Sex, Td3Fields, CURRENT_YY};
+
+        let mrz_date = |raw: &str, role: DateRole| {
+            MrzDate::from_field(
+                RawDateField::try_from(raw).expect("six MRZ date characters"),
+                role,
+                CURRENT_YY,
+            )
+        };
+        let mrz_text = format_td3(&Td3Fields {
+            document_code: "P".to_string(),
+            issuing_country: "RUS".to_string(),
+            document_number: "123456789".to_string(),
+            surname: "PETROV".to_string(),
+            given_names: "IVANL".to_string(),
+            nationality: "RUS".to_string(),
+            date_of_birth: mrz_date("800101", DateRole::Birth),
+            sex: Sex::Male,
+            date_of_expiry: mrz_date("301230", DateRole::Expiry),
+            personal_number: None,
+        });
+        let (l1, l2) = mrz_text
+            .split_once('\n')
+            .expect("format_td3 emits two lines");
+        assert!(l1.starts_with("P<RUS"), "sanity: emitted line 1 is {l1}");
+        assert!(
+            l1.contains("IVANL<"),
+            "sanity: given name must sit directly against the filler run, got {l1}"
+        );
+
+        // Swap line 2's leading document-number digit for its lookalike
+        // letter, forcing the damaged pass's single-substitution repair --
+        // see the source fixture's own doc comment for why this needs a
+        // distinct-digit document number and produces two admissible,
+        // disagreeing readings that `single()` refuses.
+        let mut damaged_l2: Vec<char> = l2.chars().collect();
+        assert_eq!(
+            damaged_l2[0], '1',
+            "sanity: fixture's document number starts with 1"
+        );
+        damaged_l2[0] = 'I';
+        let damaged_l2: String = damaged_l2.into_iter().collect();
+        let text = format!("{l1}\n{damaged_l2}");
+
+        let parsed = mrz::find_and_parse(&text);
+        let data = parsed
+            .as_ref()
+            .expect("a checksum-failed fallback, not a hard error");
+        assert!(
+            !data.valid(),
+            "sanity: two admissible readings disagreeing on given_names must still be refused"
+        );
+        // The fallback candidate's own failing check digit -- not
+        // `given_names`, which has none. Illustrates exactly why the variant
+        // site's wording must not claim these checks belong to every reading
+        // the pass produced: `single()` refused over a *name* disagreement,
+        // but the checks shown here belong only to whichever candidate
+        // `find_and_parse` fell back to.
+        assert_eq!(
+            data.checks.failed(),
+            vec![mrz::Field::DocumentNumber, mrz::Field::Composite]
+        );
+        assert_eq!(
+            describe_unaccepted_mrz(&parsed),
+            "fallback reading fails checks: document_number, composite"
+        );
     }
 
     // ---- chargrid wiring: pure helpers (no OCR engine needed) -------------
