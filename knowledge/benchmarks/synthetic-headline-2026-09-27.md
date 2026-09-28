@@ -1,6 +1,6 @@
 # The synthetic headline is 368 / 500 on `main`: #468/#471 and #483 fix 15 wrong reads, and #521 costs TD1 four hits
 
-**Date:** 2026-09-27 · **MAIN:** `739279c` (after); `d052ae2` (before: `f80877b` + #457's report-only counter, the reader the 370 was measured on); `1ef7426` (before #521); bisect builds at `97b3e7a`, `8ce66f2`, `6dbc195`, `1cb9236` · **DATA:** n/a (generated corpus, no `samples-data` input) · **Evidence:** Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) · **Status:** current
+**Date:** 2026-09-27 · **MAIN:** `739279c` (after); `d052ae2` (before: `f80877b` + #457's report-only counter, the reader the 370 was measured on); `1ef7426` (before #521); bisect builds at `97b3e7a`, `8ce66f2`, `6dbc195`, `1cb9236` · **DATA:** n/a (generated corpus, no `samples-data` input) · **Evidence:** Observed (fifteen local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, plus 189 single-seed bisect runs) plus Derived (per-seed comparison of the JSON reports) · **Status:** superseded by [`synthetic-headline-2026-09-28.md`](synthetic-headline-2026-09-28.md)
 
 **2026-09-27, runs 09:45–11:51 UTC, one Linux container (4 vCPU, Intel Xeon @ 2.10 GHz),
 sequential.** This re-measures the synthetic row in
