@@ -251,6 +251,19 @@ make on their own, beyond the check digits, is refusing a document number whose 
 filler. A direct parse reports what the check digits establish, which is consistency, plus that one
 structural refusal, and leaves plausibility to those repair-time gates.
 
+**`apply_occlusion`** takes this table one step further, for an image-derived
+[`CellMask`](https://docs.rs/mrz/latest/mrz/struct.CellMask.html) of cells an occluder covers on an
+already-parsed zone. A masked check-covered or structural cell refuses the whole call
+(`MrzError::OccludedCheckedCell`) rather than reporting a value the arithmetic cannot back up, and is
+never rebuilt from check-digit arithmetic even where it could be solved for uniquely. A masked
+unverifiable cell withholds its field — listed and blanked, never returned as a value. The name field
+follows ICAO's own grammar: a masked cell before a *visible* `<<` withholds the surname and the given
+names together, since a covered separator could either complete itself or continue a multi-part
+surname; a masked cell strictly after it, but before the given names' own visible end, withholds the
+given names alone; and a mask confined to trailing filler withholds nothing. An empty mask is always
+the identity. See [`apply_occlusion`](https://docs.rs/mrz/latest/mrz/fn.apply_occlusion.html)'s own
+documentation for the full semantics, including the overflow-layout case.
+
 ## Conformance
 
 `mrz` is verified against the ICAO Doc 9303 text, not against memory of it. Worked examples
