@@ -54,3 +54,4 @@ the record.
 | [0021](ADR-0021-fixed-grid-mrz-strips.md) | Fixed-grid MRZ strips: check-anchor alignment with an explicit ambiguity outcome | Proposed |
 | [0023](ADR-0023-cli-output-contract.md) | The CLI's output contract: `--json`, and stdout/stderr for everything else | Accepted (2026-09-26) |
 | [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27) |
+| [0026](ADR-0026-covered-cells-are-occluded.md) | Covered MRZ cells are reported as `occluded`, never as text | Proposed |
