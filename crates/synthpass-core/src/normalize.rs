@@ -70,10 +70,23 @@ fn looks_like_a_code(s: &str) -> bool {
 ///
 /// **Every entry here was observed in this corpus, and the table as a whole is
 /// proved by a measurement.** Each token appears verbatim in a real Tier-2
-/// answer, and together they flip 10 answers from miss to hit against
-/// `crates/synthpass-llm/tests/parity.rs` while flipping none the other way.
-/// See `knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md` for the
+/// answer, and together they flip miss-to-hit against
+/// `crates/synthpass-llm/tests/parity.rs` while flipping none the other way:
+/// 10 fields as of 2026-09-05, another 19 as of 2026-09-27. See
+/// `knowledge/benchmarks/normalize-country-demonyms-2026-09-05.md` and
+/// `knowledge/benchmarks/normalize-country-demonyms-2026-09-27.md` for the
 /// accept rule.
+///
+/// **A country's own name in another language belongs here only when it is
+/// grammatically a demonym/adjective** (`HRVATSKO`, `ESPANOLA` — see below).
+/// A plain alternate *noun* spelling of the name itself — `Türkiye` without
+/// its diaeresis, `Azərbaycan` transliterated, `Polska` — is a name, not a
+/// demonym, and lives in [`mrz::code_for_name`]'s own alternate-names table
+/// instead, checked automatically before this table is ever reached. `CZECH`,
+/// extracted from the observed `CZECH REPUBLIC`, is the one 2026-09-27
+/// candidate that moved the *other* way: the corpus never printed a bare
+/// `CZECH`, only the full former official name, so it is `mrz`'s
+/// `"Czech Republic"` entry that resolves it, not a token here.
 ///
 /// The obvious sibling forms — `CROATIAN`, `SPANISH`, `SLOVAQUE`, `SRPSKO` —
 /// are deliberately **absent**. They are surely correct, and that is not the
@@ -104,6 +117,25 @@ const DEMONYMS: &[(&str, &str)] = &[
     ("SERBIAN", "SRB"),
     ("SLOVAK", "SVK"),
     ("ESPANOLA", "ESP"),
+    ("AFGHAN", "AFG"),
+    ("ANGOLANA", "AGO"),
+    ("BANGLADESHI", "BGD"),
+    ("CHINESE", "CHN"),
+    ("COLOMBIANA", "COL"),
+    ("DOMINICANA", "DOM"),
+    ("GERMAN", "D"),
+    ("GHANAIAN", "GHA"),
+    ("INDIAN", "IND"),
+    ("MAURITANIENNE", "MRT"),
+    ("NEPALESE", "NPL"),
+    ("NIGERIAN", "NGA"),
+    ("PAKISTANI", "PAK"),
+    ("POLISH", "POL"),
+    ("ROMANIAN", "ROU"),
+    ("RUSSIAN", "RUS"),
+    ("SOMALI", "SOM"),
+    ("SWISS", "CHE"),
+    ("TURKISH", "TUR"),
 ];
 
 /// The single country named by `s`'s tokens, or `None` when none is named
@@ -554,9 +586,9 @@ const DOCUMENT_TYPE_FORMS: &[(&str, &str)] = &[
 
 /// Short digest of every vocabulary table `country_code` and this module's
 /// other normalizers dispatch on: [`MONTH_NAMES`], [`DEMONYMS`], [`SEX_FORMS`],
-/// [`DOCUMENT_TYPE_FORMS`], and [`mrz::codes`] — the country-name table
-/// `country_code` consults *before* `DEMONYMS` (see [`country_code`]'s doc
-/// comment).
+/// [`DOCUMENT_TYPE_FORMS`], [`mrz::codes`], and [`mrz::alternate_names`] —
+/// the two country-name tables `country_code` consults *before* `DEMONYMS`
+/// (see [`country_code`]'s doc comment).
 ///
 /// # Why this exists
 ///
@@ -574,11 +606,12 @@ const DOCUMENT_TYPE_FORMS: &[(&str, &str)] = &[
 /// the last two accuracy changes on this project actually landed. This is the
 /// other half of that guard.
 ///
-/// **[`mrz::codes`] is included for the same reason, not left out as "someone
-/// else's table".** `nationality`/`issuing_country` resolve through it before
-/// `DEMONYMS` is ever reached, so a change to *that* table is exactly as
-/// capable of silently moving parity numbers as a change to `DEMONYMS` — the
-/// two tables were an equally uncovered blind spot until this included both.
+/// **[`mrz::codes`] and [`mrz::alternate_names`] are included for the same
+/// reason, not left out as "someone else's table".** `nationality`/
+/// `issuing_country` resolve through both before `DEMONYMS` is ever reached,
+/// so a change to either is exactly as capable of silently moving parity
+/// numbers as a change to `DEMONYMS` — an equally uncovered blind spot until
+/// this included all three.
 ///
 /// # What it deliberately does not cover
 ///
@@ -616,6 +649,10 @@ pub fn vocabulary_fingerprint() -> String {
     buf.push_str("countries\n");
     for (code, name) in mrz::codes() {
         let _ = writeln!(buf, "{code}={name}");
+    }
+    buf.push_str("alternate_names\n");
+    for (name, code) in mrz::alternate_names() {
+        let _ = writeln!(buf, "{name}={code}");
     }
     format!("{:016x}", fnv1a64(buf.as_bytes()))
 }
@@ -739,6 +776,58 @@ mod tests {
             issuing_country("SLOVENSK? REPUBLIKA / SLOVAK REPUBLIC/"),
             "SVK"
         );
+    }
+
+    /// Every case here is a real Tier-2 `actual=` value from the prompt-v3
+    /// parity run reviewed in issue #539 (CI run 36323412121) that the
+    /// pipeline passed through unresolved. See
+    /// `knowledge/benchmarks/normalize-country-demonyms-2026-09-27.md`.
+    ///
+    /// Tests `nationality`/`issuing_country` end to end, the public surface a
+    /// caller actually observes — deliberately not asserting *which* table
+    /// resolved each one. `AZERBAYCAN`, `TURKIYE`, `Polska` and `CZECH
+    /// REPUBLIC` resolve through [`mrz::code_for_name`]'s alternate-names
+    /// table (they are country *names*, not demonyms — see [`DEMONYMS`]'s
+    /// doc comment); the rest resolve through [`DEMONYMS`] here.
+    #[test]
+    fn nationality_reads_the_2026_09_27_demonym_and_alternate_name_forms() {
+        assert_eq!(nationality("AFGHAN"), "AFG");
+        assert_eq!(nationality("ANGOLANA"), "AGO");
+        assert_eq!(nationality("AZERBAYCAN"), "AZE");
+        assert_eq!(nationality("Bangladeshi"), "BGD");
+        assert_eq!(nationality("CHINESE"), "CHN");
+        assert_eq!(nationality("COLOMBIANA"), "COL");
+        assert_eq!(nationality("DOMINICANA"), "DOM");
+        assert_eq!(nationality("German"), "D");
+        assert_eq!(nationality("GHANAIAN"), "GHA");
+        assert_eq!(nationality("Indian"), "IND");
+        assert_eq!(nationality("INDIAN"), "IND");
+        assert_eq!(nationality("Mauritanienne"), "MRT");
+        assert_eq!(nationality("NEPALESE"), "NPL");
+        assert_eq!(nationality("NIGERIAN"), "NGA");
+        assert_eq!(nationality("PAKISTANI"), "PAK");
+        assert_eq!(nationality("Polish"), "POL");
+        assert_eq!(issuing_country("Polska"), "POL");
+        assert_eq!(nationality("ROMANIAN"), "ROU");
+        assert_eq!(nationality("Russian"), "RUS");
+        assert_eq!(nationality("Somali"), "SOM");
+        assert_eq!(nationality("Swiss"), "CHE");
+        assert_eq!(nationality("Turkish"), "TUR");
+        assert_eq!(nationality("TURKIYE"), "TUR");
+        assert_eq!(issuing_country("TURKIYE"), "TUR");
+        assert_eq!(nationality("CZECH REPUBLIC"), "CZE");
+        assert_eq!(issuing_country("CZECH REPUBLIC"), "CZE");
+        // Full official long-form names, whole-string matches, no demonym
+        // or token splitting involved.
+        assert_eq!(nationality("REPUBLIC OF KOREA"), "KOR");
+        assert_eq!(issuing_country("REPUBLIC OF KOREA"), "KOR");
+        assert_eq!(issuing_country("TURKEY"), "TUR");
+        assert_eq!(issuing_country("Republic of Turkey"), "TUR");
+        assert_eq!(
+            issuing_country("UNITED KINGDOM OF GREAT BRITAIN AND NORTHERN IRELAND"),
+            "GBR"
+        );
+        assert_eq!(issuing_country("Islamic Republic of Afghanistan"), "AFG");
     }
 
     #[test]
@@ -866,19 +955,22 @@ mod tests {
 
     #[test]
     fn vocabulary_fingerprint_covers_every_table_it_claims_to() {
-        // The digest is built from five labelled tables. This reproduces that
+        // The digest is built from six labelled tables. This reproduces that
         // construction and asserts a change to *each* one moves the result —
         // a fingerprint that silently omitted a table would certify runs it
         // never covered, which is the exact failure it exists to prevent.
-        // `mrz::codes` is included here on the same footing as the other four:
-        // `country_code` consults it before `DEMONYMS`, so it is exactly as
-        // capable of silently moving parity numbers.
+        // `mrz::codes`/`mrz::alternate_names` are included here on the same
+        // footing as the other four: `country_code` consults both before
+        // `DEMONYMS`, so either is exactly as capable of silently moving
+        // parity numbers.
+        #[allow(clippy::too_many_arguments)]
         fn digest(
             months: &[(&str, u32)],
             demonyms: &[(&str, &str)],
             sex: &[(&str, &str)],
             doctype: &[(&str, &str)],
             countries: &[(&str, &str)],
+            alt_names: &[(&str, &str)],
         ) -> String {
             use std::fmt::Write;
             let mut buf = String::new();
@@ -902,16 +994,22 @@ mod tests {
             for (c, n) in countries {
                 let _ = writeln!(buf, "{c}={n}");
             }
+            buf.push_str("alternate_names\n");
+            for (n, c) in alt_names {
+                let _ = writeln!(buf, "{n}={c}");
+            }
             format!("{:016x}", fnv1a64(buf.as_bytes()))
         }
 
         let countries = mrz::codes();
+        let alt_names = mrz::alternate_names();
         let real = digest(
             MONTH_NAMES,
             DEMONYMS,
             SEX_FORMS,
             DOCUMENT_TYPE_FORMS,
             countries,
+            alt_names,
         );
         assert_eq!(
             real,
@@ -923,7 +1021,14 @@ mod tests {
         months.push(("THERMIDOR", 11));
         assert_ne!(
             real,
-            digest(&months, DEMONYMS, SEX_FORMS, DOCUMENT_TYPE_FORMS, countries)
+            digest(
+                &months,
+                DEMONYMS,
+                SEX_FORMS,
+                DOCUMENT_TYPE_FORMS,
+                countries,
+                alt_names
+            )
         );
 
         let mut demonyms = DEMONYMS.to_vec();
@@ -935,7 +1040,8 @@ mod tests {
                 &demonyms,
                 SEX_FORMS,
                 DOCUMENT_TYPE_FORMS,
-                countries
+                countries,
+                alt_names
             )
         );
 
@@ -943,14 +1049,28 @@ mod tests {
         sex.push(("INDETERMINATE", "X"));
         assert_ne!(
             real,
-            digest(MONTH_NAMES, DEMONYMS, &sex, DOCUMENT_TYPE_FORMS, countries)
+            digest(
+                MONTH_NAMES,
+                DEMONYMS,
+                &sex,
+                DOCUMENT_TYPE_FORMS,
+                countries,
+                alt_names
+            )
         );
 
         let mut doctype = DOCUMENT_TYPE_FORMS.to_vec();
         doctype.push(("RESIDENCE PERMIT", "I"));
         assert_ne!(
             real,
-            digest(MONTH_NAMES, DEMONYMS, SEX_FORMS, &doctype, countries)
+            digest(
+                MONTH_NAMES,
+                DEMONYMS,
+                SEX_FORMS,
+                &doctype,
+                countries,
+                alt_names
+            )
         );
 
         // The regression this test exists for: a change to `mrz`'s own
@@ -965,7 +1085,23 @@ mod tests {
                 DEMONYMS,
                 SEX_FORMS,
                 DOCUMENT_TYPE_FORMS,
-                &mutated_countries
+                &mutated_countries,
+                alt_names
+            )
+        );
+
+        // Same regression, for `mrz`'s alternate-names table.
+        let mut mutated_alt_names = alt_names.to_vec();
+        mutated_alt_names.push(("Ruritanian Republic", "RUR"));
+        assert_ne!(
+            real,
+            digest(
+                MONTH_NAMES,
+                DEMONYMS,
+                SEX_FORMS,
+                DOCUMENT_TYPE_FORMS,
+                countries,
+                &mutated_alt_names
             )
         );
     }
