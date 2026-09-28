@@ -298,6 +298,62 @@ pub(crate) fn variants(raw: &str, target: usize, repair: fn(&str) -> String) -> 
     out
 }
 
+/// [`fit_length`] for line 1 of a two-line format (TD3/TD2/MRV-A/MRV-B):
+/// on a short line, never inflates a `<` run that starts before index 5 —
+/// the document-code filler (index 1, the second cell of a `P<`-style code)
+/// and every cell of the three-cell issuing-state slot (indices 2..5), such
+/// as a `D<<` issuer — since index 5 is where the name field starts.
+///
+/// Line 1 of every two-line format carries no check digit (Doc 9303 Part 4
+/// §4.2.1 and its TD1/TD2/MRV analogues), so nothing arbitrates a wrong
+/// candidate here the way a check digit would on line 2: the first candidate
+/// that pairs with a checksum-valid line 2 wins outright. OCR's dropped
+/// fillers are overwhelmingly from the name field's own trailing padding,
+/// not the three-cell document-code/issuer prefix, so inflating a run that
+/// starts inside that prefix manufactures a wrong issuer (or document code)
+/// that nothing downstream catches. When the longest run starts at index 5
+/// or later, this is byte-identical to [`fit_length`]; exact-width and
+/// too-long lines are always byte-identical to it.
+fn fit_line1_length(n: &str, target: usize) -> Vec<String> {
+    if n.len() >= target {
+        return fit_length(n, target);
+    }
+    let skip_inflate = matches!(longest_filler_run(n), Some((start, _)) if start < 5);
+    let mut v = fit_length(n, target);
+    if skip_inflate && v.len() > 1 {
+        // `fit_length`'s short-line branch always pushes the inflate
+        // candidate first (when a filler run exists) and the tail-padded
+        // candidate last; dropping the first here is exactly "pad the tail
+        // instead" for a run that starts inside the document-code/issuer
+        // prefix, with no separate candidate-construction code to drift
+        // from `fit_length`'s own.
+        v.remove(0);
+    }
+    v
+}
+
+/// [`variants`] for line 1 of a two-line format (TD3/TD2/MRV-A/MRV-B) — see
+/// [`fit_line1_length`] for how it differs. Every other candidate-building
+/// path (checked lines, TD1's three lines, [`crate::repair::solve_class_sweep`])
+/// keeps calling [`variants`]/[`fit_length`] directly and is unaffected.
+pub(crate) fn line1_variants(raw: &str, target: usize, repair: fn(&str) -> String) -> Vec<String> {
+    let n = normalize_line(raw);
+    if n.len() + 14 < target || n.len() > target + 4 || !is_mrz_charset(&n) {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for fitted in fit_line1_length(&n, target) {
+        let repaired = repair(&fitted);
+        let last_resort = aggressive_defiller(&repaired);
+        for form in [repaired, fitted, last_resort] {
+            if !out.contains(&form) {
+                out.push(form);
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +406,83 @@ mod tests {
         );
         // No separator at all + a KK pair → it was the separator.
         assert_eq!(fix_name_separator("VZORECKKJANA<<<"), "VZOREC<<JANA<<<");
+    }
+
+    #[test]
+    fn line1_fit_pads_the_tail_when_the_only_run_starts_before_the_name_field() {
+        // A dropped document-code filler (`PCANMARTIN...` read for
+        // `P<CANMARTIN...`) leaves exactly one `<` run, at index 1 — before
+        // index 5, where the name field starts. `fit_length` inflates it,
+        // shifting the issuing-state slot's own bytes into filler;
+        // `fit_line1_length` must pad the tail instead.
+        let n = "P<CANMARTIN";
+        let ordinary = fit_length(n, 20);
+        assert_eq!(
+            ordinary.len(),
+            2,
+            "sanity: fit_length still offers the inflate candidate here"
+        );
+        assert_eq!(
+            fit_line1_length(n, 20),
+            vec![ordinary[1].clone()],
+            "only fit_length's tail-padded candidate must survive"
+        );
+    }
+
+    #[test]
+    fn line1_fit_matches_fit_length_when_the_longest_run_starts_at_or_after_the_name_field() {
+        // The longest run (five cells, starting at index 8) sits inside the
+        // name field, not the document-code/issuer prefix, so this must be
+        // byte-identical to `fit_length`.
+        let n = "P<CANDOE<<<<<JAMESON";
+        assert_eq!(fit_length(n, 25).len(), 2);
+        assert_eq!(fit_line1_length(n, 25), fit_length(n, 25));
+    }
+
+    #[test]
+    fn line1_fit_pads_the_tail_for_a_germany_style_d_filler_issuer_slot() {
+        // `D<<` (Germany's legacy single-letter code) and the name's own
+        // `<<` separator tie at length 2; `longest_filler_run`'s tie rule
+        // keeps the first (start 3, inside the issuing-state slot) — so
+        // this exercises the same "starts before index 5" gate as the
+        // single-run case above, via a tie rather than an outright maximum.
+        // The fillers inside the issuing-state slot must never be inflated.
+        let n = "P<D<<SCHWARZENEGGER<<REYNALDALEXANDER";
+        assert_eq!(n.len(), 37);
+        let ordinary = fit_length(n, 44);
+        assert_eq!(
+            ordinary.len(),
+            2,
+            "sanity: fit_length still offers the inflate candidate here"
+        );
+        assert_ne!(
+            ordinary[0], ordinary[1],
+            "sanity: the inflate and tail-padded candidates must differ"
+        );
+        assert_eq!(
+            fit_line1_length(n, 44),
+            vec![ordinary[1].clone()],
+            "only fit_length's tail-padded candidate must survive"
+        );
+    }
+
+    #[test]
+    fn line1_fit_matches_fit_length_for_exact_width_and_too_long_lines() {
+        // `fit_line1_length` only ever changes behavior on a short line
+        // (`n.len() < target`); exact-width and too-long lines must be
+        // byte-identical to `fit_length`, unconditionally. Lengths are
+        // computed rather than hard-coded, so a miscounted literal fails
+        // loudly instead of silently testing the wrong branch.
+        let exact = "P<CANMARTIN<<SARA<<<<";
+        let target = exact.len();
+        assert_eq!(fit_line1_length(exact, target), fit_length(exact, target));
+        assert_eq!(fit_line1_length(exact, target), vec![exact.to_string()]);
+
+        let too_long = "P<CANMARTIN<<<<<<<<<<<SARA<<<<<<<<<<<<<<<<<<<<";
+        assert!(too_long.len() > target);
+        assert_eq!(
+            fit_line1_length(too_long, target),
+            fit_length(too_long, target)
+        );
     }
 }
