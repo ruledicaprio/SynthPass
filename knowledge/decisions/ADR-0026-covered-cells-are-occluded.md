@@ -1,6 +1,6 @@
 # ADR-0026 — Covered MRZ cells are reported as `occluded`, never as text
 
-**Status:** Proposed
+**Status:** Accepted (2026-09-28: the owner accepted the ADR as proposed, with `occluded` as the name)
 **Date:** 2026-09-28
 
 ## Context
