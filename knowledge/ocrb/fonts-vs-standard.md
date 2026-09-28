@@ -75,8 +75,10 @@ assumes a cap of 2.46 mm.
   - The glyph shapes are close enough on digits, letters and stroke.
   - The two corrections the standard supports are:
     - raise `<` by about 0.025-0.03 cap, about 22-27 units on the vendored font's 885-unit cap;
-    - fix the **cell width**, which is a layout bug, not a font bug. The generator's 1.119 cap
-      cell is 8% wider than ISO's pitch (1.033) and 9% wider than real print (1.024).
+    - fix the **cell width**, which was a layout bug, not a font bug. *Corrected 2026-09-28
+      ([#411](https://github.com/ruledicaprio/SynthPass/issues/411)):* the generator's old
+      1.119 cap cell (8% wider than ISO's pitch of 1.033, 9% wider than real print's 1.024) is
+      now a fixed 22 px `MRZ_CELL_WIDTH` in every format, 1.026 cap.
   - Rounded stroke ends matter far less. ISO 1831's squared-off maximum COL accepts both.
 - **For chargrid priors** ([`crates/synthpass-ocr/src/chargrid.rs`](../../crates/synthpass-ocr/src/chargrid.rs)):
   - Every font puts an ideal filler at 17-23% of a cell (`ocrb_metrics` `filler_cell_ink`:

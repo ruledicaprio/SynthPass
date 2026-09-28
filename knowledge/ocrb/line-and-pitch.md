@@ -34,8 +34,11 @@ page N is PDF page N+4.
   therefore bound its pitch search at **0.93-1.07 cap** without excluding conforming print. The
   upper bound is a measurement, not a standard limit, because nothing in the standard caps pitch
   from above.
-- The synthetic generator's **1.119 cap** cell (TD3) and 1.166 (TD2/MRV-B) fall **outside every
-  real measurement and above the nominal value**. See
+- *Corrected 2026-09-28 ([#411](https://github.com/ruledicaprio/SynthPass/issues/411)):* the
+  generator used to draw a **1.119 cap** cell (TD3) and 1.166 (TD2/MRV-B), both **outside every
+  real measurement and above the nominal value**. It now draws a fixed 22 px `MRZ_CELL_WIDTH`
+  ([`crates/synthpass-gen/src/layout.rs`](../../crates/synthpass-gen/src/layout.rs)) in every
+  format — **1.026 cap**, inside the ISO 1831 floor and the measured real-TD3 range. See
   [`../benchmarks/ocrb-standards-vs-priors-2026-09-24.md`](../benchmarks/ocrb-standards-vs-priors-2026-09-24.md).
 
 ## Alignment and skew
