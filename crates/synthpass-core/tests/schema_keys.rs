@@ -16,7 +16,8 @@ use std::collections::BTreeMap;
 
 use synthpass_core::v2::{
     CheckDigits, CoreField, EscalationKind, ExtractionFields, ExtractionTrace, ExtractionV2,
-    FieldConfidence, MrzBlock, MrzFormat, PromptRef, Provenance, SCHEMA_VERSION_V2,
+    FieldConfidence, MrzBlock, MrzFormat, MrzOcclusion, OcclusionKind, OcclusionSpan, PromptRef,
+    Provenance, SCHEMA_VERSION_V2,
 };
 
 /// Top-level keys of a value, sorted.
@@ -169,6 +170,7 @@ fn trace_appears_only_with_content_and_carries_no_score() {
             digest: "deadbeef".into(),
         }),
         config_overrides: BTreeMap::from([("SYNTHPASS_OCR_TEXTURE".into(), "off".into())]),
+        mrz_occlusion: None,
     });
 
     let json = to_json(&e);
@@ -325,6 +327,14 @@ fn extraction_v2_round_trips() {
         escalation: None,
         prompt: None,
         config_overrides: BTreeMap::from([("SYNTHPASS_OCR_MAX_SECONDS".into(), "10".into())]),
+        mrz_occlusion: Some(MrzOcclusion {
+            spans: vec![OcclusionSpan {
+                line: 0,
+                first: 5,
+                last: 13,
+                kind: OcclusionKind::Fill,
+            }],
+        }),
     });
 
     let json = serde_json::to_string(&original).expect("serializes");
@@ -353,4 +363,102 @@ fn records_without_trace_still_deserialize() {
         serde_json::from_value(legacy).expect("a pre-trace record must still parse");
     assert_eq!(parsed.trace, None);
     assert_eq!(parsed.schema_version, SCHEMA_VERSION_V2);
+    // Predates `occluded` too (#565) — must default, not fail to parse.
+    assert!(parsed.occluded.is_empty());
+}
+
+// ── ADR-0026: occlusion wire shape ──
+
+/// `occluded`, like every other schema addition, must not appear on a record
+/// that has nothing to say about it — this is the same byte-identity
+/// contract `trace_is_absent_unless_populated` pins for `trace`.
+#[test]
+fn occluded_is_absent_unless_populated() {
+    for (name, record) in [("tier1", tier1()), ("tier2", tier2())] {
+        assert!(
+            !keys(&to_json(&record)).contains(&"occluded".to_string()),
+            "{name}: `occluded` must not serialize while empty"
+        );
+    }
+}
+
+/// A listed field is `null` in `fields`, `0.0` in `confidence`, and named in
+/// `occluded` — the three states ADR-0026 decision 4 keeps apart: covered
+/// (`null`, listed), read as nothing (`""`), and not read (`null`,
+/// unlisted).
+#[test]
+fn an_occluded_field_is_null_listed_and_at_zero_confidence() {
+    let mut e = tier1();
+    e.fields.set(CoreField::GivenNames, None);
+    e.confidence.occlude(CoreField::GivenNames);
+    e.occluded = vec![CoreField::GivenNames];
+
+    let json = to_json(&e);
+    assert_eq!(json["fields"]["given_names"], serde_json::Value::Null);
+    assert_eq!(json["confidence"]["given_names"], 0.0);
+    assert_eq!(json["occluded"], serde_json::json!(["given_names"]));
+}
+
+/// `mrz_occlusion` sits beside `escalation` on the wire, not inside
+/// `config_overrides` — pinning the exact key set and the `kind` spelling.
+#[test]
+fn mrz_occlusion_wire_shape_is_pinned() {
+    let mut e = tier1();
+    e.trace = Some(ExtractionTrace {
+        mrz_occlusion: Some(MrzOcclusion {
+            spans: vec![OcclusionSpan {
+                line: 1,
+                first: 0,
+                last: 8,
+                kind: OcclusionKind::Blur,
+            }],
+        }),
+        ..Default::default()
+    });
+
+    let json = to_json(&e);
+    let trace = &json["trace"];
+    assert_eq!(trace["mrz_occlusion"]["spans"][0]["line"], 1);
+    assert_eq!(trace["mrz_occlusion"]["spans"][0]["first"], 0);
+    assert_eq!(trace["mrz_occlusion"]["spans"][0]["last"], 8);
+    assert_eq!(trace["mrz_occlusion"]["spans"][0]["kind"], "blur");
+    // Not folded into `config_overrides` — a per-document observation, not
+    // configuration. `config_overrides` is empty here, so — like every other
+    // empty field on `ExtractionTrace` — it is omitted entirely, not present
+    // as an empty object.
+    assert!(
+        !trace.as_object().unwrap().contains_key("config_overrides"),
+        "an empty config_overrides must stay omitted, not become a home for \
+         mrz_occlusion's own keys"
+    );
+}
+
+/// A trace holding only an occlusion is not an empty trace — otherwise a
+/// caller that gates on `is_empty` before attaching one would drop the only
+/// occlusion evidence a record carries.
+#[test]
+fn is_empty_is_false_with_only_an_occlusion_present() {
+    let trace = ExtractionTrace {
+        mrz_occlusion: Some(MrzOcclusion {
+            spans: vec![OcclusionSpan {
+                line: 0,
+                first: 5,
+                last: 5,
+                kind: OcclusionKind::Fill,
+            }],
+        }),
+        ..Default::default()
+    };
+    assert!(!trace.is_empty());
+}
+
+/// A record written before `mrz_occlusion` existed must still deserialize —
+/// the same contract `records_without_trace_still_deserialize` pins for
+/// `trace` as a whole, one level down.
+#[test]
+fn records_without_the_mrz_occlusion_key_still_deserialize() {
+    let legacy_trace = serde_json::json!({"providers": ["mrz"]});
+    let trace: ExtractionTrace =
+        serde_json::from_value(legacy_trace).expect("a pre-occlusion trace must still parse");
+    assert_eq!(trace.mrz_occlusion, None);
 }

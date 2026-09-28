@@ -6,8 +6,9 @@
 > landed, and it had never been committed. See
 > [`technical_debt.md`](technical_debt.md) for how that happened and
 > [`ROADMAP.md`](ROADMAP.md)'s M5 entry for the milestone this shipped under.
-> Section numbers below (`§3`, `§4`, `§9`, `§11`, `§12`) are chosen to match
-> those existing citations, not to imply sections `§1`, `§2`, `§5`–`§8`,
+> Section numbers below (`§3`, `§4`, `§9`, `§11`, `§12`, `§13`) are chosen to
+> match those existing citations (`§13` added alongside the wiring it
+> documents — issue #565), not to imply sections `§1`, `§2`, `§5`–`§8`,
 > `§10` were ever written or planned — they weren't; don't add them
 > speculatively.
 >
@@ -148,3 +149,59 @@ field-layout parser, scoped as its own provider against the M7
 quietly fail forever. See `ROADMAP.md`'s "Beyond ICAO 9303" section for the
 full scoping — this file only documents that the schema slot exists and why
 it's still empty.
+
+## §13 — Occlusion: covered MRZ cells are reported, never reconstructed
+
+Issue #565, [ADR-0026](decisions/ADR-0026-covered-cells-are-occluded.md). A
+box or a heavy blur inside an MRZ zone reads today as if it were print — the
+zone can be checksum-valid while a covered name comes back as garbled text
+with no sign anything was covered at all. This section covers the two schema
+keys and the one thing v1 cannot say about them. Nothing populates them yet:
+detection is not built, and ADR-0026 decision 8 ships it off by default until
+it is measured.
+
+**The two keys.**
+
+- `ExtractionTrace.mrz_occlusion: Option<MrzOcclusion>` — the per-document
+  *observation*: `{spans: [{line, first, last, kind}]}`, where `kind` is
+  `"fill"` or `"blur"`. It sits beside `escalation`, not
+  inside `config_overrides` (`config_overrides` is configuration that holds
+  for every document a process reads under it; an occlusion span is a fact
+  about *this* document). Spans are cell positions only, never the covered
+  text, so the trace stays PII-free even though it always accompanies a
+  PII-bearing record. Omitted when `None`; `ExtractionTrace::is_empty()`
+  returns `false` when only an occlusion is present, so a caller that gates
+  attaching a trace on `is_empty` never drops the only occlusion evidence a
+  record carries.
+- `ExtractionV2.occluded: Vec<CoreField>` — the per-document *consequence*:
+  which ICAO fields the observation above caused to be withheld. Sorted and
+  deduplicated, omitted when empty. A field named here is `null` in `fields`
+  and `FieldConfidence::OCCLUDED` (`0.0`) in `confidence`.
+
+**Three states, kept apart on purpose.** A field can be empty for three
+different reasons. Before these keys existed, a covered field and an unread
+one were both `null` with nothing to tell them apart:
+
+| State | `fields.<field>` | `confidence.<field>` | listed in `occluded` |
+| --- | --- | --- | --- |
+| Covered — the image shows it occluded | `null` | `0.0` | yes |
+| Read as nothing — the field is genuinely blank (e.g. no personal number) | `""` | whatever the read scored | no |
+| Not read at all — no provider reached it | `null` | `0.0` (the struct default) | no |
+
+**The v1 limitation.** v1's `Extraction` has no status vocabulary at all —
+every field is `Option<String>`, with no sibling list of *why* a field is
+`null`. An occluded field's v1 value is `null`, exactly like a field that was
+simply never read; a v1-only consumer cannot recover which. This is
+permanent, not a gap this milestone will close later: `ExtractionV2::from(&Extraction)`
+(the v1→v2 lift) cannot invent an `occluded` list a v1 record never carried,
+and it doesn't try — see `lift_never_recovers_occlusion_v1_has_no_vocabulary_for`
+in `crates/synthpass-core/src/v2.rs`. A client that needs to know *which*
+fields were covered must read `ExtractionV2`.
+
+**Not covered here.** The detector that fills `mrz_occlusion`, and the
+Tier-2 masking that keeps a model from filling a covered field (ADR-0026
+decision 6), are not built yet. Until they are, every record serializes
+byte-identically to one without these keys. ADR-0026 has the full design,
+including why a covered check-digited cell is refused outright rather than
+reported (decision 7) and why the wire word is `occluded`, never `redacted`
+(decision 1).

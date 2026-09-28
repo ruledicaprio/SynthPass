@@ -15,7 +15,9 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use synthpass_core::v2::{CheckDigits, ExtractionV2, MrzBlock, MrzFormat, Provenance, ProviderId};
+use synthpass_core::v2::{
+    CheckDigits, CoreField, ExtractionV2, MrzBlock, MrzFormat, Provenance, ProviderId,
+};
 use synthpass_core::{Extraction, Validity};
 
 use crate::evidence::Evidence;
@@ -102,7 +104,7 @@ impl FieldReader for MrzReader {
             ..Evidence::default()
         };
 
-        let Some(data) = mrz::find_and_parse_with(ctx.text, &crate::mrz_parse_options()).ok()
+        let Some(mut data) = mrz::find_and_parse_with(ctx.text, &crate::mrz_parse_options()).ok()
         else {
             evidence.missing = synthpass_core::v2::ExtractionFields::default().missing();
             return Ok(Reading {
@@ -115,6 +117,41 @@ impl FieldReader for MrzReader {
         evidence.observe_mrz(&data);
         evidence.mrz_format = Some(mrz_format_of(&data));
         evidence.blind_positions = Some(blind_positions(&data.mrz_lines));
+
+        // ADR-0026: apply an occlusion observation, if the recognizer made
+        // one, to the zone that just parsed — before anything downstream
+        // (the checksum gate, `extraction_v2_from_mrz`) sees the covered
+        // cells' raw text. No producer sets `Recognition::mrz_occlusion` yet
+        // (#565 PR 6 wires `synthpass-ocr`'s detector), so this is
+        // unreachable on every path in this workspace today; it is
+        // unconditional rather than feature-gated so that landing a
+        // producer later needs no further change here.
+        let mut occluded_fields: Vec<CoreField> = Vec::new();
+        if let Some(occ) = recognition
+            .and_then(|r| r.mrz_occlusion.as_ref())
+            .filter(|occ| !occ.spans.is_empty())
+        {
+            match crate::occlusion::apply(&data, occ) {
+                Ok((masked, fields)) => {
+                    data = masked;
+                    occluded_fields = fields;
+                }
+                Err(_refused) => {
+                    // A masked cell fed an ICAO check digit, or was the
+                    // format's structural cell: never solved for, even
+                    // where the arithmetic could do it uniquely (decision
+                    // 7). The reading is not accepted; the routing policy
+                    // turns this flag into `EscalationKind::MrzOccluded`.
+                    evidence.mrz_occlusion_refused = true;
+                    evidence.missing = synthpass_core::v2::ExtractionFields::default().missing();
+                    return Ok(Reading {
+                        extraction: ExtractionV2::default(),
+                        evidence,
+                        by: self.id(),
+                    });
+                }
+            }
+        }
 
         if !data.valid() {
             // A record whose check digits do not verify is not a Tier-1 result.
@@ -129,14 +166,22 @@ impl FieldReader for MrzReader {
             });
         }
 
-        let extraction = extraction_v2_from_mrz(&data);
+        let extraction = extraction_v2_from_mrz_impl(&data, &occluded_fields);
         evidence.observe_line1(
             extraction
                 .line1_integrity
                 .as_ref()
-                .expect("extraction_v2_from_mrz always sets line1_integrity"),
+                .expect("extraction_v2_from_mrz_impl always sets line1_integrity"),
         );
-        evidence.missing = extraction.fields.missing();
+        // Excludes an occluded field (ADR-0026): it is `null` for a reason
+        // unrelated to a failed read, and `ExtractionFields::missing` alone
+        // cannot tell the two apart — see `Reading::missing`'s doc comment.
+        evidence.missing = extraction
+            .fields
+            .missing()
+            .into_iter()
+            .filter(|field| !extraction.occluded.contains(field))
+            .collect();
 
         Ok(Reading {
             extraction,
@@ -284,7 +329,26 @@ pub fn mrz_block_from(m: &mrz::MrzData) -> MrzBlock {
 /// `extraction_v2_from_mrz`. Byte-for-byte the same output — that equivalence
 /// is what makes wiring the provider into the pipeline a refactor rather than
 /// a behaviour change.
+///
+/// Thin wrapper over [`extraction_v2_from_mrz_impl`] with an empty occluded
+/// set — kept as a separate, unchanged-signature function because
+/// `synthpass-bench` already calls it with one argument, and it is not in
+/// this PR's scope (#565 PR 3).
 pub fn extraction_v2_from_mrz(m: &mrz::MrzData) -> ExtractionV2 {
+    extraction_v2_from_mrz_impl(m, &[])
+}
+
+/// [`extraction_v2_from_mrz`], plus ADR-0026's occlusion bookkeeping:
+/// `occluded` is nulled and set to [`FieldConfidence::OCCLUDED`][occ] in the
+/// result, listed in [`ExtractionV2::occluded`] (sorted, deduplicated), and
+/// excluded from [`synthpass_core::fusion::check_line1_integrity_excluding`]'s
+/// checks so a field `m` already carries as withheld (blanked by
+/// [`crate::occlusion::apply`]) can never itself be the cause of a line-1
+/// integrity finding — see that function's own doc comment for why a
+/// post-hoc filter cannot substitute for excluding it before the checks run.
+///
+/// [occ]: synthpass_core::v2::FieldConfidence::OCCLUDED
+fn extraction_v2_from_mrz_impl(m: &mrz::MrzData, occluded: &[CoreField]) -> ExtractionV2 {
     let block = mrz_block_from(m);
     let mut v2 = ExtractionV2::from(&extraction_from_mrz(m));
     v2.provenance = Provenance::MrzChecksum;
@@ -292,9 +356,21 @@ pub fn extraction_v2_from_mrz(m: &mrz::MrzData) -> ExtractionV2 {
     v2.mrz = Some(block);
     // A field a deterministic check contradicts must not keep the confidence it
     // had when nothing contradicted it.
-    let verdict = synthpass_core::fusion::check_line1_integrity(m);
+    let verdict = synthpass_core::fusion::check_line1_integrity_excluding(m, occluded);
     v2.confidence.downgrade_flagged(&verdict);
     v2.line1_integrity = Some(verdict);
+
+    for &field in occluded {
+        v2.fields.set(field, None);
+        v2.confidence.occlude(field);
+    }
+    if !occluded.is_empty() {
+        let mut listed = occluded.to_vec();
+        listed.sort();
+        listed.dedup();
+        v2.occluded = listed;
+    }
+
     v2
 }
 
@@ -456,6 +532,172 @@ mod tests {
         assert_eq!(reading.evidence.mrz_band_score, Some(0.91));
         assert_eq!(reading.evidence.text_sanity, Some(0.87));
         assert_eq!(reading.evidence.rotation_applied, 180);
+    }
+
+    // ── ADR-0026: occlusion wiring ──
+    //
+    // No producer in this workspace sets `Recognition::mrz_occlusion` yet
+    // (#565 PR 6) — every `Recognition` below is built by hand, exercising
+    // the wiring itself rather than a real detector.
+
+    use crate::provider::Recognition;
+    use synthpass_core::v2::{MrzOcclusion, OcclusionKind, OcclusionSpan};
+
+    /// Column 20 of `SPECIMEN`'s line 0 sits inside `given_names`, with the
+    /// surname's own `<<` terminator still visible — the same cell
+    /// `mrz::apply_occlusion`'s own doc-test uses.
+    fn given_names_occlusion() -> MrzOcclusion {
+        MrzOcclusion {
+            spans: vec![OcclusionSpan {
+                line: 0,
+                first: 20,
+                last: 20,
+                kind: OcclusionKind::Fill,
+            }],
+        }
+    }
+
+    fn recognition_with(occ: MrzOcclusion) -> Recognition {
+        let mut recognition = Recognition::from_text(SPECIMEN);
+        recognition.mrz_occlusion = Some(occ);
+        recognition
+    }
+
+    #[test]
+    fn an_occluded_field_is_null_listed_sorted_deduplicated_and_at_zero_confidence() {
+        let recognition = recognition_with(given_names_occlusion());
+        let ctx = DocumentContext::from_text(SPECIMEN).with_recognition(&recognition);
+        let reading = block_on(MrzReader::new().read(&ctx)).expect("never errs");
+
+        assert_eq!(reading.extraction.occluded, vec![CoreField::GivenNames]);
+        assert_eq!(reading.extraction.fields.given_names, None);
+        assert_eq!(reading.extraction.confidence.given_names, 0.0);
+        // Untouched field: still reported normally.
+        assert_eq!(
+            reading.extraction.fields.get(CoreField::Surname),
+            Some("ERIKSSON")
+        );
+    }
+
+    #[test]
+    fn evidence_missing_excludes_an_occluded_field() {
+        let recognition = recognition_with(given_names_occlusion());
+        let ctx = DocumentContext::from_text(SPECIMEN).with_recognition(&recognition);
+        let reading = block_on(MrzReader::new().read(&ctx)).expect("never errs");
+
+        assert!(
+            !reading.evidence.missing.contains(&CoreField::GivenNames),
+            "an occluded field is withheld on purpose, not a failed read — \
+             `escalate_on_missing_fields` must never see it as missing"
+        );
+        assert!(
+            !reading.missing().contains(&CoreField::GivenNames),
+            "Reading::missing must agree with Evidence::missing"
+        );
+    }
+
+    /// `synthpass_core::fusion`'s
+    /// `missing_name_separator_is_suppressed_when_given_names_is_occluded`
+    /// pins the fusion function in isolation; this reproduces the same
+    /// shape through `extraction_v2_from_mrz_impl` (the function
+    /// `MrzReader::read` actually calls), so the wiring itself — not just
+    /// the fusion function — is proven to withhold `given_names` before
+    /// line-1 integrity ever runs over it. Built with an explicit surname
+    /// long enough to trip `MissingNameSeparator` if `given_names` read
+    /// back empty for the wrong reason (12 or fewer would never have fired
+    /// it, occluded or not, and would prove nothing).
+    #[test]
+    fn occluding_given_names_never_collaterally_flags_a_long_visible_surname() {
+        const SURNAME: &str = "VONHOHENZOLLERNSIGI"; // 19 chars > the 12-char threshold
+        const GIVEN: &str = "ANNA<MARIA"; // 10 chars, single-`<`-separated as ICAO requires
+        const NAME_FIELD_WIDTH: usize = 39; // TD3: 44 total - 2 (doc code) - 3 (country)
+        let filler = "<".repeat(NAME_FIELD_WIDTH - SURNAME.len() - 2 - GIVEN.len());
+        let name_field = format!("{SURNAME}<<{GIVEN}{filler}");
+        assert_eq!(
+            name_field.chars().count(),
+            NAME_FIELD_WIDTH,
+            "fixture arithmetic"
+        );
+        let line1 = format!("P<UTO{name_field}");
+        assert_eq!(line1.chars().count(), 44, "fixture arithmetic");
+        // Unrelated to line 1 — TD3 carries no check digit for any line-1
+        // field — reused verbatim from `SPECIMEN` for a valid checksum.
+        let line2 = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+        let parsed = mrz::parse_td3(&line1, line2).expect("structural line 1, valid line 2");
+        assert!(parsed.valid(), "fixture arithmetic");
+        assert_eq!(parsed.surname, SURNAME, "fixture arithmetic");
+        assert_eq!(parsed.given_names, "ANNA MARIA", "fixture arithmetic");
+
+        // Mask one cell strictly inside `given_names`' own content (after
+        // the surname's `<<` separator, before the field's trailing
+        // filler), leaving that separator and the given-names' own visible
+        // `<<` terminator untouched — the shape that withholds exactly
+        // `given_names`, per `mrz::apply_occlusion`'s name grammar.
+        let masked_column = 5 + SURNAME.len() + 2 + 5; // the "M" of "MARIA"
+        let occ = MrzOcclusion {
+            spans: vec![OcclusionSpan {
+                line: 0,
+                first: masked_column as u8,
+                last: masked_column as u8,
+                kind: OcclusionKind::Fill,
+            }],
+        };
+        let (masked, occluded) =
+            crate::occlusion::apply(&parsed, &occ).expect("an unverifiable cell never refuses");
+        assert_eq!(occluded, vec![CoreField::GivenNames]);
+        assert_eq!(masked.given_names, "");
+        assert_eq!(
+            masked.surname, SURNAME,
+            "the visible surname must survive untouched"
+        );
+
+        let extraction = extraction_v2_from_mrz_impl(&masked, &occluded);
+        assert_eq!(
+            extraction.line1_integrity,
+            Some(synthpass_core::fusion::Verdict::Accepted),
+            "given_names occluded, nothing else wrong: no finding, and no \
+             collateral flag on the long, visible surname: {:?}",
+            extraction.line1_integrity
+        );
+    }
+
+    #[test]
+    fn a_span_over_a_checked_cell_refuses_the_reading() {
+        let recognition = recognition_with(MrzOcclusion {
+            // Line 1 (zero-based), column 0: the document-number check
+            // digit's first cell.
+            spans: vec![OcclusionSpan {
+                line: 1,
+                first: 0,
+                last: 0,
+                kind: OcclusionKind::Blur,
+            }],
+        });
+        let ctx = DocumentContext::from_text(SPECIMEN).with_recognition(&recognition);
+        let reading = block_on(MrzReader::new().read(&ctx)).expect("never errs");
+
+        assert!(reading.evidence.mrz_occlusion_refused);
+        assert_eq!(reading.extraction, ExtractionV2::default());
+        assert_eq!(
+            crate::routing::RoutingPolicy::default().decide(&reading.evidence),
+            crate::routing::Decision::Escalate {
+                reason: synthpass_core::v2::EscalationKind::MrzOccluded,
+                budget: crate::provider::CostClass::Expensive,
+            }
+        );
+    }
+
+    #[test]
+    fn empty_occlusion_spans_change_nothing() {
+        let with_empty_occlusion = recognition_with(MrzOcclusion::default());
+        let ctx_a = DocumentContext::from_text(SPECIMEN).with_recognition(&with_empty_occlusion);
+        let with_empty = block_on(MrzReader::new().read(&ctx_a)).expect("never errs");
+
+        let without = read(SPECIMEN);
+
+        assert_eq!(with_empty.extraction, without.extraction);
+        assert_eq!(with_empty.evidence, without.evidence);
     }
 
     /// Blind positions are counted and recorded, and deliberately not acted

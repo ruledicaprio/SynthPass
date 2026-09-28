@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use serde::Serialize;
-use synthpass_core::v2::{ExtractionV2, ImageRef, ProviderId};
+use synthpass_core::v2::{ExtractionV2, ImageRef, MrzOcclusion, ProviderId};
 
 use crate::evidence::Evidence;
 
@@ -223,6 +223,14 @@ pub struct Recognition {
     /// Whole-page character-plausibility score. **Not a model confidence** —
     /// see `synthpass_ocr::geometry::text_sanity`.
     pub text_sanity: Option<f32>,
+    /// Which MRZ cells the image showed covered (ADR-0026), when an
+    /// occlusion detector ran and found any — `None` when no detector ran,
+    /// or one ran and found nothing. This crate has no detector of its own;
+    /// `synthpass-ocr` computes it and fills this field the same way it
+    /// already fills [`mrz_band_score`](Self::mrz_band_score) and
+    /// [`text_sanity`](Self::text_sanity), so no OCR engine or image type
+    /// enters this crate's dependency graph.
+    pub mrz_occlusion: Option<MrzOcclusion>,
 }
 
 impl Recognition {
@@ -268,8 +276,20 @@ impl Reading {
     }
 
     /// Fields this reading left empty, in the schema's own vocabulary.
+    ///
+    /// Excludes a field listed in [`ExtractionV2::occluded`] (ADR-0026): an
+    /// occluded field is `null` too, so [`ExtractionFields::missing`] cannot
+    /// tell the two apart on its own — this is the one place that has both
+    /// values in hand to make the distinction.
+    ///
+    /// [`ExtractionFields::missing`]: synthpass_core::v2::ExtractionFields::missing
     pub fn missing(&self) -> Vec<synthpass_core::v2::CoreField> {
-        self.extraction.fields.missing()
+        self.extraction
+            .fields
+            .missing()
+            .into_iter()
+            .filter(|field| !self.extraction.occluded.contains(field))
+            .collect()
     }
 }
 

@@ -299,65 +299,110 @@ const SUSPICIOUSLY_LONG_UNSPLIT_NAME: usize = 12;
 /// Runs the line-1 integrity checks over an already-parsed, checksum-passing
 /// [`MrzData`] record. Callers should still gate on [`MrzData::valid`]
 /// first — this module says nothing about line 2.
+///
+/// Thin wrapper over [`check_line1_integrity_excluding`] with an empty
+/// occluded set — kept as a separate, unchanged-signature function because
+/// `synthpass-pipeline` and `synthpass-bench` already call it with one
+/// argument, and neither is in this PR's scope (#565 PR 3).
 pub fn check_line1_integrity(m: &MrzData) -> Verdict {
+    check_line1_integrity_excluding(m, &[])
+}
+
+/// [`check_line1_integrity`], but every check that would read a field named
+/// in `occluded` is skipped instead of run.
+///
+/// **Why this exists (ADR-0026, decision 6).** [`mrz::apply_occlusion`]
+/// blanks a covered, unverifiable field to an empty `String` rather than
+/// guessing at it — exactly the shape this module already treats as "nothing
+/// there". Run unmodified over a masked record, this module cannot tell a
+/// covered `given_names` from a genuinely empty one: a long, visible
+/// `surname` next to a masked `given_names` reads as
+/// [`Finding::MissingNameSeparator`], not as "the given names are covered".
+/// Naming the occluded fields up front — instead of filtering the resulting
+/// [`Verdict`] afterwards — matters because a filter can only drop findings
+/// that *are* about an occluded field; it cannot undo
+/// [`Finding::MissingNameSeparator`] flagging a **visible, untouched**
+/// `surname` collaterally, which is what would happen here if `given_names`
+/// alone were occluded and the check still ran.
+///
+/// Every clause below is gated in the same shape and order as
+/// [`check_line1_integrity`]'s own body, so `check_line1_integrity(m) ==
+/// check_line1_integrity_excluding(m, &[])` by construction — there is
+/// exactly one place this reasoning lives.
+pub fn check_line1_integrity_excluding(m: &MrzData, occluded: &[crate::v2::CoreField]) -> Verdict {
+    use crate::v2::CoreField;
+    let occludes = |field: CoreField| occluded.contains(&field);
+    let name_occluded = occludes(CoreField::Surname) || occludes(CoreField::GivenNames);
+
     let mut reasons = Vec::new();
 
-    match mrz::country_name(&m.issuing_country) {
-        None => reasons.push(Finding::UnrecognizedIssuingCountry {
-            got: m.issuing_country.clone(),
-        }),
-        Some(_) => {
-            if mrz::country_name(&m.nationality).is_some() && m.issuing_country != m.nationality {
-                reasons.push(Finding::IssuingCountryNationalityMismatch {
-                    issuing_country: m.issuing_country.clone(),
-                    nationality: m.nationality.clone(),
-                });
+    if !occludes(CoreField::IssuingCountry) {
+        match mrz::country_name(&m.issuing_country) {
+            None => reasons.push(Finding::UnrecognizedIssuingCountry {
+                got: m.issuing_country.clone(),
+            }),
+            Some(_) => {
+                if !occludes(CoreField::Nationality)
+                    && mrz::country_name(&m.nationality).is_some()
+                    && m.issuing_country != m.nationality
+                {
+                    reasons.push(Finding::IssuingCountryNationalityMismatch {
+                        issuing_country: m.issuing_country.clone(),
+                        nationality: m.nationality.clone(),
+                    });
+                }
             }
         }
     }
 
-    if m.given_names.is_empty() && m.surname.len() > SUSPICIOUSLY_LONG_UNSPLIT_NAME {
+    if !name_occluded
+        && m.given_names.is_empty()
+        && m.surname.len() > SUSPICIOUSLY_LONG_UNSPLIT_NAME
+    {
         reasons.push(Finding::MissingNameSeparator {
             surname_len: m.surname.len(),
         });
     }
 
-    if mrz::country_name(&m.nationality).is_none() {
+    if !occludes(CoreField::Nationality) && mrz::country_name(&m.nationality).is_none() {
         reasons.push(Finding::UnrecognizedNationality {
             got: m.nationality.clone(),
         });
     }
 
-    if m.surname.chars().any(|c| c.is_ascii_digit()) {
+    if !occludes(CoreField::Surname) && m.surname.chars().any(|c| c.is_ascii_digit()) {
         reasons.push(Finding::NonAlphabeticName {
             field: "surname".to_string(),
         });
     }
-    if m.given_names.chars().any(|c| c.is_ascii_digit()) {
+    if !occludes(CoreField::GivenNames) && m.given_names.chars().any(|c| c.is_ascii_digit()) {
         reasons.push(Finding::NonAlphabeticName {
             field: "given_names".to_string(),
         });
     }
 
-    if !m.surname.is_empty() && m.surname.chars().count() <= 2 {
+    if !occludes(CoreField::Surname) && !m.surname.is_empty() && m.surname.chars().count() <= 2 {
         reasons.push(Finding::SuspiciouslyShortNameComponent {
             field: "surname".to_string(),
             len: m.surname.chars().count(),
         });
     }
-    if !m.given_names.is_empty() && m.given_names.chars().count() <= 2 {
+    if !occludes(CoreField::GivenNames)
+        && !m.given_names.is_empty()
+        && m.given_names.chars().count() <= 2
+    {
         reasons.push(Finding::SuspiciouslyShortNameComponent {
             field: "given_names".to_string(),
             len: m.given_names.chars().count(),
         });
     }
 
-    if has_repeated_letter_run(&m.surname) {
+    if !occludes(CoreField::Surname) && has_repeated_letter_run(&m.surname) {
         reasons.push(Finding::DegenerateRepeatedCharacterRun {
             field: "surname".to_string(),
         });
     }
-    if has_repeated_letter_run(&m.given_names) {
+    if !occludes(CoreField::GivenNames) && has_repeated_letter_run(&m.given_names) {
         reasons.push(Finding::DegenerateRepeatedCharacterRun {
             field: "given_names".to_string(),
         });
@@ -518,65 +563,99 @@ fn document_types_agree(tier2_value: &str, mrz_value: &str) -> bool {
 /// transliteration ambiguity (`Müller` → `MULLER`, `MUELLER`, or `MUXXER`,
 /// all ICAO-sanctioned) is never flagged as a contradiction.
 pub fn check_tier2_against_mrz(fields: &crate::v2::ExtractionFields, m: &MrzData) -> Vec<Finding> {
+    check_tier2_against_mrz_excluding(fields, m, &[])
+}
+
+/// [`check_tier2_against_mrz`], but the comparison for a field named in
+/// `occluded` is skipped instead of run.
+///
+/// **Why this exists (ADR-0026, decision 6).** An occluded MRZ field is
+/// withheld, not read — an occluded `surname` is blank in `m` for a reason
+/// unrelated to whatever Tier 2 reported, so comparing the two and flagging
+/// [`Finding::LlmContradictsMrzStructural`] would call a deliberate
+/// withholding a contradiction. Each comparison below is independent per
+/// field (unlike [`check_line1_integrity_excluding`]'s
+/// [`Finding::MissingNameSeparator`], no comparison here can flag a
+/// *different*, non-occluded field), so gating each `if let` individually is
+/// sufficient and keeps `check_tier2_against_mrz(f, m) ==
+/// check_tier2_against_mrz_excluding(f, m, &[])` by construction.
+pub fn check_tier2_against_mrz_excluding(
+    fields: &crate::v2::ExtractionFields,
+    m: &MrzData,
+    occluded: &[crate::v2::CoreField],
+) -> Vec<Finding> {
     use crate::v2::CoreField;
+    let occludes = |field: CoreField| occluded.contains(&field);
 
     let mut findings = Vec::new();
 
-    if let Some(v) = fields.get(CoreField::DocumentType) {
-        if !m.document_type.is_empty()
-            && !document_types_agree(&crate::normalize::document_type(v), &m.document_type)
-        {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::DocumentType.as_str().to_string(),
-            });
-        }
-    }
-
-    if let Some(v) = fields.get(CoreField::IssuingCountry) {
-        if !m.issuing_country.is_empty()
-            && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.issuing_country)
-        {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::IssuingCountry.as_str().to_string(),
-            });
-        }
-    }
-
-    if let Some(v) = fields.get(CoreField::Nationality) {
-        if !m.nationality.is_empty()
-            && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.nationality)
-        {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::Nationality.as_str().to_string(),
-            });
-        }
-    }
-
-    if let Some(v) = fields.get(CoreField::Sex) {
-        // Compare in the product vocabulary that Tier 2 normalizes into.
-        if let Some(mrz_sex) = crate::mrz_product::sex(m.sex) {
-            let normalized = crate::normalize::sex(v);
-            if normalized != mrz_sex && !(m.sex == mrz::Sex::Unspecified && normalized == "<") {
+    if !occludes(CoreField::DocumentType) {
+        if let Some(v) = fields.get(CoreField::DocumentType) {
+            if !m.document_type.is_empty()
+                && !document_types_agree(&crate::normalize::document_type(v), &m.document_type)
+            {
                 findings.push(Finding::LlmContradictsMrzStructural {
-                    field: CoreField::Sex.as_str().to_string(),
+                    field: CoreField::DocumentType.as_str().to_string(),
                 });
             }
         }
     }
 
-    if let Some(v) = fields.get(CoreField::Surname) {
-        if !m.surname.is_empty() && !name_matches_any_transliteration(v, &m.surname) {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::Surname.as_str().to_string(),
-            });
+    if !occludes(CoreField::IssuingCountry) {
+        if let Some(v) = fields.get(CoreField::IssuingCountry) {
+            if !m.issuing_country.is_empty()
+                && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.issuing_country)
+            {
+                findings.push(Finding::LlmContradictsMrzStructural {
+                    field: CoreField::IssuingCountry.as_str().to_string(),
+                });
+            }
         }
     }
 
-    if let Some(v) = fields.get(CoreField::GivenNames) {
-        if !m.given_names.is_empty() && !name_matches_any_transliteration(v, &m.given_names) {
-            findings.push(Finding::LlmContradictsMrzStructural {
-                field: CoreField::GivenNames.as_str().to_string(),
-            });
+    if !occludes(CoreField::Nationality) {
+        if let Some(v) = fields.get(CoreField::Nationality) {
+            if !m.nationality.is_empty()
+                && !mrz::codes_equivalent(&crate::normalize::country_code(v), &m.nationality)
+            {
+                findings.push(Finding::LlmContradictsMrzStructural {
+                    field: CoreField::Nationality.as_str().to_string(),
+                });
+            }
+        }
+    }
+
+    if !occludes(CoreField::Sex) {
+        if let Some(v) = fields.get(CoreField::Sex) {
+            // Compare in the product vocabulary that Tier 2 normalizes into.
+            if let Some(mrz_sex) = crate::mrz_product::sex(m.sex) {
+                let normalized = crate::normalize::sex(v);
+                if normalized != mrz_sex && !(m.sex == mrz::Sex::Unspecified && normalized == "<") {
+                    findings.push(Finding::LlmContradictsMrzStructural {
+                        field: CoreField::Sex.as_str().to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    if !occludes(CoreField::Surname) {
+        if let Some(v) = fields.get(CoreField::Surname) {
+            if !m.surname.is_empty() && !name_matches_any_transliteration(v, &m.surname) {
+                findings.push(Finding::LlmContradictsMrzStructural {
+                    field: CoreField::Surname.as_str().to_string(),
+                });
+            }
+        }
+    }
+
+    if !occludes(CoreField::GivenNames) {
+        if let Some(v) = fields.get(CoreField::GivenNames) {
+            if !m.given_names.is_empty() && !name_matches_any_transliteration(v, &m.given_names) {
+                findings.push(Finding::LlmContradictsMrzStructural {
+                    field: CoreField::GivenNames.as_str().to_string(),
+                });
+            }
         }
     }
 
@@ -1127,5 +1206,112 @@ mod tests {
         };
         assert_eq!(finding.kind(), FindingKind::LlmContradictsMrzStructural);
         assert_eq!(finding.kind().as_str(), "llm_contradicts_mrz_structural");
+    }
+
+    // ── ADR-0026: occluded fields are skipped, not flagged ──
+
+    #[test]
+    fn missing_name_separator_is_suppressed_when_given_names_is_occluded() {
+        use crate::v2::CoreField;
+        // The exact corpus corruption shape from `the_collapsed_filler_run_
+        // corruption_is_flagged` above, restated as what `mrz::apply_occlusion`
+        // leaves behind when `given_names` (not `surname`) is the covered
+        // field: a visible, untouched surname next to a blanked given_names.
+        let mut m = base();
+        "TRANDALEKSANDER".clone_into(&mut m.surname);
+        String::new().clone_into(&mut m.given_names);
+        assert_eq!(
+            check_line1_integrity(&m),
+            Verdict::NeedsReview {
+                reasons: vec![Finding::MissingNameSeparator { surname_len: 15 }]
+            },
+            "sanity: unmasked, this still fires"
+        );
+        assert_eq!(
+            check_line1_integrity_excluding(&m, &[CoreField::GivenNames]),
+            Verdict::Accepted,
+            "given_names occluded: the finding must not fire — and it must not \
+             fire at all, not just get filtered after the fact, or the visible \
+             surname would be flagged as a side effect"
+        );
+    }
+
+    #[test]
+    fn given_names_occlusion_does_not_collaterally_downgrade_the_visible_surname() {
+        use crate::v2::{CoreField, FieldConfidence};
+        let mut m = base();
+        "TRANDALEKSANDER".clone_into(&mut m.surname);
+        String::new().clone_into(&mut m.given_names);
+        let verdict = check_line1_integrity_excluding(&m, &[CoreField::GivenNames]);
+        let mut confidence = FieldConfidence::mrz_checksum_scope();
+        confidence.downgrade_flagged(&verdict);
+        assert_eq!(
+            confidence.surname,
+            FieldConfidence::mrz_checksum_scope().surname,
+            "a finding that never fired must not downgrade a field it would \
+             have named — this is the case a post-hoc filter cannot fix"
+        );
+    }
+
+    #[test]
+    fn suspiciously_short_name_component_is_suppressed_when_occluded() {
+        use crate::v2::CoreField;
+        let mut m = base();
+        "E".clone_into(&mut m.surname);
+        assert!(check_line1_integrity(&m).is_flagged(), "sanity");
+        assert_eq!(
+            check_line1_integrity_excluding(&m, &[CoreField::Surname]),
+            Verdict::Accepted
+        );
+    }
+
+    #[test]
+    fn unrecognized_nationality_is_suppressed_when_occluded() {
+        use crate::v2::CoreField;
+        let mut m = base();
+        "ZZZ".clone_into(&mut m.nationality);
+        assert!(check_line1_integrity(&m).is_flagged(), "sanity");
+        assert_eq!(
+            check_line1_integrity_excluding(&m, &[CoreField::Nationality]),
+            Verdict::Accepted
+        );
+    }
+
+    #[test]
+    fn an_occluded_field_with_nothing_else_wrong_stays_accepted() {
+        use crate::v2::CoreField;
+        // Empty is exactly what `mrz::apply_occlusion` leaves an occluded
+        // field at, and a document with nothing else wrong must read clean.
+        let mut m = base();
+        String::new().clone_into(&mut m.surname);
+        String::new().clone_into(&mut m.given_names);
+        assert_eq!(
+            check_line1_integrity_excluding(&m, &[CoreField::Surname, CoreField::GivenNames]),
+            Verdict::Accepted
+        );
+    }
+
+    #[test]
+    fn tier2_sex_contradiction_is_suppressed_when_occluded() {
+        use crate::v2::CoreField;
+        let mut m = base();
+        // What `mrz::apply_occlusion` leaves a covered sex cell at.
+        m.sex = mrz::Sex::Unspecified;
+        let mut fields = agreeing_fields();
+        fields.sex = Some("M".into());
+        assert_eq!(
+            check_tier2_against_mrz(&fields, &m),
+            vec![Finding::LlmContradictsMrzStructural {
+                field: "sex".to_string()
+            }],
+            "sanity: unmasked, this still fires (see \
+             unspecified_mrz_sex_agrees_with_x_and_filler above)"
+        );
+        assert_eq!(
+            check_tier2_against_mrz_excluding(&fields, &m, &[CoreField::Sex]),
+            Vec::new(),
+            "sex occluded: the withheld MRZ value must not be treated as a \
+             contradiction of Tier 2's own read"
+        );
     }
 }
