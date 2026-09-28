@@ -46,6 +46,38 @@ fn mrz_format_str(format: MrzFormat) -> &'static str {
     }
 }
 
+/// Resolves [`DocumentDetail::mrz_format`] for one document/reading pair —
+/// extracted to a named function, rather than left as the closure it started
+/// as, so it is unit-testable without a full `run_prepped` pass.
+///
+/// - Synthetic corpus: always `known_or_guessed_format`, the label's exact
+///   format, independent of `evidence` — the ground truth is generated, not
+///   read, so there is nothing for a read to override.
+/// - Real specimens: `evidence.mrz_format` wins, but **only when that read's
+///   checksums are valid** (`Evidence::mrz_checksums_valid`) — a checksum-
+///   invalid read is exactly as apt to guess the wrong MRZ format from noise
+///   as it is to misread any other field, so it earns no more trust here than
+///   anywhere else. Otherwise (no evidence, no resolved format, or a
+///   checksum-invalid read) falls back to `known_or_guessed_format`, the
+///   ground-truth guess from `MrzFormat::guess_from_lines`, or `None` when
+///   neither resolved a format — a specimen with no MRZ is not a
+///   TD-anything. See #555.
+fn resolve_mrz_format(
+    synthetic: bool,
+    known_or_guessed_format: Option<&'static str>,
+    evidence: Option<&Evidence>,
+) -> Option<&'static str> {
+    if synthetic {
+        known_or_guessed_format
+    } else {
+        evidence
+            .filter(|e| e.mrz_checksums_valid)
+            .and_then(|e| e.mrz_format)
+            .map(mrz_format_str)
+            .or(known_or_guessed_format)
+    }
+}
+
 /// Characters where the run's recovered MRZ zone differs from the
 /// hand-transcribed true zone, compared line by line over the longer of the
 /// two (a missing character counts as a mismatch). `0` means the OCR/parse
@@ -776,8 +808,9 @@ fn mrz_zone_matches_layout(zone: &str, layout: &[MrzFieldSpan]) -> bool {
 ///
 /// `None` when `format` isn't one [`mrz_field_layout`] recognises, **and also
 /// when `truth` does not have the shape that format declares.** The second
-/// case is not hypothetical: `resolve_format` prefers the provider's own
-/// `Evidence::mrz_format`, so a reader that misdetects the format hands this
+/// case is not hypothetical: `resolve_mrz_format` takes the provider's own
+/// `Evidence::mrz_format` whenever that read is checksum-valid (see #555), so
+/// a checksum-valid read that still misdetects the format hands this
 /// function a layout that does not describe the document at all. Measured
 /// 2026-09-19 on a TD3 specimen read as TD1 — without the guard it reported
 /// differing characters on *line 3 of a two-line zone* and populated TD1-only
@@ -994,10 +1027,14 @@ pub struct DocumentDetail {
     ///   re-derived from the read.
     /// - Real specimens: this provider's own Tier-1 read, via
     ///   `Evidence::mrz_format` (populated only by the deterministic MRZ
-    ///   provider's `mrz_format_of`) when it parsed anything at all; else a
-    ///   best-effort guess from the ground-truth `mrz_line` via
+    ///   provider's `mrz_format_of`), but **only when that read's checksums
+    ///   are valid** (`Evidence::mrz_checksums_valid`); else a best-effort
+    ///   guess from the ground-truth `mrz_line` via
     ///   `MrzFormat::guess_from_lines`. `None` when neither resolved a
-    ///   format — a specimen with no MRZ is not a TD-anything.
+    ///   format — a specimen with no MRZ is not a TD-anything. A
+    ///   checksum-invalid read used to win regardless, which mislabelled a
+    ///   redacted specimen's fallback read as whatever format its garbage
+    ///   happened to start with — see `resolve_mrz_format` and #555.
     pub mrz_format: Option<&'static str>,
     /// Whether the provider returned a reading at all. `false` means it
     /// errored and contributed nothing to any aggregate. **Not** a Tier-1
@@ -1959,21 +1996,21 @@ async fn run_prepped_with_dump_options(
             let elapsed = started.elapsed();
             elapsed_per_doc.push(elapsed);
 
-            // See `DocumentDetail::mrz_format`'s doc: synthetic documents
-            // always resolve to the label's exact format, independent of
-            // whether this read even succeeded; real specimens prefer this
-            // provider's own Tier-1 read (`Evidence::mrz_format`, populated
-            // only by the deterministic MRZ provider) and fall back to the
-            // ground-truth guess computed once in `prep_specimens`.
+            // See `DocumentDetail::mrz_format`'s doc and `resolve_mrz_format`'s
+            // own: synthetic documents always resolve to the label's exact
+            // format, independent of whether this read even succeeded; real
+            // specimens take this provider's own Tier-1 read
+            // (`Evidence::mrz_format`, populated only by the deterministic MRZ
+            // provider) only when that read is checksum-valid, and otherwise
+            // fall back to the ground-truth guess computed once in
+            // `prep_specimens` (#555 — a checksum-invalid read is no more
+            // trustworthy about the format than about any other field).
             let resolve_format = |evidence: Option<&Evidence>| -> Option<&'static str> {
-                if bench_page.synthetic {
-                    bench_page.known_or_guessed_format
-                } else {
-                    evidence
-                        .and_then(|e| e.mrz_format)
-                        .map(mrz_format_str)
-                        .or(bench_page.known_or_guessed_format)
-                }
+                resolve_mrz_format(
+                    bench_page.synthetic,
+                    bench_page.known_or_guessed_format,
+                    evidence,
+                )
             };
 
             let reading = match reading {
@@ -2659,6 +2696,68 @@ mod tests {
     use super::*;
     use synthpass_core::v2::ExtractionV2;
     use synthpass_die::{FieldReader, IntelligenceProvider, ProviderError, ProviderId, Reading};
+
+    // `resolve_mrz_format` (#555): a real specimen's `mrz_format` must come
+    // from the provider's own read only when that read is checksum-valid.
+
+    /// Builds an `Evidence` naming a resolved MRZ format and its checksum
+    /// validity — the two fields `resolve_mrz_format` reads — leaving every
+    /// other field at its `Default`. Struct-literal syntax can't do this
+    /// directly: `Evidence` is `#[non_exhaustive]`, even within this crate.
+    fn evidence_with_format(format: MrzFormat, checksums_valid: bool) -> Evidence {
+        let mut evidence = Evidence::default();
+        evidence.mrz_format = Some(format);
+        evidence.mrz_checksums_valid = checksums_valid;
+        evidence
+    }
+
+    #[test]
+    fn checksum_invalid_real_specimen_read_falls_back_to_the_guess() {
+        let checksum_invalid = evidence_with_format(MrzFormat::MrvB, false);
+        assert_eq!(
+            resolve_mrz_format(false, Some("TD3"), Some(&checksum_invalid)),
+            Some("TD3"),
+            "a checksum-invalid read must not override the ground-truth guess, \
+             even though it did resolve a format"
+        );
+    }
+
+    #[test]
+    fn checksum_invalid_real_specimen_read_with_no_guess_is_unresolved() {
+        let checksum_invalid = evidence_with_format(MrzFormat::MrvB, false);
+        assert_eq!(
+            resolve_mrz_format(false, None, Some(&checksum_invalid)),
+            None,
+            "with no ground-truth guess to fall back to, a checksum-invalid \
+             read must resolve to unresolved, not the read's own format"
+        );
+    }
+
+    #[test]
+    fn checksum_valid_real_specimen_read_wins_even_against_a_disagreeing_guess() {
+        let checksum_valid = evidence_with_format(MrzFormat::Td3, true);
+        assert_eq!(
+            resolve_mrz_format(false, Some("TD1"), Some(&checksum_valid)),
+            Some("TD3"),
+            "a checksum-valid read is trusted over the ground-truth guess, \
+             even when they disagree"
+        );
+    }
+
+    #[test]
+    fn synthetic_document_keeps_the_label_format_whatever_the_read_says() {
+        let checksum_valid_but_wrong = evidence_with_format(MrzFormat::MrvB, true);
+        assert_eq!(
+            resolve_mrz_format(true, Some("TD1"), Some(&checksum_valid_but_wrong)),
+            Some("TD1"),
+            "a synthetic document's label always wins, independent of the read"
+        );
+        assert_eq!(
+            resolve_mrz_format(true, Some("TD1"), None),
+            Some("TD1"),
+            "a synthetic document's label wins even when there is no read at all"
+        );
+    }
 
     fn rate_test_page() -> BenchPage {
         BenchPage {
@@ -3944,8 +4043,9 @@ mod tests {
     /// not a confident wrong one.
     ///
     /// This is the measured 2026-09-19 case, not a hypothetical: a TD3
-    /// specimen whose reader misdetected the format as TD1. `resolve_format`
-    /// prefers the provider's own evidence, so the wrong layout reached
+    /// specimen whose reader misdetected the format as TD1. `resolve_mrz_format`
+    /// takes the provider's own evidence when that read is checksum-valid
+    /// (#555), so the wrong layout reached
     /// `mrz_field_mismatch`, which happily attributed a two-line 44-column
     /// zone against TD1's three-line 30-column table — reporting differing
     /// characters on a line the document does not have, and populating
