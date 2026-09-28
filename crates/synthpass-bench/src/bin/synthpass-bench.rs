@@ -238,11 +238,10 @@ struct SeedResult {
     elapsed_ms: u128,
     /// `synthpass_bench::HitResult::retry_stop` passthrough — why the native
     /// OCR retry loop stopped for this document (`"general_valid"`,
-    /// `"variant_valid"`, `"variant_valid_confirmed"`, `"repair_unconfirmed"`,
-    /// `"budget"`, `"pass_cap"`, `"exhausted"`). `None` only when OCR itself
-    /// failed (`miss_kind == Some("ocr_error")`), same as `raw_text`'s
-    /// absence in `--dump-ocr`. The per-document counterpart to
-    /// `Report::ocr_arms` — see that field's doc (#498's provider-bench
+    /// `"variant_valid"`, `"budget"`, `"pass_cap"`, `"exhausted"`). `None`
+    /// only when OCR itself failed (`miss_kind == Some("ocr_error")`), same
+    /// as `raw_text`'s absence in `--dump-ocr`. The per-document counterpart
+    /// to `Report::ocr_arms` — see that field's doc (#498's provider-bench
     /// parity, issue #510).
     #[serde(skip_serializing_if = "Option::is_none")]
     retry_stop: Option<String>,
@@ -254,7 +253,7 @@ struct SeedResult {
     retry_variant_id: Option<String>,
     /// `synthpass_bench::HitResult::retry_damaged_recovery` passthrough —
     /// `MrzData::damaged_recovery` of the reading the native retry loop
-    /// accepted or held. `Some` exactly when `retry_variant_id` is `Some`.
+    /// accepted. `Some` exactly when `retry_variant_id` is `Some`.
     /// Always serialized, same discipline as `retry_variant_id` above.
     retry_damaged_recovery: Option<bool>,
     /// `synthpass_bench::HitResult::tier1_damaged_recovery` passthrough —
@@ -1154,8 +1153,6 @@ mod tests {
         assert_eq!(json["ocr_arms"]["rotate"], "default");
         assert_eq!(json["ocr_arms"]["skew"], "default");
         assert_eq!(json["ocr_arms"]["chargrid"], "off");
-        assert_eq!(json["ocr_arms"]["stop"], "first-valid");
-        assert_eq!(json["ocr_arms"]["confirm_passes"], 2);
 
         assert_eq!(json["results"][0]["retry_stop"], "general_valid");
     }

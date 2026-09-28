@@ -35,20 +35,9 @@
 //! contributes up to two more — a crop to that content-scored box rather
 //! than a blind or row-density-searched one — chained on strictly as
 //! trailing extras after `mrz_variants`'s own. The loop stops at the first
-//! variant that validates (see [`StopMode`] for the one exception).
-//! Retries are additive-only — the general pass's
+//! variant that validates. Retries are additive-only — the general pass's
 //! text is never replaced — so Tier-2 input can only gain candidate lines,
 //! and a checksum gate upstream decides what is trusted.
-//!
-//! # Retry-stop oracle (measurement arm)
-//!
-//! `SYNTHPASS_OCR_STOP` (`first-valid`, default, or `clean`) and
-//! `SYNTHPASS_OCR_CONFIRM_PASSES` (default [`DEFAULT_CONFIRM_PASSES`]) govern
-//! whether a checksum-valid reading recovered only through `mrz`'s
-//! damaged-capture search is trusted as readily as one the ordinary scan read
-//! cleanly — see [`StopMode`] for the mechanism and why it is scoped to
-//! damaged hits rather than applied to every document. Unset, the retry loop
-//! is byte-identical to before this arm existed.
 //!
 //! # Pass budget
 //!
@@ -231,11 +220,45 @@ fn build_mrz(detection: Model, recognition: Model) -> Result<OcrsEngine, String>
     .map_err(|e| format!("failed to build mrz-constrained ocrs engine: {e}"))
 }
 
+/// Retry-stop knobs this crate no longer reads (issue #473). The `clean` arm they
+/// configured was removed after its re-run changed no real outcome and cost a
+/// real name read (`knowledge/benchmarks/retry-stop-rerun-2026-09-27.md`).
+const REMOVED_KNOBS: [&str; 2] = ["SYNTHPASS_OCR_STOP", "SYNTHPASS_OCR_CONFIRM_PASSES"];
+
+/// The [`REMOVED_KNOBS`] that `is_set` reports as set, in that order. Pure, so
+/// the rule is tested without touching the process environment.
+fn removed_knobs_set(is_set: impl Fn(&str) -> bool) -> Vec<&'static str> {
+    REMOVED_KNOBS
+        .into_iter()
+        .filter(|knob| is_set(knob))
+        .collect()
+}
+
+/// Prints one stderr line per removed knob still set, once per process, when
+/// the models load. A leftover `SYNTHPASS_OCR_STOP=clean` would otherwise do
+/// nothing silently, and an A/B run with it would compare two `first-valid`
+/// arms and read as a null result. `eprintln!` rather than `tracing`, because
+/// the CLI and both bench binaries install no subscriber (issue #491's
+/// `SYNTHPASS_OCR_AUTO_DOWNLOAD` warning is `tracing`-only for that reason).
+fn warn_removed_knobs_once() {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        for knob in removed_knobs_set(|knob| std::env::var_os(knob).is_some()) {
+            eprintln!(
+                "[synthpass-ocr] {knob} is set but no longer has any effect: the `clean` \
+                 retry-stop arm was removed (issue #473), so every run stops on the first \
+                 checksum-valid reading"
+            );
+        }
+    });
+}
+
 impl NativeOcr {
     /// Load both `.rten` model files and build the warm, reusable engines.
     /// (`rten::Model` is not `Clone`, so each file is loaded twice — once per
     /// engine; ~12 MB each, a one-off cost at process start.)
     pub fn load(detection_path: &Path, recognition_path: &Path) -> Result<Self, String> {
+        warn_removed_knobs_once();
         let load = |path: &Path, what: &str| {
             Model::load_file(path)
                 .map_err(|e| format!("failed to load {what} model at {}: {e}", path.display()))
@@ -257,6 +280,7 @@ impl NativeOcr {
     /// knowledge/ARCHITECTURE.md §10).
     #[cfg(feature = "embedded-models")]
     pub fn load_embedded() -> Result<Self, String> {
+        warn_removed_knobs_once();
         let load = |bytes: &'static [u8], what: &str| {
             Model::load_static_slice(bytes)
                 .map_err(|e| format!("failed to load embedded {what} model: {e}"))
@@ -332,12 +356,6 @@ impl NativeOcr {
         // both return points below (the general-pass hit and the end of the
         // retry loop) apply the same run's arm.
         let chargrid_mode = chargrid_mode();
-        // #473: `first-valid` (default) by design -- read once so every stop
-        // decision in this call (the general pass and every retry variant)
-        // uses the same arm. See `StopMode` and `confirm_passes` for what
-        // `clean` changes.
-        let stop_mode = ocr_stop_mode();
-        let confirm_budget = confirm_passes();
         let image = decode_image(image_path)?.into_rgb8();
 
         // A3: auto-rotate before the main pass (detection-only, cheap; see
@@ -444,65 +462,35 @@ impl NativeOcr {
                 general_started.elapsed()
             );
         }
-        // #473: an outstanding checksum-valid reading that only came from
-        // `mrz`'s damaged-capture search (`MrzData::damaged_recovery`),
-        // held under `StopMode::Clean` instead of stopping the loop
-        // immediately -- see `StopMode`'s doc for why a repaired reading is
-        // consistent, not proven. Always `None` under the default
-        // `StopMode::FirstValid`, which never defers a stop, so this whole
-        // mechanism costs nothing when the arm is off.
-        let mut pending: Option<mrz::MrzData> = None;
-        let mut pending_pass_id: Option<String> = None;
-        // The `passes_run` value (0 for the general pass) at which `pending`
-        // was set -- `confirm_budget` more variant passes are allowed after
-        // that before the loop gives up and accepts it unconfirmed.
-        let mut pending_set_at_pass: usize = 0;
-        // The page turn of the pass `pending` came from (0 for the general
-        // pass), applied to `rotation` if the loop ends by accepting it.
-        let mut pending_turn = 0;
         if let Some(data) = mrz::find_and_parse(&text).ok().filter(|d| d.valid()) {
-            if stop_mode == StopMode::FirstValid || !data.damaged_recovery {
-                // #473 measurement: reported unconditionally (not gated on
-                // `stop_mode`) so a `SYNTHPASS_OCR_STOP=first-valid` run --
-                // the default -- also tells Phase 1 measurement whether the
-                // pass it stopped on needed damaged-capture repair.
-                if verbose {
-                    eprintln!(
-                        "[synthpass-ocr] general pass: stopping, damaged_recovery={}",
-                        data.damaged_recovery
-                    );
-                }
-                // PR-1.4: the general pass's own image is unambiguously the one
-                // the valid MRZ was read from -- no retry variant to disambiguate.
-                let chargrid_arm = if chargrid_mode == ChargridMode::Off {
-                    None
-                } else {
-                    apply_chargrid(chargrid_mode, &self.mrz_engine, &image, &mut text, verbose)
-                };
-                let text_sanity = page_sanity(&text);
-                return Ok(OcrPage {
-                    text,
-                    lines,
-                    mrz_band,
-                    mrz_band_score,
-                    portrait,
-                    rotation,
-                    text_sanity,
-                    retry_variant_id: Some("general".to_string()),
-                    retry_damaged_recovery: Some(data.damaged_recovery),
-                    retry_budget_hit: false,
-                    retry_stop: Some("general_valid".to_string()),
-                    chargrid: chargrid_arm,
-                });
-            }
             if verbose {
                 eprintln!(
-                    "[synthpass-ocr] general pass: valid MRZ needed damaged-capture repair; \
-                     holding for confirmation instead of stopping (SYNTHPASS_OCR_STOP=clean)"
+                    "[synthpass-ocr] general pass: stopping, damaged_recovery={}",
+                    data.damaged_recovery
                 );
             }
-            pending = Some(data);
-            pending_pass_id = Some("general".to_string());
+            // PR-1.4: the general pass's own image is unambiguously the one
+            // the valid MRZ was read from -- no retry variant to disambiguate.
+            let chargrid_arm = if chargrid_mode == ChargridMode::Off {
+                None
+            } else {
+                apply_chargrid(chargrid_mode, &self.mrz_engine, &image, &mut text, verbose)
+            };
+            let text_sanity = page_sanity(&text);
+            return Ok(OcrPage {
+                text,
+                lines,
+                mrz_band,
+                mrz_band_score,
+                portrait,
+                rotation,
+                text_sanity,
+                retry_variant_id: Some("general".to_string()),
+                retry_damaged_recovery: Some(data.damaged_recovery),
+                retry_budget_hit: false,
+                retry_stop: Some("general_valid".to_string()),
+                chargrid: chargrid_arm,
+            });
         } else if verbose {
             eprintln!("[synthpass-ocr] Tier-1 miss on general pass; MRZ-band candidate lines:");
             for line in mrz_shaped_lines(&text).lines() {
@@ -513,9 +501,8 @@ impl NativeOcr {
         let max_passes = max_passes();
         let max_duration = max_duration();
         let mut retry_variant_id = None;
-        // #473: `MrzData::damaged_recovery` from whichever reading
-        // `retry_variant_id` ends up naming -- the accepted variant, or the
-        // held `pending` reading if the loop accepts that instead. `Some`
+        // `MrzData::damaged_recovery` from whichever reading
+        // `retry_variant_id` ends up naming. `Some`
         // exactly when `retry_variant_id` is `Some`; see `OcrPage`'s doc.
         let mut retry_damaged_recovery: Option<bool> = None;
         let mut retry_budget_hit = false;
@@ -662,10 +649,6 @@ impl NativeOcr {
         for (passes_run, (i, (turn, variant))) in (1usize..).zip(variants) {
             if passes_run >= max_passes {
                 retry_stop = Some("pass_cap".to_string());
-                if pending.is_some() {
-                    retry_variant_id = pending_pass_id.clone();
-                    retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
-                }
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] pass budget ({max_passes}) reached before variant {i}; stopping retries"
@@ -676,31 +659,9 @@ impl NativeOcr {
             if overall_started.elapsed() >= max_duration {
                 retry_budget_hit = true;
                 retry_stop = Some("budget".to_string());
-                if pending.is_some() {
-                    retry_variant_id = pending_pass_id.clone();
-                    retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
-                }
                 if verbose {
                     eprintln!(
                         "[synthpass-ocr] time budget ({max_duration:?}) reached before variant {i}; stopping retries"
-                    );
-                }
-                break;
-            }
-            // #473: `pending` is only ever `Some` under `StopMode::Clean` (see
-            // above) -- this whole branch is dead under the default arm.
-            // `confirm_budget` more passes were allowed after `pending` was
-            // set; once spent without a clean read or an agreeing repeat,
-            // accept the held reading rather than search indefinitely.
-            if pending.is_some() && passes_run > pending_set_at_pass + confirm_budget {
-                retry_stop = Some("repair_unconfirmed".to_string());
-                retry_variant_id = pending_pass_id.clone();
-                retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
-                if verbose {
-                    eprintln!(
-                        "[synthpass-ocr] confirm-pass budget ({confirm_budget}) exhausted before \
-                         variant {i}; accepting the damaged-capture reading from \
-                         {pending_pass_id:?} unconfirmed"
                     );
                 }
                 break;
@@ -747,72 +708,35 @@ impl NativeOcr {
             // Check just this pass's lines: a valid MRZ appended means Tier 1
             // will find it — later (costlier) variants have nothing to add.
             if let Some(data) = mrz::find_and_parse(&candidates).ok().filter(|d| d.valid()) {
-                // #473: under `StopMode::Clean`, a repaired reading stops the
-                // loop only once it is either superseded by a clean one or
-                // echoed by an independent repaired read that agrees on
-                // every field (see `same_document`) -- not on first sight.
-                // Always `true` under `StopMode::FirstValid`, so this is a
-                // no-op there.
-                let confirmed_agreement = stop_mode == StopMode::Clean
-                    && data.damaged_recovery
-                    && pending.as_ref().is_some_and(|p| same_document(p, &data));
-                let stop_now = match stop_mode {
-                    StopMode::FirstValid => true,
-                    StopMode::Clean => !data.damaged_recovery || confirmed_agreement,
-                };
-                if stop_now {
-                    // The reported rotation has to describe the buffer this MRZ was
-                    // actually read off, or `OcrPage.rotation` stops being usable
-                    // evidence for anything downstream.
-                    if turn != 0 {
-                        rotation = (rotation + turn) % 360;
-                    }
-                    if verbose {
-                        if turn == 0 {
-                            eprintln!(
-                                "[synthpass-ocr] variant {i}: valid MRZ found, stopping retries \
-                                 (damaged_recovery={})",
-                                data.damaged_recovery
-                            );
-                        } else {
-                            eprintln!(
-                                "[synthpass-ocr] variant {i}: valid MRZ found on the {turn}°-turned \
-                                 page (reported rotation now {rotation}°), stopping retries \
-                                 (damaged_recovery={})",
-                                data.damaged_recovery
-                            );
-                        }
-                    }
-                    retry_variant_id = Some(pass_id);
-                    retry_damaged_recovery = Some(data.damaged_recovery);
-                    retry_stop = Some(if confirmed_agreement {
-                        "variant_valid_confirmed".to_string()
-                    } else {
-                        "variant_valid".to_string()
-                    });
-                    // Move, not clone: `variant` is not read again after this
-                    // point in the loop, and this branch always `break`s.
-                    winning_variant_image = Some(variant);
-                    break;
-                }
-                // `StopMode::Clean`, a damaged-capture reading that neither
-                // superseded nor echoed `pending` -- hold the *first* one
-                // seen (a later disagreeing repair is not better evidence
-                // than the first, see `mrz`'s own `fallback` ordering) and
-                // keep searching for at most `confirm_budget` more passes.
-                if pending.is_none() {
-                    pending = Some(data);
-                    pending_pass_id = Some(pass_id.clone());
-                    pending_set_at_pass = passes_run;
-                    pending_turn = turn;
+                // The reported rotation has to describe the buffer this MRZ was
+                // actually read off, or `OcrPage.rotation` stops being usable
+                // evidence for anything downstream.
+                if turn != 0 {
+                    rotation = (rotation + turn) % 360;
                 }
                 if verbose {
-                    let left = (pending_set_at_pass + confirm_budget).saturating_sub(passes_run);
-                    eprintln!(
-                        "[synthpass-ocr] variant {i}: valid but damaged-capture MRZ, holding for \
-                         confirmation ({left} pass(es) left)"
-                    );
+                    if turn == 0 {
+                        eprintln!(
+                            "[synthpass-ocr] variant {i}: valid MRZ found, stopping retries \
+                             (damaged_recovery={})",
+                            data.damaged_recovery
+                        );
+                    } else {
+                        eprintln!(
+                            "[synthpass-ocr] variant {i}: valid MRZ found on the {turn}°-turned \
+                             page (reported rotation now {rotation}°), stopping retries \
+                             (damaged_recovery={})",
+                            data.damaged_recovery
+                        );
+                    }
                 }
+                retry_variant_id = Some(pass_id);
+                retry_damaged_recovery = Some(data.damaged_recovery);
+                retry_stop = Some("variant_valid".to_string());
+                // Move, not clone: `variant` is not read again after this
+                // point in the loop, and this branch always `break`s.
+                winning_variant_image = Some(variant);
+                break;
             } else if verbose {
                 eprintln!("[synthpass-ocr] variant {i}: MRZ-shaped but checksum-invalid lines:");
                 for line in candidates.lines() {
@@ -821,39 +745,16 @@ impl NativeOcr {
             }
         }
         if retry_stop.is_none() {
-            retry_stop = Some(
-                match &pending {
-                    Some(_) => "repair_unconfirmed",
-                    None => "exhausted",
-                }
-                .to_string(),
-            );
-            if pending.is_some() {
-                retry_variant_id = pending_pass_id.clone();
-                retry_damaged_recovery = pending.as_ref().map(|p| p.damaged_recovery);
-            }
-        }
-        // #473: the loop accepted the held reading rather than a variant it
-        // stopped on, so the reported rotation has to describe the pass that
-        // reading came from -- the same rule the stop branch applies above.
-        if pending.is_some() && winning_variant_image.is_none() && pending_turn != 0 {
-            rotation = (rotation + pending_turn) % 360;
+            retry_stop = Some("exhausted".to_string());
         }
         // PR-1.4: `retry_variant_id.is_some()` together with
         // `winning_variant_image.is_some()` means the loop broke on a valid
         // reading for that specific variant -- the two are set together, only
-        // in that branch. `retry_stop == "repair_unconfirmed"` (#473, only
-        // reachable under `StopMode::Clean`) is the one case where
-        // `retry_variant_id` is `Some` (the pass that first produced the held
-        // reading) while `winning_variant_image` stays `None`: the loop
-        // accepted an earlier pass's repaired reading after its confirmation
-        // budget ran out, and that pass's image was never retained past its
-        // own iteration. Every other way the loop can end (pass cap, time
-        // budget, exhausted the variant list, all with no `pending`) leaves
-        // both `None`, even if `text`'s accumulated lines happen to combine
-        // into a valid MRZ across two different variants -- that combination
-        // has no single source image, so repair is skipped rather than
-        // guessed at.
+        // in that branch. Every other way the loop can end (pass cap, time
+        // budget, or the variant list exhausted) leaves both `None`, even if
+        // `text`'s accumulated lines happen to combine into a valid MRZ across
+        // two different variants -- that combination has no single source
+        // image, so repair is skipped rather than guessed at.
         let chargrid_arm = match (chargrid_mode, &winning_variant_image) {
             (ChargridMode::Off, _) => None,
             (_, Some(image)) => {
@@ -1628,109 +1529,6 @@ fn chargrid_mode() -> ChargridMode {
     }
 }
 
-/// Whether a checksum-valid MRZ reading that only exists because `mrz`'s
-/// damaged-capture search recovered it is trusted the same as one the
-/// ordinary scan read cleanly. See [`ocr_stop_mode`].
-///
-/// **The defect this exists to fix (#473).** A reading is checksum-*proven*
-/// consistent, never checksum-*proven correct* — `mrz::MrzData::damaged_recovery`
-/// says so explicitly. Two synthetic TD3 repros: seed 99 (clean profile, seed
-/// 0) has a pass whose single-glyph confusable sweep lands on a
-/// checksum-valid but wrong document number, when a later pass would have
-/// read the zone cleanly; seed 85 loses the name-separator filler, and the
-/// damaged-capture search accepts the merged text as the surname with an
-/// empty given name — line 1 carries no check digit to object either way. In
-/// both cases the *default* arm below (`FirstValid`) stops on the first hit
-/// regardless, which is why it stays the default: see [`Clean`](Self::Clean)
-/// for why a stricter oracle is not simply switched on for every document.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StopMode {
-    /// Stop the retry loop (general pass or a variant) the instant any
-    /// reading validates, damaged-capture or not — today's behaviour,
-    /// unchanged, and the default. Fast, and right on every specimen whose
-    /// first checksum-valid pass is also a correct one; #473's two repros are
-    /// the cases where it is not.
-    FirstValid,
-    /// A damaged-capture hit (`MrzData::damaged_recovery`) does not stop the
-    /// loop by itself. It is held (see `recognize_detailed`'s `pending`) and
-    /// the loop keeps searching for up to [`confirm_passes`] more passes,
-    /// stopping early on whichever comes first: a clean (non-damaged) valid
-    /// reading, or a second, independent damaged-capture reading that agrees
-    /// with the held one on every field ([`same_document`]). If neither
-    /// arrives before the confirm budget (or the ordinary pass/time budgets)
-    /// runs out, the held reading is accepted anyway — this arm spends more
-    /// passes on the rarer damaged-hit case, it does not refuse to answer.
-    ///
-    /// **Why this is scoped to damaged hits only, not every document.** A
-    /// stricter oracle applied unconditionally — require a line-1
-    /// plausibility check, not just checksum validity, before stopping *any*
-    /// retry — was already measured and reverted (see [`has_valid_mrz`]'s doc
-    /// comment and `synthpass_core::fusion`'s module doc): it made every
-    /// document search more MRZ-constrained passes, appending more candidate
-    /// lines for `find_and_parse` to search, and that additional search
-    /// surface produced more coincidental checksum-valid false matches than
-    /// it fixed. Gating the extra passes on `damaged_recovery` keeps that cost
-    /// on the minority of documents where the first hit was already the
-    /// weaker kind of evidence, instead of taxing every document to protect
-    /// against a failure mode only some of them can have.
-    Clean,
-}
-
-/// `SYNTHPASS_OCR_STOP` — `first-valid` (default) or `clean`. See [`StopMode`].
-///
-/// Unrecognised values fall back to the default, matching every other knob in
-/// this module: this is a measurement knob, and a typo should not take down a
-/// production read.
-fn ocr_stop_mode() -> StopMode {
-    match std::env::var("SYNTHPASS_OCR_STOP")
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "clean" => StopMode::Clean,
-        _ => StopMode::FirstValid,
-    }
-}
-
-/// Default `SYNTHPASS_OCR_CONFIRM_PASSES` — how many extra retry passes
-/// [`StopMode::Clean`] spends trying to confirm a held damaged-capture
-/// reading before accepting it unconfirmed. Inert under [`StopMode::FirstValid`].
-///
-/// Not yet measured: `2` is a starting point that bounds the worst-case extra
-/// cost per affected document. The #473 A/B (`first-valid` vs `clean`) is what
-/// should confirm or replace it.
-const DEFAULT_CONFIRM_PASSES: usize = 2;
-
-/// `SYNTHPASS_OCR_CONFIRM_PASSES`, or [`DEFAULT_CONFIRM_PASSES`] if
-/// unset/invalid. `0` is a legal value — it means "never spend an extra pass,
-/// accept the first damaged-capture hit unconfirmed", which is *not* the same
-/// as [`StopMode::FirstValid`]: a later clean read that arrives via the
-/// ordinary pass/time budget's own remaining passes can still supersede it,
-/// only the dedicated confirm search is skipped.
-fn confirm_passes() -> usize {
-    std::env::var("SYNTHPASS_OCR_CONFIRM_PASSES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_CONFIRM_PASSES)
-}
-
-/// Do `a` and `b` describe the same document? Every [`mrz::MrzData`] field
-/// agrees except `mrz_lines` (the raw zone text, which two independently
-/// OCR'd passes are never byte-identical on even when they agree on every
-/// decoded field) and `damaged_recovery` (both sides of this comparison are
-/// already known to be damaged-capture reads — see the call site). Mirrors
-/// `mrz`'s own private `single()` unanimity gate.
-fn same_document(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
-    let normalize = |d: &mrz::MrzData| {
-        let mut d = d.clone();
-        d.mrz_lines.clear();
-        d.damaged_recovery = false;
-        d
-    };
-    normalize(a) == normalize(b)
-}
-
 /// This run's OCR measurement-arm configuration — every measurement-arm
 /// `SYNTHPASS_OCR_*` knob this crate defines, at once, for a bench report to
 /// record alongside its hit rate. Lowercase mode names, matching each knob's
@@ -1752,12 +1550,6 @@ pub struct OcrArms {
     pub rotate: &'static str,
     pub skew: &'static str,
     pub chargrid: &'static str,
-    /// See [`StopMode`] — `"first-valid"` (default) or `"clean"`.
-    pub stop: &'static str,
-    /// `SYNTHPASS_OCR_CONFIRM_PASSES` (see [`confirm_passes`]). Recorded
-    /// under every `stop` arm, even though only `"clean"` reads it, so two
-    /// runs that differ only in this knob can never look identical.
-    pub confirm_passes: usize,
 }
 
 impl OcrArms {
@@ -1776,8 +1568,6 @@ impl OcrArms {
         rotate: "default",
         skew: "default",
         chargrid: "off",
-        stop: "first-valid",
-        confirm_passes: DEFAULT_CONFIRM_PASSES,
     };
 
     /// Read every `SYNTHPASS_OCR_*` measurement knob this crate defines from
@@ -1808,11 +1598,6 @@ impl OcrArms {
                 ChargridMode::On => "on",
                 ChargridMode::Control => "control",
             },
-            stop: match ocr_stop_mode() {
-                StopMode::FirstValid => "first-valid",
-                StopMode::Clean => "clean",
-            },
-            confirm_passes: confirm_passes(),
         }
     }
 
@@ -1835,12 +1620,9 @@ impl OcrArms {
 /// [`max_passes`], [`max_duration`]), so `SYNTHPASS_OCR_MAX_PASSES=abc` or
 /// `=0` — both of which fall back to [`DEFAULT_MAX_PASSES`] — record
 /// nothing, and `SYNTHPASS_OCR_MAX_PASSES=7` (spelling out today's default)
-/// records nothing either. `confirm_passes` is compared and recorded under
-/// every `stop` arm, even `"first-valid"` (where it's inert) — the same
-/// reasoning [`OcrArms::DEFAULT`]'s own doc gives for carrying it at all: two
-/// runs that differ only in this knob must never look identical.
+/// records nothing either.
 ///
-/// Pure and exhaustive over the nine knobs the issue names — no env access
+/// Pure and exhaustive over the seven knobs the issue names — no env access
 /// here, so it's unit-testable without touching the process environment (see
 /// this module's `env_lock`-guarded tests for why that matters). See
 /// [`config_overrides`] for the thin wrapper that reads the process env.
@@ -1869,15 +1651,6 @@ pub fn config_overrides_from(
         overrides.insert(
             "SYNTHPASS_OCR_CHARGRID".to_string(),
             arms.chargrid.to_string(),
-        );
-    }
-    if arms.stop != OcrArms::DEFAULT.stop {
-        overrides.insert("SYNTHPASS_OCR_STOP".to_string(), arms.stop.to_string());
-    }
-    if arms.confirm_passes != OcrArms::DEFAULT.confirm_passes {
-        overrides.insert(
-            "SYNTHPASS_OCR_CONFIRM_PASSES".to_string(),
-            arms.confirm_passes.to_string(),
         );
     }
     if max_passes != DEFAULT_MAX_PASSES {
@@ -3067,8 +2840,6 @@ mod tests {
             "SYNTHPASS_OCR_ROTATE",
             "SYNTHPASS_OCR_SKEW",
             "SYNTHPASS_OCR_CHARGRID",
-            "SYNTHPASS_OCR_STOP",
-            "SYNTHPASS_OCR_CONFIRM_PASSES",
         ] {
             unsafe { std::env::remove_var(var) };
         }
@@ -3084,19 +2855,24 @@ mod tests {
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ORDER") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_ROTATE") };
         unsafe { std::env::remove_var("SYNTHPASS_OCR_SKEW") };
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
         unsafe { std::env::set_var("SYNTHPASS_OCR_CHARGRID", "on") };
         assert!(!OcrArms::from_env().is_default());
         unsafe { std::env::remove_var("SYNTHPASS_OCR_CHARGRID") };
+    }
 
-        // The confirm budget is a knob of its own: a run that moved only it
-        // is not a default run, and its report must say which budget ran.
-        unsafe { std::env::set_var("SYNTHPASS_OCR_CONFIRM_PASSES", "5") };
-        let arms = OcrArms::from_env();
-        assert_eq!(arms.confirm_passes, 5);
-        assert!(!arms.is_default());
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
+    #[test]
+    fn removed_knobs_set_names_each_removed_knob_that_is_set() {
+        assert!(removed_knobs_set(|_| false).is_empty());
+        assert_eq!(
+            removed_knobs_set(|knob| knob == "SYNTHPASS_OCR_STOP"),
+            vec!["SYNTHPASS_OCR_STOP"]
+        );
+        assert_eq!(
+            removed_knobs_set(|_| true),
+            vec!["SYNTHPASS_OCR_STOP", "SYNTHPASS_OCR_CONFIRM_PASSES"]
+        );
+        // A live knob is never reported as removed.
+        assert!(removed_knobs_set(|knob| knob == "SYNTHPASS_OCR_TEXTURE").is_empty());
     }
 
     #[test]
@@ -3129,8 +2905,6 @@ mod tests {
         arms.order = "band-first";
         arms.rotate = "legacy";
         arms.skew = "legacy";
-        arms.stop = "clean";
-        arms.confirm_passes = 5;
         assert_eq!(
             config_overrides_from(arms, DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
             std::collections::BTreeMap::from([
@@ -3138,8 +2912,6 @@ mod tests {
                 ("SYNTHPASS_OCR_ORDER".to_string(), "band-first".to_string()),
                 ("SYNTHPASS_OCR_ROTATE".to_string(), "legacy".to_string()),
                 ("SYNTHPASS_OCR_SKEW".to_string(), "legacy".to_string()),
-                ("SYNTHPASS_OCR_STOP".to_string(), "clean".to_string()),
-                ("SYNTHPASS_OCR_CONFIRM_PASSES".to_string(), "5".to_string()),
             ]),
             "every non-default arm reports, `chargrid` stays off and absent"
         );
@@ -3170,79 +2942,6 @@ mod tests {
                 "10".to_string()
             )])
         );
-    }
-
-    #[test]
-    fn ocr_stop_mode_defaults_to_first_valid_and_parses_clean() {
-        let _env = crate::env_lock();
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
-        assert_eq!(
-            ocr_stop_mode(),
-            StopMode::FirstValid,
-            "unset must be byte-for-byte unchanged behaviour"
-        );
-
-        for (raw, expected) in [
-            ("clean", StopMode::Clean),
-            ("CLEAN", StopMode::Clean),
-            ("  clean  ", StopMode::Clean),
-            ("first-valid", StopMode::FirstValid),
-            // A typo is a measurement mistake, not a production outage: it
-            // falls back to the default, same as every other knob here.
-            ("cleann", StopMode::FirstValid),
-            ("", StopMode::FirstValid),
-        ] {
-            unsafe { std::env::set_var("SYNTHPASS_OCR_STOP", raw) };
-            assert_eq!(ocr_stop_mode(), expected, "parsing {raw:?}");
-        }
-
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_STOP") };
-    }
-
-    #[test]
-    fn confirm_passes_reads_env_with_fallback() {
-        let _env = crate::env_lock();
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
-        assert_eq!(confirm_passes(), DEFAULT_CONFIRM_PASSES, "unset falls back");
-
-        unsafe { std::env::set_var("SYNTHPASS_OCR_CONFIRM_PASSES", "5") };
-        assert_eq!(confirm_passes(), 5, "valid override honored");
-
-        // Unlike `max_passes`, `0` is a legal, distinct value here — see
-        // `confirm_passes`'s own doc comment.
-        unsafe { std::env::set_var("SYNTHPASS_OCR_CONFIRM_PASSES", "0") };
-        assert_eq!(
-            confirm_passes(),
-            0,
-            "zero is honored, not a fallback trigger"
-        );
-
-        unsafe { std::env::set_var("SYNTHPASS_OCR_CONFIRM_PASSES", "not-a-number") };
-        assert_eq!(
-            confirm_passes(),
-            DEFAULT_CONFIRM_PASSES,
-            "invalid falls back"
-        );
-
-        unsafe { std::env::remove_var("SYNTHPASS_OCR_CONFIRM_PASSES") };
-    }
-
-    #[test]
-    fn same_document_ignores_mrz_lines_and_damaged_recovery_but_not_content() {
-        let text = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
-                     L898902C36UTO7408122F1204159ZE184226B<<<<<10";
-        let a = mrz::find_and_parse(text).expect("fixture parses");
-        let mut b = a.clone();
-        // Different raw zone text and a different `damaged_recovery` flag —
-        // neither should matter to `same_document`, which asks only whether
-        // two independently-obtained readings describe the same document.
-        b.mrz_lines = "different raw text".to_string();
-        b.damaged_recovery = !a.damaged_recovery;
-        assert!(same_document(&a, &b));
-
-        let mut different_person = a.clone();
-        different_person.surname = "OTHERPERSON".to_string();
-        assert!(!same_document(&a, &different_person));
     }
 
     #[test]

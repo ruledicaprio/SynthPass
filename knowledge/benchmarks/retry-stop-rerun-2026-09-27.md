@@ -258,6 +258,13 @@ only when a second pass agrees would keep the gain and, on this run's 6 supersed
 both moves. ADR-0025 already lists "confirming every variant stop" as unmeasured and deferred. It
 would need its own A/B.
 
+**Amended 2026-09-28: the owner chose option (a).** `clean` is removed, together with
+`SYNTHPASS_OCR_CONFIRM_PASSES` and the retry loop's hold-and-confirm logic, and every run now
+stops on the first checksum-valid reading, the only default it ever had. ADR-0025 (Proposed only
+in `55f4c0c`) was not adopted, so its rules (1) and (2) never reach `main`. PR
+[#548](https://github.com/ruledicaprio/SynthPass/pull/548)'s per-document `retry_damaged_recovery`
+and `tier1_damaged_recovery` stay. The lever above stays Hypothesized and unbuilt.
+
 ## Invocations
 
 Driver `473-rerun.sh 55f4c0c`, run through the session's single job slot, in worktree `m6-dump`

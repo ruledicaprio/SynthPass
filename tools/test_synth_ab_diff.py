@@ -108,10 +108,10 @@ class RetryKey(unittest.TestCase):
         self.assertEqual(d.retry_key(row), "null/null")
 
     def test_bool_renders_lowercase(self):
-        row = {"retry_stop": "variant_valid_confirmed", "retry_damaged_recovery": True}
-        self.assertEqual(d.retry_key(row), "variant_valid_confirmed/true")
+        row = {"retry_stop": "variant_valid", "retry_damaged_recovery": True}
+        self.assertEqual(d.retry_key(row), "variant_valid/true")
         row["retry_damaged_recovery"] = False
-        self.assertEqual(d.retry_key(row), "variant_valid_confirmed/false")
+        self.assertEqual(d.retry_key(row), "variant_valid/false")
 
 
 class ByRetryBreakdown(unittest.TestCase):
@@ -122,16 +122,16 @@ class ByRetryBreakdown(unittest.TestCase):
             doc(19, False, retry_stop="pass_cap", retry_damaged_recovery=None),
         )
         after = report(
-            doc(18, True, False, [field("surname")], retry_stop="variant_valid_confirmed",
+            doc(18, True, False, [field("surname")], retry_stop="variant_valid",
                 retry_damaged_recovery=True),
-            doc(19, True, False, [field("surname")], retry_stop="variant_valid_confirmed",
+            doc(19, True, False, [field("surname")], retry_stop="variant_valid",
                 retry_damaged_recovery=True),
         )
         r = d.compare(before, after)
-        self.assertEqual(r["by_retry"], {"variant_valid_confirmed/true": 2})
+        self.assertEqual(r["by_retry"], {"variant_valid/true": 2})
         moved18 = next(m for m in r["moved"] if m["seed"] == 18)
         self.assertEqual(moved18["retry_before"], "general_valid/false")
-        self.assertEqual(moved18["retry_after"], "variant_valid_confirmed/true")
+        self.assertEqual(moved18["retry_after"], "variant_valid/true")
 
     def test_old_report_with_no_retry_keys_at_all_is_unknown_not_a_crash(self):
         before = report(doc(0, True, True, PREFIX_WRONG))
