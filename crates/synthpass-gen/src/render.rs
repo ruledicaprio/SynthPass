@@ -178,7 +178,7 @@ fn draw_mrz_glyphs(
 ) {
     use ab_glyph::{point, Font, ScaleFont};
 
-    let px_scale = line_rect.height as f32 * 0.8;
+    let px_scale = layout::MRZ_FONT_PX;
     let scaled = font.as_scaled(px_scale);
     let y = line_rect.y as f32 + scaled.ascent();
     for (i, c) in text.chars().enumerate() {
