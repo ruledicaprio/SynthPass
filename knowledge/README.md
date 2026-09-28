@@ -20,7 +20,7 @@ the constraints and the direction before you open a source file:
    principles, each with the place in the codebase that enforces it.
 2. **[VISION.md](VISION.md)** — the dual mission and the explicit non-goals.
 3. **[ARCHITECTURE.md](ARCHITECTURE.md)** — how it works today, and the
-   version-by-version record of what got deleted and why.
+   engineering conventions every change follows.
 4. **[ROADMAP.md](ROADMAP.md)** — the authoritative milestone spine.
 5. **[../README.md](../README.md)** — install, usage, the public surface.
 
@@ -33,9 +33,10 @@ the constraints and the direction before you open a source file:
 - **[ROADMAP.md](ROADMAP.md)** — the authoritative milestone spine, Definition of
   Done per phase, what's shipped vs. planned. If another doc's roadmap section
   disagrees with this one, this one wins.
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — engineering rationale, trade-offs, and
-  the version-by-version design history (why Tier 1 / Tier 2 exist, what got
-  deleted and when).
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — the entry point to how the system is
+  built: overview, components, extension seams, known limitations, and the
+  engineering conventions (§13). Its topic pages are in [architecture/](architecture/).
+  What got deleted and when is in [CHANGELOG.md](../CHANGELOG.md), not here.
 - **[technical_debt.md](technical_debt.md)** — deferred decisions with honest
   severity and effort. Add an entry when you *choose* not to fix something.
 - **[BRANDING.md](BRANDING.md)** — the naming model, messaging guardrails, and the
@@ -80,6 +81,7 @@ algorithm, pipeline, benchmark, configuration or heuristic, it does not get kept
 
 | Folder | Holds |
 |---|---|
+| **[architecture/](architecture/)** | Topic pages split out of `ARCHITECTURE.md`: the extraction pipeline, the configuration reference. What, as it is today. |
 | **[decisions/](decisions/)** | Architecture Decision Records. Why, not what. |
 | **[providers/](providers/)** | One note per intelligence provider: capability, measured behaviour, licence of the weights. |
 | **[prompts/](prompts/)** | Prompt philosophy and per-version evaluation results. The prompts themselves live in `crates/synthpass-llm/prompts/` — they are compiled in. |

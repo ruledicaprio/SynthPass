@@ -45,8 +45,8 @@ shell do not cross into the container on their own — `docker run` needs its ow
 ### Cross-compiling to musl locally
 
 `synthpass-builder` ships `x86_64-unknown-linux-musl`'s Rust std, a pinned Zig (the `CC`/`CXX` for
-`llama-cpp-2`'s C++ build under musl), and `cargo-zigbuild` — see knowledge/ARCHITECTURE.md §10 for why
-Zig was chosen over `cross-rs`/manual `musl-gcc`:
+`llama-cpp-2`'s C++ build under musl), and `cargo-zigbuild` — CHANGELOG.md's `[1.0.0]` entry records why
+Zig was chosen over `cross-rs`/manual `musl-gcc`, and knowledge/ARCHITECTURE.md §10 what the build produces:
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/work" \

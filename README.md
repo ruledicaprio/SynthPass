@@ -95,9 +95,9 @@ help text changes.*
 | decrypt an encrypted result | `synthpass decrypt result.json.enc` (needs `SYNTHPASS_KEY`) |
 
 From a source checkout, `cargo run -p synthpass-cli -- <command>` does the same. The
-`POST /api/extract` API and every environment variable are in
-[ARCHITECTURE.md §5](knowledge/ARCHITECTURE.md#5-pipeline-execution-flow) and
-[§12](knowledge/ARCHITECTURE.md#12-configuration-reference).
+web server's routes are in [architecture/pipeline.md](knowledge/architecture/pipeline.md#front-ends),
+and every environment variable and exit code in
+[architecture/configuration.md](knowledge/architecture/configuration.md).
 
 ## Make a pass, then read it back
 
@@ -201,7 +201,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 | --- | --- |
 | [VISION.md](knowledge/VISION.md) | Why the project exists, its principles, and permanent non-goals |
 | [ROADMAP.md](knowledge/ROADMAP.md) | M1–M8 milestones, a Definition of Done each, current state |
-| [ARCHITECTURE.md](knowledge/ARCHITECTURE.md) | Engineering rationale, trade-offs, design history, full configuration reference |
+| [ARCHITECTURE.md](knowledge/ARCHITECTURE.md) | How the system is built: components, extension seams, limitations, engineering conventions; links to the pipeline and configuration pages |
 | [LICENSING.md](knowledge/LICENSING.md) | Offline Ed25519 licensing — customer and vendor CLI walkthroughs |
 | [benchmarks/README.md](knowledge/benchmarks/README.md) | Accuracy methodology, metric definitions, live trend charts |
 | [SYNTHPASS.md](knowledge/SYNTHPASS.md) | Generation and benchmarking, run locally |

@@ -45,11 +45,11 @@ file...", batch's summary line — every emoji line) goes to stderr, never stdou
 ## Where the contracts live
 
 - Exit codes (0 ok, 1 failure, 2 usage, 3 license refusal): the table in
-  [`knowledge/ARCHITECTURE.md` §12](../../knowledge/ARCHITECTURE.md#12-configuration-reference),
+  [`knowledge/architecture/configuration.md`](../../knowledge/architecture/configuration.md#exit-codes),
   implemented by the `Exit` enum in `src/main.rs`.
 - The output contract (`--json`, stdout vs stderr):
   [ADR-0023](../../knowledge/decisions/ADR-0023-cli-output-contract.md).
-- The processing flow per command: `knowledge/ARCHITECTURE.md` §5, "CLI".
+- The processing flow: [`knowledge/architecture/pipeline.md`](../../knowledge/architecture/pipeline.md).
 - `export` formats and schema: [`knowledge/EXPORTS.md`](../../knowledge/EXPORTS.md).
 - Licensing: [`knowledge/LICENSING.md`](../../knowledge/LICENSING.md).
 

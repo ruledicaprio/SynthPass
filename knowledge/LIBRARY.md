@@ -16,13 +16,14 @@ it is not there yet.
 
 ## `knowledge/` inventory
 
-Fifteen subdirectories, all under `knowledge/`, plus the sixteen root-level living documents
+Sixteen subdirectories, all under `knowledge/`, plus the sixteen root-level living documents
 `README.md` already indexes under "Current & forward-looking" (not repeated here). File counts
 are top-level files (a `figures/`, `incoming/` or similar subfolder is called out separately, not
 folded into the count).
 
 | Directory | Files (top-level) | Purpose, per its own README |
 | --- | --- | --- |
+| [`architecture/`](architecture/) | 2 topic pages + README | Pages split out of `ARCHITECTURE.md` (2026-09-28): the extraction pipeline (§5) and the configuration reference (§12). `ARCHITECTURE.md` stays the entry point and keeps the section numbers. |
 | [`decisions/`](decisions/) | 21 ADRs + README | Architecture Decision Records — why, not what. Never deleted, only superseded. |
 | [`benchmarks/`](benchmarks/) | 44 dated `.md` reports + `FINDINGS.md`, `PIPELINE.md`, README, 10 raw-data files (`real-specimen-mrz-baseline.json`, `real-specimen-outcomes.jsonl` and 8 older sweep-output JSONs), plus 2 sweep-output subfolders (`ocr-order-ab/`, `mrz-matrix-probe-2026-09-21-run/`) | Methodology, metric definitions, dated sweep results including rejected candidates. The only place in the repo carrying live accuracy numbers. |
 | [`docs9303/`](docs9303/) | 13 ICAO Doc 9303 Parts + `CONFORMANCE_BASIS.md`, `Mrz_Field_Layout.md`, README, plus a `figures/` subfolder | ICAO Doc 9303, Parts 1–13, the spec behind `crates/mrz` and `synthpass-die`. Kept as reference; audited against ICAO's own PDFs 2026-09-24. |
@@ -39,7 +40,7 @@ folded into the count).
 | [`providers/`](providers/) | README only | One note per intelligence provider (capability, measured behaviour, weights licence) — the template exists; no per-provider note has been filed yet. |
 | [`vision/`](vision/) | README only | Vision-language models and the multimodal track. Explicitly "not implemented" as of v1.4.0 — the README states the target shape, not a shipped capability. |
 
-Five of the fifteen (`evaluation/`, `hardware/`, `prompts/`, `providers/`, `vision/`) are
+Five of the sixteen (`evaluation/`, `hardware/`, `prompts/`, `providers/`, `vision/`) are
 README-only by design, not by neglect — each README says so itself (see `providers/README.md`'s
 "what does not belong here" and `vision/README.md`'s "Status: not implemented"). A README-only
 directory is not a gap to fill speculatively; principle 6 (`benchmarks/README.md`) rules out
