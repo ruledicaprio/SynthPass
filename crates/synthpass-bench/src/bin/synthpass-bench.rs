@@ -395,6 +395,11 @@ struct Report {
     /// recorded it before, so a retry-arm question about `td1`/`td2`/…
     /// history had no run-level record of which arm produced it (#510).
     ocr_arms: synthpass_bench::report::OcrArmsReport,
+    /// The `text-detection.rten`/`text-recognition.rten` paths this run
+    /// actually loaded (issue #541) — a run-level fact next to `ocr_arms`,
+    /// since this binary loads one `NativeOcr` instance for the whole run.
+    /// Always serialized; see `synthpass_bench::report::ModelPathsReport`.
+    model_paths: synthpass_bench::report::ModelPathsReport,
     hits: u64,
     hit_rate: f64,
     /// Tier-1 hits that *also* read both name fields exactly right (`hit &&
@@ -477,11 +482,19 @@ fn main() {
     };
 
     let root = repo_root();
-    let ocr = NativeOcr::load(
-        &root.join("text-detection.rten"),
-        &root.join("text-recognition.rten"),
-    )
-    .expect("failed to load OCR models — run from the repo root");
+    // `SYNTHPASS_OCR_MODEL_DIR` if set, otherwise this binary's own
+    // build-tree repo root (today's behaviour, unchanged) — issue #541.
+    let model_dir = synthpass_bench::resolve_model_dir(&root, |k| std::env::var_os(k));
+    let detection_path = model_dir.join("text-detection.rten");
+    let recognition_path = model_dir.join("text-recognition.rten");
+    eprintln!(
+        "OCR models: detection={} recognition={}",
+        detection_path.display(),
+        recognition_path.display()
+    );
+    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect(
+        "failed to load OCR models — run from the repo root, or set SYNTHPASS_OCR_MODEL_DIR",
+    );
 
     let corpus = generate_corpus(
         parsed.profile,
@@ -790,6 +803,10 @@ fn main() {
         count: parsed.count,
         seed_start: parsed.seed,
         ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::from_env()),
+        model_paths: synthpass_bench::report::ModelPathsReport::resolve(
+            &detection_path,
+            &recognition_path,
+        ),
         hits,
         hit_rate,
         strict_hits,
@@ -1101,6 +1118,7 @@ mod tests {
             count: 1,
             seed_start: 0,
             ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::DEFAULT),
+            model_paths: synthpass_bench::report::ModelPathsReport::default(),
             hits,
             hit_rate: hits as f64,
             strict_hits,
@@ -1155,6 +1173,26 @@ mod tests {
         assert_eq!(json["ocr_arms"]["chargrid"], "off");
 
         assert_eq!(json["results"][0]["retry_stop"], "general_valid");
+    }
+
+    /// Issue #541: the resolved model paths are a run-level field, always
+    /// present in the JSON (never omitted, unlike `retry_stop`).
+    #[test]
+    fn report_carries_resolved_model_paths() {
+        let mut report = synthetic_rate_report(1, 1, 0);
+        report.model_paths = synthpass_bench::report::ModelPathsReport::resolve(
+            Path::new("/opt/synthpass/models/text-detection.rten"),
+            Path::new("/opt/synthpass/models/text-recognition.rten"),
+        );
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert!(json["model_paths"]["detection"]
+            .as_str()
+            .unwrap()
+            .ends_with("text-detection.rten"));
+        assert!(json["model_paths"]["recognition"]
+            .as_str()
+            .unwrap()
+            .ends_with("text-recognition.rten"));
     }
 
     /// `retry_stop` is `#[serde(skip_serializing_if = "Option::is_none")]`,

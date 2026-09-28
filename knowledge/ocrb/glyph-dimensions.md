@@ -120,10 +120,11 @@ the style or from an editorial change between 1976 editions.
   of their ink. A per-cell classifier or `chargrid` fit
   ([`crates/synthpass-ocr/src/chargrid.rs`](../../crates/synthpass-ocr/src/chargrid.rs)) should
   expect glyph-dependent horizontal offsets of up to about 0.07 pitch.
-  `synthpass-gen`'s ink-centring
-  ([`crates/synthpass-gen/src/render.rs`](../../crates/synthpass-gen/src/render.rs)) removes those
-  offsets from the synthetic corpus. The vendored font's own left-edge spread is 0.19 pitch, as
-  [`tools/ocrb_metrics.py`](../../tools/ocrb_metrics.py) reports.
+  `synthpass-gen` centres each glyph's advance box in its cell, not its ink
+  ([`crates/synthpass-gen/src/render.rs`](../../crates/synthpass-gen/src/render.rs),
+  `draw_mrz_glyphs`), so the synthetic corpus carries the vendored font's own per-glyph placement
+  rather than the standard's reference lines. The vendored font's own left-edge spread is 0.19
+  pitch, as [`tools/ocrb_metrics.py`](../../tools/ocrb_metrics.py) reports.
 
 ## Reference drawings and what the standard reproduces
 

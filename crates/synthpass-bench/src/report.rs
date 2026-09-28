@@ -279,6 +279,45 @@ impl From<synthpass_ocr::OcrArms> for OcrArmsReport {
     }
 }
 
+/// The two `.rten` model file paths a run actually loaded — a run-level fact
+/// next to the run's other provenance (`OcrArmsReport`, `mrz_class_sweep_arm`),
+/// not a per-document field and not part of `synthpass_ocr::OcrArms` (the
+/// measurement-arm knob set). Exists because both bench binaries now resolve
+/// `SYNTHPASS_OCR_MODEL_DIR` (issue #541) instead of always reading the build
+/// tree's own `repo_root()`: a report with no record of which files a run
+/// actually opened could not tell "the models on disk" from "the tree's own
+/// build-time copy."
+///
+/// Always serialized. The reports that carry it are `Serialize`-only; their
+/// readers — `tools/` by key, [`crate::bench_report::GateReport`] by ignoring
+/// unknown fields — tolerate both a report without it and one with it.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
+pub struct ModelPathsReport {
+    pub detection: String,
+    pub recognition: String,
+}
+
+impl ModelPathsReport {
+    /// `std::fs::canonicalize` of each path a binary actually passed to
+    /// `NativeOcr::load`, falling back to that same path exactly as given
+    /// when canonicalization fails (e.g. it does not exist — `NativeOcr::load`
+    /// itself already failed the whole run by the time a report would be
+    /// written, but a test can still exercise this half independently).
+    pub fn resolve(detection_path: &std::path::Path, recognition_path: &std::path::Path) -> Self {
+        Self {
+            detection: canonicalize_or_given(detection_path),
+            recognition: canonicalize_or_given(recognition_path),
+        }
+    }
+}
+
+fn canonicalize_or_given(path: &std::path::Path) -> String {
+    std::fs::canonicalize(path)
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
 #[derive(Serialize)]
 pub struct SpeedReport {
     pub mean_ms: u128,
@@ -465,6 +504,11 @@ pub struct Report {
     /// a clean null. Quote this field, never the variable you believe you
     /// set.
     pub mrz_class_sweep_arm: &'static str,
+    /// The `text-detection.rten`/`text-recognition.rten` paths this run
+    /// actually loaded — one `NativeOcr` instance shared across every
+    /// provider row, so this is a single run-level fact, not per-provider.
+    /// Always serialized; see [`ModelPathsReport`].
+    pub model_paths: ModelPathsReport,
     pub providers: Vec<ProviderRow>,
 }
 
@@ -816,6 +860,97 @@ mod tests {
             !text.contains("strict_names"),
             "an absent field must not round-trip back in: {text}"
         );
+    }
+
+    /// Issue #541: falls back to the path exactly as given when it does not
+    /// exist (canonicalization fails) — the case a report for a failed run
+    /// would never actually reach (`NativeOcr::load` errors first), but the
+    /// half `ModelPathsReport::resolve` owns must still behave correctly on
+    /// its own.
+    #[test]
+    fn model_paths_report_falls_back_to_the_given_path_when_canonicalize_fails() {
+        let missing = std::path::Path::new("/nonexistent/synthpass-541/text-detection.rten");
+        let resolved = ModelPathsReport::resolve(missing, missing);
+        assert_eq!(resolved.detection, missing.display().to_string());
+        assert_eq!(resolved.recognition, missing.display().to_string());
+    }
+
+    /// A path that does exist is canonicalized, not merely echoed back.
+    #[test]
+    fn model_paths_report_canonicalizes_an_existing_path() {
+        let dir = std::env::temp_dir();
+        let resolved = ModelPathsReport::resolve(&dir, &dir);
+        let expected = std::fs::canonicalize(&dir).unwrap().display().to_string();
+        assert_eq!(resolved.detection, expected);
+        assert_eq!(resolved.recognition, expected);
+    }
+
+    /// Always serialized — never omitted, matching the doc on the field in
+    /// `provider-bench`'s top-level `Report`.
+    #[test]
+    fn model_paths_report_always_serializes_both_keys() {
+        let resolved = ModelPathsReport {
+            detection: "/models/text-detection.rten".to_string(),
+            recognition: "/models/text-recognition.rten".to_string(),
+        };
+        let json = serde_json::to_value(&resolved).expect("serialize");
+        assert_eq!(json["detection"], "/models/text-detection.rten");
+        assert_eq!(json["recognition"], "/models/text-recognition.rten");
+    }
+
+    /// A freshly-built `provider-bench` report always carries `model_paths`
+    /// in its JSON — the counterpart to the "old report still parses" test
+    /// below.
+    #[test]
+    fn provider_bench_report_always_serializes_model_paths() {
+        let report = Report {
+            timestamp_unix: 0,
+            source: "synthetic-corpus",
+            profile: None,
+            format: None,
+            count: 1,
+            seed_start: None,
+            mrz_class_sweep_arm: "off",
+            model_paths: ModelPathsReport {
+                detection: "/models/text-detection.rten".to_string(),
+                recognition: "/models/text-recognition.rten".to_string(),
+            },
+            providers: Vec::new(),
+        };
+        let json = serde_json::to_value(&report).expect("serialize report");
+        assert_eq!(
+            json["model_paths"]["detection"],
+            "/models/text-detection.rten"
+        );
+        assert_eq!(
+            json["model_paths"]["recognition"],
+            "/models/text-recognition.rten"
+        );
+    }
+
+    /// The crate's own reader of this JSON, `bench-report`'s `GateReport`,
+    /// still parses a report that carries the new `model_paths` key.
+    #[test]
+    fn a_report_carrying_model_paths_still_parses_as_a_gate_report() {
+        let report = Report {
+            timestamp_unix: 0,
+            source: "synthetic-corpus",
+            profile: None,
+            format: None,
+            count: 1,
+            seed_start: None,
+            mrz_class_sweep_arm: "off",
+            model_paths: ModelPathsReport {
+                detection: "/models/text-detection.rten".to_string(),
+                recognition: "/models/text-recognition.rten".to_string(),
+            },
+            providers: Vec::new(),
+        };
+        let json = serde_json::to_string(&report).expect("serialize report");
+        let parsed: crate::bench_report::GateReport =
+            serde_json::from_str(&json).expect("GateReport ignores the new key");
+        assert_eq!(parsed.source, "synthetic-corpus");
+        assert_eq!(parsed.mrz_class_sweep_arm, "off");
     }
 
     #[test]
