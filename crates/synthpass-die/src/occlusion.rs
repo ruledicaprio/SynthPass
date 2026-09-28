@@ -10,10 +10,10 @@ use mrz::{CellMask, MrzData, MrzError, ZoneField};
 use synthpass_core::v2::{CoreField, MrzOcclusion};
 
 /// Why [`apply`] refused to produce a masked reading. Every variant means
-/// the same thing downstream: [`crate::mrz_reader::MrzReader::read`] does
-/// not accept the reading (ADR-0026, decision 7 — a covered, check-digited
-/// cell is never solved for, even where the arithmetic could do it
-/// uniquely).
+/// the same thing downstream: [`MrzReader`](crate::mrz_reader::MrzReader)'s
+/// [`FieldReader::read`](crate::provider::FieldReader::read) does not accept
+/// the reading (ADR-0026, decision 7 — a covered, check-digited cell is never
+/// solved for, even where the arithmetic could do it uniquely).
 ///
 /// `#[non_exhaustive]`: this crate is not published, but every other error
 /// type here (`ProviderError`) already follows this shape, and a future
@@ -37,7 +37,7 @@ pub enum Refused {
     /// [`core_field_of`] does not map to a [`CoreField`]. `ZoneField` is
     /// `#[non_exhaustive]`, so a future `mrz` release can add one this
     /// module does not yet know — refusing here, instead of silently
-    /// dropping the field from [`Occluded::fields`], is what keeps that a
+    /// dropping the field from [`mrz::Occluded::fields`], is what keeps that a
     /// safe upgrade rather than a value quietly reaching the wire with no
     /// covered-field marker at all.
     UnknownZoneField,
