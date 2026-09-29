@@ -1,4 +1,3 @@
-//! ICAO 9303 check-digit math and generic OCR-repair primitives.
 //!
 //! A check digit is deterministic evidence rather than a model score: it
 //! either agrees with the candidate or it does not. What agreement establishes
@@ -103,9 +102,9 @@ pub(crate) fn letterize(c: char) -> char {
     }
 }
 
-/// Repair high-signal filler runs while retaining letters at the name boundary.
-/// An isolated K/L run is ambiguous: a name ending in KK can touch a filler
-/// read as K. A visible filler or a long trailing run supplies more evidence.
+/// Repair filler runs, retaining a name's final two repeated letters when a
+/// third K/L touches visible filler. A run after a visible filler is padding,
+/// while a run with no visible filler in the middle of a name is ambiguous.
 pub(crate) fn defiller(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -120,13 +119,20 @@ pub(crate) fn defiller(s: &str) -> String {
                 .iter()
                 .filter(|b| matches!(b, b'K' | b'L'))
                 .count();
-            let trailing = bytes[i..j].contains(&b'<') && bytes[j..].iter().all(|b| *b == b'<');
-            let anchored = i > 0 && bytes[i - 1] == b'<' && (i < 2 || bytes[i - 2] != b'<');
-            if (anchored && j == bytes.len() && kl >= 3) || (trailing && kl >= 6) {
-                out.extend(std::iter::repeat_n('<', j - i));
-            } else if trailing && kl == 3 && bytes[i..i + 3].iter().all(|b| *b == bytes[i]) {
+            let after_filler = i > 0 && bytes[i - 1] == b'<';
+            let visible_filler = bytes[i..j].contains(&b'<');
+            if !after_filler
+                && visible_filler
+                && kl == 3
+                && bytes[i..i + 3].iter().all(|b| *b == bytes[i])
+            {
                 out.push_str(&s[i..i + 2]);
                 out.extend(std::iter::repeat_n('<', j - i - 2));
+            } else if j - i >= 4
+                && kl >= 3
+                && (after_filler || visible_filler || j == bytes.len())
+            {
+                out.extend(std::iter::repeat_n('<', j - i));
             } else {
                 out.push_str(&s[i..j]);
             }
@@ -170,10 +176,13 @@ pub(crate) fn fix_doc_code(l: &str) -> String {
     }
 }
 
-/// Recover a lost `<<` only when the candidate `KK` follows a sufficiently
-/// long prefix. Short prefixes include common real double-K names, so an
-/// unmarked pair there is not evidence of a separator. No name check digit
-/// exists to arbitrate a pair later in the field.
+/// Recover a lost `<<` only when the candidate `KK` follows six cells.
+/// In the pinned ambiguous names (JUKKA, PEKKA, MIKKO, HAKKINEN) the pair
+/// starts at cell 2; the existing VZOREC repair starts at cell 6. None of
+/// 65 reviewed fixture surnames or 25 generator surnames contains `KK`, so
+/// those corpora cannot establish a generally safe boundary. This guard
+/// preserves the observed short names while the A/B measurement decides
+/// whether the unmarked repair should survive at all.
 pub(crate) fn fix_name_separator(s: &str) -> String {
     let trimmed = s.trim_end_matches('<');
     if !trimmed.contains("<<") {
@@ -426,10 +435,15 @@ mod tests {
                 format!("{name}<<<<")
             );
         }
+        // Still a wrong single-field read; there is no evidence that tells
+        // whether its K run is a separator or belongs to a name.
         assert_eq!(fix_name_separator("KUKKKKMARI"), "KUKKKKMARI");
         assert_eq!(fix_name_separator(&defiller("KUKKKKMARI")), "KUKKKKMARI");
         assert_eq!(fix_name_separator(&defiller("KUKK<<MARI")), "KUKK<<MARI");
         assert_eq!(fix_name_separator("TAMM<<MIKK"), "TAMM<<MIKK");
+        // The guard can also miss a real separator after a short surname.
+        assert_eq!(fix_name_separator("SMITHKKJOHN"), "SMITHKKJOHN");
+        assert_eq!(fix_name_separator("LIKKJOHN"), "LIKKJOHN");
     }
 
     #[test]
