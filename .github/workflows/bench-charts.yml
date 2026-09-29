@@ -222,18 +222,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
+      # The README's specimen image is the generator's own output for the
+      # command the README shows (seed 1, TD1, clean profile), so it is
+      # regenerated here rather than hand-captured, and a generator change
+      # that alters it shows up in this workflow's PR like any chart change.
+      - name: Regenerate the README specimen
+        run: |
+          cargo run -p synthpass-cli --release -- generate --document-type td1 --count 1 --seed 1 --profile clean --out-dir "$RUNNER_TEMP/specimen"
+          cp "$RUNNER_TEMP/specimen/synthpass_1_td1.png" knowledge/img/synthetic_pass_example.png
+
       - name: Open a PR if any chart changed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git diff --quiet -- knowledge/img/*.svg; then
+          if git diff --quiet -- knowledge/img/*.svg knowledge/img/synthetic_pass_example.png; then
             echo "No chart changes -- nothing to PR."
             exit 0
           fi
 
           branch="bench-charts/$(date +%Y-%m-%d)-${{ github.run_number }}"
           git checkout -b "$branch"
-          git add knowledge/img/*.svg
+          git add knowledge/img/*.svg knowledge/img/synthetic_pass_example.png
           git commit -m "chore(bench): refresh trend charts ($(date +%Y-%m-%d))"
           git push origin "$branch"
 
