@@ -54,11 +54,14 @@ def provider_report(rate=None, failed_specimen_valid=0):
             "providers": [provider]}
 
 
-def write_arm(root, name, reports=None, outcomes=None, zones=None, run=None, real_report=None):
+def write_arm(root, name, reports=None, outcomes=None, zones=None, run=None, real_report=None,
+              stdouts=None, passes=None):
     arm = Path(root) / name
     arm.mkdir()
     for file_name, rep in (reports or {}).items():
         (arm / file_name).write_text(json.dumps(rep), encoding="utf-8")
+    for file_name, text in (stdouts or {}).items():
+        (arm / file_name).write_text(text, encoding="utf-8")
     if outcomes is not None:
         real = arm / "real"
         real.mkdir()
@@ -70,6 +73,8 @@ def write_arm(root, name, reports=None, outcomes=None, zones=None, run=None, rea
             (real / d.CURRENT_RUN).write_text(ARCHIVE + "\n", encoding="utf-8")
         if real_report is not None:
             (real / d.REPORT).write_text(json.dumps(real_report), encoding="utf-8")
+        if passes is not None:
+            (real / d.PASSES).write_text("".join(json.dumps(r) + "\n" for r in passes), encoding="utf-8")
     return arm
 
 
@@ -339,6 +344,338 @@ class Arms(unittest.TestCase):
         code, out, _ = run(before, after, "--json")
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["synthetic"]["td1.json"]["changed"], [])
+
+
+SECRET = "SECRETLINE9"
+
+
+def dump_stdout(texts):
+    """A `synthpass-bench` stdout: one `--- seed N raw OCR lines ---` block per seed."""
+    out = []
+    for seed, text in texts.items():
+        out.append(f"--- seed {seed} raw OCR lines ---")
+        out += [f"  [{i}] {json.dumps(line)}" for i, line in enumerate(text.split("\n"))]
+        out.append("")
+    return "\n".join(out) + "\n"
+
+
+def traced(seed, **over):
+    """A seed with a valid pass trace: general read nothing, pass-00 appended a
+    line, pass-01 was accepted."""
+    passes = [
+        {"order": 0, "id": "general", "transform": "general", "outcome": "no_mrz_shaped_lines", "readings": []},
+        {"order": 1, "id": "pass-00", "transform": "mrz_variants:0", "outcome": "appended",
+         "readings": [{"text": "LINE-A"}]},
+        {"order": 2, "id": "pass-01", "transform": "mrz_variants:1", "outcome": "accepted",
+         "readings": [{"text": "LINE-B"}]},
+    ]
+    out = doc(seed, True, retry_stop="variant_valid", retry_variant_id="pass-01",
+              ocr_text="GENERAL\nLINE-A\nLINE-B", ocr_passes=passes)
+    out.update(over)
+    return out
+
+
+def untraced(row):
+    return {k: v for k, v in row.items() if k not in ("ocr_text", "ocr_passes")}
+
+
+class ExpectIdentical(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def synth(self, name, docs, texts=None):
+        stdouts = None if texts is None else {"td1.stdout": dump_stdout(texts)}
+        return write_arm(self.root, name, reports={"td1.json": report(*docs)}, stdouts=stdouts)
+
+    def neutral(self, before, after, *args):
+        code, out, err = run(before, after, "--expect-identical", *args)
+        return code, out, err
+
+    def test_identical_arms_are_neutral(self):
+        docs = [doc(0, True), doc(1, False, "checksum_failed")]
+        texts = {0: "A\nB", 1: "C"}
+        code, out, err = self.neutral(self.synth("a", docs, texts), self.synth("b", docs, texts))
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.endswith("NEUTRAL\n"))
+        self.assertNotIn("NOT NEUTRAL", out)
+        self.assertIn("ignoring elapsed_ms, ocr_ms, run_manifest", out)
+        self.assertIn("td1.json: seeds 2/2", out)
+
+    def test_a_difference_only_in_ignored_keys_is_neutral(self):
+        asset = "passports/X.jpg"
+        ledger_a = {**outcome_row(asset, "hit"), "ocr_ms": 10}
+        ledger_b = {**outcome_row(asset, "hit"), "ocr_ms": 9999}
+        before = write_arm(self.root, "a", reports={"td1.json": report(doc(0, True))},
+                           outcomes=[ledger_a], zones=[{**zone_row(asset, ["A"]), "run_manifest": "m1"}])
+        after = write_arm(self.root, "b", reports={"td1.json": report(doc(0, True, elapsed_ms=77))},
+                          outcomes=[ledger_b], zones=[{**zone_row(asset, ["A"]), "run_manifest": "m2"}])
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 0, out)
+
+    def test_ignore_names_the_key_and_leaves_it_out(self):
+        before = self.synth("a", [doc(0, True, note="x")])
+        after = self.synth("b", [doc(0, True, note="y")])
+        self.assertEqual(self.neutral(before, after)[0], 3)
+        code, out, _ = self.neutral(before, after, "--ignore", "note")
+        self.assertEqual(code, 0)
+        self.assertIn("ignoring elapsed_ms, note, ocr_ms, run_manifest", out)
+
+    def test_one_changed_field_is_not_neutral_and_names_the_seed(self):
+        before = self.synth("a", [doc(0, True), doc(41, True)])
+        after = self.synth("b", [doc(0, True), doc(41, True, line1_flagged=True)])
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 3)
+        self.assertIn("results[] differ: 41 (line1_flagged)", out)
+        self.assertTrue(out.endswith("NOT NEUTRAL\n"))
+        code, out, _ = self.neutral(before, after, "--json")
+        result = json.loads(out)
+        self.assertEqual((code, result["exit"], result["neutral"]), (3, 3, False))
+        self.assertEqual(result["synthetic"]["td1.json"]["results_differ"],
+                         {"failed": 1, "ids": ["41 (line1_flagged)"]})
+
+    def test_a_missing_dump_row_or_block_is_not_neutral(self):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit"), outcome_row("passports/Y.jpg", "hit")]
+        before = write_arm(self.root, "a", outcomes=rows, zones=[zone_row(asset, ["A"]),
+                                                                  zone_row("passports/Y.jpg", ["B"])])
+        after = write_arm(self.root, "b", outcomes=rows, zones=[zone_row(asset, ["A"])])
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 3)
+        self.assertIn("passports/Y.jpg (only in before)", out)
+        docs = [doc(0, True), doc(1, True)]
+        code, out, _ = self.neutral(self.synth("c", docs, {0: "A", 1: "B"}), self.synth("d", docs, {0: "A"}))
+        self.assertEqual(code, 3)
+        self.assertIn("dump blocks differ: 1 (only in before)", out)
+
+    def test_changed_raw_text_is_not_neutral_and_never_printed(self):
+        docs = [doc(0, True)]
+        before = self.synth("a", docs, {0: f"{SECRET}\nB"})
+        after = self.synth("b", docs, {0: "CHANGED-TEXT\nB"})
+        for args in ((), ("--json",)):
+            code, out, err = self.neutral(before, after, *args)
+            self.assertEqual(code, 3)
+            for text in (SECRET, "CHANGED-TEXT"):
+                self.assertNotIn(text, out + err)
+        asset = "passports/X.jpg"
+        real_before = write_arm(self.root, "c", outcomes=[outcome_row(asset, "hit")],
+                                zones=[{**zone_row(asset, ["ZONE-A"]), "raw_ocr_text": SECRET}])
+        real_after = write_arm(self.root, "d", outcomes=[outcome_row(asset, "hit")],
+                               zones=[{**zone_row(asset, ["ZONE-B"]), "raw_ocr_text": "CHANGED-TEXT"}])
+        for args in ((), ("--json",)):
+            code, out, err = self.neutral(real_before, real_after, *args)
+            self.assertEqual(code, 3)
+            self.assertIn("passports/X.jpg (raw_ocr_text, recovered_mrz_lines)", out)
+            for text in (SECRET, "CHANGED-TEXT", "ZONE-A", "ZONE-B"):
+                self.assertNotIn(text, out + err)
+
+    def test_ocr_text_in_one_arm_must_equal_the_other_arms_dump(self):
+        texts = {0: "A\nB"}
+        before = self.synth("a", [doc(0, True)], texts)
+        good = self.synth("b", [doc(0, True, ocr_text="A\nB")], texts)
+        bad = self.synth("c", [doc(0, True, ocr_text="A\nX")], texts)
+        code, out, _ = self.neutral(before, good)
+        self.assertEqual(code, 0, out)
+        self.assertIn("also ignored here: ocr_text", out)
+        code, out, _ = self.neutral(before, bad)
+        self.assertEqual(code, 3)
+        self.assertIn("ocr_text differs from the other arm's dump: 0 (after)", out)
+        self.assertNotIn("A\nX", out)
+
+    def test_rust_debug_quoting_is_decoded(self):
+        self.assertEqual(d.rust_debug_str(r'"a\"b\\c\n\u{e9}\u{1f600}\0"'), 'a"b\\c\né\U0001f600\x00')
+        path = Path(self.root) / "x.stdout"
+        path.write_text('noise\n--- seed 3 raw OCR lines ---\n  [0] "caf\\u{e9}"\n  [1] "B"\nseed 3: hit\n',
+                        encoding="utf-8")
+        self.assertEqual(d.block_text(d.dump_blocks(path)[3]), "café\nB")
+
+    def test_an_escaped_backslash_is_not_an_escape_start(self):
+        # Spelled by Rust as: "a\\0b\\u{41}\u{301}\0\"x"
+        literal = '"a\\\\0b\\\\u{41}\\u{301}\\0\\"x"'
+        self.assertEqual(d.rust_debug_str(literal), 'a\\0b\\u{41}\u0301\x00"x')
+        for bad in ('no quotes', '"\\q"', '"dangling\\"', '"a"b"', '"\\u{110000}"'):
+            with self.assertRaises(ValueError, msg=bad):
+                d.rust_debug_str(bad)
+
+    def test_a_valid_trace_passes_and_a_trace_needs_no_pair(self):
+        before = self.synth("a", [untraced(traced(0))], {0: "GENERAL\nLINE-A\nLINE-B"})
+        after = self.synth("b", [traced(0)], {0: "GENERAL\nLINE-A\nLINE-B"})
+        code, out, _ = self.neutral(before, after, "--check-pass-trace")
+        self.assertEqual(code, 0, out)
+        self.assertIn("trace breaks 0 (passes 3)", out)
+
+    def trace_break(self, mutate, expect):
+        row = traced(0)
+        mutate(row)
+        before = self.synth("a", [untraced(traced(0))])
+        after = self.synth("b", [row])
+        code, out, _ = self.neutral(before, after, "--check-pass-trace")
+        self.assertEqual(code, 3, out)
+        self.assertIn(expect, out)
+        self.assertNotIn("LINE-A", out)
+        # Without the flag the same pair is neutral: the trace is one-sided, so ignored.
+        self.assertEqual(self.neutral(before, after)[0], 0)
+
+    def test_non_contiguous_pass_orders_are_a_break(self):
+        def mutate(row):
+            row["ocr_passes"][2]["order"] = 5
+        self.trace_break(mutate, "trace breaks: 0 (after: orders are not contiguous")
+
+    def test_two_accepted_passes_are_a_break(self):
+        def mutate(row):
+            row["ocr_passes"][1]["outcome"] = "accepted"
+        self.trace_break(mutate, "2 accepted passes with stop variant_valid")
+
+    def test_a_reading_tail_that_is_not_the_end_of_ocr_text_is_a_break(self):
+        def mutate(row):
+            row["ocr_text"] = "GENERAL\nLINE-A\nOTHER"
+        self.trace_break(mutate, "the appended and accepted readings are not the tail of ocr_text")
+
+    def test_readings_must_be_empty_exactly_when_nothing_was_read(self):
+        def mutate(row):
+            row["ocr_passes"][0]["readings"] = [{"text": "GENERAL"}]
+        self.trace_break(mutate, "readings disagree with the outcome")
+
+    def test_check_pass_trace_without_any_trace_is_refused(self):
+        arm = self.synth("a", [doc(0, True)])
+        other = self.synth("b", [doc(0, True)])
+        code, out, err = self.neutral(arm, other, "--check-pass-trace")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("neither arm has a pass trace", err)
+
+    def test_the_real_trace_must_match_the_dump_and_the_ledger(self):
+        asset = "passports/X.jpg"
+        ledger = {**outcome_row(asset, "hit"), "retry_stop": "variant_valid", "retry_variant_id": "pass-01",
+                  "retry_budget_hit": False}
+        trace = {"asset_id": asset, "ocr_text": "GENERAL\nLINE-A\nLINE-B", "retry_stop": "variant_valid",
+                 "retry_variant_id": "pass-01", "retry_budget_hit": False,
+                 "ocr_passes": traced(0)["ocr_passes"]}
+        dump = {**zone_row(asset, ["A"]), "raw_ocr_text": "GENERAL\nLINE-A\nLINE-B"}
+        before = write_arm(self.root, "a", outcomes=[ledger], zones=[dump])
+        good = write_arm(self.root, "b", outcomes=[ledger], zones=[dump], passes=[trace])
+        code, out, _ = self.neutral(before, good, "--check-pass-trace")
+        self.assertEqual(code, 0, out)
+        wrong = {**trace, "ocr_text": "GENERAL\nLINE-A\nLINE-B\nMORE", "retry_stop": "exhausted"}
+        bad = write_arm(self.root, "c", outcomes=[ledger], zones=[dump], passes=[wrong])
+        code, out, _ = self.neutral(before, bad, "--check-pass-trace")
+        self.assertEqual(code, 3)
+        self.assertIn("trace ocr_text differs from the dump: passports/X.jpg (after)", out)
+        self.assertIn("trace retry fields differ from the ledger: passports/X.jpg (after)", out)
+        self.assertNotIn("MORE", out)
+
+    def test_a_one_sided_budget_stop_is_not_an_ab(self):
+        before = self.synth("a", [doc(0, True), doc(1, True)])
+        after = self.synth("b", [doc(0, True), doc(1, True, retry_stop="budget")])
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 1)
+        self.assertIn("NOT AN A/B: a budget stop in one arm only: td1.json:1", out)
+        self.assertIn("td1.json:1 (after only)", out)
+
+    def test_a_budget_stop_in_both_arms_is_listed_with_its_text_verdict(self):
+        docs = [doc(0, True, retry_stop="budget"), doc(1, True)]
+        texts = {0: "A", 1: "B"}
+        code, out, _ = self.neutral(self.synth("a", docs, texts), self.synth("b", docs, texts))
+        self.assertEqual(code, 0, out)
+        self.assertIn("budget stops: 1 in both arms: td1.json:0 (text same); 0 in one arm only", out)
+        asset = "passports/X.jpg"
+        row = {**outcome_row(asset, "hit"), "retry_stop": "budget"}
+        real_a = write_arm(self.root, "c", outcomes=[row], zones=[zone_row(asset, ["A"])])
+        real_b = write_arm(self.root, "d", outcomes=[row], zones=[zone_row(asset, ["A"])])
+        self.assertIn("passports/X.jpg (text same)", self.neutral(real_a, real_b)[1])
+
+    def test_a_corpus_mismatch_is_not_an_ab(self):
+        asset = "passports/X.jpg"
+        before = write_arm(self.root, "a", outcomes=[outcome_row(asset, "hit")], run=archive())
+        after = write_arm(self.root, "b", outcomes=[outcome_row(asset, "hit")], run=archive(corpus="d" * 64))
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 1)
+        self.assertIn("NOT AN A/B: real: corpus manifests differ", out)
+
+    def test_a_private_arm_is_still_refused(self):
+        public = [outcome_row("passports/X.jpg", "hit")]
+        before = write_arm(self.root, "a", outcomes=public, run=archive())
+        after = write_arm(self.root, "b", outcomes=public,
+                          run=archive(flags=("--real-specimens", "--include-private")))
+        self.assertEqual(self.neutral(before, after)[:2], (2, ""))
+
+    def test_a_format_in_one_arm_only_is_not_neutral(self):
+        rep = report(doc(0, True))
+        before = write_arm(self.root, "a", reports={"td1.json": rep, "td3.json": rep})
+        after = write_arm(self.root, "b", reports={"td1.json": rep})
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 3)
+        self.assertIn("NOT COMPARED: td3.json only in the before arm", out)
+
+    def test_at_most_eight_ids_are_listed_per_check(self):
+        before = self.synth("a", [doc(n, True) for n in range(12)])
+        after = self.synth("b", [doc(n, True, line1_flagged=True) for n in range(12)])
+        code, out, _ = self.neutral(before, after)
+        self.assertEqual(code, 3)
+        self.assertIn("7 (line1_flagged), and 4 more", out)
+        self.assertNotIn("8 (line1_flagged)", out)
+
+    def real_pair(self, trace_a, trace_b):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit")]
+        self.pairs = getattr(self, "pairs", 0) + 1
+        before = write_arm(self.root, f"a{self.pairs}", outcomes=rows, passes=trace_a)
+        after = write_arm(self.root, f"b{self.pairs}", outcomes=rows, passes=trace_b)
+        return before, after
+
+    def test_real_trace_rows_are_compared_when_both_arms_have_them(self):
+        row = {"asset_id": "passports/X.jpg", "ocr_text": "T", "retry_stop": "exhausted", "run_manifest": "m1",
+               "ocr_passes": [{"order": 0, "id": "general", "outcome": "no_mrz_shaped_lines", "readings": []}]}
+        same = self.real_pair([row], [{**row, "run_manifest": "m2"}])
+        code, out, _ = self.neutral(*same)
+        self.assertEqual(code, 0, out)
+        self.assertIn("trace rows 1/1 rows, differ 0", out)
+        other = {**row, "retry_stop": "budget"}
+        code, out, _ = self.neutral(*self.real_pair([row], [other]))
+        self.assertEqual(code, 3)
+        self.assertIn("trace rows differ: passports/X.jpg (retry_stop)", out)
+
+    def test_a_real_trace_in_one_arm_only_is_not_compared(self):
+        row = {"asset_id": "passports/X.jpg", "ocr_text": "T", "ocr_passes": []}
+        code, out, _ = self.neutral(*self.real_pair(None, [row]))
+        self.assertEqual(code, 0, out)
+        self.assertIn("trace rows not compared", out)
+
+    def test_ignored_keys_apply_at_any_depth(self):
+        def with_chargrid(value):
+            row = traced(0)
+            for rec in row["ocr_passes"]:
+                rec["chargrid"] = value
+            return row
+
+        before = self.synth("a", [with_chargrid(None)])
+        after = self.synth("b", [{**with_chargrid("on")}])
+        code, out, _ = self.neutral(before, after, "--check-pass-trace")
+        self.assertEqual(code, 3)
+        self.assertIn("results[] differ: 0 (ocr_passes)", out)
+        code, out, _ = self.neutral(before, after, "--check-pass-trace", "--ignore", "chargrid")
+        self.assertEqual(code, 0, out)
+        self.assertIn("chargrid", out.splitlines()[0])
+        self.assertIn("at any depth", out.splitlines()[0])
+        # A real trace row gains a nested key in one arm.
+        row = {"asset_id": "passports/X.jpg", "ocr_text": "T",
+               "ocr_passes": [{"order": 0, "id": "general", "readings": []}]}
+        gained = {**row, "ocr_passes": [{**row["ocr_passes"][0], "chargrid": None}]}
+        pair = self.real_pair([row], [gained])
+        self.assertEqual(self.neutral(*pair)[0], 3)
+        self.assertEqual(self.neutral(*pair, "--ignore", "chargrid")[0], 0)
+
+    def test_the_new_flags_need_the_new_mode_and_default_exit_codes_hold(self):
+        arm = self.synth("a", [doc(0, True)])
+        for flag in (["--check-pass-trace"], ["--ignore", "note"]):
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+                run(arm, arm, *flag)
+            self.assertEqual(raised.exception.code, 2)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            run(arm, arm, "--expect-identical", "--asset", "x")
+        changed = self.synth("b", [doc(0, True, line1_flagged=True)])
+        self.assertEqual(run(arm, changed)[0], 0)
+        self.assertEqual(self.neutral(arm, changed)[0], 3)
 
 
 if __name__ == "__main__":
