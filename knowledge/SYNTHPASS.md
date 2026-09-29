@@ -165,38 +165,89 @@ CI-gated today.
 
 ## Nightly data collection (`bench-data` branch)
 
-`.github/workflows/bench-data-collection.yml` runs `synthpass-bench --profile all` once a day and
-appends the flattened per-document outcomes — `seed`, `profile`, `hit`, `reason`, `elapsed_ms` — as
-JSON lines to `dataset.jsonl` on a dedicated `bench-data` branch (not `main`, which is protected;
-this workflow pushes there directly, unattended, no PR per run). `bench-data` is an **orphan**
+`.github/workflows/bench-data-collection.yml` measures all five formats every night
+([ADR-0027](decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)) and appends
+allowlisted per-document rows to a dedicated `bench-data` branch (not `main`, which is protected;
+the workflow pushes there directly, unattended, no PR per run). `bench-data` is an **orphan**
 branch: it shares no history with `main`. It also holds the per-track `results/<track>/history.jsonl`
 files that `scripts/run-bench.ps1` appends, weekly through `bench-charts.yml`.
 
-**Two writers.** Both push to `bench-data` without a PR, and each fetched the branch minutes before
-its push, so either can find that the other moved it. They write different files, so each rebases
-onto the new tip and retries, up to five times, and fails loudly if it still cannot push. A nightly
-run whose commit or push fails keeps the rows it would have appended as a `bench-data-rows-<run id>`
-artifact for 7 days.
+**What runs.** A matrix of five `measure` jobs, one per format (`td1 td2 td3 mrva mrvb`), each
+running `synthpass-bench` twice with the shipped OCR defaults and budget:
 
-Each run continues from the highest seed already in the dataset, so no document is ever measured
-twice and none overlaps the M4 CI gate. `(seed, profile)` is therefore the primary key, and the
-workflow refuses to commit an append that would break that.
+| Slice | Invocation | Per night, per format | Purpose |
+| --- | --- | --- | --- |
+| `fresh` | `--profile all --count 200 --seed <window>` | 200 documents, 40 per profile | Generalisation. The window continues from the highest fresh seed that format already has, so no document is measured twice. |
+| `fixed` | `--profile clean --count 100 --seed 0` | the same 100 documents | The synthetic-headline invocation, re-run nightly. A change to what the pipeline reads is a named seed, not sampling noise. |
 
-That guarantee is newer than the dataset. The window used to be `days_since_epoch * count`, which
-assumed one run per UTC day; on **2026-07-25** a manual dispatch landed alongside the scheduled run,
-drew the same window, and added 200 duplicate rows. They were removed in a later commit on
-`bench-data` (1810 → 1610 rows), which is why the row count drops once in that branch's history.
+That is 1,500 documents a night. `--ocr-passes` is on so each row can name the passes; it is
+report-only and changes no measured value. The `measure` jobs hold `contents: read` and upload
+their reports (synthetic OCR text included) as an artifact kept 3 days.
 
-This is data collection only — nothing consumes this dataset yet. Because `synthpass-gen`'s
-output is fully determined by `seed`, each row is enough on its own to regenerate the exact
-document and its degrade parameters later; there was no need to also persist the parameters. The
-intent is to build up a corpus of (parameters → outcome) examples ahead of any future auto-tuning
-or RL-style work on the generator's degrade settings — that tuning logic doesn't exist yet and is
-tracked separately.
+**What is published.** One `publish` job, `contents: write`, runs only on `main` and only main's
+code (it fetches the commit the run started on and uses no third-party action). It runs
+`tools/bench_nightly_rows.py assemble`, which projects each report to the rows below and appends
+them to three files on `bench-data`:
 
-**Retention.** The branch grows by `count` rows per run (~200/day, ~40 KB/day) with no expiry, and
-nothing prunes it. At 1610 rows / ~320 KB that is not yet a problem; a consumer will want to decide
-on a window before it is. Fetch it with `git fetch origin bench-data` — a normal checkout of `main`
-never pulls it.
+| File | Holds |
+| --- | --- |
+| `fresh.jsonl` | schema-2 rows of the fresh slice. `(document_type, seed, profile)` is unique; the workflow refuses to commit an append that would repeat one. |
+| `fixed.jsonl` | schema-2 rows of the fixed slice. The same seeds repeat every night, by design. |
+| `runs.jsonl` | one header per run (per format and slice): git sha, generator fingerprint (the fixed slice's hash over its rendered documents), the OCR arms, the model SHA-256s, runner CPU model and core count, `rustc`, the invocation and the run's counts. |
+
+A row carries `run_id` (joins it to its header), `slice`, `document_type`, `seed`, `profile`,
+`render_sha256`, `hit`, `miss_kind`, `check_states`, `field_cer` (one CER per field), `name_error`,
+`line1_flagged`, `retry_stop`, `retry_variant_id`, `retry_damaged_recovery`,
+`tier1_damaged_recovery`, `ocr_pass_count`, `ocr_passes` (each pass's id and outcome) and
+`elapsed_ms`. `elapsed_ms` is a diagnostic and never a result: no CI timing is (ADR-0027 decision 6).
+Every value is a number, a boolean or a short class label. A row never carries `reason`, a field's
+expected or read value, OCR text or a pass's readings; the seed and the commit regenerate the
+document. The tool refuses any key outside its allowlist, and any allowed key whose value is not
+the expected kind.
+
+The derived flags (`wrong_accept`, `names_exact`, `accepted_read`, the prefix counts) are not
+stored. The same tool recomputes them from the rows and requires them to equal the report's own
+top-level counts on every run; a mismatch fails the job and publishes nothing.
+
+**Budget.** The nightly keeps the shipped `SYNTHPASS_OCR_MAX_SECONDS` and `SYNTHPASS_OCR_MAX_PASSES`,
+because it measures the product as shipped. Each row's `retry_stop` says why its retry loop
+stopped. A `budget` stop marks that document's measurement invalid, not a result; the header counts
+them (`counts.budget_stops`). The report does not carry the effective budget, so a header's
+`max_passes` and `max_seconds` are the runner's own overrides and are `null` while none is set,
+meaning the binary's built-in defaults at `git_sha`.
+
+**Off `main`, nothing is written.** A dispatch from any other ref runs the same measurement and the
+same projection in a read-only `dry-run` job, and the would-be rows go to the
+`nightly-would-be-rows` artifact for 7 days, never to `bench-data`.
+
+**Schema 1 (`dataset.jsonl`) is frozen.** No new row is appended. A row read from it follows one
+rule: a row with no `schema` key is schema 1; its `reason` maps to a miss kind by prefix
+(`checksum invalid` to `checksum_failed`, `document number mismatch` to `document_number_mismatch`,
+`no MRZ found` to `no_mrz_found`; a hit has none) and is then dropped; every other schema-2 key
+reads as absent (`null`), never as `false` or `0`. `tools/bench_nightly_rows.py`'s `read_rows` is
+the one reader. The frozen file holds `run_timestamp_unix`, `git_sha`, `seed`, `profile`, `hit`,
+`reason` and `elapsed_ms` per document, TD3 only.
+
+**Two writers.** Both this workflow and `scripts/run-bench.ps1` push to `bench-data` without a PR,
+and each fetched the branch minutes before its push, so either can find that the other moved it.
+They write different files, so each rebases onto the new tip and retries, up to five times, and
+fails loudly if it still cannot push. If every attempt fails, the measurements stay in the run's
+artifacts for 3 days and the `publish` job can be re-run.
+
+The window guarantee is newer than the frozen dataset. It used to be `days_since_epoch * count`,
+which assumed one run per UTC day; on **2026-07-25** a manual dispatch landed alongside the
+scheduled run, drew the same window, and added 200 duplicate rows. They were removed in a later
+commit on `bench-data` (1810 to 1610 rows), which is why the row count drops once in that branch's
+history.
+
+This is data collection only: nothing consumes these files yet. Because `synthpass-gen`'s output is
+fully determined by `seed`, a row plus the commit is enough to regenerate the exact document and its
+degrade parameters later. The intent is a corpus of (parameters to outcome) examples ahead of any
+future auto-tuning or RL-style work on the generator's degrade settings, and, later, an advisory
+that reads the fixed slice seed by seed; neither exists yet.
+
+**Retention.** The three files grow by about 1,500 rows a night with no expiry, and nothing prunes
+them. A consumer will want to decide on a window before that matters. Fetch the branch with
+`git fetch origin bench-data`; a normal checkout of `main` never pulls it.
 
 Findings from the corpus belong in [`benchmarks/`](benchmarks/), not here.
