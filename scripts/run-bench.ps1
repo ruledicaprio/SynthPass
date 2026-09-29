@@ -40,15 +40,17 @@ binary still serves every track without new tooling.
 
 `td3` here is a *second*, independent way to measure the same TD3 format
 `.github/workflows/bench-data-collection.yml` already covers nightly into
-`dataset.jsonl` -- that workflow's corpus and this track's
+`fresh.jsonl` and `fixed.jsonl` -- that workflow's corpus and this track's
 `results/td3-bench/history.jsonl` are different files serving different
-purposes (a large nightly Tier-1 dataset vs. a small `-Track td1/td2`-shaped
+purposes (a large nightly per-document dataset vs. a small `-Track td1/td2`-shaped
 trend point for the per-format comparison chart), not a duplicate schedule.
 
 This is the local, manual counterpart to .github/workflows/bench-data-
-collection.yml (which runs synthpass-bench against TD3 only, on a
-schedule). Run this by hand whenever you want a fresh data point for a
-track; nothing here is scheduled or automatic.
+collection.yml (which runs synthpass-bench against all five formats every
+night: 200 fresh documents on all profiles plus a fixed 100-document clean
+slice per format, with the shipped OCR defaults). Run this by hand whenever
+you want a fresh data point for a track; nothing here is scheduled or
+automatic.
 
 All git writes happen inside an isolated `git worktree` checked out to
 bench-data, never in this repo's own working tree -- so a run is safe even

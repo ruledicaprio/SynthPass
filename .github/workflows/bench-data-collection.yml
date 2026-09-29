@@ -1,18 +1,33 @@
 name: Bench data collection
 
-# Nightly, unattended data collection for future RL/auto-tuning work on
-# synthpass-gen's degrade parameters. This workflow does NOT tune anything —
-# it only runs the existing M4 `synthpass-bench` corpus runner against a
-# fresh, never-before-seen seed range each day and appends the per-document
-# (seed, profile, hit/miss, reason) outcomes to a growing dataset. Generation is
-# fully deterministic from `seed` at a given commit, so each row's `(seed,
-# git_sha)` is enough for a future training/tuning loop to rebuild that commit
-# and reconstruct the exact document and its degrade parameters on demand. A
-# generator change (#411's MRZ geometry, for one) renders a different document
-# for the same seed on either side of it.
+# Nightly, unattended synthetic measurement of all five MRZ formats (ADR-0027). It does NOT tune
+# anything: it runs the M4 `synthpass-bench` corpus runner, projects the report to an allowlisted
+# set of per-document values, and appends those rows to the `bench-data` branch.
 #
-# Writes to a dedicated `bench-data` branch (not `main`, which is protected —
-# see CONTRIBUTING.md) so this can push automatically without a PR per run.
+# Per format (td1 td2 td3 mrva mrvb) and night, two slices:
+#   fresh  200 documents, all five profiles, on a seed window that continues from the highest seed
+#          that format already has, so no document is measured twice.
+#   fixed  100 documents, `--profile clean --count 100 --seed 0` (the synthetic-headline
+#          invocation), the same 100 every night, so a change to what the pipeline reads is a named
+#          seed and not sampling noise.
+# Both run with the shipped OCR defaults and budget (the nightly measures the product as shipped),
+# and each run's header records the conditions it ran under.
+#
+# Rows go to new files, schema 2: `fresh.jsonl`, `fixed.jsonl`, `runs.jsonl` (one header per run).
+# `dataset.jsonl` is frozen. Rows carry numbers, booleans and short class labels only: no `reason`,
+# no field values, no OCR text, no pass readings. Seed and commit regenerate a document.
+# See tools/bench_nightly_rows.py and
+# knowledge/decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md.
+#
+# Trust boundary. The five `measure` jobs run whatever code this ref holds and have `contents:
+# read`. The one job that can write `bench-data`, `publish`, runs only on `main` and only main's
+# code: it fetches the commit it was started on, uses no third-party action (so there is nothing to
+# pin), and holds `contents: write` and `actions: read`. On any other ref the rows go to an
+# artifact instead (`dry-run`, `contents: read`): a dispatch from a branch can never write
+# `bench-data`.
+#
+# Writes to a dedicated `bench-data` branch (not `main`, which is protected — see CONTRIBUTING.md)
+# so this can push automatically without a PR per run.
 
 on:
   schedule:
@@ -20,22 +35,33 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "Documents to check this run"
+        description: "Fresh documents per format this run (the fixed slice is always 100)"
         default: "200"
 
 permissions:
-  contents: write
+  contents: read
 
+# Per ref, so a dry run dispatched from a branch never queues behind, or cancels, main's nightly.
 concurrency:
-  group: bench-data-collection
+  group: bench-data-collection-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  collect:
-    name: Collect bench data (clean + degraded profiles)
+  measure:
+    name: Measure ${{ matrix.format }}
     runs-on: ubuntu-latest
+    # ~300 documents; TD1 is the slowest format (about 4-7 s a document on a runner).
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        format: [td1, td2, td3, mrva, mrvb]
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -46,6 +72,9 @@ jobs:
             cmake pkg-config clang libclang-dev
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          # One cache for the five formats: they build the same binary.
+          shared-key: bench-data-collection
 
       - name: Cache OCR .rten models
         uses: actions/cache@v6
@@ -65,110 +94,156 @@ jobs:
           echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
           echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
 
-      # Must run BEFORE the seed window is picked: the window continues from
-      # what the dataset already contains.
-      - name: Checkout or create the bench-data branch
+      # Read-only, anonymous: the repository is public, and no credential is in this job. Must run
+      # BEFORE the seed window is picked: the window continues from what the branch already holds.
+      - name: Read the bench-data branch
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
         run: |
-          git fetch origin bench-data || true
-          if git ls-remote --exit-code --heads origin bench-data >/dev/null 2>&1; then
-            git worktree add data-branch origin/bench-data
-            cd data-branch && git checkout -B bench-data
-          else
-            git worktree add --detach data-branch
-            cd data-branch
-            git checkout --orphan bench-data
-            git rm -rf . >/dev/null 2>&1 || true
-          fi
+          rc=0
+          git ls-remote --exit-code --heads "$REPO_URL" bench-data >/dev/null 2>&1 || rc=$?
+          case "$rc" in
+            0) git clone --quiet --depth 1 --branch bench-data --single-branch "$REPO_URL" data-branch ;;
+            2) echo "no bench-data branch yet"; mkdir data-branch ;;
+            *) echo "::error::could not list the bench-data branch (git exit $rc)"; exit 1 ;;
+          esac
 
-      # A fresh, monotonically-increasing seed window, continuing from the
-      # highest seed the dataset already holds. Every run therefore covers
-      # documents neither a previous run nor the M4 CI gate has seen.
-      #
-      # This used to be `days_since_epoch * count`, which silently assumed one
-      # run per UTC day. On 2026-07-25 a manual workflow_dispatch landed
-      # alongside the scheduled run, both drew the identical window, and 200
-      # duplicate (seed, profile) rows entered the corpus — 12% of it at the
-      # time. The commit guard below could not catch it: git_sha, timestamp and
-      # elapsed_ms differ, so the lines are textually new even though the
-      # documents measured are the same. Deriving the window from the data
-      # itself rather than from the calendar has no such assumption, and
-      # self-heals if a run is missed, retried, or dispatched by hand.
+      # A fresh, monotonically-increasing seed window per format, continuing from the highest fresh
+      # seed the branch already holds for it (and never below the frozen dataset.jsonl's highest
+      # seed). Deriving the window from the data, not the calendar, has no one-run-a-day
+      # assumption: on 2026-07-25 a manual dispatch landed beside the scheduled run, both drew the
+      # same window, and 200 duplicate rows entered the corpus.
       - name: Pick this run's seed window
-        id: seed
-        # The dispatch input reaches the script through the environment, never
-        # through `${{ }}` inside `run:`, which would splice it into the shell
-        # source.
+        id: plan
+        # The dispatch input reaches the script through the environment, never through `${{ }}`
+        # inside `run:`, which would splice it into the shell source.
         env:
           COUNT_INPUT: ${{ github.event.inputs.count }}
+          FORMAT: ${{ matrix.format }}
         run: |
           count="${COUNT_INPUT:-200}"
           if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::count must be a positive integer, got '$count'"
             exit 1
           fi
-          if [ -s data-branch/dataset.jsonl ]; then
-            max_seed=$(jq -s 'map(.seed) | max' data-branch/dataset.jsonl)
-            seed_start=$(( max_seed + 1 ))
-          else
-            seed_start=0
-          fi
+          seed_start=$(python3 tools/bench_nightly_rows.py next-seed \
+            --data-dir data-branch --document-type "$FORMAT")
           echo "count=$count" >> "$GITHUB_OUTPUT"
           echo "seed_start=$seed_start" >> "$GITHUB_OUTPUT"
-          echo "Continuing from seed $seed_start (count $count)"
+          echo "$FORMAT: fresh window from seed $seed_start (count $count)"
 
-      - name: Run synthpass-bench (all profiles, round-robin)
-        run: |
-          cargo run -p synthpass-bench --release --bin synthpass-bench -- \
-            --count ${{ steps.seed.outputs.count }} \
-            --seed ${{ steps.seed.outputs.seed_start }} \
-            --profile all \
-            --out bench-report.json
+      - name: Build synthpass-bench
+        run: cargo build -p synthpass-bench --release --bin synthpass-bench
 
-      - name: Flatten this run's report into the dataset and commit
+      # `--ocr-passes` is report-only: it adds each pass's id and outcome (and OCR text, which the
+      # projection never copies) and changes no measured value. The reports are synthetic and are
+      # kept for 3 days as an artifact (ADR-0027 decision 5).
+      - name: Measure the fresh slice (all profiles, round-robin)
         env:
-          SEED_START: ${{ steps.seed.outputs.seed_start }}
-          COUNT: ${{ steps.seed.outputs.count }}
+          FORMAT: ${{ matrix.format }}
+          COUNT: ${{ steps.plan.outputs.count }}
+          SEED_START: ${{ steps.plan.outputs.seed_start }}
         run: |
-          dataset="$PWD/data-branch/dataset.jsonl"
-          jq -c --arg sha "$GITHUB_SHA" \
-            '.timestamp_unix as $ts | .results[] | {run_timestamp_unix: $ts, git_sha: $sha, seed, profile, hit, reason: (.reason // null), elapsed_ms}' \
-            bench-report.json > new-rows.jsonl
-          cat new-rows.jsonl >> "$dataset"
+          target/release/synthpass-bench \
+            --document-type "$FORMAT" --profile all \
+            --count "$COUNT" --seed "$SEED_START" \
+            --ocr-passes --out reports/fresh.json
 
-          # The invariant the seed window is supposed to guarantee, checked
-          # rather than assumed. (seed, profile) identifies a document and the
-          # degradation applied to it; generation is deterministic from the
-          # seed, so a repeat is a duplicate measurement that would silently
-          # double-weight those rows for any future tuning. Refuse to publish
-          # rather than append a corpus someone has to clean up later.
-          check_no_duplicates() {
-            dupes=$(jq -s '[group_by(.seed, .profile)[] | select(length > 1)] | length' "$dataset")
-            if [ "$dupes" != "0" ]; then
-              echo "::error::$dupes duplicate (seed, profile) pair(s) after this append — the seed window overlapped an earlier run. Not committing."
-              exit 1
-            fi
-          }
-          check_no_duplicates
+      - name: Measure the fixed slice (the synthetic-headline invocation)
+        env:
+          FORMAT: ${{ matrix.format }}
+        run: |
+          target/release/synthpass-bench \
+            --document-type "$FORMAT" --profile clean \
+            --count 100 --seed 0 \
+            --ocr-passes --out reports/fixed.json
 
+      - name: Record the run's conditions
+        run: python3 tools/bench_nightly_rows.py context --out reports/context.json
+
+      # `if: always()`: a failed slice must not lose the other one's report.
+      - name: Keep the measurement
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-nightly-${{ matrix.format }}
+          path: reports/
+          if-no-files-found: ignore
+          retention-days: 3
+
+  # The only job that writes bench-data. Main only, main's code only.
+  publish:
+    name: Publish rows to bench-data
+    needs: measure
+    # Not `success()`: five formats should not lose a night to one flaky job. The last step fails
+    # the run when any measurement failed.
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      # `gh run download` lists this run's artifacts.
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+    steps:
+      # No `uses:` in this job. It fetches the commit this run started on, which on `main` is
+      # main's code, and never the head of a branch.
+      - name: Fetch main's code
+        run: |
+          test "$GITHUB_REF" = "refs/heads/main"
+          git init --quiet code
+          git -C code fetch --quiet --depth 1 "$REPO_URL" "$GITHUB_SHA"
+          git -C code checkout --quiet FETCH_HEAD
+
+      - name: Download this run's measurements
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: gh run download "$RUN_ID" --pattern 'bench-nightly-*' --dir artifacts
+
+      # Allowlists every value, recomputes the derived flags from the rows and requires them to
+      # equal each report's own counts. All or nothing: a mismatch fails the job.
+      - name: Project the reports to schema-2 rows
+        run: python3 code/tools/bench_nightly_rows.py assemble --artifacts artifacts --out new-rows
+
+      - name: Append the rows to bench-data and push
+        run: |
+          gh auth setup-git
+          rc=0
+          git ls-remote --exit-code --heads "$REPO_URL" bench-data >/dev/null 2>&1 || rc=$?
+          case "$rc" in
+            0) git clone --quiet --depth 1 --branch bench-data --single-branch "$REPO_URL" data-branch ;;
+            2) git init --quiet -b bench-data data-branch && git -C data-branch remote add origin "$REPO_URL" ;;
+            *) echo "::error::could not list the bench-data branch (git exit $rc)"; exit 1 ;;
+          esac
           cd data-branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add dataset.jsonl
-          # Only reachable if the bench produced no results at all — every real
-          # row is textually unique (it carries this run's git_sha, timestamp
-          # and timings), so this is not, and never was, a duplicate guard.
+
+          cat ../new-rows/fresh.jsonl >> fresh.jsonl
+          cat ../new-rows/fixed.jsonl >> fixed.jsonl
+          cat ../new-rows/runs.jsonl >> runs.jsonl
+
+          # A fresh document is measured once: (document_type, seed, profile) is its key, and a
+          # repeat would double-weight it. The fixed slice repeats by design. Checked again after
+          # every rebase.
+          python3 ../code/tools/bench_nightly_rows.py guard --file fresh.jsonl
+
+          git add fresh.jsonl fixed.jsonl runs.jsonl
           if git diff --cached --quiet; then
             echo "no new rows, nothing to commit"
             exit 0
           fi
-          total_rows=$(wc -l < dataset.jsonl)
-          git commit -m "data: append run (seed $SEED_START, count $COUNT) — ${total_rows} rows total"
+          fresh_rows=$(wc -l < ../new-rows/fresh.jsonl)
+          fixed_rows=$(wc -l < ../new-rows/fixed.jsonl)
+          git commit -m "data: nightly run ${GITHUB_RUN_ID} (${fresh_rows} fresh, ${fixed_rows} fixed rows)"
 
-          # bench-charts.yml (through scripts/run-bench.ps1) also pushes to
-          # bench-data, and this run fetched it about fifteen minutes ago. The
-          # two write different files, so rebasing onto a newer tip cannot
-          # conflict. Retry instead of dropping this run's rows on a rejected
-          # push, and check the duplicate invariant again on the rebased file.
+          # bench-charts.yml (through scripts/run-bench.ps1) also pushes to bench-data. The two
+          # write different files, so rebasing onto a newer tip cannot conflict. Retry instead of
+          # dropping this run's rows on a rejected push. If every attempt fails, the measurements
+          # stay in this run's artifacts for 3 days: re-run this job.
           for attempt in 1 2 3 4 5; do
             if git push origin bench-data; then
               exit 0
@@ -176,18 +251,59 @@ jobs:
             echo "::warning::push to bench-data rejected (attempt $attempt of 5); rebasing onto its new tip"
             sleep $(( attempt * 20 ))
             git pull --rebase origin bench-data
-            check_no_duplicates
+            python3 ../code/tools/bench_nightly_rows.py guard --file fresh.jsonl
           done
-          echo "::error::could not push to bench-data after 5 attempts; this run's rows are kept in the bench-data-rows artifact"
+          echo "::error::could not push to bench-data after 5 attempts; re-run this job within 3 days"
           exit 1
 
-      # A failed push must not lose the measured rows: keep them for 7 days,
-      # the same rows the dataset would have received and nothing more.
-      - name: Keep this run's rows when the commit or push failed
-        if: failure()
+      - name: Fail the run if a measurement failed
+        if: ${{ !cancelled() && needs.measure.result != 'success' }}
+        env:
+          MEASURE_RESULT: ${{ needs.measure.result }}
+        run: |
+          echo "::error::the measure jobs ended '$MEASURE_RESULT'; rows from the formats that finished were published"
+          exit 1
+
+  # Any other ref: the same projection, read-only, rows to an artifact and never to bench-data.
+  dry-run:
+    name: Dry run (rows to an artifact)
+    needs: measure
+    if: ${{ !cancelled() && github.ref != 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download this run's measurements
+        env:
+          RUN_ID: ${{ github.run_id }}
+        run: gh run download "$RUN_ID" --pattern 'bench-nightly-*' --dir artifacts
+
+      - name: Project the reports to schema-2 rows
+        run: |
+          echo "Dry run on ${GITHUB_REF}: nothing is written to bench-data." >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/bench_nightly_rows.py assemble --artifacts artifacts --out would-be-rows
+          wc -l would-be-rows/*.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the would-be rows
         uses: actions/upload-artifact@v7
         with:
-          name: bench-data-rows-${{ github.run_id }}
-          path: new-rows.jsonl
-          if-no-files-found: ignore
+          name: nightly-would-be-rows
+          path: would-be-rows/
           retention-days: 7
+
+      - name: Fail the run if a measurement failed
+        if: ${{ !cancelled() && needs.measure.result != 'success' }}
+        env:
+          MEASURE_RESULT: ${{ needs.measure.result }}
+        run: |
+          echo "::error::the measure jobs ended '$MEASURE_RESULT'"
+          exit 1
