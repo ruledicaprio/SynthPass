@@ -54,8 +54,10 @@
 //! - [`evidence`] — what was observed, for routing only.
 //! - [`catalog`] — the ordered, immutable provider set.
 //! - [`mrz_reader`] — the deterministic ICAO 9303 provider, and [`read_tier1`], the
-//!   Tier-1 read it and both benchmarks share (with the opt-in shadow line-1 selector,
-//!   `SYNTHPASS_MRZ_LINE1_SELECT`, off by default and unmeasured).
+//!   Tier-1 read it, the pipeline's v1 record and both benchmarks share (with the
+//!   line-1 selector, on by default and measured in
+//!   `knowledge/benchmarks/line1-selection-ab-2026-09-29.md`;
+//!   `SYNTHPASS_MRZ_LINE1_SELECT=off` opts out).
 //! - [`routing`] — turns [`Evidence`] into a spend decision, consulted by
 //!   `synthpass-pipeline`'s Tier-1 gate.
 //! - [`occlusion`] — applies an image-derived occlusion observation to an
@@ -115,43 +117,50 @@ pub fn mrz_parse_options_for(class_sweep: bool) -> mrz::ParseOptions {
     mrz::ParseOptions::default().with_class_sweep(class_sweep)
 }
 
-/// The shadow line-1 selector's arm, from `SYNTHPASS_MRZ_LINE1_SELECT` (#574).
+/// The line-1 selector's arm, from `SYNTHPASS_MRZ_LINE1_SELECT` (#574).
 ///
-/// The same three arms as [`class_sweep_arm`], with one difference: the
+/// The same three arms as [`class_sweep_arm`], with two differences: the
 /// selector is not an `mrz::ParseOptions` field, so `control` and `on` are
 /// both "run [`mrz::select_line1`] on the accepted read" and differ only in
-/// what happens to a proposal.
+/// what happens to a proposal; and the default is `on`, not `off`.
 ///
-/// - [`Off`](Line1Arm::Off), the default: the selector is not consulted.
+/// - [`Off`](Line1Arm::Off): the selector is not consulted. An explicit opt-out
+///   that restores the read as it was before the selector.
 /// - [`Control`](Line1Arm::Control): it runs and its verdict is recorded, and a
 ///   proposal is discarded. The read is byte-identical to `off`, so `off` vs
 ///   `control` shows what the recording alone changes (nothing) and `control`
 ///   vs `on` isolates the swap.
-/// - [`On`](Line1Arm::On): a proposal replaces the accepted read.
+/// - [`On`](Line1Arm::On), the default: a proposal replaces the accepted read.
 ///
-/// **Unmeasured.** See [`read_tier1`] for where it applies.
+/// **Measured.** The A/B behind the promotion is
+/// `knowledge/benchmarks/line1-selection-ab-2026-09-29.md`: no outcome changed,
+/// no field went from correct to wrong, strict names went from 13/45 to 15/45,
+/// and every synthetic format was identical seed for seed. See [`read_tier1`]
+/// for where it applies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Line1Arm {
-    /// The selector is not consulted. The default.
-    #[default]
+    /// The selector is not consulted. An explicit opt-out.
     Off,
     /// The selector runs and is recorded; a proposal is discarded.
     Control,
-    /// The selector runs and is recorded; a proposal replaces the read.
+    /// The selector runs and is recorded; a proposal replaces the read. The
+    /// default.
+    #[default]
     On,
 }
 
 impl Line1Arm {
     /// The arm a `SYNTHPASS_MRZ_LINE1_SELECT` value names: `on`, `control` or
-    /// `off`, case-insensitive and trimmed. **Anything else is `off`,
-    /// silently**, as [`class_sweep_arm`] does. Pure, so the mapping is tested
-    /// without touching the process environment.
+    /// `off`, case-insensitive and trimmed. **Anything else, including empty,
+    /// is `on`, the default, silently**, the rule [`class_sweep_arm`] follows
+    /// for its own default. Pure, so the mapping is tested without touching the
+    /// process environment.
     #[must_use]
     pub fn parse(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
-            "on" => Self::On,
+            "off" => Self::Off,
             "control" => Self::Control,
-            _ => Self::Off,
+            _ => Self::On,
         }
     }
 
@@ -168,8 +177,8 @@ impl Line1Arm {
 
 /// The line-1 selector arm this process measures, by name and by value.
 ///
-/// Read from `SYNTHPASS_MRZ_LINE1_SELECT`; **an unrecognised value falls back
-/// to `off` silently**, which is why the name is returned: quote what the binary
+/// Read from `SYNTHPASS_MRZ_LINE1_SELECT`; **an unset, empty or unrecognised
+/// value falls back to `on`, the default, silently**, which is why the name is returned: quote what the binary
 /// says it measured, never the variable you believe you set. Beside
 /// [`class_sweep_arm`] for the same reason: [`read_tier1`] applies it, and both
 /// benches reuse that function, so they cannot drift into measuring different
@@ -185,7 +194,9 @@ pub fn line1_select_arm() -> (&'static str, Line1Arm) {
 ///
 /// Both knobs change what Tier 1 returns, so a record produced under either
 /// must say so (principle 7): a knob appears here exactly when its arm is not
-/// `off`, and an all-default process returns an empty map. `control` is listed
+/// its default, and an all-default process returns an empty map. The default of
+/// the class sweep is `off`, so it is listed when not `off`; the default of the
+/// line-1 selector is `on`, so it is listed when not `on`. `control` is listed
 /// although it is a placebo, because a run under it is not a default run.
 #[must_use]
 pub fn mrz_config_overrides() -> std::collections::BTreeMap<String, String> {
@@ -200,11 +211,11 @@ pub fn mrz_config_overrides_from(
     line1_select: &str,
 ) -> std::collections::BTreeMap<String, String> {
     let mut overrides = std::collections::BTreeMap::new();
-    for (variable, arm) in [
-        ("SYNTHPASS_MRZ_CLASS_SWEEP", class_sweep),
-        ("SYNTHPASS_MRZ_LINE1_SELECT", line1_select),
+    for (variable, arm, default) in [
+        ("SYNTHPASS_MRZ_CLASS_SWEEP", class_sweep, "off"),
+        ("SYNTHPASS_MRZ_LINE1_SELECT", line1_select, "on"),
     ] {
-        if arm != "off" {
+        if arm != default {
             overrides.insert(variable.to_string(), arm.to_string());
         }
     }
@@ -239,15 +250,17 @@ mod tests {
             // Case and surrounding whitespace do not matter.
             ("ON", Line1Arm::On),
             ("  Control\n", Line1Arm::Control),
-            // Anything unrecognised, including empty, is `off`, silently.
-            ("", Line1Arm::Off),
-            ("true", Line1Arm::Off),
-            ("1", Line1Arm::Off),
-            ("onn", Line1Arm::Off),
+            ("OFF", Line1Arm::Off),
+            // Anything unrecognised, including empty, is `on`, the default, silently.
+            ("", Line1Arm::On),
+            ("garbage", Line1Arm::On),
+            ("true", Line1Arm::On),
+            ("1", Line1Arm::On),
+            ("offf", Line1Arm::On),
         ] {
             assert_eq!(Line1Arm::parse(value), arm, "{value:?}");
         }
-        assert_eq!(Line1Arm::default(), Line1Arm::Off);
+        assert_eq!(Line1Arm::default(), Line1Arm::On);
     }
 
     #[test]
@@ -267,17 +280,22 @@ mod tests {
         assert!(mrz_parse_options_for(true).class_sweep);
     }
 
+    /// The defaults are class sweep `off` and line-1 select `on`.
     #[test]
     fn no_override_is_reported_at_the_defaults() {
-        assert!(mrz_config_overrides_from("off", "off").is_empty());
+        assert!(mrz_config_overrides_from("off", "on").is_empty());
     }
 
     #[test]
-    fn each_mrz_knob_is_reported_by_its_own_variable_when_not_off() {
+    fn each_mrz_knob_is_reported_by_its_own_variable_when_not_its_default() {
         use std::collections::BTreeMap;
         assert_eq!(
-            mrz_config_overrides_from("on", "off"),
+            mrz_config_overrides_from("on", "on"),
             BTreeMap::from([("SYNTHPASS_MRZ_CLASS_SWEEP".to_string(), "on".to_string())])
+        );
+        assert_eq!(
+            mrz_config_overrides_from("off", "off"),
+            BTreeMap::from([("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "off".to_string())])
         );
         assert_eq!(
             mrz_config_overrides_from("off", "control"),
@@ -287,13 +305,13 @@ mod tests {
             )])
         );
         assert_eq!(
-            mrz_config_overrides_from("control", "on"),
+            mrz_config_overrides_from("control", "off"),
             BTreeMap::from([
                 (
                     "SYNTHPASS_MRZ_CLASS_SWEEP".to_string(),
                     "control".to_string()
                 ),
-                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "on".to_string()),
+                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "off".to_string()),
             ])
         );
     }

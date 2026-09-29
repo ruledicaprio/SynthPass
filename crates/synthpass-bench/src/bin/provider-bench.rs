@@ -1355,7 +1355,8 @@ fn write_baseline_and_ledger(
 
 /// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
 /// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and both `SYNTHPASS_MRZ_*`
-/// arms are `off`, `Some(message)` otherwise. A pure function of its arguments
+/// arms are at their defaults (class sweep `off`, line-1 select `on`),
+/// `Some(message)` otherwise. A pure function of its arguments
 /// alone (no env reads, no I/O) so it is directly unit-testable without setting
 /// process environment variables — see `knowledge/benchmarks/README.md`'s
 /// maintenance contract for why a baseline may only describe the default
@@ -1366,21 +1367,24 @@ fn write_baseline_and_ledger(
 /// `class_sweep` and `line1_select` are the arm names
 /// `synthpass_die::class_sweep_arm` and `synthpass_die::line1_select_arm`
 /// return. Both change what Tier 1 reads, so a baseline written under either
-/// would describe a configuration nobody runs by default (#574). `control` is
-/// refused as well: it is a placebo, but a baseline is a claim about the default.
+/// when it is not at its default would describe a configuration nobody runs by
+/// default (#574). The line-1 selector's default is `on` since its promotion
+/// (`knowledge/benchmarks/line1-selection-ab-2026-09-29.md`), so `off` is the
+/// arm that is refused there. `control` is refused as well: it is a placebo, but
+/// a baseline is a claim about the default.
 fn refuse_non_default_baseline(
     arms: &synthpass_ocr::OcrArms,
     class_sweep: &str,
     line1_select: &str,
 ) -> Option<String> {
-    if arms.is_default() && class_sweep == "off" && line1_select == "off" {
+    if arms.is_default() && class_sweep == "off" && line1_select == "on" {
         return None;
     }
     Some(format!(
         "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
          (texture=on, order=default, rotate=default, skew=default, chargrid=off) and \
-         SYNTHPASS_MRZ_CLASS_SWEEP and SYNTHPASS_MRZ_LINE1_SELECT at off — a baseline is only \
-         valid for the default provider configuration (see knowledge/benchmarks/README.md). \
+         SYNTHPASS_MRZ_CLASS_SWEEP at off and SYNTHPASS_MRZ_LINE1_SELECT at on, their \
+         defaults — a baseline is only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
          This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}, \
          mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}.",
         arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
@@ -2731,7 +2735,7 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_allows_the_default_arms() {
         assert_eq!(
-            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "off"),
+            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "on"),
             None
         );
     }
@@ -2740,28 +2744,41 @@ mod tests {
     fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.chargrid = "on";
-        let msg = refuse_non_default_baseline(&arms, "off", "off").expect("must refuse");
+        let msg = refuse_non_default_baseline(&arms, "off", "on").expect("must refuse");
         assert!(msg.contains("chargrid=on"), "message: {msg}");
 
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.texture = "off";
-        assert!(refuse_non_default_baseline(&arms, "off", "off").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "on").is_some());
     }
 
     /// #574: both `SYNTHPASS_MRZ_*` arms change what Tier 1 reads, so a baseline
-    /// may not be written or asserted under either, `control` included.
+    /// may not be written or asserted with either off its default: class sweep
+    /// `off`, line-1 select `on`. `control` is refused on both.
     #[test]
     fn refuse_non_default_baseline_rejects_either_mrz_arm() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
         for value in ["on", "control"] {
-            let msg = refuse_non_default_baseline(&arms, value, "off").expect("class sweep");
+            let msg = refuse_non_default_baseline(&arms, value, "on").expect("class sweep");
             assert!(msg.contains(&format!("mrz_class_sweep={value}")), "{msg}");
+        }
+        for value in ["off", "control"] {
             let msg = refuse_non_default_baseline(&arms, "off", value).expect("line-1 select");
             assert!(msg.contains(&format!("mrz_line1_select={value}")), "{msg}");
         }
         // Both moved at once is refused once, and the message names both.
-        let msg = refuse_non_default_baseline(&arms, "on", "on").expect("both");
-        assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=on"));
+        let msg = refuse_non_default_baseline(&arms, "on", "off").expect("both");
+        assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=off"));
+    }
+
+    /// The pinned pairs from the #574 promotion: `("off", "on")` is accepted,
+    /// `("off", "off")` and `("off", "control")` are refused.
+    #[test]
+    fn refuse_non_default_baseline_accepts_only_the_line1_default() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        assert_eq!(refuse_non_default_baseline(&arms, "off", "on"), None);
+        assert!(refuse_non_default_baseline(&arms, "off", "off").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "control").is_some());
     }
 
     #[test]

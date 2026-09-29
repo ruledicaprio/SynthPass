@@ -642,10 +642,13 @@ impl Pipeline {
 
         // Tier 1: deterministic ICAO 9303 MRZ validation via the M7 provider
         // catalog. A valid composite checksum is deterministic evidence the
-        // read is consistent with the printed zone — no LLM needed. `mrz_data` is parsed directly (not read back off
+        // read is consistent with the printed zone — no LLM needed. `mrz_data` is read directly (not read back off
         // `reading`, which carries no raw `mrz::MrzData`) because it's still
         // needed for `PipelineResult.mrz` and the v1 `Extraction` shape below.
-        let mrz_data = mrz::find_and_parse(&markdown).ok();
+        // It goes through `read_tier1`, the same Tier-1 read `MrzReader` makes
+        // for the v2 record (line-1 selector included, #574), so the v1 and v2
+        // records carry the same names under every `SYNTHPASS_MRZ_LINE1_SELECT` arm.
+        let mrz_data = synthpass_die::mrz_reader::read_tier1(&markdown).parsed.ok();
 
         let mut recognition = Recognition::from_text(markdown.clone());
         recognition.mrz_band_score = ocr_result.mrz_band_score;
@@ -1967,7 +1970,7 @@ mod tests {
             Box::new(KnobReportingOcr("just prose — no MRZ anywhere")),
             Box::new(MockBackend),
         );
-        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("off", "on");
+        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 
@@ -1977,9 +1980,49 @@ mod tests {
         assert_eq!(
             trace.config_overrides,
             std::collections::BTreeMap::from([
-                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "on".to_string()),
+                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "off".to_string()),
                 ("SYNTHPASS_OCR_TEXTURE".to_string(), "off".to_string()),
             ]),
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// A TD3 zone whose first line 1 has a name field that breaks the grammar
+    /// (`<<<<Q` after the given names) and whose second is the grammatical
+    /// one, both over the same line 2 -- the shape the line-1 selector (#574)
+    /// acts on. Same fixture as `synthpass-die`'s `broken_then_good`.
+    const UTO_BROKEN_THEN_GOOD_MARKDOWN: &str = "P<UTOSPECIMEN<<TESTXYZ<<<<Q<<<<<<<<<<<<<<<<<\nL898902C36UTO7408122F1204159ZE184226B<<<<<10\n\nP<UTOSPECIMEN<<TESTXYZ<<<<<<<<<<<<<<<<<<<<<<\nL898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// #574: the v1 record (`PipelineResult.mrz`) is the Tier-1 read the v2
+    /// record gets, not a separate `mrz::find_and_parse`. Both sides read the
+    /// same process environment, so this holds under any
+    /// `SYNTHPASS_MRZ_LINE1_SELECT` arm: with the selector on the two carry the
+    /// selected names, and with it off both carry line 1 as read.
+    #[tokio::test]
+    async fn the_v1_record_follows_the_tier1_read_the_v2_record_gets() {
+        let (input, dir) = temp_input("v1-follows-tier1").await;
+        let pipeline = Pipeline::new(
+            Box::new(StaticOcr(UTO_BROKEN_THEN_GOOD_MARKDOWN)),
+            Box::new(MockBackend),
+        );
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(result.method, Method::MrzDeterministic);
+        assert_eq!(
+            result.mrz,
+            synthpass_die::mrz_reader::read_tier1(UTO_BROKEN_THEN_GOOD_MARKDOWN)
+                .parsed
+                .ok(),
+            "PipelineResult.mrz must be the Tier-1 read, selector included"
+        );
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        let mrz = result.mrz.as_ref().expect("the zone parses");
+        assert_eq!(
+            v2.mrz.as_ref().map(|block| block.lines.as_str()),
+            Some(mrz.mrz_lines.as_str()),
+            "the v2 record's zone is the same read"
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -2069,7 +2112,7 @@ mod tests {
         // The mock echoes 4 chars of the markdown into v1's `mrz_line` (a
         // stand-in for the real LLM guessing at the MRZ zone), but
         // `process_document` overrides `v2.mrz` from `stage.mrz_data` —
-        // the pipeline's own deterministic `mrz::find_and_parse` result —
+        // the pipeline's own deterministic Tier-1 read (`read_tier1`) —
         // rather than trusting that guess. No real MRZ exists in this
         // document's markdown, so `stage.mrz_data` is `None` and `v2.mrz`
         // must be `None` too: an absent deterministic read is more honest

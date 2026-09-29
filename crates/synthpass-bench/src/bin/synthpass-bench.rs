@@ -465,12 +465,12 @@ struct Report {
     /// value falls back to `off` silently. Always serialized; `provider-bench`
     /// records the same arm as `mrz_class_sweep_arm`.
     mrz_class_sweep_arm: &'static str,
-    /// The shadow line-1 selector arm this run measured (#574), from
-    /// `SYNTHPASS_MRZ_LINE1_SELECT`, as `mrz_class_sweep_arm` above. Always
-    /// serialized; `provider-bench` records it under the same name. The
-    /// synthetic `Tier-1` read goes through `synthpass_die::read_tier1`, so the
-    /// arm reaches every result here; per-document verdicts are not recorded
-    /// on this report.
+    /// The line-1 selector arm this run measured (#574), from
+    /// `SYNTHPASS_MRZ_LINE1_SELECT` (default `on`), as `mrz_class_sweep_arm`
+    /// above. Always serialized; `provider-bench` records it under the same
+    /// name. The synthetic `Tier-1` read goes through
+    /// `synthpass_die::read_tier1`, so the arm reaches every result here;
+    /// per-document verdicts are not recorded on this report.
     mrz_line1_select_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded (issue #541) — a run-level fact next to `ocr_arms`,
