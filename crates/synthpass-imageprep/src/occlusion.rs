@@ -31,8 +31,8 @@ struct RawFeatures {
 
 /// Measure a name line using the verified line's fixed-width cell grid.
 ///
-/// `row_offset` is -1 for the line above a verified line 2, or +2 for TD1's
-/// line 3 relative to a verified line 1. `row_pitch` is measured from the
+/// `row_offset` is -1 for the name line above a verified line 2, or +1 for
+/// TD1's line 3 below its verified line 2. `row_pitch` is measured from the
 /// zone's line geometry in image pixels, not from the name text. Returns
 /// `None` for invalid/out-of-image geometry, cells too small to measure, or
 /// a verified line with no measurable texture. This function does no OCR and
