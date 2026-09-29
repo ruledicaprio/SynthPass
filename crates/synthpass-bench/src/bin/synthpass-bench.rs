@@ -39,8 +39,13 @@
 //!                        `results[]` entry. Off by default and report-only: the keys are
 //!                        absent without the flag, and no measured value changes. With it
 //!                        on both keys are always present (`ocr_passes` is `[]` and
-//!                        `ocr_text` `null` when OCR itself failed). Synthetic text only,
-//!                        so nothing here is a real document's OCR (ADR-0024, amendment 1)
+//!                        `ocr_text` `null` when OCR itself failed). Each pass object also
+//!                        carries `chargrid`: `null`, or - on the pass that read the MRZ,
+//!                        when SYNTHPASS_OCR_CHARGRID is `on` or `control` - what the
+//!                        name-line repair did there (the matched line's box, each glyph's
+//!                        position, the fitted grid, the ink per cell and per column, the
+//!                        repair outcome). Synthetic text only, so nothing here is a real
+//!                        document's OCR (ADR-0024, amendments 1 and 2)
 //!   --escalation-report  Tier-2 escalation rate under the default routing
 //!                        policy vs. Chunk 7's composite-only opt-in, and
 //!                        whether the newly-accepted documents are correct
@@ -153,8 +158,9 @@ fn usage() {
     );
     eprintln!(
         "  --ocr-passes         add ocr_text and ocr_passes (every executed OCR pass with its \
-         transform, outcome and the MRZ-shaped lines it read, with boxes) to each results[] \
-         entry; off by default, report-only"
+         transform, outcome and the MRZ-shaped lines it read, with boxes, plus a chargrid \
+         object on the accepted pass when SYNTHPASS_OCR_CHARGRID is on or control) to each \
+         results[] entry; off by default, report-only"
     );
     eprintln!(
         "  --escalation-report  print the Tier-2 escalation rate under the default routing \
@@ -1447,6 +1453,7 @@ mod tests {
                 image_height: 20,
                 outcome: synthpass_ocr::PassOutcome::Accepted,
                 readings: Vec::new(),
+                chargrid: None,
             },
         ]));
         let json = serde_json::to_value(&read).expect("serialize SeedResult");
@@ -1454,6 +1461,17 @@ mod tests {
         assert_eq!(json["ocr_passes"][0]["id"], "general");
         assert_eq!(json["ocr_passes"][0]["outcome"], "accepted");
         assert_eq!(json["ocr_passes"][0]["transform"], "general");
+        assert!(
+            json["ocr_passes"][0]
+                .as_object()
+                .unwrap()
+                .contains_key("chargrid"),
+            "the key is always there"
+        );
+        assert!(
+            json["ocr_passes"][0]["chargrid"].is_null(),
+            "and null while the chargrid arm is unset"
+        );
     }
 
     #[test]

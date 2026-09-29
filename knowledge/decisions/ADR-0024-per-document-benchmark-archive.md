@@ -201,3 +201,61 @@ depends on which OCR arms are on.
 - A second opt-in file format exists until the archive absorbs it.
 - Boxes are in each pass's own image space (crop, upscale, deskew, turn), so they compare within a
   pass, not across passes.
+
+## Amendment 2 (2026-09-29) — the chargrid capture for #575, on the same trace
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29).
+
+### Context
+
+[#575](https://github.com/ruledicaprio/SynthPass/issues/575) part E reports that the chargrid name-line
+repair (`SYNTHPASS_OCR_CHARGRID`, off by default) sometimes restores a filler one cell right of where it is
+printed, and names candidate causes without evidence for any. The 2026-09-18 chargrid A/B could show that a
+repaired name line was wrong, not why, because its reports held no read characters and no grid geometry
+([reconciliation](../benchmarks/chargrid-ab-reconciliation-2026-09-24.md)).
+[#411](https://github.com/ruledicaprio/SynthPass/issues/411) asks for the `ocrs` line-box height beside
+chargrid's reads, so the ink floor's margin is measured on real documents rather than modelled. Both need
+the same observation of one chargrid attempt.
+
+### Decision
+
+1. When the chargrid arm runs (`on` or `control`), `recognize_detailed_traced` attaches one chargrid record
+   to the accepted pass, whose pixels the attempt read. It holds the arm and the verdict `OcrPage::chargrid`
+   reports. Once a recognized line has matched the name line, it also holds: the name line's MRZ index and
+   width, the parsed name line, the matched line's index and text, whether it was downscaled, the working
+   image size, the `ocrs` line box, a SHA-256 of the grayscale band the ink is measured on, each glyph's
+   character and edges, the dark-pixel count of every column of that band, and the ink floor. When a grid
+   was fitted, it also holds the grid's origin and pitch, each glyph's cell, each cell's ink and the repair
+   outcome.
+2. The record is enough to replay the grid fit, the alignment, the ink measurement and both gates offline,
+   with one input varied, without re-running OCR. Outputs are recorded as well as inputs, so a replay is
+   checked against what ran before anything is varied.
+3. The band is identified by its hash and never written. The column profile, the glyph characters and the
+   lines are document content under the same rules as a pass's readings: the same opt-in flags, the same
+   file, the same destination guard, the same refusal of `--include-private`, and never stdout, stderr, a
+   log, `--out`, the outcome ledger or a tracked document. A dated note may cite positions, pitches, cell
+   indices, per-cell ink and line-box heights by asset ID, as this ADR's disclosure rule allows.
+4. It is behaviour-neutral, as amendment 1's Decision 6 requires. With the arm off nothing is recorded and
+   nothing changes. With it on, the page and every outcome are identical with and without tracing, and
+   identical to the arm before this change. The arm stays off by default, and its algorithm, constants and
+   gates are unchanged.
+5. The private track carries none of it (Decision 7), the hash included.
+
+### Alternatives rejected
+
+- **A second entry point or file.** Two traces of one OCR call could disagree about which pass the attempt
+  read, and every reader would have to join them.
+- **Log it under `SYNTHPASS_OCR_VERBOSE`.** That prints zone text and pixel profiles to a log, which this ADR
+  forbids, and a log is not a schema a replay can check.
+- **Write the band crop.** It moves a real document's pixels out of the image file. The hash lets a local
+  analysis find and verify the same pixels from the image.
+- **Record per-cell ink only.** Per-cell ink depends on the grid, so a replay that moves the origin or the
+  pitch could not recompute it. The column profile can.
+- **A separate logging path for #411.** Two records of one line box would drift.
+
+### Consequences
+
+- The note #575 asks for can overlay hand-marked cells on the recorded grid, and vary the pitch, the
+  origin, the packing penalty or the glyph anchor one at a time.
+- The ink floor's margin can be measured from recorded per-cell ink and line-box heights.
+- The pass object gains one key, `chargrid`, which is `null` unless the arm ran.

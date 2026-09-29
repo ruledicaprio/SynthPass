@@ -56,7 +56,12 @@
 //!                      executed OCR pass in order — its id, the transform that
 //!                      produced its pixels, its image size, what the retry loop did
 //!                      with it, and each MRZ-shaped line it read with its bounding
-//!                      box (ADR-0024, amendment 1). Refuses --include-private, and
+//!                      box (ADR-0024, amendment 1). Each row also carries `chargrid`,
+//!                      the verdict the page reports (`null` with the arm off), and,
+//!                      when SYNTHPASS_OCR_CHARGRID is `on` or `control`, the pass that
+//!                      read the MRZ carries a `chargrid` object: the name-line repair's
+//!                      matched line, glyph positions, fitted grid and ink (amendment
+//!                      2). Refuses --include-private, and
 //!                      refuses an output directory inside the working tree that git
 //!                      does not ignore. The readings never enter the --out report,
 //!                      the outcome ledger, stdout or stderr
@@ -305,8 +310,10 @@ fn usage() {
     eprintln!(
         "  --dump-ocr-passes  with --real-specimens: write <out-dir>/provider-bench-ocr-passes.jsonl, \
          one row per OCR'd document: the full OCR text and every executed OCR pass with its \
-         transform, outcome and the MRZ-shaped lines it read (with boxes). Refuses \
-         --include-private and an output directory git does not ignore"
+         transform, outcome and the MRZ-shaped lines it read (with boxes), each row's \
+         chargrid verdict, and, with SYNTHPASS_OCR_CHARGRID on or control, a chargrid object \
+         on the pass that read the MRZ. Refuses --include-private and an output directory \
+         git does not ignore"
     );
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \

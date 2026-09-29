@@ -181,6 +181,14 @@ fn assert_trace_invariants(sample: &str, page: &synthpass_ocr::OcrPage, records:
             "{sample}: {}: a pass that read nothing MRZ-shaped has no readings, and vice versa",
             record.id
         );
+        // The chargrid attempt reads the accepted pass's pixels, so only that
+        // record may hold one. These tests run with the arm unset, which is why
+        // every record carries `None`; `native_ocr_chargrid_trace.rs` covers `on`.
+        assert!(
+            record.chargrid.is_none() || record.outcome == PassOutcome::Accepted,
+            "{sample}: {}: only an accepted pass may carry a chargrid record",
+            record.id
+        );
         for reading in &record.readings {
             assert_eq!(reading.text, reading.text.trim());
             assert!(reading.text.chars().filter(|c| !c.is_whitespace()).count() >= 20);
