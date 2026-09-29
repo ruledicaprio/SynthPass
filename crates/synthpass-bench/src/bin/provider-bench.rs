@@ -76,9 +76,17 @@
 //!                      (`checksum_failed`, `no_mrz_found`, …) grew, or the
 //!                      outcome ledger next to PATH no longer hashes to
 //!                      `outcomes_sha256`. A missing PATH is written and passes
-//!                      (first-run bootstrap). When a committed ledger is
-//!                      present, also prints an informational (non-failing)
-//!                      per-document outcome diff against this run. The per-PR
+//!                      (first-run bootstrap). Writes a text-free projection of
+//!                      this run's own outcome ledger
+//!                      (`real-specimen-outcomes-text-free.jsonl`, every
+//!                      `miss_reason` reduced to its kind) under the `--out`
+//!                      directory, never next to the baseline. When a committed
+//!                      ledger is present,
+//!                      also prints an informational (non-failing) per-document
+//!                      diff against this run: the outcome changes, then every
+//!                      other recorded field in two groups (deterministic;
+//!                      timing-sensitive), also appended to
+//!                      `$GITHUB_STEP_SUMMARY` when that is set. The per-PR
 //!                      no-regression gate. Refuses to run (exit non-zero,
 //!                      writes nothing) unless every `SYNTHPASS_OCR_*`
 //!                      measurement arm is at its default — a baseline is only
@@ -687,6 +695,358 @@ fn diff_outcomes(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<String>
     lines
 }
 
+/// Most document lines any one group of [`diff_ledger_fields`] prints; the
+/// per-field totals above them are never capped.
+const DOC_LINE_CAP: usize = 20;
+
+/// The per-document fields [`diff_ledger_fields`] compares, in
+/// [`OutcomeRow`] schema (declaration) order — the order its totals print in.
+/// `outcome` is left to [`diff_outcomes`], and `ocr_ms` has its own summary
+/// line, so neither is here.
+const DIFFED_FIELDS: &[&str] = &[
+    "miss_reason",
+    "mrz_format",
+    "mrz_found",
+    "mrz_checksums_valid",
+    "names_exact",
+    "name_error",
+    "retry_variant_id",
+    "retry_budget_hit",
+    "retry_stop",
+];
+
+/// One field that differs on one document, already rendered for printing.
+struct FieldChange {
+    field: &'static str,
+    /// `field old -> new`, or `miss_reason kind (detail changed)`. Built only
+    /// from enumerated values (format labels, booleans, retry ids, stop kinds,
+    /// name-error classes) and the miss *kind*: the step summary this reaches
+    /// is public, so nothing here may carry the ledger's `miss_reason` text
+    /// (it can hold both document numbers, ADR-0024 build step 0a) or any
+    /// value read from a document.
+    text: String,
+}
+
+fn render_optional(value: Option<&str>) -> String {
+    value.unwrap_or("null").to_string()
+}
+
+fn render_optional_bool(value: Option<bool>) -> String {
+    value.map_or_else(|| "null".to_string(), |b| b.to_string())
+}
+
+fn push_transition(changes: &mut Vec<FieldChange>, field: &'static str, old: String, new: String) {
+    if old != new {
+        changes.push(FieldChange {
+            field,
+            text: format!("{field} {old} -> {new}"),
+        });
+    }
+}
+
+/// Every [`DIFFED_FIELDS`] entry that differs between two rows of the same
+/// document, in schema order.
+fn field_changes(old: &OutcomeRow, new: &OutcomeRow) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    // The kind is `outcome`; the text behind it is never printed.
+    if old.miss_reason != new.miss_reason {
+        let text = if old.outcome == new.outcome {
+            format!("miss_reason {} (detail changed)", new.outcome)
+        } else {
+            format!(
+                "miss_reason {} -> {} (detail changed)",
+                old.outcome, new.outcome
+            )
+        };
+        changes.push(FieldChange {
+            field: "miss_reason",
+            text,
+        });
+    }
+    push_transition(
+        &mut changes,
+        "mrz_format",
+        render_optional(old.mrz_format.as_deref()),
+        render_optional(new.mrz_format.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "mrz_found",
+        old.mrz_found.to_string(),
+        new.mrz_found.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "mrz_checksums_valid",
+        old.mrz_checksums_valid.to_string(),
+        new.mrz_checksums_valid.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "names_exact",
+        render_optional_bool(old.names_exact),
+        render_optional_bool(new.names_exact),
+    );
+    push_transition(
+        &mut changes,
+        "name_error",
+        render_optional(old.name_error.as_deref()),
+        render_optional(new.name_error.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_variant_id",
+        render_optional(old.retry_variant_id.as_deref()),
+        render_optional(new.retry_variant_id.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_budget_hit",
+        old.retry_budget_hit.to_string(),
+        new.retry_budget_hit.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "retry_stop",
+        render_optional(old.retry_stop.as_deref()),
+        render_optional(new.retry_stop.as_deref()),
+    );
+    changes
+}
+
+/// A document that hit the OCR retry-pass time budget on either side. Which
+/// passes finished depends on runner speed, so nothing about such a document
+/// is a stable signal.
+fn is_budget_limited(old: &OutcomeRow, new: &OutcomeRow) -> bool {
+    old.retry_budget_hit
+        || new.retry_budget_hit
+        || old.retry_stop.as_deref() == Some("budget")
+        || new.retry_stop.as_deref() == Some("budget")
+}
+
+/// `field count, field count, …` in [`DIFFED_FIELDS`] order, zero counts left
+/// out. Counts are documents, and are never capped.
+fn field_totals(docs: &[(&str, Vec<FieldChange>)]) -> String {
+    DIFFED_FIELDS
+        .iter()
+        .filter_map(|field| {
+            let count = docs
+                .iter()
+                .filter(|(_, changes)| changes.iter().any(|c| c.field == *field))
+                .count();
+            (count > 0).then(|| format!("{field} {count}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `  key: change; change` per document (at most [`DOC_LINE_CAP`]), then
+/// `  ... and N more`.
+fn push_document_lines(lines: &mut Vec<String>, docs: &[(&str, Vec<FieldChange>)]) {
+    for (key, changes) in docs.iter().take(DOC_LINE_CAP) {
+        let texts: Vec<&str> = changes.iter().map(|c| c.text.as_str()).collect();
+        lines.push(format!("  {key}: {}", texts.join("; ")));
+    }
+    if docs.len() > DOC_LINE_CAP {
+        lines.push(format!("  ... and {} more", docs.len() - DOC_LINE_CAP));
+    }
+}
+
+/// Median of `values`, sorted in place; the integer mean of the two middle
+/// values (rounded down) when the count is even. `0` for an empty slice.
+fn median(values: &mut [u128]) -> u128 {
+    values.sort_unstable();
+    let n = values.len();
+    match n {
+        0 => 0,
+        _ if n % 2 == 1 => values[n / 2],
+        _ => (values[n / 2 - 1] + values[n / 2]) / 2,
+    }
+}
+
+/// Informational per-field diff of every [`OutcomeRow`] field other than
+/// `outcome` (which [`diff_outcomes`] reports) between the committed ledger
+/// and this run's rows, joined on [`OutcomeRow::sort_key`] (issue #557).
+/// **Never a gate failure**: like [`diff_outcomes`] the return type has no
+/// failure variant. Documents present on one side only are counted by
+/// [`diff_outcomes`] and skipped here.
+///
+/// Two groups, so a reviewer reads the stable signal separately from the
+/// timing-sensitive one:
+///
+/// - **Deterministic** — `miss_reason` (the kind and "detail changed", never
+///   the text), `mrz_format`, `mrz_found`, `mrz_checksums_valid`,
+///   `names_exact`, `name_error`, `retry_variant_id` and `retry_stop`. One
+///   totals line (documents per field, always complete), then one line per
+///   document, at most [`DOC_LINE_CAP`].
+/// - **Timing-sensitive** — `ocr_ms` (one summary line: documents that differ,
+///   median |delta|, both totals) and every change on a *budget-limited*
+///   document (see [`is_budget_limited`]), which includes `retry_budget_hit`
+///   and `retry_stop == "budget"`.
+///
+/// Nothing is printed for a group with nothing in it. Documents come in
+/// `sort_key` order and fields in schema order, so the output is a pure
+/// function of the two inputs.
+fn diff_ledger_fields(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<String> {
+    let committed_by_key: BTreeMap<&str, &OutcomeRow> =
+        committed.iter().map(|r| (r.sort_key(), r)).collect();
+    let actual_by_key: BTreeMap<&str, &OutcomeRow> =
+        actual.iter().map(|r| (r.sort_key(), r)).collect();
+
+    let mut deterministic: Vec<(&str, Vec<FieldChange>)> = Vec::new();
+    let mut budget_limited: Vec<(&str, Vec<FieldChange>)> = Vec::new();
+    let mut ocr_deltas: Vec<u128> = Vec::new();
+    let mut common = 0usize;
+    let mut ocr_old_total = 0u128;
+    let mut ocr_new_total = 0u128;
+    for (key, old) in &committed_by_key {
+        let Some(new) = actual_by_key.get(key) else {
+            continue;
+        };
+        common += 1;
+        ocr_old_total += old.ocr_ms;
+        ocr_new_total += new.ocr_ms;
+        if old.ocr_ms != new.ocr_ms {
+            ocr_deltas.push(old.ocr_ms.abs_diff(new.ocr_ms));
+        }
+        let changes = field_changes(old, new);
+        if changes.is_empty() {
+            continue;
+        }
+        if is_budget_limited(old, new) {
+            budget_limited.push((*key, changes));
+        } else {
+            deterministic.push((*key, changes));
+        }
+    }
+
+    let mut lines = Vec::new();
+    if !deterministic.is_empty() {
+        lines.push(format!(
+            "deterministic field diff vs committed (report-only): {} document(s); {}",
+            deterministic.len(),
+            field_totals(&deterministic),
+        ));
+        push_document_lines(&mut lines, &deterministic);
+    }
+    if !ocr_deltas.is_empty() {
+        lines.push(format!(
+            "timing-sensitive field diff vs committed (report-only): ocr_ms differs on {} of \
+             {common} document(s), median |delta| {} ms, total {ocr_old_total} ms -> \
+             {ocr_new_total} ms",
+            ocr_deltas.len(),
+            median(&mut ocr_deltas),
+        ));
+    }
+    if !budget_limited.is_empty() {
+        lines.push(format!(
+            "budget-limited document(s) vs committed (report-only; every change on them is \
+             timing-sensitive): {} document(s); {}",
+            budget_limited.len(),
+            field_totals(&budget_limited),
+        ));
+        push_document_lines(&mut lines, &budget_limited);
+    }
+    lines
+}
+
+/// Appends `lines` to the GitHub step summary at `path` as one fenced block,
+/// or does nothing when `path` is `None` (`GITHUB_STEP_SUMMARY` unset). The
+/// caller warns and carries on if this fails: the summary is evidence, never
+/// a gate condition.
+///
+/// The repository is public, so the summary is public too: `lines` must
+/// already be limited to asset ids, field names, enumerated values and counts
+/// — see [`FieldChange`].
+fn append_step_summary(path: Option<&Path>, lines: &[String]) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let mut body =
+        String::from("### Real-specimen per-document ledger diff (report-only)\n\n```text\n");
+    for line in lines {
+        body.push_str(line);
+        body.push('\n');
+    }
+    body.push_str("```\n");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(body.as_bytes())
+}
+
+/// The step summary file GitHub Actions names in `GITHUB_STEP_SUMMARY`; `None`
+/// outside Actions (unset or empty).
+fn step_summary_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("GITHUB_STEP_SUMMARY")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+/// The fixed name of the text-free projection of an assert run's ledger,
+/// written under the `--out` directory (see [`write_run_ledger_projection`]).
+/// Deliberately not [`OUTCOMES_LEDGER_FILENAME`]: the name says it is a
+/// projection, and it can never be mistaken for, or written over, the
+/// committed ledger.
+const RUN_LEDGER_PROJECTION_FILENAME: &str = "real-specimen-outcomes-text-free.jsonl";
+
+/// `rows` with every `miss_reason` reduced to its kind (`outcome`); every other
+/// field is kept as it is. Rows stay [`OutcomeRow`]s, so the file parses with
+/// [`parse_ledger`] and diffs like a ledger.
+///
+/// Why: the full `miss_reason` text can carry values read from the document.
+/// The audit of every `MissReason` `Display`
+/// format (`crates/synthpass-bench/src/lib.rs`):
+///
+/// - `DocumentNumberMismatch`: `got {got:?}, expected {expected:?}` — **both
+///   document numbers**, one of them OCR-read from the specimen.
+/// - `NoMrzFound`: the `Debug` of an `mrz::MrzError` — `BadCharacter` carries
+///   the offending character and `BadDocumentCode` the first characters of
+///   line 1, both OCR-read from the specimen. (`BadLength`, `BadChecksum`,
+///   `LeadingFiller`, `IncompleteSequence`, `NotFound` carry numbers and
+///   enums only.)
+/// - `OcrError`: the OCR engine's error string, unaudited for values, so
+///   treated as carrying them.
+/// - `ChecksumFailed`: check-digit field names and a fixed suffix only;
+///   `Redacted`, `NoMrzExpected`, `FalsePositiveMrz` and
+///   `DocumentNumberLeadingFiller`: fixed strings.
+///
+/// CI never publishes real-specimen text, even as a short-lived artifact
+/// (ADR-0027 Decision 5), so what an assert run uploads is this projection,
+/// never the full rows. Making the committed ledger itself value-free is
+/// ADR-0024 build step 0a, a separate change; until then the write-baseline
+/// path still writes the full ledger, unchanged.
+fn text_free_projection(rows: &[OutcomeRow]) -> Vec<OutcomeRow> {
+    rows.iter()
+        .map(|row| OutcomeRow {
+            miss_reason: row.miss_reason.as_ref().map(|_| row.outcome.clone()),
+            ..row.clone()
+        })
+        .collect()
+}
+
+/// Writes the [`text_free_projection`] of this run's rows next to the report
+/// `--out`, so the workflow can upload the evidence behind the per-document
+/// diff. Returns the path written. It is under the `--out` directory and under
+/// [`RUN_LEDGER_PROJECTION_FILENAME`], so it can never overwrite the committed
+/// ledger.
+fn write_run_ledger_projection(
+    out: &str,
+    rows: &[OutcomeRow],
+) -> std::io::Result<std::path::PathBuf> {
+    let path = outcomes_ledger_path(out).with_file_name(RUN_LEDGER_PROJECTION_FILENAME);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&path, ledger_bytes(&text_free_projection(rows)))?;
+    Ok(path)
+}
+
 const BASELINE_NOTE: &str = "Real-specimen Tier-1 no-regression baseline for the deterministic \
     `mrz` provider. Regenerate ONLY via CI: `gh workflow run real-specimen-gate.yml -f \
     mode=write-baseline`, download the artifact, commit it. Local numbers differ from CI \
@@ -918,6 +1278,20 @@ fn run_baseline_step(
 
     print_baseline_table(&baseline, &snapshot);
 
+    // A text-free projection of this run's own ledger, under the `--out`
+    // directory (never next to the committed baseline), so the workflow can
+    // upload the evidence behind the diff below — see `text_free_projection`
+    // for why it is not the full ledger. Written before anything here can exit
+    // non-zero. A failure to write it is a warning: the evidence is not a gate
+    // condition.
+    match write_run_ledger_projection(&parsed.out, &rows) {
+        Ok(projection) => println!(
+            "text-free projection of this run's outcome ledger written to {}",
+            projection.display()
+        ),
+        Err(e) => eprintln!("⚠ could not write the text-free ledger projection: {e}"),
+    }
+
     // Outcome-ledger integrity + an informational per-document diff, only
     // when a committed ledger actually sits next to the baseline (absent for
     // one written before this change). A sha mismatch is a gate failure in
@@ -935,8 +1309,15 @@ fn run_baseline_step(
         }
         match parse_ledger(&committed_bytes) {
             Ok(committed_rows) => {
-                for line in diff_outcomes(&committed_rows, &rows) {
+                let mut diff_lines = diff_outcomes(&committed_rows, &rows);
+                diff_lines.extend(diff_ledger_fields(&committed_rows, &rows));
+                for line in &diff_lines {
                     println!("{line}");
+                }
+                // The same lines go to the job's step summary. Report-only:
+                // a failed write warns and never changes the gate result.
+                if let Err(e) = append_step_summary(step_summary_path().as_deref(), &diff_lines) {
+                    eprintln!("⚠ could not write the step summary: {e}");
                 }
             }
             Err(e) => eprintln!(
@@ -2790,6 +3171,339 @@ mod tests {
         assert!(lines[0].contains("0 only in the committed ledger"));
         assert!(lines[0].contains("0 only in this run"));
         assert_eq!(lines.len(), 1, "no per-document rows when nothing moved");
+    }
+
+    /// `outcome_row(asset_id, "hit")` with `edit` applied — a one-line way to
+    /// vary the field a `diff_ledger_fields` test is about.
+    fn hit_row_with(asset_id: &str, edit: impl FnOnce(&mut OutcomeRow)) -> OutcomeRow {
+        let mut row = outcome_row(asset_id, "hit");
+        edit(&mut row);
+        row
+    }
+
+    #[test]
+    fn diff_ledger_fields_prints_nothing_when_no_field_moved() {
+        let rows = vec![outcome_row("a", "hit"), outcome_row("b", "checksum_failed")];
+        // Only the existing outcome line remains for an unchanged ledger.
+        assert_eq!(diff_ledger_fields(&rows, &rows), Vec::<String>::new());
+        assert_eq!(diff_outcomes(&rows, &rows).len(), 1);
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_deterministic_change_in_schema_order() {
+        // Like `diff_outcomes`, the return type has no failure variant: a
+        // per-field diff is informational whatever it finds.
+        let committed = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("MRVA".to_string())
+        })];
+        let actual = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("TD3".to_string());
+            r.mrz_checksums_valid = false;
+        })];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format \
+                 1, mrz_checksums_valid 1"
+                    .to_string(),
+                "  a: mrz_format MRVA -> TD3; mrz_checksums_valid true -> false".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_prints_the_miss_kind_and_never_the_miss_reason_text() {
+        let mismatch = |got: &str, expected: &str| {
+            hit_row_with("d", |r| {
+                r.outcome = "document_number_mismatch".to_string();
+                r.miss_reason = Some(format!(
+                    "document number mismatch: got {got:?}, expected {expected:?}"
+                ));
+            })
+        };
+        let committed = vec![mismatch("X1234567", "Y7654321")];
+        let actual = vec![mismatch("X1234568", "Y7654321")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines,
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); miss_reason 1"
+                    .to_string(),
+                "  d: miss_reason document_number_mismatch (detail changed)".to_string(),
+            ]
+        );
+        let printed = lines.join("\n");
+        for text in ["X1234567", "X1234568", "Y7654321", "got", "expected"] {
+            assert!(
+                !printed.contains(text),
+                "the miss_reason text must never be printed: {printed}"
+            );
+        }
+    }
+
+    #[test]
+    fn diff_ledger_fields_names_both_kinds_when_the_kind_changed() {
+        let committed = vec![hit_row_with("d", |r| {
+            r.outcome = "checksum_failed".to_string();
+            r.miss_reason = Some("checksum invalid: composite".to_string());
+        })];
+        let actual = vec![outcome_row("d", "hit")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert!(
+            lines.contains(&"  d: miss_reason checksum_failed -> hit (detail changed)".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            !lines.join("\n").contains("composite"),
+            "the miss_reason text must never be printed"
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_ocr_ms_only_changes_as_one_timing_line() {
+        let with_ms = |id: &str, ms: u128| hit_row_with(id, |r| r.ocr_ms = ms);
+        let committed = vec![with_ms("a", 1000), with_ms("b", 2000), with_ms("c", 300)];
+        let actual = vec![with_ms("a", 1500), with_ms("b", 1000), with_ms("c", 300)];
+        // |delta| is 500 and 1000: the median of an even count is the integer
+        // mean of the middle two. `c` did not move and is not counted as
+        // differing, but is in the "of 3" and in both totals.
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "timing-sensitive field diff vs committed (report-only): ocr_ms differs on 2 of 3 \
+                 document(s), median |delta| 750 ms, total 3300 ms -> 2800 ms"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_moves_every_change_on_a_budget_limited_document_to_the_timing_group() {
+        let committed = vec![
+            hit_row_with("b", |r| {
+                r.mrz_format = Some("TD3".to_string());
+                r.retry_stop = Some("exhausted".to_string());
+            }),
+            // Budget-limited on the committed side only.
+            hit_row_with("c", |r| r.retry_stop = Some("budget".to_string())),
+            hit_row_with("d", |r| r.mrz_found = true),
+        ];
+        let actual = vec![
+            hit_row_with("b", |r| {
+                r.mrz_format = Some("MRVA".to_string());
+                r.retry_budget_hit = true;
+                r.retry_stop = Some("budget".to_string());
+            }),
+            hit_row_with("c", |r| {
+                r.names_exact = Some(true);
+                r.retry_stop = Some("exhausted".to_string());
+            }),
+            hit_row_with("d", |r| r.mrz_found = false),
+        ];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                // `d` is not budget-limited, so it alone is deterministic.
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_found 1"
+                    .to_string(),
+                "  d: mrz_found true -> false".to_string(),
+                "budget-limited document(s) vs committed (report-only; every change on them is \
+                 timing-sensitive): 2 document(s); mrz_format 1, names_exact 1, retry_budget_hit \
+                 1, retry_stop 2"
+                    .to_string(),
+                "  b: mrz_format TD3 -> MRVA; retry_budget_hit false -> true; retry_stop \
+                 exhausted -> budget"
+                    .to_string(),
+                "  c: names_exact null -> true; retry_stop budget -> exhausted".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_caps_document_lines_at_twenty_but_keeps_complete_totals() {
+        let ids: Vec<String> = (0..25).map(|i| format!("doc-{i:02}")).collect();
+        let committed: Vec<OutcomeRow> = ids.iter().map(|id| outcome_row(id, "hit")).collect();
+        let actual: Vec<OutcomeRow> = ids
+            .iter()
+            .map(|id| hit_row_with(id, |r| r.mrz_found = false))
+            .collect();
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 25 document(s); mrz_found 25"
+        );
+        assert_eq!(
+            lines.len(),
+            22,
+            "totals, 20 document lines, the overflow line"
+        );
+        assert!(lines[1].starts_with("  doc-00: "));
+        assert!(lines[20].starts_with("  doc-19: "));
+        assert_eq!(lines[21], "  ... and 5 more");
+    }
+
+    #[test]
+    fn diff_ledger_fields_is_ordered_by_key_whatever_the_input_order() {
+        let changed = |id: &str| hit_row_with(id, |r| r.name_error = Some("swapped".to_string()));
+        let committed = vec![
+            outcome_row("c", "hit"),
+            outcome_row("a", "hit"),
+            outcome_row("b", "hit"),
+        ];
+        let actual = vec![changed("b"), changed("c"), changed("a")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        let keys: Vec<&str> = lines[1..]
+            .iter()
+            .map(|l| l.trim_start().split(':').next().expect("key before colon"))
+            .collect();
+        assert_eq!(keys, vec!["a", "b", "c"]);
+        let mut committed_sorted = committed.clone();
+        committed_sorted.sort_by(|x, y| x.sort_key().cmp(y.sort_key()));
+        assert_eq!(diff_ledger_fields(&committed_sorted, &actual), lines);
+    }
+
+    #[test]
+    fn diff_ledger_fields_skips_a_document_present_on_one_side_only() {
+        let committed = vec![
+            outcome_row("a", "hit"),
+            hit_row_with("only-committed", |r| r.mrz_found = false),
+        ];
+        let actual = vec![
+            hit_row_with("a", |r| r.mrz_format = Some("TD3".to_string())),
+            hit_row_with("only-actual", |r| r.ocr_ms = 99_999),
+        ];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines,
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format 1"
+                    .to_string(),
+                "  a: mrz_format null -> TD3".to_string(),
+            ],
+            "documents on one side only are counted by `diff_outcomes`, not diffed here"
+        );
+    }
+
+    /// A fresh scratch directory under the system temp dir, unique per test.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass-field-diff-test-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    #[test]
+    fn append_step_summary_writes_the_diff_lines_and_nothing_without_a_path() {
+        let dir = scratch_dir("step-summary");
+        let summary = dir.join("summary.md");
+        let lines = vec![
+            "outcome ledger diff vs committed: 0 document(s) changed outcome".to_string(),
+            "  a: mrz_format null -> TD3".to_string(),
+        ];
+
+        append_step_summary(None, &lines).expect("no path is a no-op");
+        assert!(!summary.exists(), "an unset variable must write nothing");
+
+        append_step_summary(Some(summary.as_path()), &lines).expect("write the summary");
+        let text = std::fs::read_to_string(&summary).expect("summary exists");
+        for line in &lines {
+            assert!(text.contains(&format!("{line}\n")), "{text}");
+        }
+        assert!(text.contains("```text\n") && text.ends_with("```\n"));
+
+        // GitHub steps append to one shared file; a second call must not truncate.
+        append_step_summary(Some(summary.as_path()), &lines).expect("append again");
+        let twice = std::fs::read_to_string(&summary).expect("summary exists");
+        assert_eq!(twice.matches("  a: mrz_format null -> TD3\n").count(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_free_projection_holds_no_miss_reason_text_for_a_document_number_mismatch() {
+        let mismatch = hit_row_with("d", |r| {
+            r.outcome = "document_number_mismatch".to_string();
+            r.miss_reason = Some(
+                "document number mismatch: got \"X1234567\", expected \"Y7654321\"".to_string(),
+            );
+            r.mrz_format = Some("TD3".to_string());
+        });
+        let bad_code = hit_row_with("e", |r| {
+            r.outcome = "no_mrz_found".to_string();
+            r.miss_reason = Some("no MRZ found: BadDocumentCode(\"PZ\")".to_string());
+        });
+        let hit = outcome_row("h", "hit");
+        let rows = vec![mismatch.clone(), bad_code, hit.clone()];
+
+        let projected = text_free_projection(&rows);
+        let bytes = String::from_utf8(ledger_bytes(&projected)).expect("valid UTF-8");
+        for text in [
+            "X1234567",
+            "Y7654321",
+            "got",
+            "expected",
+            "BadDocumentCode",
+            "PZ",
+        ] {
+            assert!(
+                !bytes.contains(text),
+                "the projection must hold no miss_reason text, found {text:?}: {bytes}"
+            );
+        }
+        // The kind survives, every other field is kept, and a hit stays a hit.
+        assert_eq!(
+            projected[0].miss_reason.as_deref(),
+            Some("document_number_mismatch")
+        );
+        assert_eq!(
+            projected[0],
+            OutcomeRow {
+                miss_reason: Some("document_number_mismatch".to_string()),
+                ..mismatch
+            }
+        );
+        assert_eq!(projected[1].miss_reason.as_deref(), Some("no_mrz_found"));
+        assert_eq!(projected[2], hit);
+        // Still a ledger: it parses back and diffs like one.
+        assert_eq!(
+            parse_ledger(&ledger_bytes(&projected)).expect("projection parses"),
+            projected
+        );
+    }
+
+    #[test]
+    fn write_run_ledger_projection_writes_under_out_and_never_as_the_committed_ledger() {
+        let dir = scratch_dir("run-ledger");
+        let out_dir = dir.join("artifacts");
+        let rows = vec![hit_row_with("a", |r| {
+            r.outcome = "document_number_mismatch".to_string();
+            r.miss_reason =
+                Some("document number mismatch: got \"X1\", expected \"Y2\"".to_string());
+        })];
+
+        let out = out_dir.join("report.json");
+        let written =
+            write_run_ledger_projection(out.to_str().expect("utf8"), &rows).expect("write");
+        assert_eq!(written, out_dir.join(RUN_LEDGER_PROJECTION_FILENAME));
+        assert_ne!(
+            written.file_name().expect("file name"),
+            OUTCOMES_LEDGER_FILENAME,
+            "the projection must not share the committed ledger's name"
+        );
+        let on_disk = std::fs::read_to_string(&written).expect("projection on disk");
+        assert!(
+            !on_disk.contains("X1") && !on_disk.contains("Y2"),
+            "{on_disk}"
+        );
+        assert_eq!(
+            on_disk.as_bytes(),
+            ledger_bytes(&text_free_projection(&rows)).as_slice()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
