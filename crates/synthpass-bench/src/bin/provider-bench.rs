@@ -46,10 +46,14 @@
 //!                      score, and the recovered MRZ zone + failing check
 //!                      digit(s), and append a row per miss to
 //!                      <out-dir>/provider-bench-miss-ocr-dump.jsonl.
+//!                      Refuses an output directory inside the working tree
+//!                      unless git ignores it.
 //!                      The real-specimen equivalent of synthpass-bench's own
 //!                      --dump-ocr, scoped to this one miss kind since a
 //!                      real-specimen run is much larger than a synthetic
 //!                      diagnostic one
+//!   --dump-ocr-hits    with --real-specimens: add Tier-1 hits to the same OCR
+//!                      dump; the same destination guard applies
 //!   --dump-ocr-passes  with --real-specimens: write
 //!                      <out-dir>/provider-bench-ocr-passes.jsonl, one row per OCR'd
 //!                      document (whatever its outcome, written once from the OCR
@@ -193,7 +197,9 @@ struct Args {
     /// failed; `> 0` → OCR introduced the error). See
     /// `synthpass_bench::provider_bench::run_prepped`'s doc for why this is
     /// scoped to those two in-denominator miss kinds rather than every
-    /// document the way `synthpass-bench --dump-ocr` is.
+    /// document the way `synthpass-bench --dump-ocr` is. This flag and
+    /// `--dump-ocr-hits` refuse an output directory inside the working tree
+    /// unless git ignores it.
     dump_ocr: bool,
     dump_ocr_hits: bool,
     /// With `real_specimens`: write `<out-dir>/provider-bench-ocr-passes.jsonl`,
@@ -338,11 +344,12 @@ fn usage() {
         "  --dump-ocr         with --real-specimens: for every checksum_failed or no_mrz_found \
          miss, print the full pre-parse OCR text + MRZ band score (+ recovered MRZ zone + failing \
          check digit(s) for checksum_failed), and append a row per miss to \
-         <out-dir>/provider-bench-miss-ocr-dump.jsonl"
+         <out-dir>/provider-bench-miss-ocr-dump.jsonl. Refuses an output directory inside the \
+         working tree unless git ignores it"
     );
     eprintln!(
         "  --dump-ocr-hits    with --real-specimens: add Tier-1 hits to the same OCR dump; \
-         without this flag --dump-ocr remains miss-only"
+         without this flag --dump-ocr remains miss-only; the same destination guard applies"
     );
     eprintln!(
         "  --dump-ocr-passes  with --real-specimens: write <out-dir>/provider-bench-ocr-passes.jsonl, \
@@ -1142,12 +1149,11 @@ const RUN_LEDGER_PROJECTION_FILENAME: &str = "real-specimen-outcomes-text-free.j
 /// field is kept as it is. Rows stay [`OutcomeRow`]s, so the file parses with
 /// [`parse_ledger`] and diffs like a ledger.
 ///
-/// Why: the full `miss_reason` text can carry values read from the document.
+/// Why: some full `miss_reason` text can carry values read from the document.
 /// The audit of every `MissReason` `Display`
 /// format (`crates/synthpass-bench/src/lib.rs`):
 ///
-/// - `DocumentNumberMismatch`: `got {got:?}, expected {expected:?}` — **both
-///   document numbers**, one of them OCR-read from the specimen.
+/// - `DocumentNumberMismatch`: a fixed string carrying no document numbers.
 /// - `NoMrzFound`: the `Debug` of an `mrz::MrzError` — `BadCharacter` carries
 ///   the offending character and `BadDocumentCode` the first characters of
 ///   line 1, both OCR-read from the specimen. (`BadLength`, `BadChecksum`,
@@ -1161,9 +1167,9 @@ const RUN_LEDGER_PROJECTION_FILENAME: &str = "real-specimen-outcomes-text-free.j
 ///
 /// CI never publishes real-specimen text, even as a short-lived artifact
 /// (ADR-0027 Decision 5), so what an assert run uploads is this projection,
-/// never the full rows. Making the committed ledger itself value-free is
-/// ADR-0024 build step 0a, a separate change; until then the write-baseline
-/// path still writes the full ledger, unchanged.
+/// never the full rows. ADR-0024 build step 0a makes the committed ledger's
+/// document-number mismatch reason value-free too; the projection remains
+/// necessary for the other reasons above.
 fn text_free_projection(rows: &[OutcomeRow]) -> Vec<OutcomeRow> {
     rows.iter()
         .map(|row| OutcomeRow {
@@ -1910,6 +1916,13 @@ fn out_dir(out: &str) -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
+/// Whether this run asks to write any document-OCR dump next to `--out`.
+/// Every such flag goes through the shared destination guard before a model
+/// loads or a document is read.
+fn writes_document_ocr_dump(parsed: &Args) -> bool {
+    parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes
+}
+
 /// Persist a content-addressed run description next to the raw OCR dump.
 /// A row's `run_manifest` is a filename relative to its JSONL, so repeated
 /// runs in one output directory cannot silently re-point old rows.
@@ -2041,9 +2054,9 @@ async fn main() {
     let show_progress = parsed.progress || std::io::stderr().is_terminal();
 
     let root = repo_root();
-    // Refused before any model loads or document is read: the pass readings are
+    // Refused before any model loads or document is read: these dumps hold
     // document OCR, and a destination git would stage is not a place for them.
-    if parsed.dump_ocr_passes {
+    if writes_document_ocr_dump(&parsed) {
         let dir = out_dir(&parsed.out);
         let cwd = std::env::current_dir().unwrap_or_else(|e| {
             eprintln!("❌ cannot determine the working directory: {e}");
@@ -2927,6 +2940,17 @@ mod tests {
     }
 
     #[test]
+    fn every_document_ocr_dump_flag_uses_the_destination_guard() {
+        assert!(!writes_document_ocr_dump(
+            &parse_args(&args_of(&["--real-specimens"])).expect("parses")
+        ));
+        for flag in ["--dump-ocr", "--dump-ocr-hits", "--dump-ocr-passes"] {
+            let parsed = parse_args(&args_of(&["--real-specimens", flag])).expect("parses");
+            assert!(writes_document_ocr_dump(&parsed), "{flag}");
+        }
+    }
+
+    #[test]
     fn ocr_run_manifest_pins_flags_pivot_and_corpus_hash() {
         let dir = std::env::temp_dir().join(format!(
             "provider-bench-ocr-run-test-{}",
@@ -3801,27 +3825,25 @@ mod tests {
 
     #[test]
     fn diff_ledger_fields_prints_the_miss_kind_and_never_the_miss_reason_text() {
-        let mismatch = |got: &str, expected: &str| {
+        let no_mrz = |detail: &str| {
             hit_row_with("d", |r| {
-                r.outcome = "document_number_mismatch".to_string();
-                r.miss_reason = Some(format!(
-                    "document number mismatch: got {got:?}, expected {expected:?}"
-                ));
+                r.outcome = "no_mrz_found".to_string();
+                r.miss_reason = Some(format!("no MRZ found: {detail}"));
             })
         };
-        let committed = vec![mismatch("X1234567", "Y7654321")];
-        let actual = vec![mismatch("X1234568", "Y7654321")];
+        let committed = vec![no_mrz("SECRET-OLD")];
+        let actual = vec![no_mrz("SECRET-NEW")];
         let lines = diff_ledger_fields(&committed, &actual);
         assert_eq!(
             lines,
             vec![
                 "deterministic field diff vs committed (report-only): 1 document(s); miss_reason 1"
                     .to_string(),
-                "  d: miss_reason document_number_mismatch (detail changed)".to_string(),
+                "  d: miss_reason no_mrz_found (detail changed)".to_string(),
             ]
         );
         let printed = lines.join("\n");
-        for text in ["X1234567", "X1234568", "Y7654321", "got", "expected"] {
+        for text in ["SECRET-OLD", "SECRET-NEW"] {
             assert!(
                 !printed.contains(text),
                 "the miss_reason text must never be printed: {printed}"
@@ -4014,9 +4036,7 @@ mod tests {
     fn text_free_projection_holds_no_miss_reason_text_for_a_document_number_mismatch() {
         let mismatch = hit_row_with("d", |r| {
             r.outcome = "document_number_mismatch".to_string();
-            r.miss_reason = Some(
-                "document number mismatch: got \"X1234567\", expected \"Y7654321\"".to_string(),
-            );
+            r.miss_reason = Some("document number mismatch".to_string());
             r.mrz_format = Some("TD3".to_string());
         });
         let bad_code = hit_row_with("e", |r| {
@@ -4068,8 +4088,7 @@ mod tests {
         let out_dir = dir.join("artifacts");
         let rows = vec![hit_row_with("a", |r| {
             r.outcome = "document_number_mismatch".to_string();
-            r.miss_reason =
-                Some("document number mismatch: got \"X1\", expected \"Y2\"".to_string());
+            r.miss_reason = Some("document number mismatch".to_string());
         })];
 
         let out = out_dir.join("report.json");

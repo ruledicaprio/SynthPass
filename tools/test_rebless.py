@@ -899,23 +899,23 @@ class LedgerDiffTests(unittest.TestCase):
         )
 
     def test_miss_reason_prints_the_kind_and_never_the_text(self):
-        def mismatch(got: str) -> dict:
+        def no_mrz(detail: str) -> dict:
             return ledger_row(
                 "d",
-                outcome="document_number_mismatch",
-                miss_reason=f'document number mismatch: got "{got}", expected "Y7654321"',
+                outcome="no_mrz_found",
+                miss_reason=f"no MRZ found: {detail}",
             )
 
-        lines = rb.format_ledger_field_diff_lines([mismatch("X1234567")], [mismatch("X1234568")])
+        lines = rb.format_ledger_field_diff_lines([no_mrz("SECRET-OLD")], [no_mrz("SECRET-NEW")])
         self.assertEqual(
             lines,
             [
                 "deterministic field diff vs committed (report-only): 1 document(s); miss_reason 1",
-                "  d: miss_reason document_number_mismatch (detail changed)",
+                "  d: miss_reason no_mrz_found (detail changed)",
             ],
         )
         printed = "\n".join(lines)
-        for text in ("X1234567", "X1234568", "Y7654321", "got", "expected"):
+        for text in ("SECRET-OLD", "SECRET-NEW"):
             self.assertNotIn(text, printed)
 
     def test_miss_reason_with_a_changed_kind_names_both_kinds(self):
