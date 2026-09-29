@@ -20,12 +20,14 @@
 //!   after `-Inf` masking, which this probe never does).
 //!
 //! `class` is alphabet length + 1 = 97 (index 0 is the CTC blank; label
-//! `i + 1` is the character at index `i` of `ocrs` 0.12.2's private
-//! recognition alphabet — see [`CTC_ALPHABET`]'s doc comment for how that
-//! table was pinned). We do not need CTC's alignment: the grid gives cell
-//! boundaries in image space, the resize factor and the model's downsample
-//! factor of 4 are known, so a grid column maps to a timestep range by
-//! arithmetic — see [`timestep_range`].
+//! `i + 1` is the character at index `i` of `ocrs` 0.13.1's private
+//! recognition alphabet — see `ctc_matrix::CTC_ALPHABET`'s doc comment for
+//! how that table is pinned). We do not need CTC's alignment: the grid gives
+//! cell boundaries in image space, the resize factor and the model's
+//! downsample factor of 4 are known, so a grid column maps to a timestep
+//! range by arithmetic — see `ctc_matrix::timestep_range`. The label table,
+//! the batch runner and that arithmetic live in `common/ctc_matrix.rs`,
+//! shared with `glyph_atlas.rs`.
 //!
 //! # Modes
 //!
@@ -41,7 +43,8 @@
 //!   at `n ∈ {0, 1, 2, 4}`. Every cell of one line shares an identical-width
 //!   context crop (the grid is fixed-pitch), so all of a line's cells batch
 //!   into one `[N, 1, H, W]` tensor and one inference — see
-//!   [`run_recognition_batch`] — rather than one inference per cell.
+//!   `ctc_matrix::run_recognition_batch` — rather than one inference per
+//!   cell.
 //!
 //! # Numbers this probe reports
 //!
@@ -86,16 +89,18 @@
 //!
 //! Run with `--release`: a corpus-wide run does several recognition passes
 //! per document across every mode.
+//!
+//! The two `.rten` models are read from `SYNTHPASS_OCR_MODEL_DIR` if set,
+//! else from the repo root.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use image::{GrayImage, RgbImage};
-use ocrs::{DecodeMethod, ImageSource, OcrEngine, OcrEngineParams, OcrInput, TextItem};
+use ocrs::{ImageSource, OcrEngine, OcrInput, TextItem};
 use rten::Model;
-use rten_imageproc::{bounding_rect, PointF, RotatedRect, Vec2};
-use rten_tensor::prelude::*;
+use rten_imageproc::{bounding_rect, RotatedRect};
 use rten_tensor::{Layout, NdTensor};
 
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig};
@@ -103,71 +108,17 @@ use synthpass_ocr::chargrid::{self, Glyph, Grid};
 use synthpass_ocr::geometry::{self, detect_mrz_band_range, BBox, OcrLine};
 use synthpass_ocr::MRZ_CHARSET;
 
-// ---------------------------------------------------------------------
-// The CTC label table (verified facts; see the module doc).
-// ---------------------------------------------------------------------
-
-/// `ocrs` 0.12.2's private recognition alphabet (`recognition.rs`'s
-/// `DEFAULT_ALPHABET`), duplicated here because it is never exposed —
-/// `OcrEngineParams::allowed_chars` only masks decode probabilities to
-/// `-Inf` for excluded characters, it does not change the model's own
-/// alphabet or class count (confirmed by reading `ocrs::OcrEngine::new_impl`:
-/// `excluded_char_labels` is computed *from* this alphabet, which is used
-/// verbatim by both the general and MRZ-constrained engines). Pinned against
-/// silent upgrade drift by `ctc_alphabet_tests` below.
-const CTC_ALPHABET: &str = " 0123456789!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~EABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-
-/// CTC label 0 is reserved for the blank symbol; label `i + 1` is
-/// [`CTC_ALPHABET`]'s character at index `i`.
-const CTC_BLANK_LABEL: usize = 0;
-
-/// `<` — the MRZ filler `ocrs`'s beam decoder essentially never emits (see
-/// `synthpass_ocr::chargrid`'s module doc). Item 2.
-const CTC_LABEL_FILLER: usize = 29;
-
-/// The mangled EUR-symbol class `ocrs`'s alphabet stores as ASCII `'E'`
-/// (`// nb. The "E" before "ABCDE" should be the EUR symbol.` — `ocrs`'s own
-/// source comment), distinct from the genuine alphabetic `'E'` at
-/// [`CTC_LABEL_LETTER_E`]. Both decode to the same character, so only the
-/// raw matrix can tell them apart. Item 3.
-const CTC_LABEL_EUR_E: usize = 44;
-
-/// The genuine alphabetic `E`. Item 3.
-const CTC_LABEL_LETTER_E: usize = 49;
-
-/// Width downsample factor of the recognition model's CNN stage (verified;
-/// see the module doc).
-const CTC_DOWNSAMPLE: f32 = 4.0;
-
-/// Beam width for `ocrs`'s MRZ-constrained engine, mirroring
-/// `synthpass_ocr`'s own private `MRZ_BEAM_WIDTH` so mode `ocrs`'s control
-/// read matches production's actual decode.
-const MRZ_BEAM_WIDTH: u32 = 24;
-
-fn ctc_char(label: usize) -> Option<char> {
-    if label == CTC_BLANK_LABEL {
-        None
-    } else {
-        CTC_ALPHABET.chars().nth(label - 1)
-    }
-}
-
-#[cfg(test)]
-mod ctc_alphabet_tests {
-    use super::*;
-
-    /// Pins the three labels this probe's items 2/3 depend on against a
-    /// silent `ocrs` alphabet change — if this ever fails, every downstream
-    /// number in this file is reading the wrong class index.
-    #[test]
-    fn labels_match_the_verified_ocrs_alphabet() {
-        assert_eq!(CTC_ALPHABET.chars().count(), 96, "97 classes = 96 + blank");
-        assert_eq!(ctc_char(CTC_LABEL_FILLER), Some('<'));
-        assert_eq!(ctc_char(CTC_LABEL_EUR_E), Some('E'));
-        assert_eq!(ctc_char(CTC_LABEL_LETTER_E), Some('E'));
-        assert_eq!(ctc_char(CTC_BLANK_LABEL), None);
-    }
-}
+// The label table, batch runner and pixel-to-timestep arithmetic, shared
+// with `glyph_atlas.rs`. This example uses most of it; the other includer
+// uses a different subset, hence the `allow`.
+#[path = "common/ctc_matrix.rs"]
+#[allow(dead_code)]
+mod ctc_matrix;
+use ctc_matrix::{
+    averaged_distribution, axis_aligned_rect, ctc_char, load_general_engine, load_mrz_engine,
+    load_raw_recognition_model, model_dir, run_recognition_batch, timestep_range, CTC_BLANK_LABEL,
+    CTC_LABEL_EUR_E, CTC_LABEL_FILLER, CTC_LABEL_LETTER_E,
+};
 
 // ---------------------------------------------------------------------
 // CLI
@@ -270,9 +221,10 @@ fn main() {
         std::process::exit(1);
     }
     let root = repo_root();
+    let models = model_dir(&root);
 
     if let Some(seeds) = args.synthetic_origin_seeds {
-        let mrz_engine = match load_mrz_engine(&root) {
+        let mrz_engine = match load_mrz_engine(&models) {
             Ok(e) => e,
             Err(e) => {
                 eprintln!("{e}");
@@ -286,21 +238,21 @@ fn main() {
         return;
     }
 
-    let general_engine = match load_general_engine(&root) {
+    let general_engine = match load_general_engine(&models) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
         }
     };
-    let mrz_engine = match load_mrz_engine(&root) {
+    let mrz_engine = match load_mrz_engine(&models) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("{e}");
             std::process::exit(1);
         }
     };
-    let raw_recognition_model = match load_raw_recognition_model(&root) {
+    let raw_recognition_model = match load_raw_recognition_model(&models) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{e}");
@@ -339,44 +291,6 @@ fn main() {
     if let Err(e) = write_json(&args.out_dir, "summary.json", &agg.to_json(args.mode)) {
         eprintln!("failed to write summary.json: {e}");
     }
-}
-
-// ---------------------------------------------------------------------
-// Engine loading
-// ---------------------------------------------------------------------
-
-fn load_model(path: &Path) -> Result<Model, String> {
-    Model::load_file(path).map_err(|e| format!("failed to load model {}: {e}", path.display()))
-}
-
-fn load_general_engine(root: &Path) -> Result<OcrEngine, String> {
-    let detection = load_model(&root.join("text-detection.rten"))?;
-    let recognition = load_model(&root.join("text-recognition.rten"))?;
-    OcrEngine::new(OcrEngineParams {
-        detection_model: Some(detection),
-        recognition_model: Some(recognition),
-        ..Default::default()
-    })
-    .map_err(|e| format!("failed to build general engine: {e}"))
-}
-
-fn load_mrz_engine(root: &Path) -> Result<OcrEngine, String> {
-    let detection = load_model(&root.join("text-detection.rten"))?;
-    let recognition = load_model(&root.join("text-recognition.rten"))?;
-    OcrEngine::new(OcrEngineParams {
-        detection_model: Some(detection),
-        recognition_model: Some(recognition),
-        allowed_chars: Some(MRZ_CHARSET.to_string()),
-        decode_method: DecodeMethod::BeamSearch {
-            width: MRZ_BEAM_WIDTH,
-        },
-        ..Default::default()
-    })
-    .map_err(|e| format!("failed to build MRZ-constrained engine: {e}"))
-}
-
-fn load_raw_recognition_model(root: &Path) -> Result<Model, String> {
-    load_model(&root.join("text-recognition.rten"))
 }
 
 // ---------------------------------------------------------------------
@@ -894,116 +808,12 @@ fn cell_column_profile(
 // Matrix reading (modes `line` and `cell`).
 // ---------------------------------------------------------------------
 
-fn axis_aligned_rect(top: f32, left: f32, bottom: f32, right: f32) -> RotatedRect {
-    let width = (right - left).max(1.0);
-    let height = (bottom - top).max(1.0);
-    let center = PointF::from_yx((top + bottom) / 2.0, (left + right) / 2.0);
-    RotatedRect::new(center, Vec2::from_yx(-1.0, 0.0), width, height)
-}
-
-/// Runs `model` on a batch of same-height crops in one `run_one` call,
-/// padding narrower crops on the right to the widest (mirroring `ocrs`'s own
-/// `prepare_text_line_batch` convention) rather than requiring exact width
-/// equality — the grid is fixed-pitch so crops of one context size should
-/// already match, but real images can differ by a rounding pixel. Returns
-/// `[batch, seq, class]`.
-fn run_recognition_batch(
-    model: &Model,
-    crops: &[NdTensor<f32, 2>],
-) -> Result<NdTensor<f32, 3>, String> {
-    if crops.is_empty() {
-        return Err("run_recognition_batch: empty batch".to_string());
-    }
-    let h = crops[0].shape()[0];
-    let max_w = crops.iter().map(|c| c.shape()[1]).max().unwrap_or(0);
-    if max_w == 0 {
-        return Err("run_recognition_batch: zero-width crop".to_string());
-    }
-    let mut batch = NdTensor::<f32, 4>::zeros([crops.len(), 1, h, max_w]);
-    for (i, crop) in crops.iter().enumerate() {
-        let w = crop.shape()[1];
-        batch.slice_mut((i, 0, .., ..w)).copy_from(crop);
-    }
-    let value: rten::Value = batch.into();
-    let output = model
-        .run_one(value.into(), None)
-        .map_err(|e| format!("recognition model run failed: {e}"))?;
-    let tensor: rten_tensor::Tensor<f32> = output
-        .try_into()
-        .map_err(|_| "recognition output was not an f32 tensor".to_string())?;
-    let mut seq_batch_cls: NdTensor<f32, 3> = tensor
-        .try_into()
-        .map_err(|_| "recognition output did not have 3 dims".to_string())?;
-    // [seq, batch, class] -> [batch, seq, class] (mirrors `ocrs`'s own
-    // `TextRecognizer::run`).
-    seq_batch_cls.permute([1, 0, 2]);
-    Ok(seq_batch_cls)
-}
-
-/// Average probability (`.exp()` of the raw log-probits — never `.softmax()`,
-/// see the module doc) of each class over timesteps `[t0, t1)` of batch
-/// item `item` of `batch` (`[batch, seq, class]`), clamped to the actual
-/// sequence length. `None` on an empty range.
-fn averaged_distribution(
-    batch: &NdTensor<f32, 3>,
-    item: usize,
-    t0: usize,
-    t1: usize,
-) -> Option<Vec<f64>> {
-    let view = batch.slice([item]);
-    let seq_len = view.shape()[0];
-    let classes = view.shape()[1];
-    let t0 = t0.min(seq_len);
-    let t1 = t1.min(seq_len).max(t0);
-    if t1 <= t0 {
-        return None;
-    }
-    let mut sums = vec![0.0f64; classes];
-    for t in t0..t1 {
-        for (c, sum) in sums.iter_mut().enumerate() {
-            *sum += f64::from(view[[t, c]].exp());
-        }
-    }
-    let n = f64::from((t1 - t0) as u32);
-    for v in &mut sums {
-        *v /= n;
-    }
-    Some(sums)
-}
-
 fn top_label_excluding_blank(dist: &[f64]) -> Option<usize> {
     dist.iter()
         .enumerate()
         .filter(|&(label, _)| label != CTC_BLANK_LABEL)
         .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(label, _)| label)
-}
-
-/// Maps an x-range in a crop's ORIGINAL pixel coordinates to a timestep
-/// range in that crop's own CTC output, given its own resized width (from
-/// `prepare_recognition_input`) and the fixed downsample factor. `crop_left`/
-/// `crop_width` describe the crop's extent in the same original-pixel space
-/// as `x_lo`/`x_hi`.
-fn timestep_range(
-    x_lo: f32,
-    x_hi: f32,
-    crop_left: f32,
-    crop_width: f32,
-    resized_width: f32,
-) -> (usize, usize) {
-    let map = |x: f32| -> usize {
-        if crop_width <= 0.0 {
-            return 0;
-        }
-        let resized_x = (x - crop_left) * resized_width / crop_width;
-        (resized_x / CTC_DOWNSAMPLE).round().max(0.0) as usize
-    };
-    let t0 = map(x_lo);
-    let mut t1 = map(x_hi);
-    if t1 <= t0 {
-        t1 = t0 + 1;
-    }
-    (t0, t1)
 }
 
 /// Mode `line`: one inference over the whole band line's own `RotatedRect`
