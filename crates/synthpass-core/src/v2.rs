@@ -354,6 +354,12 @@ impl FieldConfidence {
         };
         for reason in reasons {
             match reason {
+                // These raw-line observations are report-only. They do not
+                // change confidence until their precision has been measured.
+                Finding::RawIssuerNotInRegistry { .. }
+                | Finding::DigitInTwoLineLine1
+                | Finding::RawNameSeparatorMissing
+                | Finding::RawInteriorFillerRun => {}
                 Finding::UnrecognizedIssuingCountry { .. } => {
                     self.issuing_country = IMPLAUSIBLE;
                 }

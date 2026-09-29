@@ -116,7 +116,13 @@ impl Evidence {
 
     /// Record a line-1 integrity verdict, stripped to kinds.
     pub fn observe_line1(&mut self, verdict: &Verdict) {
-        self.line1_findings = verdict.kinds();
+        // Raw-line observations are serialized in the extraction verdict but
+        // do not feed even the opt-in Line1Flagged routing clause.
+        self.line1_findings = verdict
+            .kinds()
+            .into_iter()
+            .filter(|kind| !kind.is_report_only())
+            .collect();
     }
 
     /// Whether anything at all was recognized.
@@ -174,5 +180,17 @@ mod tests {
 
         // The PII the finding carried did not survive the projection.
         assert!(!format!("{:?}", e.line1_findings).contains("XXX"));
+    }
+
+    #[test]
+    fn report_only_raw_findings_do_not_trigger_line1_routing() {
+        let verdict = Verdict::NeedsReview {
+            reasons: vec![synthpass_core::fusion::Finding::RawNameSeparatorMissing],
+        };
+        let mut evidence = Evidence::default();
+        evidence.observe_line1(&verdict);
+        assert!(evidence.line1_findings.is_empty());
+        assert!(!evidence.line1_flagged());
+        assert!(verdict.is_flagged());
     }
 }

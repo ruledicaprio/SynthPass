@@ -95,6 +95,18 @@ pub enum Support {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Zeroize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Finding {
+    /// Raw line-1 issuer cells 2..5 have no registry match after trimming
+    /// filler. This is a corroboration miss, not proof the issuer is wrong.
+    RawIssuerNotInRegistry { got: String },
+    /// A digit appears from cell 5 onward in a two-line format's line 1.
+    /// Records the shape only, never the name or the digit.
+    DigitInTwoLineLine1,
+    /// The two-line name field has no visible `<<`; legitimate specimens can
+    /// print this way, so this finding is diagnostic only.
+    RawNameSeparatorMissing,
+    /// A second interior `<<` occurs after the surname/given-name separator.
+    /// No name bytes are copied into the finding.
+    RawInteriorFillerRun,
     /// `issuing_country` is not a recognized ICAO/ISO 3166-1 code — the
     /// clearest, cheapest signal of a shifted line 1.
     UnrecognizedIssuingCountry { got: String },
@@ -200,6 +212,10 @@ pub enum Finding {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum FindingKind {
+    RawIssuerNotInRegistry,
+    DigitInTwoLineLine1,
+    RawNameSeparatorMissing,
+    RawInteriorFillerRun,
     UnrecognizedIssuingCountry,
     IssuingCountryNationalityMismatch,
     MissingNameSeparator,
@@ -211,10 +227,26 @@ pub enum FindingKind {
 }
 
 impl FindingKind {
+    /// Raw structural observations stay out of the opt-in routing signal.
+    /// Their precision has not been measured against the real corpus.
+    pub fn is_report_only(self) -> bool {
+        matches!(
+            self,
+            Self::RawIssuerNotInRegistry
+                | Self::DigitInTwoLineLine1
+                | Self::RawNameSeparatorMissing
+                | Self::RawInteriorFillerRun
+        )
+    }
+
     /// Stable snake_case label, identical to the serde representation. Safe as
     /// a metric label value: the set is closed and fixed at compile time.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::RawIssuerNotInRegistry => "raw_issuer_not_in_registry",
+            Self::DigitInTwoLineLine1 => "digit_in_two_line_line1",
+            Self::RawNameSeparatorMissing => "raw_name_separator_missing",
+            Self::RawInteriorFillerRun => "raw_interior_filler_run",
             Self::UnrecognizedIssuingCountry => "unrecognized_issuing_country",
             Self::IssuingCountryNationalityMismatch => "issuing_country_nationality_mismatch",
             Self::MissingNameSeparator => "missing_name_separator",
@@ -242,6 +274,10 @@ impl Finding {
     /// some default kind, because the result is what reaches logs and metrics.
     pub fn kind(&self) -> FindingKind {
         match self {
+            Self::RawIssuerNotInRegistry { .. } => FindingKind::RawIssuerNotInRegistry,
+            Self::DigitInTwoLineLine1 => FindingKind::DigitInTwoLineLine1,
+            Self::RawNameSeparatorMissing => FindingKind::RawNameSeparatorMissing,
+            Self::RawInteriorFillerRun => FindingKind::RawInteriorFillerRun,
             Self::UnrecognizedIssuingCountry { .. } => FindingKind::UnrecognizedIssuingCountry,
             Self::IssuingCountryNationalityMismatch { .. } => {
                 FindingKind::IssuingCountryNationalityMismatch
@@ -335,6 +371,39 @@ pub fn check_line1_integrity_excluding(m: &MrzData, occluded: &[crate::v2::CoreF
     let name_occluded = occludes(CoreField::Surname) || occludes(CoreField::GivenNames);
 
     let mut reasons = Vec::new();
+
+    if let Some(line1) = m.mrz_lines.lines().next() {
+        if !occludes(CoreField::IssuingCountry) {
+            if let Some(raw) = line1.get(2..5) {
+                let issuer = raw.trim_matches('<');
+                if mrz::country_name(issuer).is_none() {
+                    reasons.push(Finding::RawIssuerNotInRegistry {
+                        got: issuer.to_string(),
+                    });
+                }
+            }
+        }
+        let two_line = matches!(
+            m.format,
+            mrz::Format::Td2 | mrz::Format::Td3 | mrz::Format::MrvA | mrz::Format::MrvB
+        );
+        if two_line && !name_occluded {
+            if let Some(name) = line1.get(5..) {
+                if name.bytes().any(|b| b.is_ascii_digit()) {
+                    reasons.push(Finding::DigitInTwoLineLine1);
+                }
+                let populated = name.trim_end_matches('<');
+                if let Some(separator) = populated.find("<<") {
+                    let given = &populated[separator + 2..];
+                    if given.contains("<<") {
+                        reasons.push(Finding::RawInteriorFillerRun);
+                    }
+                } else {
+                    reasons.push(Finding::RawNameSeparatorMissing);
+                }
+            }
+        }
+    }
 
     if !occludes(CoreField::IssuingCountry) {
         match mrz::country_name(&m.issuing_country) {
@@ -679,6 +748,54 @@ mod tests {
     #[test]
     fn a_clean_document_is_accepted() {
         assert_eq!(check_line1_integrity(&base()), Verdict::Accepted);
+    }
+
+    #[test]
+    fn raw_issuer_uses_cells_two_through_five_after_trimming_filler() {
+        for issuer in ["RCS", "<<<", "OOO", "DOR", "TRC"] {
+            let mut m = base();
+            m.mrz_lines.replace_range(2..5, issuer);
+            let kind = FindingKind::RawIssuerNotInRegistry;
+            assert!(check_line1_integrity(&m).kinds().contains(&kind), "{issuer}");
+            assert!(kind.is_report_only());
+        }
+    }
+
+    #[test]
+    fn raw_two_line_names_report_digits_missing_separator_and_interior_filler() {
+        let mut digit = base();
+        digit.mrz_lines.replace_range(5..6, "9");
+        assert!(check_line1_integrity(&digit)
+            .kinds()
+            .contains(&FindingKind::DigitInTwoLineLine1));
+
+        let mut missing = base();
+        missing.mrz_lines = missing.mrz_lines.replacen("ERIKSSON<<ANNA", "ERIKSSONKKANNA", 1);
+        assert!(check_line1_integrity(&missing)
+            .kinds()
+            .contains(&FindingKind::RawNameSeparatorMissing));
+
+        let mut interior = base();
+        interior.mrz_lines = interior.mrz_lines.replacen("ANNA<MARIA", "ANNA<<ARIA", 1);
+        assert!(check_line1_integrity(&interior)
+            .kinds()
+            .contains(&FindingKind::RawInteriorFillerRun));
+
+        // TD1 line 1 carries the document number, so digits there are not
+        // name anomalies. Its names live on line 3.
+        digit.format = mrz::Format::Td1;
+        assert!(!check_line1_integrity(&digit)
+            .kinds()
+            .contains(&FindingKind::DigitInTwoLineLine1));
+    }
+
+    #[test]
+    fn raw_findings_serialize_as_additive_kinds_without_name_text() {
+        let finding = Finding::RawInteriorFillerRun;
+        let json = serde_json::to_value(&finding).expect("serialize finding");
+        assert_eq!(json["kind"], "raw_interior_filler_run");
+        assert_eq!(json.as_object().expect("object").len(), 1);
+        assert!(finding.kind().is_report_only());
     }
 
     #[test]

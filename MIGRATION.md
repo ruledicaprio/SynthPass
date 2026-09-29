@@ -6,6 +6,16 @@ to the versions it ships (see [`changelog.d/README.md`](changelog.d/README.md)).
 
 ## Unreleased
 
+### Raw line-1 findings in extraction JSON (#576)
+
+`Finding` now has four report-only variants: `raw_issuer_not_in_registry`,
+`digit_in_two_line_line1`, `raw_name_separator_missing`, and
+`raw_interior_filler_run`. JSON consumers that reject unknown `line1_integrity.reasons[].kind`
+values must accept these kinds. Rust code matching `Finding` exhaustively must add arms for them.
+The new findings do not lower field confidence and do not trigger the opt-in `Line1Flagged`
+routing clause. A raw issuer registry miss is diagnostic, including for valid codes absent from the
+registry; no parsed zone is refused or rewritten.
+
 ## Migration guide: `mrz` 0.8 → 0.9
 
 ### `mrz` 0.8 → 0.9
