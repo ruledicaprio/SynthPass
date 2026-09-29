@@ -21,6 +21,7 @@ use synthpass_ocr::NativeOcr;
 
 pub mod bench_report;
 pub mod ground_truth;
+pub mod ocr_passes;
 pub mod provider_bench;
 pub mod report;
 
@@ -1171,6 +1172,30 @@ pub struct HitResult {
 /// in-memory entry point today, so a temp file is the same pattern every
 /// other OCR call site in this workspace already uses.
 pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) -> HitResult {
+    check_document_inner(ocr, image, expected, None)
+}
+
+/// [`check_document`] plus one [`synthpass_ocr::PassRecord`] per OCR pass that
+/// ran, for `synthpass-bench --ocr-passes` (ADR-0024, amendment 1). The
+/// [`HitResult`] is what `check_document` returns for the same input: the
+/// traced OCR call returns the same page as the untraced one. The records are
+/// empty when OCR itself failed.
+pub fn check_document_traced(
+    ocr: &NativeOcr,
+    image: &DynamicImage,
+    expected: &Labels,
+) -> (HitResult, Vec<synthpass_ocr::PassRecord>) {
+    let mut records = Vec::new();
+    let result = check_document_inner(ocr, image, expected, Some(&mut records));
+    (result, records)
+}
+
+fn check_document_inner(
+    ocr: &NativeOcr,
+    image: &DynamicImage,
+    expected: &Labels,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
+) -> HitResult {
     let start = Instant::now();
 
     let path = std::env::temp_dir().join(format!(
@@ -1191,7 +1216,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
-    ) = run_check(&path, write_result, ocr, expected);
+    ) = run_check(&path, write_result, ocr, expected, trace);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -1268,6 +1293,7 @@ fn run_check(
     write_result: image::ImageResult<()>,
     ocr: &NativeOcr,
     expected: &Labels,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
 ) -> CheckOutcome {
     if let Err(e) = write_result {
         return (
@@ -1291,7 +1317,14 @@ fn run_check(
     // thin wrapper over the former that discards everything but `text` (see
     // `NativeOcr::recognize`'s doc comment), so this call does no extra OCR
     // work — it just keeps `retry_stop` this report now carries (issue #510).
-    let page = match ocr.recognize_detailed(path) {
+    let recognized = match trace {
+        Some(records) => ocr.recognize_detailed_traced(path).map(|(page, passes)| {
+            *records = passes;
+            page
+        }),
+        None => ocr.recognize_detailed(path),
+    };
+    let page = match recognized {
         Ok(page) => page,
         Err(e) => {
             return (

@@ -12,7 +12,7 @@
 //! ```text
 //! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
 //!                 [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N]
-//!                 [--dump-ocr] [--escalation-report]
+//!                 [--dump-ocr] [--ocr-passes] [--escalation-report]
 //!   --count N            number of documents to check (default: 100)
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
@@ -33,6 +33,14 @@
 //!   --dump-ocr           print every document's raw OCR text (one printed
 //!                        line per detected line) before the summary — a
 //!                        small-`--count` diagnostic, not for a full run
+//!   --ocr-passes         add `ocr_text` (the full OCR page text) and `ocr_passes` (every
+//!                        executed OCR pass in order: id, transform, image size, outcome,
+//!                        and each MRZ-shaped line it read with its bounding box) to each
+//!                        `results[]` entry. Off by default and report-only: the keys are
+//!                        absent without the flag, and no measured value changes. With it
+//!                        on both keys are always present (`ocr_passes` is `[]` and
+//!                        `ocr_text` `null` when OCR itself failed). Synthetic text only,
+//!                        so nothing here is a real document's OCR (ADR-0024, amendment 1)
 //!   --escalation-report  Tier-2 escalation rate under the default routing
 //!                        policy vs. Chunk 7's composite-only opt-in, and
 //!                        whether the newly-accepted documents are correct
@@ -84,6 +92,12 @@ struct Args {
     /// every document, so it is a diagnostic run, not something to leave on
     /// for a 100-document corpus.
     dump_ocr: bool,
+    /// Add `ocr_text` and `ocr_passes` to every `results[]` entry — the
+    /// per-pass OCR readings behind #574 (ADR-0024, amendment 1). Report-only:
+    /// it runs the traced OCR entry point, which returns the same page as the
+    /// untraced one, so no hit, miss, retry stop or timing-independent field
+    /// changes. Off by default, and the keys are then absent from the report.
+    ocr_passes: bool,
     /// Print the Tier-2 escalation rate under the shipped default routing
     /// policy *and* under Chunk 7's `accept_composite_only_failure` opt-in,
     /// plus whether the documents that opt-in would newly accept are actually
@@ -107,6 +121,7 @@ impl Default for Args {
             max_prefix_wrong_accepts: None,
             document_type: DocumentType::TD3,
             dump_ocr: false,
+            ocr_passes: false,
             escalation_report: false,
         }
     }
@@ -116,7 +131,7 @@ fn usage() {
     eprintln!(
         "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
          [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N] [--dump-ocr] \
-         [--escalation-report]"
+         [--ocr-passes] [--escalation-report]"
     );
     eprintln!("  --count N            number of documents to check (default: 100)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -135,6 +150,11 @@ fn usage() {
     eprintln!(
         "  --dump-ocr           print every document's raw OCR text (one printed line per \
          detected line) before the summary — meant for a small --count diagnostic run"
+    );
+    eprintln!(
+        "  --ocr-passes         add ocr_text and ocr_passes (every executed OCR pass with its \
+         transform, outcome and the MRZ-shaped lines it read, with boxes) to each results[] \
+         entry; off by default, report-only"
     );
     eprintln!(
         "  --escalation-report  print the Tier-2 escalation rate under the default routing \
@@ -211,6 +231,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             }
             "--dump-ocr" => {
                 parsed.dump_ocr = true;
+                i += 1;
+            }
+            "--ocr-passes" => {
+                parsed.ocr_passes = true;
                 i += 1;
             }
             "--escalation-report" => {
@@ -325,6 +349,17 @@ struct SeedResult {
     /// otherwise, including on every non-hit.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     wrong_fields: Vec<&'static str>,
+    /// `--ocr-passes` only: the full `OcrPage::text` this document's OCR
+    /// returned. The outer `Option` is the flag (`None` omits the key), the
+    /// inner one is OCR having failed (`Some(None)` is `null`) — so with the
+    /// flag on the key is always present. Report-only; nothing reads it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ocr_text: Option<Option<String>>,
+    /// `--ocr-passes` only: every executed OCR pass, in order, with the
+    /// MRZ-shaped lines it read (ADR-0024, amendment 1). Omitted without the
+    /// flag; `[]` with it when OCR itself failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ocr_passes: Option<Vec<synthpass_bench::ocr_passes::PassObject>>,
 }
 
 #[derive(Serialize)]
@@ -545,7 +580,11 @@ fn main() {
     let results: Vec<SeedResult> = corpus
         .into_iter()
         .map(|doc| {
-            let result = check_document(&ocr, &doc.image, &doc.labels);
+            let (result, pass_records) = if parsed.ocr_passes {
+                synthpass_bench::check_document_traced(&ocr, &doc.image, &doc.labels)
+            } else {
+                (check_document(&ocr, &doc.image, &doc.labels), Vec::new())
+            };
             if parsed.dump_ocr {
                 println!("--- seed {} raw OCR lines ---", doc.seed);
                 match &result.raw_text {
@@ -571,6 +610,12 @@ fn main() {
             let kind = result.reason.as_ref().map(miss_kind);
             let prefix_wrong_accepted_read =
                 is_prefix_wrong_accepted_read(result.hit, kind, &wrong_fields);
+            // The traced fields exist only under `--ocr-passes`; `raw_text` is
+            // the text `mrz::find_and_parse` was handed, i.e. `OcrPage::text`.
+            let ocr_text = parsed.ocr_passes.then(|| result.raw_text.clone());
+            let ocr_passes = parsed
+                .ocr_passes
+                .then(|| synthpass_bench::ocr_passes::pass_objects(&pass_records));
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
@@ -590,6 +635,8 @@ fn main() {
                 prefix_wrong_accept,
                 prefix_wrong_accepted_read,
                 wrong_fields,
+                ocr_text,
+                ocr_passes,
                 fields: result
                     .fields
                     .into_iter()
@@ -1342,6 +1389,80 @@ mod tests {
         assert_eq!(json["tier1_damaged_recovery"], false);
     }
 
+    /// #574 / ADR-0024 amendment 1: without `--ocr-passes` the per-document
+    /// shape is exactly what it was, so no consumer of the default report
+    /// (`tools/synth_ab_diff.py`, the trend charts) sees a new key. This is
+    /// the full key set of a bare hit (the optional keys that are empty are
+    /// omitted), so a new key has to be added here on purpose.
+    #[test]
+    fn a_default_result_carries_neither_ocr_text_nor_ocr_passes() {
+        let json = serde_json::to_value(doc(None, &[], &[])).expect("serialize SeedResult");
+        let object = json.as_object().unwrap();
+        assert!(!object.contains_key("ocr_text"), "{json}");
+        assert!(!object.contains_key("ocr_passes"), "{json}");
+        let mut keys: Vec<&str> = object.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "check_states",
+                "elapsed_ms",
+                "hit",
+                "line1_flagged",
+                "names_exact",
+                "prefix_wrong_accept",
+                "prefix_wrong_accepted_read",
+                "profile",
+                "retry_damaged_recovery",
+                "retry_variant_id",
+                "seed",
+                "tier1_damaged_recovery",
+                "wrong_accept",
+            ]
+        );
+    }
+
+    /// With `--ocr-passes` both keys are always present: `ocr_passes: []` and
+    /// `ocr_text: null` when OCR itself failed (there is no page to have text),
+    /// never omitted.
+    #[test]
+    fn ocr_passes_keys_are_always_present_when_the_flag_is_on() {
+        let mut failed = doc(Some("ocr_error"), &[], &[]);
+        failed.ocr_text = Some(None);
+        failed.ocr_passes = Some(Vec::new());
+        let json = serde_json::to_value(&failed).expect("serialize SeedResult");
+        assert_eq!(json["ocr_text"], serde_json::Value::Null);
+        assert!(json.as_object().unwrap().contains_key("ocr_text"), "{json}");
+        assert_eq!(json["ocr_passes"], serde_json::json!([]));
+
+        let mut read = doc(None, &[], &[]);
+        read.ocr_text = Some(Some("P<UTO...\nline two".to_string()));
+        read.ocr_passes = Some(synthpass_bench::ocr_passes::pass_objects(&[
+            synthpass_ocr::PassRecord {
+                order: 0,
+                id: "general".to_string(),
+                transform: synthpass_ocr::PassTransform::General,
+                turn: 0,
+                image_width: 10,
+                image_height: 20,
+                outcome: synthpass_ocr::PassOutcome::Accepted,
+                readings: Vec::new(),
+            },
+        ]));
+        let json = serde_json::to_value(&read).expect("serialize SeedResult");
+        assert_eq!(json["ocr_text"], "P<UTO...\nline two");
+        assert_eq!(json["ocr_passes"][0]["id"], "general");
+        assert_eq!(json["ocr_passes"][0]["outcome"], "accepted");
+        assert_eq!(json["ocr_passes"][0]["transform"], "general");
+    }
+
+    #[test]
+    fn ocr_passes_flag_parses_and_is_off_by_default() {
+        assert!(!parse_args(&[]).expect("defaults").ocr_passes);
+        let parsed = parse_args(&["--ocr-passes".to_string()]).expect("flag parses");
+        assert!(parsed.ocr_passes);
+    }
+
     fn doc(
         miss: Option<&'static str>,
         failing: &[&'static str],
@@ -1389,6 +1510,8 @@ mod tests {
             prefix_wrong_accept: false,
             prefix_wrong_accepted_read: false,
             wrong_fields: Vec::new(),
+            ocr_text: None,
+            ocr_passes: None,
         }
     }
 
