@@ -85,3 +85,12 @@ test = true
 [[example]]
 name = "probe_matrix"
 test = true
+
+# The glyph atlas (#433). Its model-free tests (per-cell statistics on
+# hand-built matrices, degradation determinism, rotation geometry, the
+# serialized-key allowlist, the output-directory refusal) are the guard for a
+# tool whose real runs need the models and take an hour; without
+# `test = true` they would be built and never run.
+[[example]]
+name = "glyph_atlas"
+test = true
