@@ -1150,6 +1150,14 @@ impl CapabilitySnapshot {
 /// `labelled_documents` alongside makes the `Option` legible on its own: a
 /// report can always say *how many* documents a rate (or its absence) was
 /// computed over.
+///
+/// **Three populations (#564).** `field_match_rate`, `mean_cer` and
+/// `per_field_cer` cover every labelled document the reader answered,
+/// whatever its outcome. That mixes read quality with the corpus's share of
+/// misses and non-conforming specimens, so they are kept for continuity with
+/// the bench history and not quoted as accuracy. The two populations to quote
+/// are [`Self::accepted_reads`] (read quality) and [`Self::scored`]
+/// (end-to-end), each with its own document count.
 pub struct AccuracyStats {
     /// How many of `documents` contributed at least one ground-truth field.
     /// Always equal to `documents` for the synthetic corpus (every
@@ -1159,19 +1167,147 @@ pub struct AccuracyStats {
     pub labelled_documents: usize,
     /// Fraction of `(document, field)` pairs where the provider's answer
     /// exactly matches ground truth, over fields ground truth actually has a
-    /// value for. `None` iff `labelled_documents == 0`.
+    /// value for, on every labelled document. `None` iff
+    /// `labelled_documents == 0`.
     pub field_match_rate: Option<f64>,
     /// Mean character error rate over the same population, via
     /// [`crate::cer`] — reuses the exact metric `synthpass-bench`'s Tier-1
     /// report already uses, so the two numbers are comparable. `None` iff
     /// `labelled_documents == 0`.
     pub mean_cer: Option<f64>,
-    /// Per-field mean CER. A field's entry is `None` when no document in the
-    /// labelled population had ground truth for that specific field (for
+    /// Per-field mean CER over the same population, with the number of
+    /// documents that had truth for the field. A field's mean is `None` when
+    /// no labelled document had ground truth for that specific field (for
     /// instance every real specimen loaded so far omitting
     /// `personal_number`), for the same reason the whole-report rate is
     /// `Option`.
-    pub per_field_cer: Vec<(&'static str, Option<f64>)>,
+    pub per_field_cer: Vec<(&'static str, Option<f64>, usize)>,
+    /// **Read quality:** field accuracy over the labelled documents with an
+    /// accepted read ([`crate::is_accepted_read`]), what a caller receives
+    /// when the check digits verify.
+    ///
+    /// Not "Tier-1 hits": a hit also requires the document number to equal
+    /// the truth, so a hits-only population would make `document_number`
+    /// right by construction and keep only the reads that already agree with
+    /// the truth. A document-number mismatch is an accepted read, and its
+    /// wrong fields count here.
+    pub accepted_reads: PopulationAccuracy,
+    /// **End-to-end:** field accuracy over the labelled documents in
+    /// [`Tier1HitRate`]'s scored population ([`in_scored_tier1_population`]),
+    /// the same documents the hit rate is computed over.
+    ///
+    /// A scored document the reader did not read contributes every field it
+    /// has truth for, scored as absent, and so does one the reader errored
+    /// on. A `checksum_failed_specimen` is outside it: its printed zone fails
+    /// its own check digits, so no read of it can be accepted, and the reader
+    /// returns no fields for a failed checksum.
+    pub scored: PopulationAccuracy,
+}
+
+/// Field-match rate and mean CER over one population of labelled documents,
+/// with the population's size and a per-field breakdown.
+///
+/// `documents` counts the documents that contributed at least one field
+/// comparison. The rates are `None` iff it is zero, for the reason
+/// [`AccuracyStats`]'s doc gives: no population is not 0% accuracy.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PopulationAccuracy {
+    pub documents: usize,
+    pub field_match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+    /// One entry per [`CoreField`], in [`CoreField::ALL`] order.
+    pub per_field: Vec<FieldAccuracy>,
+}
+
+/// One field's accuracy within a [`PopulationAccuracy`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldAccuracy {
+    pub field: &'static str,
+    /// How many documents in the population had truth for this field. Each
+    /// rate is over these documents only, so a mean over one document is
+    /// visibly one document.
+    pub documents: usize,
+    pub match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+}
+
+/// Running counts behind one [`PopulationAccuracy`].
+struct FieldTally {
+    documents: usize,
+    comparisons: usize,
+    exact: usize,
+    cer_sum: f64,
+    /// Indexed like [`CoreField::ALL`]: `(comparisons, exact, cer_sum)`.
+    per_field: Vec<(usize, usize, f64)>,
+}
+
+impl FieldTally {
+    fn new() -> Self {
+        Self {
+            documents: 0,
+            comparisons: 0,
+            exact: 0,
+            cer_sum: 0.0,
+            per_field: vec![(0, 0, 0.0); CoreField::ALL.len()],
+        }
+    }
+
+    /// Adds one document's field comparisons, each `(index into
+    /// CoreField::ALL, exact, cer)`. A document with none is not counted.
+    fn add_document(&mut self, comparisons: &[(usize, bool, f64)]) {
+        if comparisons.is_empty() {
+            return;
+        }
+        self.documents += 1;
+        for &(field, exact, cer) in comparisons {
+            self.comparisons += 1;
+            self.exact += usize::from(exact);
+            self.cer_sum += cer;
+            let (n, field_exact, field_cer) = &mut self.per_field[field];
+            *n += 1;
+            *field_exact += usize::from(exact);
+            *field_cer += cer;
+        }
+    }
+
+    fn finish(self) -> PopulationAccuracy {
+        let rate = |sum: f64, count: usize| (count > 0).then(|| sum / count as f64);
+        PopulationAccuracy {
+            documents: self.documents,
+            field_match_rate: rate(self.exact as f64, self.comparisons),
+            mean_cer: rate(self.cer_sum, self.comparisons),
+            per_field: CoreField::ALL
+                .iter()
+                .zip(self.per_field)
+                .map(|(field, (n, exact, cer_sum))| FieldAccuracy {
+                    field: field.as_str(),
+                    documents: n,
+                    match_rate: rate(exact as f64, n),
+                    mean_cer: rate(cer_sum, n),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// A document's field comparisons when the reader returned nothing: every
+/// field it has truth for, scored as absent (`got = ""`), the way the
+/// comparison loop scores an absent field.
+fn absent_field_comparisons(
+    ground_truth: Option<&HashMap<CoreField, String>>,
+) -> Vec<(usize, bool, f64)> {
+    let Some(truth) = ground_truth else {
+        return Vec::new();
+    };
+    CoreField::ALL
+        .iter()
+        .enumerate()
+        .filter_map(|(i, field)| {
+            truth
+                .get(field)
+                .map(|expected| (i, expected.is_empty(), crate::cer(expected, "")))
+        })
+        .collect()
 }
 
 /// The unsupported-assertion metric outcome for one provider: either a
@@ -1949,6 +2085,9 @@ async fn run_prepped_with_dump_options(
         let mut field_total = 0usize;
         let mut cer_sum = 0.0f64;
         let mut cer_count = 0usize;
+        // The two quoted populations (#564); see `AccuracyStats`.
+        let mut accepted_reads = FieldTally::new();
+        let mut scored = FieldTally::new();
         let mut per_field: Vec<(&'static str, f64, usize)> = CoreField::ALL
             .iter()
             .map(|f| (f.as_str(), 0.0, 0))
@@ -2050,6 +2189,12 @@ async fn run_prepped_with_dump_options(
                         chargrid: bench_page.page.chargrid.clone(),
                         tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
                     });
+                    // `OcrError` sits inside the scored population: a reader
+                    // that errored read nothing, so end-to-end counts every
+                    // field this document has truth for as absent. It is not
+                    // an accepted read.
+                    scored
+                        .add_document(&absent_field_comparisons(bench_page.ground_truth.as_ref()));
                     if progress {
                         eprintln!(
                             "[{} {}/{ocr_documents}] {} MISS ocr_error ({elapsed:.1?})",
@@ -2068,6 +2213,10 @@ async fn run_prepped_with_dump_options(
             // Identical for every field in the loop below — computed once
             // per document rather than once per assertion.
             let ocr_text_lower = bench_page.page.text.to_lowercase();
+            // `(index into CoreField::ALL, exact, cer)` for each field this
+            // document has truth for, added to the populations once
+            // `miss_reason` is known.
+            let mut doc_fields: Vec<(usize, bool, f64)> = Vec::new();
 
             for (i, field) in CoreField::ALL.iter().enumerate() {
                 let got = reading.extraction.fields.get(*field);
@@ -2090,6 +2239,7 @@ async fn run_prepped_with_dump_options(
                     cer_count += 1;
                     per_field[i].1 += field_cer;
                     per_field[i].2 += 1;
+                    doc_fields.push((i, got_str == expected.as_str(), field_cer));
                 }
 
                 // Unsupported-assertion: needs no ground truth at all — only
@@ -2224,6 +2374,16 @@ async fn run_prepped_with_dump_options(
                         })
                     })
             };
+
+            // One predicate each, shared with the rates they sit beside, so
+            // "accepted" and "scored" cannot drift from `accepted_reads` and
+            // `tier1_hit_rate`.
+            if crate::is_accepted_read(miss_reason.as_ref()) {
+                accepted_reads.add_document(&doc_fields);
+            }
+            if in_scored_tier1_population(&miss_reason) {
+                scored.add_document(&doc_fields);
+            }
 
             let dump_miss_kind = match &miss_reason {
                 Some(
@@ -2568,8 +2728,10 @@ async fn run_prepped_with_dump_options(
                 mean_cer: (cer_count > 0).then(|| cer_sum / cer_count as f64),
                 per_field_cer: per_field
                     .into_iter()
-                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64)))
+                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64), n))
                     .collect(),
+                accepted_reads: accepted_reads.finish(),
+                scored: scored.finish(),
             },
             speed,
             json_validity: (!capability.deterministic).then(|| JsonValidityStats {
@@ -3103,6 +3265,170 @@ mod tests {
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 1);
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
+    }
+
+    /// #564: read quality is over accepted reads, end-to-end is over the
+    /// scored population, and a non-conforming specimen is in neither.
+    #[tokio::test]
+    async fn field_accuracy_populations_follow_the_accepted_and_scored_predicates() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            given_names: "",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("one reader");
+        let page = |truth: &[(CoreField, &str)]| {
+            let mut page = rate_test_page();
+            page.mrz_expected = true;
+            page.mrz_found = true;
+            page.ground_truth = Some(
+                truth
+                    .iter()
+                    .map(|(field, value)| (*field, value.to_string()))
+                    .collect(),
+            );
+            page
+        };
+        // A hit.
+        let hit = page(&[(CoreField::Surname, "DOE")]);
+        // Checksum-valid, but the reader returns no document number: an
+        // accepted read that the scorer files as a document-number mismatch.
+        let mismatch = page(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C3"),
+        ]);
+        // A scored miss: nothing MRZ-shaped was found.
+        let mut unread = page(&[(CoreField::Surname, "SMITH")]);
+        unread.mrz_found = false;
+        // A printed zone that fails its own check digits.
+        let mut nonconforming = page(&[(CoreField::Surname, "DOE")]);
+        nonconforming.printed_zone_nonconforming = true;
+
+        let reports = run_prepped(
+            &catalog,
+            &[Some(hit), Some(mismatch), Some(unread), Some(nonconforming)],
+            false,
+            None,
+            false,
+        )
+        .await;
+        let accuracy = &reports[0].accuracy;
+
+        // All labelled, kept for continuity: 3 of 5 comparisons exact.
+        assert_eq!(accuracy.labelled_documents, 4);
+        assert_eq!(accuracy.field_match_rate, Some(0.6));
+
+        // Read quality: the hit and the mismatch, whose missing document
+        // number counts against it.
+        let accepted = &accuracy.accepted_reads;
+        assert_eq!(accepted.documents, 2);
+        assert_eq!(accepted.field_match_rate, Some(2.0 / 3.0));
+        let document_number = accepted
+            .per_field
+            .iter()
+            .find(|field| field.field == "document_number")
+            .expect("document_number");
+        assert_eq!(document_number.documents, 1);
+        assert_eq!(document_number.match_rate, Some(0.0));
+        assert_eq!(document_number.mean_cer, Some(1.0));
+
+        // End-to-end: the hit, the mismatch and the unread miss, but not the
+        // non-conforming specimen.
+        let scored = &accuracy.scored;
+        assert_eq!(scored.documents, 3);
+        assert_eq!(scored.field_match_rate, Some(0.5));
+        let surname = scored
+            .per_field
+            .iter()
+            .find(|field| field.field == "surname")
+            .expect("surname");
+        assert_eq!(surname.documents, 3);
+
+        let json = serde_json::to_value(crate::report::ProviderRow::from(
+            reports.into_iter().next().expect("one report"),
+        ))
+        .expect("serialize report");
+        assert_eq!(json["accuracy"]["accepted_reads"]["documents"], 2);
+        assert_eq!(json["accuracy"]["scored"]["documents"], 3);
+        let scored_surname = json["accuracy"]["scored"]["per_field"]
+            .as_array()
+            .expect("per_field")
+            .iter()
+            .find(|field| field["field"] == "surname")
+            .expect("surname")
+            .clone();
+        assert_eq!(scored_surname["documents"], 3);
+        let all_labelled_surname = json["accuracy"]["per_field_cer"]
+            .as_array()
+            .expect("per_field_cer")
+            .iter()
+            .find(|field| field["field"] == "surname")
+            .expect("surname")
+            .clone();
+        assert_eq!(all_labelled_surname["documents"], 4);
+    }
+
+    /// A reader that fails on every document.
+    struct ErroringReader {
+        capability: Capability,
+    }
+
+    #[async_trait::async_trait]
+    impl IntelligenceProvider for ErroringReader {
+        fn id(&self) -> ProviderId {
+            ProviderId("erroring-test-reader")
+        }
+        fn capability(&self) -> &Capability {
+            &self.capability
+        }
+        fn describe(&self) -> String {
+            "always-failing test reader".into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FieldReader for ErroringReader {
+        async fn read(&self, _ctx: &DocumentContext<'_>) -> Result<Reading, ProviderError> {
+            Err(ProviderError::Failed {
+                detail: "test failure".into(),
+            })
+        }
+    }
+
+    /// A reader error is a failed read: end-to-end scores the document's
+    /// fields as absent, and it is not an accepted read.
+    #[tokio::test]
+    async fn a_reader_error_scores_absent_fields_end_to_end_only() {
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(ErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("one reader");
+        let mut page = rate_test_page();
+        page.mrz_expected = true;
+        page.mrz_found = true;
+        page.ground_truth = Some(HashMap::from([
+            (CoreField::Surname, "DOE".to_string()),
+            (CoreField::GivenNames, "JOHN".to_string()),
+        ]));
+
+        let reports = run_prepped(&catalog, &[Some(page)], false, None, false).await;
+        let accuracy = &reports[0].accuracy;
+        assert_eq!(accuracy.scored.documents, 1);
+        assert_eq!(accuracy.scored.field_match_rate, Some(0.0));
+        assert_eq!(accuracy.scored.mean_cer, Some(1.0));
+        assert_eq!(accuracy.accepted_reads.documents, 0);
+        assert_eq!(accuracy.accepted_reads.field_match_rate, None);
+        // The all-labelled figure, kept for continuity, never counted an
+        // errored read.
+        assert_eq!(accuracy.field_match_rate, None);
     }
 
     /// An entirely unlabelled corpus must report `None`, not a fabricated

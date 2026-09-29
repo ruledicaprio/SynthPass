@@ -104,21 +104,21 @@ and every environment variable and exit code in
 SynthPass mints its own documents, so accuracy is graded against ground truth, not assumptions —
 every render ships a `.labels.json` sidecar of per-field labels and a checksum-valid MRZ.
 
-<img src="knowledge/img/synthetic_pass_example.png" alt="A generated pass — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
+<img src="knowledge/img/synthetic_pass_example.png" alt="A generated TD1 ID card — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
 
 ```powershell
-cargo run -p synthpass-cli -- generate --count 1 --seed 42 --profile clean --out-dir out/
-cargo run -p synthpass-cli -- out/synthpass_42.png   # read it back, every check digit re-verified
+cargo run -p synthpass-cli -- generate --document-type td1 --count 1 --seed 1 --profile clean --out-dir out/
+cargo run -p synthpass-cli -- out/synthpass_1_td1.png   # read it back, every check digit re-verified
 ```
 
-`out/synthpass_42.labels.json` is the ground truth the read is graded against — fictional, and
+`out/synthpass_1_td1.labels.json` is the ground truth the read is graded against — fictional, and
 correct because SynthPass built the MRZ itself. Extraction writes its own read to
-`out/synthpass_42.json`, a different name on purpose, so reading a generated pass back never
+`out/synthpass_1_td1.json`, a different name on purpose, so reading a generated pass back never
 overwrites the labels it's graded against:
 
 ```json
-{ "surname": "ESKANDARI", "given_names": "MAREN", "document_number": "FLLF2W13I",
-  "nationality": "BRA", "date_of_birth": "1975-05-18", "sex": "F", "date_of_expiry": "2034-04-18" }
+{ "surname": "KOVALENKO", "given_names": "ANDRII", "document_number": "ZRQZFB5GZ",
+  "nationality": "BLR", "date_of_birth": "1985-05-07", "sex": "M", "date_of_expiry": "2035-04-26" }
 ```
 
 `synthpass-bench` scales this to a whole generated corpus — method in
