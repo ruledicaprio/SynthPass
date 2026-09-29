@@ -3157,6 +3157,7 @@ mod tests {
         reader: Arc<ImageRecordingReader>,
     ) -> Pipeline {
         Pipeline {
+            mrz_config_overrides: std::collections::BTreeMap::new(),
             ocr: Arc::from(ocr),
             infer: Arc::from(infer),
             audit_log: None,
@@ -3184,6 +3185,7 @@ mod tests {
         reader: Arc<ImageRecordingReader>,
     ) -> Pipeline {
         Pipeline {
+            mrz_config_overrides: std::collections::BTreeMap::new(),
             ocr: Arc::from(ocr),
             infer: Arc::from(infer),
             audit_log: None,

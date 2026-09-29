@@ -1127,6 +1127,7 @@ mod tests {
     fn damaged_recovery_keys_are_always_present_null_or_set() {
         fn detail(name: &str) -> DocumentDetailReport {
             DocumentDetailReport {
+                line1_selection: None,
                 name: name.to_string(),
                 asset_id: None,
                 mrz_found: true,

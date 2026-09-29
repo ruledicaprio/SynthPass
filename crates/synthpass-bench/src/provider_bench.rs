@@ -3836,6 +3836,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -3856,6 +3857,7 @@ mod tests {
                 ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -4063,6 +4065,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4108,6 +4111,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4188,6 +4192,7 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: Some("passports/corrupted-td3-fixture.png".to_string()),
             source_sha256: Some("a".repeat(64)),
             name: "corrupted-td3-fixture".to_string(),
@@ -4302,6 +4307,7 @@ mod tests {
         // OCR text with nothing MRZ-shaped in it: an MRZ is expected
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "no-mrz-found-fixture".to_string(),
@@ -4384,6 +4390,7 @@ mod tests {
         assert!(!recovered.valid());
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "labelled-nonconforming-specimen".to_string(),
@@ -4454,6 +4461,7 @@ mod tests {
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "labelled-ocr-misread".to_string(),
@@ -4549,6 +4557,7 @@ mod tests {
         let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4604,6 +4613,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4653,6 +4663,7 @@ mod tests {
 
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4717,6 +4728,7 @@ mod tests {
         // so it lands in `no_mrz_expected`.
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4783,6 +4795,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -4837,6 +4850,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -5546,6 +5560,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5595,6 +5610,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5650,6 +5666,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),

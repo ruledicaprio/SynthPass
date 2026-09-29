@@ -41,6 +41,10 @@ pub struct Line1Selection {
 /// The verdict of [`select_line1`].
 ///
 /// `#[non_exhaustive]`: an output type that may grow a variant.
+// `Proposed` holds a whole `MrzData` on purpose: a verdict is made once per
+// accepted read and moved once, so boxing it would add an allocation for no
+// measurable gain.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Line1Verdict {

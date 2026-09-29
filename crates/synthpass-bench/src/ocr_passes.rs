@@ -1070,7 +1070,7 @@ mod tests {
     /// must return the identical value (`serde_json`'s `float_roundtrip`).
     #[test]
     fn a_band_score_reads_back_as_the_identical_f64() {
-        for score in [0.1_f64, 1.0 / 3.0, 0.7_777_777_777_777_777, 1e-9] {
+        for score in [0.1_f64, 1.0 / 3.0, 0.777_777_777_777_777_7, 1e-9] {
             let mut collector = OcrPassesCollector::new(None);
             collector.push(
                 "doc",
