@@ -73,12 +73,15 @@ download = ["dep:reqwest"]
 name = "corpus_manifest"
 test = true
 
-# Same reason as `corpus_manifest` above. probe_matrix carries a test pinning
-# CTC labels 29/44/49 against `ocrs` 0.12.2's private `DEFAULT_ALPHABET`, which
-# it has to duplicate because `ocrs` never exposes it. Every figure the probe
-# reports is an index into that table, so if upstream reorders it the numbers
+# Same reason as `corpus_manifest` above. probe_matrix includes
+# `examples/common/ctc_matrix.rs`, which carries a test pinning CTC labels
+# 29/44/49 in its copy of `ocrs` 0.13.1's private `DEFAULT_ALPHABET`, which it
+# has to duplicate because `ocrs` never exposes it. Every figure the probe
+# reports is an index into that table, so if the copy is edited the numbers
 # silently become a different question's answer. Without `test = true` the
-# guard is built but never run, which is the same as not having it.
+# guard is built but never run, which is the same as not having it. (That test
+# compares the copy with itself; what catches an upstream reorder is
+# glyph_atlas's run-start self-check against `ocrs`'s own greedy read.)
 [[example]]
 name = "probe_matrix"
 test = true
