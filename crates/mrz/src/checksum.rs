@@ -103,9 +103,9 @@ pub(crate) fn letterize(c: char) -> char {
     }
 }
 
-/// Replace runs of ≥ `min_run` consecutive `K`/`L` characters with fillers —
-/// OCR persistently misreads the `<` filler as K or L, and no transliterated
-/// ICAO name contains four K/L in a row.
+/// Repair high-signal filler runs while retaining letters at the name boundary.
+/// An isolated K/L run is ambiguous: a name ending in KK can touch a filler
+/// read as K. A visible filler or a long trailing run supplies more evidence.
 pub(crate) fn defiller(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -120,8 +120,13 @@ pub(crate) fn defiller(s: &str) -> String {
                 .iter()
                 .filter(|b| matches!(b, b'K' | b'L'))
                 .count();
-            if j - i >= 4 && kl >= 3 {
+            let trailing = bytes[i..j].contains(&b'<') && bytes[j..].iter().all(|b| *b == b'<');
+            let anchored = i > 0 && bytes[i - 1] == b'<' && (i < 2 || bytes[i - 2] != b'<');
+            if (anchored && j == bytes.len() && kl >= 3) || (trailing && kl >= 6) {
                 out.extend(std::iter::repeat_n('<', j - i));
+            } else if trailing && kl == 3 && bytes[i..i + 3].iter().all(|b| *b == bytes[i]) {
+                out.push_str(&s[i..i + 2]);
+                out.extend(std::iter::repeat_n('<', j - i - 2));
             } else {
                 out.push_str(&s[i..j]);
             }
@@ -165,15 +170,17 @@ pub(crate) fn fix_doc_code(l: &str) -> String {
     }
 }
 
-/// MRZ name fields separate surname from given names with `<<`. When a name
-/// field has no `<<` at all but contains `KK`, that pair is a misread
-/// separator. Fields that already contain a real `<<` (e.g. MIKKO<<HEIKKI)
-/// are left untouched.
+/// Recover a lost `<<` only when the candidate `KK` follows a sufficiently
+/// long prefix. Short prefixes include common real double-K names, so an
+/// unmarked pair there is not evidence of a separator. No name check digit
+/// exists to arbitrate a pair later in the field.
 pub(crate) fn fix_name_separator(s: &str) -> String {
     let trimmed = s.trim_end_matches('<');
     if !trimmed.contains("<<") {
         if let Some(pos) = trimmed.find("KK") {
-            return format!("{}<<{}", &s[..pos], &s[pos + 2..]);
+            if pos >= 6 && !trimmed[pos + 2..].is_empty() {
+                return format!("{}<<{}", &s[..pos], &s[pos + 2..]);
+            }
         }
     }
     s.to_string()
@@ -414,8 +421,11 @@ mod tests {
         // in a name whose separator was dropped by OCR.
         for name in ["JUKKAMARI", "PEKKAPETRI", "MIKKOMATTI", "HAKKINENHEIKKI"] {
             assert_eq!(fix_name_separator(name), name);
+            assert_eq!(fix_name_separator(&format!("{name}<<<<")), format!("{name}<<<<"));
         }
         assert_eq!(fix_name_separator("KUKKKKMARI"), "KUKKKKMARI");
+        assert_eq!(fix_name_separator(&defiller("KUKKKKMARI")), "KUKKKKMARI");
+        assert_eq!(fix_name_separator(&defiller("KUKK<<MARI")), "KUKK<<MARI");
         assert_eq!(fix_name_separator("TAMM<<MIKK"), "TAMM<<MIKK");
     }
 
@@ -423,8 +433,11 @@ mod tests {
     fn defiller_preserves_letters_next_to_noisy_name_padding() {
         assert_eq!(defiller("KUKKKKMARI"), "KUKKKKMARI");
         assert_eq!(defiller("KUKKK<<<"), "KUKK<<<<");
+        assert_eq!(fix_name_separator(&defiller("KUKKK<<<")), "KUKK<<<<");
         assert_eq!(defiller("TAMM<<MIKKK<<"), "TAMM<<MIKK<<<");
+        assert_eq!(fix_name_separator(&defiller("TAMM<<MIKKK<<")), "TAMM<<MIKK<<<");
         assert_eq!(defiller("JUKKA<<PEKKA<<<"), "JUKKA<<PEKKA<<<");
+        assert_eq!(defiller("PALLL<<<"), "PALL<<<<");
     }
 
     #[test]
