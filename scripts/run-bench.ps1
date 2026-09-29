@@ -384,7 +384,29 @@ $hasChanges = ($LASTEXITCODE -ne 0)
 if ($hasChanges) {
     $totalRows = (Get-Content $historyFile | Measure-Object -Line).Lines
     git commit -m "data: $Track-bench run against main@$sha ($totalRows rows total)" | Out-Null
-    git push origin bench-data
+    # The nightly bench-data-collection workflow, or another track's run, can
+    # push to bench-data between the fetch above and this push. A native git
+    # failure does not throw, so check every exit code: rebase onto the new tip
+    # (the writers touch different files, so it cannot conflict with them) and
+    # retry, and fail loudly rather than report a push that never happened.
+    $pushed = $false
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        git push origin bench-data
+        if ($LASTEXITCODE -eq 0) {
+            $pushed = $true
+            break
+        }
+        Write-Warning "Push to bench-data rejected (attempt $attempt of 5); rebasing onto its new tip."
+        Start-Sleep -Seconds (20 * $attempt)
+        git pull --rebase origin bench-data
+        if ($LASTEXITCODE -ne 0) {
+            git rebase --abort 2>$null
+            throw "Could not rebase the $Track history row onto origin/bench-data. It is committed in $worktree but not pushed."
+        }
+    }
+    if (-not $pushed) {
+        throw "Pushing the $Track history row to bench-data failed 5 times. It is committed in $worktree but not pushed."
+    }
     Write-Host "Pushed $($rows.Count) new row(s) to origin/bench-data ($totalRows total for $Track)."
 } else {
     Write-Host "No new rows staged -- nothing to commit."
