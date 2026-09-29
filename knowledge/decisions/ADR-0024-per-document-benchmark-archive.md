@@ -134,3 +134,12 @@ From the 2026-09-27 design pass; each step is its own PR.
 5. **3, the query and diff tool** (`tools/`, standard library only, disclosure-safe output).
 6. **4, schema 2**, after #508 settles which OCR pass Tier 1 reads.
 7. **5, the private track's text-free records** (Decision 7).
+
+## Amendment (2026-09-29) — the nightly synthetic dataset is not an archive publication
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29).
+
+Decision 8 governs archive records and is unchanged. The nightly synthetic dataset on `bench-data`
+predates this ADR and is not an archive record. It is a separate, allowlisted projection of synthetic
+results. [ADR-0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) sets its scope,
+including that it publishes no text, and what CI may publish at all.
