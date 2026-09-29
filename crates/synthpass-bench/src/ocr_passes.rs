@@ -451,11 +451,12 @@ pub fn read_rows(dir: &Path) -> Result<PassesFile, String> {
     parse_rows(&body).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-/// Refuses a destination inside the working tree that git does not ignore.
+/// Refuses an OCR-dump destination inside the working tree that git does not
+/// ignore.
 ///
-/// The readings are document OCR. A file inside the checkout that git would
-/// stage is one `git add -A` from a commit, so the file is only written where
-/// it is either outside the tree or ignored (`artifacts/` is). `is_ignored`
+/// The dump files hold document OCR. A file inside the checkout that git would
+/// stage is one `git add -A` from a commit, so OCR dumps are only written where
+/// they are either outside the tree or ignored (`artifacts/` is). `is_ignored`
 /// answers for a path relative to `root`; production passes [`git_ignores`].
 /// The same rule, and the same `git check-ignore` mechanism, as
 /// `ground_truth`'s review-HTML output.
@@ -485,7 +486,7 @@ pub fn check_passes_destination(
         Ok(())
     } else {
         Err(format!(
-            "--dump-ocr-passes writes document OCR, and {} is inside the working tree and not \
+            "OCR dump flags write document OCR, and {} is inside the working tree and not \
              ignored by git; use an --out directory under artifacts/ or outside the checkout",
             relative.display()
         ))
