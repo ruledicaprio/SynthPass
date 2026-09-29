@@ -3089,6 +3089,7 @@ mod tests {
             unsupported_fields: Vec::new(),
             names_exact: None,
             name_error: None,
+            field_correctness: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
             retry_damaged_recovery: None,

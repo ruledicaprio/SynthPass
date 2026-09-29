@@ -28,7 +28,7 @@ use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpe
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use synthpass_core::v2::{CoreField, MrzFormat};
+use synthpass_core::v2::{CoreField, ExtractionFields, MrzFormat};
 use synthpass_die::{Capability, CostClass, DocumentContext, Evidence, ProviderCatalog};
 use synthpass_ocr::{NativeOcr, OcrPage};
 
@@ -1087,6 +1087,25 @@ pub struct DocumentDetail {
     /// values themselves. `None` both when `names_exact` is `Some(true)` and
     /// when it is `None`.
     pub name_error: Option<&'static str>,
+    /// Per-field correctness of this document's **accepted read**, for every
+    /// field its ground truth defines, keyed by [`CoreField::as_str`]. **Field
+    /// names and the [`FieldCorrectness`] enum only, never a value**: the
+    /// report is uploaded from CI and the truth is real-specimen text
+    /// (ADR-0027).
+    ///
+    /// `None` when the document has no ground truth (or truth for none of the
+    /// twelve fields), the same population `labelled_documents` counts.
+    /// Report-only: nothing gates on it (#574).
+    ///
+    /// Derived from the comparison `FieldTally` runs (see `compare_document`),
+    /// so summing `Exact` over the documents reproduces
+    /// [`AccuracyStats::accepted_reads`]'s per-field exact counts. A document
+    /// whose read was not accepted ([`crate::is_accepted_read`]), and one whose
+    /// reader errored, reads every field `Unread`: there is no accepted read
+    /// to have got anything right or wrong. That is what makes this a
+    /// per-document view of the read-quality population rather than of the
+    /// looser all-answers one.
+    pub field_correctness: Option<BTreeMap<&'static str, FieldCorrectness>>,
     /// Wall-clock time of this document's OCR pass (`recognize_detailed`),
     /// carried through from preparation. The same for every reader, since OCR
     /// runs once per document and is shared. Recorded per document because a
@@ -1290,24 +1309,130 @@ impl FieldTally {
     }
 }
 
-/// A document's field comparisons when the reader returned nothing: every
-/// field it has truth for, scored as absent (`got = ""`), the way the
-/// comparison loop scores an absent field.
-fn absent_field_comparisons(
-    ground_truth: Option<&HashMap<CoreField, String>>,
-) -> Vec<(usize, bool, f64)> {
-    let Some(truth) = ground_truth else {
-        return Vec::new();
+/// How one field of one document came out against its ground truth.
+///
+/// A name and a verdict, never the value: see
+/// [`DocumentDetail::field_correctness`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldCorrectness {
+    /// The read equals the truth exactly.
+    Exact,
+    /// A value was read and it differs from the truth.
+    Wrong,
+    /// No accepted read, or the field is absent from the read.
+    Unread,
+}
+
+impl FieldCorrectness {
+    /// The lower-case wire name used in the report JSON.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Wrong => "wrong",
+            Self::Unread => "unread",
+        }
+    }
+}
+
+/// One field's comparison against its truth, the single rule behind the
+/// aggregates ([`FieldTally`], the all-labelled rate and CER) and the
+/// per-document [`FieldCorrectness`] map.
+struct FieldComparison {
+    exact: bool,
+    cer: f64,
+    correctness: FieldCorrectness,
+}
+
+/// Compares one field. `got` is `None` when the field is absent from the read
+/// (`ExtractionFields::get` also returns `None` for an empty or blank value).
+///
+/// Exactness is decided first and by the aggregates' rule (`got == expected`,
+/// an absent read being `""`), so the map's `Exact` count cannot differ from
+/// the tally's. Only a non-exact answer is split into `Unread` and `Wrong`.
+fn compare_field(expected: &str, got: Option<&str>) -> FieldComparison {
+    let got_str = got.unwrap_or("");
+    let exact = got_str == expected;
+    let correctness = if exact {
+        FieldCorrectness::Exact
+    } else if got_str.is_empty() {
+        FieldCorrectness::Unread
+    } else {
+        FieldCorrectness::Wrong
     };
-    CoreField::ALL
-        .iter()
-        .enumerate()
-        .filter_map(|(i, field)| {
-            truth
-                .get(field)
-                .map(|expected| (i, expected.is_empty(), crate::cer(expected, "")))
-        })
-        .collect()
+    FieldComparison {
+        exact,
+        cer: crate::cer(expected, got_str),
+        correctness,
+    }
+}
+
+/// One document's field comparisons in both forms the harness needs.
+struct DocumentComparison {
+    /// `(index into CoreField::ALL, exact, cer)` for each field the document
+    /// has truth for, in `CoreField::ALL` order: [`FieldTally::add_document`]'s
+    /// input.
+    tally: Vec<(usize, bool, f64)>,
+    /// The same comparisons as a verdict per field name.
+    correctness: BTreeMap<&'static str, FieldCorrectness>,
+}
+
+impl DocumentComparison {
+    /// The map for [`DocumentDetail::field_correctness`]. `None` when the
+    /// document has no truth to compare against. When the read was not an
+    /// accepted one, every field is `Unread` whatever the tally scored.
+    fn field_correctness(
+        &self,
+        accepted: bool,
+    ) -> Option<BTreeMap<&'static str, FieldCorrectness>> {
+        if self.correctness.is_empty() {
+            return None;
+        }
+        Some(
+            self.correctness
+                .iter()
+                .map(|(field, correctness)| {
+                    let correctness = if accepted {
+                        *correctness
+                    } else {
+                        FieldCorrectness::Unread
+                    };
+                    (*field, correctness)
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Compares a document's read, when it has one, against its ground truth,
+/// field by field. `fields` is `None` when the reader returned nothing: every
+/// field the document has truth for is then scored as absent.
+///
+/// Only fields the truth has a value for are compared, see
+/// [`AccuracyStats`]'s doc on why an absent label must not be scored as a
+/// miss. A document without truth yields no comparisons.
+fn compare_document(
+    ground_truth: Option<&HashMap<CoreField, String>>,
+    fields: Option<&ExtractionFields>,
+) -> DocumentComparison {
+    let mut comparison = DocumentComparison {
+        tally: Vec::new(),
+        correctness: BTreeMap::new(),
+    };
+    let Some(truth) = ground_truth else {
+        return comparison;
+    };
+    for (i, field) in CoreField::ALL.iter().enumerate() {
+        let Some(expected) = truth.get(field) else {
+            continue;
+        };
+        let got = fields.and_then(|fields| fields.get(*field));
+        let compared = compare_field(expected, got);
+        comparison.tally.push((i, compared.exact, compared.cer));
+        comparison
+            .correctness
+            .insert(field.as_str(), compared.correctness);
+    }
+    comparison
 }
 
 /// The unsupported-assertion metric outcome for one provider: either a
@@ -2256,6 +2381,7 @@ async fn run_prepped_with_dump_options(
                     // aggregate, and a per-document view that simply omitted
                     // the row would make that indistinguishable from a
                     // document it handled cleanly with no assertions.
+                    let error_comparison = compare_document(bench_page.ground_truth.as_ref(), None);
                     documents_detail.push(DocumentDetail {
                         name: bench_page.name.clone(),
                         asset_id: bench_page.asset_id.clone(),
@@ -2277,6 +2403,9 @@ async fn run_prepped_with_dump_options(
                         names_exact: has_name_ground_truth(bench_page.ground_truth.as_ref())
                             .then_some(false),
                         name_error: None,
+                        // No read, so no accepted read: every field with
+                        // truth is `Unread`.
+                        field_correctness: error_comparison.field_correctness(false),
                         ocr_elapsed: bench_page.ocr_elapsed,
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
                         retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
@@ -2289,8 +2418,7 @@ async fn run_prepped_with_dump_options(
                     // that errored read nothing, so end-to-end counts every
                     // field this document has truth for as absent. It is not
                     // an accepted read.
-                    scored
-                        .add_document(&absent_field_comparisons(bench_page.ground_truth.as_ref()));
+                    scored.add_document(&error_comparison.tally);
                     if progress {
                         eprintln!(
                             "[{} {}/{ocr_documents}] {} MISS ocr_error ({elapsed:.1?})",
@@ -2309,34 +2437,29 @@ async fn run_prepped_with_dump_options(
             // Identical for every field in the loop below — computed once
             // per document rather than once per assertion.
             let ocr_text_lower = bench_page.page.text.to_lowercase();
-            // `(index into CoreField::ALL, exact, cer)` for each field this
-            // document has truth for, added to the populations once
-            // `miss_reason` is known.
-            let mut doc_fields: Vec<(usize, bool, f64)> = Vec::new();
+            // Each field this document has truth for, compared once. The
+            // tally goes to the populations once `miss_reason` is known, and
+            // the same comparisons make `DocumentDetail::field_correctness`,
+            // so the per-document map cannot disagree with the aggregates.
+            let comparison = compare_document(
+                bench_page.ground_truth.as_ref(),
+                Some(&reading.extraction.fields),
+            );
+            // Field-match / CER: only over fields this document has ground
+            // truth for — see `AccuracyStats`'s doc on why an absent label
+            // must not be scored as a miss. Summed in `CoreField::ALL` order,
+            // as the comparisons are made.
+            for &(i, exact, field_cer) in &comparison.tally {
+                field_total += 1;
+                field_hits += usize::from(exact);
+                cer_sum += field_cer;
+                cer_count += 1;
+                per_field[i].1 += field_cer;
+                per_field[i].2 += 1;
+            }
 
-            for (i, field) in CoreField::ALL.iter().enumerate() {
+            for field in CoreField::ALL.iter() {
                 let got = reading.extraction.fields.get(*field);
-
-                // Field-match / CER: only over fields this document has
-                // ground truth for — see `AccuracyStats`'s doc on why an
-                // absent label must not be scored as a miss.
-                if let Some(expected) = bench_page
-                    .ground_truth
-                    .as_ref()
-                    .and_then(|gt| gt.get(field))
-                {
-                    field_total += 1;
-                    let got_str = got.unwrap_or("");
-                    if got_str == expected.as_str() {
-                        field_hits += 1;
-                    }
-                    let field_cer = crate::cer(expected, got_str);
-                    cer_sum += field_cer;
-                    cer_count += 1;
-                    per_field[i].1 += field_cer;
-                    per_field[i].2 += 1;
-                    doc_fields.push((i, got_str == expected.as_str(), field_cer));
-                }
 
                 // Unsupported-assertion: needs no ground truth at all — only
                 // the OCR text this provider was given — but is only a
@@ -2474,11 +2597,12 @@ async fn run_prepped_with_dump_options(
             // One predicate each, shared with the rates they sit beside, so
             // "accepted" and "scored" cannot drift from `accepted_reads` and
             // `tier1_hit_rate`.
-            if crate::is_accepted_read(miss_reason.as_ref()) {
-                accepted_reads.add_document(&doc_fields);
+            let accepted = crate::is_accepted_read(miss_reason.as_ref());
+            if accepted {
+                accepted_reads.add_document(&comparison.tally);
             }
             if in_scored_tier1_population(&miss_reason) {
-                scored.add_document(&doc_fields);
+                scored.add_document(&comparison.tally);
             }
 
             let dump_miss_kind = match &miss_reason {
@@ -2676,6 +2800,7 @@ async fn run_prepped_with_dump_options(
                 unsupported_fields: doc_unsupported_fields,
                 names_exact,
                 name_error,
+                field_correctness: comparison.field_correctness(accepted),
                 ocr_elapsed: bench_page.ocr_elapsed,
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
                 retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
@@ -5416,6 +5541,304 @@ mod tests {
             }
             StrictNameHitRate::NotApplicable { reason } => {
                 panic!("expected a computed strict name hit rate, got NotApplicable: {reason}")
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // #574: per-document field correctness (`DocumentDetail::field_correctness`).
+    // ---------------------------------------------------------------------
+
+    /// A read carrying exactly `values`; every other field is absent.
+    fn read_fields(values: &[(CoreField, &str)]) -> ExtractionFields {
+        let mut fields = ExtractionFields::default();
+        for (field, value) in values {
+            fields.set(*field, Some((*value).to_string()));
+        }
+        fields
+    }
+
+    fn truth_of(values: &[(CoreField, &str)]) -> HashMap<CoreField, String> {
+        values
+            .iter()
+            .map(|(field, value)| (*field, (*value).to_string()))
+            .collect()
+    }
+
+    /// Exact, wrong and unread, per field, on one document; a field the truth
+    /// does not define is not in the map at all.
+    #[test]
+    fn field_correctness_is_exact_wrong_or_unread_per_field_with_truth() {
+        let truth = truth_of(&[
+            (CoreField::IssuingCountry, "UTO"),
+            (CoreField::DocumentNumber, "L898902C3"),
+            (CoreField::Surname, "ERIKSSON"),
+            (CoreField::DateOfBirth, "1974-08-12"),
+            (CoreField::PersonalNumber, "ZE184226B"),
+        ]);
+        let read = read_fields(&[
+            (CoreField::IssuingCountry, "UTO"),
+            (CoreField::DocumentNumber, "L898902C8"),
+            // A blank answer is no answer.
+            (CoreField::Surname, "   "),
+            // Read but not in the truth: never in the map.
+            (CoreField::Sex, "F"),
+        ]);
+        let comparison = compare_document(Some(&truth), Some(&read));
+        let map = comparison
+            .field_correctness(true)
+            .expect("a document with truth has a map");
+        assert_eq!(
+            map,
+            BTreeMap::from([
+                ("issuing_country", FieldCorrectness::Exact),
+                ("document_number", FieldCorrectness::Wrong),
+                ("surname", FieldCorrectness::Unread),
+                ("date_of_birth", FieldCorrectness::Unread),
+                ("personal_number", FieldCorrectness::Unread),
+            ])
+        );
+    }
+
+    /// No accepted read means no field was read, however the fields compare.
+    #[test]
+    fn field_correctness_is_all_unread_without_an_accepted_read() {
+        let truth = truth_of(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C3"),
+        ]);
+        let read = read_fields(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C8"),
+        ]);
+        let comparison = compare_document(Some(&truth), Some(&read));
+        assert_eq!(
+            comparison.field_correctness(false),
+            Some(BTreeMap::from([
+                ("surname", FieldCorrectness::Unread),
+                ("document_number", FieldCorrectness::Unread),
+            ]))
+        );
+        // A reader that returned nothing at all scores the same way.
+        let errored = compare_document(Some(&truth), None);
+        assert_eq!(
+            errored.field_correctness(false),
+            comparison.field_correctness(false)
+        );
+    }
+
+    #[test]
+    fn a_document_without_truth_has_no_field_correctness() {
+        let read = read_fields(&[(CoreField::Surname, "DOE")]);
+        assert!(compare_document(None, Some(&read))
+            .field_correctness(true)
+            .is_none());
+        // Truth that defines none of the fields is no truth either.
+        let empty = HashMap::new();
+        assert!(compare_document(Some(&empty), Some(&read))
+            .field_correctness(true)
+            .is_none());
+        assert!(compare_document(None, None)
+            .field_correctness(false)
+            .is_none());
+    }
+
+    /// The per-document maps and the aggregate tally are one comparison:
+    /// summing `Exact` over the documents' maps reproduces the tally's
+    /// per-field exact counts, and every truth field is either exact, wrong or
+    /// unread. Issuer and name fields get no normalisation the aggregate path
+    /// does not: case and padding differences are `Wrong` in both.
+    #[test]
+    fn summed_field_correctness_reproduces_the_tally_exact_counts() {
+        let documents = [
+            (
+                truth_of(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::DocumentNumber, "L898902C3"),
+                ]),
+                read_fields(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::DocumentNumber, "L898902C3"),
+                ]),
+            ),
+            (
+                truth_of(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::Sex, "F"),
+                ]),
+                read_fields(&[
+                    // Differences of case and padding only.
+                    (CoreField::IssuingCountry, "gbr"),
+                    (CoreField::Surname, " SMITH"),
+                    (CoreField::GivenNames, "ANNA"),
+                ]),
+            ),
+            (
+                truth_of(&[(CoreField::IssuingCountry, "D"), (CoreField::Sex, "M")]),
+                read_fields(&[(CoreField::IssuingCountry, "D"), (CoreField::Sex, "F")]),
+            ),
+        ];
+
+        let mut tally = FieldTally::new();
+        let mut summed_exact = vec![0usize; CoreField::ALL.len()];
+        let mut summed_truth = vec![0usize; CoreField::ALL.len()];
+        for (truth, read) in &documents {
+            let comparison = compare_document(Some(truth), Some(read));
+            tally.add_document(&comparison.tally);
+            let map = comparison
+                .field_correctness(true)
+                .expect("every document here has truth");
+            assert_eq!(map.len(), truth.len());
+            for (i, field) in CoreField::ALL.iter().enumerate() {
+                if let Some(verdict) = map.get(field.as_str()) {
+                    summed_truth[i] += 1;
+                    summed_exact[i] += usize::from(*verdict == FieldCorrectness::Exact);
+                }
+            }
+        }
+
+        for (i, field) in CoreField::ALL.iter().enumerate() {
+            let (comparisons, exact, _) = tally.per_field[i];
+            assert_eq!(
+                summed_truth[i], comparisons,
+                "{field}: documents with truth"
+            );
+            assert_eq!(summed_exact[i], exact, "{field}: exact count");
+        }
+        // The rules the two paths share, pinned on the fields named above.
+        let second = compare_document(Some(&documents[1].0), Some(&documents[1].1))
+            .field_correctness(true)
+            .expect("truth");
+        assert_eq!(second["issuing_country"], FieldCorrectness::Wrong);
+        assert_eq!(second["surname"], FieldCorrectness::Wrong);
+        assert_eq!(second["given_names"], FieldCorrectness::Wrong);
+        assert_eq!(second["sex"], FieldCorrectness::Unread);
+        let third = compare_document(Some(&documents[2].0), Some(&documents[2].1))
+            .field_correctness(true)
+            .expect("truth");
+        assert_eq!(third["issuing_country"], FieldCorrectness::Exact);
+        assert_eq!(third["sex"], FieldCorrectness::Wrong);
+    }
+
+    /// End to end through `run_prepped`: the report's maps sum to
+    /// `accepted_reads`' exact counts, the serialized key set is pinned, and
+    /// no field value, truth or read, reaches the map.
+    #[tokio::test]
+    async fn report_field_correctness_matches_accepted_reads_and_holds_no_values() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "READSURNAME",
+            given_names: "",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("one reader");
+        let page = |name: &str, truth: &[(CoreField, &str)], mrz_found: bool| {
+            let mut page = rate_test_page();
+            page.name = name.to_string();
+            page.mrz_expected = true;
+            page.mrz_found = mrz_found;
+            if !truth.is_empty() {
+                page.ground_truth = Some(truth_of(truth));
+            }
+            page
+        };
+        let pages = [
+            // Accepted: surname exact, given names unread (the reader answers
+            // an empty string), document number unread (no such answer).
+            Some(page(
+                "accepted-a",
+                &[
+                    (CoreField::Surname, "READSURNAME"),
+                    (CoreField::GivenNames, "TRUTHGIVEN"),
+                    (CoreField::DocumentNumber, "TRUTHNUMBER1"),
+                ],
+                true,
+            )),
+            // Accepted: surname wrong.
+            Some(page(
+                "accepted-b",
+                &[(CoreField::Surname, "TRUTHSURNAME")],
+                true,
+            )),
+            // No MRZ found: not an accepted read, so every field is unread
+            // although the surname would have matched.
+            Some(page(
+                "not-accepted",
+                &[(CoreField::Surname, "READSURNAME")],
+                false,
+            )),
+            // No truth at all.
+            Some(page("no-truth", &[], true)),
+        ];
+        let reports = run_prepped(&catalog, &pages, false, None, false).await;
+        let detail = &reports[0].documents_detail;
+
+        let mut exact_per_field: BTreeMap<&str, usize> = BTreeMap::new();
+        for d in detail {
+            for (field, verdict) in d.field_correctness.iter().flatten() {
+                if *verdict == FieldCorrectness::Exact {
+                    *exact_per_field.entry(*field).or_default() += 1;
+                }
+            }
+        }
+        for field in &reports[0].accuracy.accepted_reads.per_field {
+            let expected = field
+                .match_rate
+                .map_or(0, |rate| (rate * field.documents as f64).round() as usize);
+            assert_eq!(
+                exact_per_field.get(field.field).copied().unwrap_or(0),
+                expected,
+                "{}",
+                field.field
+            );
+        }
+
+        assert!(detail[3].field_correctness.is_none());
+        let json = serde_json::to_value(crate::report::ProviderRow::from(
+            reports.into_iter().next().expect("one report"),
+        ))
+        .expect("serialize report");
+        let rows = json["documents_detail"].as_array().expect("rows");
+        assert!(
+            !rows[3]
+                .as_object()
+                .expect("row")
+                .contains_key("field_correctness"),
+            "a document without truth has no key: {}",
+            rows[3]
+        );
+        assert_eq!(
+            rows[0]["field_correctness"],
+            serde_json::json!({
+                "document_number": "unread",
+                "given_names": "unread",
+                "surname": "exact",
+            })
+        );
+        assert_eq!(
+            rows[1]["field_correctness"],
+            serde_json::json!({ "surname": "wrong" })
+        );
+        assert_eq!(
+            rows[2]["field_correctness"],
+            serde_json::json!({ "surname": "unread" })
+        );
+        // Names and verdicts only: no value, truth or read, is in any map.
+        for row in &rows[..3] {
+            let map = row["field_correctness"].to_string();
+            for value in ["READSURNAME", "TRUTHSURNAME", "TRUTHGIVEN", "TRUTHNUMBER1"] {
+                assert!(!map.contains(value), "{value} leaked into {map}");
             }
         }
     }

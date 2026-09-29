@@ -46,8 +46,10 @@ def archive(flags=("--real-specimens", "--mrz-only", "--dump-ocr"), commit="a" *
             "ocr_arms": ocr_arms or {"chargrid": "off", "texture": "on"}}
 
 
-def provider_report(rate=None, failed_specimen_valid=0):
+def provider_report(rate=None, failed_specimen_valid=0, details=None):
     provider = {"provider_id": "mrz", "checksum_valid_on_failed_specimen": failed_specimen_valid}
+    if details is not None:
+        provider["documents_detail"] = details
     if rate is not None:
         provider["tier1_hit_rate"] = {"status": "computed", "rate": rate}
     return {"mrz_class_sweep_arm": "off", "model_paths": {"detection": "d", "recognition": "r"},
@@ -344,6 +346,140 @@ class Arms(unittest.TestCase):
         code, out, _ = run(before, after, "--json")
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["synthetic"]["td1.json"]["changed"], [])
+
+
+def detail_row(asset, fields=None):
+    """A `documents_detail` row; `fields` is the `field_correctness` map, absent when None."""
+    row = {"name": asset.rsplit("/", 1)[-1], "asset_id": asset, "read_ok": True}
+    if fields is not None:
+        row["field_correctness"] = fields
+    return row
+
+
+class FieldCorrectness(unittest.TestCase):
+    A, B, C, D = "passports/A.jpg", "passports/B.jpg", "id_cards/C.jpg", "misc/D.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def arm(self, name, details):
+        assets = [row["asset_id"] for row in details] if details else [self.A]
+        return write_arm(self.root, name, outcomes=[outcome_row(a, "hit") for a in assets],
+                         real_report=provider_report(1.0, details=details))
+
+    def fc(self, before, after):
+        n = len(list(Path(self.root).iterdir()))
+        arms = self.arm(f"before{n}", before), self.arm(f"after{n}", after)
+        return d.compare_arms(*arms, [])["real"]["field_correctness"]
+
+    def pair(self):
+        before = [
+            detail_row(self.A, {"issuing_country": "exact", "surname": "exact", "sex": "wrong"}),
+            detail_row(self.B, {"issuing_country": "exact", "date_of_birth": "unread", "sex": "exact"}),
+            detail_row(self.C, {"issuing_country": "wrong", "surname": "exact"}),
+            detail_row(self.D),
+        ]
+        after = [
+            detail_row(self.A, {"issuing_country": "wrong", "surname": "exact", "sex": "exact"}),
+            detail_row(self.B, {"issuing_country": "exact", "date_of_birth": "exact", "sex": "unread"}),
+            detail_row(self.C, {"issuing_country": "exact", "surname": "unread"}),
+            detail_row(self.D),
+        ]
+        return before, after
+
+    def test_transitions_are_counted_per_field(self):
+        fc = self.fc(*self.pair())
+        self.assertEqual(fc["recorded"], [True, True])
+        self.assertEqual((fc["documents"], fc["compared"]), ([3, 3], 3))
+        self.assertEqual(list(fc["transitions"]), ["issuing_country", "surname", "date_of_birth", "sex"])
+        self.assertEqual(fc["transitions"]["issuing_country"],
+                         {"exact->wrong": 1, "wrong->exact": 1, "exact->unread": 0, "unread->exact": 0})
+        self.assertEqual(fc["transitions"]["surname"],
+                         {"exact->wrong": 0, "wrong->exact": 0, "exact->unread": 1, "unread->exact": 0})
+        self.assertEqual(fc["transitions"]["date_of_birth"],
+                         {"exact->wrong": 0, "wrong->exact": 0, "exact->unread": 0, "unread->exact": 1})
+        self.assertEqual(fc["transitions"]["sex"],
+                         {"exact->wrong": 0, "wrong->exact": 1, "exact->unread": 1, "unread->exact": 0})
+
+    def test_documents_with_an_exact_to_non_exact_field_are_named_by_asset_and_field(self):
+        fc = self.fc(*self.pair())
+        self.assertEqual(fc["regressions"], [
+            {"asset": self.C, "fields": {"surname": "unread"}},
+            {"asset": self.A, "fields": {"issuing_country": "wrong"}},
+            {"asset": self.B, "fields": {"sex": "unread"}},
+        ])
+
+    def test_an_unchanged_pair_has_no_transitions_and_no_regressions(self):
+        before, _ = self.pair()
+        fc = self.fc(before, before)
+        self.assertEqual((fc["transitions"], fc["regressions"]), ({}, []))
+        _, out, _ = run(self.arm("b2", before), self.arm("a2", before))
+        self.assertIn("no transitions", out)
+        self.assertIn("documents with an exact -> non-exact field: 0", out)
+
+    def test_an_arm_without_the_key_is_not_recorded(self):
+        before, after = self.pair()
+        old = [detail_row(r["asset_id"]) for r in before]
+        for label, pair, recorded in (("before", (old, after), [False, True]),
+                                      ("after", (before, old), [True, False]),
+                                      ("both", (old, old), [False, False])):
+            fc = self.fc(*pair)
+            self.assertEqual(fc["recorded"], recorded, label)
+            self.assertIsNone(fc["transitions"], label)
+            self.assertIsNone(fc["regressions"], label)
+        _, out, _ = run(self.arm("b2", old), self.arm("a2", after))
+        self.assertIn("field correctness: not recorded in the before arm's report.json", out)
+        # A report with no documents_detail at all, and no report.json, are the same.
+        bare = write_arm(self.root, "bare", outcomes=[outcome_row(self.A, "hit")], real_report=provider_report(1.0))
+        no_report = write_arm(self.root, "no_report", outcomes=[outcome_row(self.A, "hit")])
+        recorded = self.arm("recorded", before)
+        for arm in (bare, no_report):
+            r = d.compare_arms(arm, recorded, [])["real"]
+            self.assertEqual(r["field_correctness"]["recorded"], [False, True])
+
+    def test_only_the_fields_a_document_has_in_both_arms_are_compared(self):
+        fc = self.fc([detail_row(self.A, {"surname": "exact", "sex": "exact"})],
+                     [detail_row(self.A, {"surname": "wrong"}), detail_row(self.B, {"surname": "wrong"})])
+        self.assertEqual(fc["documents"], [1, 2])
+        self.assertEqual(fc["compared"], 0 + 1)
+        self.assertEqual(list(fc["transitions"]), ["surname"])
+        self.assertEqual(fc["regressions"], [{"asset": self.A, "fields": {"surname": "wrong"}}])
+
+    def test_the_rendering_names_fields_and_assets_and_never_a_value(self):
+        before, after = self.pair()
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after))
+        self.assertEqual(code, 0)
+        self.assertIn("field correctness: 3 documents compared (3 -> 3 with truth)", out)
+        self.assertIn("issuing_country: exact->wrong 1, wrong->exact 1, exact->unread 0, unread->exact 0", out)
+        self.assertIn("documents with an exact -> non-exact field: 3", out)
+        self.assertIn(f"{self.A}: issuing_country exact -> wrong", out)
+        self.assertIn(f"{self.C}: surname exact -> unread", out)
+
+    def test_a_map_that_carried_a_value_would_still_print_none(self):
+        before = [detail_row(self.A, {"surname": "exact", "sex": "SECRETVALUE9"})]
+        after = [detail_row(self.A, {"surname": "SECRETVALUE9", "sex": "exact"})]
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--json")
+        self.assertEqual(code, 0)
+        self.assertNotIn("SECRETVALUE9", out)
+        code, out, _ = run(self.arm("b3", before), self.arm("a3", after))
+        self.assertNotIn("SECRETVALUE9", out)
+        self.assertIn(f"{self.A}: surname exact -> other", out)
+
+    def test_the_json_result_carries_the_comparison(self):
+        before, after = self.pair()
+        _, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--json")
+        fc = json.loads(out)["real"]["field_correctness"]
+        self.assertEqual(fc["compared"], 3)
+        self.assertEqual(len(fc["regressions"]), 3)
+
+    def test_expect_identical_does_not_read_the_report_maps(self):
+        # The neutrality mode compares the ledger, dump and trace rows; report.json is not among them.
+        before, after = self.pair()
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--expect-identical")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("field correctness", out)
 
 
 SECRET = "SECRETLINE9"
