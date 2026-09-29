@@ -154,3 +154,38 @@ fn an_already_clean_zone_parses_exactly_as_before() {
 
     assert_eq!(find_and_parse(&zone).expect("clean TD3 parses"), expected);
 }
+
+/// A token that is already a whole line (36 cells) is never consumed into a
+/// short neighbour, even when the pair would add up to another line width
+/// (36 + 8 = 44). Only 44 + 44 was pinned before.
+#[test]
+fn a_complete_36_cell_token_is_not_joined_to_an_8_cell_neighbour() {
+    let zone = td2_zone();
+    let (line1, line2) = zone.split_once('\n').expect("TD2 has two lines");
+    assert_eq!(line1.len(), 36);
+    let expected = clean_read(&zone);
+    let text = format!("{line1} XXXXXXXX {line2}");
+
+    assert_eq!(
+        find_and_parse(&text).expect("the complete TD2 lines still read"),
+        expected
+    );
+}
+
+/// The same, 30 + 6 = 36: a complete TD1 line followed by a 6-cell fragment.
+#[test]
+fn a_complete_30_cell_token_is_not_joined_to_a_6_cell_neighbour() {
+    let zone = td1_zone();
+    let mut lines = zone.lines();
+    let line1 = lines.next().expect("TD1 line 1");
+    let line2 = lines.next().expect("TD1 line 2");
+    let line3 = lines.next().expect("TD1 line 3");
+    assert_eq!(line2.len(), 30);
+    let expected = clean_read(&zone);
+    let text = format!("{line1}\n{line2} XXXXXX {line3}");
+
+    assert_eq!(
+        find_and_parse(&text).expect("the complete TD1 lines still read"),
+        expected
+    );
+}

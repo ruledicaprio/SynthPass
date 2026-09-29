@@ -16,6 +16,52 @@ Every entry names the pull request or commit it came from, so it traces back to 
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-09-29
+
+**Behaviour changes.** The API only grows, but a caller can see these:
+
+- **`find_and_parse` no longer returns the first checksum-valid zone.** 0.9.0 documented that a
+  reading whose check digits all validate is returned immediately. Now a valid zone that shows a
+  wrong-physical-line symptom loses to a later unflagged valid zone, including one of a format
+  tried later or one from the damaged-capture pass. A text whose only valid zones are flagged pays
+  for the full scan plus the damaged pass, and returns the first flagged zone as before (#593).
+- **The returned document code, issuer, document number or names can differ** for a short line 1
+  (#577), a TD1 line 1 that lost its position-1 filler (#580), and a line the OCR split on a
+  space (#602).
+
+### Added
+- **`apply_occlusion`.** Apply an image-derived `CellMask` to an already-parsed `MrzData`: a
+  masked check-covered or structural cell refuses the call (`MrzError::OccludedCheckedCell`)
+  rather than reporting a value the check-digit arithmetic cannot back up; a masked unverifiable
+  cell withholds its `ZoneField` (listed in the new `Occluded::fields` and blanked in
+  `Occluded::data`), following ICAO's own name grammar for the surname/given-names split. An
+  empty mask is always the identity. `mrz_lines` keeps the read, covered cells included, so it
+  must never stand in for a withheld field, and a blanked `sex` or optional-data slot reads like a
+  printed filler unless the caller checks `Occluded::fields`. Additive: no existing function or
+  field changes, and `MrzError` gains `OccludedCheckedCell`, which is additive because `MrzError`
+  is `#[non_exhaustive]` (#568). `CellMask` does not implement `serde` yet, and adding it later is
+  additive; its internal bitset is deliberately not a wire format.
+- **`select_line1`, an opt-in check of the one field no check digit covers on a two-line format.** Given the OCR text and the zone `find_and_parse_with` accepted, it looks in the same text for a better line 1 and returns a `Line1Selection` (`verdict`, `eligible`, `distinct`) without applying anything. The verdict is `Kept` (the accepted name field is well formed), `Proposed(MrzData)` (exactly one other line qualifies), `Ambiguous`, `NoCandidate`, `Unresolved(Line1Unresolved)` (the zone shows a wrong-physical-line symptom: an issuer outside the country table, a repeated line, or a digit in the name field) or `OutOfScope` (TD1, or a read whose check digits fail). A line qualifies only if it is exactly the format's width as read, in the MRZ charset, has the accepted line 1's document code and issuing state byte for byte, has a well-formed name field, and parses checksum-valid with the accepted line 2 into a read that differs only in `surname`, `given_names` and line 1 of `mrz_lines`. It has no tunable and never changes another field. **Opt-in**: nothing in `mrz` calls it. It has been measured: in SynthPass's replayed A/B on the 261 public specimens (`knowledge/benchmarks/line1-selection-ab-2026-09-29.md`), applying its proposals changed no outcome and took names exact among hits from 13 of 33 to 15 of 33, and all five synthetic formats were identical. That is one corpus; `ParseOptions::class_sweep` remains unmeasured. Additive: `Line1Selection`, `Line1Verdict` and `Line1Unresolved` are `#[non_exhaustive]`, and no existing function, type or field changes (#609). Run it before `apply_occlusion`, not after.
+
+### Fixed
+- **Whitespace-split OCR lines.** `find_and_parse` rejoins two adjacent OCR tokens when neither is
+  already 30, 36 or 44 characters as read and the pair together is exactly one of those. Widths are
+  UTF-8 bytes of the text as read, before normalization. The join replaces the two fragments; it is
+  not added as a further candidate. It adds no refusal and changes no public API. One observed side
+  effect (#602's post-merge A/B): on the 261 public specimens no outcome changed, but 9 of 171
+  dumped zones on hits now come from a different OCR reading, so fields no check digit covers
+  (names, nationality, document code) moved in both directions (#602).
+- **Line 1 of TD3/TD2/MRV-A/MRV-B no longer corrupts the issuing state or document code when
+  fitting a short OCR line.** Recovering a short line 1 used to inflate whichever filler run was
+  longest to make up the missing length; when OCR noise broke the trailing name-field padding
+  into isolated single-cell runs, the one-cell document-code filler could tie for longest and win,
+  pushing the issuing-state slot's own bytes into the name field and reading the issuer back as
+  `<<<`. A short line now pads the missing cells onto the tail instead whenever the longest run
+  starts inside the document-code/issuing-state prefix (before the name field), leaving the prefix
+  untouched (#577).
+- **A checksum-valid zone that holds a wrong physical line is now ranked below an unflagged valid zone in the same text.** A format's line 1 (and TD1's line 3) enters few or none of its check digits, so a second reading of line 2, a visual-zone header or a name line could stand in for it and the zone still validated: `find_and_parse` returned the first such zone, e.g. `POOOO000O5RKS...` as line 1 of a Kosovo passport (line 2 read twice) or `VISERINGVISASNE987654321...` as line 1 of a Sweden visa. `find_and_parse` and `find_and_parse_with` now keep scanning past a valid zone that shows any of three symptoms: line 1's issuing state is not in the country table, two of its lines are near-identical (similarity of at least 0.6 after dropping fillers and folding lookalike characters), or a TD3/TD2/MRV-A/MRV-B line 1 holds a digit from cell 5 on, where the name field is. The damaged-capture pass also runs when only such a zone was found. An unflagged valid zone found on the way wins; when there is none, the first flagged zone is returned exactly as before, so a document with an issuer outside the table is still read and nothing is ever refused. This reverses 0.9.0's "a reading whose check digits all validate is returned immediately". No public API change and no new option (#593).
+- **A TD1 line 1 that lost its position-1 filler no longer reads back with the wrong document code, issuing state and document number.** When OCR dropped the `<` after the document code, the shifted line could still pass every check digit: its document-number check cell reads `<` (value 0) and passes about one time in ten, and its composite passes as well whenever the true check digit is `0` or `5`. The as-read shifted line was tried first and won, giving e.g. code `IU`, issuer `SAK` for a genuine `I<USA...`. TD1 now applies the rule TD2, MRV-A and MRV-B already do: when at least one line-1 candidate has a leading `I`/`A`/`C` and an issuing state that resolves, the candidates that do not are dropped; when none resolves, every candidate is kept, so a document with an unknown issuer is read as before and never refused. The same rule now also applies to line 1 in the damaged-capture searches for one misread cell and for a uniformly misread document-number class, which previously only ever offered the shifted line; when no candidate resolves they return the candidates they returned before. In the class sweep the unshifted reading is offered only when the shifted search also found something; a line 1 whose only repair is the unshifted reading is not offered there. No public API change (#580).
+
 ## [0.9.0] — 2026-09-28
 
 **Upgrading from 0.8:** this is a breaking release for one input. A document number whose first

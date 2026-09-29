@@ -529,3 +529,54 @@ fn candidates_come_from_the_scanners_line_walk() {
     let data = proposed(select(&text, &accepted));
     assert_eq!(data.mrz_lines, format!("{}\n{}", fx.good, fx.line2));
 }
+
+/// `MrzData`'s fields are public, so `mrz_lines` can be edited after parsing.
+/// Anything but two lines of exactly the format's width is out of scope, and
+/// is refused before the wrong-line similarity check ever sees it: that check
+/// does work quadratic in the line length, so an enormous edited line must not
+/// reach it. An out-of-scope verdict for a zone whose name field is ill-formed
+/// and whose issuer resolves also shows the guard runs ahead of every other
+/// step, since any later step would have proposed or flagged it.
+#[test]
+fn a_zone_edited_after_parsing_is_out_of_scope() {
+    for format in FORMATS {
+        let fx = Fixture::new(format);
+        let broken = fx.broken_line1();
+        let accepted = fx.parse(&broken);
+        let text = fx.text(&[&broken, &fx.good]);
+        let width = fx.width();
+        // Sanity: unedited, the same text yields a proposal.
+        assert!(matches!(
+            select(&text, &accepted).verdict,
+            Line1Verdict::Proposed(_)
+        ));
+
+        let huge = format!("{}{}", &broken[..5], "A<".repeat(50_000));
+        let edits = [
+            String::new(),                                     // no lines
+            broken.clone(),                                    // one line
+            format!("{broken}\n{}\n{}", fx.line2, fx.line2),   // three lines
+            format!("{}\n{}", &broken[..width - 1], fx.line2), // line 1 too short
+            format!("{broken}<\n{}", fx.line2),                // line 1 too long
+            format!("{broken}\n{}<", fx.line2),                // line 2 too long
+            format!("{huge}\n{}", fx.line2),                   // unbounded line 1
+            format!("{broken}\n{huge}"),                       // unbounded line 2
+        ];
+        for mrz_lines in edits {
+            let mut edited = accepted.clone();
+            edited.mrz_lines = mrz_lines.clone();
+            let selection = select(&text, &edited);
+            assert_eq!(
+                selection.verdict,
+                Line1Verdict::OutOfScope,
+                "{format:?}: {:?}",
+                mrz_lines.chars().take(60).collect::<String>()
+            );
+            assert_eq!(
+                (selection.eligible, selection.distinct),
+                (0, 0),
+                "{format:?}"
+            );
+        }
+    }
+}

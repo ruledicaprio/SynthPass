@@ -49,6 +49,10 @@ const CELL_STRIDE: usize = 44;
 /// a caller's input to stay correct: an ignored coordinate simply never
 /// matches a real cell.
 ///
+/// `CellMask` does not implement `serde` traits: its bitset is an internal
+/// representation, not a wire format. Adding an implementation later is
+/// additive.
+///
 /// ```
 /// use mrz::CellMask;
 ///
@@ -63,7 +67,6 @@ const CELL_STRIDE: usize = 44;
 /// assert!(CellMask::EMPTY.with(0, 50).is_empty());
 /// ```
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CellMask(u128);
 
 impl CellMask {
@@ -88,6 +91,7 @@ impl CellMask {
     /// let mask = CellMask::EMPTY.with(0, 5);
     /// assert!(mask.contains(0, 5));
     /// ```
+    #[must_use]
     pub fn with(self, line: usize, column: usize) -> Self {
         match Self::bit(line, column) {
             Some(bit) => Self(self.0 | (1u128 << bit)),
@@ -183,6 +187,20 @@ pub enum ZoneField {
 /// The result of [`apply_occlusion`]: a parsed zone with every masked,
 /// unverifiable field withheld.
 ///
+/// Read [`fields`](Self::fields) before trusting [`data`](Self::data). A
+/// withheld field is blanked, and two blanks look exactly like a value the
+/// document really printed: a withheld `sex` reads [`Sex::Unspecified`], and a
+/// withheld optional-data slot reads `None`, the same as a printed filler.
+/// Only `fields` says which of the two happened.
+///
+/// `data.mrz_lines` ([`MrzData::mrz_lines`]) is **not** redacted. It keeps
+/// every cell as it was read, the covered ones included, because it stays the
+/// validated read (ADR-0026 rejects rewriting covered cells). Never show it,
+/// or re-parse it, as a stand-in for a withheld field.
+///
+/// With the `zeroize` feature, `data` is an [`MrzData`] and wipes itself on
+/// drop like any other.
+///
 /// `#[non_exhaustive]`: constructed only by [`apply_occlusion`].
 ///
 /// ```
@@ -205,10 +223,11 @@ pub enum ZoneField {
 #[non_exhaustive]
 pub struct Occluded {
     /// The parsed zone, with every field in [`fields`](Self::fields) blanked
-    /// (an empty `String`, or `None` for the two `Option<String>` optional-data
-    /// slots, or [`Sex::Unspecified`] for the sex cell) so no covered value
-    /// survives. Every other field is exactly as [`apply_occlusion`]'s
-    /// `parsed` argument held it.
+    /// (an empty `String`, `None` for the two `Option<String>` optional-data
+    /// slots, or [`Sex::Unspecified`] for the sex cell). Every other field is
+    /// exactly as [`apply_occlusion`]'s `parsed` argument held it,
+    /// [`mrz_lines`](MrzData::mrz_lines) included: that string still holds
+    /// the covered cells as read, so it never stands in for a withheld field.
     pub data: MrzData,
     /// Which fields were withheld, in the order [`apply_occlusion`]
     /// discovered them: fields other than the name in the zone's cell order,
@@ -225,6 +244,13 @@ pub struct Occluded {
 /// have been built against the same zone `parsed` came from — this function
 /// has no way to check that, since [`MrzData`] does not carry cell-level
 /// image coordinates itself.
+///
+/// The result withholds *fields*, not text: `mrz_lines` is returned unchanged,
+/// covered cells included (see [`Occluded`]), and a blanked `sex` or
+/// optional-data slot looks like a printed filler unless the caller checks
+/// [`Occluded::fields`]. If you also run [`select_line1`](crate::select_line1),
+/// run it **before** this function: given an [`Occluded::data`] whose names
+/// were withheld it can propose them back from the OCR text.
 ///
 /// # Semantics
 ///
@@ -342,7 +368,7 @@ pub fn apply_occlusion(parsed: &MrzData, mask: CellMask) -> Result<Occluded, Mrz
         blank(&mut data, field);
     }
 
-    withhold_name_if_masked(&mut data, &mut fields, &template, &lines, mask);
+    withhold_name_if_masked(&mut data, &mut fields, &template, &lines, mask)?;
 
     Ok(Occluded { data, fields })
 }
@@ -385,34 +411,55 @@ fn push_once(fields: &mut Vec<ZoneField>, field: ZoneField) {
 
 fn blank(data: &mut MrzData, field: ZoneField) {
     match field {
-        ZoneField::DocumentCode => data.document_type.clear(),
-        ZoneField::IssuingCountry => data.issuing_country.clear(),
-        ZoneField::Surname => data.surname.clear(),
-        ZoneField::GivenNames => data.given_names.clear(),
-        ZoneField::Nationality => data.nationality.clear(),
+        ZoneField::DocumentCode => wipe(&mut data.document_type),
+        ZoneField::IssuingCountry => wipe(&mut data.issuing_country),
+        ZoneField::Surname => wipe(&mut data.surname),
+        ZoneField::GivenNames => wipe(&mut data.given_names),
+        ZoneField::Nationality => wipe(&mut data.nationality),
         ZoneField::Sex => data.sex = Sex::Unspecified,
-        ZoneField::OptionalData1 => data.optional_data_1 = None,
-        ZoneField::OptionalData2 => data.optional_data_2 = None,
+        ZoneField::OptionalData1 => wipe_optional(&mut data.optional_data_1),
+        ZoneField::OptionalData2 => wipe_optional(&mut data.optional_data_2),
     }
+}
+
+/// Empty a withheld string. With the `zeroize` feature the old bytes are
+/// overwritten first, so a withheld value does not linger in the buffer that
+/// `clear` alone would leave behind.
+fn wipe(value: &mut String) {
+    #[cfg(feature = "zeroize")]
+    zeroize::Zeroize::zeroize(value);
+    #[cfg(not(feature = "zeroize"))]
+    value.clear();
+}
+
+/// `wipe`, then `None`: a withheld optional-data slot reads as absent.
+fn wipe_optional(value: &mut Option<String>) {
+    if let Some(inner) = value.as_mut() {
+        wipe(inner);
+    }
+    *value = None;
 }
 
 /// Find, mask, and grade the zone's single name field against the grammar
 /// documented on [`apply_occlusion`]. A no-op when no cell of the name field
-/// is masked.
+/// is masked; `Err(NotFound)` only if the template has no name cells at all.
 fn withhold_name_if_masked(
     data: &mut MrzData,
     fields: &mut Vec<ZoneField>,
     template: &strip::Template,
     lines: &[&str],
     mask: CellMask,
-) {
+) -> Result<(), MrzError> {
     let mut name_cells = template
         .cells
         .iter()
         .filter(|cell| cell.field == Field::Name);
-    let first = name_cells
-        .next()
-        .expect("every format this crate parses defines a name field");
+    // Every format this crate parses defines a name field, so this cannot
+    // happen; if a template change ever broke that, refuse rather than
+    // return a zone whose name cells were never looked at.
+    let Some(first) = name_cells.next() else {
+        return Err(MrzError::NotFound);
+    };
     let line = usize::from(first.line);
     let start = usize::from(first.column);
     let end = name_cells
@@ -424,7 +471,7 @@ fn withhold_name_if_masked(
         .map(|i| mask.contains(line, start + i))
         .collect();
     let Some(first_masked) = masked.iter().position(|&m| m) else {
-        return;
+        return Ok(());
     };
 
     let (surname_occluded, given_occluded) = match visible_double_filler(&chars, &masked, 0) {
@@ -445,6 +492,7 @@ fn withhold_name_if_masked(
         push_once(fields, ZoneField::GivenNames);
         blank(data, ZoneField::GivenNames);
     }
+    Ok(())
 }
 
 /// The lowest index `i >= from` such that `chars[i..i + 2]` reads `<<` and
