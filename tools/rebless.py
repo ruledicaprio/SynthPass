@@ -120,7 +120,7 @@ import index_findings as ixf  # noqa: E402 -- regenerates FINDINGS.md's generate
 
 # --------------------------------------------------------------------------
 # Baseline schema constants, mirrored from
-# crates/synthpass-bench/src/bin/provider-bench.rs (`OFF_DENOMINATOR_KINDS`,
+# crates/synthpass-bench/src/report.rs (`OFF_DENOMINATOR_KINDS`,
 # `REGRESSION_BUCKETS`) the same way apply_cohort.py mirrors the manifest
 # contract: that Rust source, not this file, is what CI actually enforces.
 # --------------------------------------------------------------------------
@@ -178,12 +178,17 @@ SCORED_KEYS = ("scored", "tier1_hits")
 # The full REGRESSION_BUCKETS set, not just the three the task narrative names
 # (the three that happen to be non-zero in the corpus today) -- an unnamed
 # member moving is still a scored miss and must never be classified otherwise.
-SCORED_MISS_KEYS = ("checksum_failed", "no_mrz_found", "ocr_error", "document_number_mismatch", "false_positive_mrz")
-# `by_miss_kind` is a Rust BTreeMap built with `.entry(kind).or_default()` --
-# a miss kind with zero occurrences is simply absent from the JSON, not
-# present with a 0 value. Every key in this tuple must default to 0 when
-# flattening, not just `false_positive_mrz` (the one the committed baseline
-# happens to omit today).
+SCORED_MISS_KEYS = (
+    "checksum_failed",
+    "no_mrz_found",
+    "ocr_error",
+    "document_number_mismatch",
+    "false_positive_mrz",
+    "document_number_leading_filler",
+)
+# Current CI pre-fills every known miss kind with zero in `report.rs`.
+# Older committed baselines did not, so flattening still defaults each known
+# miss kind to zero before comparing an old baseline with a current one.
 ALL_MISS_KIND_KEYS = tuple(sorted(set(SCORED_MISS_KEYS) | {"redacted_mrz", "no_mrz_expected", "checksum_failed_specimen"}))
 
 CLASS_IDENTICAL = "identical"
