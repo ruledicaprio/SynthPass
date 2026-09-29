@@ -120,6 +120,15 @@ pub struct Pipeline {
     /// `submit` spawns) is still visible to `Pipeline::job` lookups made
     /// through any other clone (e.g. `synthpass-serve`'s `AppState`).
     jobs: Arc<jobs::JobRegistry>,
+    /// The non-default `SYNTHPASS_MRZ_*` arms (`SYNTHPASS_MRZ_CLASS_SWEEP`,
+    /// `SYNTHPASS_MRZ_LINE1_SELECT`) this pipeline was built under, read once
+    /// by [`synthpass_die::mrz_config_overrides`]. Both change what Tier 1
+    /// returns, so every record's [`ExtractionTrace::config_overrides`] carries
+    /// them beside the OCR engine's own (principle 7). A snapshot rather than a
+    /// per-document read, like the engine's own configuration: these are
+    /// process-wide settings, and it keeps the merge testable without touching
+    /// the process environment.
+    mrz_config_overrides: std::collections::BTreeMap<String, String>,
 }
 
 /// Bumps `llm_queue_depth` for the lifetime of the guard — from just before
@@ -406,7 +415,25 @@ impl Pipeline {
                     .expect("distinct provider ids: \"mrz\" and \"llm\""),
             ),
             jobs: Arc::new(jobs::JobRegistry::new(jobs::DEFAULT_QUEUE_CAPACITY)),
+            mrz_config_overrides: synthpass_die::mrz_config_overrides(),
         }
+    }
+
+    /// The [`ExtractionTrace::config_overrides`] of a record whose OCR run
+    /// reported `ocr`: the engine's own non-default configuration plus this
+    /// pipeline's non-default `SYNTHPASS_MRZ_*` arms. The two key sets never
+    /// overlap, so the merge cannot overwrite a knob.
+    fn trace_overrides(
+        &self,
+        ocr: &std::collections::BTreeMap<String, String>,
+    ) -> std::collections::BTreeMap<String, String> {
+        let mut merged = ocr.clone();
+        merged.extend(
+            self.mrz_config_overrides
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        merged
     }
 
     /// Point-in-time counters and histograms for the `/metrics` endpoint.
@@ -661,7 +688,7 @@ impl Pipeline {
                     providers: vec![reading.by.to_string()],
                     escalation: None,
                     prompt: None,
-                    config_overrides: ocr_result.config_overrides.clone(),
+                    config_overrides: self.trace_overrides(&ocr_result.config_overrides),
                     // No occlusion detector runs in this pipeline yet (#565
                     // PR 6 wires `synthpass-ocr`'s detector through here).
                     mrz_occlusion: None,
@@ -755,7 +782,7 @@ impl Pipeline {
                             ],
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
-                            config_overrides: stage.ocr.config_overrides.clone(),
+                            config_overrides: self.trace_overrides(&stage.ocr.config_overrides),
                             // No occlusion detector runs in this pipeline yet
                             // (#565 PR 6).
                             mrz_occlusion: None,
@@ -857,7 +884,7 @@ impl Pipeline {
                             ],
                             escalation: stage.escalation,
                             prompt: self.infer.prompt_ref(),
-                            config_overrides: stage.ocr.config_overrides.clone(),
+                            config_overrides: self.trace_overrides(&stage.ocr.config_overrides),
                             // No occlusion detector runs in this pipeline yet
                             // (#565 PR 6).
                             mrz_occlusion: None,
@@ -1889,6 +1916,70 @@ mod tests {
                 "off".to_string()
             )]),
             "the engine's reported configuration must reach the trace unchanged"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// #574: a Tier-1 (accept) record also carries the non-default
+    /// `SYNTHPASS_MRZ_*` arms, beside the engine's own configuration. The
+    /// arms are set on the pipeline directly, so no test touches the process
+    /// environment.
+    #[tokio::test]
+    async fn tier1_trace_carries_the_mrz_arms_when_they_are_set() {
+        let (input, dir) = temp_input("tier1-mrz-arms").await;
+        let mut pipeline = Pipeline::new(
+            Box::new(KnobReportingOcr(HRV_TD3_MARKDOWN)),
+            Box::new(MockBackend),
+        );
+        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("on", "control");
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(result.method, Method::MrzDeterministic);
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        let trace = v2
+            .trace
+            .as_ref()
+            .expect("Tier-1 accept always attaches a trace");
+        assert_eq!(
+            trace.config_overrides,
+            std::collections::BTreeMap::from([
+                ("SYNTHPASS_MRZ_CLASS_SWEEP".to_string(), "on".to_string()),
+                (
+                    "SYNTHPASS_MRZ_LINE1_SELECT".to_string(),
+                    "control".to_string()
+                ),
+                ("SYNTHPASS_OCR_TEXTURE".to_string(), "off".to_string()),
+            ]),
+            "the MRZ arms are merged with the engine's configuration, never replacing it"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    /// #574: the Tier-2 record carries the same MRZ arms, for the same reason:
+    /// the deterministic read that fed its hint ran under them.
+    #[tokio::test]
+    async fn tier2_trace_carries_the_mrz_arms_when_they_are_set() {
+        let (input, dir) = temp_input("tier2-mrz-arms").await;
+        let mut pipeline = Pipeline::new(
+            Box::new(KnobReportingOcr("just prose — no MRZ anywhere")),
+            Box::new(MockBackend),
+        );
+        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("off", "on");
+
+        let result = pipeline.process_document(&input).await.expect("process");
+
+        assert_eq!(result.method, Method::Llm);
+        let v2 = result.extracted_v2.as_ref().expect("v2 extraction");
+        let trace = v2.trace.as_ref().expect("Tier-2 always attaches a trace");
+        assert_eq!(
+            trace.config_overrides,
+            std::collections::BTreeMap::from([
+                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "on".to_string()),
+                ("SYNTHPASS_OCR_TEXTURE".to_string(), "off".to_string()),
+            ]),
         );
 
         let _ = tokio::fs::remove_dir_all(&dir).await;

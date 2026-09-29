@@ -1348,23 +1348,35 @@ fn write_baseline_and_ledger(
 }
 
 /// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
-/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`], `Some(message)`
-/// otherwise. A pure function of `arms` alone (no env reads, no I/O) so it is
-/// directly unit-testable without setting process environment variables —
-/// see `knowledge/benchmarks/README.md`'s maintenance contract for why a
-/// baseline may only describe the default provider configuration: every
-/// other arm is a measurement in progress, and committing a baseline against
-/// one would make its own A/B look like a regression against itself the
-/// moment the env var is unset again.
-fn refuse_non_default_baseline(arms: &synthpass_ocr::OcrArms) -> Option<String> {
-    if arms.is_default() {
+/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and both `SYNTHPASS_MRZ_*`
+/// arms are `off`, `Some(message)` otherwise. A pure function of its arguments
+/// alone (no env reads, no I/O) so it is directly unit-testable without setting
+/// process environment variables — see `knowledge/benchmarks/README.md`'s
+/// maintenance contract for why a baseline may only describe the default
+/// provider configuration: every other arm is a measurement in progress, and
+/// committing a baseline against one would make its own A/B look like a
+/// regression against itself the moment the env var is unset again.
+///
+/// `class_sweep` and `line1_select` are the arm names
+/// `synthpass_die::class_sweep_arm` and `synthpass_die::line1_select_arm`
+/// return. Both change what Tier 1 reads, so a baseline written under either
+/// would describe a configuration nobody runs by default (#574). `control` is
+/// refused as well: it is a placebo, but a baseline is a claim about the default.
+fn refuse_non_default_baseline(
+    arms: &synthpass_ocr::OcrArms,
+    class_sweep: &str,
+    line1_select: &str,
+) -> Option<String> {
+    if arms.is_default() && class_sweep == "off" && line1_select == "off" {
         return None;
     }
     Some(format!(
         "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
-         (texture=on, order=default, rotate=default, skew=default, chargrid=off) — a baseline is \
-         only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
-         This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}.",
+         (texture=on, order=default, rotate=default, skew=default, chargrid=off) and \
+         SYNTHPASS_MRZ_CLASS_SWEEP and SYNTHPASS_MRZ_LINE1_SELECT at off — a baseline is only \
+         valid for the default provider configuration (see knowledge/benchmarks/README.md). \
+         This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}, \
+         mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}.",
         arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
     ))
 }
@@ -1376,7 +1388,11 @@ fn run_baseline_step(
     snapshot: Option<(RealSpecimenSnapshot, Vec<OutcomeRow>)>,
     ts_unix: u64,
 ) {
-    if let Some(msg) = refuse_non_default_baseline(&synthpass_ocr::OcrArms::from_env()) {
+    if let Some(msg) = refuse_non_default_baseline(
+        &synthpass_ocr::OcrArms::from_env(),
+        synthpass_die::class_sweep_arm().0,
+        synthpass_die::line1_select_arm().0,
+    ) {
         eprintln!("{msg}");
         std::process::exit(1);
     }
@@ -1651,6 +1667,11 @@ struct OcrDumpRunManifest<'a> {
     flags: &'a [String],
     pivot_yy: u32,
     ocr_arms: BTreeMap<String, String>,
+    /// The `SYNTHPASS_MRZ_*` arms this process ran under, as it resolved them
+    /// (#574). Always this process's own, also in a replay: the capture's OCR
+    /// arms are copied above because the text came from that OCR, but the MRZ
+    /// arms describe the read a replay makes.
+    mrz_arms: MrzArms,
     corpus_manifest: &'static str,
     corpus_manifest_sha256: Option<String>,
     documents_loaded: usize,
@@ -1663,6 +1684,24 @@ struct OcrDumpRunManifest<'a> {
     /// was before replay existed (its file name is a hash of these bytes).
     #[serde(skip_serializing_if = "Option::is_none")]
     replay_of: Option<ReplayOf<'a>>,
+}
+
+/// The `SYNTHPASS_MRZ_*` arms as the run manifest spells them: each name is
+/// what the binary resolved, never the variable's raw value (an unrecognised
+/// value falls back to `off`).
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct MrzArms {
+    class_sweep: &'static str,
+    line1_select: &'static str,
+}
+
+impl MrzArms {
+    fn from_env() -> Self {
+        Self {
+            class_sweep: synthpass_die::class_sweep_arm().0,
+            line1_select: synthpass_die::line1_select_arm().0,
+        }
+    }
 }
 
 /// What a replay's manifest says about the capture it replayed (ADR-0024,
@@ -1921,6 +1960,7 @@ fn write_ocr_run_manifest(
         flags,
         pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
         ocr_arms,
+        mrz_arms: MrzArms::from_env(),
         corpus_manifest: "samples/corpus.jsonl",
         corpus_manifest_sha256: corpus_manifest_sha256(root),
         documents_loaded,
@@ -2603,6 +2643,7 @@ async fn main() {
         count,
         seed_start,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
+        mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
         model_paths: if replay_dir.is_some() {
             ModelPathsReport {
                 detection: NO_MODEL_LOADED.to_string(),
@@ -2623,6 +2664,10 @@ async fn main() {
     println!(
         "mrz class-sweep arm measured: {}",
         synthpass_die::class_sweep_arm().0
+    );
+    println!(
+        "mrz line-1 select arm measured: {}",
+        synthpass_die::line1_select_arm().0
     );
     println!("report written to {}", parsed.out);
     if let Some(dir) = replay_dir {
@@ -2673,7 +2718,7 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_allows_the_default_arms() {
         assert_eq!(
-            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT),
+            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "off"),
             None
         );
     }
@@ -2682,12 +2727,28 @@ mod tests {
     fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.chargrid = "on";
-        let msg = refuse_non_default_baseline(&arms).expect("must refuse");
+        let msg = refuse_non_default_baseline(&arms, "off", "off").expect("must refuse");
         assert!(msg.contains("chargrid=on"), "message: {msg}");
 
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.texture = "off";
-        assert!(refuse_non_default_baseline(&arms).is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "off").is_some());
+    }
+
+    /// #574: both `SYNTHPASS_MRZ_*` arms change what Tier 1 reads, so a baseline
+    /// may not be written or asserted under either, `control` included.
+    #[test]
+    fn refuse_non_default_baseline_rejects_either_mrz_arm() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        for value in ["on", "control"] {
+            let msg = refuse_non_default_baseline(&arms, value, "off").expect("class sweep");
+            assert!(msg.contains(&format!("mrz_class_sweep={value}")), "{msg}");
+            let msg = refuse_non_default_baseline(&arms, "off", value).expect("line-1 select");
+            assert!(msg.contains(&format!("mrz_line1_select={value}")), "{msg}");
+        }
+        // Both moved at once is refused once, and the message names both.
+        let msg = refuse_non_default_baseline(&arms, "on", "on").expect("both");
+        assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=on"));
     }
 
     #[test]
@@ -2889,6 +2950,14 @@ mod tests {
             synthpass_die::mrz_parse_options().pivot_yy
         );
         assert_eq!(manifest["git_commit"], git_head());
+        // #574: both MRZ arms, as this process resolved them.
+        assert_eq!(
+            manifest["mrz_arms"],
+            serde_json::json!({
+                "class_sweep": synthpass_die::class_sweep_arm().0,
+                "line1_select": synthpass_die::line1_select_arm().0,
+            })
+        );
         assert_eq!(manifest["corpus_manifest"], "samples/corpus.jsonl");
         assert!(manifest["corpus_manifest_sha256"]
             .as_str()
@@ -3472,6 +3541,7 @@ mod tests {
             retry_stop: None,
             chargrid: None,
             tier1_damaged_recovery: None,
+            line1_selection: None,
         }
     }
 

@@ -100,6 +100,105 @@ pub struct Evidence {
     ///
     /// [`RoutingPolicy::decide`]: crate::routing::RoutingPolicy::decide
     pub mrz_occlusion_refused: bool,
+
+    // ---- from `mrz::select_line1`, when its arm is not `off` ----
+    /// What the shadow line-1 selector said about the accepted read (#574).
+    /// `None` when the arm is `off`, and when Tier 1 accepted nothing to select
+    /// on. Text-free by construction: verdict kinds and counts, never a name
+    /// or a line. **Observed-only**: nothing routes on it.
+    pub line1_selection: Option<Line1Summary>,
+}
+
+/// What the shadow line-1 selector concluded, as a verdict kind and counts.
+///
+/// [`Line1Outcome`] and [`Line1Reason`] are fieldless and `eligible`/`distinct`
+/// are counts, so nothing here holds a name or a zone line and the summary is
+/// safe to log and to write into a benchmark report (ADR-0027). It derives no
+/// `Serialize`, like [`Evidence`]: a benchmark renders its own text-free view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Line1Summary {
+    /// The arm the read was made under: `control` or `on`, never `off`.
+    pub arm: crate::Line1Arm,
+    /// What the selector found, with `on` reported as [`Line1Outcome::Applied`]
+    /// where `control` reports [`Line1Outcome::Proposed`].
+    pub outcome: Line1Outcome,
+    /// Why the selector did nothing, for [`Line1Outcome::NoAction`] and
+    /// [`Line1Outcome::Unresolved`]; `None` for the other outcomes.
+    pub reason: Option<Line1Reason>,
+    /// Candidate lines that passed every eligibility check, duplicates
+    /// included. See `mrz::Line1Selection::eligible`.
+    pub eligible: usize,
+    /// Distinct name fields among them. See `mrz::Line1Selection::distinct`.
+    pub distinct: usize,
+    /// Whether the proposal's `surname` or `given_names` differ from the
+    /// accepted read's. `false` unless the outcome is `Proposed` or `Applied`.
+    pub names_changed: bool,
+}
+
+/// The kind of verdict a [`Line1Summary`] carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Line1Outcome {
+    /// The arm is `on` and a proposal replaced the accepted read.
+    Applied,
+    /// The arm is `control` and the selector found a proposal, which was
+    /// discarded.
+    Proposed,
+    /// The accepted zone shows a wrong-physical-line symptom, so the selector
+    /// did not look at its name field. Carries the [`Line1Reason`].
+    Unresolved,
+    /// More than one distinct eligible name field.
+    Ambiguous,
+    /// Nothing to do, with the [`Line1Reason`] why. Spelled `none` in the report.
+    NoAction,
+}
+
+impl Line1Outcome {
+    /// The spelling the benchmark report uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied => "applied",
+            Self::Proposed => "proposed",
+            Self::Unresolved => "unresolved",
+            Self::Ambiguous => "ambiguous",
+            Self::NoAction => "none",
+        }
+    }
+}
+
+/// Why a [`Line1Summary`] is `NoAction` or `Unresolved`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Line1Reason {
+    /// The accepted read is TD1 or fails a check digit.
+    OutOfScope,
+    /// The accepted name field already follows the name grammar.
+    Kept,
+    /// The name field is ungrammatical and no other line is eligible.
+    NoCandidate,
+    /// Unresolved: line 1's issuing state is not in the country table.
+    IssuerUnresolved,
+    /// Unresolved: two of the zone's lines are near-identical.
+    RepeatedLine,
+    /// Unresolved: a digit sits in line 1's name field.
+    DigitInNameField,
+}
+
+impl Line1Reason {
+    /// The spelling the benchmark report uses.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OutOfScope => "out_of_scope",
+            Self::Kept => "kept",
+            Self::NoCandidate => "no_candidate",
+            Self::IssuerUnresolved => "issuer_unresolved",
+            Self::RepeatedLine => "repeated_line",
+            Self::DigitInNameField => "digit_in_name_field",
+        }
+    }
 }
 
 impl Evidence {

@@ -864,9 +864,9 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
 /// One in-denominator real-specimen miss (`checksum_failed` or
 /// `no_mrz_found`), as written to `provider-bench-miss-ocr-dump.jsonl` when
 /// `run_prepped` is given a `dump_ocr_dir`. Owned strings throughout — the
-/// per-document `read_mrz` it draws `recovered_mrz_lines` from is a loop
-/// local that does not outlive the iteration. This is a diagnostic artifact,
-/// not a hot path.
+/// per-document Tier-1 read it draws `recovered_mrz_lines` from
+/// (`synthpass_die::read_tier1`) is a loop local that does not outlive the
+/// iteration. This is a diagnostic artifact, not a hot path.
 ///
 /// For a `no_mrz_found` row `recovered_mrz_lines` is empty, `check_states` is
 /// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
@@ -896,8 +896,11 @@ struct MissOcrDump {
     mrz_band_score: Option<f64>,
     /// The full pre-parse OCR text the provider was handed.
     raw_ocr_text: String,
-    /// The MRZ zone `mrz::find_and_parse` recovered (post width/substitution
-    /// repair), one entry per line; empty if nothing parsed.
+    /// The MRZ zone `synthpass_die::read_tier1` recovered (post
+    /// width/substitution repair, and post line-1 selection under
+    /// `SYNTHPASS_MRZ_LINE1_SELECT=on`), one entry per line; empty if nothing
+    /// parsed. With every `SYNTHPASS_MRZ_*` arm `off` this is what
+    /// `mrz::find_and_parse` recovers, as it was before the arms reached it.
     recovered_mrz_lines: Vec<String>,
     /// Per-check-digit state: `true` verified, `false` failed, `null` not
     /// printed by this layout.
@@ -1139,6 +1142,142 @@ pub struct DocumentDetail {
     /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
     /// `None` when Tier 1 found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,
+    /// The shadow line-1 selector's verdict on this document's Tier-1 read
+    /// (#574), text-free. `None` when the arm is `off`, for a provider whose
+    /// reading records none (only the deterministic `mrz` provider does), and
+    /// when Tier 1 accepted nothing to select on.
+    pub line1_selection: Option<Line1SelectionDetail>,
+}
+
+/// What the shadow line-1 selector said about one document, for the report:
+/// [`synthpass_die::Line1Summary`] plus where the proposed line was read.
+///
+/// **Text-free (ADR-0027).** Every string here is a verdict kind, a reason
+/// kind, a pass id (`pass-03`, `general`) or a `PassTransform` wire label
+/// (`mrz_variants:2`): none is document text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line1SelectionDetail {
+    /// `control` or `on`; a document has none under `off`.
+    pub arm: &'static str,
+    /// `applied`, `proposed`, `unresolved`, `ambiguous` or `none`
+    /// ([`synthpass_die::Line1Outcome::as_str`]).
+    pub verdict: &'static str,
+    /// Why the selector did nothing, for `none` and `unresolved`
+    /// ([`synthpass_die::Line1Reason::as_str`]).
+    pub reason: Option<&'static str>,
+    /// Candidate lines that passed every eligibility check, duplicates included.
+    pub eligible: usize,
+    /// Distinct name fields among them.
+    pub distinct: usize,
+    /// Whether the proposal's `surname` or `given_names` differ from the
+    /// accepted read's.
+    pub names_changed: bool,
+    /// The OCR passes whose readings include the proposed line 1, in execution
+    /// order. Empty unless the verdict is `proposed` or `applied` **and** a pass
+    /// trace exists: a replay, or a live run with `--dump-ocr-passes`.
+    pub source_passes: Vec<String>,
+    /// The `PassTransform` labels of those passes, each once, in the order
+    /// they first appear.
+    pub source_transforms: Vec<String>,
+}
+
+/// One OCR pass's readings, kept beside a document's page so a line-1 proposal
+/// can be traced to the passes that read it (#574). **Document text**: it is
+/// compared and never written anywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PassProvenance {
+    id: String,
+    /// The `synthpass_ocr::PassTransform` wire label.
+    transform: String,
+    /// The text of each MRZ-shaped line the pass read.
+    readings: Vec<String>,
+}
+
+/// The provenance of a pass trace, in execution order.
+fn pass_provenance(passes: &[crate::ocr_passes::PassObject]) -> Vec<PassProvenance> {
+    passes
+        .iter()
+        .map(|pass| PassProvenance {
+            id: pass.id.clone(),
+            transform: pass.transform.clone(),
+            readings: pass
+                .readings
+                .iter()
+                .map(|reading| reading.text.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// A reading with whitespace stripped and case folded: the form
+/// `mrz`'s line walk compares, so a proposal's line 1 (already in that form)
+/// can be found in a pass's raw reading.
+fn comparable_reading(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+/// The report detail for `summary`, with provenance from `passes`.
+///
+/// `proposed_line1` is the proposal's line 1 (`synthpass_die::Tier1Read::
+/// proposed_line1`); it is compared against the passes' readings and never
+/// stored. The source lists stay empty unless the verdict is `proposed` or
+/// `applied`, so a `kept` document never claims a source.
+fn line1_selection_detail(
+    summary: &synthpass_die::Line1Summary,
+    proposed_line1: Option<&str>,
+    passes: &[PassProvenance],
+) -> Line1SelectionDetail {
+    let mut source_passes: Vec<String> = Vec::new();
+    let mut source_transforms: Vec<String> = Vec::new();
+    let proposed = matches!(
+        summary.outcome,
+        synthpass_die::Line1Outcome::Proposed | synthpass_die::Line1Outcome::Applied
+    );
+    if let (true, Some(line1)) = (proposed, proposed_line1) {
+        for pass in passes {
+            if pass
+                .readings
+                .iter()
+                .any(|reading| comparable_reading(reading) == line1)
+            {
+                source_passes.push(pass.id.clone());
+                if !source_transforms.contains(&pass.transform) {
+                    source_transforms.push(pass.transform.clone());
+                }
+            }
+        }
+    }
+    Line1SelectionDetail {
+        arm: summary.arm.name(),
+        verdict: summary.outcome.as_str(),
+        reason: summary.reason.map(synthpass_die::Line1Reason::as_str),
+        eligible: summary.eligible,
+        distinct: summary.distinct,
+        names_changed: summary.names_changed,
+        source_passes,
+        source_transforms,
+    }
+}
+
+/// `documents_detail`'s verdicts, counted: every verdict kind is a key, so an
+/// arm that never proposed reads `proposed: 0` rather than an absent key.
+/// `None` when no document carries a selection (the arm is `off`, or the
+/// provider records none), so the key is absent from such a report.
+pub fn line1_selection_counts(details: &[DocumentDetail]) -> Option<BTreeMap<&'static str, usize>> {
+    let mut counts: Option<BTreeMap<&'static str, usize>> = None;
+    for selection in details.iter().filter_map(|d| d.line1_selection.as_ref()) {
+        let counts = counts.get_or_insert_with(|| {
+            ["applied", "proposed", "unresolved", "ambiguous", "none"]
+                .into_iter()
+                .map(|verdict| (verdict, 0))
+                .collect()
+        });
+        *counts.entry(selection.verdict).or_insert(0) += 1;
+    }
+    counts
 }
 
 pub struct CapabilitySnapshot {
@@ -1805,6 +1944,11 @@ struct BenchPage {
     /// once in [`prep_specimens`]/[`prep_corpus`] and shared by every reader,
     /// the same way the OCR text is.
     ocr_elapsed: Duration,
+    /// The readings of every OCR pass, when a pass trace exists for this
+    /// document: a replay, or a live run with `--dump-ocr-passes`. Empty
+    /// otherwise. Used only to say which passes read a line-1 proposal
+    /// ([`line1_selection_detail`]); document text, never written out.
+    pass_readings: Vec<PassProvenance>,
 }
 
 /// Process-wide sequence keeps duplicate display names and concurrent runs distinct.
@@ -1901,6 +2045,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
                 ocr_elapsed,
+                pass_readings: Vec::new(),
             })
         })
         .collect()
@@ -1933,6 +2078,7 @@ fn prep_specimens(
             let (page, image_path, ocr_elapsed) =
                 ocr_and_keep_path(ocr, &doc.image, passes.is_some().then_some(&mut records))
                     .ok()?;
+            let pass_readings = pass_provenance(&crate::ocr_passes::pass_objects(&records));
             if let Some(collector) = passes.as_deref_mut() {
                 collector.push(
                     &doc.name,
@@ -1942,7 +2088,9 @@ fn prep_specimens(
                     &records,
                 );
             }
-            Some(specimen_bench_page(doc, page, image_path, ocr_elapsed))
+            let mut bench_page = specimen_bench_page(doc, page, image_path, ocr_elapsed);
+            bench_page.pass_readings = pass_readings;
+            Some(bench_page)
         })
         .collect()
 }
@@ -2016,6 +2164,7 @@ fn specimen_bench_page(
         synthetic: false,
         known_or_guessed_format,
         ocr_elapsed,
+        pass_readings: Vec::new(),
     }
 }
 
@@ -2301,12 +2450,15 @@ fn replay_pages(
     Ok(specimens
         .iter()
         .map(|doc| {
-            Some(specimen_bench_page(
+            let row = by_asset[doc.asset_id.as_str()];
+            let mut bench_page = specimen_bench_page(
                 doc,
-                replayed_page(by_asset[doc.asset_id.as_str()]),
+                replayed_page(row),
                 temporary_image_path(),
                 Duration::ZERO,
-            ))
+            );
+            bench_page.pass_readings = pass_provenance(&row.ocr_passes);
+            Some(bench_page)
         })
         .collect())
 }
@@ -2564,6 +2716,14 @@ async fn run_prepped_with_dump_options(
             // this harness measures exactly the same gate the pipeline does.
             let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
             let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
+            // The Tier-1 read the reader itself makes, under this process's
+            // arms (`SYNTHPASS_MRZ_CLASS_SWEEP`, `SYNTHPASS_MRZ_LINE1_SELECT`).
+            // `read_mrz` above stays the hint's parse, as production's is; the
+            // dump zone below is this read, so with an arm set it shows the zone
+            // the reader returned (#574, finding 3). With every arm `off` the two
+            // are one parse: `mrz_parse_options()` is then the crate default.
+            let tier1 = synthpass_die::read_tier1(&bench_page.page.text);
+            let dump_zone: Option<&mrz::MrzData> = tier1.parsed.as_ref().ok();
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
@@ -2635,6 +2795,8 @@ async fn run_prepped_with_dump_options(
                         retry_stop: bench_page.page.retry_stop.clone(),
                         chargrid: bench_page.page.chargrid.clone(),
                         tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                        // No reading, so no selection was recorded.
+                        line1_selection: None,
                     });
                     // `OcrError` sits inside the scored population: a reader
                     // that errored read nothing, so end-to-end counts every
@@ -2863,7 +3025,7 @@ async fn run_prepped_with_dump_options(
                 let (recovered, check_states): (
                     Vec<String>,
                     Option<BTreeMap<String, Option<bool>>>,
-                ) = match &read_mrz {
+                ) = match dump_zone {
                     Some(data) => {
                         let recovered: Vec<String> =
                             data.mrz_lines.lines().map(str::to_string).collect();
@@ -2895,11 +3057,11 @@ async fn run_prepped_with_dump_options(
                     }
                 };
 
-                let compared_cells = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                let compared_cells = match (dump_zone, &bench_page.ground_truth_mrz) {
                     (Some(data), Some(truth)) => Some(compared_cells(&data.mrz_lines, truth)),
                     _ => None,
                 };
-                let zone_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                let zone_mismatch = match (dump_zone, &bench_page.ground_truth_mrz) {
                     (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
                     _ => None,
                 };
@@ -2907,7 +3069,7 @@ async fn run_prepped_with_dump_options(
                 // which table to look positions up against) on top of
                 // `zone_mismatch`'s own two preconditions — see
                 // `MissOcrDump::field_mismatch_counts`'s doc.
-                let field_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz, mrz_format) {
+                let field_mismatch = match (dump_zone, &bench_page.ground_truth_mrz, mrz_format) {
                     (Some(data), Some(truth), Some(format)) => {
                         mrz_field_mismatch(format, &data.mrz_lines, truth)
                     }
@@ -3030,6 +3192,16 @@ async fn run_prepped_with_dump_options(
                 retry_stop: bench_page.page.retry_stop.clone(),
                 chargrid: bench_page.page.chargrid.clone(),
                 tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                // From the reading's own evidence, so a provider that made no
+                // Tier-1 read records none; the proposal's line 1 is looked up
+                // in the pass trace, when there is one, and never stored.
+                line1_selection: reading.evidence.line1_selection.as_ref().map(|summary| {
+                    line1_selection_detail(
+                        summary,
+                        tier1.proposed_line1.as_deref(),
+                        &bench_page.pass_readings,
+                    )
+                }),
             });
         }
 
@@ -3381,6 +3553,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed: Duration::ZERO,
+            pass_readings: Vec::new(),
         }
     }
 
@@ -5544,6 +5717,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed,
+            pass_readings: Vec::new(),
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -5616,6 +5790,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
             // this document's true given names.
@@ -5635,6 +5810,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 3: no MRZ found, but still labelled with a name truth —
             // name-scorable, not a hit.
@@ -5654,6 +5830,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 4: a Tier-1 hit with no ground truth for either name field —
             // not name-scorable.
@@ -5673,6 +5850,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 5: carries a name truth, but is outside `tier1_hit_rate`'s own
             // scored population (`mrz_expected: false` and `mrz_found:
@@ -5695,6 +5873,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
         ];
         // `FixedReader` returns the same `hit_evidence` for every document
@@ -6447,5 +6626,163 @@ mod tests {
         assert_eq!(detail[0].retry_damaged_recovery, Some(false));
         assert!(detail[1].retry_budget_hit);
         assert_eq!(detail[1].ocr_elapsed, Duration::ZERO);
+    }
+
+    // ---- #574: the shadow line-1 selector in the benchmark ----
+
+    /// The ICAO specimen's line 2, which every selector case pairs with a line 1
+    /// of its own making. Constructed text only: no real-specimen OCR.
+    const SELECTOR_LINE2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// A TD3 line 1 for the specimen's issuer, filler-padded to 44 cells. No
+    /// name holds a `K` or an `L`, which the scanner's repairs read as fillers.
+    fn selector_line1(name_field: &str) -> String {
+        let mut line = format!("P<UTO{name_field}");
+        while line.len() < 44 {
+            line.push('<');
+        }
+        line
+    }
+
+    /// The scanner accepts the first line 1 as read (its name field breaks the
+    /// grammar), and the second is the well-formed reading of the same line.
+    fn broken_then_good_text() -> String {
+        format!(
+            "{}\n{SELECTOR_LINE2}\n\n{}\n{SELECTOR_LINE2}",
+            selector_line1("SPECIMEN<<TESTXYZ<<<<Q"),
+            selector_line1("SPECIMEN<<TESTXYZ"),
+        )
+    }
+
+    fn control_read(text: &str) -> synthpass_die::Tier1Read {
+        synthpass_die::read_tier1_with(
+            text,
+            &synthpass_die::mrz_parse_options_for(false),
+            synthpass_die::Line1Arm::Control,
+        )
+    }
+
+    fn provenance(id: &str, transform: &str, readings: &[&str]) -> PassProvenance {
+        PassProvenance {
+            id: id.to_string(),
+            transform: transform.to_string(),
+            readings: readings.iter().map(|r| r.to_string()).collect(),
+        }
+    }
+
+    /// The source fields name the passes whose readings hold the proposed
+    /// line 1 once whitespace is stripped, in execution order, each transform
+    /// once.
+    #[test]
+    fn a_proposal_is_traced_to_the_passes_that_read_it() {
+        let read = control_read(&broken_then_good_text());
+        let summary = read.line1.expect("control records a verdict");
+        assert_eq!(summary.outcome, synthpass_die::Line1Outcome::Proposed);
+        let good = selector_line1("SPECIMEN<<TESTXYZ");
+        assert_eq!(read.proposed_line1.as_deref(), Some(good.as_str()));
+
+        let spaced = format!("{} {}", &good[..12], &good[12..]);
+        let passes = vec![
+            provenance(
+                "general",
+                "general",
+                &[&selector_line1("SPECIMEN<<TESTXYZ<<<<Q"), SELECTOR_LINE2],
+            ),
+            provenance("pass-02", "mrz_variants:2", &[&spaced, SELECTOR_LINE2]),
+            provenance("pass-03", "mrz_variants:2", &[&good]),
+            provenance("pass-04", "mrz_variants:3", &["NOT<A<ZONE"]),
+        ];
+        let detail = line1_selection_detail(&summary, read.proposed_line1.as_deref(), &passes);
+
+        assert_eq!(detail.arm, "control");
+        assert_eq!(detail.verdict, "proposed");
+        assert_eq!(detail.reason, None);
+        assert_eq!((detail.eligible, detail.distinct), (1, 1));
+        assert!(detail.names_changed);
+        assert_eq!(detail.source_passes, vec!["pass-02", "pass-03"]);
+        assert_eq!(detail.source_transforms, vec!["mrz_variants:2"]);
+
+        // No pass trace, no provenance; the verdict is still reported.
+        let untraced = line1_selection_detail(&summary, read.proposed_line1.as_deref(), &[]);
+        assert!(untraced.source_passes.is_empty() && untraced.source_transforms.is_empty());
+        assert_eq!(untraced.verdict, "proposed");
+    }
+
+    /// A verdict that is not a proposal never claims a source, even when a
+    /// pass happens to hold the same line.
+    #[test]
+    fn only_a_proposal_carries_a_source() {
+        let zone = format!("{}\n{SELECTOR_LINE2}", selector_line1("SPECIMEN<<TESTXYZ"));
+        let read = control_read(&zone);
+        let summary = read.line1.expect("control records a verdict");
+        assert_eq!(summary.outcome, synthpass_die::Line1Outcome::NoAction);
+        let passes = vec![provenance(
+            "pass-01",
+            "general",
+            &[&selector_line1("SPECIMEN<<TESTXYZ")],
+        )];
+        let detail = line1_selection_detail(
+            &summary,
+            Some(&selector_line1("SPECIMEN<<TESTXYZ")),
+            &passes,
+        );
+        assert_eq!(detail.verdict, "none");
+        assert_eq!(detail.reason, Some("kept"));
+        assert!(detail.source_passes.is_empty());
+    }
+
+    /// The reading's own evidence decides whether a document carries a
+    /// selection: absent (the arm is `off`) writes none, present is passed
+    /// through.
+    #[tokio::test]
+    async fn a_document_carries_the_selection_its_reading_recorded() {
+        let read = control_read(&broken_then_good_text());
+        let mut recording = Evidence::default();
+        recording.line1_selection = read.line1;
+
+        let mut page = rate_test_page();
+        page.page = OcrPage {
+            text: "no zone here".to_string(),
+            ..OcrPage::default()
+        };
+        let prepped = vec![Some(page)];
+        for (evidence, expected) in [(Evidence::default(), None), (recording, Some("proposed"))] {
+            let catalog = synthpass_die::ProviderCatalog::builder()
+                .with_reader(std::sync::Arc::new(FixedReader {
+                    evidence,
+                    ..FixedReader::default()
+                }))
+                .build()
+                .expect("no duplicate ids");
+            let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+            let detail = &reports[0].documents_detail[0];
+            assert_eq!(detail.line1_selection.as_ref().map(|s| s.verdict), expected);
+        }
+    }
+
+    /// With every `SYNTHPASS_MRZ_*` arm `off` the dump zone comes from
+    /// `read_tier1`, which is what `mrz::find_and_parse` returns: the dump is
+    /// byte-identical to what it was before the arms reached it (#574, finding
+    /// 3). Pins the equivalence over the shapes a dump sees: a clean zone, a
+    /// broken-name zone, a checksum failure, prose and a merged zone.
+    #[test]
+    fn the_dump_zone_with_every_arm_off_is_what_find_and_parse_returns() {
+        let specimen = format!("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n{SELECTOR_LINE2}");
+        let texts = [
+            specimen.clone(),
+            broken_then_good_text(),
+            specimen.replace("L898902C36UTO", "L898902C35UTO"),
+            "just some ordinary prose with no machine readable zone".to_string(),
+            format!("{} {SELECTOR_LINE2}", selector_line1("SPECIMEN<<TESTXYZ")),
+        ];
+        for text in &texts {
+            let off = synthpass_die::read_tier1_with(
+                text,
+                &synthpass_die::mrz_parse_options_for(false),
+                synthpass_die::Line1Arm::Off,
+            );
+            assert_eq!(off.parsed, mrz::find_and_parse(text), "{text}");
+            assert_eq!(off.line1, None, "{text}");
+        }
     }
 }

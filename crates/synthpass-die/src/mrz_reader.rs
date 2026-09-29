@@ -20,10 +20,11 @@ use synthpass_core::v2::{
 };
 use synthpass_core::{Extraction, Validity};
 
-use crate::evidence::Evidence;
+use crate::evidence::{Evidence, Line1Outcome, Line1Reason, Line1Summary};
 use crate::provider::{
     Capability, DocumentContext, FieldReader, IntelligenceProvider, ProviderError, Reading,
 };
+use crate::Line1Arm;
 
 /// The `extraction_method` string this provider stamps, matching v1's
 /// vocabulary exactly so the wire value is unchanged.
@@ -104,8 +105,9 @@ impl FieldReader for MrzReader {
             ..Evidence::default()
         };
 
-        let Some(mut data) = mrz::find_and_parse_with(ctx.text, &crate::mrz_parse_options()).ok()
-        else {
+        let tier1 = read_tier1(ctx.text);
+        evidence.line1_selection = tier1.line1;
+        let Some(mut data) = tier1.parsed.ok() else {
             evidence.missing = synthpass_core::v2::ExtractionFields::default().missing();
             return Ok(Reading {
                 extraction: ExtractionV2::default(),
@@ -188,6 +190,139 @@ impl FieldReader for MrzReader {
             evidence,
             by: self.id(),
         })
+    }
+}
+
+/// A Tier-1 read: what `mrz` accepted from a text, and what the shadow line-1
+/// selector said about it.
+#[derive(Debug, Clone)]
+pub struct Tier1Read {
+    /// The accepted read, or why there is none. Under the `on` arm this is the
+    /// selector's proposal when it made one; otherwise it is exactly what
+    /// `mrz::find_and_parse_with` returned.
+    pub parsed: Result<mrz::MrzData, mrz::MrzError>,
+    /// The selector's verdict, when its arm is `control` or `on` and there was
+    /// an accepted read to select on; `None` under `off`, and when nothing was
+    /// accepted.
+    pub line1: Option<Line1Summary>,
+    /// Line 1 of the selector's proposal, under `control` as well as `on`,
+    /// for a benchmark that looks the proposal up in the OCR passes' readings
+    /// (provenance, never used to decide anything). **Document text**: never
+    /// serialise it into a report or log it. `None` when the selector made no
+    /// proposal.
+    pub proposed_line1: Option<String>,
+}
+
+/// The Tier-1 read of an OCR text: [`mrz::find_and_parse_with`] under this
+/// process's arms, then the shadow line-1 selector under its own
+/// (`SYNTHPASS_MRZ_LINE1_SELECT`, see [`crate::line1_select_arm`]).
+///
+/// This is the one place a benchmark and the product read Tier 1, so every arm
+/// reads the same way. [`MrzReader`], the synthetic benchmark's Tier-1 read and
+/// the real-specimen benchmark's dump zone all call it. **Not routed through
+/// it, on purpose:** the OCR retry loop's own parse (so its stopping rule and
+/// "no extra OCR" hold), the pipeline's Tier-2 hint parse, the prep `mrz_found`
+/// parses and the printed-zone validity parse. Those keep their own calls.
+#[must_use]
+pub fn read_tier1(text: &str) -> Tier1Read {
+    read_tier1_with(
+        text,
+        &crate::mrz_parse_options(),
+        crate::line1_select_arm().1,
+    )
+}
+
+/// [`read_tier1`] with the parse options and the line-1 arm given explicitly,
+/// so the arms are tested without touching the process environment.
+///
+/// - [`Line1Arm::Off`]: exactly `mrz::find_and_parse_with(text, opts)`;
+///   `mrz::select_line1` is never called.
+/// - [`Line1Arm::Control`]: the selector runs and its verdict is recorded; a
+///   proposal is discarded, so `parsed` is what `Off` returns.
+/// - [`Line1Arm::On`]: as `Control`, and a proposal replaces `parsed`.
+///
+/// **Unmeasured.** The selector changes name fields only.
+#[must_use]
+pub fn read_tier1_with(text: &str, opts: &mrz::ParseOptions, arm: Line1Arm) -> Tier1Read {
+    let mut parsed = mrz::find_and_parse_with(text, opts);
+    let selected = match &parsed {
+        Ok(accepted) if arm != Line1Arm::Off => Some(summarize(
+            arm,
+            mrz::select_line1(text, accepted, opts),
+            accepted,
+        )),
+        _ => None,
+    };
+    let Some((summary, proposal)) = selected else {
+        return Tier1Read {
+            parsed,
+            line1: None,
+            proposed_line1: None,
+        };
+    };
+    let proposed_line1 = proposal
+        .as_ref()
+        .and_then(|data| data.mrz_lines.lines().next())
+        .map(str::to_string);
+    if let (Line1Arm::On, Some(proposal)) = (arm, proposal) {
+        parsed = Ok(proposal);
+    }
+    Tier1Read {
+        parsed,
+        line1: Some(summary),
+        proposed_line1,
+    }
+}
+
+/// The text-free summary of `selection` for `accepted`, and the proposal when
+/// there is one (which the caller applies only under `on`).
+fn summarize(
+    arm: Line1Arm,
+    selection: mrz::Line1Selection,
+    accepted: &mrz::MrzData,
+) -> (Line1Summary, Option<mrz::MrzData>) {
+    let mut names_changed = false;
+    let mut proposal = None;
+    let (outcome, reason) = match selection.verdict {
+        mrz::Line1Verdict::Proposed(data) => {
+            names_changed =
+                data.surname != accepted.surname || data.given_names != accepted.given_names;
+            proposal = Some(data);
+            let outcome = if arm == Line1Arm::On {
+                Line1Outcome::Applied
+            } else {
+                Line1Outcome::Proposed
+            };
+            (outcome, None)
+        }
+        mrz::Line1Verdict::Ambiguous => (Line1Outcome::Ambiguous, None),
+        mrz::Line1Verdict::Unresolved(why) => (Line1Outcome::Unresolved, unresolved_reason(why)),
+        mrz::Line1Verdict::NoCandidate => (Line1Outcome::NoAction, Some(Line1Reason::NoCandidate)),
+        mrz::Line1Verdict::Kept => (Line1Outcome::NoAction, Some(Line1Reason::Kept)),
+        mrz::Line1Verdict::OutOfScope => (Line1Outcome::NoAction, Some(Line1Reason::OutOfScope)),
+        // `mrz::Line1Verdict` is `#[non_exhaustive]`: a verdict this code does
+        // not know is reported as no action, without a reason, and never applied.
+        _ => (Line1Outcome::NoAction, None),
+    };
+    let summary = Line1Summary {
+        arm,
+        outcome,
+        reason,
+        eligible: selection.eligible,
+        distinct: selection.distinct,
+        names_changed,
+    };
+    (summary, proposal)
+}
+
+/// The report reason for an `mrz::Line1Unresolved`; `None` for a variant this
+/// code does not know (the type is `#[non_exhaustive]`).
+fn unresolved_reason(why: mrz::Line1Unresolved) -> Option<Line1Reason> {
+    match why {
+        mrz::Line1Unresolved::IssuerUnresolved => Some(Line1Reason::IssuerUnresolved),
+        mrz::Line1Unresolved::RepeatedLine => Some(Line1Reason::RepeatedLine),
+        mrz::Line1Unresolved::DigitInNameField => Some(Line1Reason::DigitInNameField),
+        _ => None,
     }
 }
 
@@ -855,5 +990,199 @@ mod tests {
                 "catalog-routed read must report the same format as a direct read"
             );
         }
+    }
+
+    // ── #574: the shadow line-1 selector, through `read_tier1_with` ──
+    //
+    // Every case names its arm and its parse options explicitly, so nothing
+    // here reads or writes the process environment.
+
+    /// The ICAO specimen's line 2, which every case below pairs with a line 1
+    /// of its own making.
+    const SPECIMEN_LINE2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// A TD3 line 1 for the specimen's issuer with `name_field` after it,
+    /// filler-padded to 44 cells. No name here holds a `K` or an `L`, which the
+    /// scanner's repairs read as misread fillers.
+    fn specimen_line1(name_field: &str) -> String {
+        let mut line = format!("P<UTO{name_field}");
+        while line.len() < 44 {
+            line.push('<');
+        }
+        assert_eq!(line.len(), 44);
+        line
+    }
+
+    /// A `<<<<` run inside the name field breaks the name grammar, and the
+    /// scanner accepts the line as read: line 1 has no check digit.
+    fn broken_line1() -> String {
+        specimen_line1("SPECIMEN<<TESTXYZ<<<<Q")
+    }
+
+    fn good_line1() -> String {
+        specimen_line1("SPECIMEN<<TESTXYZ")
+    }
+
+    /// An OCR run that read the broken line 1 first and the good one second.
+    fn broken_then_good() -> String {
+        format!(
+            "{}\n{SPECIMEN_LINE2}\n\n{}\n{SPECIMEN_LINE2}",
+            broken_line1(),
+            good_line1()
+        )
+    }
+
+    fn tier1(text: &str, arm: Line1Arm) -> Tier1Read {
+        read_tier1_with(text, &mrz::ParseOptions::default(), arm)
+    }
+
+    #[test]
+    fn off_is_find_and_parse_with_exactly_and_never_selects() {
+        let corrupted = SPECIMEN.replace("L898902C36UTO", "L898902C35UTO");
+        let texts = [
+            SPECIMEN.to_string(),
+            TD1_SPECIMEN.to_string(),
+            TD2_SPECIMEN.to_string(),
+            MRV_A_SPECIMEN.to_string(),
+            MRV_B_SPECIMEN.to_string(),
+            "just some ordinary prose with no machine readable zone".to_string(),
+            corrupted,
+            broken_then_good(),
+        ];
+        for opts in [
+            mrz::ParseOptions::default(),
+            mrz::ParseOptions::default().with_class_sweep(true),
+        ] {
+            for text in &texts {
+                let read = read_tier1_with(text, &opts, Line1Arm::Off);
+                assert_eq!(read.parsed, mrz::find_and_parse_with(text, &opts), "{text}");
+                assert_eq!(read.line1, None, "{text}");
+            }
+        }
+    }
+
+    /// The scanner accepts the broken line 1 as read, which the cases below
+    /// build on. If this fails, the fixture no longer builds the state the
+    /// selector is meant to see.
+    #[test]
+    fn the_scanner_accepts_the_broken_line_as_read() {
+        let accepted = mrz::find_and_parse_with(&broken_then_good(), &mrz::ParseOptions::default())
+            .expect("parses");
+        assert!(accepted.valid());
+        assert_eq!(
+            accepted.mrz_lines,
+            format!("{}\n{SPECIMEN_LINE2}", broken_line1())
+        );
+    }
+
+    #[test]
+    fn control_records_a_proposal_and_discards_it() {
+        let text = broken_then_good();
+        let off = tier1(&text, Line1Arm::Off);
+        let control = tier1(&text, Line1Arm::Control);
+
+        assert_eq!(control.parsed, off.parsed, "a placebo changes nothing");
+        let summary = control.line1.expect("control records a verdict");
+        assert_eq!(summary.arm, Line1Arm::Control);
+        assert_eq!(summary.outcome, Line1Outcome::Proposed);
+        assert_eq!(summary.reason, None);
+        assert_eq!((summary.eligible, summary.distinct), (1, 1));
+        assert!(summary.names_changed, "the broken given names carry spaces");
+        // The proposal's line 1 is kept for provenance under `control` too, and
+        // is absent when the arm is `off`.
+        assert_eq!(control.proposed_line1, Some(good_line1()));
+        assert_eq!(off.proposed_line1, None);
+    }
+
+    #[test]
+    fn on_applies_the_proposal_and_changes_only_the_names() {
+        let text = broken_then_good();
+        let off = tier1(&text, Line1Arm::Off).parsed.expect("parses");
+        let on = tier1(&text, Line1Arm::On);
+
+        let summary = on.line1.expect("on records a verdict");
+        assert_eq!(summary.arm, Line1Arm::On);
+        assert_eq!(summary.outcome, Line1Outcome::Applied);
+        assert!(summary.names_changed);
+
+        let applied = on.parsed.expect("still parses");
+        assert!(applied.valid());
+        assert_eq!(
+            applied.mrz_lines,
+            format!("{}\n{SPECIMEN_LINE2}", good_line1())
+        );
+        assert_eq!(applied.surname, "SPECIMEN");
+        assert_eq!(applied.given_names, "TESTXYZ");
+        assert_eq!(off.given_names, "TESTXYZ    Q");
+
+        let mut restored = applied.clone();
+        restored.given_names = off.given_names.clone();
+        restored.mrz_lines = off.mrz_lines.clone();
+        assert_eq!(restored, off, "nothing but the names and line 1 moved");
+    }
+
+    #[test]
+    fn a_grammatical_read_is_kept_under_both_arms() {
+        for text in [SPECIMEN, TD2_SPECIMEN, MRV_A_SPECIMEN, MRV_B_SPECIMEN] {
+            let off = tier1(text, Line1Arm::Off);
+            for arm in [Line1Arm::Control, Line1Arm::On] {
+                let read = tier1(text, arm);
+                assert_eq!(read.parsed, off.parsed, "{arm:?}: {text}");
+                let summary = read.line1.expect("a verdict is recorded");
+                assert_eq!(summary.outcome, Line1Outcome::NoAction, "{arm:?}");
+                assert_eq!(summary.reason, Some(Line1Reason::Kept), "{arm:?}");
+                assert!(!summary.names_changed, "{arm:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn td1_and_an_unverified_read_are_out_of_scope() {
+        let corrupted = SPECIMEN.replace("L898902C36UTO", "L898902C35UTO");
+        for text in [TD1_SPECIMEN.to_string(), corrupted] {
+            let off = tier1(&text, Line1Arm::Off);
+            let on = tier1(&text, Line1Arm::On);
+            assert_eq!(on.parsed, off.parsed, "{text}");
+            let summary = on.line1.expect("a verdict is recorded");
+            assert_eq!(summary.outcome, Line1Outcome::NoAction, "{text}");
+            assert_eq!(summary.reason, Some(Line1Reason::OutOfScope), "{text}");
+        }
+    }
+
+    #[test]
+    fn no_accepted_read_has_no_selection_to_record() {
+        let prose = "just some ordinary prose with no machine readable zone";
+        for arm in [Line1Arm::Off, Line1Arm::Control, Line1Arm::On] {
+            let read = tier1(prose, arm);
+            assert!(read.parsed.is_err(), "{arm:?}");
+            assert_eq!(read.line1, None, "{arm:?}");
+        }
+    }
+
+    /// Two different well-formed line 1s: nothing is picked, under either arm.
+    #[test]
+    fn an_ambiguous_verdict_changes_nothing_even_when_on() {
+        let other = specimen_line1("SPECIMEN<<TESTXYZW");
+        let text = format!("{}\n\n{other}\n{SPECIMEN_LINE2}", broken_then_good());
+        let off = tier1(&text, Line1Arm::Off);
+        let on = tier1(&text, Line1Arm::On);
+        assert_eq!(on.parsed, off.parsed);
+        let summary = on.line1.expect("a verdict is recorded");
+        assert_eq!(summary.outcome, Line1Outcome::Ambiguous);
+        assert_eq!((summary.eligible, summary.distinct), (2, 2));
+        assert!(!summary.names_changed);
+    }
+
+    #[test]
+    fn the_reader_reports_the_selection_in_its_evidence_only_when_the_arm_is_on() {
+        // The process arm is `off` unless the environment says otherwise, and
+        // this test makes no claim about the environment: it asserts only that
+        // the evidence agrees with whatever arm the process is under.
+        let arm = crate::line1_select_arm().1;
+        let reading = read(SPECIMEN);
+        assert_eq!(
+            reading.evidence.line1_selection.is_some(),
+            arm != Line1Arm::Off
+        );
     }
 }

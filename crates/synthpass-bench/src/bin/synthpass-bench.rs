@@ -454,6 +454,19 @@ struct Report {
     /// recorded it before, so a retry-arm question about `td1`/`td2`/…
     /// history had no run-level record of which arm produced it (#510).
     ocr_arms: synthpass_bench::report::OcrArmsReport,
+    /// The `mrz` class-sweep arm this run measured, as the binary resolved it
+    /// (`off`, `control` or `on`, from `SYNTHPASS_MRZ_CLASS_SWEEP`). Quote
+    /// this field, never the variable you believe you set: an unrecognised
+    /// value falls back to `off` silently. Always serialized; `provider-bench`
+    /// records the same arm as `mrz_class_sweep_arm`.
+    mrz_class_sweep_arm: &'static str,
+    /// The shadow line-1 selector arm this run measured (#574), from
+    /// `SYNTHPASS_MRZ_LINE1_SELECT`, as `mrz_class_sweep_arm` above. Always
+    /// serialized; `provider-bench` records it under the same name. The
+    /// synthetic `Tier-1` read goes through `synthpass_die::read_tier1`, so the
+    /// arm reaches every result here; per-document verdicts are not recorded
+    /// on this report.
+    mrz_line1_select_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded (issue #541) — a run-level fact next to `ocr_arms`,
     /// since this binary loads one `NativeOcr` instance for the whole run.
@@ -912,6 +925,8 @@ fn main() {
         count: parsed.count,
         seed_start: parsed.seed,
         ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::from_env()),
+        mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
+        mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
         model_paths: synthpass_bench::report::ModelPathsReport::resolve(
             &detection_path,
             &recognition_path,
@@ -1261,6 +1276,8 @@ mod tests {
             count: 1,
             seed_start: 0,
             ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::DEFAULT),
+            mrz_class_sweep_arm: "off",
+            mrz_line1_select_arm: "off",
             model_paths: synthpass_bench::report::ModelPathsReport::default(),
             hits,
             hit_rate: hits as f64,
@@ -1319,6 +1336,20 @@ mod tests {
         assert_eq!(json["ocr_arms"]["chargrid"], "off");
 
         assert_eq!(json["results"][0]["retry_stop"], "general_valid");
+    }
+
+    /// #574: both MRZ arms are run-level fields, always present in the JSON, so
+    /// a report says which arm produced its numbers.
+    #[test]
+    fn report_carries_both_mrz_arms() {
+        let mut report = synthetic_rate_report(1, 1, 0);
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["mrz_class_sweep_arm"], "off");
+        assert_eq!(json["mrz_line1_select_arm"], "off");
+
+        report.mrz_line1_select_arm = "control";
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["mrz_line1_select_arm"], "control");
     }
 
     /// Issue #541: the resolved model paths are a run-level field, always
