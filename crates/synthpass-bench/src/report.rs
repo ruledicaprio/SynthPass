@@ -34,15 +34,56 @@ pub struct CapabilityReport {
 /// no labelled document had ground truth for that specific field (per-field)
 /// — see `synthpass_bench::provider_bench::AccuracyStats`'s doc for why that
 /// is reported as absent rather than a fabricated `0.0`.
+///
+/// Those top-level rates cover every labelled document and are kept for
+/// continuity. `accepted_reads` (read quality) and `scored` (end-to-end) are
+/// the populations to quote, each with its own document count (#564).
 #[derive(Serialize)]
 pub struct AccuracyReport {
     pub labelled_documents: usize,
     pub field_match_rate: Option<f64>,
     pub mean_cer: Option<f64>,
-    pub hits_only_field_match_rate: Option<f64>,
-    pub hits_only_mean_cer: Option<f64>,
-    pub hits_only_documents: usize,
     pub per_field_cer: Vec<PerFieldCer>,
+    pub accepted_reads: PopulationAccuracyReport,
+    pub scored: PopulationAccuracyReport,
+}
+
+/// Mirrors `synthpass_bench::provider_bench::PopulationAccuracy` for JSON.
+#[derive(Serialize)]
+pub struct PopulationAccuracyReport {
+    pub documents: usize,
+    pub field_match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+    pub per_field: Vec<FieldAccuracyReport>,
+}
+
+/// Mirrors `synthpass_bench::provider_bench::FieldAccuracy` for JSON.
+#[derive(Serialize)]
+pub struct FieldAccuracyReport {
+    pub field: &'static str,
+    pub documents: usize,
+    pub match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+}
+
+impl From<crate::provider_bench::PopulationAccuracy> for PopulationAccuracyReport {
+    fn from(population: crate::provider_bench::PopulationAccuracy) -> Self {
+        Self {
+            documents: population.documents,
+            field_match_rate: population.field_match_rate,
+            mean_cer: population.mean_cer,
+            per_field: population
+                .per_field
+                .into_iter()
+                .map(|field| FieldAccuracyReport {
+                    field: field.field,
+                    documents: field.documents,
+                    match_rate: field.match_rate,
+                    mean_cer: field.mean_cer,
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -423,9 +464,6 @@ impl From<ProviderReport> for ProviderRow {
                 labelled_documents: r.accuracy.labelled_documents,
                 field_match_rate: r.accuracy.field_match_rate,
                 mean_cer: r.accuracy.mean_cer,
-                hits_only_field_match_rate: r.accuracy.hits_only_field_match_rate,
-                hits_only_mean_cer: r.accuracy.hits_only_mean_cer,
-                hits_only_documents: r.accuracy.hits_only_documents,
                 per_field_cer: r
                     .accuracy
                     .per_field_cer
@@ -436,6 +474,8 @@ impl From<ProviderReport> for ProviderRow {
                         documents,
                     })
                     .collect(),
+                accepted_reads: r.accuracy.accepted_reads.into(),
+                scored: r.accuracy.scored.into(),
             },
             speed: SpeedReport {
                 mean_ms: r.speed.mean.as_millis(),
@@ -1092,10 +1132,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
-                hits_only_field_match_rate: None,
-                hits_only_mean_cer: None,
-                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
+                accepted_reads: Default::default(),
+                scored: Default::default(),
             },
             speed: SpeedStats {
                 mean: Duration::ZERO,
@@ -1240,10 +1279,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
-                hits_only_field_match_rate: None,
-                hits_only_mean_cer: None,
-                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
+                accepted_reads: Default::default(),
+                scored: Default::default(),
             },
             speed: SpeedStats {
                 mean: Duration::ZERO,

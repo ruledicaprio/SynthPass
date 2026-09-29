@@ -98,8 +98,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real_with_dump_options, AssertionBucket, ProviderReport,
-    StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
+    run_provider_bench, run_provider_bench_real_with_dump_options, AssertionBucket,
+    PopulationAccuracy, ProviderReport, StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::report::{
     ModelPathsReport, OutcomeRow, ProviderRow, RealSpecimenBaseline, RealSpecimenSnapshot, Report,
@@ -1408,26 +1408,10 @@ async fn main() {
     }
 
     for r in &reports {
-        let field_match = r
-            .accuracy
-            .field_match_rate
-            .map(|v| format!("{:.1}%", v * 100.0))
-            .unwrap_or_else(|| "n/a".to_string());
-        let mean_cer = r
-            .accuracy
-            .mean_cer
-            .map(|v| format!("{v:.3}"))
-            .unwrap_or_else(|| "n/a".to_string());
-        let hits_field_match = r
-            .accuracy
-            .hits_only_field_match_rate
-            .map(|v| format!("{:.1}%", v * 100.0))
-            .unwrap_or_else(|| "n/a".to_string());
-        let hits_mean_cer = r
-            .accuracy
-            .hits_only_mean_cer
-            .map(|v| format!("{v:.3}"))
-            .unwrap_or_else(|| "n/a".to_string());
+        let cer = |mean: Option<f64>| {
+            mean.map(|v| format!("{v:.3}"))
+                .unwrap_or_else(|| "n/a".to_string())
+        };
         let unsupported = match &r.unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1467,22 +1451,62 @@ async fn main() {
         };
         let tier1_hit_rate: &Tier1HitRate = &r.tier1_hit_rate;
         println!(
-            "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, field match \
-             {field_match} (all labelled), mean CER {mean_cer} (all labelled), \
-             field match {hits_field_match} (hits only, {} labelled docs), \
-             mean CER {hits_mean_cer} (hits only), mean {} ms, unsupported-assertion rate \
-             {unsupported}",
+            "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, mean {} ms, \
+             unsupported-assertion rate {unsupported}",
             r.provider_id,
             r.documents,
             r.accuracy.labelled_documents,
-            r.accuracy.hits_only_documents,
             r.speed.mean.as_millis(),
         );
-        for (field, mean, documents) in &r.accuracy.per_field_cer {
-            let mean = mean
-                .map(|value| format!("{value:.3}"))
-                .unwrap_or_else(|| "n/a".to_string());
-            println!("    {field}: mean CER {mean} (all labelled, {documents} docs)");
+
+        // Field accuracy over three populations, each with its size (#564).
+        // Read quality and end-to-end are the two to quote; the all-labelled
+        // figure is kept for continuity with the bench history and mixes in
+        // misses and non-conforming specimens. See
+        // `synthpass_bench::provider_bench::AccuracyStats`'s doc.
+        let accepted = &r.accuracy.accepted_reads;
+        let scored = &r.accuracy.scored;
+        println!(
+            "  field accuracy, accepted reads ({} docs): field match {}, mean CER {}",
+            accepted.documents,
+            format_percentage(accepted.field_match_rate),
+            cer(accepted.mean_cer),
+        );
+        println!(
+            "  field accuracy, scored end-to-end ({} docs): field match {}, mean CER {}",
+            scored.documents,
+            format_percentage(scored.field_match_rate),
+            cer(scored.mean_cer),
+        );
+        println!(
+            "  field accuracy, all labelled incl. non-conforming ({} docs): field match {}, \
+             mean CER {}",
+            r.accuracy.labelled_documents,
+            format_percentage(r.accuracy.field_match_rate),
+            cer(r.accuracy.mean_cer),
+        );
+        let in_population = |population: &PopulationAccuracy, field: &str| {
+            population
+                .per_field
+                .iter()
+                .find(|entry| entry.field == field)
+                .map(|entry| (entry.mean_cer, entry.documents))
+                .unwrap_or((None, 0))
+        };
+        println!("  per-field mean CER (docs): accepted reads | scored | all labelled");
+        for (field, all_mean, all_documents) in &r.accuracy.per_field_cer {
+            let (accepted_mean, accepted_documents) = in_population(accepted, field);
+            let (scored_mean, scored_documents) = in_population(scored, field);
+            if accepted_documents + scored_documents + all_documents == 0 {
+                continue;
+            }
+            println!(
+                "    {field}: {} ({accepted_documents}) | {} ({scored_documents}) | {} \
+                 ({all_documents})",
+                cer(accepted_mean),
+                cer(scored_mean),
+                cer(*all_mean),
+            );
         }
 
         // Two name-accuracy rates over two different denominators — no ICAO
@@ -2569,10 +2593,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
-                hits_only_field_match_rate: None,
-                hits_only_mean_cer: None,
-                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
+                accepted_reads: Default::default(),
+                scored: Default::default(),
             },
             speed: SpeedStats {
                 mean: Duration::ZERO,
