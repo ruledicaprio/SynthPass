@@ -1560,16 +1560,27 @@ fn temporary_image_path() -> PathBuf {
 /// file write, so it measures the OCR pipeline rather than the disk. It is
 /// where a real-specimen run spends almost all of its time, and until it was
 /// recorded nothing said which documents that time went to (ADR-0010, step 5).
+///
+/// With `trace` `Some`, the OCR call is `recognize_detailed_traced`, which
+/// returns the same page and fills the vector with one record per executed
+/// pass (ADR-0024, amendment 1); with `None` it is `recognize_detailed`.
 fn ocr_and_keep_path(
     ocr: &NativeOcr,
     image: &image::DynamicImage,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
 ) -> Result<(OcrPage, PathBuf, Duration), String> {
     let path = temporary_image_path();
     image
         .save(&path)
         .map_err(|e| format!("failed to write temp image: {e}"))?;
     let started = Instant::now();
-    let result = ocr.recognize_detailed(&path);
+    let result = match trace {
+        Some(records) => ocr.recognize_detailed_traced(&path).map(|(page, passes)| {
+            *records = passes;
+            page
+        }),
+        None => ocr.recognize_detailed(&path),
+    };
     let ocr_elapsed = started.elapsed();
     match result {
         Ok(page) => Ok((page, path, ocr_elapsed)),
@@ -1596,7 +1607,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.seed);
             }
-            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
+            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image, None).ok()?;
             let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
             // Read from the OCR text, never from `labels`: the question is
             // what this run's OCR pass actually recovered, which is what a
@@ -1632,10 +1643,16 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
 /// ground truth (`None` when the specimen had no `samples/ocr_fixtures/
 /// <stem>.json` label). Unlike [`prep_corpus`], a missing label is not a
 /// reason to drop the document — only an OCR failure is.
+///
+/// `passes`, when `Some`, receives one [`OcrPassesRow`](crate::ocr_passes::OcrPassesRow)
+/// per OCR'd document. This is the only place the rows are made, and this runs
+/// once per run, so the rows are per document however many providers read the
+/// documents afterwards.
 fn prep_specimens(
     ocr: &NativeOcr,
     specimens: &[RealSpecimenDoc],
     progress: bool,
+    mut passes: Option<&mut crate::ocr_passes::OcrPassesCollector>,
 ) -> Vec<Option<BenchPage>> {
     let total = specimens.len();
     specimens
@@ -1645,7 +1662,19 @@ fn prep_specimens(
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.name);
             }
-            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
+            let mut records = Vec::new();
+            let (page, image_path, ocr_elapsed) =
+                ocr_and_keep_path(ocr, &doc.image, passes.is_some().then_some(&mut records))
+                    .ok()?;
+            if let Some(collector) = passes.as_deref_mut() {
+                collector.push(
+                    &doc.name,
+                    Some(&doc.asset_id),
+                    Some(&doc.source_sha256),
+                    &page,
+                    &records,
+                );
+            }
             let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
             // The hand-transcribed true printed MRZ zone, when this specimen
             // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
@@ -1757,16 +1786,8 @@ pub async fn run_provider_bench_real_with_dump_options(
     dump_ocr_hits: bool,
     progress: bool,
 ) -> Vec<ProviderReport> {
-    // The CLI writes this pointer immediately before the run. Reading it
-    // here keeps the existing public benchmark function signature intact.
-    let run_manifest = dump_ocr_dir.and_then(|dir| {
-        std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt"))
-            .ok()
-            .filter(|name| {
-                !name.is_empty() && !name.chars().any(|c| matches!(c, '/' | '\\' | '\n' | '\r'))
-            })
-    });
-    let prepped = prep_specimens(ocr, specimens, progress);
+    let run_manifest = current_run_manifest(dump_ocr_dir);
+    let prepped = prep_specimens(ocr, specimens, progress, None);
     run_prepped_with_dump_options(
         catalog,
         &prepped,
@@ -1777,6 +1798,81 @@ pub async fn run_provider_bench_real_with_dump_options(
         progress,
     )
     .await
+}
+
+/// The run manifest file name the CLI wrote next to the dumps, if any. The CLI
+/// writes this pointer immediately before the run; reading it here keeps the
+/// public benchmark function signatures free of it.
+fn current_run_manifest(dir: Option<&Path>) -> Option<String> {
+    dir.and_then(|dir| {
+        std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt"))
+            .ok()
+            .filter(|name| {
+                !name.is_empty() && !name.chars().any(|c| matches!(c, '/' | '\\' | '\n' | '\r'))
+            })
+    })
+}
+
+/// The opt-in dumps a real-specimen run can write, next to the `--out` report.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RealDumpOptions<'a> {
+    /// `--dump-ocr`: directory for the miss OCR dump.
+    pub ocr_dir: Option<&'a Path>,
+    /// `--dump-ocr-hits`: add Tier-1 hits to that dump.
+    pub ocr_hits: bool,
+    /// `--dump-ocr-passes`: directory for
+    /// [`OCR_PASSES_FILENAME`](crate::ocr_passes::OCR_PASSES_FILENAME). The
+    /// caller has already checked the destination
+    /// ([`crate::ocr_passes::check_passes_destination`]) and refused the
+    /// private track.
+    pub ocr_passes_dir: Option<&'a Path>,
+}
+
+/// [`run_provider_bench_real_with_dump_options`] with the full set of dumps.
+///
+/// With `dumps.ocr_passes_dir` set, every document is OCR'd through the traced
+/// entry point, which returns the same page as the untraced one, and one row
+/// per OCR'd document is written to `provider-bench-ocr-passes.jsonl` right
+/// after the corpus prep — once, before any provider reads a document. The
+/// readings never reach a [`ProviderReport`], [`DocumentDetail`] or the outcome
+/// ledger. `Err` only when that file cannot be written, and it is returned
+/// before any provider runs.
+pub async fn run_provider_bench_real_with_options(
+    catalog: &ProviderCatalog,
+    ocr: &NativeOcr,
+    specimens: &[RealSpecimenDoc],
+    measure_memory: bool,
+    dumps: &RealDumpOptions<'_>,
+    progress: bool,
+) -> Result<Vec<ProviderReport>, String> {
+    let run_manifest = current_run_manifest(dumps.ocr_dir.or(dumps.ocr_passes_dir));
+    let mut passes = dumps
+        .ocr_passes_dir
+        .map(|_| crate::ocr_passes::OcrPassesCollector::new(run_manifest.clone()));
+    let prepped = prep_specimens(ocr, specimens, progress, passes.as_mut());
+    if let (Some(dir), Some(collector)) = (dumps.ocr_passes_dir, passes.as_ref()) {
+        // The path and a count only: the readings are document OCR.
+        let (path, rows) = collector.write(dir).inspect_err(|_| {
+            // `run_prepped` removes these after the last reader; nobody will.
+            for bench_page in prepped.iter().flatten() {
+                let _ = std::fs::remove_file(&bench_page.image_path);
+            }
+        })?;
+        eprintln!(
+            "OCR pass readings written to {} ({rows} rows)",
+            path.display()
+        );
+    }
+    Ok(run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        dumps.ocr_dir,
+        dumps.ocr_hits,
+        run_manifest.as_deref(),
+        progress,
+    )
+    .await)
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was

@@ -66,6 +66,17 @@
 //! see that module's doc for the mechanism (`ocrs` never emits an isolated
 //! `<`) and [`OcrPage::chargrid`] for what a run records. Unset, the OCR path
 //! is byte-identical to before this arm existed.
+//!
+//! # Pass trace (benchmark-only)
+//!
+//! [`NativeOcr::recognize_detailed_traced`] returns the same [`OcrPage`] as
+//! `recognize_detailed` plus one [`PassRecord`] per executed pass: the pass id,
+//! the transform that produced its pixels, its image size, what the loop did
+//! with it, and every MRZ-shaped line it read with the line's index and
+//! bounding box. It exists so a benchmark can say which pass read a line, which
+//! the appended page text no longer can. Nothing on the extraction path calls
+//! it, [`OcrPage`] does not carry it, and its types derive no `Serialize`; see
+//! [`pass_trace`] and ADR-0024, amendment 1.
 
 // Fixed-grid MRZ name-line repair: pure geometry, no `ocrs` types; not yet
 // wired into `NativeOcr`. Its docs live in the module's own `//!` comment --
@@ -75,7 +86,10 @@ pub mod chargrid;
 pub mod download;
 #[cfg(feature = "embedded-models")]
 pub mod embedded;
+pub mod pass_trace;
 pub mod verify;
+
+pub use pass_trace::{LineReading, PassOutcome, PassRecord, PassTransform};
 
 // Preprocessing and layout geometry now live in `synthpass-imageprep`, a
 // pure-Rust crate that also compiles to wasm32 so the browser demo can run
@@ -347,7 +361,45 @@ impl NativeOcr {
     /// eats into the retry loop's own wall-clock budget
     /// (`DEFAULT_MAX_SECONDS`) — it adds to this call's total latency, not
     /// to the retry loop's.
+    ///
+    /// One line of the "unchanged" list is a rewrite, not a leave-alone:
+    /// `run_pass` now runs `detect_words` → `find_text_lines` →
+    /// `recognize_text` itself instead of calling `OcrEngine::get_text`. That is
+    /// `get_text`'s own body in `ocrs` 0.13.1, so the returned text and its
+    /// error messages are identical (see `run_pass`); it is what lets
+    /// [`Self::recognize_detailed_traced`] read each line's box from the very
+    /// pass the product runs.
     pub fn recognize_detailed(&self, image_path: &Path) -> Result<OcrPage, String> {
+        self.recognize_inner(image_path, None)
+    }
+
+    /// [`Self::recognize_detailed`] plus a [`PassRecord`] for every OCR pass
+    /// that ran, in execution order (see [`pass_trace`]).
+    ///
+    /// **For the benchmarks only.** The returned [`OcrPage`] is exactly what
+    /// `recognize_detailed` returns for the same image and environment; the
+    /// records are observation only and never feed back into it. On error no
+    /// records are returned.
+    pub fn recognize_detailed_traced(
+        &self,
+        image_path: &Path,
+    ) -> Result<(OcrPage, Vec<PassRecord>), String> {
+        let mut records = Vec::new();
+        let page = self.recognize_inner(image_path, Some(&mut records))?;
+        Ok((page, records))
+    }
+
+    /// The body of [`Self::recognize_detailed`] and
+    /// [`Self::recognize_detailed_traced`]. With `trace` `None` (every product
+    /// call) no reading is built and nothing is allocated for one; with `Some`,
+    /// a record is pushed per executed pass. The records are derived from the
+    /// pass's structured lines beside the loop's own text handling, which is
+    /// otherwise unchanged.
+    fn recognize_inner(
+        &self,
+        image_path: &Path,
+        mut trace: Option<&mut Vec<PassRecord>>,
+    ) -> Result<OcrPage, String> {
         let verbose = verbose_enabled();
         // `None` on every normal run; `Some` only under the
         // `SYNTHPASS_OCR_DUMP_VARIANTS` cell-(c) diagnostic (see its doc).
@@ -454,7 +506,8 @@ impl NativeOcr {
         if let Some(dir) = &dump_dir {
             dump_pass_image(dir, image_path, "general", &image, verbose);
         }
-        let mut text = run_pass(&self.engine, &image)?;
+        let general_lines = run_pass(&self.engine, &image)?;
+        let mut text = pass_trace::joined_text(&general_lines);
         if verbose {
             let regions = region_count(&self.engine, &image).unwrap_or(0);
             eprintln!(
@@ -463,7 +516,37 @@ impl NativeOcr {
             );
         }
         let general_parsed = mrz::find_and_parse(&text);
+        // The general pass's record, pushed once its outcome is known. Its
+        // readings are the MRZ-shaped lines of the text just parsed, so the
+        // lines that ended up in the page text.
+        let record_general = |trace: &mut Option<&mut Vec<PassRecord>>, accepted: bool| {
+            if let Some(records) = trace.as_deref_mut() {
+                let readings = pass_trace::mrz_readings(&general_lines);
+                debug_assert!(pass_trace::readings_match_candidates(&general_lines));
+                // The general pass's lines are the base of the page text, so a
+                // pass that read MRZ-shaped lines "appended" them in the sense
+                // `PassOutcome::Appended` documents.
+                let outcome = if accepted {
+                    PassOutcome::Accepted
+                } else if readings.is_empty() {
+                    PassOutcome::NoMrzShapedLines
+                } else {
+                    PassOutcome::Appended
+                };
+                records.push(PassRecord {
+                    order: 0,
+                    id: "general".to_string(),
+                    transform: PassTransform::General,
+                    turn: 0,
+                    image_width: image.width(),
+                    image_height: image.height(),
+                    outcome,
+                    readings,
+                });
+            }
+        };
         if let Some(data) = general_parsed.as_ref().ok().filter(|d| d.valid()) {
+            record_general(&mut trace, true);
             if verbose {
                 eprintln!(
                     "[synthpass-ocr] general pass: stopping, damaged_recovery={}",
@@ -492,13 +575,16 @@ impl NativeOcr {
                 retry_stop: Some("general_valid".to_string()),
                 chargrid: chargrid_arm,
             });
-        } else if verbose {
-            eprintln!(
-                "[synthpass-ocr] Tier-1 miss on general pass ({}); MRZ-band candidate lines:",
-                describe_unaccepted_mrz(&general_parsed)
-            );
-            for line in mrz_shaped_lines(&text).lines() {
-                eprintln!("[synthpass-ocr]   {line}");
+        } else {
+            record_general(&mut trace, false);
+            if verbose {
+                eprintln!(
+                    "[synthpass-ocr] Tier-1 miss on general pass ({}); MRZ-band candidate lines:",
+                    describe_unaccepted_mrz(&general_parsed)
+                );
+                for line in mrz_shaped_lines(&text).lines() {
+                    eprintln!("[synthpass-ocr]   {line}");
+                }
             }
         }
 
@@ -534,9 +620,16 @@ impl NativeOcr {
         // returns nothing when there's no confident band, or when the band
         // it found is close enough to the blind crop to be a duplicate (see
         // its doc comment), so this costs nothing on the common case.
+        //
+        // Each tier carries the [`PassTransform`] that built its pixels, attached
+        // where the tier is built so construction stays lazy and the label
+        // follows the pixels rather than the position.
         let geometry_variants = mrz_band
             .map(|band| preprocess::geometry_band_variants(&image, band, NATIVE_UPSCALE_FILTER))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(k, variant)| (PassTransform::GeometryBand(k), variant));
         // Texture suppression chains on *after* the geometry variants, making
         // it the last pass of all — the same trailing contract, one step
         // further out. It is built lazily so that a document which validates
@@ -551,58 +644,19 @@ impl NativeOcr {
         // which arm is selected.
         let order = ocr_order();
         let band_first_pass = if order == OcrOrder::BandFirst && texture_mode != TextureMode::Off {
-            vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
+            vec![(
+                PassTransform::BandFirstPlain,
+                preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER),
+            )]
         } else {
             Vec::new()
         };
-        let texture_variants = std::iter::once_with(|| match texture_mode {
-            TextureMode::Off => Vec::new(),
-            // Two variants, not one, and the order is deliberate. The
-            // 2026-09-04 real-specimen A/B found that these fix *different*
-            // miss classes — `plain_band` recovers `no_mrz_found` (a detection
-            // failure) while the median recovers `checksum_failed` (a
-            // recognition failure) — and that running only one of them made
-            // them compete for a single trailing slot, so each arm lost the
-            // documents the other would have caught. `plain_band` goes first
-            // because it is the cheaper of the two (a crop and an upscale, no
-            // per-pixel window sort), and on a document that validates from it
-            // the median is never built at all. Under `OcrOrder::BandFirst`
-            // that first entry has already run, at the front of the whole
-            // chain, so it is left out here rather than duplicated.
-            TextureMode::On => {
-                let mut variants = if order == OcrOrder::BandFirst {
-                    Vec::new()
-                } else {
-                    vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
-                };
-                variants.extend(preprocess::texture_variants(&image, NATIVE_UPSCALE_FILTER));
-                variants
-            }
-            // Placebo. `plain_band` is the untreated band crop, and its own
-            // doc comment records that it is deliberately kept out of
-            // `mrz_variants` because `ocrs` normalizes internally and an
-            // untreated variant "adds nothing there" — which is exactly the
-            // property a control needs. It costs a real pass and appends real
-            // text, while being the one band treatment already measured as
-            // inert on this engine. Same `BandFirst` de-duplication as `On`.
-            TextureMode::Control => {
-                if order == OcrOrder::BandFirst {
-                    Vec::new()
-                } else {
-                    vec![preprocess::plain_band(&image, NATIVE_UPSCALE_FILTER)]
-                }
-            }
-        })
-        .flatten();
-        let mut mrz_variants_list =
-            preprocess::mrz_variants_with(&image, NATIVE_UPSCALE_FILTER, skew_mode());
-        // `OcrOrder::Control`'s reorder: swap the two blind-crop variants
-        // (contrast-stretched, binarized) that neither `BandFirst` nor any
-        // other hypothesis here expects to matter individually — see
-        // `OcrOrder::Control`'s doc comment for why this arm exists.
-        if order == OcrOrder::Control && mrz_variants_list.len() >= 2 {
-            mrz_variants_list.swap(0, 1);
-        }
+        let texture_variants =
+            std::iter::once_with(|| texture_tier(&image, texture_mode, order)).flatten();
+        let mrz_variants_list = label_mrz_variants(
+            preprocess::mrz_variants_with(&image, NATIVE_UPSCALE_FILTER, skew_mode()),
+            order,
+        );
         // The outermost trailing tier (ADR-0008 chunk 2, layer 1): the page
         // turned a quarter in each direction, band-cropped. This is the other
         // half of gating `choose_rotation` — the gate stops a low-signal page
@@ -626,6 +680,7 @@ impl NativeOcr {
                     .iter()
                     .map(|&turn| {
                         (
+                            PassTransform::QuarterTurn(turn),
                             turn,
                             preprocess::plain_band(
                                 &rotate_image(&image, turn),
@@ -647,10 +702,10 @@ impl NativeOcr {
             .chain(mrz_variants_list)
             .chain(geometry_variants)
             .chain(texture_variants)
-            .map(|variant| (0u16, variant))
+            .map(|(transform, variant)| (transform, 0u16, variant))
             .chain(quarter_turn_variants)
             .enumerate();
-        for (passes_run, (i, (turn, variant))) in (1usize..).zip(variants) {
+        for (passes_run, (i, (transform, turn, variant))) in (1usize..).zip(variants) {
             if passes_run >= max_passes {
                 retry_stop = Some("pass_cap".to_string());
                 if verbose {
@@ -672,6 +727,28 @@ impl NativeOcr {
             }
 
             let pass_id = format!("pass-{i:02}");
+            // Pushed exactly once per executed pass, on whichever branch of the
+            // body below the pass ends: a failure, a pass with nothing MRZ-shaped,
+            // an append, or the accepting pass. `lines` is the pass's structured
+            // output, `None` when the recognizer failed. Observation only: it
+            // reads the loop's state and changes none of it.
+            let record_pass = |trace: &mut Option<&mut Vec<PassRecord>>,
+                               lines: Option<&[(String, BBox)]>,
+                               outcome: PassOutcome| {
+                if let Some(records) = trace.as_deref_mut() {
+                    let readings = lines.map(pass_trace::mrz_readings).unwrap_or_default();
+                    records.push(PassRecord {
+                        order: i + 1,
+                        id: pass_id.clone(),
+                        transform,
+                        turn,
+                        image_width: variant.width(),
+                        image_height: variant.height(),
+                        outcome,
+                        readings,
+                    });
+                }
+            };
             let variant_started = Instant::now();
             if let Some(dir) = &dump_dir {
                 dump_pass_image(
@@ -687,12 +764,14 @@ impl NativeOcr {
             }
             // A failed retry pass must never fail the whole OCR — the general
             // pass's text is already in hand and Tier 2 can still run on it.
-            let Ok(pass_text) = run_pass(&self.mrz_engine, &variant) else {
+            let Ok(pass_lines) = run_pass(&self.mrz_engine, &variant) else {
+                record_pass(&mut trace, None, PassOutcome::Failed);
                 if verbose {
                     eprintln!("[synthpass-ocr] variant {i}: pass failed, skipping");
                 }
                 continue;
             };
+            let pass_text = pass_trace::joined_text(&pass_lines);
             if verbose {
                 let regions = region_count(&self.mrz_engine, &variant).unwrap_or(0);
                 eprintln!(
@@ -701,7 +780,12 @@ impl NativeOcr {
                 );
             }
             let candidates = mrz_shaped_lines(&pass_text);
+            debug_assert!(
+                trace.is_none() || pass_trace::readings_match_candidates(&pass_lines),
+                "a pass's readings must be exactly the lines the loop appends"
+            );
             if candidates.is_empty() {
+                record_pass(&mut trace, Some(&pass_lines), PassOutcome::NoMrzShapedLines);
                 if verbose {
                     eprintln!("[synthpass-ocr] variant {i}: no MRZ-shaped lines");
                 }
@@ -735,6 +819,7 @@ impl NativeOcr {
                         );
                     }
                 }
+                record_pass(&mut trace, Some(&pass_lines), PassOutcome::Accepted);
                 retry_variant_id = Some(pass_id);
                 retry_damaged_recovery = Some(data.damaged_recovery);
                 retry_stop = Some("variant_valid".to_string());
@@ -742,7 +827,9 @@ impl NativeOcr {
                 // point in the loop, and this branch always `break`s.
                 winning_variant_image = Some(variant);
                 break;
-            } else if verbose {
+            }
+            record_pass(&mut trace, Some(&pass_lines), PassOutcome::Appended);
+            if verbose {
                 // No checksum-valid reading was accepted for this pass --
                 // that covers a genuinely checksum-invalid zone *and* a
                 // damaged pass whose checksum-valid readings `mrz`'s
@@ -1245,16 +1332,130 @@ fn geometry_pass(
     Ok((lines, word_boxes))
 }
 
-/// Run one detection+recognition pass over an in-memory image.
-fn run_pass(engine: &OcrsEngine, image: &RgbImage) -> Result<String, String> {
+/// Run one detection+recognition pass over an in-memory image, returning every
+/// recognized line with its bounding rectangle in this image's pixel space.
+///
+/// The pass's text is [`pass_trace::joined_text`] of the result. The product
+/// uses only the text and drops the boxes; the traced entry point derives its
+/// readings from the same lines, so both read the very pass that ships.
+///
+/// **This is `OcrEngine::get_text`'s body, unrolled.** In `ocrs` 0.13.1
+/// `get_text` is `detect_words` → `find_text_lines` → `recognize_text`, then
+/// `filter_map(|line| line.map(|l| l.to_string()))` and `join("\n")`; that is
+/// the sequence below, the joined text is byte-identical to it, and
+/// [`geometry_pass`] already runs the same three steps. It has to be spelled out
+/// because `get_text` returns only the joined string, and the boxes exist only
+/// on the recognized lines. Keeping one pass implementation for the product and
+/// the benchmark is deliberate: two would agree only through `ocrs`'s
+/// internals, and an `ocrs` bump could split them, so re-read `get_text` when
+/// bumping the pinned version. Every error is worded as `get_text`'s was, so a
+/// failure still reads `ocr text extraction failed: …`.
+fn run_pass(engine: &OcrsEngine, image: &RgbImage) -> Result<Vec<(String, BBox)>, String> {
     let source = ImageSource::from_bytes(image.as_raw(), image.dimensions())
         .map_err(|e| format!("failed to prepare image source: {e}"))?;
     let input = engine
         .prepare_input(source)
         .map_err(|e| format!("failed to prepare ocr input: {e}"))?;
-    engine
-        .get_text(&input)
-        .map_err(|e| format!("ocr text extraction failed: {e}"))
+    let words = engine
+        .detect_words(&input)
+        .map_err(|e| format!("ocr text extraction failed: {e}"))?;
+    let line_groups = engine.find_text_lines(&input, &words);
+    let recognized = engine
+        .recognize_text(&input, &line_groups)
+        .map_err(|e| format!("ocr text extraction failed: {e}"))?;
+    Ok(recognized
+        .into_iter()
+        .flatten()
+        .map(|line| {
+            let r = line.bounding_rect();
+            let bbox = BBox::from_tlbr(
+                r.top() as f32,
+                r.left() as f32,
+                r.bottom() as f32,
+                r.right() as f32,
+            );
+            (line.to_string(), bbox)
+        })
+        .collect())
+}
+
+/// The trailing texture-suppression tier's variants, each labelled with the
+/// transform that built it. Called lazily from the retry loop (inside a
+/// `once_with`), so a document that validates earlier never builds them.
+fn texture_tier(
+    image: &RgbImage,
+    mode: TextureMode,
+    order: OcrOrder,
+) -> Vec<(PassTransform, RgbImage)> {
+    match mode {
+        TextureMode::Off => Vec::new(),
+        // Two variants, not one, and the order is deliberate. The
+        // 2026-09-04 real-specimen A/B found that these fix *different*
+        // miss classes — `plain_band` recovers `no_mrz_found` (a detection
+        // failure) while the median recovers `checksum_failed` (a
+        // recognition failure) — and that running only one of them made
+        // them compete for a single trailing slot, so each arm lost the
+        // documents the other would have caught. `plain_band` goes first
+        // because it is the cheaper of the two (a crop and an upscale, no
+        // per-pixel window sort), and on a document that validates from it
+        // the median is never built at all. Under `OcrOrder::BandFirst`
+        // that first entry has already run, at the front of the whole
+        // chain, so it is left out here rather than duplicated.
+        TextureMode::On => {
+            let mut variants = if order == OcrOrder::BandFirst {
+                Vec::new()
+            } else {
+                vec![(
+                    PassTransform::TexturePlain,
+                    preprocess::plain_band(image, NATIVE_UPSCALE_FILTER),
+                )]
+            };
+            variants.extend(
+                preprocess::texture_variants(image, NATIVE_UPSCALE_FILTER)
+                    .into_iter()
+                    .map(|variant| (PassTransform::TextureMedian, variant)),
+            );
+            variants
+        }
+        // Placebo. `plain_band` is the untreated band crop, and its own
+        // doc comment records that it is deliberately kept out of
+        // `mrz_variants` because `ocrs` normalizes internally and an
+        // untreated variant "adds nothing there" — which is exactly the
+        // property a control needs. It costs a real pass and appends real
+        // text, while being the one band treatment already measured as
+        // inert on this engine. Same `BandFirst` de-duplication as `On`.
+        TextureMode::Control => {
+            if order == OcrOrder::BandFirst {
+                Vec::new()
+            } else {
+                vec![(
+                    PassTransform::TexturePlain,
+                    preprocess::plain_band(image, NATIVE_UPSCALE_FILTER),
+                )]
+            }
+        }
+    }
+}
+
+/// Labels the `mrz_variants` tier and applies `OcrOrder::Control`'s reorder.
+///
+/// The label is the entry's index as the preprocessor returned it, attached
+/// **before** the swap so it follows the pixels: under `Control` the two
+/// swapped entries keep their own labels and only their run order changes.
+fn label_mrz_variants(variants: Vec<RgbImage>, order: OcrOrder) -> Vec<(PassTransform, RgbImage)> {
+    let mut labelled: Vec<_> = variants
+        .into_iter()
+        .enumerate()
+        .map(|(k, variant)| (PassTransform::MrzVariant(k), variant))
+        .collect();
+    // `OcrOrder::Control`'s reorder: swap the two blind-crop variants
+    // (contrast-stretched, binarized) that neither `BandFirst` nor any
+    // other hypothesis here expects to matter individually — see
+    // `OcrOrder::Control`'s doc comment for why this arm exists.
+    if order == OcrOrder::Control && labelled.len() >= 2 {
+        labelled.swap(0, 1);
+    }
+    labelled
 }
 
 /// Does this text already contain a checksum-valid MRZ? The oracle that
@@ -2821,6 +3022,65 @@ mod tests {
             "DEFAULT_MAX_PASSES ({DEFAULT_MAX_PASSES}) must let the retry loop reach every \
              worst-case variant, including the last geometry-band one"
         );
+    }
+
+    /// Distinct sizes stand in for distinct pixels: a label that followed the
+    /// position instead of the pixels would be caught by the widths.
+    fn dummy_variants(n: u32) -> Vec<image::RgbImage> {
+        (1..=n).map(|w| image::RgbImage::new(w, 1)).collect()
+    }
+
+    #[test]
+    fn mrz_variant_labels_follow_the_pixels_under_every_order() {
+        let widths = |labelled: &[(PassTransform, image::RgbImage)]| -> Vec<u32> {
+            labelled.iter().map(|(_, v)| v.width()).collect()
+        };
+        let labels = |labelled: &[(PassTransform, image::RgbImage)]| -> Vec<PassTransform> {
+            labelled.iter().map(|(t, _)| *t).collect()
+        };
+        let mrz = |k: usize| PassTransform::MrzVariant(k);
+
+        for order in [OcrOrder::Default, OcrOrder::BandFirst] {
+            let labelled = label_mrz_variants(dummy_variants(4), order);
+            assert_eq!(labels(&labelled), [mrz(0), mrz(1), mrz(2), mrz(3)]);
+            assert_eq!(widths(&labelled), [1, 2, 3, 4], "{order:?} keeps the order");
+        }
+
+        // Control swaps the first two entries' run order; each keeps its own
+        // label, so `mrz_variants:0` is still the width-1 pixels, now second.
+        let labelled = label_mrz_variants(dummy_variants(4), OcrOrder::Control);
+        assert_eq!(labels(&labelled), [mrz(1), mrz(0), mrz(2), mrz(3)]);
+        assert_eq!(widths(&labelled), [2, 1, 3, 4]);
+
+        // Nothing to swap: the reorder's own `len() >= 2` guard holds.
+        let labelled = label_mrz_variants(dummy_variants(1), OcrOrder::Control);
+        assert_eq!(labels(&labelled), [mrz(0)]);
+        assert!(label_mrz_variants(Vec::new(), OcrOrder::Control).is_empty());
+    }
+
+    #[test]
+    fn texture_tier_labels_match_the_arm_that_built_each_pass() {
+        let image = image::RgbImage::from_pixel(400, 300, image::Rgb([250, 250, 250]));
+        let labels = |mode, order| -> Vec<PassTransform> {
+            texture_tier(&image, mode, order)
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect()
+        };
+        let plain = PassTransform::TexturePlain;
+        let median = PassTransform::TextureMedian;
+
+        assert_eq!(labels(TextureMode::On, OcrOrder::Default), [plain, median]);
+        assert_eq!(labels(TextureMode::On, OcrOrder::Control), [plain, median]);
+        // `band-first` moved the plain crop to the front of the chain, where
+        // it is labelled `band_first:plain_band`, so it is not repeated here.
+        assert_eq!(labels(TextureMode::On, OcrOrder::BandFirst), [median]);
+        assert_eq!(labels(TextureMode::Control, OcrOrder::Default), [plain]);
+        assert_eq!(labels(TextureMode::Control, OcrOrder::Control), [plain]);
+        assert!(labels(TextureMode::Control, OcrOrder::BandFirst).is_empty());
+        for order in [OcrOrder::Default, OcrOrder::BandFirst, OcrOrder::Control] {
+            assert!(labels(TextureMode::Off, order).is_empty());
+        }
     }
 
     #[test]

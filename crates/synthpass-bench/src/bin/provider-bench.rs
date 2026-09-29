@@ -16,7 +16,7 @@
 //! ```text
 //! provider-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out PATH]
 //!                [--measure-memory] [--real-specimens] [--limit N] [--mrz-only]
-//!                [--format NAME] [--verbose] [--dump-ocr]
+//!                [--format NAME] [--verbose] [--dump-ocr] [--dump-ocr-passes]
 //!                [--write-baseline PATH] [--assert-baseline PATH]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
@@ -49,16 +49,28 @@
 //!                      --dump-ocr, scoped to this one miss kind since a
 //!                      real-specimen run is much larger than a synthetic
 //!                      diagnostic one
+//!   --dump-ocr-passes  with --real-specimens: write
+//!                      <out-dir>/provider-bench-ocr-passes.jsonl, one row per OCR'd
+//!                      document (whatever its outcome, written once from the OCR
+//!                      prep, not once per provider): the full OCR text and every
+//!                      executed OCR pass in order — its id, the transform that
+//!                      produced its pixels, its image size, what the retry loop did
+//!                      with it, and each MRZ-shaped line it read with its bounding
+//!                      box (ADR-0024, amendment 1). Refuses --include-private, and
+//!                      refuses an output directory inside the working tree that git
+//!                      does not ignore. The readings never enter the --out report,
+//!                      the outcome ledger, stdout or stderr
 //!   --progress         force the per-document stderr progress log on even
 //!                      when stderr is redirected. It is already on by
 //!                      default whenever stderr is a terminal, so this flag
 //!                      is only needed to keep it when piping to a file
 //!   --mrz-only         register only the deterministic `mrz` reader, skipping
 //!                      the Tier-2 LLM provider (and its ~1 GB GGUF, never
-//!                      loaded). Turns a full real-specimen run from hours into
-//!                      the ~1-minute deterministic pass — what the per-PR
-//!                      `real-specimen-gate.yml` CI job runs. Valid over either
-//!                      corpus source.
+//!                      loaded). Leaves the deterministic OCR + Tier-1 pass, without
+//!                      the LLM pass that dominates a full real-specimen run
+//!                      (hours) — what the per-PR `real-specimen-gate.yml` CI job
+//!                      runs (tens of minutes: the OCR retry chain is most of it).
+//!                      Valid over either corpus source.
 //!   --write-baseline PATH
 //!                      after the run, write the `mrz` provider's Tier-1
 //!                      snapshot (HIT count + miss-kind histogram + denominator)
@@ -98,8 +110,8 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real_with_dump_options, AssertionBucket, ProviderReport,
-    StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
+    run_provider_bench, run_provider_bench_real_with_options, AssertionBucket, ProviderReport,
+    RealDumpOptions, StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::report::{
     ModelPathsReport, OutcomeRow, ProviderRow, RealSpecimenBaseline, RealSpecimenSnapshot, Report,
@@ -149,6 +161,16 @@ struct Args {
     /// document the way `synthpass-bench --dump-ocr` is.
     dump_ocr: bool,
     dump_ocr_hits: bool,
+    /// With `real_specimens`: write `<out-dir>/provider-bench-ocr-passes.jsonl`,
+    /// one row per OCR'd document with the full OCR text and every executed
+    /// OCR pass's MRZ-shaped lines (transform, outcome, bounding box) — #574,
+    /// ADR-0024 amendment 1. Its own flag, not a widening of `--dump-ocr`: the
+    /// miss dump's row shape is depended on by
+    /// `tools/classify_mrz_mechanisms.py`. Refuses `--include-private` (same
+    /// rule as the OCR dumps) and an output directory inside the working tree
+    /// that git does not ignore. Not an `SYNTHPASS_OCR_*` arm: it changes no
+    /// output, so it does not enter the baseline refusal.
+    dump_ocr_passes: bool,
     /// Force the per-document progress log on even when stderr is not a
     /// terminal. Progress is *already* on by default for an interactive run
     /// (see `show_progress` in `main`) — a full real-specimen pass takes over
@@ -224,6 +246,7 @@ impl Default for Args {
             verbose: false,
             dump_ocr: false,
             dump_ocr_hits: false,
+            dump_ocr_passes: false,
             progress: false,
             format: None,
             document_type: None,
@@ -278,6 +301,12 @@ fn usage() {
     eprintln!(
         "  --dump-ocr-hits    with --real-specimens: add Tier-1 hits to the same OCR dump; \
          without this flag --dump-ocr remains miss-only"
+    );
+    eprintln!(
+        "  --dump-ocr-passes  with --real-specimens: write <out-dir>/provider-bench-ocr-passes.jsonl, \
+         one row per OCR'd document: the full OCR text and every executed OCR pass with its \
+         transform, outcome and the MRZ-shaped lines it read (with boxes). Refuses \
+         --include-private and an output directory git does not ignore"
     );
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \
@@ -381,6 +410,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.dump_ocr_hits = true;
                 i += 1;
             }
+            "--dump-ocr-passes" => {
+                parsed.dump_ocr_passes = true;
+                i += 1;
+            }
             // Deliberately not gated on --real-specimens the way --dump-ocr
             // is: the synthetic corpus is slow enough to want progress too,
             // and a flag that only forces on an already-default behaviour has
@@ -461,7 +494,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.include_private && !parsed.real_specimens {
         return Err("--include-private is only valid together with --real-specimens".to_string());
     }
-    if parsed.include_private && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+    if parsed.dump_ocr_passes && !parsed.real_specimens {
+        return Err("--dump-ocr-passes is only valid together with --real-specimens".to_string());
+    }
+    if parsed.include_private && (parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes)
+    {
         return Err("OCR dumps cannot include samples/private/".to_string());
     }
     if parsed.include_local && !parsed.real_specimens {
@@ -1134,6 +1171,16 @@ struct OcrDumpRunManifest<'a> {
     outcome_ledger: &'static str,
 }
 
+/// The directory the dumps next to `--out` go in: its parent, or the current
+/// directory when `--out` has no directory part.
+fn out_dir(out: &str) -> std::path::PathBuf {
+    std::path::Path::new(out)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+}
+
 /// Persist a content-addressed run description next to the raw OCR dump.
 /// A row's `run_manifest` is a filename relative to its JSONL, so repeated
 /// runs in one output directory cannot silently re-point old rows.
@@ -1260,6 +1307,23 @@ async fn main() {
     let show_progress = parsed.progress || std::io::stderr().is_terminal();
 
     let root = repo_root();
+    // Refused before any model loads or document is read: the pass readings are
+    // document OCR, and a destination git would stage is not a place for them.
+    if parsed.dump_ocr_passes {
+        let dir = out_dir(&parsed.out);
+        let cwd = std::env::current_dir().unwrap_or_else(|e| {
+            eprintln!("❌ cannot determine the working directory: {e}");
+            std::process::exit(1);
+        });
+        if let Err(e) =
+            synthpass_bench::ocr_passes::check_passes_destination(&root, &cwd, &dir, |relative| {
+                synthpass_bench::ocr_passes::git_ignores(&root, relative)
+            })
+        {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        }
+    }
     // `SYNTHPASS_OCR_MODEL_DIR` if set, otherwise this binary's own
     // build-tree repo root (today's behaviour, unchanged) — issue #541.
     let model_dir = synthpass_bench::resolve_model_dir(&root, |k| std::env::var_os(k));
@@ -1278,9 +1342,9 @@ async fn main() {
     // way to reach the latter's registered instance is through a `Pipeline`
     // (`LlmFieldReader` is `pub(crate)` there). `--mrz-only` skips all of it —
     // no second OCR engine, no `NativeInferer`, no GGUF ever touched — and
-    // builds a one-reader catalog directly instead, turning a real-specimen
-    // run from hours into the ~1-minute deterministic pass the per-PR
-    // `real-specimen-gate.yml` CI job needs.
+    // builds a one-reader catalog directly instead, leaving the deterministic
+    // OCR + Tier-1 pass the per-PR `real-specimen-gate.yml` CI job needs
+    // without the LLM pass that turns a real-specimen run into hours.
     let pipeline;
     let deterministic_only;
     let catalog: &ProviderCatalog = if parsed.mrz_only {
@@ -1333,15 +1397,11 @@ async fn main() {
             specimens.len(),
             specimens.len() - labelled,
         );
-        // `--dump-ocr` writes its JSONL next to the `--out` report; an --out
-        // with no directory part means the current directory.
-        let dump_dir = (parsed.dump_ocr || parsed.dump_ocr_hits).then(|| {
-            std::path::Path::new(&parsed.out)
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-        });
+        // `--dump-ocr` and `--dump-ocr-passes` write their JSONL next to the
+        // `--out` report; an --out with no directory part means the current
+        // directory.
+        let dump_dir = (parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes)
+            .then(|| out_dir(&parsed.out));
         if let Some(dir) = dump_dir.as_deref() {
             write_ocr_run_manifest(&root, dir, &args, specimens.len(), labelled).unwrap_or_else(
                 |e| {
@@ -1350,16 +1410,26 @@ async fn main() {
                 },
             );
         }
-        let reports = run_provider_bench_real_with_dump_options(
+        let dumps = RealDumpOptions {
+            ocr_dir: dump_dir
+                .as_deref()
+                .filter(|_| parsed.dump_ocr || parsed.dump_ocr_hits),
+            ocr_hits: parsed.dump_ocr_hits,
+            ocr_passes_dir: dump_dir.as_deref().filter(|_| parsed.dump_ocr_passes),
+        };
+        let reports = run_provider_bench_real_with_options(
             catalog,
             &ocr,
             &specimens,
             parsed.measure_memory,
-            dump_dir.as_deref(),
-            parsed.dump_ocr_hits,
+            &dumps,
             show_progress,
         )
-        .await;
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        });
         (
             reports,
             "real-specimens",
@@ -1388,7 +1458,10 @@ async fn main() {
     // The committed baseline ledger may describe a different OCR run. Keep
     // this run's exact outcomes beside its dump so the classifier never has
     // to guess that historical outcomes still match the current pass.
-    if parsed.real_specimens && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+    // The run manifest names this ledger, so any dump flag that writes the
+    // manifest writes it too.
+    if parsed.real_specimens && (parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes)
+    {
         let mrz = reports
             .iter()
             .find(|r| r.provider_id == "mrz")
@@ -1922,6 +1995,68 @@ mod tests {
             .err()
             .expect("private OCR dump must be rejected")
             .contains("samples/private/"));
+    }
+
+    fn args_of(flags: &[&str]) -> Vec<String> {
+        flags.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// #574 / ADR-0024 amendment 1: the pass readings are document OCR, so the
+    /// flag is real-specimen-only like the other OCR dumps, and off by default.
+    #[test]
+    fn dump_ocr_passes_needs_real_specimens_and_is_off_by_default() {
+        assert!(
+            !parse_args(&args_of(&["--real-specimens"]))
+                .expect("parses")
+                .dump_ocr_passes
+        );
+        let parsed = parse_args(&args_of(&["--real-specimens", "--dump-ocr-passes"]))
+            .expect("valid combination");
+        assert!(parsed.dump_ocr_passes);
+        assert!(
+            !parsed.dump_ocr && !parsed.dump_ocr_hits,
+            "the pass dump is its own flag, not a widening of --dump-ocr"
+        );
+        let err = parse_args(&args_of(&["--dump-ocr-passes"]))
+            .err()
+            .expect("refused without --real-specimens");
+        assert!(err.contains("--real-specimens"), "{err}");
+    }
+
+    /// Same message and rule as `--dump-ocr`'s: a private specimen never gets
+    /// an OCR dump, whichever dump flag asks.
+    #[test]
+    fn dump_ocr_passes_rejects_the_private_track() {
+        let err = parse_args(&args_of(&[
+            "--real-specimens",
+            "--include-private",
+            "--dump-ocr-passes",
+        ]))
+        .err()
+        .expect("private pass dump must be rejected");
+        assert_eq!(err, "OCR dumps cannot include samples/private/");
+    }
+
+    /// `--include-local` follows `--dump-ocr`'s rule, which allows it (the
+    /// local track is gitignored).
+    #[test]
+    fn dump_ocr_passes_allows_the_local_track() {
+        let parsed = parse_args(&args_of(&[
+            "--real-specimens",
+            "--include-local",
+            "--dump-ocr-passes",
+        ]))
+        .expect("local track is allowed");
+        assert!(parsed.include_local && parsed.dump_ocr_passes);
+    }
+
+    #[test]
+    fn out_dir_is_the_parent_of_out_or_the_current_directory() {
+        assert_eq!(
+            out_dir("artifacts/provider-bench-report.json"),
+            std::path::PathBuf::from("artifacts")
+        );
+        assert_eq!(out_dir("report.json"), std::path::PathBuf::from("."));
     }
 
     #[test]

@@ -134,3 +134,61 @@ From the 2026-09-27 design pass; each step is its own PR.
 5. **3, the query and diff tool** (`tools/`, standard library only, disclosure-safe output).
 6. **4, schema 2**, after #508 settles which OCR pass Tier 1 reads.
 7. **5, the private track's text-free records** (Decision 7).
+
+## Amendment 1 (2026-09-29) — per-pass OCR readings for #574, behind a benchmark-only entry point
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29). It is the separate decision the rejected
+alternative "Add every OCR pass's lines to `OcrPage`" asks for before pass attribution is built.
+
+### Context
+
+[#574](https://github.com/ruledicaprio/SynthPass/issues/574) measures line-1 attempt selection,
+which [ADR-0021](ADR-0021-fixed-grid-mrz-strips.md)'s 2026-09-24 decision takes as a narrow task.
+A selector has to say which OCR pass a line-1 reading came from. The native retry loop appends
+each pass's MRZ-shaped lines to one page text, so that provenance is gone before Tier 1 sees the
+text, and `OcrPage::retry_variant_id` names only the pass that stopped the loop, by an index that
+depends on which OCR arms are on.
+
+### Decision
+
+1. `synthpass-ocr` gains `NativeOcr::recognize_detailed_traced`. It returns the same `OcrPage` as
+   `recognize_detailed`, plus one record per executed pass, in execution order: the pass id
+   (`general` or `pass-NN`, the `retry_variant_id` vocabulary), the transform that produced its
+   pixels, its image size, whether it failed, added nothing, was appended or was accepted, and
+   every MRZ-shaped line it read with the line's index and bounding box.
+2. It records every MRZ-shaped line — the lines the loop already appends — not a line-1
+   classification. Choosing a line-1 candidate is interpretation, which `synthpass-ocr` does not
+   do (ARCHITECTURE §13.1), and the lines around line 1 are the evidence a selector needs.
+3. One code path: the product's OCR pass runs the same three ocrs steps the traced entry point
+   reads its boxes from, so the benchmark measures what ships.
+4. `OcrPage`, `recognize`, `recognize_detailed`, `synthpass-imageprep`, `synthpass-pipeline`,
+   `ExtractionTrace` and every `SYNTHPASS_OCR_*` variable are unchanged. No extraction-path caller
+   uses the traced entry point, and its types derive no `Serialize`.
+5. The benchmarks report the records only when asked: `synthpass-bench --ocr-passes`, and
+   `provider-bench --real-specimens --dump-ocr-passes`, which writes a separate JSONL next to
+   `--out`, refuses `--include-private`, and refuses a destination inside the working tree that
+   git does not ignore. The records never enter the `--out` trend report or the outcome ledger.
+6. The change must be behaviour-neutral: the introducing PR shows byte-identical OCR text and
+   identical per-document outcomes, retry stops and accepted passes before and after, on the five
+   synthetic formats and on the real-specimen run.
+7. When this archive's record schema lands, the public and local tracks carry these records under
+   the same field names. The private track carries none (Decision 7).
+
+### Alternatives rejected
+
+- **A per-pass vector on `OcrPage`.** Rejected above for this ADR, for the same reason: it would
+  carry diagnostic zone text through every production extraction.
+- **An `SYNTHPASS_OCR_*` arm.** Capturing is not a treatment. An arm would enter `OcrArms`,
+  `config_overrides` and the baseline refusal for a switch that changes no output.
+- **Only line-1 candidates.** Bakes the selector's classification into the observation, so a
+  selector's arms could no longer replay the same evidence.
+- **Two OCR pass implementations** (the product on `get_text`, the trace on the explicit steps). Their
+  agreement would rest on ocrs internals, and an ocrs bump could split them.
+- **Waiting for the archive.** Blocks #574 on build steps 1–4 for a record a flag can produce now.
+
+### Consequences
+
+- A selector can name the pass, transform and position behind every line it considers.
+- A second opt-in file format exists until the archive absorbs it.
+- Boxes are in each pass's own image space (crop, upscale, deskew, turn), so they compare within a
+  pass, not across passes.
