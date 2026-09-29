@@ -52,7 +52,10 @@ synthpass-llm = { path = "../synthpass-llm" }
 synthpass-pipeline = { path = "../synthpass-pipeline" }
 image = { workspace = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: the pass file's `mrz_band_score` is an `f64` that `provider-bench
+# --replay-ocr-passes` reads back and writes into the dump row, so it must parse to the
+# identical value (the default parser can be one ulp off). No new dependency.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # The outcome ledger's integrity hash (`RealSpecimenBaseline::outcomes_sha256`)
 # — already pinned at this version in the workspace lockfile via
 # `synthpass-export`/`synthpass-ocr`, so this is not a new dependency.

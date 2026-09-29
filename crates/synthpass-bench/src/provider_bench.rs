@@ -23,6 +23,12 @@
 //! Both entry points funnel into [`run_prepped`], the one place accuracy and
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
+//!
+//! A third source is a **replay** ([`run_provider_bench_replay`], ADR-0024
+//! amendment 3): the public corpus's pages are rebuilt from a captured
+//! `provider-bench-ocr-passes.jsonl` instead of by OCR, and then run through the
+//! same [`run_prepped`]. Tier 1 is a pure function of the page text, so a replay
+//! measures everything downstream of `OcrPage::text` and nothing upstream.
 
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
@@ -1936,65 +1942,81 @@ fn prep_specimens(
                     &records,
                 );
             }
-            let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
-            // The hand-transcribed true printed MRZ zone, when this specimen
-            // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
-            // compares the run's recovered zone against it to tell a genuine
-            // OCR misread apart from a specimen whose *printed* check digits
-            // are wrong by design.
-            let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
-            // Does the *printed* zone pass its own check digits? Parsed from
-            // the hand transcription, not from OCR, so the answer describes the
-            // document and stays the same whatever the run reads off it.
-            // `None` (unlabelled) is not evidence of non-conformance — see
-            // `BenchPage::printed_zone_nonconforming`.
-            let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
-                !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
-                    .is_ok_and(|d| d.valid())
-            });
-            let found = mrz::find_and_parse(&page.text);
-            let mrz_found = found.is_ok();
-            let document_number_leading_filler =
-                matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
-            // Derived from the filename, the same way the corpus manifest
-            // generator records `mrz.redacted` (`corpus_manifest.rs`). The
-            // bench never reads `samples/corpus.jsonl` — it walks the image
-            // directory — so the stem is the signal it has.
-            let redacted = doc.name.to_ascii_lowercase().contains("redacted");
-            // Best-effort fallback only — used in `run_prepped` when no
-            // provider's own Tier-1 read resolves a format for this
-            // document. Reuses `MrzFormat::guess_from_lines` rather than a
-            // new heuristic; `None` when there is no ground-truth `mrz_line`
-            // to guess from at all (most of `samples/`, by construction).
-            let known_or_guessed_format = doc
-                .labels
-                .as_ref()
-                .and_then(|l| l.mrz_line.as_deref())
-                .and_then(MrzFormat::guess_from_lines)
-                .map(mrz_format_str);
-            Some(BenchPage {
-                name: doc.name.clone(),
-                asset_id: Some(doc.asset_id.clone()),
-                source_sha256: Some(doc.source_sha256.clone()),
-                page,
-                ground_truth,
-                ground_truth_mrz,
-                image_path,
-                mrz_found,
-                document_number_leading_filler,
-                redacted,
-                // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
-                // time — unlike `redacted`, which the stem can carry on its own.
-                // The manifest is the signal here because two driving-license
-                // fronts predate the `_no_mrz` naming convention entirely.
-                mrz_expected: doc.mrz_expected,
-                printed_zone_nonconforming,
-                synthetic: false,
-                known_or_guessed_format,
-                ocr_elapsed,
-            })
+            Some(specimen_bench_page(doc, page, image_path, ocr_elapsed))
         })
         .collect()
+}
+
+/// One real specimen's [`BenchPage`], from its corpus document and the OCR page
+/// of its run.
+///
+/// The one place a specimen's page is built, shared by the live prep
+/// ([`prep_specimens`]) and the replay ([`replay_pages`]), so the two cannot
+/// disagree about anything that is not the OCR. `mrz_found` and
+/// `document_number_leading_filler` are recomputed from `page.text` here, which
+/// is why a replay needs only the text, not those two values.
+fn specimen_bench_page(
+    doc: &RealSpecimenDoc,
+    page: OcrPage,
+    image_path: PathBuf,
+    ocr_elapsed: Duration,
+) -> BenchPage {
+    let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
+    // The hand-transcribed true printed MRZ zone, when this specimen
+    // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
+    // compares the run's recovered zone against it to tell a genuine
+    // OCR misread apart from a specimen whose *printed* check digits
+    // are wrong by design.
+    let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
+    // Does the *printed* zone pass its own check digits? Parsed from
+    // the hand transcription, not from OCR, so the answer describes the
+    // document and stays the same whatever the run reads off it.
+    // `None` (unlabelled) is not evidence of non-conformance — see
+    // `BenchPage::printed_zone_nonconforming`.
+    let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
+        !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
+            .is_ok_and(|d| d.valid())
+    });
+    let found = mrz::find_and_parse(&page.text);
+    let mrz_found = found.is_ok();
+    let document_number_leading_filler = matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
+    // Derived from the filename, the same way the corpus manifest
+    // generator records `mrz.redacted` (`corpus_manifest.rs`). The
+    // bench never reads `samples/corpus.jsonl` — it walks the image
+    // directory — so the stem is the signal it has.
+    let redacted = doc.name.to_ascii_lowercase().contains("redacted");
+    // Best-effort fallback only — used in `run_prepped` when no
+    // provider's own Tier-1 read resolves a format for this
+    // document. Reuses `MrzFormat::guess_from_lines` rather than a
+    // new heuristic; `None` when there is no ground-truth `mrz_line`
+    // to guess from at all (most of `samples/`, by construction).
+    let known_or_guessed_format = doc
+        .labels
+        .as_ref()
+        .and_then(|l| l.mrz_line.as_deref())
+        .and_then(MrzFormat::guess_from_lines)
+        .map(mrz_format_str);
+    BenchPage {
+        name: doc.name.clone(),
+        asset_id: Some(doc.asset_id.clone()),
+        source_sha256: Some(doc.source_sha256.clone()),
+        page,
+        ground_truth,
+        ground_truth_mrz,
+        image_path,
+        mrz_found,
+        document_number_leading_filler,
+        redacted,
+        // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
+        // time — unlike `redacted`, which the stem can carry on its own.
+        // The manifest is the signal here because two driving-license
+        // fronts predate the `_no_mrz` naming convention entirely.
+        mrz_expected: doc.mrz_expected,
+        printed_zone_nonconforming,
+        synthetic: false,
+        known_or_guessed_format,
+        ocr_elapsed,
+    }
 }
 
 /// Runs every reader in `catalog` against every document in `corpus`,
@@ -2124,6 +2146,206 @@ pub async fn run_provider_bench_real_with_options(
             path.display()
         );
     }
+    Ok(run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        dumps.ocr_dir,
+        dumps.ocr_hits,
+        run_manifest.as_deref(),
+        progress,
+    )
+    .await)
+}
+
+/// The `OcrPage` a captured row stands for: the text and every value scoring,
+/// the report, the ledger or a dump reads from the page. The rest of `OcrPage`
+/// (lines, band box, portrait, text sanity) is read by none of them and stays at
+/// its default.
+fn replayed_page(row: &crate::ocr_passes::OcrPassesRow) -> OcrPage {
+    OcrPage {
+        text: row.ocr_text.clone(),
+        rotation: row.rotation,
+        mrz_band_score: row.mrz_band_score,
+        retry_variant_id: row.retry_variant_id.clone(),
+        retry_damaged_recovery: row.retry_damaged_recovery,
+        retry_budget_hit: row.retry_budget_hit,
+        retry_stop: row.retry_stop.clone(),
+        chargrid: row.chargrid.clone(),
+        ..OcrPage::default()
+    }
+}
+
+/// At most five ids for an error message, then a count of the rest.
+fn some_ids(ids: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut out = ids
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if ids.len() > SHOWN {
+        out.push_str(&format!(", and {} more", ids.len() - SHOWN));
+    }
+    out
+}
+
+/// One page per corpus document, in corpus order, from `capture`'s rows: what a
+/// replay scores. `Err` says why the capture cannot stand in for this corpus,
+/// checked in this order:
+///
+/// 1. the rows lack a key the replay needs ([`PassesFile::missing_keys`]);
+/// 2. the rows do not cover the corpus exactly once: a row with no `asset_id`,
+///    two rows for one asset, a corpus document with no row, a row for an asset
+///    the corpus does not hold;
+/// 3. a row's `source_sha256` is not the SHA-256 of the corpus image's bytes
+///    (`RealSpecimenDoc::source_sha256`): the capture read other bytes.
+///
+/// The corpus manifest's hash is the caller's to check; it is not on the rows.
+/// Each page is built by [`specimen_bench_page`], the function the live prep
+/// uses, so `mrz_found`, the ground truth and every flag derived from the
+/// document are computed the same way; the page's own values come from the row
+/// ([`replayed_page`]) and `ocr_elapsed` is zero, since no OCR ran. No image is
+/// written: `image_path` names a file that does not exist, which no reader in
+/// a `--mrz-only` run opens and which [`run_prepped`]'s cleanup ignores.
+///
+/// [`PassesFile::missing_keys`]: crate::ocr_passes::PassesFile::missing_keys
+fn replay_pages(
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+) -> Result<Vec<Option<BenchPage>>, String> {
+    if !capture.missing_keys.is_empty() {
+        return Err(format!(
+            "the capture's rows lack {}: a replay needs {} to reproduce the live run's report; \
+             recapture with a build that writes them",
+            capture.missing_keys.join(", "),
+            if capture.missing_keys.len() == 1 {
+                "that key"
+            } else {
+                "those keys"
+            },
+        ));
+    }
+
+    let mut by_asset: BTreeMap<&str, &crate::ocr_passes::OcrPassesRow> = BTreeMap::new();
+    let mut repeated: Vec<&str> = Vec::new();
+    for (index, row) in capture.rows.iter().enumerate() {
+        let Some(asset) = row.asset_id.as_deref() else {
+            return Err(format!("capture row {} has no asset_id", index + 1));
+        };
+        if by_asset.insert(asset, row).is_some() && !repeated.contains(&asset) {
+            repeated.push(asset);
+        }
+    }
+    let corpus: std::collections::BTreeSet<&str> =
+        specimens.iter().map(|doc| doc.asset_id.as_str()).collect();
+    let without_row: Vec<&str> = corpus
+        .iter()
+        .copied()
+        .filter(|asset| !by_asset.contains_key(asset))
+        .collect();
+    let outside_corpus: Vec<&str> = by_asset
+        .keys()
+        .copied()
+        .filter(|asset| !corpus.contains(asset))
+        .collect();
+    let mut coverage: Vec<String> = Vec::new();
+    if !repeated.is_empty() {
+        coverage.push(format!(
+            "{} asset(s) have more than one row: {}",
+            repeated.len(),
+            some_ids(&repeated)
+        ));
+    }
+    if !without_row.is_empty() {
+        coverage.push(format!(
+            "{} corpus document(s) have no row: {}",
+            without_row.len(),
+            some_ids(&without_row)
+        ));
+    }
+    if !outside_corpus.is_empty() {
+        coverage.push(format!(
+            "{} row(s) are for assets this corpus does not hold: {}",
+            outside_corpus.len(),
+            some_ids(&outside_corpus)
+        ));
+    }
+    if !coverage.is_empty() {
+        return Err(format!(
+            "the capture does not cover the corpus exactly once ({}); a capture and its replay \
+             must run over the same documents, with the same --format, --limit and --include-* \
+             flags",
+            coverage.join("; ")
+        ));
+    }
+
+    let other_bytes: Vec<&str> = specimens
+        .iter()
+        .filter(|doc| {
+            by_asset[doc.asset_id.as_str()].source_sha256.as_deref()
+                != Some(doc.source_sha256.as_str())
+        })
+        .map(|doc| doc.asset_id.as_str())
+        .collect();
+    if !other_bytes.is_empty() {
+        return Err(format!(
+            "{} capture row(s) were read from image bytes this corpus does not hold \
+             (source_sha256 differs): {}; the capture was measured on another samples revision",
+            other_bytes.len(),
+            some_ids(&other_bytes)
+        ));
+    }
+
+    Ok(specimens
+        .iter()
+        .map(|doc| {
+            Some(specimen_bench_page(
+                doc,
+                replayed_page(by_asset[doc.asset_id.as_str()]),
+                temporary_image_path(),
+                Duration::ZERO,
+            ))
+        })
+        .collect())
+}
+
+/// Whether `capture` can stand in for `specimens`: [`replay_pages`]'s checks,
+/// without running anything. Called before a replay writes a file, so a refused
+/// replay leaves nothing behind.
+pub fn check_replay(
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+) -> Result<(), String> {
+    replay_pages(specimens, capture).map(|_| ())
+}
+
+/// Runs every reader in `catalog` over the real specimens in `specimens` **without
+/// OCR**, reading each document's page from `capture` (ADR-0024, amendment 3).
+///
+/// The scoring is [`run_prepped_with_dump_options`], the function a live run
+/// uses, so the report, the outcome rows and the dumps come out of the same code;
+/// only where the page came from differs. `dumps.ocr_dir` and `dumps.ocr_hits`
+/// behave as in [`run_provider_bench_real_with_options`]. `dumps.ocr_passes_dir`
+/// must be `None`: a replay reads the pass trace and writes none.
+///
+/// A replay measures only what happens to `OcrPage::text` and the values beside
+/// it; OCR runtime and retry behaviour are the capture's. `Err` is
+/// [`replay_pages`]'s refusal, returned before any reader runs.
+pub async fn run_provider_bench_replay(
+    catalog: &ProviderCatalog,
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+    measure_memory: bool,
+    dumps: &RealDumpOptions<'_>,
+    progress: bool,
+) -> Result<Vec<ProviderReport>, String> {
+    if dumps.ocr_passes_dir.is_some() {
+        return Err("a replay reads the pass file and writes none".to_string());
+    }
+    let prepped = replay_pages(specimens, capture)?;
+    let run_manifest = current_run_manifest(dumps.ocr_dir);
     Ok(run_prepped_with_dump_options(
         catalog,
         &prepped,
@@ -5841,5 +6063,389 @@ mod tests {
                 assert!(!map.contains(value), "{value} leaked into {map}");
             }
         }
+    }
+
+    // --- replay (ADR-0024, amendment 3) -----------------------------------
+    //
+    // Synthetic text throughout: the zone below is the same made-up specimen
+    // the tests above use, never a real document's OCR (ADR-0027).
+
+    const REPLAY_LINE_1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const REPLAY_LINE_2_VALID: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// The same line with a malformed date of birth: it parses, and fails a check.
+    const REPLAY_LINE_2_BROKEN: &str = "L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+
+    fn replay_doc(name: &str, labels: Option<synthpass_core::Extraction>) -> RealSpecimenDoc {
+        RealSpecimenDoc {
+            name: name.to_string(),
+            asset_id: format!("passports/{name}.png"),
+            source_sha256: format!("{name:0<64}"),
+            image: image::DynamicImage::new_rgb8(1, 1),
+            labels,
+            class: crate::SpecimenClass::Passport,
+            mrz_expected: true,
+        }
+    }
+
+    fn replay_labels() -> synthpass_core::Extraction {
+        let mut labels = synthpass_core::Extraction::default();
+        labels.document_number = Some("L898902C3".to_string());
+        labels.surname = Some("ERIKSSON".to_string());
+        labels.given_names = Some("ANNA MARIA".to_string());
+        labels.mrz_line = Some(format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"));
+        labels
+    }
+
+    /// Three documents, each exercising other page values: a labelled hit with a
+    /// retry variant, a checksum miss with a band score and a spent budget, and a
+    /// page with no MRZ at all.
+    fn replay_corpus() -> Vec<(RealSpecimenDoc, OcrPage)> {
+        vec![
+            (
+                replay_doc("specimen-a", Some(replay_labels())),
+                OcrPage {
+                    text: format!("REPUBLIC OF UTOPIA\n{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"),
+                    rotation: 0,
+                    mrz_band_score: Some(0.8125),
+                    retry_variant_id: Some("pass-01".to_string()),
+                    retry_damaged_recovery: Some(false),
+                    retry_stop: Some("variant_valid".to_string()),
+                    chargrid: Some("unchanged".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+            (
+                replay_doc("specimen-b", None),
+                OcrPage {
+                    text: format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_BROKEN}"),
+                    rotation: 90,
+                    mrz_band_score: Some(0.6125),
+                    retry_budget_hit: true,
+                    retry_stop: Some("budget".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+            (
+                replay_doc("specimen-c", None),
+                OcrPage {
+                    text: "NOTHING MRZ-SHAPED HERE".to_string(),
+                    rotation: 180,
+                    retry_stop: Some("exhausted".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+        ]
+    }
+
+    /// The capture file a live run over `corpus` would have written.
+    fn replay_capture(corpus: &[(RealSpecimenDoc, OcrPage)]) -> crate::ocr_passes::PassesFile {
+        let mut collector = crate::ocr_passes::OcrPassesCollector::new(Some("run.json".into()));
+        for (doc, page) in corpus {
+            collector.push(
+                &doc.name,
+                Some(&doc.asset_id),
+                Some(&doc.source_sha256),
+                page,
+                &[],
+            );
+        }
+        crate::ocr_passes::PassesFile {
+            rows: collector.rows().to_vec(),
+            missing_keys: Vec::new(),
+        }
+    }
+
+    fn replay_specimens(corpus: &[(RealSpecimenDoc, OcrPage)]) -> Vec<RealSpecimenDoc> {
+        corpus.iter().map(|(doc, _)| doc.clone()).collect()
+    }
+
+    fn mrz_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .build()
+            .expect("one reader")
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "provider-bench-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// The property the whole feature rests on: for the same page, a replayed row
+    /// yields the same `DocumentDetail`, the same ledger row and the same dump
+    /// row as the live path. Only `ocr_ms` differs, because no OCR ran.
+    #[tokio::test]
+    async fn a_replayed_row_scores_exactly_as_the_live_page_does() {
+        let corpus = replay_corpus();
+        let live: Vec<Option<BenchPage>> = corpus
+            .iter()
+            .map(|(doc, page)| {
+                Some(specimen_bench_page(
+                    doc,
+                    page.clone(),
+                    PathBuf::from("live-unused.png"),
+                    Duration::from_millis(1234),
+                ))
+            })
+            .collect();
+        let capture = replay_capture(&corpus);
+        let replayed = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("the capture covers the corpus: {e}"));
+
+        let catalog = mrz_catalog();
+        let (live_dir, replay_dir) = (scratch_dir("live"), scratch_dir("replay"));
+        // Hits are dumped too, so the dump holds a row of every kind.
+        let live_reports = run_prepped_with_dump_options(
+            &catalog,
+            &live,
+            false,
+            Some(&live_dir),
+            true,
+            Some("run.json"),
+            false,
+        )
+        .await;
+        let replay_reports = run_prepped_with_dump_options(
+            &catalog,
+            &replayed,
+            false,
+            Some(&replay_dir),
+            true,
+            Some("run.json"),
+            false,
+        )
+        .await;
+
+        // The ledger rows, with the one timing field zeroed.
+        let ledger = |reports: &[ProviderReport]| -> Vec<crate::report::OutcomeRow> {
+            reports[0]
+                .documents_detail
+                .iter()
+                .map(|d| crate::report::OutcomeRow {
+                    ocr_ms: 0,
+                    ..crate::report::OutcomeRow::from(d)
+                })
+                .collect()
+        };
+        assert_eq!(ledger(&live_reports), ledger(&replay_reports));
+        assert_eq!(
+            live_reports[0].documents_detail[0].ocr_elapsed.as_millis(),
+            1234
+        );
+        assert_eq!(
+            replay_reports[0].documents_detail[0].ocr_elapsed,
+            Duration::ZERO
+        );
+
+        // Every recorded per-document field, as the report writes it.
+        let detail = |reports: Vec<ProviderReport>| -> Vec<serde_json::Value> {
+            let json = serde_json::to_value(crate::report::ProviderRow::from(
+                reports.into_iter().next().expect("one report"),
+            ))
+            .expect("serialize");
+            let mut rows = json["documents_detail"].as_array().expect("rows").clone();
+            for row in &mut rows {
+                row.as_object_mut().expect("row").remove("ocr_ms");
+            }
+            rows
+        };
+        let (live_rows, replay_rows) = (detail(live_reports), detail(replay_reports));
+        assert_eq!(live_rows, replay_rows);
+        // The two values the row gained are what this comparison could not
+        // have passed without.
+        assert_eq!(live_rows[0]["retry_damaged_recovery"], false);
+        assert_eq!(live_rows[0]["chargrid"], "unchanged");
+        assert_eq!(live_rows[1]["retry_budget_hit"], true);
+        assert_eq!(live_rows[1]["miss_reason"], "checksum_failed");
+
+        // The dump: byte-identical files, with a row for the hit, the checksum
+        // miss and the page with no zone.
+        let dump = |dir: &Path| {
+            std::fs::read_to_string(dir.join("provider-bench-miss-ocr-dump.jsonl"))
+                .expect("dump written")
+        };
+        let (live_dump, replay_dump) = (dump(&live_dir), dump(&replay_dir));
+        let _ = std::fs::remove_dir_all(&live_dir);
+        let _ = std::fs::remove_dir_all(&replay_dir);
+        assert_eq!(live_dump, replay_dump);
+        let dump_rows: Vec<serde_json::Value> = live_dump
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("row"))
+            .collect();
+        assert_eq!(dump_rows.len(), 3);
+        assert_eq!(dump_rows[0]["mrz_band_score"], 0.8125);
+        assert_eq!(dump_rows[1]["mrz_band_score"], 0.6125);
+        assert!(dump_rows[2]["mrz_band_score"].is_null());
+    }
+
+    #[test]
+    fn a_replayed_page_takes_the_documents_own_values_from_the_corpus_not_the_row() {
+        let corpus = replay_corpus();
+        let capture = replay_capture(&corpus);
+        let pages = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("covered: {e}"));
+        let labelled = pages[0].as_ref().expect("a page per document");
+        assert_eq!(labelled.name, "specimen-a");
+        assert_eq!(
+            labelled.asset_id.as_deref(),
+            Some("passports/specimen-a.png")
+        );
+        assert!(labelled.mrz_found, "recomputed from the row's text");
+        assert!(labelled.ground_truth.is_some() && labelled.ground_truth_mrz.is_some());
+        assert!(!labelled.synthetic && labelled.mrz_expected);
+        assert_eq!(labelled.ocr_elapsed, Duration::ZERO);
+        assert_eq!(labelled.page.mrz_band_score, Some(0.8125));
+        assert_eq!(labelled.page.retry_damaged_recovery, Some(false));
+        assert_eq!(labelled.page.rotation, 0);
+        assert!(!pages[2].as_ref().expect("page").mrz_found);
+        assert_eq!(pages[1].as_ref().expect("page").page.rotation, 90);
+    }
+
+    #[test]
+    fn rows_are_matched_by_asset_id_and_come_out_in_corpus_order() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.rows.reverse();
+        let pages = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("covered: {e}"));
+        let names: Vec<&str> = pages
+            .iter()
+            .map(|page| page.as_ref().expect("page").name.as_str())
+            .collect();
+        assert_eq!(names, ["specimen-a", "specimen-b", "specimen-c"]);
+        assert_eq!(
+            pages[2].as_ref().expect("page").page.text,
+            "NOTHING MRZ-SHAPED HERE"
+        );
+    }
+
+    #[test]
+    fn a_capture_lacking_a_key_the_replay_needs_is_refused_naming_the_keys() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.missing_keys = vec!["retry_damaged_recovery", "mrz_band_score"];
+        let err = check_replay(&replay_specimens(&corpus), &capture).expect_err("refused");
+        assert!(
+            err.contains("retry_damaged_recovery, mrz_band_score"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_capture_that_does_not_cover_the_corpus_exactly_once_is_refused() {
+        let corpus = replay_corpus();
+        let specimens = replay_specimens(&corpus);
+
+        let mut duplicated = replay_capture(&corpus);
+        duplicated.rows.push(duplicated.rows[1].clone());
+        let err = check_replay(&specimens, &duplicated).expect_err("a duplicate row");
+        assert!(
+            err.contains("more than one row: passports/specimen-b.png"),
+            "{err}"
+        );
+
+        let mut short = replay_capture(&corpus);
+        short.rows.remove(0);
+        let err = check_replay(&specimens, &short).expect_err("a missing row");
+        assert!(err.contains("no row: passports/specimen-a.png"), "{err}");
+
+        let mut extra = replay_capture(&corpus);
+        extra.rows.push(crate::ocr_passes::OcrPassesRow {
+            asset_id: Some("passports/other.png".to_string()),
+            ..extra.rows[0].clone()
+        });
+        let err = check_replay(&specimens, &extra).expect_err("a row for another asset");
+        assert!(err.contains("does not hold: passports/other.png"), "{err}");
+
+        let mut anonymous = replay_capture(&corpus);
+        anonymous.rows[2].asset_id = None;
+        let err = check_replay(&specimens, &anonymous).expect_err("a row with no asset_id");
+        assert!(err.contains("capture row 3 has no asset_id"), "{err}");
+
+        // A replay over a subset of a capture is not the capture's corpus either.
+        let err = check_replay(&specimens[..2], &replay_capture(&corpus)).expect_err("a subset");
+        assert!(err.contains("passports/specimen-c.png"), "{err}");
+        assert!(err.contains("exactly once"), "{err}");
+    }
+
+    #[test]
+    fn a_row_read_from_other_image_bytes_is_refused_naming_the_asset() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.rows[1].source_sha256 = Some("f".repeat(64));
+        let err = check_replay(&replay_specimens(&corpus), &capture).expect_err("refused");
+        assert!(err.contains("source_sha256 differs"), "{err}");
+        assert!(err.contains("passports/specimen-b.png"), "{err}");
+        assert!(
+            !err.contains("specimen-a"),
+            "only the differing asset: {err}"
+        );
+        capture.rows[1].source_sha256 = None;
+        assert!(check_replay(&replay_specimens(&corpus), &capture).is_err());
+    }
+
+    #[test]
+    fn a_long_list_of_offending_ids_is_cut_to_five() {
+        let ids: Vec<String> = (0..8).map(|n| format!("passports/{n}.png")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let listed = some_ids(&refs);
+        assert!(listed.ends_with(", and 3 more"), "{listed}");
+        assert!(listed.contains("passports/4.png") && !listed.contains("passports/5.png"));
+        assert_eq!(some_ids(&refs[..2]), "passports/0.png, passports/1.png");
+    }
+
+    #[tokio::test]
+    async fn a_replay_refuses_to_write_a_pass_trace() {
+        let corpus = replay_corpus();
+        let dir = scratch_dir("no-trace");
+        let dumps = RealDumpOptions {
+            ocr_passes_dir: Some(dir.as_path()),
+            ..RealDumpOptions::default()
+        };
+        let err = run_provider_bench_replay(
+            &mrz_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &dumps,
+            false,
+        )
+        .await
+        .err()
+        .expect("refused");
+        assert!(err.contains("writes none"), "{err}");
+        assert!(!dir.exists(), "nothing was written");
+    }
+
+    #[tokio::test]
+    async fn a_replay_runs_the_scoring_path_and_reports_the_captured_retry_state() {
+        let corpus = replay_corpus();
+        let reports = run_provider_bench_replay(
+            &mrz_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions::default(),
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        let detail = &reports[0].documents_detail;
+        assert_eq!(detail.len(), 3);
+        assert!(
+            detail[0].miss_reason.is_none(),
+            "the labelled zone is a hit"
+        );
+        assert_eq!(detail[0].names_exact, Some(true));
+        assert_eq!(detail[0].retry_variant_id.as_deref(), Some("pass-01"));
+        assert_eq!(detail[0].retry_damaged_recovery, Some(false));
+        assert!(detail[1].retry_budget_hit);
+        assert_eq!(detail[1].ocr_elapsed, Duration::ZERO);
     }
 }

@@ -270,6 +270,32 @@ class Arms(unittest.TestCase):
         self.assertTrue(any(p.startswith("image bytes differ for 1 asset") for p in problems))
         self.assertEqual(run(before, other_corpus)[0], 1)
 
+    def test_a_replays_identity_block_names_the_capture_it_replayed(self):
+        asset = "passports/X.jpg"
+        replay_of = {"run_manifest": "provider-bench-ocr-run-cap.json", "sha256": "d" * 64}
+        capture = write_arm(self.root, "capture", outcomes=[outcome_row(asset, "hit")],
+                            zones=[zone_row(asset, ["A"])], run=archive(), real_report=provider_report(1.0))
+        replay = write_arm(self.root, "replay", outcomes=[outcome_row(asset, "hit")],
+                           zones=[zone_row(asset, ["A"])], run={**archive(), "replay_of": replay_of},
+                           real_report=provider_report(1.0))
+        r = d.compare_arms(capture, replay, [])["real"]
+        self.assertEqual(r["problems"], [], "a replay of a capture is an A/B")
+        self.assertEqual([i["replay_of"] for i in r["identity"]], [None, replay_of])
+        self.assertIn("replay_of is recorded in one arm only", r["notes"])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertIn("after:  commit aaaaaaa; corpus cccccccccccc; class sweep off; "
+                      "replay of provider-bench-ocr-run-cap.json (sha256 dddddddddddd)", out)
+        self.assertNotIn("replay of", next(line for line in out.splitlines() if line.startswith("  before:")))
+        # Two replays of different captures differ in that identity, as a note, not a refusal.
+        other = write_arm(self.root, "other", outcomes=[outcome_row(asset, "hit")],
+                          zones=[zone_row(asset, ["A"])],
+                          run={**archive(), "replay_of": {**replay_of, "sha256": "e" * 64}},
+                          real_report=provider_report(1.0))
+        r = d.compare_arms(replay, other, [])["real"]
+        self.assertEqual(r["problems"], [])
+        self.assertTrue(any(n.startswith("replay_of differs") for n in r["notes"]))
+
     def test_a_document_dumped_in_one_arm_only_is_named(self):
         # provider-bench does not dump a document_number_mismatch, so a hit that
         # becomes one leaves the dump.
@@ -801,6 +827,108 @@ class ExpectIdentical(unittest.TestCase):
         self.assertEqual(self.neutral(*pair)[0], 3)
         self.assertEqual(self.neutral(*pair, "--ignore", "chargrid")[0], 0)
 
+    def capture_and_replay(self, replay_report=None, replay_ledger=None, replay_dump=None):
+        """A capture (a live run with the pass trace) and its replay (no OCR: `ocr_ms` 0,
+        another run manifest, no pass trace), the pair `--replay-ocr-passes` produces."""
+        asset = "passports/X.jpg"
+        self.pairs = getattr(self, "pairs", 0) + 1
+        ledger = {**outcome_row(asset, "hit", names_exact=True), "ocr_ms": 8123, "retry_stop": "variant_valid",
+                  "retry_variant_id": "pass-01", "retry_budget_hit": False}
+        dump = {**zone_row(asset, ["A", "B"]), "run_manifest": "provider-bench-ocr-run-cap.json",
+                "mrz_band_score": 0.5}
+        trace = {"asset_id": asset, "ocr_text": "RAW OCR TEXT", "retry_stop": "variant_valid",
+                 "retry_variant_id": "pass-01", "retry_budget_hit": False,
+                 "run_manifest": "provider-bench-ocr-run-cap.json", "ocr_passes": traced(0)["ocr_passes"]}
+        detail = {**detail_row(asset, {"surname": "exact"}), "ocr_ms": 8123, "retry_damaged_recovery": False,
+                  "tier1_damaged_recovery": False, "check_states": {"composite": True}}
+        capture_flags = ("--real-specimens", "--mrz-only", "--dump-ocr", "--dump-ocr-hits", "--dump-ocr-passes",
+                         "--out", "cap/real/report.json")
+        replay_flags = ("--real-specimens", "--mrz-only", "--replay-ocr-passes", "cap/real", "--dump-ocr",
+                        "--dump-ocr-hits", "--out", "rep/real/report.json")
+        capture = write_arm(self.root, f"capture{self.pairs}", outcomes=[ledger], zones=[dump], passes=[trace],
+                            run=archive(flags=capture_flags),
+                            real_report=provider_report(1.0, details=[detail]))
+        replay = write_arm(
+            self.root, f"replay{self.pairs}",
+            outcomes=[replay_ledger or {**ledger, "ocr_ms": 0}],
+            zones=[replay_dump or {**dump, "run_manifest": "provider-bench-ocr-run-rep.json"}],
+            run={**archive(flags=replay_flags),
+                 "replay_of": {"run_manifest": "provider-bench-ocr-run-cap.json", "sha256": "d" * 64}},
+            real_report=provider_report(1.0, details=[replay_report or {**detail, "ocr_ms": 0}]))
+        return capture, replay
+
+    def test_a_capture_and_its_replay_can_reach_neutral(self):
+        # Only the run manifest's name, timing and the pass trace the replay does not write differ;
+        # the existing ignore rules cover all three, so no --ignore is needed.
+        capture, replay = self.capture_and_replay()
+        code, out, err = self.neutral(capture, replay)
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertTrue(out.endswith("NEUTRAL\n"))
+        self.assertIn("trace rows not compared (an arm has no trace file)", out)
+        self.assertIn("dump 1/1 rows, differ 0", out)
+        self.assertIn("note: the runs differ in flags, replay_of", out)
+        self.assertNotIn("RAW OCR TEXT", out)
+
+    def test_a_replay_that_read_something_else_is_not_neutral(self):
+        asset = "passports/X.jpg"
+        moved = {**outcome_row(asset, "checksum_failed", names_exact=True), "ocr_ms": 0, "retry_stop": "variant_valid",
+                 "retry_variant_id": "pass-01", "retry_budget_hit": False}
+        capture, replay = self.capture_and_replay(replay_ledger=moved)
+        code, out, _ = self.neutral(capture, replay)
+        self.assertEqual(code, 3)
+        self.assertIn("ledger differ: passports/X.jpg (outcome)", out)
+        # A band score the replay lost is a dump difference, which is why the row carries it.
+        capture, replay = self.capture_and_replay(replay_dump={**zone_row(asset, ["A", "B"]), "mrz_band_score": None,
+                                                              "run_manifest": "provider-bench-ocr-run-rep.json"})
+        code, out, _ = self.neutral(capture, replay)
+        self.assertEqual(code, 3)
+        self.assertIn("dump rows differ: passports/X.jpg (mrz_band_score)", out)
+
+    def test_check_report_compares_the_per_document_report_fields_a_replay_must_reproduce(self):
+        capture, replay = self.capture_and_replay()
+        code, out, _ = self.neutral(capture, replay, "--check-report")
+        self.assertEqual(code, 0, out)
+        self.assertIn("report rows 1/1, differ 0", out)
+        # The fields the ledger and the dump lack: without --check-report they go unseen ...
+        lost = {**detail_row("passports/X.jpg", {"surname": "exact"}), "ocr_ms": 0, "retry_damaged_recovery": None,
+                "tier1_damaged_recovery": False, "check_states": {"composite": True}}
+        capture, replay = self.capture_and_replay(replay_report=lost)
+        self.assertEqual(self.neutral(capture, replay)[0], 0)
+        # ... and with it, the one that moved is named.
+        code, out, _ = self.neutral(capture, replay, "--check-report")
+        self.assertEqual(code, 3)
+        self.assertIn("report rows differ: passports/X.jpg (retry_damaged_recovery)", out)
+        self.assertTrue(out.endswith("NOT NEUTRAL\n"))
+        code, out, _ = self.neutral(capture, replay, "--check-report", "--json")
+        self.assertEqual(json.loads(out)["real"]["report_differ"],
+                         {"failed": 1, "ids": ["passports/X.jpg (retry_damaged_recovery)"]})
+
+    def test_check_report_needs_a_report_in_some_arm_and_skips_a_one_sided_pair(self):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit")]
+        none_a = write_arm(self.root, "n1", outcomes=rows)
+        none_b = write_arm(self.root, "n2", outcomes=rows)
+        code, out, err = self.neutral(none_a, none_b, "--check-report")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("--check-report was asked", err)
+        with_report = write_arm(self.root, "r1", outcomes=rows,
+                                real_report=provider_report(1.0, details=[detail_row(asset, {})]))
+        code, out, _ = self.neutral(with_report, none_a, "--check-report")
+        self.assertEqual(code, 0, out)
+        self.assertIn("report rows not compared (an arm has no report.json rows)", out)
+        # Not requested: nothing about the report is printed.
+        self.assertNotIn("report rows", self.neutral(with_report, none_a)[1])
+
+    def test_a_report_row_without_an_asset_id_or_repeated_is_an_error(self):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit")]
+        good = write_arm(self.root, "g", outcomes=rows, real_report=provider_report(1.0, details=[detail_row(asset)]))
+        repeated = write_arm(self.root, "d", outcomes=rows,
+                             real_report=provider_report(1.0, details=[detail_row(asset), detail_row(asset)]))
+        code, out, err = self.neutral(good, repeated, "--check-report")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("twice", err)
+
     def test_the_new_flags_need_the_new_mode_and_default_exit_codes_hold(self):
         arm = self.synth("a", [doc(0, True)])
         for flag in (["--check-pass-trace"], ["--ignore", "note"]):
@@ -812,6 +940,12 @@ class ExpectIdentical(unittest.TestCase):
         changed = self.synth("b", [doc(0, True, line1_flagged=True)])
         self.assertEqual(run(arm, changed)[0], 0)
         self.assertEqual(self.neutral(arm, changed)[0], 3)
+
+    def test_check_report_needs_the_neutrality_mode(self):
+        arm = self.synth("only", [doc(0, True)])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            run(arm, arm, "--check-report")
+        self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

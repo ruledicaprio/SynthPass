@@ -48,15 +48,15 @@ An arm is one directory, holding whatever the A/B measured:
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --asset <asset_id> ...
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --json
-    python tools/bench_ab_diff.py A B --expect-identical [--check-pass-trace] [--ignore KEY ...] [--json]
+    python tools/bench_ab_diff.py A B --expect-identical [--check-pass-trace] [--check-report] [--ignore KEY ...] [--json]
 
 `--asset` (repeatable) adds a status block for a named real specimen, whether or
 not it changed. Give the `asset_id` as the outcome ledger spells it, such as
 `passports/Kosovo_Passport_Specimen_P0_RKS_2023_mrz.jpg`.
 
 `--expect-identical` is the neutrality mode, for a change that should move
-nothing (see below). `--check-pass-trace` and `--ignore` are refused without
-it, and `--asset` is refused with it: that mode prints no zones.
+nothing (see below). `--check-pass-trace`, `--check-report` and `--ignore` are
+refused without it, and `--asset` is refused with it: that mode prints no zones.
 
 **Exit status:**
 - **0** if every pair compared is an A/B. Under `--expect-identical`, also
@@ -72,10 +72,12 @@ it, and `--asset` is refused with it: that mode prints no zones.
   - two arms with nothing in common to compare;
   - an arm measured with a private or local track;
   - under `--expect-identical`, `--check-pass-trace` when neither arm has a
-    pass trace.
+    pass trace, and `--check-report` when neither arm has a real `report.json`
+    with `documents_detail` rows.
 - **3**, only under `--expect-identical`: the pair is an A/B but not identical.
-  A difference in a row, a dump, a pass trace or a dumped text; a dump row or
-  block in one arm only; a format or the real run in one arm only.
+  A difference in a row, a dump, a pass trace, a report row (`--check-report`)
+  or a dumped text; a dump row or block in one arm only; a format or the real
+  run in one arm only.
 
 Codes 0, 1 and 2 mean the same in both modes. When several apply, 2 wins over 1
 and 1 wins over 3.
@@ -110,6 +112,14 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   per asset, whenever both arms have the file, with or without
   `--check-pass-trace`. With the file in one arm only, they are not compared,
   which is no failure, as for the dump.
+- **`--check-report`** also compares the real arms' `report.json`: the `mrz`
+  provider's `documents_detail` rows, per asset, after the same ignores (`ocr_ms`
+  is one). Those rows hold every per-document field the ledger and the dump do not
+  (`check_states`, `retry_damaged_recovery`, `tier1_damaged_recovery`, the
+  assertion counts, `field_correctness`), so this is the check that a replay
+  reproduced them. It is opt-in because a change under test may legitimately move
+  them. Without it `report.json` is not read in this mode. With the file in one
+  arm only, the rows are not compared; in neither arm, the flag is refused.
 - **`--check-pass-trace`,** in whichever arm has the trace (`ocr_passes` in a
   synthetic report; `provider-bench-ocr-passes.jsonl` on the real side):
   - orders and ids are contiguous, and `general` appears only at 0;
@@ -124,11 +134,19 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   dumped texts compared by hash. One in a single arm is not an A/B: the retry
   loop is wall-clock budgeted, so the two arms did not run the same search.
 
-A difference in the run identity (flags, OCR arms, model paths) is named as a
-note and does not change the verdict.
+A difference in the run identity (flags, OCR arms, model paths, `replay_of`) is
+named as a note and does not change the verdict.
 
-`report.json` is not read in this mode, so `field_correctness` is not compared
-here. The ledger, dump and trace rows are.
+**A capture and its replay.** `provider-bench --replay-ocr-passes` (ADR-0024,
+amendment 3) reads a captured pass file instead of running OCR. Between the
+capture and its replay this mode can reach NEUTRAL, and the ignores above are
+exactly what allows it: `ocr_ms` is zero in the replay, `run_manifest` names
+another file, and the replay writes no pass trace, so the trace rows are not
+compared. Everything else must match. Run it with `--check-report` to include the
+per-document report fields.
+
+Without `--check-report`, `report.json` is not read in this mode, so
+`field_correctness` is not compared here. The ledger, dump and trace rows are.
 
 ## What it prints
 
@@ -151,7 +169,9 @@ here. The ledger, dump and trace rows are.
 - **The flag-only changes,** grouped by the keys that moved.
 - **Real:**
   - **Each arm's identity:** commit, dirty tree, flags, OCR arms, corpus
-    manifest, class-sweep arm and model paths. A different corpus or different
+    manifest, class-sweep arm and model paths, and, for a replay
+    (`provider-bench --replay-ocr-passes`), `replay_of`: the capture's run-manifest
+    file name and its SHA-256. A different corpus or different
     image bytes means the pair is not an A/B. Any other difference is printed,
     since it may be the lever under test.
   - **Tier-1 hits over both denominators,** and names exact among the hits with
@@ -461,6 +481,7 @@ def identity(archive: dict | None, report: dict | None) -> dict:
         "flags": normalized_flags(archive.get("flags")),
         "ocr_arms": archive.get("ocr_arms"),
         "corpus_manifest_sha256": archive.get("corpus_manifest_sha256"),
+        "replay_of": archive.get("replay_of"),
         "mrz_class_sweep_arm": report.get("mrz_class_sweep_arm"),
         "model_paths": report.get("model_paths"),
     }
@@ -671,7 +692,12 @@ def short_identity(ident: dict) -> str:
     commit = (ident["git_commit"] or "unknown")[:7]
     dirty = {True: ", dirty tree", False: "", None: ", tree state unknown"}[ident["working_tree_dirty"]]
     corpus = (ident["corpus_manifest_sha256"] or "unknown")[:12]
-    return f"commit {commit}{dirty}; corpus {corpus}; class sweep {na(ident['mrz_class_sweep_arm'])}"
+    text = f"commit {commit}{dirty}; corpus {corpus}; class sweep {na(ident['mrz_class_sweep_arm'])}"
+    replay = ident.get("replay_of")
+    if replay:
+        # The capture's manifest file name and hash: no document text.
+        text += f"; replay of {na(replay.get('run_manifest'))} (sha256 {str(replay.get('sha256'))[:12]})"
+    return text
 
 
 def render_synthetic(name: str, r: dict) -> list[str]:
@@ -1079,7 +1105,27 @@ def neutral_synthetic(name: str, before: Path, after: Path, extra: list[str], ch
     return out
 
 
-def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool) -> dict:
+def report_rows(path: Path) -> dict[str, dict] | None:
+    """The mrz provider's `documents_detail` rows of a `report.json`, by asset id.
+    `None` when there is no such file or it holds no rows (an arm that predates
+    them). A row without an `asset_id`, or a repeated one, is an error."""
+    if not path.is_file():
+        return None
+    rows = mrz_provider(load_json(path)).get("documents_detail")
+    if not rows:
+        return None
+    out: dict[str, dict] = {}
+    for row in rows:
+        asset = row.get("asset_id")
+        if asset is None:
+            raise ValueError(f"{path.name}: a documents_detail row has no asset_id")
+        if asset in out:
+            raise ValueError(f"{path.name}: documents_detail has asset_id {asset!r} twice")
+        out[asset] = row
+    return out
+
+
+def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool, check_report: bool = False) -> dict:
     ledgers = [load_jsonl(d / OUTCOMES) for d in (before, after)]
     ignore, _ = ignored_keys(*ledgers, extra)
     out: dict = {
@@ -1095,7 +1141,18 @@ def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool)
         "trace_text_differs_from_dump": None,
         "trace_retry_differs_from_ledger": None,
         "passes": 0,
+        "report_requested": check_report,
+        "report_present": [False, False],
+        "report_rows": None,
+        "report_differ": None,
     }
+    if check_report:
+        reports = [report_rows(d / REPORT) for d in (before, after)]
+        out["report_present"] = [r is not None for r in reports]
+        if reports[0] is not None and reports[1] is not None:
+            report_ignore, _ = ignored_keys(*reports, extra)
+            out["report_rows"] = [len(reports[0]), len(reports[1])]
+            out["report_differ"] = failing(row_differences(reports[0], reports[1], report_ignore))
     dumps = [load_jsonl(d / ZONES, PROVIDER) if (d / ZONES).is_file() else None for d in (before, after)]
     if dumps[0] is not None and dumps[1] is not None:
         dump_ignore, _ = ignored_keys(*dumps, extra)
@@ -1140,14 +1197,16 @@ def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool)
 
 
 CHECK_KEYS = ("results_differ", "dump_blocks_differ", "text_vs_dump_differ", "trace_breaks",
-              "ledger_differ", "dump_differ", "trace_differ", "trace_text_differs_from_dump", "trace_retry_differs_from_ledger")
+              "ledger_differ", "dump_differ", "trace_differ", "trace_text_differs_from_dump", "trace_retry_differs_from_ledger",
+              "report_differ")
 
 
 def failed_checks(section: dict) -> int:
     return sum((section.get(k) or {}).get("failed", 0) for k in CHECK_KEYS)
 
 
-def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], check_trace: bool) -> dict:
+def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], check_trace: bool,
+                    check_report: bool = False) -> dict:
     """The neutrality verdict for two arms, given `compare_arms`'s result for
     them. `exit` follows the default mode's codes, and adds 3, a pair that is an
     A/B but not identical."""
@@ -1155,10 +1214,12 @@ def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], che
     synthetic_b, synthetic_a = synthetic_reports(before), synthetic_reports(after)
     synthetic = {name: neutral_synthetic(name, synthetic_b[name], synthetic_a[name], extra, check_trace)
                  for name in base["synthetic"]}
-    real = neutral_real(before / "real", after / "real", extra, check_trace) if base["real"] else None
+    real = neutral_real(before / "real", after / "real", extra, check_trace, check_report) if base["real"] else None
     if check_trace and not any(s["trace_breaks"] is not None for s in synthetic.values()) \
             and not (real and real["trace"]):
         raise Refused("--check-pass-trace was asked, and neither arm has a pass trace to check")
+    if check_report and not (real and any(real["report_present"])):
+        raise Refused("--check-report was asked, and neither arm has a real report.json with documents_detail to check")
     if base["real"]:
         real["differs_in"] = [k for k in base["real"]["identity"][0] if k != "git_commit"
                               and base["real"]["identity"][0][k] != base["real"]["identity"][1][k]]
@@ -1219,17 +1280,21 @@ def render_neutral(result: dict) -> str:
             f"{r['dump_rows'][0]}/{r['dump_rows'][1]} rows, differ {show_check(r['dump_differ'])} (raw_ocr_text by sha256)"
         rows = "not compared (an arm has no trace file)" if r["trace_rows"] is None else \
             f"{r['trace_rows'][0]}/{r['trace_rows'][1]} rows, differ {show_check(r['trace_differ'])}"
+        report = "" if not r["report_requested"] else (
+            " | report rows not compared (an arm has no report.json rows)" if r["report_rows"] is None else
+            f" | report rows {r['report_rows'][0]}/{r['report_rows'][1]}, differ {show_check(r['report_differ'])}")
         trace = "invariants not checked" if r["trace"] is None else (
             f"{r['passes']} passes, documents without a row {r['trace_documents_without_row']}, "
             f"ocr_text != dump {show_check(r['trace_text_differs_from_dump'])}, "
             f"retry fields != ledger {show_check(r['trace_retry_differs_from_ledger'])}, "
             f"breaks {show_check(r['trace_breaks'])}")
         lines.append(f"real: documents {r['documents'][0]}/{r['documents'][1]} | ledger differ "
-                     f"{show_check(r['ledger_differ'])} | dump {dump} | trace rows {rows} | trace {trace} -> {mark}")
+                     f"{show_check(r['ledger_differ'])} | dump {dump} | trace rows {rows} | trace {trace}{report} -> {mark}")
         if r["differs_in"]:
             lines.append(f"  note: the runs differ in {', '.join(r['differs_in'])}")
         for label, key in (("ledger differ", "ledger_differ"), ("dump rows differ", "dump_differ"),
                            ("trace rows differ", "trace_differ"),
+                           ("report rows differ", "report_differ"),
                            ("trace ocr_text differs from the dump", "trace_text_differs_from_dump"),
                            ("trace retry fields differ from the ledger", "trace_retry_differs_from_ledger"),
                            ("trace breaks", "trace_breaks")):
@@ -1258,12 +1323,15 @@ def main(argv: list[str] | None = None) -> int:
                          "prints counts and ids, never OCR text")
     ap.add_argument("--check-pass-trace", action="store_true",
                     help="with --expect-identical: check the invariants of `ocr_passes` and the real pass trace")
+    ap.add_argument("--check-report", action="store_true",
+                    help="with --expect-identical: also compare the real arms' report.json documents_detail rows "
+                         "(every per-document field the ledger and the dump lack)")
     ap.add_argument("--ignore", action="append", default=[], metavar="KEY",
                     help="with --expect-identical: a row key to leave out of the comparison (repeatable)")
     args = ap.parse_args(argv)
     if not args.expect_identical:
-        if args.check_pass_trace or args.ignore:
-            ap.error("--check-pass-trace and --ignore need --expect-identical")
+        if args.check_pass_trace or args.check_report or args.ignore:
+            ap.error("--check-pass-trace, --check-report and --ignore need --expect-identical")
     elif args.asset:
         ap.error("--asset does not apply to --expect-identical, which prints no zones")
     for arm in (args.before, args.after):
@@ -1273,7 +1341,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = compare_arms(args.before, args.after, args.asset)
         if args.expect_identical and (result["synthetic"] or result["real"]):
-            verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace)
+            verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace,
+                                      args.check_report)
     except Refused as e:
         print(f"bench_ab_diff: refused: {e}", file=sys.stderr)
         return 2
