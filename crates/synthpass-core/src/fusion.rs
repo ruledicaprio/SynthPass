@@ -756,7 +756,10 @@ mod tests {
             let mut m = base();
             m.mrz_lines.replace_range(2..5, issuer);
             let kind = FindingKind::RawIssuerNotInRegistry;
-            assert!(check_line1_integrity(&m).kinds().contains(&kind), "{issuer}");
+            assert!(
+                check_line1_integrity(&m).kinds().contains(&kind),
+                "{issuer}"
+            );
             assert!(kind.is_report_only());
         }
     }
@@ -770,7 +773,9 @@ mod tests {
             .contains(&FindingKind::DigitInTwoLineLine1));
 
         let mut missing = base();
-        missing.mrz_lines = missing.mrz_lines.replacen("ERIKSSON<<ANNA", "ERIKSSONKKANNA", 1);
+        missing.mrz_lines = missing
+            .mrz_lines
+            .replacen("ERIKSSON<<ANNA", "ERIKSSONKKANNA", 1);
         assert!(check_line1_integrity(&missing)
             .kinds()
             .contains(&FindingKind::RawNameSeparatorMissing));
