@@ -2736,6 +2736,15 @@ fn single(mut hits: Vec<MrzData>) -> Option<MrzData> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn trailing_kk_before_padding_does_not_hide_single_name_separator() {
+        let repaired = fix_name_separator(&defiller("ADEYEMI<SOFIAKK<<<"));
+        let (surname, given_names) = clean_name(&repaired);
+
+        assert_eq!(surname, "ADEYEMI");
+        assert_eq!(given_names, "SOFIA");
+    }
+
     /// #476's TD1 side of #468/#469's TD3 generalization, pinned as a
     /// white-box unit test on [`td1_line1_variants`] rather than through
     /// [`find_and_parse`]: TD1 and TD2 share the `I`/`A`/`C` line-1 prefix by

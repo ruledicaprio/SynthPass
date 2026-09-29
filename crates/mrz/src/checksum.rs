@@ -179,14 +179,14 @@ pub(crate) fn fix_doc_code(l: &str) -> String {
 /// In the pinned ambiguous names (JUKKA, PEKKA, MIKKO, HAKKINEN) the pair
 /// starts at cell 2; the existing VZOREC repair starts at cell 6. None of
 /// 65 reviewed fixture surnames or 25 generator surnames contains `KK`, so
-/// those corpora cannot establish a generally safe boundary. This guard
-/// preserves the observed short names while the A/B measurement decides
-/// whether the unmarked repair should survive at all.
+/// those corpora cannot establish a generally safe boundary. The six-cell
+/// guard preserves the observed short names; the remaining ambiguity is
+/// recorded in `knowledge/technical_debt.md`.
 pub(crate) fn fix_name_separator(s: &str) -> String {
     let trimmed = s.trim_end_matches('<');
     if !trimmed.contains("<<") {
         if let Some(pos) = trimmed.find("KK") {
-            if pos >= 6 && !trimmed[pos + 2..].is_empty() {
+            if pos >= 6 {
                 return format!("{}<<{}", &s[..pos], &s[pos + 2..]);
             }
         }
