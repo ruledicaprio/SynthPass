@@ -11,13 +11,22 @@
 //!   [`OCR_PASSES_FILENAME`], one [`OcrPassesRow`] per OCR'd document, from the
 //!   corpus prep (which runs once, not once per provider).
 //!
+//! - When `SYNTHPASS_OCR_CHARGRID` is `on` or `control`, the pass that read the
+//!   MRZ carries a `chargrid` object ([`ChargridObject`]): the name-line
+//!   repair's matched line, glyph positions, fitted grid and ink, enough to
+//!   replay it (ADR-0024, amendment 2). It is `null` on every other pass and
+//!   whenever the arm is off. Each `provider-bench` row also carries
+//!   `chargrid`, the verdict [`OcrPage::chargrid`] reports.
+//!
 //! Both are off by default, and the readings never enter the `--out` trend
 //! report, the outcome ledger, stdout, stderr or a log: they are diagnostic
-//! zone text, and for the real-specimen track they are a document's OCR.
+//! zone text, and for the real-specimen track they are a document's OCR. The
+//! chargrid object's `raw_name_line`, `recognized_text`, glyph characters,
+//! `repair.line` and `column_ink` are document content under the same rules.
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use synthpass_ocr::{OcrPage, PassRecord};
+use synthpass_ocr::{ChargridFit, ChargridLineCapture, ChargridRecord, OcrPage, PassRecord};
 
 /// The file `provider-bench --dump-ocr-passes` writes next to `--out`.
 pub const OCR_PASSES_FILENAME: &str = "provider-bench-ocr-passes.jsonl";
@@ -52,6 +61,171 @@ pub struct PassObject {
     /// `failed`, `no_mrz_shaped_lines`, `appended` or `accepted`.
     pub outcome: &'static str,
     pub readings: Vec<ReadingObject>,
+    /// The chargrid attempt that read this pass's pixels. Always present:
+    /// `null` unless this is the accepted pass and the arm ran.
+    pub chargrid: Option<ChargridObject>,
+}
+
+/// One chargrid attempt (`synthpass_ocr::ChargridRecord`). Key set pinned by
+/// tests.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ChargridObject {
+    /// `on` or `control`.
+    pub mode: &'static str,
+    /// Byte-identical to the page's `chargrid` verdict.
+    pub verdict: String,
+    /// `null` when the attempt stopped before a line matched.
+    pub line: Option<ChargridLineObject>,
+}
+
+/// The matched line and what was measured on it, in the working image's pixel
+/// space. See `synthpass_ocr::ChargridLineCapture` for each field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ChargridLineObject {
+    pub name_line_index: usize,
+    pub width: usize,
+    pub raw_name_line: String,
+    pub recognized_line_index: usize,
+    pub recognized_text: String,
+    pub downscaled: bool,
+    pub image_width: u32,
+    pub image_height: u32,
+    pub line_box: LineBoxObject,
+    pub band_sha256: String,
+    pub glyphs: Vec<GlyphObject>,
+    pub column_ink: Vec<u32>,
+    pub ink_floor: f32,
+    /// `null` when no grid could be fitted.
+    pub fit: Option<ChargridFitObject>,
+}
+
+/// A line box in edges, not [`BoxObject`]'s `{x, y, w, h}`: edges are what the
+/// grid fit and the ink measurement consume, so a replay reads them as they are.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LineBoxObject {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+/// One recognized character with its horizontal extent.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GlyphObject {
+    /// A one-character string.
+    pub ch: String,
+    pub left: f32,
+    pub right: f32,
+}
+
+/// The fitted grid and the repair's verdict on it. The grid's cell count is the
+/// line's `width`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ChargridFitObject {
+    pub origin: f32,
+    pub pitch: f32,
+    /// Glyph `i` sits in cell `cells[i]`; `null` when the glyphs could not be
+    /// aligned.
+    pub cells: Option<Vec<usize>>,
+    /// Exactly what the repair's ink gate received, one value per cell.
+    pub cell_ink: Vec<f32>,
+    pub repair: RepairObject,
+}
+
+/// What the repair returned, with a fixed key set: every value that does not
+/// apply is `null`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RepairObject {
+    /// `ok`, or a `synthpass_ocr::chargrid::Rejected::as_str` label.
+    pub outcome: &'static str,
+    /// The repaired line; only on `ok`.
+    pub line: Option<String>,
+    /// How many fillers were placed; only on `ok`.
+    pub fillers_placed: Option<usize>,
+    /// The glyph deficit; only on `ink_mismatch`.
+    pub expected: Option<usize>,
+    /// How many empty cells met the ink floor; only on `ink_mismatch`.
+    pub found: Option<usize>,
+}
+
+fn repair_object(
+    repair: &Result<synthpass_ocr::chargrid::Repair, synthpass_ocr::chargrid::Rejected>,
+) -> RepairObject {
+    match repair {
+        Ok(repair) => RepairObject {
+            outcome: "ok",
+            line: Some(repair.line.clone()),
+            fillers_placed: Some(repair.fillers_placed),
+            expected: None,
+            found: None,
+        },
+        Err(rejected) => {
+            let (expected, found) = match rejected {
+                synthpass_ocr::chargrid::Rejected::InkMismatch { expected, found } => {
+                    (Some(*expected), Some(*found))
+                }
+                _ => (None, None),
+            };
+            RepairObject {
+                outcome: rejected.as_str(),
+                line: None,
+                fillers_placed: None,
+                expected,
+                found,
+            }
+        }
+    }
+}
+
+fn fit_object(fit: &ChargridFit) -> ChargridFitObject {
+    ChargridFitObject {
+        origin: fit.grid.origin,
+        pitch: fit.grid.pitch,
+        cells: fit.cells.clone(),
+        cell_ink: fit.cell_ink.clone(),
+        repair: repair_object(&fit.repair),
+    }
+}
+
+fn line_object(line: &ChargridLineCapture) -> ChargridLineObject {
+    ChargridLineObject {
+        name_line_index: line.name_line_index,
+        width: line.width,
+        raw_name_line: line.raw_name_line.clone(),
+        recognized_line_index: line.recognized_line_index,
+        recognized_text: line.recognized_text.clone(),
+        downscaled: line.downscaled,
+        image_width: line.image_width,
+        image_height: line.image_height,
+        line_box: LineBoxObject {
+            left: line.line_box.left,
+            top: line.line_box.top,
+            right: line.line_box.right,
+            bottom: line.line_box.bottom,
+        },
+        band_sha256: line.band_sha256.clone(),
+        glyphs: line
+            .glyphs
+            .iter()
+            .map(|glyph| GlyphObject {
+                ch: glyph.ch.to_string(),
+                left: glyph.left,
+                right: glyph.right,
+            })
+            .collect(),
+        column_ink: line.column_ink.clone(),
+        ink_floor: line.ink_floor,
+        fit: line.fit.as_ref().map(fit_object),
+    }
+}
+
+/// The report shape of one chargrid attempt.
+pub fn chargrid_object(record: &ChargridRecord) -> ChargridObject {
+    ChargridObject {
+        mode: record.mode,
+        verdict: record.verdict.clone(),
+        line: record.line.as_ref().map(line_object),
+    }
 }
 
 /// The report shape of a run's pass records, in execution order.
@@ -80,6 +254,7 @@ pub fn pass_objects(records: &[PassRecord]) -> Vec<PassObject> {
                     text: reading.text.clone(),
                 })
                 .collect(),
+            chargrid: record.chargrid.as_ref().map(chargrid_object),
         })
         .collect()
 }
@@ -101,6 +276,10 @@ pub struct OcrPassesRow {
     pub retry_variant_id: Option<String>,
     pub retry_stop: Option<String>,
     pub retry_budget_hit: bool,
+    /// `OcrPage::chargrid` verbatim: the chargrid arm's verdict for this
+    /// document, `null` when the arm is off. Present even when no pass holds a
+    /// capture (a `skipped:` verdict reads no pixels).
+    pub chargrid: Option<String>,
     /// The full `OcrPage::text` the providers were handed.
     pub ocr_text: String,
     pub ocr_passes: Vec<PassObject>,
@@ -140,6 +319,7 @@ impl OcrPassesCollector {
             retry_variant_id: page.retry_variant_id.clone(),
             retry_stop: page.retry_stop.clone(),
             retry_budget_hit: page.retry_budget_hit,
+            chargrid: page.chargrid.clone(),
             ocr_text: page.text.clone(),
             ocr_passes: pass_objects(records),
         });
@@ -273,6 +453,7 @@ mod tests {
             image_height: 480,
             outcome,
             readings,
+            chargrid: None,
         }
     }
 
@@ -313,6 +494,7 @@ mod tests {
         assert_eq!(
             keys(&json),
             [
+                "chargrid",
                 "id",
                 "image_height",
                 "image_width",
@@ -323,6 +505,11 @@ mod tests {
                 "turn"
             ]
         );
+        assert!(
+            json.as_object().unwrap().contains_key("chargrid"),
+            "always present"
+        );
+        assert!(json["chargrid"].is_null(), "null when there is no attempt");
         assert_eq!(json["id"], "pass-00");
         assert_eq!(json["transform"], "mrz_variants:0");
         assert_eq!(json["outcome"], "appended");
@@ -351,6 +538,7 @@ mod tests {
             keys(&json),
             [
                 "asset_id",
+                "chargrid",
                 "name",
                 "ocr_passes",
                 "ocr_text",
@@ -363,8 +551,269 @@ mod tests {
             ]
         );
         assert_eq!(json["run_manifest"], "run.json");
+        assert!(json["chargrid"].is_null(), "null when the arm is off");
         assert_eq!(json["rotation"], 90);
         assert_eq!(json["ocr_passes"][0]["outcome"], "no_mrz_shaped_lines");
+    }
+
+    fn chargrid_record(
+        repair: Result<synthpass_ocr::chargrid::Repair, synthpass_ocr::chargrid::Rejected>,
+    ) -> synthpass_ocr::ChargridRecord {
+        use synthpass_ocr::chargrid::{Glyph, Grid};
+        synthpass_ocr::ChargridRecord {
+            mode: "on",
+            verdict: "repaired".to_string(),
+            line: Some(ChargridLineCapture {
+                name_line_index: 0,
+                width: 44,
+                raw_name_line: "P<UTOERIKSSONANNA".to_string(),
+                recognized_line_index: 4,
+                recognized_text: "PUTOERIKSSONANNA".to_string(),
+                downscaled: true,
+                image_width: 1600,
+                image_height: 90,
+                line_box: synthpass_ocr::LineBox {
+                    left: 10,
+                    top: 20,
+                    right: 1500,
+                    bottom: 60,
+                },
+                band_sha256: "ab".repeat(32),
+                glyphs: vec![
+                    Glyph {
+                        ch: 'P',
+                        left: 10.5,
+                        right: 27.25,
+                    },
+                    Glyph {
+                        ch: 'U',
+                        left: 44.0,
+                        right: 60.0,
+                    },
+                ],
+                column_ink: vec![0, 3, 40],
+                ink_floor: 0.05,
+                fit: Some(ChargridFit {
+                    grid: Grid {
+                        origin: 9.75,
+                        pitch: 33.875,
+                        cells: 44,
+                    },
+                    cells: Some(vec![0, 1]),
+                    cell_ink: vec![0.5, 0.125],
+                    repair,
+                }),
+            }),
+        }
+    }
+
+    fn repaired() -> synthpass_ocr::chargrid::Repair {
+        synthpass_ocr::chargrid::Repair {
+            line: "P<UTOERIKSSON<<ANNA".to_string(),
+            fillers_placed: 2,
+        }
+    }
+
+    #[test]
+    fn a_chargrid_object_has_exactly_the_documented_keys_at_every_level() {
+        let mut record = record(4, PassOutcome::Accepted, vec![reading()]);
+        record.chargrid = Some(chargrid_record(Ok(repaired())));
+        let json = serde_json::to_value(&pass_objects(&[record])[0]).unwrap();
+        let chargrid = &json["chargrid"];
+        assert_eq!(keys(chargrid), ["line", "mode", "verdict"]);
+        assert_eq!(chargrid["mode"], "on");
+        assert_eq!(chargrid["verdict"], "repaired");
+        let line = &chargrid["line"];
+        assert_eq!(
+            keys(line),
+            [
+                "band_sha256",
+                "column_ink",
+                "downscaled",
+                "fit",
+                "glyphs",
+                "image_height",
+                "image_width",
+                "ink_floor",
+                "line_box",
+                "name_line_index",
+                "raw_name_line",
+                "recognized_line_index",
+                "recognized_text",
+                "width"
+            ]
+        );
+        assert_eq!(
+            keys(&line["line_box"]),
+            ["bottom", "left", "right", "top"],
+            "edges, not x/y/w/h"
+        );
+        assert_eq!(line["line_box"]["right"], 1500);
+        assert_eq!(keys(&line["glyphs"][0]), ["ch", "left", "right"]);
+        assert_eq!(line["glyphs"][0]["ch"], "P");
+        assert_eq!(line["glyphs"][1]["left"], 44.0);
+        assert_eq!(line["column_ink"], serde_json::json!([0, 3, 40]));
+        assert_eq!(line["downscaled"], true);
+        assert_eq!(line["recognized_line_index"], 4);
+        let fit = &line["fit"];
+        assert_eq!(
+            keys(fit),
+            ["cell_ink", "cells", "origin", "pitch", "repair"]
+        );
+        assert_eq!(fit["origin"], 9.75);
+        assert_eq!(fit["pitch"], 33.875);
+        assert_eq!(fit["cells"], serde_json::json!([0, 1]));
+        assert_eq!(fit["cell_ink"], serde_json::json!([0.5, 0.125]));
+    }
+
+    #[test]
+    fn a_chargrid_line_and_fit_are_null_when_they_were_never_made() {
+        let no_line = synthpass_ocr::ChargridRecord {
+            mode: "control",
+            verdict: "skipped:no_line_match".to_string(),
+            line: None,
+        };
+        let json = serde_json::to_value(chargrid_object(&no_line)).unwrap();
+        assert_eq!(keys(&json), ["line", "mode", "verdict"]);
+        assert!(json["line"].is_null());
+
+        let mut no_fit = chargrid_record(Ok(repaired()));
+        no_fit.line.as_mut().unwrap().fit = None;
+        let json = serde_json::to_value(chargrid_object(&no_fit)).unwrap();
+        assert!(json["line"]["fit"].is_null());
+        assert!(json["line"]["glyphs"].is_array());
+
+        let mut no_cells = chargrid_record(Ok(repaired()));
+        no_cells.line.as_mut().unwrap().fit.as_mut().unwrap().cells = None;
+        let json = serde_json::to_value(chargrid_object(&no_cells)).unwrap();
+        assert!(json["line"]["fit"]["cells"].is_null());
+    }
+
+    #[test]
+    fn the_repair_object_has_a_fixed_key_set_and_nulls_what_does_not_apply() {
+        use synthpass_ocr::chargrid::Rejected;
+        let repair_of = |repair| {
+            let record = chargrid_record(repair);
+            serde_json::to_value(chargrid_object(&record)).unwrap()["line"]["fit"]["repair"].clone()
+        };
+        let keys_expected = ["expected", "fillers_placed", "found", "line", "outcome"];
+
+        let ok = repair_of(Ok(repaired()));
+        assert_eq!(keys(&ok), keys_expected);
+        assert_eq!(ok["outcome"], "ok");
+        assert_eq!(ok["line"], "P<UTOERIKSSON<<ANNA");
+        assert_eq!(ok["fillers_placed"], 2);
+        assert!(ok["expected"].is_null() && ok["found"].is_null());
+
+        let mismatch = repair_of(Err(Rejected::InkMismatch {
+            expected: 2,
+            found: 1,
+        }));
+        assert_eq!(keys(&mismatch), keys_expected);
+        assert_eq!(mismatch["outcome"], "ink_mismatch");
+        assert_eq!(mismatch["expected"], 2);
+        assert_eq!(mismatch["found"], 1);
+        assert!(mismatch["line"].is_null() && mismatch["fillers_placed"].is_null());
+
+        for (rejected, label) in [
+            (Rejected::NoDeficit, "no_deficit"),
+            (Rejected::TooManyGlyphs, "too_many_glyphs"),
+            (Rejected::GridFit, "grid_fit"),
+            (Rejected::PrefixChanged, "prefix_changed"),
+        ] {
+            let other = repair_of(Err(rejected));
+            assert_eq!(keys(&other), keys_expected, "{label}");
+            assert_eq!(other["outcome"], label);
+            for key in ["line", "fillers_placed", "expected", "found"] {
+                assert!(other[key].is_null(), "{label}: {key}");
+            }
+        }
+    }
+
+    /// The `f32`s the file carries must read back as the identical `f32`: a
+    /// replay checked against a rounded value would disagree with the run.
+    #[test]
+    fn every_float_parses_back_to_the_identical_f32() {
+        use synthpass_ocr::chargrid::{Glyph, Grid};
+        #[derive(serde::Deserialize)]
+        struct Back {
+            line: BackLine,
+        }
+        #[derive(serde::Deserialize)]
+        struct BackLine {
+            ink_floor: f32,
+            glyphs: Vec<BackGlyph>,
+            fit: BackFit,
+        }
+        #[derive(serde::Deserialize)]
+        struct BackGlyph {
+            left: f32,
+            right: f32,
+        }
+        #[derive(serde::Deserialize)]
+        struct BackFit {
+            origin: f32,
+            pitch: f32,
+            cell_ink: Vec<f32>,
+        }
+        let awkward: [f32; 8] = [
+            0.1,
+            1.0 / 3.0,
+            f32::from_bits(24.0f32.to_bits() - 1),
+            f32::from_bits(33.875f32.to_bits() + 1),
+            -30.25,
+            1e-7,
+            0.05,
+            1_234_567.9,
+        ];
+        let mut record = chargrid_record(Ok(repaired()));
+        let line = record.line.as_mut().unwrap();
+        line.ink_floor = awkward[6];
+        line.glyphs = awkward
+            .windows(2)
+            .map(|pair| Glyph {
+                ch: 'A',
+                left: pair[0],
+                right: pair[1],
+            })
+            .collect();
+        let fit = line.fit.as_mut().unwrap();
+        fit.grid = Grid {
+            origin: awkward[2],
+            pitch: awkward[3],
+            cells: 44,
+        };
+        fit.cell_ink = awkward.to_vec();
+
+        let text = serde_json::to_string(&chargrid_object(&record)).unwrap();
+        let back: Back = serde_json::from_str(&text).unwrap();
+        let bits = |values: &[f32]| values.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(back.line.ink_floor.to_bits(), awkward[6].to_bits());
+        assert_eq!(back.line.fit.origin.to_bits(), awkward[2].to_bits());
+        assert_eq!(back.line.fit.pitch.to_bits(), awkward[3].to_bits());
+        assert_eq!(bits(&back.line.fit.cell_ink), bits(&awkward));
+        for (glyph, pair) in back.line.glyphs.iter().zip(awkward.windows(2)) {
+            assert_eq!(glyph.left.to_bits(), pair[0].to_bits());
+            assert_eq!(glyph.right.to_bits(), pair[1].to_bits());
+        }
+    }
+
+    #[test]
+    fn a_row_carries_the_page_verdict_verbatim() {
+        let mut collector = OcrPassesCollector::new(None);
+        for verdict in [None, Some("skipped:no_source_image"), Some("repaired")] {
+            let mut page = page();
+            page.chargrid = verdict.map(str::to_string);
+            collector.push("doc", None, None, &page, &[]);
+        }
+        let json: Vec<serde_json::Value> = collector
+            .rows()
+            .iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+        assert!(json[0]["chargrid"].is_null());
+        assert_eq!(json[1]["chargrid"], "skipped:no_source_image");
+        assert_eq!(json[2]["chargrid"], "repaired");
     }
 
     /// One row per OCR'd document. The rows come from the corpus prep, which

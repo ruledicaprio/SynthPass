@@ -76,12 +76,15 @@
 //! bounding box. It exists so a benchmark can say which pass read a line, which
 //! the appended page text no longer can. Nothing on the extraction path calls
 //! it, [`OcrPage`] does not carry it, and its types derive no `Serialize`; see
-//! [`pass_trace`] and ADR-0024, amendment 1.
+//! [`pass_trace`] and ADR-0024, amendment 1. With `SYNTHPASS_OCR_CHARGRID` on
+//! or `control`, the accepted pass's record also holds that chargrid attempt's
+//! name-line geometry, glyph positions and ink ([`ChargridRecord`], amendment 2).
 
-// Fixed-grid MRZ name-line repair: pure geometry, no `ocrs` types; not yet
-// wired into `NativeOcr`. Its docs live in the module's own `//!` comment --
-// an outer `///` here would be merged with them and resolve their intra-doc
-// links in this scope, where the module's items are not visible.
+// Fixed-grid MRZ name-line repair: pure geometry, no `ocrs` types. It is wired
+// into `NativeOcr` by `apply_chargrid`, behind `SYNTHPASS_OCR_CHARGRID`. Its
+// docs live in the module's own `//!` comment -- an outer `///` here would be
+// merged with them and resolve their intra-doc links in this scope, where the
+// module's items are not visible.
 pub mod chargrid;
 pub mod download;
 #[cfg(feature = "embedded-models")]
@@ -89,7 +92,10 @@ pub mod embedded;
 pub mod pass_trace;
 pub mod verify;
 
-pub use pass_trace::{LineReading, PassOutcome, PassRecord, PassTransform};
+pub use pass_trace::{
+    ChargridFit, ChargridLineCapture, ChargridRecord, LineBox, LineReading, PassOutcome,
+    PassRecord, PassTransform,
+};
 
 // Preprocessing and layout geometry now live in `synthpass-imageprep`, a
 // pure-Rust crate that also compiles to wasm32 so the browser demo can run
@@ -120,7 +126,7 @@ const NATIVE_UPSCALE_FILTER: UpscaleFilter = UpscaleFilter::Lanczos3;
 pub use synthpass_imageprep::MRZ_CHARSET;
 
 use image::metadata::Orientation;
-use image::{ImageDecoder, RgbImage};
+use image::{GrayImage, ImageDecoder, RgbImage};
 use ocrs::{DecodeMethod, ImageSource, OcrEngine as OcrsEngine, OcrEngineParams, TextItem};
 use rten::Model;
 use std::path::{Path, PathBuf};
@@ -379,7 +385,9 @@ impl NativeOcr {
     /// **For the benchmarks only.** The returned [`OcrPage`] is exactly what
     /// `recognize_detailed` returns for the same image and environment; the
     /// records are observation only and never feed back into it. On error no
-    /// records are returned.
+    /// records are returned. With `SYNTHPASS_OCR_CHARGRID` `on` or `control`
+    /// the `Accepted` record also carries that chargrid attempt's
+    /// [`ChargridRecord`].
     pub fn recognize_detailed_traced(
         &self,
         image_path: &Path,
@@ -408,6 +416,9 @@ impl NativeOcr {
         // both return points below (the general-pass hit and the end of the
         // retry loop) apply the same run's arm.
         let chargrid_mode = chargrid_mode();
+        // Where a traced run collects the chargrid attempt's line capture. A
+        // product call (`trace` `None`) never reads or fills it.
+        let mut chargrid_line: Option<ChargridLineCapture> = None;
         let image = decode_image(image_path)?.into_rgb8();
 
         // A3: auto-rotate before the main pass (detection-only, cheap; see
@@ -542,6 +553,7 @@ impl NativeOcr {
                     image_height: image.height(),
                     outcome,
                     readings,
+                    chargrid: None,
                 });
             }
         };
@@ -558,7 +570,16 @@ impl NativeOcr {
             let chargrid_arm = if chargrid_mode == ChargridMode::Off {
                 None
             } else {
-                apply_chargrid(chargrid_mode, &self.mrz_engine, &image, &mut text, verbose)
+                let verdict = apply_chargrid(
+                    chargrid_mode,
+                    &self.mrz_engine,
+                    &image,
+                    &mut text,
+                    verbose,
+                    trace.is_some().then_some(&mut chargrid_line),
+                );
+                attach_chargrid_record(&mut trace, chargrid_mode, &verdict, chargrid_line.take());
+                verdict
             };
             let text_sanity = page_sanity(&text);
             return Ok(OcrPage {
@@ -746,6 +767,7 @@ impl NativeOcr {
                         image_height: variant.height(),
                         outcome,
                         readings,
+                        chargrid: None,
                     });
                 }
             };
@@ -862,7 +884,16 @@ impl NativeOcr {
         let chargrid_arm = match (chargrid_mode, &winning_variant_image) {
             (ChargridMode::Off, _) => None,
             (_, Some(image)) => {
-                apply_chargrid(chargrid_mode, &self.mrz_engine, image, &mut text, verbose)
+                let verdict = apply_chargrid(
+                    chargrid_mode,
+                    &self.mrz_engine,
+                    image,
+                    &mut text,
+                    verbose,
+                    trace.is_some().then_some(&mut chargrid_line),
+                );
+                attach_chargrid_record(&mut trace, chargrid_mode, &verdict, chargrid_line.take());
+                verdict
             }
             (_, None) if has_valid_mrz(&text) => Some("skipped:no_source_image".to_string()),
             (_, None) => Some("skipped:no_valid_mrz".to_string()),
@@ -1764,6 +1795,18 @@ enum ChargridMode {
     Control,
 }
 
+impl ChargridMode {
+    /// The env var's own vocabulary, which [`OcrArms::chargrid`] and a
+    /// [`ChargridRecord`] carry.
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::On => "on",
+            Self::Control => "control",
+        }
+    }
+}
+
 /// `SYNTHPASS_OCR_CHARGRID` — `off`, `on` or `control`, defaulting to
 /// [`ChargridMode::Off`]: this is an unmeasured arm as of PR-1.4 (which only
 /// wires the module in — nothing has promoted it), so the default must be
@@ -1851,11 +1894,7 @@ impl OcrArms {
                 preprocess::SkewMode::Default => "default",
                 preprocess::SkewMode::Legacy => "legacy",
             },
-            chargrid: match chargrid_mode() {
-                ChargridMode::Off => "off",
-                ChargridMode::On => "on",
-                ChargridMode::Control => "control",
-            },
+            chargrid: chargrid_mode().as_str(),
         }
     }
 
@@ -2074,15 +2113,130 @@ struct ChargridAttempt {
     repair: Result<chargrid::Repair, chargrid::Rejected>,
 }
 
+/// The result of fitting a matched line: the repair the gates returned, or the
+/// snake_case skip reason when no grid could be fitted at all.
+type ChargridFitResult = Result<Result<chargrid::Repair, chargrid::Rejected>, String>;
+
+/// What [`fit_matched_line`] cannot see from the matched line alone, and a
+/// traced run records beside it. `Some` is the request to capture.
+#[derive(Debug, Clone, Copy)]
+struct CaptureContext {
+    /// The MRZ line being repaired (see [`chargrid::name_line_index`]).
+    name_line_index: usize,
+    /// The matched line's position in the recognition output it came from.
+    recognized_line_index: usize,
+    /// Whether the working image is the width-capped downscale.
+    downscaled: bool,
+}
+
+/// Lowercase hex SHA-256 of the band `cell_ink` and `column_ink` read: the
+/// image width as `u32` little-endian, the row count
+/// (`bottom.min(h) - top.min(h)`, 0 when negative) as `u32` little-endian,
+/// then those rows of `gray`, every column, row-major, one byte per pixel.
+/// [`ChargridLineCapture::band_sha256`] documents it for a reader.
+fn band_sha256(gray: &GrayImage, top: u32, bottom: u32) -> String {
+    let (w, h) = gray.dimensions();
+    let top = top.min(h);
+    let bottom = bottom.min(h);
+    let rows = bottom.saturating_sub(top);
+    let start = top as usize * w as usize;
+    let end = start + rows as usize * w as usize;
+    let mut bytes = Vec::with_capacity(8 + (end - start));
+    bytes.extend_from_slice(&w.to_le_bytes());
+    bytes.extend_from_slice(&rows.to_le_bytes());
+    bytes.extend_from_slice(&gray.as_raw()[start..end]);
+    synthpass_core::audit::sha256_hex(&bytes)
+}
+
+/// The half of [`fit_chargrid_name_line`] after a line has matched: fit the
+/// grid to `matched`'s glyphs, measure the ink on `gray` (the working image in
+/// grayscale) and run [`chargrid::repair_name_line`]. Pure and engine-free, so
+/// the model-free tests call it directly.
+///
+/// With `capture` `None` (every product call) nothing is recorded and nothing
+/// is allocated for a record. With `Some`, the second element is the
+/// [`ChargridLineCapture`] of what ran: the same inputs and outputs the repair
+/// saw, read again and never fed back, so the first element is identical either
+/// way. The capture's `fit` is `None` exactly when the result is the
+/// `grid_fit_failed` skip.
+fn fit_matched_line(
+    matched: &CharLine,
+    gray: &GrayImage,
+    raw_name_line: &str,
+    width: usize,
+    capture: Option<CaptureContext>,
+) -> (ChargridFitResult, Option<ChargridLineCapture>) {
+    let glyphs = &matched.glyphs;
+    let line_capture = |context: CaptureContext, fit: Option<ChargridFit>| {
+        let (image_width, image_height) = gray.dimensions();
+        ChargridLineCapture {
+            name_line_index: context.name_line_index,
+            width,
+            raw_name_line: raw_name_line.to_string(),
+            recognized_line_index: context.recognized_line_index,
+            recognized_text: matched.text.clone(),
+            downscaled: context.downscaled,
+            image_width,
+            image_height,
+            line_box: LineBox {
+                left: matched.left,
+                top: matched.top,
+                right: matched.right,
+                bottom: matched.bottom,
+            },
+            band_sha256: band_sha256(gray, matched.top, matched.bottom),
+            glyphs: glyphs.clone(),
+            column_ink: chargrid::column_ink(gray, matched.top, matched.bottom),
+            ink_floor: chargrid::DEFAULT_INK_FLOOR,
+            fit,
+        }
+    };
+    let Some(grid) = chargrid::fit_grid(glyphs, matched.left as f32, matched.right as f32, width)
+    else {
+        return (
+            Err("grid_fit_failed".to_string()),
+            capture.map(|context| line_capture(context, None)),
+        );
+    };
+    let ink = chargrid::cell_ink(gray, matched.top, matched.bottom, &grid);
+    let repair = chargrid::repair_name_line(
+        raw_name_line,
+        glyphs,
+        width,
+        &ink,
+        chargrid::DEFAULT_INK_FLOOR,
+        &grid,
+    );
+    let line = capture.map(|context| {
+        line_capture(
+            context,
+            Some(ChargridFit {
+                grid,
+                cells: chargrid::align(glyphs, &grid),
+                cell_ink: ink.clone(),
+                repair: repair.clone(),
+            }),
+        )
+    });
+    (Ok(repair), line)
+}
+
 /// Recognize `source_image`'s characters, find the line matching
 /// `raw_name_line` (via [`match_chargrid_line`]), and fit it to `format`'s
 /// grid. `Err(reason)` is a short, snake_case skip reason —
 /// `OcrPage::chargrid`'s `"skipped:<reason>"` arm.
+///
+/// `capture`, when `Some`, is filled with the attempt's [`ChargridLineCapture`]
+/// as soon as a line has matched, including when the fit then fails; it is
+/// left untouched when nothing matched. `None` on every product call. It only
+/// reads what the attempt computes, so the result is identical either way.
 fn fit_chargrid_name_line(
     mrz_engine: &OcrsEngine,
     source_image: &RgbImage,
     format: mrz::Format,
     raw_name_line: &str,
+    name_line_index: usize,
+    capture: Option<&mut Option<ChargridLineCapture>>,
 ) -> Result<ChargridAttempt, String> {
     let Some((_, width)) = chargrid::format_geometry(format) else {
         return Err("unsupported_format".to_string());
@@ -2099,6 +2253,7 @@ fn fit_chargrid_name_line(
         Ok(line) => (line.right - line.left) as f32 > CHARGRID_LINE_WIDTH_CAP,
         Err(_) => false,
     };
+    let downscaled = needs_downscale;
     let (recognized, working_image) = if needs_downscale {
         // Safe: `needs_downscale` is only `true` when the match above was
         // `Ok`, so this second lookup cannot fail differently.
@@ -2122,35 +2277,60 @@ fn fit_chargrid_name_line(
     };
 
     let matched = match_chargrid_line(&recognized, &target).map_err(|e| e.to_string())?;
-    let glyphs = matched.glyphs.clone();
-    let grid = chargrid::fit_grid(&glyphs, matched.left as f32, matched.right as f32, width)
-        .ok_or_else(|| "grid_fit_failed".to_string())?;
     let gray = image::imageops::grayscale(&working_image);
-    let ink = chargrid::cell_ink(&gray, matched.top, matched.bottom, &grid);
-    let repair = chargrid::repair_name_line(
-        raw_name_line,
-        &glyphs,
-        width,
-        &ink,
-        chargrid::DEFAULT_INK_FLOOR,
-        &grid,
-    );
+    let context = capture.is_some().then(|| CaptureContext {
+        name_line_index,
+        // A position lookup on the borrowed line; which line matched is
+        // decided above and not touched here.
+        recognized_line_index: recognized
+            .iter()
+            .position(|line| std::ptr::eq(line, matched))
+            .unwrap_or(0),
+        downscaled,
+    });
+    let (repair, line) = fit_matched_line(matched, &gray, raw_name_line, width, context);
+    if let (Some(out), Some(line)) = (capture, line) {
+        *out = Some(line);
+    }
     Ok(ChargridAttempt {
         raw_recognized_text: matched.text.clone(),
-        repair,
+        repair: repair?,
     })
 }
 
 /// Short, snake_case label for a [`chargrid::Rejected`] — the
 /// `OcrPage::chargrid`'s `"rejected:<reason>"` arm's `<reason>`.
 fn chargrid_rejected_label(rejected: chargrid::Rejected) -> &'static str {
-    match rejected {
-        chargrid::Rejected::NoDeficit => "no_deficit",
-        chargrid::Rejected::TooManyGlyphs => "too_many_glyphs",
-        chargrid::Rejected::GridFit => "grid_fit",
-        chargrid::Rejected::InkMismatch { .. } => "ink_mismatch",
-        chargrid::Rejected::PrefixChanged => "prefix_changed",
-    }
+    rejected.as_str()
+}
+
+/// Attach one chargrid attempt to the record of the pass it read: the last
+/// record, which is the `Accepted` one at both call sites. A no-op on a product
+/// call (`trace` `None`). Observation only: it reads the attempt's verdict and
+/// touches nothing the page is built from.
+fn attach_chargrid_record(
+    trace: &mut Option<&mut Vec<PassRecord>>,
+    mode: ChargridMode,
+    verdict: &Option<String>,
+    line: Option<ChargridLineCapture>,
+) {
+    let Some(records) = trace.as_deref_mut() else {
+        return;
+    };
+    debug_assert!(
+        records
+            .last()
+            .is_some_and(|record| record.outcome == PassOutcome::Accepted),
+        "the chargrid attempt reads the accepted pass, which is the last record"
+    );
+    let Some(accepted) = records.last_mut() else {
+        return;
+    };
+    accepted.chargrid = verdict.as_ref().map(|verdict| ChargridRecord {
+        mode: mode.as_str(),
+        verdict: verdict.clone(),
+        line,
+    });
 }
 
 /// Do `a` and `b`'s non-name fields agree? The re-verification gate
@@ -2175,7 +2355,8 @@ fn chargrid_fields_match(a: &mrz::MrzData, b: &mrz::MrzData) -> bool {
 /// `has_valid_mrz` holds).
 ///
 /// Returns the value [`OcrPage::chargrid`] should carry — see that field's
-/// doc comment for what each string means. Never called with
+/// doc comment for what each string means. `capture` is passed through to
+/// [`fit_chargrid_name_line`]; only a traced run supplies it. Never called with
 /// [`ChargridMode::Off`] (both call sites branch on that before calling).
 fn apply_chargrid(
     mode: ChargridMode,
@@ -2183,6 +2364,7 @@ fn apply_chargrid(
     source_image: &RgbImage,
     text: &mut String,
     verbose: bool,
+    capture: Option<&mut Option<ChargridLineCapture>>,
 ) -> Option<String> {
     let parsed = match mrz::find_and_parse(text) {
         Ok(data) if data.valid() => data,
@@ -2204,11 +2386,17 @@ fn apply_chargrid(
         return Some("skipped:name_line_width_mismatch".to_string());
     }
 
-    let attempt =
-        match fit_chargrid_name_line(mrz_engine, source_image, parsed.format, raw_name_line) {
-            Ok(a) => a,
-            Err(reason) => return Some(format!("skipped:{reason}")),
-        };
+    let attempt = match fit_chargrid_name_line(
+        mrz_engine,
+        source_image,
+        parsed.format,
+        raw_name_line,
+        name_idx,
+        capture,
+    ) {
+        Ok(a) => a,
+        Err(reason) => return Some(format!("skipped:{reason}")),
+    };
 
     match mode {
         ChargridMode::Off => None,
@@ -2788,6 +2976,277 @@ mod tests {
             chargrid_rejected_label(chargrid::Rejected::PrefixChanged),
             "prefix_changed"
         );
+    }
+
+    // ---- chargrid capture: hash, and the fit with and without a capture -----
+
+    /// A 3x4 image whose pixels are 0..12 in row-major order.
+    fn ramp() -> GrayImage {
+        GrayImage::from_fn(3, 4, |x, y| image::Luma([(y * 3 + x) as u8]))
+    }
+
+    #[test]
+    fn band_sha256_is_pinned_for_a_tiny_image() {
+        // Width 3, two rows, then pixels 3..9: [3,0,0,0, 2,0,0,0, 3,4,5,6,7,8].
+        assert_eq!(
+            band_sha256(&ramp(), 1, 3),
+            "4a87ceac1b524cb5ee0b14ecda449c3d935d9dd5e67ae66882e15d736e32e615"
+        );
+    }
+
+    #[test]
+    fn band_sha256_clamps_rows_to_the_image() {
+        // Rows 2..100 clamp to 2..4: two rows, pixels 6..12.
+        assert_eq!(
+            band_sha256(&ramp(), 2, 100),
+            "34112041381c9c7634f2018a698512c9b032d0b5eca507394513b59263bfff58"
+        );
+        assert_eq!(band_sha256(&ramp(), 2, 100), band_sha256(&ramp(), 2, 4));
+        // No rows: just the width and a zero row count, whichever way the range
+        // is empty.
+        let empty = "35be322d094f9d154a8aba4733b8497f180353bd7ae7b0a15f90b586b549f28b";
+        for (top, bottom) in [(4, 9), (50, 90), (2, 2), (3, 1), (0, 0)] {
+            assert_eq!(band_sha256(&ramp(), top, bottom), empty, "{top}..{bottom}");
+        }
+    }
+
+    #[test]
+    fn band_sha256_moves_with_a_pixel_inside_the_band_and_not_outside_it() {
+        let base = band_sha256(&ramp(), 1, 3);
+        let mut inside = ramp();
+        inside.put_pixel(2, 2, image::Luma([200]));
+        assert_ne!(band_sha256(&inside, 1, 3), base);
+        for (x, y) in [(0, 0), (2, 0), (1, 3), (2, 3)] {
+            let mut outside = ramp();
+            outside.put_pixel(x, y, image::Luma([200]));
+            assert_eq!(band_sha256(&outside, 1, 3), base, "pixel ({x}, {y})");
+        }
+        // The width is part of the digest, so the same bytes read at another
+        // width are a different band.
+        let same_bytes = GrayImage::from_raw(6, 2, (0u8..12).collect()).unwrap();
+        assert_ne!(band_sha256(&same_bytes, 0, 2), band_sha256(&ramp(), 0, 4));
+    }
+
+    const NAME_LINE: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const CELL_PITCH: u32 = 24;
+    const BAND_HEIGHT: u32 = 40;
+
+    /// `cells` cells of `CELL_PITCH` px, ink in every cell but the `blank` ones.
+    /// Each cell keeps a blank left column and two blank rows top and bottom,
+    /// like a printed glyph, so the band has structure for the hash and profile.
+    fn drawn_band(cells: usize, blank: &[usize]) -> GrayImage {
+        GrayImage::from_fn(cells as u32 * CELL_PITCH, BAND_HEIGHT, |x, y| {
+            let cell = (x / CELL_PITCH) as usize;
+            let margin = x % CELL_PITCH == 0 || !(2..BAND_HEIGHT - 2).contains(&y);
+            image::Luma([if blank.contains(&cell) || margin {
+                250
+            } else {
+                20
+            }])
+        })
+    }
+
+    /// The matched line for `chars` printed at the cells `at` (one cell per
+    /// character), the way `recognize_chars` would report it.
+    fn matched_line(chars: &[char], at: &[usize], cells: usize) -> CharLine {
+        CharLine {
+            text: chars.iter().collect(),
+            top: 0,
+            bottom: BAND_HEIGHT,
+            left: 0,
+            right: cells as u32 * CELL_PITCH,
+            glyphs: chars
+                .iter()
+                .zip(at)
+                .map(|(&ch, &cell)| chargrid::Glyph {
+                    ch,
+                    left: (cell as u32 * CELL_PITCH) as f32,
+                    right: (cell as u32 * CELL_PITCH) as f32 + CELL_PITCH as f32 * 0.8,
+                })
+                .collect(),
+        }
+    }
+
+    /// `NAME_LINE` with the characters at `dropped` unread.
+    fn name_line_minus(dropped: &[usize]) -> CharLine {
+        let (chars, at): (Vec<char>, Vec<usize>) = NAME_LINE
+            .chars()
+            .enumerate()
+            .filter(|(i, _)| !dropped.contains(i))
+            .map(|(i, ch)| (ch, i))
+            .unzip();
+        matched_line(&chars, &at, 44)
+    }
+
+    fn context() -> CaptureContext {
+        CaptureContext {
+            name_line_index: 0,
+            recognized_line_index: 3,
+            downscaled: false,
+        }
+    }
+
+    /// Everything the capture claims about the attempt, checked against the
+    /// pure functions that ran, and then the record replayed from itself.
+    fn assert_capture_is_faithful(
+        matched: &CharLine,
+        gray: &GrayImage,
+        result: &ChargridFitResult,
+        line: &ChargridLineCapture,
+    ) {
+        assert_eq!(line.name_line_index, 0);
+        assert_eq!(line.width, 44);
+        assert_eq!(line.raw_name_line, NAME_LINE);
+        assert_eq!(line.recognized_line_index, 3);
+        assert_eq!(line.recognized_text, matched.text);
+        assert!(!line.downscaled);
+        assert_eq!((line.image_width, line.image_height), gray.dimensions());
+        assert_eq!(
+            line.line_box,
+            LineBox {
+                left: matched.left,
+                top: matched.top,
+                right: matched.right,
+                bottom: matched.bottom
+            }
+        );
+        assert_eq!(
+            line.band_sha256,
+            band_sha256(gray, matched.top, matched.bottom)
+        );
+        assert_eq!(line.glyphs, matched.glyphs);
+        assert_eq!(line.column_ink.len(), line.image_width as usize);
+        assert_eq!(line.ink_floor, chargrid::DEFAULT_INK_FLOOR);
+
+        // What ran.
+        let expected_grid = chargrid::fit_grid(
+            &matched.glyphs,
+            matched.left as f32,
+            matched.right as f32,
+            44,
+        );
+        let Some(fit) = &line.fit else {
+            assert_eq!(expected_grid, None, "no fit recorded, so none was made");
+            assert_eq!(result, &Err("grid_fit_failed".to_string()));
+            return;
+        };
+        assert_eq!(Some(fit.grid), expected_grid, "the grid, bit for bit");
+        assert_eq!(fit.cells, chargrid::align(&matched.glyphs, &fit.grid));
+        if let (Some(cells), Some(filled)) =
+            (&fit.cells, chargrid::regrid(&matched.glyphs, &fit.grid))
+        {
+            let occupied: Vec<usize> = (0..filled.len()).filter(|&k| filled[k].is_some()).collect();
+            assert_eq!(cells, &occupied, "regrid fills exactly the aligned cells");
+        }
+        assert_eq!(
+            fit.cell_ink,
+            chargrid::cell_ink(gray, matched.top, matched.bottom, &fit.grid)
+        );
+        assert_eq!(result, &Ok(fit.repair.clone()), "the repair the gate made");
+
+        // Replay from the capture alone.
+        let replayed_grid = chargrid::fit_grid(
+            &line.glyphs,
+            line.line_box.left as f32,
+            line.line_box.right as f32,
+            line.width,
+        )
+        .expect("the recorded inputs fit again");
+        assert_eq!(replayed_grid, fit.grid);
+        let replayed_ink = chargrid::cell_ink_from_columns(
+            &line.column_ink,
+            line.image_height,
+            line.line_box.top,
+            line.line_box.bottom,
+            &replayed_grid,
+        );
+        assert_eq!(replayed_ink.len(), fit.cell_ink.len());
+        for (k, (a, b)) in replayed_ink.iter().zip(&fit.cell_ink).enumerate() {
+            assert_eq!(a.to_bits(), b.to_bits(), "cell {k}");
+        }
+        assert_eq!(
+            chargrid::repair_name_line(
+                &line.raw_name_line,
+                &line.glyphs,
+                line.width,
+                &replayed_ink,
+                line.ink_floor,
+                &replayed_grid,
+            ),
+            fit.repair
+        );
+    }
+
+    /// Run `fit_matched_line` with and without a capture: the result must not
+    /// depend on it, and no capture comes back without the request.
+    fn fit_both_ways(
+        matched: &CharLine,
+        gray: &GrayImage,
+    ) -> (ChargridFitResult, ChargridLineCapture) {
+        let (plain, none) = fit_matched_line(matched, gray, NAME_LINE, 44, None);
+        assert!(none.is_none(), "no request, no capture");
+        let (traced, line) = fit_matched_line(matched, gray, NAME_LINE, 44, Some(context()));
+        assert_eq!(plain, traced, "capturing must not change the outcome");
+        let line = line.expect("a requested capture is returned");
+        assert_capture_is_faithful(matched, gray, &traced, &line);
+        (traced, line)
+    }
+
+    #[test]
+    fn fit_matched_line_captures_a_clean_two_filler_repair() {
+        let matched = name_line_minus(&[13, 14]);
+        let (result, line) = fit_both_ways(&matched, &drawn_band(44, &[]));
+        let repair = result
+            .expect("a grid fitted")
+            .expect("the repair is accepted");
+        assert_eq!(repair.line, NAME_LINE);
+        assert_eq!(repair.fillers_placed, 2);
+        let fit = line.fit.expect("fitted");
+        let cells = fit.cells.expect("aligned");
+        assert_eq!(cells.len(), 42);
+        assert!(!cells.contains(&13) && !cells.contains(&14));
+        assert_eq!(fit.cell_ink.len(), 44);
+    }
+
+    #[test]
+    fn fit_matched_line_captures_an_ink_mismatch() {
+        // Cell 14 is genuinely blank, so only one of the two empty cells is inked.
+        let matched = name_line_minus(&[13, 14]);
+        let (result, line) = fit_both_ways(&matched, &drawn_band(44, &[14]));
+        assert_eq!(
+            result,
+            Ok(Err(chargrid::Rejected::InkMismatch {
+                expected: 2,
+                found: 1
+            }))
+        );
+        let fit = line.fit.expect("fitted");
+        assert!(fit.cell_ink[13] >= chargrid::DEFAULT_INK_FLOOR);
+        assert_eq!(fit.cell_ink[14], 0.0);
+    }
+
+    #[test]
+    fn fit_matched_line_captures_a_dense_line() {
+        let matched = name_line_minus(&[]);
+        let (result, line) = fit_both_ways(&matched, &drawn_band(44, &[]));
+        assert_eq!(result, Ok(Err(chargrid::Rejected::NoDeficit)));
+        let fit = line.fit.expect("a dense line still fits");
+        assert_eq!(fit.cells, Some((0..44).collect::<Vec<_>>()));
+        assert_eq!(fit.repair, Err(chargrid::Rejected::NoDeficit));
+    }
+
+    #[test]
+    fn fit_matched_line_captures_the_line_when_no_grid_fits() {
+        // 45 glyphs cannot sit on 44 cells: the attempt skips, but the line it
+        // stopped on is still recorded, with no fit.
+        let chars: Vec<char> = NAME_LINE.chars().chain(std::iter::once('X')).collect();
+        let at: Vec<usize> = (0..45).collect();
+        let matched = matched_line(&chars, &at, 44);
+        let (result, line) = fit_both_ways(&matched, &drawn_band(44, &[]));
+        assert_eq!(result, Err("grid_fit_failed".to_string()));
+        assert!(line.fit.is_none());
+        assert_eq!(line.glyphs.len(), 45);
+        assert_eq!(line.column_ink.len(), line.image_width as usize);
     }
 
     #[test]
