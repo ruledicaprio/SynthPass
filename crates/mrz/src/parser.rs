@@ -748,13 +748,14 @@ pub fn parse_mrv_b_with(
 /// check digit (the document number's) arbitrates which candidate — if
 /// either — is real. TD3/MRV-A/MRV-B have no check digit on line 1 at all,
 /// so `consider()` in `find_and_parse_with` accepts the *first*
-/// checksum-passing line-1/line-2 combination it tries, regardless of what
-/// line 1 says — meaning an unshifted candidate offered only *after* the
-/// unrepaired one is dead code in practice: the unrepaired reading already
-/// satisfies line 2's checksums just as well (line 1 never gates them), so
-/// it always wins first and the unshifted candidate never gets a chance to
-/// matter. The call sites (TD3/MRV-A/MRV-B in `find_and_parse_with`)
-/// therefore try `repair_*_line1_unshifted` *before* `repair_*_line1`.
+/// checksum-passing line-1/line-2 combination it tries that no `rank` check
+/// flags, regardless of what line 1 says — meaning an unshifted candidate
+/// offered only *after* the unrepaired one is dead code in practice: the
+/// unrepaired reading already satisfies line 2's checksums just as well (line
+/// 1 never gates them), so it always wins first and the unshifted candidate
+/// never gets a chance to matter. The call sites (TD3/MRV-A/MRV-B in
+/// `find_and_parse_with`) therefore try `repair_*_line1_unshifted` *before*
+/// `repair_*_line1`.
 ///
 /// This is also why the fix is a **second candidate at all**, rather than
 /// applied unconditionally inside `repair_td3_line1`/`repair_mrv_line1`
@@ -821,7 +822,7 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
 /// whose line 1 had lost its position-1 filler. `D` is the only sub-3-character
 /// code in the table, so trimming cannot make any other slice newly resolve;
 /// `<<<` trims to the empty string, which still does not resolve.
-fn country_resolves(slice: &str) -> bool {
+pub(crate) fn country_resolves(slice: &str) -> bool {
     country_name(slice.trim_end_matches('<')).is_some()
 }
 
@@ -1570,8 +1571,24 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// Tries TD3, MRV-B, MRV-A, TD1, then TD2. Tolerates HTML-escaped fillers (`&lt;`, as produced by
 /// docling's Markdown) and MRZ lines merged onto a single physical line.
 ///
-/// A reading whose check digits all validate is returned immediately. When no
-/// candidate fully validates, a damaged-capture pass may reconstruct one.
+/// A reading whose check digits all validate is returned immediately, unless a
+/// line check flags it as probably holding a wrong physical line: check digits
+/// cannot tell, because a format's line 1 (and, on TD1, line 3) enters few or
+/// none of them, so a second reading of line 2, a visual-zone header or a name
+/// line can stand in for it and the zone still validates. A flagged zone is
+/// kept aside while the scan (and the damaged-capture pass below) looks for an
+/// unflagged valid one, which then wins; when there is none, the flagged zone
+/// is returned. The checks only re-rank between valid zones — they never
+/// refuse one. A zone is flagged when
+///
+/// - line 1's issuing state (cells 2..5) is not in [`country_name`]'s table;
+/// - two of its lines are near-identical (similarity of at least 0.6 after
+///   dropping fillers and folding lookalike characters, where the most similar
+///   pair in a correctly read zone scores at most 0.30); or
+/// - a two-line format's line 1 holds a digit from cell 5 on, where the name
+///   field is (TD1 is exempt).
+///
+/// When no candidate fully validates, a damaged-capture pass may reconstruct one.
 /// Otherwise the fallback ranks by verified/applicable check-digit fraction,
 /// then applicable count, and returns the best reading with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
@@ -1637,8 +1654,18 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // most conservative variants first, so the first reading at a given score
     // is the one that assumed least about the OCR noise.
     let mut fallback: Option<MrzData> = None;
+    // The first checksum-valid zone that a `crate::rank` check flagged as
+    // probably holding a wrong physical line. It is not returned by
+    // `consider`: the scan keeps looking for an unflagged valid zone, and this
+    // one is returned only when none turns up (see its use after the damaged
+    // pass). First wins, like `fallback`, for the same reason.
+    let mut flagged_first: Option<MrzData> = None;
     let mut consider = |data: MrzData| -> Option<MrzData> {
         if data.valid() {
+            if crate::rank::flagged(&data) {
+                flagged_first.get_or_insert(data);
+                return None;
+            }
             return Some(data);
         }
         match &fallback {
@@ -2011,15 +2038,28 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // candidate hit `LeadingFiller` never sets `fallback` (its `Err` skips
     // `consider` entirely), so without it a refused reading would fall
     // through to `IncompleteSequence` instead of getting a chance at repair.
-    if fallback.is_some() || refused.is_some() {
+    // A flagged valid zone opens this gate too: it may have an unflagged
+    // alternative that only the damaged pass can build.
+    if fallback.is_some() || refused.is_some() || flagged_first.is_some() {
         if let Some(mut data) = damaged_pass(&lines, opts, &intact_td1_starts) {
             // `damaged_pass` (and `class_sweep_pass`, which it tries first)
             // is the only path a reading can take here — see
             // `MrzData::damaged_recovery`'s doc comment for what this flags
             // and why a caller re-reading the source image might care.
             data.damaged_recovery = true;
-            return Ok(data);
+            if !crate::rank::flagged(&data) {
+                return Ok(data);
+            }
+            flagged_first.get_or_insert(data);
         }
+    }
+
+    // No unflagged valid zone exists, so the flagged one is the answer: the
+    // ordinary scan's if it found one, else the damaged pass's. Ranking only
+    // ever prefers between valid zones, so this comes before the fallback and
+    // refusal precedence below and never lets a flagged zone be refused.
+    if let Some(data) = flagged_first {
+        return Ok(data);
     }
 
     // A best-scoring reading that never validated *and* fails every structural
