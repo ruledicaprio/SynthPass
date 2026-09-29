@@ -249,7 +249,7 @@ A benchmark change follows this lifecycle:
 
 **Change and regress.** Keep corpus maintenance separate from accuracy optimization. Change one measurable hypothesis at a time, then rerun the same frozen population with the same provider configuration. Provider comparisons are meaningful only when both providers consume the same assets, labels, exclusions, and invocation scope.
 
-**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens.
+**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership.)*
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
 
@@ -515,15 +515,45 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 same directory, holds one JSON row per document (`asset_id`, `name`, `outcome`, the full
 `miss_reason`, `mrz_format`, `mrz_found`/`mrz_checksums_valid`, `names_exact`/`name_error`,
 `ocr_ms`, and the native-retry fields) — the per-document evidence the aggregate counts above
-are built from. It exists because the `real-specimen-gate-report` CI artifact is uploaded with
-no `retention-days`, so a dated finding derived from `--verbose` output or the JSONL report
-becomes unverifiable once GitHub's default retention window passes; the ledger is committed, so
-it does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
+are built from. It exists because the `real-specimen-gate-report` CI artifact is kept for 90
+days (`retention-days: 90`, since #416), so a dated finding derived from `--verbose` output or
+the JSONL report becomes unverifiable once that window passes; the ledger is committed, so it
+does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
 `--assert-baseline` fails the gate if the committed ledger no longer hashes to that value —
 an edited-by-hand or substituted ledger is caught the same way a hand-edited baseline count
 would be. When a committed ledger is present, an assert run also prints an informational
 (never gate-failing) per-document diff against the committed one, so a reviewer can see exactly
-which documents' outcomes moved without downloading and diffing two CI artifacts by hand.
+which documents moved without downloading and diffing two CI artifacts by hand.
+
+**The per-document diff (#557).** It is the tool behind the **Inspect** clause of the
+maintenance contract above, and it has three parts, in this order. First the outcome summary line
+and the documents whose `outcome` changed (at most 20, then `... and N more`). Then a
+**deterministic** group: `miss_reason` (the miss kind and "detail changed", never the text),
+`mrz_format`, `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
+`retry_variant_id` and `retry_stop`, as one line of per-field totals (always complete) and one
+line per document (at most 20). Then a **timing-sensitive** group: one `ocr_ms` line (documents
+that differ, median |delta|, both totals) and a block for every *budget-limited* document, one
+that hit the retry-pass time budget on either side, which carries **all** of that document's
+changes, `retry_budget_hit` and `retry_stop == "budget"` included, because which passes finished
+depends on runner speed. Documents come in `sort_key` order and fields in the ledger's schema
+order, so the output is a pure function of the two ledgers; a document on one side only is
+counted in the outcome line and not field-diffed. Nothing in the diff can fail the gate. The
+gate writes it to the job log and to `$GITHUB_STEP_SUMMARY`; the repository is public, so it
+carries asset ids, field names, enumerated values and counts only, never OCR text or
+`miss_reason` text. `tools/rebless.py` prints the same diff between the old and the new
+ledger and puts it in the commit message and the FINDINGS entry.
+
+**What an assert run uploads.** Next to the report, the workflow uploads
+`real-specimen-outcomes-text-free.jsonl` with `if: always()`, so a failed gate keeps its
+evidence for the 90-day retention. It is a *projection* of this run's ledger: every row as
+measured, except that each `miss_reason` is reduced to its kind. The reason is that the full
+`miss_reason` text can hold values read off the document: both document numbers of a
+`document_number_mismatch`, and, in a `no_mrz_found` text, the offending character or the first
+characters of line 1 of an `mrz::MrzError`; `ocr_error` texts are unaudited. CI never publishes
+real-specimen text, not even as a short-lived artifact ([ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md), Decision 5). Making the committed
+ledger itself value-free is [ADR-0024](../decisions/ADR-0024-per-document-benchmark-archive.md)
+build step 0a, a separate change; until then the write-baseline artifact, the one a maintainer
+commits, still carries the full ledger.
 
 `baseline.samples_data_sha` is the authoritative corpus pin. Before the gate or
 real-specimen chart tracks materialize images, CI resolves that exact commit,
@@ -580,7 +610,13 @@ get the mechanical doc rewrite described above and are safe to commit, push,
 re-assert and mark ready automatically; a **scored delta** (`tier1_hits` or a
 scored miss bucket moved) always stops after installing the baseline and
 printing the diff table, because that class needs `synthpass-analyst`'s prose,
-not a template. `--dry-run` previews without dispatching anything; `--run-id`
+not a template. The classification compares aggregates, so it also diffs the old
+ledger against the new one (the per-document diff above, printed and carried into
+the commit message and the FINDINGS entry) and **stops for a human with exit
+code 3** when a document's `outcome` changed under an `identical` baseline:
+equal counts can hide two documents swapping bucket, and that is never committed
+mechanically. Changes in every other field, and an outcome change under a
+`non-scored delta`, are print-only. `--dry-run` previews without dispatching anything; `--run-id`
 reuses an already-completed `write-baseline` run instead of dispatching a new
 one. See the tool's own docstring for the two independent safety gates.
 

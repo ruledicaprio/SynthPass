@@ -567,14 +567,18 @@ pub struct Report {
 /// per-document evidence behind one CI run's `RealSpecimenSnapshot`, kept
 /// alongside the aggregate baseline so a finding derived from it stays
 /// re-derivable after the `real-specimen-gate-report` CI artifact expires
-/// (the workflow uploads it with no `retention-days`, so GitHub's default
-/// window is all a dated claim gets today).
+/// (the workflow keeps that artifact for 90 days, `retention-days: 90` since
+/// #416, and the committed ledger does not expire).
 ///
 /// Field order is the JSON key order — `#[derive(Serialize)]` on a struct
 /// serializes fields in declaration order, so this order **is** the schema;
 /// do not reorder the fields without treating that as a format change.
 /// `miss_reason` is the full [`MissReason`](crate::MissReason) [`Display`](std::fmt::Display)
-/// string (may carry a parse/provider error message); `outcome` is the
+/// string (may carry a parse/provider error message, and for a
+/// `document_number_mismatch` **both document numbers**: real-specimen text
+/// never leaves the machine or the committed ledger, so `provider-bench`'s
+/// assert run uploads a text-free projection with each `miss_reason` reduced to
+/// its kind, see `text_free_projection` in `provider-bench.rs`); `outcome` is the
 /// stable machine-readable class ([`miss_kind`] or `"hit"`) — the same
 /// hit-vs-noise split [`DocumentDetailReport::miss_reason`] draws for the
 /// report JSON, deliberately not applied here since this file exists
