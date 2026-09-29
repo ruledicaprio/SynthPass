@@ -484,6 +484,98 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
 mod tests {
     use super::*;
 
+    #[cfg(feature = "embedded-fonts")]
+    fn mrz_cap_height_px(font: &ab_glyph::FontArc) -> f32 {
+        use ab_glyph::Font;
+
+        let outline = font
+            .outline(font.glyph_id('H'))
+            .expect("'H' must have an outline in the vendored OCR-B font");
+        outline.bounds.height().abs() * layout::MRZ_FONT_PX / font.height_unscaled()
+    }
+
+    #[cfg(feature = "embedded-fonts")]
+    #[test]
+    fn rendered_filler_ink_centre_is_0_53_cap() {
+        use ab_glyph::{Font, ScaleFont};
+
+        let fonts = load_fonts().expect("embedded-fonts vendors the OCR-B font");
+        let font = &fonts.mrz;
+        let line_rect = Rect::new(8, 8, layout::MRZ_CELL_WIDTH, layout::MRZ_LINE_HEIGHT);
+        let blank = Rgb([255, 255, 255]);
+        let mut image = RgbImage::from_pixel(48, 64, blank);
+
+        draw_mrz_glyphs(&mut image, font, "<", line_rect, 1);
+
+        let ink_rows: Vec<u32> = (0..image.height())
+            .filter(|&y| (0..image.width()).any(|x| image.get_pixel(x, y) != &blank))
+            .collect();
+        let top = *ink_rows.first().expect("the filler must render ink") as f32;
+        // Pixel coordinates name their top-left corners, so the lower edge of
+        // the last ink row is `last + 1`.
+        let bottom = *ink_rows.last().expect("the filler must render ink") as f32 + 1.0;
+        let ink_centre_y = (top + bottom) / 2.0;
+
+        let scaled = font.as_scaled(layout::MRZ_FONT_PX);
+        let baseline_y = line_rect.y as f32 + scaled.ascent();
+        let centre_cap = (baseline_y - ink_centre_y) / mrz_cap_height_px(font);
+
+        assert!(
+            (centre_cap - 0.53).abs() <= 0.01,
+            "rendered filler centre was {centre_cap:.3} cap; expected 0.53 +/- 0.01"
+        );
+    }
+
+    #[cfg(feature = "embedded-fonts")]
+    #[test]
+    fn raising_the_filler_leaves_every_other_mrz_glyph_byte_identical() {
+        use ab_glyph::{point, Font, ScaleFont};
+
+        const NON_FILLERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+        let fonts = load_fonts().expect("embedded-fonts vendors the OCR-B font");
+        let font = &fonts.mrz;
+        let line_rect = Rect::new(
+            8,
+            8,
+            NON_FILLERS.len() as u32 * layout::MRZ_CELL_WIDTH,
+            layout::MRZ_LINE_HEIGHT,
+        );
+        let width = line_rect.x + line_rect.width + 8;
+        let blank = Rgb([255, 255, 255]);
+        let mut actual = RgbImage::from_pixel(width, 64, blank);
+        let mut before_filler_raise = actual.clone();
+
+        draw_mrz_glyphs(
+            &mut actual,
+            font,
+            NON_FILLERS,
+            line_rect,
+            NON_FILLERS.len() as u32,
+        );
+
+        // Reproduce the pre-#411 MRZ path exactly. This is deliberately
+        // independent of `draw_mrz_glyphs`: it pins every non-filler glyph's
+        // old pixels while allowing only `<` to gain a vertical offset.
+        let px_scale = layout::MRZ_FONT_PX;
+        let scaled = font.as_scaled(px_scale);
+        let y = line_rect.y as f32 + scaled.ascent();
+        for (i, c) in NON_FILLERS.chars().enumerate() {
+            let cell = layout::mrz_char_rect_for_line(
+                line_rect,
+                NON_FILLERS.len() as u32,
+                i as u32,
+            );
+            let id = scaled.glyph_id(c);
+            let advance = scaled.h_advance(id);
+            let x = cell.x as f32 + ((cell.width as f32 - advance) / 2.0).max(0.0);
+            let glyph = id.with_scale_and_position(px_scale, point(x, y));
+            draw_one_glyph(&mut before_filler_raise, font, glyph);
+        }
+
+        assert_eq!(actual.as_raw(), before_filler_raise.as_raw());
+    }
+
     #[test]
     fn watermark_renders_without_embedded_fonts() {
         let img = RgbImage::from_pixel(layout::IMAGE_WIDTH, layout::IMAGE_HEIGHT, BACKGROUND);
