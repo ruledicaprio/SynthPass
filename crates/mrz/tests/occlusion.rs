@@ -1,17 +1,20 @@
-//! `apply_occlusion` (#565, ADR-0026): a covered cell is never read back as
-//! text.
+//! `apply_occlusion` (#565, ADR-0026): a covered cell's value is never
+//! returned as a field value. `mrz_lines` is the exception by design: it
+//! keeps the read, covered cells included, and is pinned unchanged by
+//! (e) below.
 //!
 //! This file rebuilds the crate's per-cell coverage table independently
 //! (never importing `strip`'s private types), in the spirit of
 //! `strip.rs`'s own `assert_agreement`/`reference_program`: a shared bug in
 //! the production table and its test would otherwise agree with itself.
 //! Every range below is cited against `README.md`'s "What a passing parse
-//! guarantees" table and `src/strip.rs`'s field layout (`td1`/`two_line`).
+//! guarantees" section and `src/strip.rs`'s field layout (`td1`/`two_line`).
 //!
 //! (a) `every_single_cell_mask_agrees_with_the_independently_built_coverage_table`
 //! (b) `name_grammar_table`
 //! (c) `overflow_layout_refuses_any_non_name_mask`
 //! (d) `empty_mask_is_the_identity_over_every_corpus_zone`
+//! (e) `mrz_lines_is_unchanged_by_occlusion`
 
 mod support;
 
@@ -572,6 +575,39 @@ fn a_zone_edited_after_parsing_is_refused_not_panicked() {
             apply_occlusion(&edited, mask),
             Err(MrzError::NotFound),
             "{broken:?}"
+        );
+    }
+}
+
+// ---- (e): `mrz_lines` is the validated read, and occlusion leaves it alone ----
+
+/// The documented contract on `Occluded`: withheld fields are blanked in
+/// `data`, but `data.mrz_lines` keeps every cell as read, covered ones
+/// included (ADR-0026 rejects rewriting covered cells). Every `Ok` result
+/// over every single-cell mask must return `mrz_lines` byte for byte.
+#[test]
+fn mrz_lines_is_unchanged_by_occlusion() {
+    for format in ALL_FORMATS {
+        let (_, parsed) = canonical_zone(format);
+        let mut masks = Vec::new();
+        for line in 0..3 {
+            for column in 0..width(format) {
+                masks.push(CellMask::EMPTY.with(line, column));
+            }
+        }
+        let mut checked_ok = 0;
+        for mask in masks {
+            if let Ok(occluded) = apply_occlusion(&parsed, mask) {
+                assert_eq!(
+                    occluded.data.mrz_lines, parsed.mrz_lines,
+                    "{format:?}: occlusion rewrote mrz_lines"
+                );
+                checked_ok += 1;
+            }
+        }
+        assert!(
+            checked_ok > 0,
+            "{format:?}: no mask was accepted, so nothing was pinned"
         );
     }
 }

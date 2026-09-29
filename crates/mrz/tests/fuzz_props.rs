@@ -640,3 +640,155 @@ proptest! {
         let _ = parse_td1(lines.next().expect("TD1 line 1"), lines.next().expect("TD1 line 2"), lines.next().expect("TD1 line 3"));
     }
 }
+
+// ---- The 0.9.1 entry points: `select_line1`, `apply_occlusion`, `CellMask`
+// and the class sweep. They take a parsed `MrzData` whose public fields (chiefly
+// `mrz_lines`) a caller can edit or deserialize into anything, so every
+// property below feeds them zones a parser could never have produced. ----
+
+use mrz::{
+    apply_occlusion, find_and_parse_with, select_line1, CellMask, Format, MrzData, ParseOptions,
+};
+
+/// One valid, checksum-consistent zone per format, from the crate's own
+/// specimens (the same lines `tests/occlusion.rs` uses).
+fn specimen(format_index: usize) -> MrzData {
+    match format_index % 5 {
+        0 => parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C36UTO7408122F1204159ZE184226B<<<<<10",
+        ),
+        1 => parse_td2(
+            "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+            "D231458907UTO7408122F1204159<<<<<<<6",
+        ),
+        2 => parse_td1(
+            "I<UTOD231458907<<<<<<<<<<<<<<<",
+            "7408122F1204159UTO<<<<<<<<<<<6",
+            "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+        ),
+        3 => parse_mrv_a(
+            "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C<3UTO6908061F9406236ZE184226B<<<<<<<",
+        ),
+        _ => parse_mrv_b(
+            "V<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+            "L898902C<3UTO6908061F9406236ZE184226",
+        ),
+    }
+    .expect("the crate's own specimen parses")
+}
+
+/// `mrz_lines` an edit could leave behind: anything from nothing to several
+/// ragged lines of MRZ-ish characters, so the width and line-count guards
+/// are both crossed.
+fn arbitrary_mrz_lines() -> impl Strategy<Value = String> {
+    prop::collection::vec(
+        prop::collection::vec(mrz_ish_char(), 0..100)
+            .prop_map(|chars| chars.into_iter().collect::<String>()),
+        0..5,
+    )
+    .prop_map(|lines| lines.join("\n"))
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// `select_line1` over arbitrary OCR text and an accepted read whose
+    /// `mrz_lines` is arbitrary: it returns a verdict, never panics.
+    #[test]
+    fn select_line1_never_panics_on_arbitrary_text_and_edited_lines(
+        format_index in 0usize..5,
+        text in arbitrary_text(),
+        mrz_lines in arbitrary_mrz_lines(),
+        keep_lines in any::<bool>(),
+    ) {
+        let mut accepted = specimen(format_index);
+        if !keep_lines {
+            accepted.mrz_lines = mrz_lines;
+        }
+        let opts = ParseOptions::default();
+        let _ = select_line1(&text, &accepted, &opts);
+    }
+
+    /// The realistic path: scan a mutated-specimen text, then ask the selector
+    /// about that read over a second, different text.
+    #[test]
+    fn select_line1_never_panics_on_a_scanned_read(
+        scanned in prop::collection::vec(mutated_specimen(), 1..4),
+        other in prop::collection::vec(mutated_specimen(), 0..4),
+    ) {
+        let opts = ParseOptions::default();
+        let text = scanned.join("\n");
+        if let Ok(accepted) = find_and_parse_with(&text, &opts) {
+            let _ = select_line1(&text, &accepted, &opts);
+            let _ = select_line1(&other.join("\n"), &accepted, &opts);
+        }
+    }
+
+    /// `apply_occlusion` over any mask, on a parsed zone whose `mrz_lines`
+    /// is sometimes replaced by anything at all.
+    #[test]
+    fn apply_occlusion_never_panics(
+        format_index in 0usize..5,
+        cells in prop::collection::vec((0usize..6, 0usize..60), 0..40),
+        edit_lines in any::<bool>(),
+        mrz_lines in arbitrary_mrz_lines(),
+    ) {
+        let mut parsed = specimen(format_index);
+        if edit_lines {
+            parsed.mrz_lines = mrz_lines;
+        }
+        let mask = cells
+            .iter()
+            .fold(CellMask::EMPTY, |mask, &(line, column)| mask.with(line, column));
+        let _ = apply_occlusion(&parsed, mask);
+    }
+
+    /// `CellMask::with` and `contains` accept every `usize` pair, including
+    /// the extremes that would overflow a naive `line * stride + column`.
+    #[test]
+    fn cell_mask_never_panics_on_any_coordinates(
+        pairs in prop::collection::vec((any::<usize>(), any::<usize>()), 0..40),
+        probe in (any::<usize>(), any::<usize>()),
+    ) {
+        let mask = pairs
+            .iter()
+            .fold(CellMask::EMPTY, |mask, &(line, column)| mask.with(line, column));
+        let _ = mask.contains(probe.0, probe.1);
+        let _ = mask.is_empty();
+        for &(line, column) in &pairs {
+            let _ = mask.contains(line, column);
+        }
+    }
+
+    /// The class sweep (`ParseOptions::class_sweep`) runs in the damaged-capture
+    /// pass only, so it needs text that reaches it: arbitrary, multi-line and
+    /// mutated-specimen texts, each with the sweep on.
+    #[test]
+    fn find_and_parse_with_class_sweep_never_panics(
+        text in arbitrary_text(),
+        lines in prop::collection::vec(arbitrary_text(), 0..6),
+        specimens in prop::collection::vec(mutated_specimen(), 1..4),
+    ) {
+        let opts = ParseOptions::default().with_class_sweep(true);
+        let _ = find_and_parse_with(&text, &opts);
+        let _ = find_and_parse_with(&lines.join("\n"), &opts);
+        let _ = find_and_parse_with(&specimens.join("\n"), &opts);
+    }
+}
+
+/// The formats `specimen` covers are exactly the five this crate parses.
+#[test]
+fn specimens_cover_every_format() {
+    let formats: Vec<Format> = (0..5).map(|i| specimen(i).format).collect();
+    for format in [
+        Format::Td3,
+        Format::Td2,
+        Format::Td1,
+        Format::MrvA,
+        Format::MrvB,
+    ] {
+        assert!(formats.contains(&format), "{format:?}");
+    }
+}

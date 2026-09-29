@@ -39,7 +39,7 @@ The mechanics are enforced, not remembered. Each change drops a fragment in
 `!` marks a break). CI checks the version bump against the fragments
 (`scripts/check-changelog.sh`) and against the published API (`cargo-semver-checks`).
 
-## Where it stands — 0.9.0 (released 2026-09-28)
+## Where it stands — 0.9.1 (released 2026-09-29)
 
 Delivered:
 
@@ -55,6 +55,9 @@ Delivered:
   every item docs.rs counts carries a runnable example.
 - A structural refusal of a document number whose first cell is the filler (0.9.0, #536), and a
   per-cell coverage map of the five direct parsers, pinned by tests (#421).
+- 0.9.1: `apply_occlusion` (a mask of covered cells withholds what the arithmetic cannot back up),
+  the opt-in `select_line1`, and OCR-side repairs to line-1 fitting, wrong-physical-line ranking and
+  whitespace-split lines. All additive.
 
 ## Patch track — 0.9.x
 
