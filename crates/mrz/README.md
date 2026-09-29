@@ -94,7 +94,10 @@ assert!(doc.valid()); // every check digit this format prints verified
 noisy OCR text — HTML-escaped fillers, lines merged onto one physical line — and runs a
 check-digit-guided repair pass. A repaired reading is accepted only when its check digits agree
 with it. When nothing validates, you get the best-scoring partial read with its honest `Checks`, or
-`NotFound` if the text only looked like an MRZ.
+`NotFound` if the text only looked like an MRZ. A zone that validates but shows a symptom of holding
+a wrong physical line (an issuing state that is in no registry, two near-identical lines, a digit in
+a two-line format's name field) is ranked below any unflagged valid zone in the same text, and is
+returned when there is none; the rank never refuses a valid read.
 
 ```rust
 let text = "## REPUBLIC OF UTOPIA\n\

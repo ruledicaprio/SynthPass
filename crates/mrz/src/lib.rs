@@ -128,6 +128,7 @@ mod emit;
 mod mrz_date;
 mod occlusion;
 mod parser;
+mod rank;
 mod repair;
 mod sex;
 mod strip;
