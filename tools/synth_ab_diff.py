@@ -137,6 +137,13 @@ def field_changes(before: dict, after: dict) -> list[dict]:
 
 
 def compare(before: dict, after: dict) -> dict:
+    for label, report in (("before", before), ("after", after)):
+        if (
+            not isinstance(report, dict)
+            or not isinstance(report.get("results"), list)
+            or "document_type" not in report
+        ):
+            raise ValueError(f"{label}: expected a synthpass-bench report with results list and document_type")
     problems = []
     for key in ("profile", "document_type", "seed_start", "count"):
         if before.get(key) != after.get(key):
