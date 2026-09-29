@@ -375,9 +375,9 @@ gh pr create
 ```
 
 `main` is protected (since 2026-09-17): the merge button unlocks only when the branch is **up to
-date with `main`** and five required checks are green -- `Rust (Linux)`,
-`Rust (macos-latest, default members)`, `M4 Tier-1 hit-rate gate`, `Changelog fragments &
-version bump` and `cargo-deny (advisories & licenses)`. History is linear (squash or rebase
+date with `main`** and six required checks are green -- `Rust (Linux)`,
+`Native OCR (release)`, `Rust (macos-latest, default members)`, `M4 Tier-1 hit-rate gate`,
+`Changelog fragments & version bump` and `cargo-deny (advisories & licenses)`. History is linear (squash or rebase
 merges; no merge commits), force-pushes to `main` are refused, and the rules bind the
 maintainer too. When `main` moves under an open PR, rebase locally and push with
 `--force-with-lease`, or run `gh pr update-branch --rebase <number>`; a conflict at a shared
