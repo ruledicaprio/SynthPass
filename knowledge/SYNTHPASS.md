@@ -169,7 +169,14 @@ CI-gated today.
 appends the flattened per-document outcomes — `seed`, `profile`, `hit`, `reason`, `elapsed_ms` — as
 JSON lines to `dataset.jsonl` on a dedicated `bench-data` branch (not `main`, which is protected;
 this workflow pushes there directly, unattended, no PR per run). `bench-data` is an **orphan**
-branch: it shares no history with `main` and holds nothing but the dataset.
+branch: it shares no history with `main`. It also holds the per-track `results/<track>/history.jsonl`
+files that `scripts/run-bench.ps1` appends, weekly through `bench-charts.yml`.
+
+**Two writers.** Both push to `bench-data` without a PR, and each fetched the branch minutes before
+its push, so either can find that the other moved it. They write different files, so each rebases
+onto the new tip and retries, up to five times, and fails loudly if it still cannot push. A nightly
+run whose commit or push fails keeps the rows it would have appended as a `bench-data-rows-<run id>`
+artifact for 7 days.
 
 Each run continues from the highest seed already in the dataset, so no document is ever measured
 twice and none overlaps the M4 CI gate. `(seed, profile)` is therefore the primary key, and the
