@@ -421,7 +421,10 @@ mod tests {
         // in a name whose separator was dropped by OCR.
         for name in ["JUKKAMARI", "PEKKAPETRI", "MIKKOMATTI", "HAKKINENHEIKKI"] {
             assert_eq!(fix_name_separator(name), name);
-            assert_eq!(fix_name_separator(&format!("{name}<<<<")), format!("{name}<<<<"));
+            assert_eq!(
+                fix_name_separator(&format!("{name}<<<<")),
+                format!("{name}<<<<")
+            );
         }
         assert_eq!(fix_name_separator("KUKKKKMARI"), "KUKKKKMARI");
         assert_eq!(fix_name_separator(&defiller("KUKKKKMARI")), "KUKKKKMARI");
@@ -435,14 +438,20 @@ mod tests {
         assert_eq!(defiller("KUKKK<<<"), "KUKK<<<<");
         assert_eq!(fix_name_separator(&defiller("KUKKK<<<")), "KUKK<<<<");
         assert_eq!(defiller("TAMM<<MIKKK<<"), "TAMM<<MIKK<<<");
-        assert_eq!(fix_name_separator(&defiller("TAMM<<MIKKK<<")), "TAMM<<MIKK<<<");
+        assert_eq!(
+            fix_name_separator(&defiller("TAMM<<MIKKK<<")),
+            "TAMM<<MIKK<<<"
+        );
         assert_eq!(defiller("JUKKA<<PEKKA<<<"), "JUKKA<<PEKKA<<<");
         assert_eq!(defiller("PALLL<<<"), "PALL<<<<");
     }
 
     #[test]
     fn defiller_repairs_padding_after_a_visible_filler() {
-        assert_eq!(defiller("SPECIMEN<<SPECIMEN<KLLLL"), "SPECIMEN<<SPECIMEN<<<<<<");
+        assert_eq!(
+            defiller("SPECIMEN<<SPECIMEN<KLLLL"),
+            "SPECIMEN<<SPECIMEN<<<<<<"
+        );
         assert_eq!(defiller("MARIA<LLLL"), "MARIA<<<<<");
     }
 
