@@ -456,6 +456,20 @@ mod tests {
     }
 
     #[test]
+    fn defiller_still_repairs_filler_runs_without_name_boundary_ambiguity() {
+        // These old repairs have either a terminal long run or a visible
+        // filler before the noisy run. The latter includes the public Serbia
+        // 2012 specimen's given-name tail (a regression on the first draft).
+        assert_eq!(defiller("MARIAKKKKKKK"), "MARIA<<<<<<<");
+        assert_eq!(defiller("MARIA<<KKK<<L<<"), "MARIA<<<<<<<<<<");
+        assert_eq!(defiller("ANNA<MARIA<<KKLK<<<"), "ANNA<MARIA<<<<<<<<<");
+        assert_eq!(
+            defiller("MILICA<<<KK<K<<<<K<<<<<<<<<<"),
+            "MILICA<<<<<<<<<<<<<<<<<<<<<<"
+        );
+    }
+
+    #[test]
     fn line1_fit_pads_the_tail_when_the_only_run_starts_before_the_name_field() {
         // A dropped document-code filler (`PCANMARTIN...` read for
         // `P<CANMARTIN...`) leaves exactly one `<` run, at index 1 — before
