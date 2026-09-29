@@ -19,6 +19,10 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-29 | [#411 PR 2, TD1's MRZ at Doc 9303's 37 px line pitch: TD1 holds 57 while 20 seeds swap, and correct reads go 22 → 30](#2026-09-29--411-pr-2-td1s-mrz-at-doc-9303s-37-px-line-pitch-td1-holds-57-while-20-seeds-swap-and-correct-reads-go-22--30) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-29 | [isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone](#2026-09-29--isolated--and--per-ocr-pass-both-engines-emit-isolated--only-the-general-engine-emits--and-no--reaches-a-parsed-zone) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-29 | [#574 PR 4c, the line-1 selector over three replayed arms: the veto passes, and two real names go wrong → exact](#2026-09-29--574-pr-4c-the-line-1-selector-over-three-replayed-arms-the-veto-passes-and-two-real-names-go-wrong--exact) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-29 | [The line-1 selector over three replayed arms: the veto passes, two real names go wrong → exact, and no outcome or correct field moves](line1-selection-ab-2026-09-29.md) | Observed (one live local release `provider-bench --real-specimens --mrz-only` capture, three replays of it with one binary, fifteen `synthpass-bench --profile clean --count 100 --seed 0` runs; compared with #609's `tools/bench_ab_diff.py`) plus Observed by eye (the four changed zones against their specimen images) plus Derived (per-document comparison of the three reports) | current | line1-selection-ab-2026-09-29.md |
+| 2026-09-29 | [Isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone](ocr-filler-unknown-trace-2026-09-29.md) | Observed (one local release `provider-bench --real-specimens --mrz-only --dump-ocr-passes` run and five `synthpass-bench --profile clean --count 100 --seed 0 --ocr-passes` runs, all from #595's neutrality measurement; no OCR ran for this note) plus Derived (each reading aligned against truth; a reading of `ocrs` 0.13.1 and `mrz` source) plus Hypothesized (mechanisms, marked where used) | current | ocr-filler-unknown-trace-2026-09-29.md |
 | 2026-09-29 | [The TD1 MRZ at Doc 9303's 37 px pitch: TD1 holds 57 / 100 while 20 seeds swap, correct reads go 22 → 30, and the headline stays 389 / 500](synthetic-headline-2026-09-29.md) | Observed (two local release `synthpass-bench --document-type td1 --profile clean --count 100 --seed 0` runs on one Linux container, one per build; `synthpass generate` output hashed for five formats × two builds; `chargrid_repair_synthetic` at both commits) plus Derived (per-seed comparison of the JSON reports and label files, including against the 2026-09-28 reports; the five-format total) plus Hypothesized (mechanisms, marked where used) | current | synthetic-headline-2026-09-29.md |
 | 2026-09-28 | [#411 PR 1, the MRZ at the ISO pitch: the synthetic headline goes 368 → 389 / 500, half of it wrong accepts](#2026-09-28--411-pr-1-the-mrz-at-the-iso-pitch-the-synthetic-headline-goes-368--389--500-half-of-it-wrong-accepts) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-28 | [The MRZ at the ISO pitch: the synthetic headline goes 368 → 389 / 500, with 225 seeds churning under it](synthetic-headline-2026-09-28.md) | Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, five formats × two builds) plus Derived (per-seed comparison of the JSON reports, including against the 2026-09-27 reports) plus Hypothesized (mechanisms, marked where used) | current | synthetic-headline-2026-09-28.md |
@@ -1400,3 +1404,73 @@ byte-identical source in both arms. TD1 hits hold at **57 / 100**. Correct reads
 
 Tables, every flip attributed, and what this does not claim:
 [`synthetic-headline-2026-09-29.md`](synthetic-headline-2026-09-29.md).
+
+---
+
+### 2026-09-29 — isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone
+
+**Observed**, local, no new OCR run: #595's per-pass records from one release `provider-bench
+--real-specimens --mrz-only --dump-ocr-passes` run (261 public documents, 1,894 passes, 0 outcomes
+changed against the committed ledger) and five `synthpass-bench --profile clean --count 100 --seed
+0 --ocr-passes` runs (500 seeds, 1,755 passes), both built at `76f914e`. Its `synthpass-ocr`
+source is `main`'s apart from #598's report-only chargrid capture. This is the trace #576 item 3
+asks for.
+
+- **The triage counts reproduce exactly.** `?` is in 462 of 2,044 real general-pass readings and
+  in 0 of 2,430 retry readings. Isolated `<` is in 197 general and 625 retry readings. On
+  synthetic, `?` is in 72 of 1,562 general readings and 0 of 1,854 retry readings.
+- **Every `?` is `ocrs` general-engine output, never `mrz::UNKNOWN`** (Derived from source; the
+  trace cannot tell `ocrs`'s `?` class from its out-of-range fallback). No `?` sits in any accepted
+  name-line reading or in any parsed zone (168 real, 467 synthetic). 632 of the 1,246 real `?`
+  are on the 90 documents with no zone to read.
+- **Both engines emit isolated `<`.** On labelled real documents a real single separator is kept
+  as `<` in 18 of 32 general reads and 105 of 199 retry reads. The comments saying `ocrs` never
+  emits it are wrong for both engines.
+- **Most isolated `<` in a name field are not separators.** On synthetic, all 595 are damage: 393
+  are half of a `<<` (almost always with the partner cell gone, Hypothesized CTC collapse), and
+  202 are in the filler tail. In the parsed name fields of the 33 labelled real hits, 9 of 27 are
+  real separators.
+- **The diagnosis's 9 of 18 (1 of 5 general, 8 of 13 retry) reproduces, but only grouped by the
+  pass that validated.** The general pass's own reading keeps 10 of the 16 cells it read.
+  Grouped by the reading the parsed name line matches, survival is 1 of 6 general and 8 of 12
+  retry: Nigeria 2022 moves, by one edit.
+- **Not `main`'s parsed zones:** the build lacks #593 and #566, so synthetic TD1 is the 55 px
+  generator. None of the 13 documents behind the 18 cells is among #593's seven re-reads.
+
+Tables per pass family, the `?`/`UNKNOWN` source reading, and what this does not claim:
+[`ocr-filler-unknown-trace-2026-09-29.md`](ocr-filler-unknown-trace-2026-09-29.md).
+
+---
+
+### 2026-09-29 — #574 PR 4c, the line-1 selector over three replayed arms: the veto passes, and two real names go wrong → exact
+
+**Observed**, local: one live release `provider-bench --real-specimens --mrz-only --dump-ocr
+--dump-ocr-hits --dump-ocr-passes` capture at `5001160` (the tree of `main`'s `53c283f`; 0
+outcomes changed against the committed ledger), replayed three times by one release build of #609's
+selector at `cb334d0` under `SYNTHPASS_MRZ_LINE1_SELECT` = `off`, `control` and `on`. Also five
+`synthpass-bench --profile clean --count 100 --seed 0 --dump-ocr` formats × three arms. Compared
+with #609's `bench_ab_diff`.
+
+- **The veto passes on every item.** Real hits hold at **139 / 151 = 92.1%** scored and **139 /
+  261 = 53.3%** corpus-wide. 0 outcome changes, 0 fields exact → wrong or exact → unread, and
+  none of the 13 exact-name documents touched. All five synthetic formats are identical seed for
+  seed (hits 59 / 81 / 74 / 87 / 90).
+- **Benefit: Djibouti 2019 and Somalia 2023 go wrong → exact**, both checked by eye against the
+  image and the fixture. Strict names go **13 / 45 → 15 / 45** and names exact among hits go
+  **13 / 33 → 15 / 33**. Surname wrong → exact 1, given names wrong → exact 2.
+- **Two documents without name truth change.** Russian Federation 2004 goes wrong → exact by eye.
+  Bosnia and Herzegovina 2014 goes wrong → less wrong: the surname becomes right, but the given
+  names read `AZRACMARINA`.
+- **Fidelity and placebo hold.** Capture ~ `off` is NEUTRAL (261 / 261 documents, 171 / 171 dump
+  rows, 0 report rows differ). `off` ~ `control` differs only by `control`'s recorded verdicts,
+  and `control` proposes exactly the four that `on` applies.
+- **Verdicts under `on`:** applied 4, unresolved 3 (Croatia ID 2002, Switzerland ID 2003,
+  Dominican Republic 2020), ambiguous 0, none 175.
+- **Capture-dependent:** Slovakia 2005, which the plan modelled as out of reach, is already exact
+  on this capture without the selector. That is why `off` reads 13 / 45 against the baseline's
+  12 / 45.
+- **The default stays `off`.** Promotion is a separate decision, and it includes routing the v1
+  record's parse. No headline change.
+
+Tables, the 18 wrong names left and why, and what this does not claim:
+[`line1-selection-ab-2026-09-29.md`](line1-selection-ab-2026-09-29.md).

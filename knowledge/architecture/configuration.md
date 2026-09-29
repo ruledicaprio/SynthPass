@@ -35,7 +35,9 @@ non-default *effective* value are recorded in each OCR-derived record's `trace.c
 (`synthpass-core`'s `ExtractionTrace`, [§13.1](../ARCHITECTURE.md#131-crate-responsibilities)) and
 echoed once on stderr by `synthpass`/`synthpass batch` (`⚙️  [Rust] non-default OCR knobs: NAME=value …`) —
 `SYNTHPASS_OCR_THREADS` and `SYNTHPASS_OCR_DUMP_VARIANTS` are concurrency/diagnostics, not
-measurement arms, and are not part of either.
+measurement arms, and are not part of either. The two `SYNTHPASS_MRZ_*` arms in the next section are
+recorded in the same `trace.config_overrides` (Tier-1 and Tier-2 records alike) when not `off`
+(`synthpass_die::mrz_config_overrides`), but not in the stderr echo, which lists OCR knobs only.
 
 `SYNTHPASS_OCR_AUTO_DOWNLOAD` is gone (issue #491): the extraction path never downloads
 models, full stop — a missing `.rten` file fails with an actionable message naming
@@ -59,7 +61,8 @@ in every binary.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `SYNTHPASS_MRZ_CLASS_SWEEP` | `off` | `mrz`'s uniform confusable-class sweep — `off`/`on`/`control` (`control` is a placebo identical to `off`); an unrecognised value falls back to `off` silently. Read by `synthpass-die`'s `mrz_parse_options`, so it applies to the product's `MrzReader` as well as the benches. Behaviour-changing, but not recorded in `trace.config_overrides`; bench reports record the arm as `mrz_class_sweep_arm` |
+| `SYNTHPASS_MRZ_CLASS_SWEEP` | `off` | `mrz`'s uniform confusable-class sweep — `off`/`on`/`control` (`control` is a placebo identical to `off`); an unrecognised value falls back to `off` silently. Read by `synthpass-die`'s `mrz_parse_options`, so it applies to the product's `MrzReader` as well as the benches. Behaviour-changing: recorded in `trace.config_overrides` when not `off`, and refused by `--write-baseline`/`--assert-baseline`; bench reports record the arm as `mrz_class_sweep_arm` |
+| `SYNTHPASS_MRZ_LINE1_SELECT` | `off` | The shadow line-1 selector (#574) — `off`/`control`/`on`. After Tier 1 accepts a TD3, TD2, MRV-A or MRV-B zone whose name field breaks the name grammar, `mrz::select_line1` looks in the same OCR text for exactly one other line of the same width, document code and issuer whose name field is well formed; `control` records the proposal and discards it, `on` applies it. It never changes a non-name field and runs no OCR. An unrecognised value falls back to `off` silently. Read by `synthpass-die`'s `read_tier1`, so it applies to the product's `MrzReader` as well as the benches; the pipeline's own `mrz::find_and_parse` (the v1 `extracted` record, `PipelineResult.mrz` and the Tier-2 hint) is not routed through it, so under `on` the v2 record can carry names the v1 record does not. Recorded in `trace.config_overrides` when not `off`; bench reports record it as `mrz_line1_select_arm`, and the OCR-dump run manifest records both MRZ arms as `mrz_arms`; `--write-baseline`/`--assert-baseline` refuse any other value. Unmeasured |
 
 ### Tier-2 model
 

@@ -235,7 +235,7 @@ A benchmark change follows this lifecycle:
 
 `freeze → reconcile → measure → localize → change → regress → inspect → record`
 
-**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember.
+**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember. *(Amended 2026-09-29, #574: `SYNTHPASS_MRZ_CLASS_SWEEP` and `SYNTHPASS_MRZ_LINE1_SELECT` are refused the same way unless `off`; `control` is refused too, since a baseline is a claim about the default.)*
 
 **Reconcile.** Run the identity auditor before reading accuracy numbers. The candidate asset set must reconcile with the manifest: missing assets, unlisted assets, SHA mismatches, same-path byte conflicts, and duplicate encoded-byte groups are structural findings, not OCR results. Preserve whether each asset came from `samples-data`, MAIN/fixtures, or both. Keep these identities distinct:
 
@@ -252,6 +252,40 @@ A benchmark change follows this lifecycle:
 **Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership.)*
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
+
+## Replaying a captured run
+
+`provider-bench --real-specimens --mrz-only --replay-ocr-passes DIR` runs **no OCR**. It reads
+`DIR/provider-bench-ocr-passes.jsonl`, the pass file an earlier `--dump-ocr-passes` run wrote, rebuilds
+each public-corpus document's page from its row, and scores it with the same code a live run uses
+([ADR-0024, amendment 3](../decisions/ADR-0024-per-document-benchmark-archive.md)). It is for an A/B of a
+change downstream of the OCR text. The native retry loop is wall-clock budgeted, so two live runs can read
+different text; a capture is read once, and every arm replays the same text.
+
+    # once: the capture (the pass file is document text, so --out goes under artifacts/)
+    provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits --dump-ocr-passes \
+        --out artifacts/capture/real/report.json
+    # per arm: no OCR, seconds, the same dump flags
+    provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits \
+        --replay-ocr-passes artifacts/capture/real --out artifacts/arm/real/report.json
+    python tools/bench_ab_diff.py artifacts/capture artifacts/arm --expect-identical --check-report
+
+How it follows the maintenance contract above:
+
+- **Freeze.** The capture is the frozen text. The replay's run manifest names it (`replay_of`: the
+  capture's run-manifest file name and its SHA-256) and copies its `ocr_arms`. The replaying process must
+  run under the capture's `SYNTHPASS_OCR_*` values, or it refuses.
+- **Reconcile.** Before anything is scored or written, a replay refuses a capture whose rows do not cover
+  the public corpus exactly once, whose `source_sha256` is not the corpus image's, whose
+  `corpus_manifest_sha256` is not the current `samples/corpus.jsonl`'s, or whose rows lack
+  `retry_damaged_recovery` or `mrz_band_score` (a capture from before replay existed).
+- **Inspect.** With every arm at its default, a replay must equal its capture in every recorded
+  per-document field. `bench_ab_diff --expect-identical --check-report` checks the ledger, the dump and the
+  `report.json` rows; only `ocr_ms` (zero in a replay), the run manifest's name and the pass trace a replay
+  does not write may differ. Any other difference stops the A/B.
+- **What it does not measure.** Nothing upstream of `OcrPage::text`: the OCR passes, their order and the
+  retry stop are the capture's, and it covers Tier 1 only. It is never a baseline: `--write-baseline` and
+  `--assert-baseline` are refused, as are `--include-private`, `--include-local` and `--dump-ocr-passes`.
 
 ## Record the rejections
 
@@ -278,9 +312,10 @@ Prerequisite: `samples/` images aren't tracked on `main` — run
 (real-specimen tracks) or `synthpass-bench` (the two synthetic `td1`/`td2`
 tracks — see below) scoped to one named track, appends the flattened result
 to that track's `results/<track>-bench/history.jsonl` on the `bench-data`
-branch (the same branch `bench-data-collection.yml` uses for the Tier-1
-`dataset.jsonl`, checked out via the same isolated `git worktree` pattern,
-but pushed by hand rather than on a schedule), and regenerates that track's
+branch (the same branch `bench-data-collection.yml` uses for the nightly's
+per-document rows, `fresh.jsonl`, `fixed.jsonl` and `runs.jsonl`, checked out via
+the same isolated `git worktree` pattern, but pushed by hand rather than on a
+schedule), and regenerates that track's
 trend chart. One script and one chart binary (`bench-chart`) serve every
 track — adding a new one is a new `-Track` value, not new tooling.
 Real-specimen tracks map to `provider-bench --format` (via
@@ -351,8 +386,8 @@ deliberately distinct here too.
 
 `td3` is a *second*, independent way to measure TD3: the existing
 `bench-data-collection.yml` scheduled workflow already covers it (run
-nightly, feeding a large `dataset.jsonl`, no `read_ok_rate`/trend-chart
-shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
+nightly for all five formats, feeding `fresh.jsonl` and `fixed.jsonl`, no
+`read_ok_rate`/trend-chart shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
 the same small, `-Count`/`-Seed`-controlled shape the other synthetic
 tracks already use, specifically so all five formats land in the same row
 shape for the per-format comparison chart below. The two don't duplicate
@@ -561,8 +596,8 @@ runs `tools/audit_benchmark_identity.py --check`, and refuses to fall back to a
 moving `origin/samples-data` tip. The identity report is uploaded with the run.
 A deliberate write-baseline against a newer corpus may pass an explicit
 `data_ref`; assert-mode runs cannot override the committed pin. Synthetic
-`bench-data` collection is independent of `samples-data`: its `(seed, profile)`
-identity guard remains the relevant check, while real-track history rows record
+`bench-data` collection is independent of `samples-data`: `fresh.jsonl`'s
+`(document_type, seed, profile)` uniqueness guard remains the relevant check, while real-track history rows record
 the pinned DATA SHA.
 
 **What counts as a regression.** The gate fails if `tier1_hits` drops below

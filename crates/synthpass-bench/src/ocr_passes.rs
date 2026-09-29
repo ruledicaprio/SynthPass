@@ -23,8 +23,15 @@
 //! zone text, and for the real-specimen track they are a document's OCR. The
 //! chargrid object's `raw_name_line`, `recognized_text`, glyph characters,
 //! `repair.line` and `column_ink` are document content under the same rules.
+//!
+//! The file is an input as well as an output (ADR-0024, amendment 3):
+//! [`read_rows`] is the one reader, and every type here derives `Deserialize`
+//! with owned fields, so what was written reads back equal. `provider-bench
+//! --replay-ocr-passes` replays Tier 1 from it without OCR, and a chargrid
+//! replay reads the same rows. A change to the row's schema updates the reader
+//! in the same change.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use synthpass_ocr::{ChargridFit, ChargridLineCapture, ChargridRecord, OcrPage, PassRecord};
 
@@ -32,7 +39,7 @@ use synthpass_ocr::{ChargridFit, ChargridLineCapture, ChargridRecord, OcrPage, P
 pub const OCR_PASSES_FILENAME: &str = "provider-bench-ocr-passes.jsonl";
 
 /// A bounding box in the reading pass's own image space.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BoxObject {
     pub x: f32,
     pub y: f32,
@@ -41,7 +48,7 @@ pub struct BoxObject {
 }
 
 /// One MRZ-shaped line one pass read.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReadingObject {
     pub line_index: usize,
     pub bbox: BoxObject,
@@ -49,7 +56,7 @@ pub struct ReadingObject {
 }
 
 /// One executed OCR pass, as written to a report. Key set pinned by tests.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PassObject {
     pub order: usize,
     pub id: String,
@@ -59,7 +66,7 @@ pub struct PassObject {
     pub image_width: u32,
     pub image_height: u32,
     /// `failed`, `no_mrz_shaped_lines`, `appended` or `accepted`.
-    pub outcome: &'static str,
+    pub outcome: String,
     pub readings: Vec<ReadingObject>,
     /// The chargrid attempt that read this pass's pixels. Always present:
     /// `null` unless this is the accepted pass and the arm ran.
@@ -68,10 +75,10 @@ pub struct PassObject {
 
 /// One chargrid attempt (`synthpass_ocr::ChargridRecord`). Key set pinned by
 /// tests.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChargridObject {
     /// `on` or `control`.
-    pub mode: &'static str,
+    pub mode: String,
     /// Byte-identical to the page's `chargrid` verdict.
     pub verdict: String,
     /// `null` when the attempt stopped before a line matched.
@@ -80,7 +87,7 @@ pub struct ChargridObject {
 
 /// The matched line and what was measured on it, in the working image's pixel
 /// space. See `synthpass_ocr::ChargridLineCapture` for each field.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChargridLineObject {
     pub name_line_index: usize,
     pub width: usize,
@@ -101,7 +108,7 @@ pub struct ChargridLineObject {
 
 /// A line box in edges, not [`BoxObject`]'s `{x, y, w, h}`: edges are what the
 /// grid fit and the ink measurement consume, so a replay reads them as they are.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LineBoxObject {
     pub left: u32,
     pub top: u32,
@@ -110,7 +117,7 @@ pub struct LineBoxObject {
 }
 
 /// One recognized character with its horizontal extent.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GlyphObject {
     /// A one-character string.
     pub ch: String,
@@ -120,7 +127,7 @@ pub struct GlyphObject {
 
 /// The fitted grid and the repair's verdict on it. The grid's cell count is the
 /// line's `width`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChargridFitObject {
     pub origin: f32,
     pub pitch: f32,
@@ -134,10 +141,10 @@ pub struct ChargridFitObject {
 
 /// What the repair returned, with a fixed key set: every value that does not
 /// apply is `null`.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RepairObject {
     /// `ok`, or a `synthpass_ocr::chargrid::Rejected::as_str` label.
-    pub outcome: &'static str,
+    pub outcome: String,
     /// The repaired line; only on `ok`.
     pub line: Option<String>,
     /// How many fillers were placed; only on `ok`.
@@ -153,7 +160,7 @@ fn repair_object(
 ) -> RepairObject {
     match repair {
         Ok(repair) => RepairObject {
-            outcome: "ok",
+            outcome: "ok".to_string(),
             line: Some(repair.line.clone()),
             fillers_placed: Some(repair.fillers_placed),
             expected: None,
@@ -167,7 +174,7 @@ fn repair_object(
                 _ => (None, None),
             };
             RepairObject {
-                outcome: rejected.as_str(),
+                outcome: rejected.as_str().to_string(),
                 line: None,
                 fillers_placed: None,
                 expected,
@@ -222,7 +229,7 @@ fn line_object(line: &ChargridLineCapture) -> ChargridLineObject {
 /// The report shape of one chargrid attempt.
 pub fn chargrid_object(record: &ChargridRecord) -> ChargridObject {
     ChargridObject {
-        mode: record.mode,
+        mode: record.mode.to_string(),
         verdict: record.verdict.clone(),
         line: record.line.as_ref().map(line_object),
     }
@@ -239,7 +246,7 @@ pub fn pass_objects(records: &[PassRecord]) -> Vec<PassObject> {
             turn: record.turn,
             image_width: record.image_width,
             image_height: record.image_height,
-            outcome: record.outcome.as_str(),
+            outcome: record.outcome.as_str().to_string(),
             readings: record
                 .readings
                 .iter()
@@ -260,12 +267,24 @@ pub fn pass_objects(records: &[PassRecord]) -> Vec<PassObject> {
 }
 
 /// One row of `provider-bench-ocr-passes.jsonl`: one OCR'd real specimen,
-/// whatever its outcome. Key set pinned by tests.
+/// whatever its outcome. Key set and key order pinned by tests.
 ///
 /// A separate file rather than a widened `MissOcrDump`: ADR-0024 rejected
 /// widening that row because `tools/classify_mrz_mechanisms.py` depends on its
 /// shape.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+///
+/// **Additive only.** A key keeps its name, its position and its bytes; a new
+/// key goes at the end. `retry_damaged_recovery` and `mrz_band_score` were
+/// added at the end for replay (ADR-0024, amendment 3): they are the two
+/// `OcrPage` values scoring reads that the row did not yet carry. Both are
+/// text-free.
+///
+/// `Deserialize` with `#[serde(default)]`: a row written before a key existed
+/// reads back with that key defaulted, and [`read_rows`] reports which keys
+/// were absent, so a consumer that needs one can refuse rather than replay a
+/// default.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OcrPassesRow {
     pub name: String,
     pub asset_id: Option<String>,
@@ -283,7 +302,32 @@ pub struct OcrPassesRow {
     /// The full `OcrPage::text` the providers were handed.
     pub ocr_text: String,
     pub ocr_passes: Vec<PassObject>,
+    /// `OcrPage::retry_damaged_recovery` verbatim: `MrzData::damaged_recovery`
+    /// of the reading the retry loop accepted. `Some` exactly when
+    /// `retry_variant_id` is. Reported per document by `provider-bench`.
+    pub retry_damaged_recovery: Option<bool>,
+    /// `OcrPage::mrz_band_score` verbatim: the winning MRZ band's score in
+    /// `[0, 1]`, `null` when no band was found. It is in the miss dump.
+    pub mrz_band_score: Option<f64>,
 }
+
+/// Every key a row is written with, in the order it is written. What
+/// [`PassesFile::missing_keys`] is computed against.
+pub const ROW_KEYS: [&str; 13] = [
+    "name",
+    "asset_id",
+    "source_sha256",
+    "run_manifest",
+    "rotation",
+    "retry_variant_id",
+    "retry_stop",
+    "retry_budget_hit",
+    "chargrid",
+    "ocr_text",
+    "ocr_passes",
+    "retry_damaged_recovery",
+    "mrz_band_score",
+];
 
 /// The rows of one prep, filled as each document is OCR'd.
 #[derive(Debug, Default)]
@@ -322,6 +366,8 @@ impl OcrPassesCollector {
             chargrid: page.chargrid.clone(),
             ocr_text: page.text.clone(),
             ocr_passes: pass_objects(records),
+            retry_damaged_recovery: page.retry_damaged_recovery,
+            mrz_band_score: page.mrz_band_score,
         });
     }
 
@@ -345,6 +391,64 @@ impl OcrPassesCollector {
         std::fs::write(&path, body).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
         Ok((path, self.rows.len()))
     }
+}
+
+/// The rows of a `provider-bench-ocr-passes.jsonl`, as read back.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PassesFile {
+    /// One per line, in file order.
+    pub rows: Vec<OcrPassesRow>,
+    /// The [`ROW_KEYS`] that at least one row does not carry, in [`ROW_KEYS`]
+    /// order. Empty for a file this code wrote. A non-empty list means the file
+    /// predates a key, and the row's value for it is a default, not a reading.
+    pub missing_keys: Vec<&'static str>,
+}
+
+/// Parses the body of [`OCR_PASSES_FILENAME`]: one JSON object per non-blank
+/// line.
+///
+/// Error messages carry the row number and a category, never a value: a row
+/// holds document OCR, and a message must not quote it (this crate's rule for
+/// everything that reaches stderr).
+pub fn parse_rows(body: &str) -> Result<PassesFile, String> {
+    let mut rows = Vec::new();
+    let mut missing = [false; ROW_KEYS.len()];
+    for (index, line) in body.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let number = index + 1;
+        let value: serde_json::Value = serde_json::from_str(line)
+            .map_err(|e| format!("row {number} is not JSON ({:?})", e.classify()))?;
+        let Some(object) = value.as_object() else {
+            return Err(format!("row {number} is not a JSON object"));
+        };
+        for (slot, key) in missing.iter_mut().zip(ROW_KEYS) {
+            *slot |= !object.contains_key(key);
+        }
+        let row = serde_json::from_value(value).map_err(|e| {
+            format!(
+                "row {number} does not match the pass-file schema ({:?})",
+                e.classify()
+            )
+        })?;
+        rows.push(row);
+    }
+    let missing_keys = ROW_KEYS
+        .iter()
+        .zip(missing)
+        .filter_map(|(key, absent)| absent.then_some(*key))
+        .collect();
+    Ok(PassesFile { rows, missing_keys })
+}
+
+/// Reads [`OCR_PASSES_FILENAME`] from `dir`: the one reader of the file. See
+/// [`parse_rows`].
+pub fn read_rows(dir: &Path) -> Result<PassesFile, String> {
+    let path = dir.join(OCR_PASSES_FILENAME);
+    let body = std::fs::read_to_string(&path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    parse_rows(&body).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Refuses a destination inside the working tree that git does not ignore.
@@ -539,10 +643,12 @@ mod tests {
             [
                 "asset_id",
                 "chargrid",
+                "mrz_band_score",
                 "name",
                 "ocr_passes",
                 "ocr_text",
                 "retry_budget_hit",
+                "retry_damaged_recovery",
                 "retry_stop",
                 "retry_variant_id",
                 "rotation",
@@ -839,6 +945,196 @@ mod tests {
             })
             .collect();
         assert_eq!(names, ["a", "b", "c"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The page the pinned-bytes and round-trip tests share: synthetic text,
+    /// every optional value set, so a row that dropped one would differ.
+    fn full_page() -> OcrPage {
+        OcrPage {
+            text: "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<".to_string(),
+            rotation: 90,
+            retry_variant_id: Some("pass-01".to_string()),
+            retry_damaged_recovery: Some(true),
+            retry_budget_hit: false,
+            retry_stop: Some("variant_valid".to_string()),
+            mrz_band_score: Some(0.875),
+            ..OcrPage::default()
+        }
+    }
+
+    fn full_row() -> OcrPassesRow {
+        let mut collector = OcrPassesCollector::new(Some("run.json".to_string()));
+        collector.push(
+            "specimen",
+            Some("passports/specimen.png"),
+            Some("ab"),
+            &full_page(),
+            &[
+                record(0, PassOutcome::NoMrzShapedLines, Vec::new()),
+                record(1, PassOutcome::Appended, vec![reading()]),
+            ],
+        );
+        collector.rows()[0].clone()
+    }
+
+    /// The bytes one row is written as. Two halves: everything up to and
+    /// including `ocr_passes` is what the file held before replay (amendment 3)
+    /// and must not move; the two new keys follow it, at the end. A change to
+    /// either half is a change to a file other tools read.
+    const ROW_BEFORE_THE_NEW_KEYS: &str = concat!(
+        r#"{"name":"specimen","asset_id":"passports/specimen.png","source_sha256":"ab","#,
+        r#""run_manifest":"run.json","rotation":90,"retry_variant_id":"pass-01","#,
+        r#""retry_stop":"variant_valid","retry_budget_hit":false,"chargrid":null,"#,
+        r#""ocr_text":"P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<","#,
+        r#""ocr_passes":[{"order":0,"id":"general","transform":"general","turn":0,"#,
+        r#""image_width":640,"image_height":480,"outcome":"no_mrz_shaped_lines","#,
+        r#""readings":[],"chargrid":null},"#,
+        r#"{"order":1,"id":"pass-00","transform":"mrz_variants:0","turn":0,"#,
+        r#""image_width":640,"image_height":480,"outcome":"appended","#,
+        r#""readings":[{"line_index":3,"bbox":{"x":1.0,"y":2.5,"w":30.0,"h":4.0},"#,
+        r#""text":"P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<"}],"chargrid":null}]"#,
+    );
+    const ROW_NEW_KEYS: &str = r#","retry_damaged_recovery":true,"mrz_band_score":0.875}"#;
+
+    #[test]
+    fn a_rows_bytes_are_pinned_before_and_after_the_new_keys() {
+        let written = serde_json::to_string(&full_row()).unwrap();
+        assert_eq!(written, format!("{ROW_BEFORE_THE_NEW_KEYS}{ROW_NEW_KEYS}"));
+        assert!(written.starts_with(ROW_BEFORE_THE_NEW_KEYS));
+        assert!(written.ends_with(ROW_NEW_KEYS));
+    }
+
+    #[test]
+    fn a_row_with_no_damaged_recovery_and_no_band_writes_them_as_null() {
+        let mut collector = OcrPassesCollector::new(None);
+        collector.push("doc", None, None, &OcrPage::default(), &[]);
+        let written = serde_json::to_string(&collector.rows()[0]).unwrap();
+        assert!(
+            written.ends_with(r#","retry_damaged_recovery":null,"mrz_band_score":null}"#),
+            "the keys are always present: {written}"
+        );
+    }
+
+    /// Every field of a written row reads back equal, chargrid capture included.
+    #[test]
+    fn a_row_round_trips_write_then_read_rows() {
+        let mut with_chargrid = record(2, PassOutcome::Accepted, vec![reading()]);
+        with_chargrid.chargrid = Some(chargrid_record(Ok(repaired())));
+        let mut collector = OcrPassesCollector::new(Some("run.json".to_string()));
+        collector.push(
+            "specimen",
+            Some("passports/specimen.png"),
+            Some("ab"),
+            &OcrPage {
+                chargrid: Some("repaired".to_string()),
+                ..full_page()
+            },
+            &[
+                record(0, PassOutcome::NoMrzShapedLines, Vec::new()),
+                with_chargrid,
+            ],
+        );
+        collector.push("empty", None, None, &OcrPage::default(), &[]);
+        let dir = scratch("round-trip");
+        collector.write(&dir).expect("writes");
+        let file = read_rows(&dir).expect("reads back");
+        assert_eq!(file.rows, collector.rows());
+        assert!(
+            file.missing_keys.is_empty(),
+            "a file this code wrote lacks no key: {:?}",
+            file.missing_keys
+        );
+        assert_eq!(file.rows[0].retry_damaged_recovery, Some(true));
+        assert_eq!(file.rows[0].mrz_band_score, Some(0.875));
+        assert_eq!(
+            file.rows[0].ocr_passes[1].chargrid.as_ref().unwrap().mode,
+            "on"
+        );
+        // And what was read writes the same bytes: the reader loses nothing.
+        let again: Vec<String> = file
+            .rows
+            .iter()
+            .map(|row| serde_json::to_string(row).unwrap())
+            .collect();
+        let original: Vec<String> = collector
+            .rows()
+            .iter()
+            .map(|row| serde_json::to_string(row).unwrap())
+            .collect();
+        assert_eq!(again, original);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `mrz_band_score` is an `f64` the dump row writes back out, so the reader
+    /// must return the identical value (`serde_json`'s `float_roundtrip`).
+    #[test]
+    fn a_band_score_reads_back_as_the_identical_f64() {
+        for score in [0.1_f64, 1.0 / 3.0, 0.777_777_777_777_777_7, 1e-9] {
+            let mut collector = OcrPassesCollector::new(None);
+            collector.push(
+                "doc",
+                None,
+                None,
+                &OcrPage {
+                    mrz_band_score: Some(score),
+                    ..OcrPage::default()
+                },
+                &[],
+            );
+            let body = serde_json::to_string(&collector.rows()[0]).unwrap() + "\n";
+            let file = parse_rows(&body).expect("parses");
+            assert_eq!(
+                file.rows[0].mrz_band_score.map(f64::to_bits),
+                Some(score.to_bits()),
+                "{score}"
+            );
+        }
+    }
+
+    /// A row written before replay lacks the two new keys. It still reads, the
+    /// reader says which keys were absent, and their values are defaults.
+    #[test]
+    fn a_file_written_before_the_new_keys_reads_and_names_what_it_lacks() {
+        let old = format!("{ROW_BEFORE_THE_NEW_KEYS}}}\n");
+        let file = parse_rows(&old).expect("an old row still reads");
+        assert_eq!(file.rows.len(), 1);
+        assert_eq!(
+            file.missing_keys,
+            ["retry_damaged_recovery", "mrz_band_score"]
+        );
+        assert_eq!(file.rows[0].retry_damaged_recovery, None);
+        assert_eq!(file.rows[0].mrz_band_score, None);
+        assert_eq!(
+            file.rows[0].asset_id.as_deref(),
+            Some("passports/specimen.png")
+        );
+        // A key absent from any one row is named, however many rows have it.
+        let mixed = format!("{old}{ROW_BEFORE_THE_NEW_KEYS}{ROW_NEW_KEYS}\n");
+        assert_eq!(
+            parse_rows(&mixed).unwrap().missing_keys,
+            ["retry_damaged_recovery", "mrz_band_score"]
+        );
+    }
+
+    #[test]
+    fn a_malformed_row_is_an_error_that_quotes_no_value() {
+        let err = parse_rows("{\"name\":\"a\"}\nnot json SECRET-TEXT\n").expect_err("refused");
+        assert!(err.starts_with("row 2 is not JSON"), "{err}");
+        assert!(!err.contains("SECRET-TEXT"), "{err}");
+        let err = parse_rows("[1]\n").expect_err("refused");
+        assert_eq!(err, "row 1 is not a JSON object");
+        let err = parse_rows("{\"rotation\":\"SECRET-TEXT\"}\n").expect_err("refused");
+        assert!(err.starts_with("row 1 does not match"), "{err}");
+        assert!(!err.contains("SECRET-TEXT"), "{err}");
+        assert_eq!(parse_rows("\n\n").unwrap().rows, Vec::new());
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_naming_it() {
+        let dir = scratch("no-file");
+        let err = read_rows(&dir).expect_err("no file");
+        assert!(err.contains(OCR_PASSES_FILENAME), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

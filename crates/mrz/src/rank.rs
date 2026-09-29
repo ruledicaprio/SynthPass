@@ -41,11 +41,38 @@ const NAME_FIELD_START: usize = 5;
 /// - **A digit sits in a two-line format's name field**
 ///   ([`digit_in_name_field`]).
 pub(crate) fn flagged(data: &MrzData) -> bool {
+    flag_reason(data).is_some()
+}
+
+/// Which of [`flagged`]'s checks fired.
+///
+/// The variants are in the order the checks run, and the first to fire is the
+/// one reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlagReason {
+    /// [`issuer_unresolved`].
+    IssuerUnresolved,
+    /// [`repeats_a_line`].
+    RepeatedLine,
+    /// [`digit_in_name_field`].
+    DigitInNameField,
+}
+
+/// [`flagged`] with the reason: `None` when no check fires, which is exactly
+/// when `flagged` is false. `flagged` is defined by this function, so the two
+/// cannot drift.
+pub(crate) fn flag_reason(data: &MrzData) -> Option<FlagReason> {
     let lines: Vec<&str> = data.mrz_lines.lines().collect();
-    let Some(&line1) = lines.first() else {
-        return false;
-    };
-    issuer_unresolved(line1) || repeats_a_line(&lines) || digit_in_name_field(data.format, line1)
+    let &line1 = lines.first()?;
+    if issuer_unresolved(line1) {
+        Some(FlagReason::IssuerUnresolved)
+    } else if repeats_a_line(&lines) {
+        Some(FlagReason::RepeatedLine)
+    } else if digit_in_name_field(data.format, line1) {
+        Some(FlagReason::DigitInNameField)
+    } else {
+        None
+    }
 }
 
 /// Line 1's issuing-state cells (2..5) do not resolve in the country registry.

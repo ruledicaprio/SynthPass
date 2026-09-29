@@ -169,6 +169,14 @@ pub struct DocumentDetailReport {
     /// `Some(true)` and when it is `null`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_error: Option<&'static str>,
+    /// `synthpass_bench::provider_bench::DocumentDetail::field_correctness`,
+    /// serialized as `{"<field name>": "exact" | "wrong" | "unread"}` for every
+    /// field this document's ground truth defines (#574). **Field names and
+    /// the three verdicts only, never a value.** The key is **absent** for a
+    /// document without ground truth; older reports lack it too, which
+    /// `tools/bench_ab_diff.py` reports as "not recorded". Report-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_correctness: Option<BTreeMap<&'static str, &'static str>>,
     /// Wall-clock milliseconds of this document's OCR pass, the per-document
     /// cost a real-specimen run is made of. The provider-level `speed` block
     /// times `reader.read` alone, which for the deterministic `mrz` provider is
@@ -192,6 +200,54 @@ pub struct DocumentDetailReport {
     /// `DocumentDetail::tier1_damaged_recovery` passthrough. **Always
     /// serialized**, same reasoning as `retry_damaged_recovery` above.
     pub tier1_damaged_recovery: Option<bool>,
+    /// The shadow line-1 selector's verdict on this document (#574). **Absent**
+    /// when the `SYNTHPASS_MRZ_LINE1_SELECT` arm is `off` (every default run),
+    /// for a provider that makes no Tier-1 read, and when Tier 1 accepted
+    /// nothing to select on, so a default report is byte-identical to one
+    /// written before the selector existed. **Text-free**: kinds, counts and
+    /// pass ids only. Report-only; nothing gates on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line1_selection: Option<Line1SelectionReport>,
+}
+
+/// Mirrors `synthpass_bench::provider_bench::Line1SelectionDetail` for JSON.
+/// Key set and order pinned by a test. **Text-free** (ADR-0027): a verdict, a
+/// reason, counts, pass ids and `PassTransform` labels.
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct Line1SelectionReport {
+    /// `control` or `on`.
+    pub arm: &'static str,
+    /// `applied`, `proposed`, `unresolved`, `ambiguous` or `none`.
+    pub verdict: &'static str,
+    /// `out_of_scope`, `kept`, `no_candidate`, `issuer_unresolved`,
+    /// `repeated_line` or `digit_in_name_field`; `null` for `applied`,
+    /// `proposed` and `ambiguous`.
+    pub reason: Option<&'static str>,
+    pub eligible: usize,
+    pub distinct: usize,
+    /// Whether the proposal's names differ from the accepted read's.
+    pub names_changed: bool,
+    /// The OCR passes whose readings include the proposed line 1, in execution
+    /// order. Empty without a pass trace (a replay, or `--dump-ocr-passes`) and
+    /// unless the verdict is `applied` or `proposed`.
+    pub source_passes: Vec<String>,
+    /// Those passes' `PassTransform` labels, each once.
+    pub source_transforms: Vec<String>,
+}
+
+impl From<crate::provider_bench::Line1SelectionDetail> for Line1SelectionReport {
+    fn from(detail: crate::provider_bench::Line1SelectionDetail) -> Self {
+        Self {
+            arm: detail.arm,
+            verdict: detail.verdict,
+            reason: detail.reason,
+            eligible: detail.eligible,
+            distinct: detail.distinct,
+            names_changed: detail.names_changed,
+            source_passes: detail.source_passes,
+            source_transforms: detail.source_transforms,
+        }
+    }
 }
 
 impl From<AssertionBucket> for AssertionBucketReport {
@@ -422,6 +478,13 @@ pub struct ProviderRow {
     /// parser (issue #443). **Report-only**: the document stays in its
     /// off-denominator bucket and no gate reads this count yet.
     pub checksum_valid_on_failed_specimen: usize,
+    /// How many documents got each shadow line-1 selector verdict (#574):
+    /// `applied`, `proposed`, `unresolved`, `ambiguous` and `none`, every key
+    /// present, over the documents whose `line1_selection` is recorded.
+    /// **Absent** when none is (the arm is `off`, or the provider makes no
+    /// Tier-1 read). Report-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line1_selection_counts: Option<BTreeMap<&'static str, usize>>,
 }
 
 /// The `checksum_failed_specimen` documents whose read nonetheless passed
@@ -452,6 +515,8 @@ impl From<ProviderReport> for ProviderRow {
     fn from(r: ProviderReport) -> Self {
         let checksum_valid_on_failed_specimen =
             checksum_valid_reads_on_failed_specimens(&r.documents_detail).len();
+        let line1_selection_counts =
+            crate::provider_bench::line1_selection_counts(&r.documents_detail);
         Self {
             provider_id: r.provider_id,
             documents: r.documents,
@@ -508,6 +573,12 @@ impl From<ProviderReport> for ProviderRow {
                     unsupported_fields: d.unsupported_fields,
                     names_exact: d.names_exact,
                     name_error: d.name_error,
+                    field_correctness: d.field_correctness.map(|fields| {
+                        fields
+                            .into_iter()
+                            .map(|(field, correctness)| (field, correctness.as_str()))
+                            .collect()
+                    }),
                     ocr_ms: d.ocr_elapsed.as_millis(),
                     retry_variant_id: d.retry_variant_id,
                     retry_damaged_recovery: d.retry_damaged_recovery,
@@ -515,12 +586,14 @@ impl From<ProviderReport> for ProviderRow {
                     retry_stop: d.retry_stop,
                     chargrid: d.chargrid,
                     tier1_damaged_recovery: d.tier1_damaged_recovery,
+                    line1_selection: d.line1_selection.map(Into::into),
                 })
                 .collect(),
             tier1_hit_rate: r.tier1_hit_rate.into(),
             strict_tier1_hit_rate: r.strict_tier1_hit_rate.into(),
             ocr_arms: r.ocr_arms.into(),
             checksum_valid_on_failed_specimen,
+            line1_selection_counts,
         }
     }
 }
@@ -555,6 +628,13 @@ pub struct Report {
     /// a clean null. Quote this field, never the variable you believe you
     /// set.
     pub mrz_class_sweep_arm: &'static str,
+    /// The shadow line-1 selector arm this run measured (#574), as the binary
+    /// resolved it -- `off`, `control` or `on`, from
+    /// `SYNTHPASS_MRZ_LINE1_SELECT`. **Always serialized**, beside
+    /// `mrz_class_sweep_arm` and for the same reason: an unrecognised value
+    /// falls back to `off` silently, so quote this field, never the variable
+    /// you believe you set.
+    pub mrz_line1_select_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded — one `NativeOcr` instance shared across every
     /// provider row, so this is a single run-level fact, not per-provider.
@@ -966,6 +1046,7 @@ mod tests {
             count: 1,
             seed_start: None,
             mrz_class_sweep_arm: "off",
+            mrz_line1_select_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -995,6 +1076,7 @@ mod tests {
             count: 1,
             seed_start: None,
             mrz_class_sweep_arm: "off",
+            mrz_line1_select_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1045,6 +1127,7 @@ mod tests {
     fn damaged_recovery_keys_are_always_present_null_or_set() {
         fn detail(name: &str) -> DocumentDetailReport {
             DocumentDetailReport {
+                line1_selection: None,
                 name: name.to_string(),
                 asset_id: None,
                 mrz_found: true,
@@ -1058,6 +1141,7 @@ mod tests {
                 unsupported_fields: Vec::new(),
                 names_exact: None,
                 name_error: None,
+                field_correctness: None,
                 ocr_ms: 0,
                 retry_variant_id: None,
                 retry_damaged_recovery: None,
@@ -1204,6 +1288,7 @@ mod tests {
             unsupported_fields: Vec::new(),
             names_exact: None,
             name_error: None,
+            field_correctness: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
             retry_damaged_recovery: None,
@@ -1211,6 +1296,7 @@ mod tests {
             retry_stop: None,
             chargrid: None,
             tier1_damaged_recovery: None,
+            line1_selection: None,
         }
     }
 
@@ -1341,5 +1427,100 @@ mod tests {
             snap.refusal_population, 2,
             "Redacted + NoMrzExpected are off-denominator; NoMrzFound is scored"
         );
+    }
+
+    // ---- #574: the shadow line-1 selector in the report ----
+
+    fn selection(
+        verdict: &'static str,
+        reason: Option<&'static str>,
+    ) -> crate::provider_bench::Line1SelectionDetail {
+        crate::provider_bench::Line1SelectionDetail {
+            arm: "control",
+            verdict,
+            reason,
+            eligible: 1,
+            distinct: 1,
+            names_changed: true,
+            source_passes: vec!["pass-04".to_string()],
+            source_transforms: vec!["mrz_variants:2".to_string()],
+        }
+    }
+
+    /// The default (`off`) writes no `line1_selection` key on a document and no
+    /// `line1_selection_counts` key on the provider row, so a default report is
+    /// byte-identical to one written before the selector existed.
+    #[test]
+    fn off_writes_no_line1_selection_key() {
+        let details = vec![detail("a", Some("a"), None)];
+        let json = serde_json::to_value(ProviderRow::from(mrz_report_with_details(details)))
+            .expect("serialize row");
+        assert!(json.get("line1_selection_counts").is_none(), "{json}");
+        assert!(
+            json["documents_detail"][0].get("line1_selection").is_none(),
+            "{json}"
+        );
+    }
+
+    /// The key set and its order are the schema: pinned here, and text-free.
+    #[test]
+    fn a_recorded_selection_serializes_its_pinned_keys_in_order() {
+        let mut proposed = detail("a", Some("a"), None);
+        proposed.line1_selection = Some(selection("proposed", None));
+        let json =
+            serde_json::to_string(&ProviderRow::from(mrz_report_with_details(vec![proposed])))
+                .expect("serialize row");
+        assert!(
+            json.contains(
+                r#""line1_selection":{"arm":"control","verdict":"proposed","reason":null,"eligible":1,"distinct":1,"names_changed":true,"source_passes":["pass-04"],"source_transforms":["mrz_variants:2"]}"#
+            ),
+            "{json}"
+        );
+    }
+
+    /// Every verdict is a key of the counts, in a fixed order, so an arm that
+    /// never proposed reads `0` and two arms' counts diff key by key.
+    #[test]
+    fn the_verdict_counts_carry_every_verdict_key() {
+        let mut kept = detail("kept", Some("kept"), None);
+        kept.line1_selection = Some(selection("none", Some("kept")));
+        let mut applied = detail("applied", Some("applied"), None);
+        applied.line1_selection = Some(selection("applied", None));
+        let mut also_kept = detail("also", Some("also"), None);
+        also_kept.line1_selection = Some(selection("none", Some("kept")));
+        let json = serde_json::to_value(ProviderRow::from(mrz_report_with_details(vec![
+            kept, applied, also_kept,
+        ])))
+        .expect("serialize row");
+        assert_eq!(
+            json["line1_selection_counts"],
+            serde_json::json!({
+                "applied": 1,
+                "proposed": 0,
+                "unresolved": 0,
+                "ambiguous": 0,
+                "none": 2,
+            })
+        );
+    }
+
+    /// The top-level arm is always serialized, beside the class-sweep arm.
+    #[test]
+    fn the_report_always_carries_the_line1_select_arm() {
+        let report = Report {
+            timestamp_unix: 0,
+            source: "real-specimens",
+            profile: None,
+            format: None,
+            count: 0,
+            seed_start: None,
+            mrz_class_sweep_arm: "off",
+            mrz_line1_select_arm: "control",
+            model_paths: ModelPathsReport::default(),
+            providers: Vec::new(),
+        };
+        let json = serde_json::to_value(&report).expect("serialize report");
+        assert_eq!(json["mrz_line1_select_arm"], "control");
+        assert_eq!(json["mrz_class_sweep_arm"], "off");
     }
 }

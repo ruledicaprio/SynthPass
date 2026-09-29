@@ -48,15 +48,15 @@ An arm is one directory, holding whatever the A/B measured:
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --asset <asset_id> ...
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --json
-    python tools/bench_ab_diff.py A B --expect-identical [--check-pass-trace] [--ignore KEY ...] [--json]
+    python tools/bench_ab_diff.py A B --expect-identical [--check-pass-trace] [--check-report] [--ignore KEY ...] [--json]
 
 `--asset` (repeatable) adds a status block for a named real specimen, whether or
 not it changed. Give the `asset_id` as the outcome ledger spells it, such as
 `passports/Kosovo_Passport_Specimen_P0_RKS_2023_mrz.jpg`.
 
 `--expect-identical` is the neutrality mode, for a change that should move
-nothing (see below). `--check-pass-trace` and `--ignore` are refused without
-it, and `--asset` is refused with it: that mode prints no zones.
+nothing (see below). `--check-pass-trace`, `--check-report` and `--ignore` are
+refused without it, and `--asset` is refused with it: that mode prints no zones.
 
 **Exit status:**
 - **0** if every pair compared is an A/B. Under `--expect-identical`, also
@@ -72,10 +72,12 @@ it, and `--asset` is refused with it: that mode prints no zones.
   - two arms with nothing in common to compare;
   - an arm measured with a private or local track;
   - under `--expect-identical`, `--check-pass-trace` when neither arm has a
-    pass trace.
+    pass trace, and `--check-report` when neither arm has a real `report.json`
+    with `documents_detail` rows.
 - **3**, only under `--expect-identical`: the pair is an A/B but not identical.
-  A difference in a row, a dump, a pass trace or a dumped text; a dump row or
-  block in one arm only; a format or the real run in one arm only.
+  A difference in a row, a dump, a pass trace, a report row (`--check-report`)
+  or a dumped text; a dump row or block in one arm only; a format or the real
+  run in one arm only.
 
 Codes 0, 1 and 2 mean the same in both modes. When several apply, 2 wins over 1
 and 1 wins over 3.
@@ -110,6 +112,14 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   per asset, whenever both arms have the file, with or without
   `--check-pass-trace`. With the file in one arm only, they are not compared,
   which is no failure, as for the dump.
+- **`--check-report`** also compares the real arms' `report.json`: the `mrz`
+  provider's `documents_detail` rows, per asset, after the same ignores (`ocr_ms`
+  is one). Those rows hold every per-document field the ledger and the dump do not
+  (`check_states`, `retry_damaged_recovery`, `tier1_damaged_recovery`, the
+  assertion counts, `field_correctness`), so this is the check that a replay
+  reproduced them. It is opt-in because a change under test may legitimately move
+  them. Without it `report.json` is not read in this mode. With the file in one
+  arm only, the rows are not compared; in neither arm, the flag is refused.
 - **`--check-pass-trace`,** in whichever arm has the trace (`ocr_passes` in a
   synthetic report; `provider-bench-ocr-passes.jsonl` on the real side):
   - orders and ids are contiguous, and `general` appears only at 0;
@@ -124,8 +134,19 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   dumped texts compared by hash. One in a single arm is not an A/B: the retry
   loop is wall-clock budgeted, so the two arms did not run the same search.
 
-A difference in the run identity (flags, OCR arms, model paths) is named as a
-note and does not change the verdict.
+A difference in the run identity (flags, OCR arms, model paths, `replay_of`) is
+named as a note and does not change the verdict.
+
+**A capture and its replay.** `provider-bench --replay-ocr-passes` (ADR-0024,
+amendment 3) reads a captured pass file instead of running OCR. Between the
+capture and its replay this mode can reach NEUTRAL, and the ignores above are
+exactly what allows it: `ocr_ms` is zero in the replay, `run_manifest` names
+another file, and the replay writes no pass trace, so the trace rows are not
+compared. Everything else must match. Run it with `--check-report` to include the
+per-document report fields.
+
+Without `--check-report`, `report.json` is not read in this mode, so
+`field_correctness` is not compared here. The ledger, dump and trace rows are.
 
 ## What it prints
 
@@ -148,14 +169,32 @@ note and does not change the verdict.
 - **The flag-only changes,** grouped by the keys that moved.
 - **Real:**
   - **Each arm's identity:** commit, dirty tree, flags, OCR arms, corpus
-    manifest, class-sweep arm and model paths. A different corpus or different
+    manifest, class-sweep arm, line-1 selector arm and model paths, and, for a replay
+    (`provider-bench --replay-ocr-passes`), `replay_of`: the capture's run-manifest
+    file name and its SHA-256. A different corpus or different
     image bytes means the pair is not an A/B. Any other difference is printed,
     since it may be the lever under test.
+  - **The shadow line-1 selector** (`report.json`'s `mrz_line1_select_arm` and
+    `documents_detail[].line1_selection`, #574), when either arm recorded it: each
+    arm's selector arm and verdict counts (`applied`, `proposed`, `unresolved`,
+    `ambiguous`, `none`), the asset ids with `applied`, `proposed` or `ambiguous`,
+    and a flag for every asset `proposed` in one arm whose counterpart arm, which
+    also recorded the selector, neither applied nor proposed it. Under a
+    `control` vs `on` pair the proposed and applied sets are equal, so a flag is a
+    fidelity failure. Verdict names and asset ids only, never a line of text.
   - **Tier-1 hits over both denominators,** and names exact among the hits with
     name truth.
   - **An alarm** for any `false_positive_mrz`, and for any checksum-valid read of
     a `checksum_failed_specimen`.
   - Every document whose outcome, MRZ format or names result changed.
+  - **Field correctness per document** (`report.json`'s
+    `documents_detail[].field_correctness`, #574): per field, how many
+    documents went exact -> wrong, wrong -> exact, exact -> unread and
+    unread -> exact, and the documents with any exact -> non-exact field,
+    named by asset id and field name. The maps hold field names and the verdicts
+    `exact`, `wrong` and `unread`, never a value. A field is compared on the
+    documents whose map has it in both arms. An arm whose report lacks the maps
+    prints "not recorded".
   - Every document whose recovered zone changed, with its lines in each arm and,
     where the corpus has a fixture, which lines match it.
   - Every document dumped in one arm only, named, with its outcome in each arm.
@@ -171,6 +210,8 @@ A report written before a key existed is compared on what both arms have:
   accepted reads print `n/a`.
 - If either arm lacks `check_states`, no seed is classed a valid miss, and valid
   misses print `n/a`.
+- If either arm's `report.json` lacks `field_correctness`, or the report is
+  absent, the per-document field transitions print "not recorded".
 
 ## Privacy
 
@@ -207,6 +248,18 @@ PREFIX_FIELDS = ("document_type", "issuing_country")
 # The five formats in the order the dated notes list them; any other report
 # name sorts after them, alphabetically.
 FORMAT_ORDER = ("td1", "td2", "td3", "mrva", "mrvb")
+# `CoreField::ALL`'s order, the order the report's field names print in. A name
+# outside it (a field added later) sorts after these.
+FIELD_ORDER = ("document_type", "issuing_country", "document_number", "surname", "given_names",
+               "nationality", "date_of_birth", "sex", "date_of_expiry", "personal_number",
+               "optional_data_1", "optional_data_2")
+FIELD_VERDICTS = ("exact", "wrong", "unread")
+# The shadow line-1 selector's verdicts (#574), in the order the report counts them
+# and this script prints them; `LINE1_LISTED` are the ones whose asset ids are named.
+LINE1_VERDICTS = ("applied", "proposed", "unresolved", "ambiguous", "none")
+LINE1_LISTED = ("applied", "proposed", "ambiguous")
+# The transitions counted per field: (before, after) verdicts.
+FIELD_TRANSITIONS = (("exact", "wrong"), ("wrong", "exact"), ("exact", "unread"), ("unread", "exact"))
 # Per-seed keys that record how a read was reached, not what it read.
 FLAG_KEYS = ("check_states", "line1_flagged", "tier1_damaged_recovery",
              "retry_damaged_recovery", "retry_stop", "retry_variant_id")
@@ -440,7 +493,9 @@ def identity(archive: dict | None, report: dict | None) -> dict:
         "flags": normalized_flags(archive.get("flags")),
         "ocr_arms": archive.get("ocr_arms"),
         "corpus_manifest_sha256": archive.get("corpus_manifest_sha256"),
+        "replay_of": archive.get("replay_of"),
         "mrz_class_sweep_arm": report.get("mrz_class_sweep_arm"),
+        "mrz_line1_select_arm": report.get("mrz_line1_select_arm"),
         "model_paths": report.get("model_paths"),
     }
 
@@ -470,6 +525,106 @@ def real_summary(outcomes: dict[str, dict], report: dict | None) -> dict:
         "false_positive_mrz": sum(1 for r in outcomes.values() if r.get("outcome") == "false_positive_mrz"),
         "checksum_valid_on_failed_specimen": provider.get("checksum_valid_on_failed_specimen"),
     }
+
+
+def field_correctness_maps(report: dict | None) -> dict[str, dict[str, str]] | None:
+    """The mrz provider's per-document `field_correctness`, by asset id: field
+    name -> `exact`, `wrong` or `unread`. `None` when the report is absent or
+    records none, an arm measured before #574 PR 2. A document without ground
+    truth has no map and is not in the result."""
+    rows = mrz_provider(report).get("documents_detail") or []
+    maps = {r["asset_id"]: r["field_correctness"] for r in rows
+            if r.get("asset_id") and isinstance(r.get("field_correctness"), dict)}
+    return maps or None
+
+
+def field_order(name: str) -> tuple[int, str]:
+    return (FIELD_ORDER.index(name) if name in FIELD_ORDER else len(FIELD_ORDER), name)
+
+
+def compare_field_correctness(before: dict | None, after: dict | None) -> dict:
+    """Per-field transitions between two arms' maps, by field name and asset id,
+    never by value. A field is compared on the documents whose map has it in
+    both arms. `transitions` and `regressions` are `None` unless both arms
+    recorded the maps."""
+    out = {"recorded": [before is not None, after is not None], "documents": [None, None],
+           "compared": None, "transitions": None, "regressions": None}
+    if before is None or after is None:
+        return out
+    common = sorted(set(before) & set(after))
+    counts: dict[str, Counter] = {}
+    regressions = []
+    for asset in common:
+        lost = {}
+        for name in sorted(set(before[asset]) & set(after[asset]), key=field_order):
+            # Only the three verdicts are ever kept: a map that carried anything
+            # else, a value, would still never reach the output.
+            pair = tuple(v if v in FIELD_VERDICTS else "other" for v in (before[asset][name], after[asset][name]))
+            if pair in FIELD_TRANSITIONS:
+                counts.setdefault(name, Counter())[f"{pair[0]}->{pair[1]}"] += 1
+            if pair[0] == "exact" and pair[1] != "exact":
+                lost[name] = pair[1]
+        if lost:
+            regressions.append({"asset": asset, "fields": lost})
+    out.update({
+        "documents": [len(before), len(after)],
+        "compared": len(common),
+        "transitions": {name: {f"{b}->{a}": counts[name][f"{b}->{a}"] for b, a in FIELD_TRANSITIONS}
+                        for name in sorted(counts, key=field_order)},
+        "regressions": regressions,
+    })
+    return out
+
+
+def line1_selection_rows(report: dict | None) -> dict[str, dict] | None:
+    """The mrz provider's per-document `line1_selection`, by asset id. `None`
+    when no document carries one: the arm was `off`, or the report predates the
+    selector. A document without an accepted read has none and is not in the
+    result."""
+    rows = mrz_provider(report).get("documents_detail") or []
+    selections = {r["asset_id"]: r["line1_selection"] for r in rows
+                  if r.get("asset_id") and isinstance(r.get("line1_selection"), dict)}
+    return selections or None
+
+
+def line1_verdict(row: dict | None) -> str | None:
+    """A row's verdict, kept only if it is one of the five the report writes:
+    anything else would be reported as `other`, never echoed."""
+    if row is None:
+        return None
+    verdict = row.get("verdict")
+    return verdict if verdict in LINE1_VERDICTS else "other"
+
+
+def line1_selection_summary(report: dict | None, rows: dict[str, dict] | None) -> dict:
+    """One arm's selector arm, verdict counts and the asset ids of the verdicts
+    worth naming. Ids and counts only."""
+    counts = Counter(line1_verdict(row) for row in (rows or {}).values())
+    return {
+        "arm": (report or {}).get("mrz_line1_select_arm"),
+        "recorded": rows is not None,
+        "counts": {v: counts[v] for v in (*LINE1_VERDICTS, "other") if counts[v] or v in LINE1_VERDICTS},
+        "assets": {v: sorted(a for a, row in (rows or {}).items() if line1_verdict(row) == v)
+                   for v in LINE1_LISTED},
+    }
+
+
+def compare_line1_selection(before: dict | None, after: dict | None) -> dict | None:
+    """The two arms' selector verdicts, and the assets whose verdicts disagree in
+    the way a `control` vs `on` pair must not: `proposed` in one arm, and in the
+    other neither `applied` nor `proposed`. Compared only when both arms recorded
+    the selector, and only on the assets both recorded. `None` when neither did."""
+    rb, ra = line1_selection_rows(before), line1_selection_rows(after)
+    if rb is None and ra is None:
+        return None
+    flags = []
+    if rb is not None and ra is not None:
+        for asset in sorted(set(rb) & set(ra)):
+            vb, va = line1_verdict(rb[asset]), line1_verdict(ra[asset])
+            if (vb == "proposed" and va not in ("applied", "proposed")) \
+                    or (va == "proposed" and vb not in ("applied", "proposed")):
+                flags.append({"asset": asset, "verdicts": [vb, va]})
+    return {"arms": [line1_selection_summary(before, rb), line1_selection_summary(after, ra)], "flags": flags}
 
 
 def real_state(row: dict | None) -> dict | None:
@@ -551,6 +706,9 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
         "dumped": [len(zb), len(za)],
         "outcome_changes": outcome_changes,
         "names_changes": names_changes,
+        "field_correctness": compare_field_correctness(field_correctness_maps(report_b),
+                                                       field_correctness_maps(report_a)),
+        "line1_selection": compare_line1_selection(report_b, report_a),
         "zone_changes": zone_changes,
         "dumped_in_one_arm_only": one_arm,
         "watched": watched,
@@ -599,7 +757,13 @@ def short_identity(ident: dict) -> str:
     commit = (ident["git_commit"] or "unknown")[:7]
     dirty = {True: ", dirty tree", False: "", None: ", tree state unknown"}[ident["working_tree_dirty"]]
     corpus = (ident["corpus_manifest_sha256"] or "unknown")[:12]
-    return f"commit {commit}{dirty}; corpus {corpus}; class sweep {na(ident['mrz_class_sweep_arm'])}"
+    text = f"commit {commit}{dirty}; corpus {corpus}; class sweep {na(ident['mrz_class_sweep_arm'])}"
+    replay = ident.get("replay_of")
+    if replay:
+        # The capture's manifest file name and hash: no document text.
+        text += f"; replay of {na(replay.get('run_manifest'))} (sha256 {str(replay.get('sha256'))[:12]})"
+    # Last, so what precedes it reads as it did before the selector existed.
+    return text + f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
 
 
 def render_synthetic(name: str, r: dict) -> list[str]:
@@ -630,6 +794,45 @@ def render_synthetic(name: str, r: dict) -> list[str]:
         groups.setdefault(tuple(f["keys"]), []).append(f["seed"])
     for keys, seeds in sorted(groups.items()):
         lines.append(f"  flag-only ({', '.join(keys)}): seeds {', '.join(map(str, seeds))}")
+    return lines
+
+
+def render_field_correctness(fc: dict) -> list[str]:
+    """Field names, asset ids and counts only: the maps hold no value."""
+    if fc["transitions"] is None:
+        missing = [side for side, recorded in zip(("before", "after"), fc["recorded"]) if not recorded]
+        return [f"  field correctness: not recorded in the {' and '.join(missing)} arm's report.json "
+                f"(documents_detail.field_correctness)"]
+    lines = [f"  field correctness: {fc['compared']} documents compared "
+             f"({fc['documents'][0]} -> {fc['documents'][1]} with truth)"]
+    for name, counts in fc["transitions"].items():
+        lines.append(f"    {name}: " + ", ".join(f"{t} {n}" for t, n in counts.items()))
+    if not fc["transitions"]:
+        lines.append("    no transitions")
+    lines.append(f"  documents with an exact -> non-exact field: {len(fc['regressions'])}")
+    for r in fc["regressions"]:
+        lines.append(f"    {r['asset']}: " + ", ".join(f"{name} exact -> {now}" for name, now in r["fields"].items()))
+    return lines
+
+
+def render_line1_selection(sel: dict | None) -> list[str]:
+    """Verdict names, counts and asset ids only: the report holds no text."""
+    if sel is None:
+        return []
+    lines = ["  line-1 selection:"]
+    for side, arm in zip(("before", "after"), sel["arms"]):
+        if not arm["recorded"]:
+            lines.append(f"    {side}: arm {na(arm['arm'])}, not recorded")
+            continue
+        counts = ", ".join(f"{v} {n}" for v, n in arm["counts"].items())
+        lines.append(f"    {side}: arm {na(arm['arm'])}; {counts}")
+        for verdict in LINE1_LISTED:
+            if arm["assets"][verdict]:
+                lines.append(f"      {verdict}: {', '.join(arm['assets'][verdict])}")
+    lines.append(f"  assets proposed in one arm and neither applied nor proposed in the other: "
+                 f"{len(sel['flags'])}")
+    for flag in sel["flags"]:
+        lines.append(f"    FLAG {flag['asset']}: {arrow([na(v) for v in flag['verdicts']])}")
     return lines
 
 
@@ -667,6 +870,8 @@ def render_real(real: dict) -> list[str]:
         b, a = c["before"], c["after"]
         lines.append(f"    {c['asset']}: names_exact {b['names_exact']} -> {a['names_exact']}, "
                      f"name_error {b['name_error']} -> {a['name_error']}")
+    lines += render_field_correctness(real["field_correctness"])
+    lines += render_line1_selection(real.get("line1_selection"))
     if real["zones_compared"]:
         lines.append(f"  zones dumped {arrow(real['dumped'])}; zone changes: {len(real['zone_changes'])}")
         for z in real["zone_changes"]:
@@ -988,7 +1193,27 @@ def neutral_synthetic(name: str, before: Path, after: Path, extra: list[str], ch
     return out
 
 
-def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool) -> dict:
+def report_rows(path: Path) -> dict[str, dict] | None:
+    """The mrz provider's `documents_detail` rows of a `report.json`, by asset id.
+    `None` when there is no such file or it holds no rows (an arm that predates
+    them). A row without an `asset_id`, or a repeated one, is an error."""
+    if not path.is_file():
+        return None
+    rows = mrz_provider(load_json(path)).get("documents_detail")
+    if not rows:
+        return None
+    out: dict[str, dict] = {}
+    for row in rows:
+        asset = row.get("asset_id")
+        if asset is None:
+            raise ValueError(f"{path.name}: a documents_detail row has no asset_id")
+        if asset in out:
+            raise ValueError(f"{path.name}: documents_detail has asset_id {asset!r} twice")
+        out[asset] = row
+    return out
+
+
+def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool, check_report: bool = False) -> dict:
     ledgers = [load_jsonl(d / OUTCOMES) for d in (before, after)]
     ignore, _ = ignored_keys(*ledgers, extra)
     out: dict = {
@@ -1004,7 +1229,18 @@ def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool)
         "trace_text_differs_from_dump": None,
         "trace_retry_differs_from_ledger": None,
         "passes": 0,
+        "report_requested": check_report,
+        "report_present": [False, False],
+        "report_rows": None,
+        "report_differ": None,
     }
+    if check_report:
+        reports = [report_rows(d / REPORT) for d in (before, after)]
+        out["report_present"] = [r is not None for r in reports]
+        if reports[0] is not None and reports[1] is not None:
+            report_ignore, _ = ignored_keys(*reports, extra)
+            out["report_rows"] = [len(reports[0]), len(reports[1])]
+            out["report_differ"] = failing(row_differences(reports[0], reports[1], report_ignore))
     dumps = [load_jsonl(d / ZONES, PROVIDER) if (d / ZONES).is_file() else None for d in (before, after)]
     if dumps[0] is not None and dumps[1] is not None:
         dump_ignore, _ = ignored_keys(*dumps, extra)
@@ -1049,14 +1285,16 @@ def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool)
 
 
 CHECK_KEYS = ("results_differ", "dump_blocks_differ", "text_vs_dump_differ", "trace_breaks",
-              "ledger_differ", "dump_differ", "trace_differ", "trace_text_differs_from_dump", "trace_retry_differs_from_ledger")
+              "ledger_differ", "dump_differ", "trace_differ", "trace_text_differs_from_dump", "trace_retry_differs_from_ledger",
+              "report_differ")
 
 
 def failed_checks(section: dict) -> int:
     return sum((section.get(k) or {}).get("failed", 0) for k in CHECK_KEYS)
 
 
-def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], check_trace: bool) -> dict:
+def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], check_trace: bool,
+                    check_report: bool = False) -> dict:
     """The neutrality verdict for two arms, given `compare_arms`'s result for
     them. `exit` follows the default mode's codes, and adds 3, a pair that is an
     A/B but not identical."""
@@ -1064,10 +1302,12 @@ def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], che
     synthetic_b, synthetic_a = synthetic_reports(before), synthetic_reports(after)
     synthetic = {name: neutral_synthetic(name, synthetic_b[name], synthetic_a[name], extra, check_trace)
                  for name in base["synthetic"]}
-    real = neutral_real(before / "real", after / "real", extra, check_trace) if base["real"] else None
+    real = neutral_real(before / "real", after / "real", extra, check_trace, check_report) if base["real"] else None
     if check_trace and not any(s["trace_breaks"] is not None for s in synthetic.values()) \
             and not (real and real["trace"]):
         raise Refused("--check-pass-trace was asked, and neither arm has a pass trace to check")
+    if check_report and not (real and any(real["report_present"])):
+        raise Refused("--check-report was asked, and neither arm has a real report.json with documents_detail to check")
     if base["real"]:
         real["differs_in"] = [k for k in base["real"]["identity"][0] if k != "git_commit"
                               and base["real"]["identity"][0][k] != base["real"]["identity"][1][k]]
@@ -1128,17 +1368,21 @@ def render_neutral(result: dict) -> str:
             f"{r['dump_rows'][0]}/{r['dump_rows'][1]} rows, differ {show_check(r['dump_differ'])} (raw_ocr_text by sha256)"
         rows = "not compared (an arm has no trace file)" if r["trace_rows"] is None else \
             f"{r['trace_rows'][0]}/{r['trace_rows'][1]} rows, differ {show_check(r['trace_differ'])}"
+        report = "" if not r["report_requested"] else (
+            " | report rows not compared (an arm has no report.json rows)" if r["report_rows"] is None else
+            f" | report rows {r['report_rows'][0]}/{r['report_rows'][1]}, differ {show_check(r['report_differ'])}")
         trace = "invariants not checked" if r["trace"] is None else (
             f"{r['passes']} passes, documents without a row {r['trace_documents_without_row']}, "
             f"ocr_text != dump {show_check(r['trace_text_differs_from_dump'])}, "
             f"retry fields != ledger {show_check(r['trace_retry_differs_from_ledger'])}, "
             f"breaks {show_check(r['trace_breaks'])}")
         lines.append(f"real: documents {r['documents'][0]}/{r['documents'][1]} | ledger differ "
-                     f"{show_check(r['ledger_differ'])} | dump {dump} | trace rows {rows} | trace {trace} -> {mark}")
+                     f"{show_check(r['ledger_differ'])} | dump {dump} | trace rows {rows} | trace {trace}{report} -> {mark}")
         if r["differs_in"]:
             lines.append(f"  note: the runs differ in {', '.join(r['differs_in'])}")
         for label, key in (("ledger differ", "ledger_differ"), ("dump rows differ", "dump_differ"),
                            ("trace rows differ", "trace_differ"),
+                           ("report rows differ", "report_differ"),
                            ("trace ocr_text differs from the dump", "trace_text_differs_from_dump"),
                            ("trace retry fields differ from the ledger", "trace_retry_differs_from_ledger"),
                            ("trace breaks", "trace_breaks")):
@@ -1167,12 +1411,15 @@ def main(argv: list[str] | None = None) -> int:
                          "prints counts and ids, never OCR text")
     ap.add_argument("--check-pass-trace", action="store_true",
                     help="with --expect-identical: check the invariants of `ocr_passes` and the real pass trace")
+    ap.add_argument("--check-report", action="store_true",
+                    help="with --expect-identical: also compare the real arms' report.json documents_detail rows "
+                         "(every per-document field the ledger and the dump lack)")
     ap.add_argument("--ignore", action="append", default=[], metavar="KEY",
                     help="with --expect-identical: a row key to leave out of the comparison (repeatable)")
     args = ap.parse_args(argv)
     if not args.expect_identical:
-        if args.check_pass_trace or args.ignore:
-            ap.error("--check-pass-trace and --ignore need --expect-identical")
+        if args.check_pass_trace or args.check_report or args.ignore:
+            ap.error("--check-pass-trace, --check-report and --ignore need --expect-identical")
     elif args.asset:
         ap.error("--asset does not apply to --expect-identical, which prints no zones")
     for arm in (args.before, args.after):
@@ -1182,7 +1429,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = compare_arms(args.before, args.after, args.asset)
         if args.expect_identical and (result["synthetic"] or result["real"]):
-            verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace)
+            verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace,
+                                      args.check_report)
     except Refused as e:
         print(f"bench_ab_diff: refused: {e}", file=sys.stderr)
         return 2

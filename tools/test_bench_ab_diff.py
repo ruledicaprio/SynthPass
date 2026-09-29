@@ -46,8 +46,10 @@ def archive(flags=("--real-specimens", "--mrz-only", "--dump-ocr"), commit="a" *
             "ocr_arms": ocr_arms or {"chargrid": "off", "texture": "on"}}
 
 
-def provider_report(rate=None, failed_specimen_valid=0):
+def provider_report(rate=None, failed_specimen_valid=0, details=None):
     provider = {"provider_id": "mrz", "checksum_valid_on_failed_specimen": failed_specimen_valid}
+    if details is not None:
+        provider["documents_detail"] = details
     if rate is not None:
         provider["tier1_hit_rate"] = {"status": "computed", "rate": rate}
     return {"mrz_class_sweep_arm": "off", "model_paths": {"detection": "d", "recognition": "r"},
@@ -268,6 +270,32 @@ class Arms(unittest.TestCase):
         self.assertTrue(any(p.startswith("image bytes differ for 1 asset") for p in problems))
         self.assertEqual(run(before, other_corpus)[0], 1)
 
+    def test_a_replays_identity_block_names_the_capture_it_replayed(self):
+        asset = "passports/X.jpg"
+        replay_of = {"run_manifest": "provider-bench-ocr-run-cap.json", "sha256": "d" * 64}
+        capture = write_arm(self.root, "capture", outcomes=[outcome_row(asset, "hit")],
+                            zones=[zone_row(asset, ["A"])], run=archive(), real_report=provider_report(1.0))
+        replay = write_arm(self.root, "replay", outcomes=[outcome_row(asset, "hit")],
+                           zones=[zone_row(asset, ["A"])], run={**archive(), "replay_of": replay_of},
+                           real_report=provider_report(1.0))
+        r = d.compare_arms(capture, replay, [])["real"]
+        self.assertEqual(r["problems"], [], "a replay of a capture is an A/B")
+        self.assertEqual([i["replay_of"] for i in r["identity"]], [None, replay_of])
+        self.assertIn("replay_of is recorded in one arm only", r["notes"])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertIn("after:  commit aaaaaaa; corpus cccccccccccc; class sweep off; "
+                      "replay of provider-bench-ocr-run-cap.json (sha256 dddddddddddd)", out)
+        self.assertNotIn("replay of", next(line for line in out.splitlines() if line.startswith("  before:")))
+        # Two replays of different captures differ in that identity, as a note, not a refusal.
+        other = write_arm(self.root, "other", outcomes=[outcome_row(asset, "hit")],
+                          zones=[zone_row(asset, ["A"])],
+                          run={**archive(), "replay_of": {**replay_of, "sha256": "e" * 64}},
+                          real_report=provider_report(1.0))
+        r = d.compare_arms(replay, other, [])["real"]
+        self.assertEqual(r["problems"], [])
+        self.assertTrue(any(n.startswith("replay_of differs") for n in r["notes"]))
+
     def test_a_document_dumped_in_one_arm_only_is_named(self):
         # provider-bench does not dump a document_number_mismatch, so a hit that
         # becomes one leaves the dump.
@@ -344,6 +372,273 @@ class Arms(unittest.TestCase):
         code, out, _ = run(before, after, "--json")
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(out)["synthetic"]["td1.json"]["changed"], [])
+
+
+def detail_row(asset, fields=None):
+    """A `documents_detail` row; `fields` is the `field_correctness` map, absent when None."""
+    row = {"name": asset.rsplit("/", 1)[-1], "asset_id": asset, "read_ok": True}
+    if fields is not None:
+        row["field_correctness"] = fields
+    return row
+
+
+class FieldCorrectness(unittest.TestCase):
+    A, B, C, D = "passports/A.jpg", "passports/B.jpg", "id_cards/C.jpg", "misc/D.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def arm(self, name, details):
+        assets = [row["asset_id"] for row in details] if details else [self.A]
+        return write_arm(self.root, name, outcomes=[outcome_row(a, "hit") for a in assets],
+                         real_report=provider_report(1.0, details=details))
+
+    def fc(self, before, after):
+        n = len(list(Path(self.root).iterdir()))
+        arms = self.arm(f"before{n}", before), self.arm(f"after{n}", after)
+        return d.compare_arms(*arms, [])["real"]["field_correctness"]
+
+    def pair(self):
+        before = [
+            detail_row(self.A, {"issuing_country": "exact", "surname": "exact", "sex": "wrong"}),
+            detail_row(self.B, {"issuing_country": "exact", "date_of_birth": "unread", "sex": "exact"}),
+            detail_row(self.C, {"issuing_country": "wrong", "surname": "exact"}),
+            detail_row(self.D),
+        ]
+        after = [
+            detail_row(self.A, {"issuing_country": "wrong", "surname": "exact", "sex": "exact"}),
+            detail_row(self.B, {"issuing_country": "exact", "date_of_birth": "exact", "sex": "unread"}),
+            detail_row(self.C, {"issuing_country": "exact", "surname": "unread"}),
+            detail_row(self.D),
+        ]
+        return before, after
+
+    def test_transitions_are_counted_per_field(self):
+        fc = self.fc(*self.pair())
+        self.assertEqual(fc["recorded"], [True, True])
+        self.assertEqual((fc["documents"], fc["compared"]), ([3, 3], 3))
+        self.assertEqual(list(fc["transitions"]), ["issuing_country", "surname", "date_of_birth", "sex"])
+        self.assertEqual(fc["transitions"]["issuing_country"],
+                         {"exact->wrong": 1, "wrong->exact": 1, "exact->unread": 0, "unread->exact": 0})
+        self.assertEqual(fc["transitions"]["surname"],
+                         {"exact->wrong": 0, "wrong->exact": 0, "exact->unread": 1, "unread->exact": 0})
+        self.assertEqual(fc["transitions"]["date_of_birth"],
+                         {"exact->wrong": 0, "wrong->exact": 0, "exact->unread": 0, "unread->exact": 1})
+        self.assertEqual(fc["transitions"]["sex"],
+                         {"exact->wrong": 0, "wrong->exact": 1, "exact->unread": 1, "unread->exact": 0})
+
+    def test_documents_with_an_exact_to_non_exact_field_are_named_by_asset_and_field(self):
+        fc = self.fc(*self.pair())
+        self.assertEqual(fc["regressions"], [
+            {"asset": self.C, "fields": {"surname": "unread"}},
+            {"asset": self.A, "fields": {"issuing_country": "wrong"}},
+            {"asset": self.B, "fields": {"sex": "unread"}},
+        ])
+
+    def test_an_unchanged_pair_has_no_transitions_and_no_regressions(self):
+        before, _ = self.pair()
+        fc = self.fc(before, before)
+        self.assertEqual((fc["transitions"], fc["regressions"]), ({}, []))
+        _, out, _ = run(self.arm("b2", before), self.arm("a2", before))
+        self.assertIn("no transitions", out)
+        self.assertIn("documents with an exact -> non-exact field: 0", out)
+
+    def test_an_arm_without_the_key_is_not_recorded(self):
+        before, after = self.pair()
+        old = [detail_row(r["asset_id"]) for r in before]
+        for label, pair, recorded in (("before", (old, after), [False, True]),
+                                      ("after", (before, old), [True, False]),
+                                      ("both", (old, old), [False, False])):
+            fc = self.fc(*pair)
+            self.assertEqual(fc["recorded"], recorded, label)
+            self.assertIsNone(fc["transitions"], label)
+            self.assertIsNone(fc["regressions"], label)
+        _, out, _ = run(self.arm("b2", old), self.arm("a2", after))
+        self.assertIn("field correctness: not recorded in the before arm's report.json", out)
+        # A report with no documents_detail at all, and no report.json, are the same.
+        bare = write_arm(self.root, "bare", outcomes=[outcome_row(self.A, "hit")], real_report=provider_report(1.0))
+        no_report = write_arm(self.root, "no_report", outcomes=[outcome_row(self.A, "hit")])
+        recorded = self.arm("recorded", before)
+        for arm in (bare, no_report):
+            r = d.compare_arms(arm, recorded, [])["real"]
+            self.assertEqual(r["field_correctness"]["recorded"], [False, True])
+
+    def test_only_the_fields_a_document_has_in_both_arms_are_compared(self):
+        fc = self.fc([detail_row(self.A, {"surname": "exact", "sex": "exact"})],
+                     [detail_row(self.A, {"surname": "wrong"}), detail_row(self.B, {"surname": "wrong"})])
+        self.assertEqual(fc["documents"], [1, 2])
+        self.assertEqual(fc["compared"], 0 + 1)
+        self.assertEqual(list(fc["transitions"]), ["surname"])
+        self.assertEqual(fc["regressions"], [{"asset": self.A, "fields": {"surname": "wrong"}}])
+
+    def test_the_rendering_names_fields_and_assets_and_never_a_value(self):
+        before, after = self.pair()
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after))
+        self.assertEqual(code, 0)
+        self.assertIn("field correctness: 3 documents compared (3 -> 3 with truth)", out)
+        self.assertIn("issuing_country: exact->wrong 1, wrong->exact 1, exact->unread 0, unread->exact 0", out)
+        self.assertIn("documents with an exact -> non-exact field: 3", out)
+        self.assertIn(f"{self.A}: issuing_country exact -> wrong", out)
+        self.assertIn(f"{self.C}: surname exact -> unread", out)
+
+    def test_a_map_that_carried_a_value_would_still_print_none(self):
+        before = [detail_row(self.A, {"surname": "exact", "sex": "SECRETVALUE9"})]
+        after = [detail_row(self.A, {"surname": "SECRETVALUE9", "sex": "exact"})]
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--json")
+        self.assertEqual(code, 0)
+        self.assertNotIn("SECRETVALUE9", out)
+        code, out, _ = run(self.arm("b3", before), self.arm("a3", after))
+        self.assertNotIn("SECRETVALUE9", out)
+        self.assertIn(f"{self.A}: surname exact -> other", out)
+
+    def test_the_json_result_carries_the_comparison(self):
+        before, after = self.pair()
+        _, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--json")
+        fc = json.loads(out)["real"]["field_correctness"]
+        self.assertEqual(fc["compared"], 3)
+        self.assertEqual(len(fc["regressions"]), 3)
+
+    def test_expect_identical_does_not_read_the_report_maps(self):
+        # The neutrality mode compares the ledger, dump and trace rows; report.json is not among them.
+        before, after = self.pair()
+        code, out, _ = run(self.arm("b2", before), self.arm("a2", after), "--expect-identical")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("field correctness", out)
+
+
+def selection_row(verdict, reason=None, arm="control", **extra):
+    """A `documents_detail[].line1_selection` object, as `provider-bench` writes it."""
+    row = {"arm": arm, "verdict": verdict, "reason": reason, "eligible": 1, "distinct": 1,
+           "names_changed": verdict in ("applied", "proposed"), "source_passes": [], "source_transforms": []}
+    row.update(extra)
+    return row
+
+
+def selection_detail(asset, selection=None):
+    row = {"name": asset.rsplit("/", 1)[-1], "asset_id": asset, "read_ok": True}
+    if selection is not None:
+        row["line1_selection"] = selection
+    return row
+
+
+class Line1Selection(unittest.TestCase):
+    A, B, C, D = "passports/A.jpg", "passports/B.jpg", "id_cards/C.jpg", "misc/D.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def arm(self, name, details, select_arm=None):
+        assets = [row["asset_id"] for row in details] if details else [self.A]
+        real_report = provider_report(1.0, details=details)
+        if select_arm is not None:
+            real_report["mrz_line1_select_arm"] = select_arm
+        return write_arm(self.root, name, outcomes=[outcome_row(a, "hit") for a in assets],
+                         real_report=real_report)
+
+    def real(self, before, after, before_arm=None, after_arm=None):
+        n = len(list(Path(self.root).iterdir()))
+        arms = self.arm(f"before{n}", before, before_arm), self.arm(f"after{n}", after, after_arm)
+        return d.compare_arms(*arms, [])["real"]
+
+    def control_and_on(self):
+        control = [
+            selection_detail(self.A, selection_row("proposed")),
+            selection_detail(self.B, selection_row("none", "kept")),
+            selection_detail(self.C, selection_row("ambiguous")),
+            selection_detail(self.D, selection_row("unresolved", "issuer_unresolved")),
+        ]
+        on = [
+            selection_detail(self.A, selection_row("applied", arm="on")),
+            selection_detail(self.B, selection_row("none", "kept", arm="on")),
+            selection_detail(self.C, selection_row("ambiguous", arm="on")),
+            selection_detail(self.D, selection_row("unresolved", "issuer_unresolved", arm="on")),
+        ]
+        return control, on
+
+    def test_the_identity_block_names_each_arms_selector_arm(self):
+        control, on = self.control_and_on()
+        r = self.real(control, on, "control", "on")
+        self.assertEqual([i["mrz_line1_select_arm"] for i in r["identity"]], ["control", "on"])
+        self.assertIn("mrz_line1_select_arm differs: control -> on", r["notes"])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertIn("line-1 select control", next(x for x in out.splitlines() if x.startswith("  before:")))
+        self.assertTrue(next(x for x in out.splitlines() if x.startswith("  after:")).endswith("line-1 select on"))
+
+    def test_verdict_counts_and_the_named_assets_per_arm(self):
+        control, on = self.control_and_on()
+        sel = self.real(control, on, "control", "on")["line1_selection"]
+        before, after = sel["arms"]
+        self.assertEqual(before["counts"], {"applied": 0, "proposed": 1, "unresolved": 1, "ambiguous": 1, "none": 1})
+        self.assertEqual(after["counts"], {"applied": 1, "proposed": 0, "unresolved": 1, "ambiguous": 1, "none": 1})
+        self.assertEqual(before["assets"], {"applied": [], "proposed": [self.A], "ambiguous": [self.C]})
+        self.assertEqual(after["assets"], {"applied": [self.A], "proposed": [], "ambiguous": [self.C]})
+        self.assertEqual(sel["flags"], [], "control's proposal is on's application: no flag")
+
+    def test_an_asset_proposed_in_one_arm_and_not_applied_in_the_other_is_flagged(self):
+        control, on = self.control_and_on()
+        on[0] = selection_detail(self.A, selection_row("none", "no_candidate", arm="on"))
+        sel = self.real(control, on, "control", "on")["line1_selection"]
+        self.assertEqual(sel["flags"], [{"asset": self.A, "verdicts": ["proposed", "none"]}])
+        # Either direction.
+        flipped = self.real(on, control, "on", "control")["line1_selection"]
+        self.assertEqual(flipped["flags"], [{"asset": self.A, "verdicts": ["none", "proposed"]}])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(control, on, "control", "on"), "real_in_one_arm_only": None})
+        self.assertIn(f"FLAG {self.A}: proposed -> none", out)
+
+    def test_two_control_arms_are_not_flagged(self):
+        control, _ = self.control_and_on()
+        sel = self.real(control, control, "control", "control")["line1_selection"]
+        self.assertEqual(sel["flags"], [])
+
+    def test_an_arm_that_recorded_nothing_is_reported_not_flagged(self):
+        control, _ = self.control_and_on()
+        off = [selection_detail(row["asset_id"]) for row in control]
+        sel = self.real(off, control, "off", "control")["line1_selection"]
+        self.assertEqual([a["recorded"] for a in sel["arms"]], [False, True])
+        self.assertEqual(sel["flags"], [])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(off, control, "off", "control"), "real_in_one_arm_only": None})
+        self.assertIn("before: arm off, not recorded", out)
+
+    def test_neither_arm_recording_prints_nothing_and_an_old_report_still_compares(self):
+        plain = [selection_detail(self.A), selection_detail(self.B)]
+        r = self.real(plain, plain)
+        self.assertIsNone(r["line1_selection"])
+        self.assertEqual(r["notes"], [])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertNotIn("line-1 selection", out)
+        self.assertTrue(next(x for x in out.splitlines() if x.startswith("  before:")).endswith("line-1 select n/a"))
+
+    def test_the_rendering_names_verdicts_and_assets_and_never_a_line(self):
+        control, on = self.control_and_on()
+        # A row that carried document text under a key this script never reads.
+        control[0]["line1_selection"]["proposed_line1"] = "P<UTOSECRETLINE9<<"
+        control[1]["line1_selection"]["verdict"] = "SECRETLINE9"
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(control, on, "control", "on"), "real_in_one_arm_only": None})
+        self.assertIn("line-1 selection:", out)
+        self.assertIn(f"proposed: {self.A}", out)
+        self.assertIn(f"applied: {self.A}", out)
+        self.assertIn("other 1", out, "an unknown verdict is counted as `other`, never echoed")
+        self.assertNotIn("SECRETLINE9", out)
+        self.assertNotIn("P<UTO", out)
+
+    def test_the_json_result_carries_the_comparison(self):
+        control, on = self.control_and_on()
+        before = self.arm("jb", control, "control")
+        after = self.arm("ja", on, "on")
+        code, out, _ = run(before, after, "--json")
+        self.assertEqual(code, 0, out)
+        sel = json.loads(out)["real"]["line1_selection"]
+        self.assertEqual(sel["arms"][0]["arm"], "control")
+        self.assertEqual(sel["arms"][1]["assets"]["applied"], [self.A])
 
 
 SECRET = "SECRETLINE9"
@@ -665,6 +960,108 @@ class ExpectIdentical(unittest.TestCase):
         self.assertEqual(self.neutral(*pair)[0], 3)
         self.assertEqual(self.neutral(*pair, "--ignore", "chargrid")[0], 0)
 
+    def capture_and_replay(self, replay_report=None, replay_ledger=None, replay_dump=None):
+        """A capture (a live run with the pass trace) and its replay (no OCR: `ocr_ms` 0,
+        another run manifest, no pass trace), the pair `--replay-ocr-passes` produces."""
+        asset = "passports/X.jpg"
+        self.pairs = getattr(self, "pairs", 0) + 1
+        ledger = {**outcome_row(asset, "hit", names_exact=True), "ocr_ms": 8123, "retry_stop": "variant_valid",
+                  "retry_variant_id": "pass-01", "retry_budget_hit": False}
+        dump = {**zone_row(asset, ["A", "B"]), "run_manifest": "provider-bench-ocr-run-cap.json",
+                "mrz_band_score": 0.5}
+        trace = {"asset_id": asset, "ocr_text": "RAW OCR TEXT", "retry_stop": "variant_valid",
+                 "retry_variant_id": "pass-01", "retry_budget_hit": False,
+                 "run_manifest": "provider-bench-ocr-run-cap.json", "ocr_passes": traced(0)["ocr_passes"]}
+        detail = {**detail_row(asset, {"surname": "exact"}), "ocr_ms": 8123, "retry_damaged_recovery": False,
+                  "tier1_damaged_recovery": False, "check_states": {"composite": True}}
+        capture_flags = ("--real-specimens", "--mrz-only", "--dump-ocr", "--dump-ocr-hits", "--dump-ocr-passes",
+                         "--out", "cap/real/report.json")
+        replay_flags = ("--real-specimens", "--mrz-only", "--replay-ocr-passes", "cap/real", "--dump-ocr",
+                        "--dump-ocr-hits", "--out", "rep/real/report.json")
+        capture = write_arm(self.root, f"capture{self.pairs}", outcomes=[ledger], zones=[dump], passes=[trace],
+                            run=archive(flags=capture_flags),
+                            real_report=provider_report(1.0, details=[detail]))
+        replay = write_arm(
+            self.root, f"replay{self.pairs}",
+            outcomes=[replay_ledger or {**ledger, "ocr_ms": 0}],
+            zones=[replay_dump or {**dump, "run_manifest": "provider-bench-ocr-run-rep.json"}],
+            run={**archive(flags=replay_flags),
+                 "replay_of": {"run_manifest": "provider-bench-ocr-run-cap.json", "sha256": "d" * 64}},
+            real_report=provider_report(1.0, details=[replay_report or {**detail, "ocr_ms": 0}]))
+        return capture, replay
+
+    def test_a_capture_and_its_replay_can_reach_neutral(self):
+        # Only the run manifest's name, timing and the pass trace the replay does not write differ;
+        # the existing ignore rules cover all three, so no --ignore is needed.
+        capture, replay = self.capture_and_replay()
+        code, out, err = self.neutral(capture, replay)
+        self.assertEqual((code, err), (0, ""), out)
+        self.assertTrue(out.endswith("NEUTRAL\n"))
+        self.assertIn("trace rows not compared (an arm has no trace file)", out)
+        self.assertIn("dump 1/1 rows, differ 0", out)
+        self.assertIn("note: the runs differ in flags, replay_of", out)
+        self.assertNotIn("RAW OCR TEXT", out)
+
+    def test_a_replay_that_read_something_else_is_not_neutral(self):
+        asset = "passports/X.jpg"
+        moved = {**outcome_row(asset, "checksum_failed", names_exact=True), "ocr_ms": 0, "retry_stop": "variant_valid",
+                 "retry_variant_id": "pass-01", "retry_budget_hit": False}
+        capture, replay = self.capture_and_replay(replay_ledger=moved)
+        code, out, _ = self.neutral(capture, replay)
+        self.assertEqual(code, 3)
+        self.assertIn("ledger differ: passports/X.jpg (outcome)", out)
+        # A band score the replay lost is a dump difference, which is why the row carries it.
+        capture, replay = self.capture_and_replay(replay_dump={**zone_row(asset, ["A", "B"]), "mrz_band_score": None,
+                                                              "run_manifest": "provider-bench-ocr-run-rep.json"})
+        code, out, _ = self.neutral(capture, replay)
+        self.assertEqual(code, 3)
+        self.assertIn("dump rows differ: passports/X.jpg (mrz_band_score)", out)
+
+    def test_check_report_compares_the_per_document_report_fields_a_replay_must_reproduce(self):
+        capture, replay = self.capture_and_replay()
+        code, out, _ = self.neutral(capture, replay, "--check-report")
+        self.assertEqual(code, 0, out)
+        self.assertIn("report rows 1/1, differ 0", out)
+        # The fields the ledger and the dump lack: without --check-report they go unseen ...
+        lost = {**detail_row("passports/X.jpg", {"surname": "exact"}), "ocr_ms": 0, "retry_damaged_recovery": None,
+                "tier1_damaged_recovery": False, "check_states": {"composite": True}}
+        capture, replay = self.capture_and_replay(replay_report=lost)
+        self.assertEqual(self.neutral(capture, replay)[0], 0)
+        # ... and with it, the one that moved is named.
+        code, out, _ = self.neutral(capture, replay, "--check-report")
+        self.assertEqual(code, 3)
+        self.assertIn("report rows differ: passports/X.jpg (retry_damaged_recovery)", out)
+        self.assertTrue(out.endswith("NOT NEUTRAL\n"))
+        code, out, _ = self.neutral(capture, replay, "--check-report", "--json")
+        self.assertEqual(json.loads(out)["real"]["report_differ"],
+                         {"failed": 1, "ids": ["passports/X.jpg (retry_damaged_recovery)"]})
+
+    def test_check_report_needs_a_report_in_some_arm_and_skips_a_one_sided_pair(self):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit")]
+        none_a = write_arm(self.root, "n1", outcomes=rows)
+        none_b = write_arm(self.root, "n2", outcomes=rows)
+        code, out, err = self.neutral(none_a, none_b, "--check-report")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("--check-report was asked", err)
+        with_report = write_arm(self.root, "r1", outcomes=rows,
+                                real_report=provider_report(1.0, details=[detail_row(asset, {})]))
+        code, out, _ = self.neutral(with_report, none_a, "--check-report")
+        self.assertEqual(code, 0, out)
+        self.assertIn("report rows not compared (an arm has no report.json rows)", out)
+        # Not requested: nothing about the report is printed.
+        self.assertNotIn("report rows", self.neutral(with_report, none_a)[1])
+
+    def test_a_report_row_without_an_asset_id_or_repeated_is_an_error(self):
+        asset = "passports/X.jpg"
+        rows = [outcome_row(asset, "hit")]
+        good = write_arm(self.root, "g", outcomes=rows, real_report=provider_report(1.0, details=[detail_row(asset)]))
+        repeated = write_arm(self.root, "d", outcomes=rows,
+                             real_report=provider_report(1.0, details=[detail_row(asset), detail_row(asset)]))
+        code, out, err = self.neutral(good, repeated, "--check-report")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("twice", err)
+
     def test_the_new_flags_need_the_new_mode_and_default_exit_codes_hold(self):
         arm = self.synth("a", [doc(0, True)])
         for flag in (["--check-pass-trace"], ["--ignore", "note"]):
@@ -676,6 +1073,12 @@ class ExpectIdentical(unittest.TestCase):
         changed = self.synth("b", [doc(0, True, line1_flagged=True)])
         self.assertEqual(run(arm, changed)[0], 0)
         self.assertEqual(self.neutral(arm, changed)[0], 3)
+
+    def test_check_report_needs_the_neutrality_mode(self):
+        arm = self.synth("only", [doc(0, True)])
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            run(arm, arm, "--check-report")
+        self.assertEqual(raised.exception.code, 2)
 
 
 if __name__ == "__main__":

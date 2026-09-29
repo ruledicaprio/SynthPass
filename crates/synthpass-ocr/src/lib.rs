@@ -66,9 +66,11 @@
 //!
 //! `SYNTHPASS_OCR_CHARGRID` (`off`/`on`/`control`, default `off`) runs the
 //! [`chargrid`] module's fixed-grid MRZ name-line repair after a Tier-1 hit —
-//! see that module's doc for the mechanism (`ocrs` never emits an isolated
-//! `<`) and [`OcrPage::chargrid`] for what a run records. Unset, the OCR path
-//! is byte-identical to before this arm existed.
+//! see that module's doc for why name lines still lose fillers even though both
+//! engines emit isolated `<`
+//! (`knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`), and
+//! [`OcrPage::chargrid`] for what a run records. Unset, the OCR path is
+//! byte-identical to before this arm existed.
 //!
 //! # Pass trace (benchmark-only)
 //!
@@ -1776,9 +1778,10 @@ fn skew_mode() -> preprocess::SkewMode {
 
 /// Which post-hit chargrid name-line repair, if any, to run after a Tier-1
 /// hit. See `crate::chargrid`'s module doc for the mechanism this wires in
-/// (`ocrs` never emits an isolated `<`, so the MRZ name line comes back
-/// missing fillers a fixed-pitch grid can recover) and [`chargrid_mode`] for
-/// the env var.
+/// (both engines emit isolated `<`, but name lines still come back missing
+/// fillers a fixed-pitch grid can recover; see
+/// `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`) and
+/// [`chargrid_mode`] for the env var.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChargridMode {
     /// No post-hit repair pass at all — behaviour byte-for-byte unchanged
@@ -2069,11 +2072,11 @@ const CHARGRID_MATCH_PREFIX_LEN: usize = 5;
 /// characters — the comparison key [`match_chargrid_line`] matches a
 /// recognized line against the parsed name line's own prefix.
 ///
-/// `ocrs` never emits `<` at all (see `crate::chargrid`'s module doc), so a
-/// recognized line's text is already filler-free; stripping `<` from the
-/// *parsed* line before comparing is what makes the two sides comparable —
-/// comparing raw prefixes would compare `"P<UTO"` against `"PUTOE"` and never
-/// match.
+/// Both engines emit isolated `<`, including on name lines; see
+/// `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`. Stripping
+/// fillers from both the parsed and recognized prefixes makes the comparison
+/// independent of which fillers survived — comparing raw prefixes could
+/// compare `"P<UTO"` against `"PUTOE"` and never match.
 fn chargrid_match_prefix(line: &str) -> String {
     line.chars()
         .filter(|&c| c != '<')

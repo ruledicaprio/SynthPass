@@ -189,6 +189,28 @@ pub fn generate_corpus(
         .collect()
 }
 
+/// Lowercase hex SHA-256 of the rendered image a synthetic document feeds OCR:
+/// its width and height (each a little-endian `u32`), then its RGBA8 pixels.
+///
+/// The nightly bench publishes this per document as the generator fingerprint.
+/// A seed renders the same pixels until the generator or a degrade profile
+/// changes, and then the hash changes with it, so a re-render is visible in the
+/// data without a list of the commits that could cause one. It covers the image
+/// only: `labels` are not hashed, and a change that moves only a label leaves
+/// it unchanged.
+pub fn render_sha256(image: &DynamicImage) -> String {
+    let rgba = image.to_rgba8();
+    let mut hasher = Sha256::new();
+    hasher.update(rgba.width().to_le_bytes());
+    hasher.update(rgba.height().to_le_bytes());
+    hasher.update(rgba.as_raw());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// One real specimen loaded from `samples/`: its file stem, the decoded
 /// image, and OPTIONAL ground truth read from a sibling
 /// `samples/ocr_fixtures/<stem>.json` label file (the v1 `Extraction` shape
@@ -1376,7 +1398,11 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
+    // `read_tier1`, not `find_and_parse_with`: the same Tier-1 read the product's
+    // `MrzReader` makes, so a `SYNTHPASS_MRZ_LINE1_SELECT` arm (#574) reaches this
+    // benchmark too. With the arm `off` it is exactly `find_and_parse_with` under
+    // `mrz_parse_options()`.
+    let decoded = match synthpass_die::read_tier1(&text).parsed {
         Ok(decoded) => decoded,
         // #536: a structural refusal, not "nothing MRZ-shaped was found" —
         // give it its own miss bucket rather than folding it into
@@ -2559,6 +2585,56 @@ mod tests {
             2,
             "include-covers walk: both files are returned: {with_covers:?}"
         );
+    }
+
+    /// The nightly's generator fingerprint: the same seed and profile hash to
+    /// the same 64 hex characters on every render, and a different seed or a
+    /// different profile hashes differently. Pins determinism of the render,
+    /// not any particular value, so a deliberate generator change does not
+    /// break it.
+    #[test]
+    fn render_sha256_is_deterministic_for_a_fixed_seed_and_profile() {
+        let hashes = |profile: super::ProfileChoice, seed: u64| -> Vec<String> {
+            super::generate_corpus(profile, seed, 2, synthpass_gen::DocumentType::TD3)
+                .iter()
+                .map(|doc| super::render_sha256(&doc.image))
+                .collect()
+        };
+        for profile in [super::ProfileChoice::Clean, super::ProfileChoice::Worn] {
+            let first = hashes(profile, 7);
+            assert_eq!(
+                first,
+                hashes(profile, 7),
+                "{profile:?}: a re-render differs"
+            );
+            assert!(
+                first
+                    .iter()
+                    .all(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())),
+                "{profile:?}: not lowercase hex SHA-256: {first:?}"
+            );
+            assert_ne!(first[0], first[1], "{profile:?}: two seeds share a hash");
+        }
+        assert_ne!(
+            hashes(super::ProfileChoice::Clean, 7),
+            hashes(super::ProfileChoice::Worn, 7),
+            "a profile that degrades the image must change the hash"
+        );
+    }
+
+    /// The hash covers dimensions and every pixel: one changed pixel, or the
+    /// same pixel count in another shape, is a different fingerprint.
+    #[test]
+    fn render_sha256_covers_dimensions_and_pixels() {
+        let base = image::DynamicImage::ImageRgba8(image::RgbaImage::new(4, 2));
+        let reshaped = image::DynamicImage::ImageRgba8(image::RgbaImage::new(2, 4));
+        let mut touched = image::RgbaImage::new(4, 2);
+        touched.put_pixel(3, 1, image::Rgba([1, 0, 0, 0]));
+        let touched = image::DynamicImage::ImageRgba8(touched);
+        let hash = super::render_sha256(&base);
+        assert_eq!(hash, super::render_sha256(&base));
+        assert_ne!(hash, super::render_sha256(&reshaped));
+        assert_ne!(hash, super::render_sha256(&touched));
     }
 
     /// The full, real end-to-end load — every image under `samples/`
