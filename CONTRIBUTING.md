@@ -300,6 +300,15 @@ count drops or any miss bucket grows past the committed baseline in
 `knowledge/benchmarks/real-specimen-mrz-baseline.json`. It is the real-corpus
 counterpart to `ci.yml`'s synthetic `m4-hit-rate` gate.
 
+The gate also prints a **report-only per-document diff** against the committed outcome ledger, in
+the job log and the run's step summary: the documents whose outcome changed, then every other
+recorded field (format, checksum validity, name error, retry path), with the timing-sensitive
+ones reported separately. It never fails the build, but a PR that touches extraction should read
+it (the "Inspect" step of the
+[benchmark maintenance contract](knowledge/benchmarks/README.md#benchmark-maintenance-contract)):
+a document can change format or retry path while every count stays put. It carries asset ids,
+field names, enumerated values and counts only, never OCR text.
+
 If your PR legitimately changes the real-specimen numbers — a parser improvement, or
 adding/removing a specimen — regenerate the baseline **in the same PR**:
 
