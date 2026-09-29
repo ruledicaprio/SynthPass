@@ -1467,6 +1467,7 @@ mod tests {
                 "prefix_wrong_accept",
                 "prefix_wrong_accepted_read",
                 "profile",
+                "render_sha256",
                 "retry_damaged_recovery",
                 "retry_variant_id",
                 "seed",
