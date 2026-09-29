@@ -95,8 +95,17 @@ jobs:
       # self-heals if a run is missed, retried, or dispatched by hand.
       - name: Pick this run's seed window
         id: seed
+        # The dispatch input reaches the script through the environment, never
+        # through `${{ }}` inside `run:`, which would splice it into the shell
+        # source.
+        env:
+          COUNT_INPUT: ${{ github.event.inputs.count }}
         run: |
-          count="${{ github.event.inputs.count || '200' }}"
+          count="${COUNT_INPUT:-200}"
+          if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::count must be a positive integer, got '$count'"
+            exit 1
+          fi
           if [ -s data-branch/dataset.jsonl ]; then
             max_seed=$(jq -s 'map(.seed) | max' data-branch/dataset.jsonl)
             seed_start=$(( max_seed + 1 ))
@@ -116,10 +125,15 @@ jobs:
             --out bench-report.json
 
       - name: Flatten this run's report into the dataset and commit
+        env:
+          SEED_START: ${{ steps.seed.outputs.seed_start }}
+          COUNT: ${{ steps.seed.outputs.count }}
         run: |
+          dataset="$PWD/data-branch/dataset.jsonl"
           jq -c --arg sha "$GITHUB_SHA" \
             '.timestamp_unix as $ts | .results[] | {run_timestamp_unix: $ts, git_sha: $sha, seed, profile, hit, reason: (.reason // null), elapsed_ms}' \
-            bench-report.json >> data-branch/dataset.jsonl
+            bench-report.json > new-rows.jsonl
+          cat new-rows.jsonl >> "$dataset"
 
           # The invariant the seed window is supposed to guarantee, checked
           # rather than assumed. (seed, profile) identifies a document and the
@@ -127,12 +141,14 @@ jobs:
           # seed, so a repeat is a duplicate measurement that would silently
           # double-weight those rows for any future tuning. Refuse to publish
           # rather than append a corpus someone has to clean up later.
-          dupes=$(jq -s '[group_by(.seed, .profile)[] | select(length > 1)] | length' \
-            data-branch/dataset.jsonl)
-          if [ "$dupes" != "0" ]; then
-            echo "::error::$dupes duplicate (seed, profile) pair(s) after this append — the seed window overlapped an earlier run. Not committing."
-            exit 1
-          fi
+          check_no_duplicates() {
+            dupes=$(jq -s '[group_by(.seed, .profile)[] | select(length > 1)] | length' "$dataset")
+            if [ "$dupes" != "0" ]; then
+              echo "::error::$dupes duplicate (seed, profile) pair(s) after this append — the seed window overlapped an earlier run. Not committing."
+              exit 1
+            fi
+          }
+          check_no_duplicates
 
           cd data-branch
           git config user.name "github-actions[bot]"
@@ -143,8 +159,35 @@ jobs:
           # and timings), so this is not, and never was, a duplicate guard.
           if git diff --cached --quiet; then
             echo "no new rows, nothing to commit"
-          else
-            total_rows=$(wc -l < dataset.jsonl)
-            git commit -m "data: append run (seed ${{ steps.seed.outputs.seed_start }}, count ${{ steps.seed.outputs.count }}) — ${total_rows} rows total"
-            git push origin bench-data
+            exit 0
           fi
+          total_rows=$(wc -l < dataset.jsonl)
+          git commit -m "data: append run (seed $SEED_START, count $COUNT) — ${total_rows} rows total"
+
+          # bench-charts.yml (through scripts/run-bench.ps1) also pushes to
+          # bench-data, and this run fetched it about fifteen minutes ago. The
+          # two write different files, so rebasing onto a newer tip cannot
+          # conflict. Retry instead of dropping this run's rows on a rejected
+          # push, and check the duplicate invariant again on the rebased file.
+          for attempt in 1 2 3 4 5; do
+            if git push origin bench-data; then
+              exit 0
+            fi
+            echo "::warning::push to bench-data rejected (attempt $attempt of 5); rebasing onto its new tip"
+            sleep $(( attempt * 20 ))
+            git pull --rebase origin bench-data
+            check_no_duplicates
+          done
+          echo "::error::could not push to bench-data after 5 attempts; this run's rows are kept in the bench-data-rows artifact"
+          exit 1
+
+      # A failed push must not lose the measured rows: keep them for 7 days,
+      # the same rows the dataset would have received and nothing more.
+      - name: Keep this run's rows when the commit or push failed
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-data-rows-${{ github.run_id }}
+          path: new-rows.jsonl
+          if-no-files-found: ignore
+          retention-days: 7
