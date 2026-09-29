@@ -292,7 +292,11 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
   visual-zone spelling ([ADR-0013](decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md)).
 - The five MRZ formats are tried in a fixed priority order (TD3 → MRV-B → MRV-A →
   TD1 → TD2) to avoid cross-format cannibalization; every candidate is
-  check-digit-verified before it is accepted.
+  check-digit-verified before it is accepted. The order no longer means "first valid wins":
+  a valid zone that shows a wrong-physical-line symptom (an issuer outside the country table,
+  two near-identical lines, a digit in a two-line format's name field) ranks below an
+  unflagged valid zone found later, of a later format or from the damaged-capture pass, and is
+  returned only when there is none (#593).
 - A document-number field whose first cell is a filler is refused outright, whatever its check
   digits say. The arithmetic cannot see a `0`, `A`, `K` or `U` read as `<` (all share residue 0
   with the filler; see `mrz::Blindspot`), and Doc 9303 enters data from the left-hand position of
@@ -301,8 +305,8 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
   still mean checksum consistency only. Interior fillers (Part 4 §4.2.2.2) and the long-number
   overflow filler in the check-digit cell stay legal. The rule covers the document number only.
 - A cell the image shows covered — a uniform fill of any tone, or blur measured against the
-  zone's own verified line — is reported `occluded`, never as text: `mrz::apply_occlusion` blanks
-  the field and `synthpass-die`'s `occlusion::apply` maps it onto the wire's `CoreField`
+  zone's own verified line — is reported `occluded`, never as a field value: `mrz::apply_occlusion` blanks
+  the field (`mrz_lines` keeps the read as validated, covered cells included) and `synthpass-die`'s `occlusion::apply` maps it onto the wire's `CoreField`
   vocabulary. A covered cell that feeds a check digit, or the format's one structural cell,
   refuses the whole zone (`MrzError::OccludedCheckedCell`) rather than reporting a value the
   arithmetic cannot back up, and it is **never reconstructed** from the check-digit arithmetic
