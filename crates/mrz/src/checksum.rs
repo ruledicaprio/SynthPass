@@ -409,6 +409,31 @@ mod tests {
     }
 
     #[test]
+    fn unmarked_double_k_is_not_evidence_of_a_separator() {
+        // The old VZOREC repair has the same shape as an ordinary double K
+        // in a name whose separator was dropped by OCR.
+        for name in ["JUKKAMARI", "PEKKAPETRI", "MIKKOMATTI", "HAKKINENHEIKKI"] {
+            assert_eq!(fix_name_separator(name), name);
+        }
+        assert_eq!(fix_name_separator("KUKKKKMARI"), "KUKKKKMARI");
+        assert_eq!(fix_name_separator("TAMM<<MIKK"), "TAMM<<MIKK");
+    }
+
+    #[test]
+    fn defiller_preserves_letters_next_to_noisy_name_padding() {
+        assert_eq!(defiller("KUKKKKMARI"), "KUKKKKMARI");
+        assert_eq!(defiller("KUKKK<<<"), "KUKK<<<<");
+        assert_eq!(defiller("TAMM<<MIKKK<<"), "TAMM<<MIKK<<<");
+        assert_eq!(defiller("JUKKA<<PEKKA<<<"), "JUKKA<<PEKKA<<<");
+    }
+
+    #[test]
+    fn defiller_repairs_padding_after_a_visible_filler() {
+        assert_eq!(defiller("SPECIMEN<<SPECIMEN<KLLLL"), "SPECIMEN<<SPECIMEN<<<<<<");
+        assert_eq!(defiller("MARIA<LLLL"), "MARIA<<<<<");
+    }
+
+    #[test]
     fn line1_fit_pads_the_tail_when_the_only_run_starts_before_the_name_field() {
         // A dropped document-code filler (`PCANMARTIN...` read for
         // `P<CANMARTIN...`) leaves exactly one `<` run, at index 1 — before
