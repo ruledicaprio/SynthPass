@@ -137,6 +137,76 @@ jobs:
       - name: Test synthpass-license vendor (signing/keygen) feature
         run: cargo test -p synthpass-license --features vendor
 
+      - name: Check the OCR backend feature builds alone
+        run: cargo check -p synthpass-pipeline --no-default-features --features inferer-native,ocr-native-rust
+
+      # synthpass-license's default build (no `vendor`) must stay signing-free —
+      # it's what synthpass-cli/synthpass-serve actually ship; `vendor` (the issuer
+      # binary's signing/keygen code) is checked separately so a break in
+      # either doesn't hide behind the other.
+      - name: Check synthpass-license feature combinations (each must build alone)
+        run: |
+          cargo check -p synthpass-license
+          cargo check -p synthpass-license --features vendor
+
+  # Split out of the `rust` job (2026-09-29) so the three native OCR tests no
+  # longer sit on that job's serial critical path. They have no data dependency
+  # on fmt/clippy/test; what they need is a *release* build of synthpass-ocr
+  # and synthpass-pipeline, and that build is the cost: with `lto = true` and
+  # `codegen-units = 1` in the release profile, #613's Rust (Linux) run spent
+  # 5 min 43 s in these three steps, about 4 min 40 s of it in the fat-LTO
+  # build and link, against 66 s of tests. Serial, the job took 9 min 27 s on
+  # a warm cache; with the release build in its own job the `rust` job is
+  # about 4 min and this one about 7 min, and the two overlap, as `m4-hit-rate`
+  # already does. Same total CI compute (one more checkout, toolchain and
+  # model download); a separate `rust-cache` key, so `rust` no longer carries
+  # the release artifacts in its cache either.
+  native-ocr:
+    name: Native OCR (release)
+    runs-on: ubuntu-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake pkg-config clang libclang-dev
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: v0.17.0
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      # Small (~12 MB total) and the URLs/checksums are fixed, so this runs on
+      # every push rather than being workflow_dispatch-gated like native-llm's
+      # ~1 GB GGUF download.
+      - name: Cache OCR .rten models
+        uses: actions/cache@v6
+        with:
+          path: |
+            text-detection.rten
+            text-recognition.rten
+          key: ocrs-rten-models-v1
+
+      - name: Download + checksum-verify the OCR .rten models
+        run: |
+          for f in text-detection.rten text-recognition.rten; do
+            if [ ! -f "$f" ]; then
+              curl -fL --retry 3 -o "$f" "https://ocrs-models.s3-accelerate.amazonaws.com/$f"
+            fi
+          done
+          echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
+          echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
+
       # These two steps are *smoke* tests — they assert the OCR stage runs and
       # the pipeline reaches a terminal result, never Tier-1 MRZ accuracy — but
       # they run real rten inference on full-size sample images, which dominated
@@ -166,17 +236,6 @@ jobs:
           SYNTHPASS_OCR_MAX_PASSES: "1"
         run: cargo test -p synthpass-pipeline --release --test rust_ocr_smoke -- --ignored
 
-      - name: Check the OCR backend feature builds alone
-        run: cargo check -p synthpass-pipeline --no-default-features --features inferer-native,ocr-native-rust
-
-      # synthpass-license's default build (no `vendor`) must stay signing-free —
-      # it's what synthpass-cli/synthpass-serve actually ship; `vendor` (the issuer
-      # binary's signing/keygen code) is checked separately so a break in
-      # either doesn't hide behind the other.
-      - name: Check synthpass-license feature combinations (each must build alone)
-        run: |
-          cargo check -p synthpass-license
-          cargo check -p synthpass-license --features vendor
 
   # Split out of the `rust` job (2026-09-05) so its ~3.5 min doesn't sit on
   # that job's serial critical path behind fmt/clippy/test/OCR-e2e — it has
