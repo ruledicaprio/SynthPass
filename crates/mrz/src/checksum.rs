@@ -129,9 +129,7 @@ pub(crate) fn defiller(s: &str) -> String {
             {
                 out.push_str(&s[i..i + 2]);
                 out.extend(std::iter::repeat_n('<', j - i - 2));
-            } else if j - i >= 4
-                && kl >= 3
-                && (after_filler || visible_filler || j == bytes.len())
+            } else if j - i >= 4 && kl >= 3 && (after_filler || visible_filler || j == bytes.len())
             {
                 out.extend(std::iter::repeat_n('<', j - i));
             } else {
