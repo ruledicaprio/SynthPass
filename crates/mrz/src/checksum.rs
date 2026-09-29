@@ -1,3 +1,4 @@
+//! ICAO 9303 check-digit math and generic OCR-repair primitives.
 //!
 //! A check digit is deterministic evidence rather than a model score: it
 //! either agrees with the candidate or it does not. What agreement establishes
