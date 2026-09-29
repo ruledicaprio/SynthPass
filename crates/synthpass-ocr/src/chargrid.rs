@@ -4,14 +4,13 @@
 //!
 //! The MRZ name line (`P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<`) is a
 //! fixed-pitch monospaced OCR-B grid — 44, 36 or 30 cells depending on
-//! format — but `ocrs`'s recognizer never emits the isolated `<` glyph at
-//! all: three probes run 2026-09-16 (`probe_chargrid.rs`, `probe_spaced.rs`,
-//! and a horizontal-stretch sweep, none committed) established that neither
-//! stretching the crop nor inserting blank gaps between cells before
-//! re-recognizing gets the model to read a lone filler — it simply drops
-//! it, so `KOVALENKO<<ANDRII` comes back as `KOVALENKOANDRII` and
-//! `mrz::clean_name` has nothing to split the given names on. No check
-//! digit covers the name line, so nothing downstream can prove which
+//! format. Both the general and MRZ engines emit isolated `<`, but the pass
+//! trace found that most isolated fillers in name fields are one surviving
+//! half of `<<` or one cell of a filler tail; repeated fillers are often
+//! dropped, so `KOVALENKO<<ANDRII` can still come back as
+//! `KOVALENKOANDRII` and `mrz::clean_name` has nothing to split the given
+//! names on (`knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`).
+//! No check digit covers the name line, so nothing downstream can prove which
 //! reading is right; this module recovers the *position* of each dropped
 //! filler from the fixed grid instead of asking the recognizer to read it.
 //!
@@ -41,11 +40,11 @@
 //! # Two probe findings this module encodes
 //!
 //! - A horizontal stretch of the crop and re-spacing the cells with blank
-//!   gaps were both tried and rejected in the 2026-09-16 probes: neither
-//!   changes what the recognizer reads, because the model has no representation
-//!   of "a `<` glyph" to produce regardless of how the input is laid out —
-//!   the fix has to happen after recognition, on the positions it already
-//!   returned.
+//!   gaps were both tried and rejected in the 2026-09-16 probes: neither made
+//!   the target lone filler survive in those crops. The later pass trace shows
+//!   that both engines do emit isolated `<` elsewhere; the repair is still
+//!   post-recognition because it must recover fillers absent from the returned
+//!   name line (`knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`).
 //! - The left-edge DP ([`align`]) took MRV-B line 1 from 0/10 to 5/10 exact
 //!   in the same probes, and never corrupted an already-dense (no missing
 //!   glyphs) line — the `n == cells` branch of [`fit_grid`] bypasses the DP
