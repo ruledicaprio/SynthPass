@@ -4,16 +4,15 @@
 //!
 //! The MRZ name line (`P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<`) is a
 //! fixed-pitch monospaced OCR-B grid — 44, 36 or 30 cells depending on
-//! format — but `ocrs`'s recognizer never emits the isolated `<` glyph at
-//! all: three probes run 2026-09-16 (`probe_chargrid.rs`, `probe_spaced.rs`,
-//! and a horizontal-stretch sweep, none committed) established that neither
-//! stretching the crop nor inserting blank gaps between cells before
-//! re-recognizing gets the model to read a lone filler — it simply drops
-//! it, so `KOVALENKO<<ANDRII` comes back as `KOVALENKOANDRII` and
-//! `mrz::clean_name` has nothing to split the given names on. No check
-//! digit covers the name line, so nothing downstream can prove which
-//! reading is right; this module recovers the *position* of each dropped
-//! filler from the fixed grid instead of asking the recognizer to read it.
+//! format. Both OCR engines do emit isolated `<`, mostly as one half of a
+//! `<<` or as a filler-tail cell, but they also drop printed fillers
+//! (see `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`).
+//! The name line can therefore still lose the separator — for example,
+//! `KOVALENKO<<ANDRII` can come back as `KOVALENKOANDRII`, leaving
+//! `mrz::clean_name` nothing to split the given names on. No check digit
+//! covers the name line, so nothing downstream can prove which reading is
+//! right; this module recovers the *position* of each dropped filler from
+//! the fixed grid instead of asking the recognizer to read it.
 //!
 //! # What this module does
 //!
