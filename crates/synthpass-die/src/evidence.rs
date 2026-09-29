@@ -84,7 +84,22 @@ pub struct Evidence {
     // ---- derived from what a reader produced ----
     /// Fields that came back with nothing usable. Never lists the two
     /// optional-data elements — see `ExtractionFields::missing` (ADR-0018).
+    /// Also never lists an occluded field — see `Reading::missing`'s own doc
+    /// comment (ADR-0026); this is the same exclusion applied at the
+    /// evidence layer, so `escalate_on_missing_fields` can never send a
+    /// covered field to Tier 2.
     pub missing: Vec<CoreField>,
+
+    // ---- from `synthpass_die::occlusion` ----
+    /// An occlusion mask covered a cell an ICAO check digit verifies (or the
+    /// format's one structural cell), so `synthpass_die::occlusion::apply`
+    /// refused the zone and the reading was not accepted (ADR-0026, decision
+    /// 7). `false` both when no occlusion was observed and when one was
+    /// observed but applied cleanly — see [`RoutingPolicy::decide`] for how
+    /// this is turned into an escalation.
+    ///
+    /// [`RoutingPolicy::decide`]: crate::routing::RoutingPolicy::decide
+    pub mrz_occlusion_refused: bool,
 }
 
 impl Evidence {

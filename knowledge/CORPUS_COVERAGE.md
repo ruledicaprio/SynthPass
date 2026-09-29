@@ -1,10 +1,8 @@
 # Corpus coverage — comprehensive world passport-check backlog
 
 Tracks Tier-1 MRZ corpus coverage against every ISO/ICAO country/entity code in
-`crates/mrz/src/countries.rs` (238 codes). This is the concrete backlog behind the "wider
-real-world corpus is the natural next accuracy milestone" note in
-`knowledge/ARCHITECTURE.md` §8 — grown one individually-vetted specimen at a time, per the
-checklist in `CONTRIBUTING.md`. **PRADO (`consilium.europa.eu/prado`) is never a source
+`crates/mrz/src/countries.rs` (238 codes), grown one individually-vetted specimen at a
+time, per the checklist in `CONTRIBUTING.md`. **PRADO (`consilium.europa.eu/prado`) is never a source
 here** — its copyright notice prohibits harvesting/redistributing its material outside
 official, non-commercial use; it's consulted only as a manual human reference, never
 scraped or stored. Which sources *are* allowed, and the review gates an agent-found candidate

@@ -8,7 +8,7 @@
 
 use crate::checksum::{
     aggressive_defiller, char_value, defiller, digitize, fix_doc_code, fix_name_separator,
-    is_mrz_charset, letterize, normalize_line, repair_positions, variants, verify,
+    is_mrz_charset, letterize, line1_variants, normalize_line, repair_positions, variants, verify,
 };
 use crate::repair::{solve_class_sweep, FieldKind, Resolution};
 use crate::{
@@ -1128,9 +1128,9 @@ fn td3_line1_variants(
         Td3Prefix::Ambiguous => Vec::new(),
         Td3Prefix::Repair(fixed) => vec![fixed],
         Td3Prefix::Keep => {
-            let candidates: Vec<String> = variants(raw, width, repair_td3_line1_shifted)
+            let candidates: Vec<String> = line1_variants(raw, width, repair_td3_line1_shifted)
                 .into_iter()
-                .chain(variants(raw, width, rep1))
+                .chain(line1_variants(raw, width, rep1))
                 .collect();
             // #469: the unshift chain above and `rep1` can each produce a
             // *distinct* 44-character line that individually passes
@@ -1203,11 +1203,11 @@ fn two_line_line1_variants_shifted(
         (44, b"V") => repair_mrv_a_line1_shifted,
         (36, b"V") => repair_mrv_b_line1_shifted,
         (36, b"IAC") => repair_td2_line1_shifted,
-        _ => return variants(raw, width, rep1),
+        _ => return line1_variants(raw, width, rep1),
     };
-    let candidates: Vec<String> = variants(raw, width, shifted)
+    let candidates: Vec<String> = line1_variants(raw, width, shifted)
         .into_iter()
-        .chain(variants(raw, width, rep1))
+        .chain(line1_variants(raw, width, rep1))
         .collect();
     if candidates
         .iter()
@@ -1682,9 +1682,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             Td3Prefix::Keep => {}
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_td3_line1_shifted)
+        let l1_candidates = line1_variants(lines[i], 44, repair_td3_line1_shifted)
             .into_iter()
-            .chain(variants(lines[i], 44, repair_td3_line1));
+            .chain(line1_variants(lines[i], 44, repair_td3_line1));
         for l1 in l1_candidates {
             if !l1.starts_with('P') {
                 continue;
@@ -1730,10 +1730,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 36, repair_mrv_b_line1_shifted)
+        let l1_candidates = line1_variants(lines[i], 36, repair_mrv_b_line1_shifted)
             .into_iter()
-            .chain(variants(lines[i], 36, repair_mrv_b_line1_unshifted))
-            .chain(variants(lines[i], 36, repair_mrv_b_line1));
+            .chain(line1_variants(lines[i], 36, repair_mrv_b_line1_unshifted))
+            .chain(line1_variants(lines[i], 36, repair_mrv_b_line1));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
@@ -1776,10 +1776,10 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 44, repair_mrv_a_line1_shifted)
+        let l1_candidates = line1_variants(lines[i], 44, repair_mrv_a_line1_shifted)
             .into_iter()
-            .chain(variants(lines[i], 44, repair_mrv_a_line1_unshifted))
-            .chain(variants(lines[i], 44, repair_mrv_a_line1));
+            .chain(line1_variants(lines[i], 44, repair_mrv_a_line1_unshifted))
+            .chain(line1_variants(lines[i], 44, repair_mrv_a_line1));
         for l1 in l1_candidates {
             if !l1.starts_with('V') {
                 continue;
@@ -1905,9 +1905,9 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
         if intact_td1_starts.contains(&i) {
             continue;
         }
-        let l1_candidates = variants(lines[i], 36, repair_td2_line1_shifted)
+        let l1_candidates = line1_variants(lines[i], 36, repair_td2_line1_shifted)
             .into_iter()
-            .chain(variants(lines[i], 36, repair_td2_line1));
+            .chain(line1_variants(lines[i], 36, repair_td2_line1));
         for l1 in l1_candidates {
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;

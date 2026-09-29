@@ -421,6 +421,12 @@ The named documents are in [`benchmarks/README.md`](benchmarks/README.md#post-m6
 - TD1 line 3 and the fully-collapsed name separator (both fillers dropped) are structurally
   unrecoverable — a checksum-valid TD1 record never proves the name. Pinned as tests, not
   chased further.
+- Partly covered zones ([#565](https://github.com/ruledicaprio/SynthPass/issues/565),
+  [`ADR-0026`](decisions/ADR-0026-covered-cells-are-occluded.md)): a cell the image shows
+  covered, by a fill or a blur, is reported `occluded`, never as text, and a covered cell a
+  check digit protects refuses the zone. Default-off behind `SYNTHPASS_OCR_OCCLUSION` until
+  the synthetic redaction profiles and the real-specimen arm meet the ADR's go/no-go. A
+  correctness change, not a hit-rate one: no scored miss fails on a covered cell.
 
 **Tier-2 / normalization.**
 
@@ -566,6 +572,9 @@ transform itself:
 - **Redaction and censoring bars.** This closes a loop the benchmark currently only *observes*:
   `redacted_mrz` is an off-denominator bucket of 36 real specimens, and nothing generates that
   population, so correct-refusal behaviour is tested only by what we happened to collect.
+  Committed for the name line by [#565](https://github.com/ruledicaprio/SynthPass/issues/565):
+  the `redact` generator option labels its covered cells exactly. Mosaic and textured patches
+  remain uncommitted.
 - **Wear, fading, stains, glare, shadow, perspective and compression artifacts** — capture
   realism, and the likeliest home of the browser-vs-native divergence
   ([`WEB_OCR_BASELINE.md`](WEB_OCR_BASELINE.md)) that is currently unexplained.

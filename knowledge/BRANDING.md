@@ -108,8 +108,8 @@ The obvious model — Community free, Professional and Enterprise unlocked by th
 Ed25519 licensing mechanism — was written down here first, and does not survive contact with
 this repository:
 
-- **The licence gate is bypassable by recompiling.** `ARCHITECTURE.md` §6 says so in its own
-  threat model: this is metering, not DRM. Under MIT, removing the check is not even a licence
+- **The licence gate is bypassable by recompiling.** [`LICENSING.md`](LICENSING.md#threat-model)
+  says so in its own threat model: this is metering, not DRM. Under MIT, removing the check is not even a licence
   violation.
 - **The bypass is documented.** `SYNTHPASS_LICENSE_SKIP=1` appears in the README quickstart,
   because local development genuinely needs it.

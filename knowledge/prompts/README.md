@@ -33,12 +33,19 @@ They live in `crates/synthpass-llm/prompts/` and are compiled in with
   and the deterministic normalizers folded in: reviewed **95/162 (58.6%)**, derived
   **85/162 (52.5%)**, **55.6% overall** (vocabulary `74aee114001a9ed2`).
 
-  **Current, 2026-09-27, prompt v3:** the corpus is now **118** fixtures (65
+  **2026-09-27, prompt v3 baseline:** the corpus is now **118** fixtures (65
   reviewed, 53 derived), vocabulary `b6bd1f9a5fdd108e`: reviewed **297/585
   (50.8%)**, derived **88/159 (55.3%)**, 385/744 (51.7%) overall. This is not a
   move from the 2026-09-05 figures: the fixture set, the normalizer vocabulary and
   some fixtures changed in between, so the two are different measurements, not two
-  points on one trend. Full per-field figures and the version history are in
+  points on one trend.
+
+  **Current** (same day, [#547](https://github.com/ruledicaprio/SynthPass/issues/547),
+  no prompt or `PROMPT_VERSION` change): the #539 vocabulary (19 demonyms, 9
+  alternate country names; vocabulary `8feb315a58cdae3e`) raised it to reviewed **335/585 (57.3%)**, derived
+  **88/159 (55.3%)**, **423/744 (56.9%)** overall — see
+  [`normalize-country-demonyms-2026-09-27.md`](../benchmarks/normalize-country-demonyms-2026-09-27.md).
+  Full per-field figures and the version history are in
   `crates/synthpass-llm/tests/parity.rs`'s module doc and
   [`knowledge/benchmarks/README.md`](../benchmarks/README.md#current-headline-numbers).
 

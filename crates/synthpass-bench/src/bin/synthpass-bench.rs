@@ -27,7 +27,9 @@
 //!                        exit non-zero if more than N Tier-1 hits read
 //!                        `document_type` or `issuing_country` wrong against
 //!                        truth (issue #453's line-1 prefix ratchet); unset
-//!                        means "measure and report only"
+//!                        means "measure and report only". Hits only: the
+//!                        report-only `prefix_wrong_accepted_reads` count also
+//!                        covers `document_number_mismatch` reads (see below)
 //!   --dump-ocr           print every document's raw OCR text (one printed
 //!                        line per detected line) before the summary — a
 //!                        small-`--count` diagnostic, not for a full run
@@ -35,6 +37,13 @@
 //!                        policy vs. Chunk 7's composite-only opt-in, and
 //!                        whether the newly-accepted documents are correct
 //! ```
+//!
+//! An *accepted read* is one the router accepts because its check digits all
+//! verified: a Tier-1 hit, or a `document_number_mismatch` miss (checksum-valid,
+//! wrong document number; see [`is_accepted_read`]). The report counts them
+//! (`accepted_reads`) and how many of them read `document_type` or
+//! `issuing_country` wrong (`prefix_wrong_accepted_reads`), report-only:
+//! `--max-prefix-wrong-accepts` gates hits alone.
 
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -302,6 +311,15 @@ struct SeedResult {
     /// `--max-prefix-wrong-accepts` gates on (issue #453); names, optional
     /// data and check-digit collisions stay report-only.
     prefix_wrong_accept: bool,
+    /// `true` iff this is an accepted read ([`is_accepted_read`]: a hit, or a
+    /// `document_number_mismatch` miss) and `wrong_scored_fields` names
+    /// `document_type` or `issuing_country`, computed independently of `hit`.
+    /// A read that passes its check digits is an accepted read whatever else
+    /// it gets wrong, and `hit` excludes the `document_number_mismatch` ones.
+    /// Report-only — no gate reads it; `--max-prefix-wrong-accepts` reads
+    /// `prefix_wrong_accept`, which judges hits alone. Always serialized, like
+    /// the other per-document bools.
+    prefix_wrong_accepted_read: bool,
     /// Which of the 12 scored fields differed from truth, in `COMPARED_FIELDS`
     /// order, when `wrong_accept` is `true`. Empty (and omitted from JSON)
     /// otherwise, including on every non-hit.
@@ -454,6 +472,20 @@ struct Report {
     /// raise of the pinned limit has to name.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     prefix_wrong_accept_seeds: Vec<u64>,
+    /// Accepted reads ([`is_accepted_read`]): Tier-1 hits plus
+    /// `document_number_mismatch` misses, whose check digits verified so the
+    /// router accepts them. The denominator for `prefix_wrong_accepted_reads`;
+    /// a count, so no rate is derived from it.
+    accepted_reads: u64,
+    /// Accepted reads whose `document_type` or `issuing_country` differs from
+    /// truth — `prefix_wrong_accepts` widened from hits to every accepted
+    /// read. **Report-only**: not gated, since `--max-prefix-wrong-accepts` is
+    /// a reviewed ratchet on hits and widening it is a separate decision.
+    prefix_wrong_accepted_reads: u64,
+    /// The seeds behind `prefix_wrong_accepted_reads`, ascending; omitted when
+    /// empty, like `prefix_wrong_accept_seeds`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    prefix_wrong_accepted_read_seeds: Vec<u64>,
     /// Mean CER per field (worst first), each annotated with the physical
     /// MRZ line it lives on for `document_type` — the JSON form of the
     /// stdout "mean character error rate by field" table. Empty when no
@@ -536,11 +568,14 @@ fn main() {
             let wrong_fields = wrong_scored_fields(&result.fields);
             let wrong_accept = result.hit && !wrong_fields.is_empty();
             let prefix_wrong_accept = wrong_accept && touches_line1_prefix(&wrong_fields);
+            let kind = result.reason.as_ref().map(miss_kind);
+            let prefix_wrong_accepted_read =
+                is_prefix_wrong_accepted_read(result.hit, kind, &wrong_fields);
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
                 hit: result.hit,
-                miss_kind: result.reason.as_ref().map(miss_kind),
+                miss_kind: kind,
                 check_states,
                 reason: result.reason.map(|r| r.to_string()),
                 elapsed_ms: result.elapsed.as_millis(),
@@ -553,6 +588,7 @@ fn main() {
                 name_error,
                 wrong_accept,
                 prefix_wrong_accept,
+                prefix_wrong_accepted_read,
                 wrong_fields,
                 fields: result
                     .fields
@@ -670,6 +706,17 @@ fn main() {
         .collect();
     let prefix_wrong_accepts = prefix_wrong_accept_seeds.len() as u64;
 
+    // Accepted reads (issue #574): report-only siblings of the gated counts
+    // above, widened from hits to every read the router accepts.
+    let accepted_reads = count_accepted_reads(&results);
+    let document_number_mismatch_reads = accepted_reads - hits;
+    let prefix_wrong_accepted_read_seeds: Vec<u64> = results
+        .iter()
+        .filter(|r| r.prefix_wrong_accepted_read)
+        .map(|r| r.seed)
+        .collect();
+    let prefix_wrong_accepted_reads = prefix_wrong_accepted_read_seeds.len() as u64;
+
     if hits > 0 {
         println!(
             "\nof {hits} Tier-1 hits, {strict_hits} ({}) read both names exactly — strict \
@@ -717,6 +764,15 @@ fn main() {
         println!(
             "wrong-accept rate among Tier-1 hits: {}",
             format_hit_rate(wrong_accept_rate)
+        );
+    }
+    if accepted_reads > 0 {
+        println!(
+            "  of {accepted_reads} accepted reads ({hits} Tier-1 hits + \
+             {document_number_mismatch_reads} document_number_mismatch), \
+             {prefix_wrong_accepted_reads} read document_type or issuing_country wrong \
+             — report-only, not gated{}",
+            format_seed_list(&prefix_wrong_accepted_read_seeds)
         );
     }
 
@@ -816,6 +872,9 @@ fn main() {
         wrong_accept_rate,
         prefix_wrong_accepts,
         prefix_wrong_accept_seeds: prefix_wrong_accept_seeds.clone(),
+        accepted_reads,
+        prefix_wrong_accepted_reads,
+        prefix_wrong_accepted_read_seeds,
         mean_cer_by_field,
         mean_cer_by_line: mean_cer_by_line_map,
         results,
@@ -870,6 +929,37 @@ fn touches_line1_prefix(wrong_fields: &[&str]) -> bool {
     wrong_fields
         .iter()
         .any(|field| LINE1_PREFIX_FIELDS.contains(field))
+}
+
+/// The one definition of an *accepted read*: a read the router accepts
+/// because its check digits verified. That is a Tier-1 `hit`, or a
+/// `document_number_mismatch` miss (checksum-valid, wrong document number).
+///
+/// Stated as an explicit rule, not derived as "not escalated": every other
+/// miss kind (`ocr_error`, `no_mrz_found`, `checksum_failed`,
+/// `checksum_failed_specimen`, `document_number_leading_filler`, …) is refused
+/// or escalated, so it is never an accepted read.
+fn is_accepted_read(hit: bool, miss_kind: Option<&str>) -> bool {
+    hit || miss_kind == Some("document_number_mismatch")
+}
+
+/// Issue #574: an accepted read ([`is_accepted_read`]) that reads the line-1
+/// prefix wrong. Judged on `wrong_fields` (a `wrong_scored_fields` result)
+/// regardless of `hit`, unlike `prefix_wrong_accept`, which requires one.
+fn is_prefix_wrong_accepted_read(
+    hit: bool,
+    miss_kind: Option<&str>,
+    wrong_fields: &[&str],
+) -> bool {
+    is_accepted_read(hit, miss_kind) && touches_line1_prefix(wrong_fields)
+}
+
+/// `Report::accepted_reads`: how many of `results` are accepted reads.
+fn count_accepted_reads(results: &[SeedResult]) -> u64 {
+    results
+        .iter()
+        .filter(|r| is_accepted_read(r.hit, r.miss_kind))
+        .count() as u64
 }
 
 /// The ratchet's comparison: the limit is the most prefix wrong accepts
@@ -1128,6 +1218,9 @@ mod tests {
             wrong_accept_rate,
             prefix_wrong_accepts: 0,
             prefix_wrong_accept_seeds: Vec::new(),
+            accepted_reads: 0,
+            prefix_wrong_accepted_reads: 0,
+            prefix_wrong_accepted_read_seeds: Vec::new(),
             mean_cer_by_field: Vec::new(),
             mean_cer_by_line: BTreeMap::new(),
             results: Vec::new(),
@@ -1294,6 +1387,7 @@ mod tests {
             name_error: None,
             wrong_accept: false,
             prefix_wrong_accept: false,
+            prefix_wrong_accepted_read: false,
             wrong_fields: Vec::new(),
         }
     }
@@ -1476,6 +1570,128 @@ mod tests {
             "nationality",
         ]));
         assert!(!touches_line1_prefix(&[]));
+    }
+
+    /// What `main` computes per document, for a read that ended as `miss` (or
+    /// as a hit when `None`) with these scored fields wrong: the pair
+    /// (`prefix_wrong_accept`, `prefix_wrong_accepted_read`).
+    fn prefix_flags(
+        miss: Option<&'static str>,
+        fields: &[synthpass_bench::FieldOutcome],
+    ) -> (bool, bool) {
+        let hit = miss.is_none();
+        let wrong_fields = wrong_scored_fields(fields);
+        let wrong_accept = hit && !wrong_fields.is_empty();
+        (
+            wrong_accept && touches_line1_prefix(&wrong_fields),
+            is_prefix_wrong_accepted_read(hit, miss, &wrong_fields),
+        )
+    }
+
+    fn wrong_issuer() -> Vec<synthpass_bench::FieldOutcome> {
+        vec![
+            field_outcome("document_type", "P", "P"),
+            field_outcome("issuing_country", "BRA", "BRC"),
+        ]
+    }
+
+    fn wrong_document_type() -> Vec<synthpass_bench::FieldOutcome> {
+        vec![
+            field_outcome("document_type", "P", "PG"),
+            field_outcome("issuing_country", "BRA", "BRA"),
+        ]
+    }
+
+    fn wrong_surname_only() -> Vec<synthpass_bench::FieldOutcome> {
+        vec![
+            field_outcome("document_type", "P", "P"),
+            field_outcome("issuing_country", "BRA", "BRA"),
+            field_outcome("surname", "CASTELLANO", "ASTELLANO"),
+        ]
+    }
+
+    /// Issue #574: a checksum-valid read with the wrong document number is
+    /// filed as a `document_number_mismatch` miss, yet the router accepts it.
+    /// A wrong issuer on it is an accepted-read prefix error, and the gated
+    /// hits-only count must not see it.
+    #[test]
+    fn a_mismatch_miss_with_a_wrong_issuing_country_is_a_prefix_wrong_accepted_read() {
+        assert_eq!(
+            prefix_flags(Some("document_number_mismatch"), &wrong_issuer()),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn a_mismatch_miss_with_a_wrong_document_type_is_a_prefix_wrong_accepted_read() {
+        assert_eq!(
+            prefix_flags(Some("document_number_mismatch"), &wrong_document_type()),
+            (false, true)
+        );
+    }
+
+    /// A hit with a wrong prefix is both the gated class and an accepted-read
+    /// prefix error.
+    #[test]
+    fn a_hit_with_a_wrong_prefix_counts_in_both() {
+        assert_eq!(prefix_flags(None, &wrong_issuer()), (true, true));
+        assert_eq!(prefix_flags(None, &wrong_document_type()), (true, true));
+    }
+
+    /// Wrong only off the line-1 prefix (a name here) is in neither count,
+    /// on a hit or on a `document_number_mismatch` miss.
+    #[test]
+    fn wrong_only_off_the_prefix_counts_in_neither() {
+        assert_eq!(prefix_flags(None, &wrong_surname_only()), (false, false));
+        assert_eq!(
+            prefix_flags(Some("document_number_mismatch"), &wrong_surname_only()),
+            (false, false)
+        );
+    }
+
+    /// Only a hit or a `document_number_mismatch` is an accepted read; every
+    /// other miss kind is refused or escalated, however wrong its prefix.
+    #[test]
+    fn other_miss_kinds_with_a_wrong_prefix_are_never_accepted_reads() {
+        for kind in [
+            "checksum_failed",
+            "checksum_failed_specimen",
+            "no_mrz_found",
+            "ocr_error",
+            "document_number_leading_filler",
+        ] {
+            assert!(!is_accepted_read(false, Some(kind)), "{kind}");
+            assert_eq!(prefix_flags(Some(kind), &wrong_issuer()), (false, false));
+            assert_eq!(
+                prefix_flags(Some(kind), &wrong_document_type()),
+                (false, false)
+            );
+        }
+        assert!(is_accepted_read(true, None));
+        assert!(is_accepted_read(false, Some("document_number_mismatch")));
+    }
+
+    /// `accepted_reads` is hits plus `document_number_mismatch` misses.
+    #[test]
+    fn accepted_reads_are_hits_plus_document_number_mismatches() {
+        let results = vec![
+            doc(None, &[], &[]),
+            doc(None, &[], &[]),
+            doc(Some("document_number_mismatch"), &[], &[]),
+            doc(Some("checksum_failed"), &["composite"], &[]),
+            doc(Some("no_mrz_found"), &[], &[]),
+            doc(Some("ocr_error"), &[], &[]),
+            doc(Some("document_number_leading_filler"), &[], &[]),
+        ];
+        assert_eq!(count_accepted_reads(&results), 3);
+        assert_eq!(count_accepted_reads(&[]), 0);
+    }
+
+    /// The new per-document bool is always serialized, like `wrong_accept`.
+    #[test]
+    fn prefix_wrong_accepted_read_is_always_serialized() {
+        let json = serde_json::to_value(doc(None, &[], &[])).expect("serialize SeedResult");
+        assert_eq!(json["prefix_wrong_accepted_read"], false);
     }
 
     /// The pinned limit is inclusive: a run at the limit passes, one above it

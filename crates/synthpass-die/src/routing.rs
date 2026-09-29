@@ -93,10 +93,11 @@ impl RoutingPolicy {
     ///
     /// 1. no MRZ found at all → [`EscalationKind::MrzNotFound`]
     /// 2. an MRZ parsed but a check digit failed → [`EscalationKind::MrzChecksumFailed`]
-    /// 3. (opt-in) line 1 integrity flagged the record → [`EscalationKind::Line1Flagged`]
-    /// 4. (opt-in) text sanity fell below the floor → [`EscalationKind::OcrBelowSanityFloor`]
-    /// 5. (opt-in) one or more fields came back empty → [`EscalationKind::FieldsMissing`]
-    /// 6. otherwise → [`Decision::Accept`]
+    /// 3. an occlusion mask covered a check-digited cell → [`EscalationKind::MrzOccluded`]
+    /// 4. (opt-in) line 1 integrity flagged the record → [`EscalationKind::Line1Flagged`]
+    /// 5. (opt-in) text sanity fell below the floor → [`EscalationKind::OcrBelowSanityFloor`]
+    /// 6. (opt-in) one or more fields came back empty → [`EscalationKind::FieldsMissing`]
+    /// 7. otherwise → [`Decision::Accept`]
     ///
     /// Clause 1 must precede clause 2: `Evidence::mrz_checksums_valid` is
     /// `false` by construction (`Evidence::default()`) whenever no MRZ was
@@ -105,6 +106,21 @@ impl RoutingPolicy {
     /// reported as `MrzChecksumFailed`, which is a lie: nothing failed to
     /// verify, because nothing was there to verify. `MrzNotFound` is the
     /// honest, more specific cause, and it must win.
+    ///
+    /// Clause 3 (`mrz_occlusion_refused`) sits **after** the two mandatory
+    /// clauses above and **before** every opt-in one, on purpose:
+    /// - It is not opt-in. Unlike clauses 4-6, ADR-0026 decision 7 (never
+    ///   reconstruct a covered check-digited cell) applies unconditionally,
+    ///   the same way clauses 1-2 do — so it cannot sit *after* an opt-in
+    ///   clause without letting a policy with every opt-in off silently
+    ///   accept a refused reading it should never see as accepted at all
+    ///   (`synthpass_die::mrz_reader::MrzReader::read` never populates
+    ///   `extraction` on this path, so there would be nothing to accept).
+    /// - It sits after clauses 1-2, not before: those two are about whether
+    ///   *anything* parsed and verified at all, which is strictly more
+    ///   fundamental than *why one specific field* was withheld — and
+    ///   `mrz_occlusion_refused` is only ever observed on a document where
+    ///   something did parse (occlusion detection runs on a Tier-1 hit).
     ///
     /// `Evidence::blind_positions` is never read here. It is shipped
     /// observed-only (see `mrz_reader.rs`, `blind_positions_are_observed_only`)
@@ -121,6 +137,12 @@ impl RoutingPolicy {
         if !ev.mrz_checksums_valid {
             return Decision::Escalate {
                 reason: EscalationKind::MrzChecksumFailed,
+                budget: self.max_budget,
+            };
+        }
+        if ev.mrz_occlusion_refused {
+            return Decision::Escalate {
+                reason: EscalationKind::MrzOccluded,
                 budget: self.max_budget,
             };
         }
@@ -230,6 +252,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// ADR-0026: a refused occluded zone escalates, and it must be
+    /// mandatory — not gated by any opt-in flag, unlike `Line1Flagged`,
+    /// `OcrBelowSanityFloor` or `FieldsMissing`.
+    #[test]
+    fn a_refused_occluded_zone_escalates_with_mrz_occluded() {
+        let ev = Evidence {
+            mrz_found: true,
+            mrz_checksums_valid: true,
+            mrz_occlusion_refused: true,
+            ..Evidence::default()
+        };
+
+        assert_eq!(
+            RoutingPolicy::default().decide(&ev),
+            Decision::Escalate {
+                reason: EscalationKind::MrzOccluded,
+                budget: CostClass::Expensive,
+            },
+            "every opt-in signal is off by default, and this must still escalate"
+        );
+    }
+
+    /// Clause order: a document that also failed its checksum reports the
+    /// more fundamental `MrzChecksumFailed`, not `MrzOccluded` — see
+    /// `decide`'s own doc comment for why.
+    #[test]
+    fn checksum_failure_is_reported_before_occlusion_refusal() {
+        let ev = Evidence {
+            mrz_found: true,
+            mrz_checksums_valid: false,
+            mrz_occlusion_refused: true,
+            ..Evidence::default()
+        };
+
+        assert_eq!(
+            RoutingPolicy::default().decide(&ev),
+            Decision::Escalate {
+                reason: EscalationKind::MrzChecksumFailed,
+                budget: CostClass::Expensive,
+            }
+        );
     }
 
     #[test]

@@ -212,6 +212,20 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   amendment). It is a **ratchet**: the fix that earns it lowers `N`, and raising `N` is a
   reviewed workflow edit that names the seeds and the mechanism. Names, optional data and
   check-digit collisions stay report-only.
+
+  **The report-only sibling — prefix wrong accepted reads** (`Report.accepted_reads`,
+  `prefix_wrong_accepted_reads`, `prefix_wrong_accepted_read_seeds`, per-document
+  `results[].prefix_wrong_accepted_read`): an *accepted read* is a Tier-1 hit **or** a
+  `document_number_mismatch` miss, and it counts here when `document_type` or `issuing_country`
+  has CER > 0 against truth. `accepted_reads` (hits plus `document_number_mismatch` misses) is
+  the denominator; the other miss kinds (`ocr_error`, `no_mrz_found`, `checksum_failed`,
+  `checksum_failed_specimen`, `document_number_leading_filler`, …) are never accepted reads.
+  It is a count, so there is no rate. It is **not gated**: `hit` excludes a
+  `document_number_mismatch` read, so the gated hits-only count above misses it, yet the router
+  accepts it, because its check digits verified. Widening what `--max-prefix-wrong-accepts`
+  counts would be a reviewed workflow edit, like raising `N`
+  ([#574](https://github.com/ruledicaprio/SynthPass/issues/574)). `hit`, `wrong_accept`,
+  `prefix_wrong_accept` and the gate do not read it.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
@@ -305,12 +319,23 @@ a reliable first-pass check for more of the same; the per-document
 
 A second, unrelated finding from the same data: 4 *correctly-placed*
 `id_card` specimens (Italy CIE 2022, two Switzerland ID crops, one unlabelled
-Bosnia-format card) resolve to **TD2**/**MRV-B** — ICAO formats no ID card
-should parse as — rather than the ID-card-shaped TD1, and all four fail
-checksum. This is a genuine cross-format-confusion weak spot in the
-deterministic pipeline, not a corpus placement error, and is a candidate for
-the "weak-spot findings" writeup once all four real-specimen tracks have a
-current `tier1_hit_rate` run.
+Bosnia-format card) resolved to **TD2**/**MRV-B** — ICAO formats no ID card
+should parse as — rather than the ID-card-shaped TD1, and all four failed
+checksum at the time. This is a genuine cross-format-confusion weak spot in
+the deterministic pipeline, not a corpus placement error, and is a candidate
+for the "weak-spot findings" writeup once all four real-specimen tracks have
+a current `tier1_hit_rate` run.
+
+*Checked against the committed ledger, 2026-09-28:* this "4 of 4 fail
+checksum" count is stale and needs re-verification, not re-citation. Only
+`Switzerland_ID_Specimen_2003_back_mrz.jpg` (one of the two Switzerland
+crops) still carries `mrz_format: MRVB` there, and it no longer fails
+checksum — it reads `mrz_checksums_valid: true`, `outcome: hit`. That is not
+a genuine MRV-B specimen: it is the same TD1 card, and the checksum-valid
+reading was stitched from two retry passes' name-line reads, not a correct
+parse ([#560](https://github.com/ruledicaprio/SynthPass/issues/560)). Italy
+CIE 2022 back and the Bosnia-Herzegovina ID card back are both labelled
+`TD1` in the current ledger, not `TD2`/`MRV-B`.
 
 **Synthetic tracks: `td1`, `td2`, `td3` (M6), `mrva`, `mrvb` (MRV-A/MRV-B
 visas, added alongside M6's own generation/extraction coverage).** A
