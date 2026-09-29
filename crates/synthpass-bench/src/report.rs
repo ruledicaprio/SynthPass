@@ -39,6 +39,9 @@ pub struct AccuracyReport {
     pub labelled_documents: usize,
     pub field_match_rate: Option<f64>,
     pub mean_cer: Option<f64>,
+    pub hits_only_field_match_rate: Option<f64>,
+    pub hits_only_mean_cer: Option<f64>,
+    pub hits_only_documents: usize,
     pub per_field_cer: Vec<PerFieldCer>,
 }
 
@@ -46,6 +49,7 @@ pub struct AccuracyReport {
 pub struct PerFieldCer {
     pub field: &'static str,
     pub mean_cer: Option<f64>,
+    pub documents: usize,
 }
 
 /// Mirrors `synthpass_bench::provider_bench::UnsupportedAssertion` for JSON:
@@ -419,11 +423,18 @@ impl From<ProviderReport> for ProviderRow {
                 labelled_documents: r.accuracy.labelled_documents,
                 field_match_rate: r.accuracy.field_match_rate,
                 mean_cer: r.accuracy.mean_cer,
+                hits_only_field_match_rate: r.accuracy.hits_only_field_match_rate,
+                hits_only_mean_cer: r.accuracy.hits_only_mean_cer,
+                hits_only_documents: r.accuracy.hits_only_documents,
                 per_field_cer: r
                     .accuracy
                     .per_field_cer
                     .into_iter()
-                    .map(|(field, mean_cer)| PerFieldCer { field, mean_cer })
+                    .map(|(field, mean_cer, documents)| PerFieldCer {
+                        field,
+                        mean_cer,
+                        documents,
+                    })
                     .collect(),
             },
             speed: SpeedReport {
@@ -1081,6 +1092,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
+                hits_only_field_match_rate: None,
+                hits_only_mean_cer: None,
+                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
             },
             speed: SpeedStats {
@@ -1226,6 +1240,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
+                hits_only_field_match_rate: None,
+                hits_only_mean_cer: None,
+                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
             },
             speed: SpeedStats {

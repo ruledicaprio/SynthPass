@@ -10,9 +10,10 @@ rates are unavailable.
 | Tier-1 hit rate (`read_ok_rate` in flattened history) | Documents other than `no_mrz_expected`, `redacted_mrz` and `checksum_failed_specimen` |
 | Strict Tier-1 hit rate | Documents in that scored population with truth for both name fields |
 | Names exact among hits | Tier-1 hits with truth for both name fields |
-| Field match rate | Field comparisons with available truth |
-| Mean CER | Character-error-rate observations for fields with available truth |
-| Per-field mean CER | Observations with truth for that specific field |
+| Field match rate (all labelled) | Field comparisons with available truth, including misses |
+| Mean CER (all labelled) | Character-error-rate observations for fields with available truth, including misses |
+| Field match rate and mean CER (hits only) | Fields with available truth on Tier-1 hits; the report also gives the number of labelled hit documents |
+| Per-field mean CER | Observations with truth for that specific field; each mean carries its own document count |
 | Unsupported-assertion rate, overall and each anchor bucket | Nonempty asserted field values in that population |
 | JSON-repair fallback rate | Documents processed by the nondeterministic provider |
 

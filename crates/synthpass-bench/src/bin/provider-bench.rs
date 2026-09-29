@@ -1418,6 +1418,16 @@ async fn main() {
             .mean_cer
             .map(|v| format!("{v:.3}"))
             .unwrap_or_else(|| "n/a".to_string());
+        let hits_field_match = r
+            .accuracy
+            .hits_only_field_match_rate
+            .map(|v| format!("{:.1}%", v * 100.0))
+            .unwrap_or_else(|| "n/a".to_string());
+        let hits_mean_cer = r
+            .accuracy
+            .hits_only_mean_cer
+            .map(|v| format!("{v:.3}"))
+            .unwrap_or_else(|| "n/a".to_string());
         let unsupported = match &r.unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1458,13 +1468,22 @@ async fn main() {
         let tier1_hit_rate: &Tier1HitRate = &r.tier1_hit_rate;
         println!(
             "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, field match \
-             {field_match}, mean CER {mean_cer}, mean {} ms, unsupported-assertion rate \
+             {field_match} (all labelled), mean CER {mean_cer} (all labelled), \
+             field match {hits_field_match} (hits only, {} labelled docs), \
+             mean CER {hits_mean_cer} (hits only), mean {} ms, unsupported-assertion rate \
              {unsupported}",
             r.provider_id,
             r.documents,
             r.accuracy.labelled_documents,
+            r.accuracy.hits_only_documents,
             r.speed.mean.as_millis(),
         );
+        for (field, mean, documents) in &r.accuracy.per_field_cer {
+            let mean = mean
+                .map(|value| format!("{value:.3}"))
+                .unwrap_or_else(|| "n/a".to_string());
+            println!("    {field}: mean CER {mean} (all labelled, {documents} docs)");
+        }
 
         // Two name-accuracy rates over two different denominators — no ICAO
         // check digit covers `surname`/`given_names`, so `tier1_hit_rate`
@@ -2550,6 +2569,9 @@ mod tests {
                 labelled_documents: 0,
                 field_match_rate: None,
                 mean_cer: None,
+                hits_only_field_match_rate: None,
+                hits_only_mean_cer: None,
+                hits_only_documents: 0,
                 per_field_cer: Vec::new(),
             },
             speed: SpeedStats {

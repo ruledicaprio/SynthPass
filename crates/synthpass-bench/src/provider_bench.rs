@@ -1166,12 +1166,18 @@ pub struct AccuracyStats {
     /// report already uses, so the two numbers are comparable. `None` iff
     /// `labelled_documents == 0`.
     pub mean_cer: Option<f64>,
+    /// Field accuracy restricted to labelled Tier-1 hits. The existing
+    /// all-labelled rates above retain their original population.
+    pub hits_only_field_match_rate: Option<f64>,
+    pub hits_only_mean_cer: Option<f64>,
+    pub hits_only_documents: usize,
     /// Per-field mean CER. A field's entry is `None` when no document in the
     /// labelled population had ground truth for that specific field (for
     /// instance every real specimen loaded so far omitting
     /// `personal_number`), for the same reason the whole-report rate is
     /// `Option`.
-    pub per_field_cer: Vec<(&'static str, Option<f64>)>,
+    /// Each count is the number of labelled documents with truth for that field.
+    pub per_field_cer: Vec<(&'static str, Option<f64>, usize)>,
 }
 
 /// The unsupported-assertion metric outcome for one provider: either a
@@ -1949,6 +1955,10 @@ async fn run_prepped_with_dump_options(
         let mut field_total = 0usize;
         let mut cer_sum = 0.0f64;
         let mut cer_count = 0usize;
+        let mut hits_only_field_hits = 0usize;
+        let mut hits_only_field_total = 0usize;
+        let mut hits_only_cer_sum = 0.0f64;
+        let mut hits_only_documents = 0usize;
         let mut per_field: Vec<(&'static str, f64, usize)> = CoreField::ALL
             .iter()
             .map(|f| (f.as_str(), 0.0, 0))
@@ -2068,6 +2078,7 @@ async fn run_prepped_with_dump_options(
             // Identical for every field in the loop below — computed once
             // per document rather than once per assertion.
             let ocr_text_lower = bench_page.page.text.to_lowercase();
+            let mut doc_fields = Vec::new();
 
             for (i, field) in CoreField::ALL.iter().enumerate() {
                 let got = reading.extraction.fields.get(*field);
@@ -2090,6 +2101,7 @@ async fn run_prepped_with_dump_options(
                     cer_count += 1;
                     per_field[i].1 += field_cer;
                     per_field[i].2 += 1;
+                    doc_fields.push((got_str == expected.as_str(), field_cer));
                 }
 
                 // Unsupported-assertion: needs no ground truth at all — only
@@ -2224,6 +2236,15 @@ async fn run_prepped_with_dump_options(
                         })
                     })
             };
+
+            if miss_reason.is_none() && !doc_fields.is_empty() {
+                hits_only_documents += 1;
+                for (exact, field_cer) in doc_fields {
+                    hits_only_field_total += 1;
+                    hits_only_field_hits += usize::from(exact);
+                    hits_only_cer_sum += field_cer;
+                }
+            }
 
             let dump_miss_kind = match &miss_reason {
                 Some(
@@ -2566,9 +2587,14 @@ async fn run_prepped_with_dump_options(
                 labelled_documents,
                 field_match_rate: (field_total > 0).then(|| field_hits as f64 / field_total as f64),
                 mean_cer: (cer_count > 0).then(|| cer_sum / cer_count as f64),
+                hits_only_field_match_rate: (hits_only_field_total > 0)
+                    .then(|| hits_only_field_hits as f64 / hits_only_field_total as f64),
+                hits_only_mean_cer: (hits_only_field_total > 0)
+                    .then(|| hits_only_cer_sum / hits_only_field_total as f64),
+                hits_only_documents,
                 per_field_cer: per_field
                     .into_iter()
-                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64)))
+                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64), n))
                     .collect(),
             },
             speed,
@@ -3103,6 +3129,58 @@ mod tests {
         let report = &reports[0];
         assert_eq!(report.accuracy.labelled_documents, 1);
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
+    }
+
+    #[tokio::test]
+    async fn hits_only_accuracy_keeps_misses_in_the_existing_all_labelled_rate() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            given_names: "",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("one reader");
+        let mut hit = rate_test_page();
+        hit.mrz_expected = true;
+        hit.mrz_found = true;
+        hit.ground_truth = Some(HashMap::from([(CoreField::Surname, "DOE".to_string())]));
+        let mut miss = rate_test_page();
+        miss.mrz_expected = true;
+        miss.mrz_found = false;
+        miss.ground_truth = Some(HashMap::from([(CoreField::Surname, "SMITH".to_string())]));
+
+        let reports = run_prepped(&catalog, &[Some(hit), Some(miss)], false, None, false).await;
+        let accuracy = &reports[0].accuracy;
+        assert_eq!(accuracy.labelled_documents, 2);
+        assert_eq!(accuracy.field_match_rate, Some(0.5));
+        assert_eq!(accuracy.hits_only_documents, 1);
+        assert_eq!(accuracy.hits_only_field_match_rate, Some(1.0));
+        assert_eq!(accuracy.hits_only_mean_cer, Some(0.0));
+        let surname = accuracy
+            .per_field_cer
+            .iter()
+            .find(|(field, _, _)| *field == "surname")
+            .expect("surname field");
+        assert_eq!(surname.2, 2);
+        let json = serde_json::to_value(crate::report::ProviderRow::from(
+            reports.into_iter().next().expect("one report"),
+        ))
+        .expect("serialize report");
+        assert_eq!(
+            json["accuracy"]["per_field_cer"]
+                .as_array()
+                .expect("fields")
+                .iter()
+                .find(|field| field["field"] == "surname")
+                .expect("surname")["documents"],
+            2
+        );
+        assert_eq!(json["accuracy"]["hits_only_documents"], 1);
     }
 
     /// An entirely unlabelled corpus must report `None`, not a fabricated
