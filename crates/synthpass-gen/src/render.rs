@@ -29,6 +29,12 @@ const PLACEHOLDER_BAR: Rgb<u8> = Rgb([120, 122, 140]);
 const MRZ_CELL: Rgb<u8> = Rgb([30, 30, 40]);
 const WATERMARK_COLOR: Rgb<u8> = Rgb([176, 48, 48]);
 
+/// Raise the vendored font's `<` from 0.508 cap to about 0.533 cap, matching
+/// the 0.532 ISO 1073-2 illustration and 0.528 real-specimen median measured
+/// in `knowledge/ocrb/filler-and-symbols.md`. No other glyph moves.
+#[cfg(feature = "embedded-fonts")]
+const MRZ_FILLER_RAISE_CAP: f32 = 0.025;
+
 fn fill_rect(img: &mut RgbImage, rect: Rect, color: Rgb<u8>) {
     for y in rect.y..(rect.y + rect.height).min(img.height()) {
         for x in rect.x..(rect.x + rect.width).min(img.width()) {
@@ -138,6 +144,15 @@ fn draw_one_glyph(img: &mut RgbImage, font: &ab_glyph::FontArc, glyph: ab_glyph:
     });
 }
 
+#[cfg(feature = "embedded-fonts")]
+fn mrz_cap_height_px(font: &ab_glyph::FontArc) -> f32 {
+    use ab_glyph::Font;
+
+    font.outline(font.glyph_id('H')).map_or(0.0, |outline| {
+        outline.bounds.height().abs() * layout::MRZ_FONT_PX / font.height_unscaled()
+    })
+}
+
 /// Flows `text` left-to-right using the font's own advance widths — fine for
 /// VIZ fields, which aren't checksum-validated and just need to look
 /// plausible within `rect`.
@@ -181,12 +196,14 @@ fn draw_mrz_glyphs(
     let px_scale = layout::MRZ_FONT_PX;
     let scaled = font.as_scaled(px_scale);
     let y = line_rect.y as f32 + scaled.ascent();
+    let filler_raise_px = MRZ_FILLER_RAISE_CAP * mrz_cap_height_px(font);
     for (i, c) in text.chars().enumerate() {
         let cell = layout::mrz_char_rect_for_line(line_rect, mrz_chars, i as u32);
         let id = scaled.glyph_id(c);
         let advance = scaled.h_advance(id);
         let x = cell.x as f32 + ((cell.width as f32 - advance) / 2.0).max(0.0);
-        let glyph = id.with_scale_and_position(px_scale, point(x, y));
+        let glyph_y = if c == '<' { y - filler_raise_px } else { y };
+        let glyph = id.with_scale_and_position(px_scale, point(x, glyph_y));
         draw_one_glyph(img, font, glyph);
     }
 }
@@ -483,16 +500,6 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(feature = "embedded-fonts")]
-    fn mrz_cap_height_px(font: &ab_glyph::FontArc) -> f32 {
-        use ab_glyph::Font;
-
-        let outline = font
-            .outline(font.glyph_id('H'))
-            .expect("'H' must have an outline in the vendored OCR-B font");
-        outline.bounds.height().abs() * layout::MRZ_FONT_PX / font.height_unscaled()
-    }
 
     #[cfg(feature = "embedded-fonts")]
     #[test]
