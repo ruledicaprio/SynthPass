@@ -160,7 +160,7 @@ differs from CI's by float rounding.
 | `scripts/measure-parity.sh` | the Tier-2 parity run with a provenance header |
 | `knowledge/benchmarks/ocr-order-ab/analyze.py` | positional per-document diff of two or three reports (the A/B attribution that the report does not do itself) |
 | `tools/synth_ab_diff.py` | per-seed diff of two `synthpass-bench` reports, classifying every seed whose scored state moved |
-| `tools/bench_ab_diff.py` | per-document diff of two whole arms, meaning every synthetic format plus the real run. Covers accepted reads (#578), reads that changed without a state move, `retry_stop` in each arm, and real outcome and zone changes with fixture agreement |
+| `tools/bench_ab_diff.py` | per-document diff of two whole arms, meaning every synthetic format plus the real run. Covers accepted reads (#578), reads that changed without a state move, flag-only changes, `retry_stop` in each arm, real outcome, names and zone changes with fixture agreement, and whether the two runs are comparable. It refuses private or local arms |
 
 ### 2.7 Documents
 
