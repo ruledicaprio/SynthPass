@@ -274,6 +274,11 @@ fn traced_ocr_on_a_blank_page_accepts_no_pass() {
 
     assert_eq!(page, plain);
     assert_trace_invariants("blank page", &page, &records);
-    assert!(records.len() > 1, "the retry passes ran");
+    // CI runs this file with `SYNTHPASS_OCR_MAX_PASSES=1` (`ci.yml`), which
+    // stops the loop before any retry pass, and the wall-clock budget can stop
+    // it too. Otherwise every retry pass runs on a blank page.
+    if !matches!(page.retry_stop.as_deref(), Some("pass_cap" | "budget")) {
+        assert!(records.len() > 1, "the retry passes ran");
+    }
     assert!(records.iter().all(|r| r.readings.is_empty()));
 }
