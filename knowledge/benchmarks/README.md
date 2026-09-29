@@ -312,9 +312,10 @@ Prerequisite: `samples/` images aren't tracked on `main` — run
 (real-specimen tracks) or `synthpass-bench` (the two synthetic `td1`/`td2`
 tracks — see below) scoped to one named track, appends the flattened result
 to that track's `results/<track>-bench/history.jsonl` on the `bench-data`
-branch (the same branch `bench-data-collection.yml` uses for the Tier-1
-`dataset.jsonl`, checked out via the same isolated `git worktree` pattern,
-but pushed by hand rather than on a schedule), and regenerates that track's
+branch (the same branch `bench-data-collection.yml` uses for the nightly's
+per-document rows, `fresh.jsonl`, `fixed.jsonl` and `runs.jsonl`, checked out via
+the same isolated `git worktree` pattern, but pushed by hand rather than on a
+schedule), and regenerates that track's
 trend chart. One script and one chart binary (`bench-chart`) serve every
 track — adding a new one is a new `-Track` value, not new tooling.
 Real-specimen tracks map to `provider-bench --format` (via
@@ -385,8 +386,8 @@ deliberately distinct here too.
 
 `td3` is a *second*, independent way to measure TD3: the existing
 `bench-data-collection.yml` scheduled workflow already covers it (run
-nightly, feeding a large `dataset.jsonl`, no `read_ok_rate`/trend-chart
-shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
+nightly for all five formats, feeding `fresh.jsonl` and `fixed.jsonl`, no
+`read_ok_rate`/trend-chart shape); `-Track td3` adds a `results/td3-bench/history.jsonl` data point in
 the same small, `-Count`/`-Seed`-controlled shape the other synthetic
 tracks already use, specifically so all five formats land in the same row
 shape for the per-format comparison chart below. The two don't duplicate
@@ -595,8 +596,8 @@ runs `tools/audit_benchmark_identity.py --check`, and refuses to fall back to a
 moving `origin/samples-data` tip. The identity report is uploaded with the run.
 A deliberate write-baseline against a newer corpus may pass an explicit
 `data_ref`; assert-mode runs cannot override the committed pin. Synthetic
-`bench-data` collection is independent of `samples-data`: its `(seed, profile)`
-identity guard remains the relevant check, while real-track history rows record
+`bench-data` collection is independent of `samples-data`: `fresh.jsonl`'s
+`(document_type, seed, profile)` uniqueness guard remains the relevant check, while real-track history rows record
 the pinned DATA SHA.
 
 **What counts as a regression.** The gate fails if `tier1_hits` drops below
