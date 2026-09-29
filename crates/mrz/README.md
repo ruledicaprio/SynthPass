@@ -127,6 +127,14 @@ Two cases that are easy to get wrong, both documented with runnable examples on 
 - **A sex cell other than `M`, `F` or `<`** is kept as read, as
   [`Sex::NonConformant`](https://docs.rs/mrz/latest/mrz/enum.Sex.html), not rewritten to `X`. No
   check digit covers the cell, so a misread there is otherwise invisible.
+- **`select_line1`** is an opt-in look at the one field no check digit covers on a two-line format:
+  line 1's name field. Given the OCR text and the zone `find_and_parse_with` accepted, it reports
+  whether the accepted name field is well formed (`Kept`), whether exactly one other line of the
+  same width, document code and issuing state would replace an ill-formed one without changing
+  anything else (`Proposed`), or why it left the zone alone. It never applies a change, never
+  touches a field other than the names, and nothing in the crate calls it. **Off by default, and
+  unmeasured**, like `ParseOptions::class_sweep`: how many correct names it would break has not
+  been established, so it exists to be A/B'd against a control.
 
 ## Emitting
 
