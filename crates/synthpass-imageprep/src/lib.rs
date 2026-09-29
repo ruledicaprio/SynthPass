@@ -38,6 +38,7 @@
 //! checksum-valid read, never break one that already worked.
 
 pub mod geometry;
+pub mod occlusion;
 pub mod preprocess;
 pub mod sniff;
 
