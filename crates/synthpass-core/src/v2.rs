@@ -354,12 +354,9 @@ impl FieldConfidence {
         };
         for reason in reasons {
             match reason {
-                // These raw-line observations are report-only. They do not
-                // change confidence until their precision has been measured.
-                Finding::RawIssuerNotInRegistry { .. }
-                | Finding::DigitInTwoLineLine1
-                | Finding::RawNameSeparatorMissing
-                | Finding::RawInteriorFillerRun => {}
+                // Report-only: they describe the zone's text, not a parsed
+                // field (`FindingKind::is_report_only`).
+                Finding::RawNameSeparatorMissing | Finding::RawInteriorFillerRun => {}
                 Finding::UnrecognizedIssuingCountry { .. } => {
                     self.issuing_country = IMPLAUSIBLE;
                 }
@@ -1525,6 +1522,19 @@ mod tests {
         assert_eq!(confidence.sex, IMPLAUSIBLE);
         // An unrelated field must survive at its prior score, untouched.
         assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
+    }
+
+    #[test]
+    fn report_only_findings_lower_no_confidence() {
+        let mut confidence = FieldConfidence::mrz_checksum_scope();
+        let before = confidence;
+        confidence.downgrade_flagged(&crate::fusion::Verdict::NeedsReview {
+            reasons: vec![
+                crate::fusion::Finding::RawNameSeparatorMissing,
+                crate::fusion::Finding::RawInteriorFillerRun,
+            ],
+        });
+        assert_eq!(confidence, before);
     }
 
     // ── ADR-0026: occlusion ──
