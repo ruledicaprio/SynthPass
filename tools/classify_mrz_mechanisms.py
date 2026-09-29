@@ -15,6 +15,7 @@ from collections import Counter
 import json
 from pathlib import Path
 import re
+import sys
 
 OFF_DENOMINATOR = {"redacted_mrz", "no_mrz_expected", "checksum_failed_specimen"}
 MRZ_ALPHABET = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789<")
@@ -248,13 +249,36 @@ def read_jsonl(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def verify_dump_run(dump_path: Path, rows: list[dict]) -> None:
+    """Refuse dump rows left by another run before classifying any evidence."""
+    pointer = dump_path.parent / "provider-bench-ocr-current-run.txt"
+    if not pointer.exists():
+        print("classify_mrz_mechanisms: dump run could not be verified (no current-run pointer)", file=sys.stderr)
+        return
+
+    current = pointer.read_text(encoding="utf-8").strip()
+    observed = ", ".join(sorted({str(row.get("run_manifest")) for row in rows})) or "<no rows>"
+    if not current or Path(current).name != current:
+        raise ValueError(f"dump run_manifest={observed}; invalid current-run pointer={current!r}")
+    for row in rows:
+        if row.get("run_manifest") != current:
+            raise ValueError(f"stale dump run_manifest={row.get('run_manifest')!r}; current-run={current!r}")
+    if not (dump_path.parent / current).is_file():
+        raise ValueError(f"missing archive for dump run_manifest={observed}; current-run={current!r}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dump", type=Path, required=True)
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
-    result = classify(read_jsonl(args.ledger), read_jsonl(args.dump))
+    try:
+        ledger_rows, dump_rows = read_jsonl(args.ledger), read_jsonl(args.dump)
+        verify_dump_run(args.dump, dump_rows)
+        result = classify(ledger_rows, dump_rows)
+    except (OSError, ValueError) as error:
+        parser.exit(2, f"classify_mrz_mechanisms: {error}\n")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(result["summary"], sort_keys=True))
