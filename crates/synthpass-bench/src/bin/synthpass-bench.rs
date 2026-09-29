@@ -257,6 +257,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
 struct SeedResult {
     seed: u64,
     profile: &'static str,
+    /// `synthpass_bench::render_sha256` of the image this document fed OCR:
+    /// the nightly's generator fingerprint. Always serialized. Hashed before
+    /// the OCR call, from the same image, so a re-render changes it and OCR
+    /// cannot.
+    render_sha256: String,
     hit: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
@@ -599,6 +604,7 @@ fn main() {
     let results: Vec<SeedResult> = corpus
         .into_iter()
         .map(|doc| {
+            let render_sha256 = synthpass_bench::render_sha256(&doc.image);
             let (result, pass_records) = if parsed.ocr_passes {
                 synthpass_bench::check_document_traced(&ocr, &doc.image, &doc.labels)
             } else {
@@ -638,6 +644,7 @@ fn main() {
             SeedResult {
                 seed: doc.seed,
                 profile: doc.profile.as_str(),
+                render_sha256,
                 hit: result.hit,
                 miss_kind: kind,
                 check_states,
@@ -1338,6 +1345,16 @@ mod tests {
         assert_eq!(json["results"][0]["retry_stop"], "general_valid");
     }
 
+    /// The nightly reads `render_sha256` from every `results[]` entry (the
+    /// generator fingerprint), so it is always serialized, never omitted.
+    #[test]
+    fn every_result_carries_its_render_sha256() {
+        let mut report = synthetic_rate_report(1, 1, 0);
+        report.results = vec![doc(None, &[], &[])];
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["results"][0]["render_sha256"], "0".repeat(64));
+    }
+
     /// #574: both MRZ arms are run-level fields, always present in the JSON, so
     /// a report says which arm produced its numbers.
     #[test]
@@ -1520,6 +1537,7 @@ mod tests {
         SeedResult {
             seed: 0,
             profile: "clean",
+            render_sha256: "0".repeat(64),
             hit: miss.is_none(),
             reason: None,
             miss_kind: miss,
