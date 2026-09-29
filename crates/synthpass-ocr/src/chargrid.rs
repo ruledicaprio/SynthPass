@@ -34,9 +34,9 @@
 //! `(char, left, right)` triple a caller builds from whatever recognizer it
 //! used. There is no OCR invocation, no image preprocessing beyond reading
 //! pixels a caller already produced, and no environment variable: this is
-//! the pure algorithm module. Wiring it into [`crate::NativeOcr`] behind an
-//! opt-in env var, and the `ocrs::TextChar` → [`Glyph`] conversion, is
-//! PR-1.4.
+//! the pure algorithm module. The wiring lives in `lib.rs`: `apply_chargrid`
+//! runs it behind the opt-in `SYNTHPASS_OCR_CHARGRID` env var, and
+//! `recognize_chars` does the `ocrs::TextChar` → [`Glyph`] conversion.
 //!
 //! # Two probe findings this module encodes
 //!
@@ -401,6 +401,32 @@ pub fn cell_ink(dark: &GrayImage, top: u32, bottom: u32, grid: &Grid) -> Vec<f32
         .collect()
 }
 
+/// Dark-pixel count of every column of `dark`, over rows `top..bottom`: the
+/// per-column form of the ink [`cell_ink`] reads, for a caller that has to
+/// recompute a cell's ink under a different grid without the image. Returns
+/// one entry per column of `dark` (`dark.width()` of them), so it is indexed
+/// by the image's own x. Rows clamp to the image exactly as in [`cell_ink`],
+/// and an empty range yields all zeros.
+///
+/// A cell's [`cell_ink`] value is the sum of this profile over the cell's
+/// columns divided by `columns * (bottom - top)` (see the test-only
+/// `cell_ink_from_columns`, which proves it bit-identical). It uses the same
+/// [`is_ink`] threshold, so the ink rule stays single-sourced.
+pub fn column_ink(dark: &GrayImage, top: u32, bottom: u32) -> Vec<u32> {
+    let (w, h) = dark.dimensions();
+    let top = top.min(h);
+    let bottom = bottom.min(h);
+    let mut counts = vec![0u32; w as usize];
+    for y in top..bottom {
+        for (x, count) in counts.iter_mut().enumerate() {
+            if is_ink(dark.get_pixel(x as u32, y)[0]) {
+                *count += 1;
+            }
+        }
+    }
+    counts
+}
+
 /// Default `ink_floor` for [`repair_name_line`]: the minimum dark-pixel
 /// fraction (from [`cell_ink`]) an empty cell must show to count as "the
 /// image shows something there, the glyph just didn't get read" rather
@@ -445,6 +471,21 @@ pub enum Rejected {
     /// format — stopped resolving to a real issuing country. See
     /// [`repair_name_line`]'s doc comment.
     PrefixChanged,
+}
+
+impl Rejected {
+    /// Short, snake_case label: the `<reason>` of `OcrPage::chargrid`'s
+    /// `"rejected:<reason>"` verdict, and the `outcome` a benchmark writes for a
+    /// repair the gates refused. The one label table for both.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NoDeficit => "no_deficit",
+            Self::TooManyGlyphs => "too_many_glyphs",
+            Self::GridFit => "grid_fit",
+            Self::InkMismatch { .. } => "ink_mismatch",
+            Self::PrefixChanged => "prefix_changed",
+        }
+    }
 }
 
 /// A successfully repaired MRZ name line.
@@ -558,6 +599,71 @@ pub fn repair_name_line(
         line: repaired,
         fillers_placed: deficit,
     })
+}
+
+/// [`cell_ink`], recomputed from [`column_ink`]'s profile alone: the ink a
+/// replay needs under a grid the recording never measured. `height` is the
+/// image's height and `top..bottom` the row range the profile was taken over;
+/// both clamp as in [`cell_ink`]. Test-only: it proves the profile is enough,
+/// and is not part of the module's API.
+#[cfg(test)]
+pub(crate) fn cell_ink_from_columns(
+    columns: &[u32],
+    height: u32,
+    top: u32,
+    bottom: u32,
+    grid: &Grid,
+) -> Vec<f32> {
+    let w = columns.len() as u32;
+    let rows = bottom.min(height).saturating_sub(top.min(height));
+    (0..grid.cells)
+        .map(|k| {
+            let x_lo = (grid.origin + k as f32 * grid.pitch).max(0.0).round() as u32;
+            let x_hi = ((grid.origin + (k as f32 + 1.0) * grid.pitch)
+                .max(0.0)
+                .round() as u32)
+                .min(w);
+            if x_lo >= x_hi || rows == 0 {
+                return 0.0;
+            }
+            let dark_px: u32 = columns[x_lo as usize..x_hi as usize].iter().sum();
+            let total = (x_hi - x_lo) * rows;
+            dark_px as f32 / total as f32
+        })
+        .collect()
+}
+
+/// [`grid_origin_from_ink`], recomputed from [`column_ink`]'s profile alone.
+/// Test-only, like [`cell_ink_from_columns`]; `columns` must already be the
+/// profile of the line's own rows.
+#[cfg(test)]
+pub(crate) fn grid_origin_from_columns(columns: &[u32], pitch: f32, cells: usize) -> Option<f32> {
+    if pitch <= 0.0 {
+        return None;
+    }
+    let w = columns.len() as f32;
+    let first_dark = columns.iter().position(|&c| c > 0)? as f32;
+    let mut best_cost = u32::MAX;
+    let mut best_x0 = first_dark;
+    let mut x0 = first_dark - pitch;
+    while x0 <= first_dark {
+        let cost: u32 = (0..=cells)
+            .map(|k| {
+                let x = (x0 + k as f32 * pitch).round();
+                if x < 0.0 || x >= w {
+                    0
+                } else {
+                    columns[x as usize]
+                }
+            })
+            .sum();
+        if cost < best_cost {
+            best_cost = cost;
+            best_x0 = x0;
+        }
+        x0 += ORIGIN_SEARCH_STEP;
+    }
+    Some(best_x0)
 }
 
 #[cfg(test)]
@@ -1084,6 +1190,152 @@ mod tests {
             repair_name_line(full, &glyphs, cells, &ink, DEFAULT_INK_FLOOR, &grid).unwrap();
         assert_eq!(repair.line, full);
         assert_eq!(repair.fillers_placed, 2);
+    }
+
+    // ---- column_ink ----------------------------------------------------------
+
+    #[test]
+    fn column_ink_counts_dark_pixels_per_column_on_a_drawn_band() {
+        let cells = 6;
+        let pitch = 10u32;
+        let height = 20u32;
+        // Cell 2 is blank; every other cell inks all but its left margin column
+        // and the two top and bottom rows.
+        let band = draw_band(cells, pitch, height, &[2]);
+        let profile = column_ink(&band, 0, height);
+        assert_eq!(profile.len(), (cells as u32 * pitch) as usize);
+        for (x, &count) in profile.iter().enumerate() {
+            let cell = x / pitch as usize;
+            let margin = x % pitch as usize == 0;
+            let expected = if cell == 2 || margin { 0 } else { height - 4 };
+            assert_eq!(count, expected, "column {x}");
+        }
+        // Rows outside the ink block read as background.
+        assert!(column_ink(&band, 0, 2).iter().all(|&c| c == 0));
+        // A sub-range counts only its own rows: rows 2..5 are all ink.
+        assert_eq!(column_ink(&band, 2, 5)[1], 3);
+    }
+
+    #[test]
+    fn column_ink_returns_one_entry_per_image_column() {
+        for (w, h) in [(1u32, 1u32), (7, 3), (40, 12)] {
+            let img = GrayImage::from_pixel(w, h, image::Luma([0]));
+            let profile = column_ink(&img, 0, h);
+            assert_eq!(profile.len(), w as usize);
+            assert!(profile.iter().all(|&c| c == h));
+        }
+    }
+
+    #[test]
+    fn column_ink_clamps_and_empties_like_cell_ink() {
+        let band = draw_band(4, 10, 20, &[]);
+        let w = band.width() as usize;
+        // Past the bottom: clamped to the image, so the same as 0..20.
+        assert_eq!(column_ink(&band, 0, 500), column_ink(&band, 0, 20));
+        assert_eq!(column_ink(&band, 5, 500), column_ink(&band, 5, 20));
+        // Entirely outside, empty and inverted ranges: all zeros, still `w` long.
+        for (top, bottom) in [(20, 30), (500, 900), (7, 7), (9, 3), (0, 0)] {
+            let profile = column_ink(&band, top, bottom);
+            assert_eq!(profile.len(), w, "rows {top}..{bottom}");
+            assert!(profile.iter().all(|&c| c == 0), "rows {top}..{bottom}");
+        }
+    }
+
+    /// Grids the recompute test runs over: fractional origins, a fractional
+    /// pitch, negative and past-the-edge cells.
+    fn recompute_grids(cells: usize) -> Vec<Grid> {
+        [
+            (0.0, 24.0),
+            (0.5, 24.0),
+            (3.7, 23.4),
+            (-30.25, 24.0),
+            (100.0, 24.5),
+            (5.0, 31.9),
+            (0.0, 0.4),
+        ]
+        .iter()
+        .map(|&(origin, pitch)| Grid {
+            origin,
+            pitch,
+            cells,
+        })
+        .collect()
+    }
+
+    #[test]
+    fn cell_ink_recomputed_from_column_ink_is_bit_identical() {
+        let cells = 44;
+        let height = 40u32;
+        // A band with blanks, so the ratios are not all one or all zero.
+        let band = draw_band(cells, 24, height, &[3, 4, 20, 21, 22]);
+        for (top, bottom) in [(0, 40), (5, 30), (10, 60), (39, 40), (40, 50), (12, 12)] {
+            let columns = column_ink(&band, top, bottom);
+            for grid in recompute_grids(cells) {
+                let direct = cell_ink(&band, top, bottom, &grid);
+                let replayed = cell_ink_from_columns(&columns, height, top, bottom, &grid);
+                assert_eq!(direct.len(), replayed.len());
+                for (k, (a, b)) in direct.iter().zip(&replayed).enumerate() {
+                    assert_eq!(
+                        a.to_bits(),
+                        b.to_bits(),
+                        "cell {k} of {grid:?}, rows {top}..{bottom}: {a} vs {b}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grid_origin_from_ink_recomputed_from_column_ink_is_identical() {
+        let cells = 44;
+        let height = 40u32;
+        let band = draw_band(cells, 24, height, &[0, 1, 30]);
+        for (top, bottom, pitch) in [
+            (0, 40, 24.0f32),
+            (5, 30, 24.0),
+            (0, 40, 23.5),
+            (0, 0, 24.0),
+            (0, 40, 0.0),
+        ] {
+            let direct = grid_origin_from_ink(&band, top, bottom, pitch, cells);
+            let columns = column_ink(&band, top, bottom);
+            let replayed = grid_origin_from_columns(&columns, pitch, cells);
+            assert_eq!(
+                direct.map(f32::to_bits),
+                replayed.map(f32::to_bits),
+                "rows {top}..{bottom}, pitch {pitch}"
+            );
+        }
+        // A band with no ink at all has no origin either way.
+        let blank = GrayImage::from_pixel(50, 10, image::Luma([250]));
+        assert_eq!(grid_origin_from_ink(&blank, 0, 10, 5.0, 10), None);
+        assert_eq!(
+            grid_origin_from_columns(&column_ink(&blank, 0, 10), 5.0, 10),
+            None
+        );
+    }
+
+    // ---- Rejected::as_str -----------------------------------------------------
+
+    #[test]
+    fn rejected_labels_are_stable_and_snake_case() {
+        let cases = [
+            (Rejected::NoDeficit, "no_deficit"),
+            (Rejected::TooManyGlyphs, "too_many_glyphs"),
+            (Rejected::GridFit, "grid_fit"),
+            (
+                Rejected::InkMismatch {
+                    expected: 2,
+                    found: 1,
+                },
+                "ink_mismatch",
+            ),
+            (Rejected::PrefixChanged, "prefix_changed"),
+        ];
+        for (rejected, label) in cases {
+            assert_eq!(rejected.as_str(), label);
+            assert!(label.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
+        }
     }
 
     // ---- property-style: random drop/restore -------------------------------

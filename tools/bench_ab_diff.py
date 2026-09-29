@@ -48,22 +48,84 @@ An arm is one directory, holding whatever the A/B measured:
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --asset <asset_id> ...
     python tools/bench_ab_diff.py BEFORE_ARM AFTER_ARM --json
+    python tools/bench_ab_diff.py A B --expect-identical [--check-pass-trace] [--ignore KEY ...] [--json]
 
 `--asset` (repeatable) adds a status block for a named real specimen, whether or
 not it changed. Give the `asset_id` as the outcome ledger spells it, such as
 `passports/Kosovo_Passport_Specimen_P0_RKS_2023_mrz.jpg`.
 
+`--expect-identical` is the neutrality mode, for a change that should move
+nothing (see below). `--check-pass-trace` and `--ignore` are refused without
+it, and `--asset` is refused with it: that mode prints no zones.
+
 **Exit status:**
-- **0** if every pair compared is an A/B.
+- **0** if every pair compared is an A/B. Under `--expect-identical`, also
+  identical.
 - **1** if a pair is not an A/B:
   - a synthetic pair covering different documents;
   - real runs over different assets, a different corpus manifest, or different
     image bytes;
-  - a report whose emitted counts disagree with its own seeds.
+  - a report whose emitted counts disagree with its own seeds;
+  - under `--expect-identical`, a `budget` stop in one arm only.
 - **2** on:
   - unreadable input;
   - two arms with nothing in common to compare;
-  - an arm measured with a private or local track.
+  - an arm measured with a private or local track;
+  - under `--expect-identical`, `--check-pass-trace` when neither arm has a
+    pass trace.
+- **3**, only under `--expect-identical`: the pair is an A/B but not identical.
+  A difference in a row, a dump, a pass trace or a dumped text; a dump row or
+  block in one arm only; a format or the real run in one arm only.
+
+Codes 0, 1 and 2 mean the same in both modes. When several apply, 2 wins over 1
+and 1 wins over 3.
+
+## Neutrality mode
+
+`--expect-identical` answers one question for a change that should not move a
+single read: does every document read the same in both arms? It prints counts,
+seeds, asset ids and sha256 prefixes, and **never a line of OCR or zone text**,
+so its output is safe for a public job summary (ADR-0027). One line per format
+and one for the real run, then `NEUTRAL` or `NOT NEUTRAL`; at most 8 ids are
+listed per failing check, and `--json` carries the same result.
+
+It first runs the default mode's checks, which decide exit 1 and 2. Then:
+
+- **Ignored keys.** `elapsed_ms`, `ocr_ms` and `run_manifest` always.
+  `ocr_text` and `ocr_passes` only where just one arm has them. Anything else
+  needs `--ignore KEY` (repeatable). An ignored key is dropped at any depth of a
+  row, so `--ignore chargrid` also drops it inside each pass record. The
+  one-sided rule for `ocr_text` and `ocr_passes` applies to a row's top level.
+  The first output line names every key.
+- **Synthetic, per format:**
+  - `results[]` is identical per seed after the ignores;
+  - the `--- seed N raw OCR lines ---` blocks of `ARM/<name>.stdout` are
+    byte-identical, when both arms have that file;
+  - an arm's `ocr_text` equals the text the other arm printed for the seed.
+- **Real:**
+  - the outcome ledger is identical per asset;
+  - the dump rows are identical, with `raw_ocr_text` compared by sha256 and
+    never printed. A row in one arm only is a difference.
+- **The real pass trace rows** (`provider-bench-ocr-passes.jsonl`) are identical
+  per asset, whenever both arms have the file, with or without
+  `--check-pass-trace`. With the file in one arm only, they are not compared,
+  which is no failure, as for the dump.
+- **`--check-pass-trace`,** in whichever arm has the trace (`ocr_passes` in a
+  synthetic report; `provider-bench-ocr-passes.jsonl` on the real side):
+  - orders and ids are contiguous, and `general` appears only at 0;
+  - readings are empty exactly when the outcome is `failed` or
+    `no_mrz_shaped_lines`;
+  - one `accepted` pass exactly when the stop is `general_valid` or
+    `variant_valid`, and it is the last pass and equals `retry_variant_id`;
+  - the appended and accepted readings form the tail of `ocr_text`;
+  - on real arms, the trace's `ocr_text` equals the dump's `raw_ocr_text` (by
+    hash), and its retry fields equal the ledger's.
+- **Budget stops** are listed by id. One in both arms is reported, with the
+  dumped texts compared by hash. One in a single arm is not an A/B: the retry
+  loop is wall-clock budgeted, so the two arms did not run the same search.
+
+A difference in the run identity (flags, OCR arms, model paths) is named as a
+note and does not change the verdict.
 
 ## What it prints
 
@@ -120,13 +182,16 @@ status 2 and before anything is printed, when:
 - an asset sits on a `private` or `local` track.
 
 The public corpus's MRZ lines are already quoted in the dated notes in
-`knowledge/benchmarks/`. This prints recovered zones, fixture agreement and
-outcomes, and never a dump's raw OCR text.
+`knowledge/benchmarks/`. The default mode prints recovered zones, fixture
+agreement and outcomes, and never a dump's raw OCR text. `--expect-identical`
+prints no text at all.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -650,6 +715,446 @@ def render(result: dict) -> str:
     return "\n".join(lines)
 
 
+# --- Neutrality mode (`--expect-identical`) ---------------------------------
+#
+# The default mode above explains what moved. This mode answers one question,
+# for a change that should move nothing: is every document read the same? It
+# prints counts, seeds, asset ids and sha256 prefixes, never a line of OCR or
+# zone text, so its output can go into a public job summary (ADR-0027).
+
+# Keys that never carry a measured result: timing, and the archive a row came from.
+ALWAYS_IGNORED = ("elapsed_ms", "ocr_ms", "run_manifest")
+# Keys only one arm may have measured (`--dump-ocr-passes` on one side). They are
+# ignored where just one arm carries them, compared where both do.
+ONE_SIDED_IGNORED = ("ocr_text", "ocr_passes")
+PASSES = "provider-bench-ocr-passes.jsonl"
+MAX_IDS = 8
+DUMP_BLOCK = re.compile(r"^--- seed (\d+) raw OCR lines ---$")
+DUMP_LINE = re.compile(r'^  \[(\d+)\] (".*")$')
+EMPTY_PASS_OUTCOMES = ("failed", "no_mrz_shaped_lines")
+ACCEPTING_STOPS = ("general_valid", "variant_valid")
+RETRY_FIELDS = ("retry_stop", "retry_variant_id", "retry_budget_hit")
+_MISSING = object()
+
+
+def digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def text_digest(value) -> str | None:
+    return digest(value) if isinstance(value, str) else None
+
+
+RUST_ESCAPE = re.compile(r"\\(?:u\{([0-9a-fA-F]+)\}|(.))", re.DOTALL)
+RUST_PLAIN = re.compile(r'[^\\"]+')
+RUST_SIMPLE_ESCAPES = {'"': '"', "\\": "\\", "n": "\n", "r": "\r", "t": "\t", "0": "\0", "'": "'"}
+
+
+def rust_debug_str(literal: str) -> str:
+    """The string a Rust `{:?}` literal spells, read left to right in one pass.
+    Rust escapes a quote, a backslash, `\\n`, `\\r`, `\\t`, `\\0`, `\\'` and
+    `\\u{XXXX}`. Any other escape, or a literal that is not quoted, is a
+    ValueError."""
+    if len(literal) < 2 or literal[0] != '"' or literal[-1] != '"':
+        raise ValueError("not a quoted Rust string literal")
+    body, pos, out = literal[1:-1], 0, []
+    while pos < len(body):
+        if body[pos] == "\\":
+            escape = RUST_ESCAPE.match(body, pos)
+            if escape is None:
+                raise ValueError("a dangling backslash in a Rust string literal")
+            if escape.group(1) is not None:
+                code = int(escape.group(1), 16)
+                if code > 0x10FFFF or 0xD800 <= code <= 0xDFFF:
+                    raise ValueError(f"\\u{{{escape.group(1)}}} is not a character")
+                out.append(chr(code))
+            elif escape.group(2) in RUST_SIMPLE_ESCAPES:
+                out.append(RUST_SIMPLE_ESCAPES[escape.group(2)])
+            else:
+                raise ValueError("an unknown escape in a Rust string literal")
+            pos = escape.end()
+        else:
+            plain = RUST_PLAIN.match(body, pos)
+            if plain is None:
+                raise ValueError("an unescaped quote in a Rust string literal")
+            out.append(plain.group())
+            pos = plain.end()
+    return "".join(out)
+
+
+def dump_blocks(path: Path) -> dict[int, list[str]]:
+    """The `--- seed N raw OCR lines ---` blocks of a `synthpass-bench` stdout,
+    by seed: each block's header and its `  [i] "..."` lines, verbatim."""
+    out, seed, block = {}, None, []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        header = DUMP_BLOCK.match(line)
+        if header:
+            if seed is not None:
+                out[seed] = block
+            seed, block = int(header.group(1)), [line]
+        elif seed is not None:
+            if DUMP_LINE.match(line):
+                block.append(line)
+            else:
+                out[seed], seed, block = block, None, []
+    if seed is not None:
+        out[seed] = block
+    return out
+
+
+def block_text(block: list[str]) -> str:
+    """The OCR text a block prints: its lines decoded and joined by newlines."""
+    return "\n".join(rust_debug_str(DUMP_LINE.match(line).group(2)) for line in block[1:])
+
+
+def failing(ids: list) -> dict:
+    """A failed check: how many, and the first `MAX_IDS` ids."""
+    return {"failed": len(ids), "ids": [str(i) for i in ids[:MAX_IDS]]}
+
+
+def without_keys(value, ignore: set[str]):
+    """`value` with every ignored key dropped, at any depth of dicts and lists."""
+    if isinstance(value, dict):
+        return {k: without_keys(v, ignore) for k, v in value.items() if k not in ignore}
+    if isinstance(value, list):
+        return [without_keys(v, ignore) for v in value]
+    return value
+
+
+def comparable(row: dict, ignore: set[str]) -> dict:
+    """A row without its ignored keys, at any depth, and with a top-level
+    `raw_ocr_text` reduced to its sha256, so a comparison can never surface the
+    text."""
+    out = without_keys(row, ignore)
+    if isinstance(out.get("raw_ocr_text"), str):
+        out["raw_ocr_text"] = "sha256:" + digest(out["raw_ocr_text"])
+    return out
+
+
+def row_differences(before: dict, after: dict, ignore: set[str]) -> list[str]:
+    """One entry per id whose row differs: the id, then the keys that differ (or
+    the arm the row is missing from). Values are never listed."""
+    out = []
+    for key in sorted(set(before) | set(after)):
+        if key not in after:
+            out.append(f"{key} (only in before)")
+        elif key not in before:
+            out.append(f"{key} (only in after)")
+        else:
+            b, a = comparable(before[key], ignore), comparable(after[key], ignore)
+            keys = sorted(k for k in set(b) | set(a) if b.get(k, _MISSING) != a.get(k, _MISSING))
+            if keys:
+                out.append(f"{key} ({', '.join(keys)})")
+    return out
+
+
+def ignored_keys(before: dict, after: dict, extra: list[str]) -> tuple[set[str], list[str]]:
+    """The keys to leave out of a comparison of two row sets, and which of them
+    were left out because only one arm carries them."""
+    one_sided = [k for k in ONE_SIDED_IGNORED
+                 if any(k in r for r in before.values()) != any(k in r for r in after.values())]
+    return set(ALWAYS_IGNORED) | set(extra) | set(one_sided), one_sided
+
+
+def is_budget_stop(row: dict) -> bool:
+    return row.get("retry_stop") == "budget" or row.get("retry_budget_hit") is True
+
+
+def trace_breaks(doc: dict) -> list[str]:
+    """What is wrong with one document's pass trace. The messages hold counts
+    and fixed words, never OCR text."""
+    passes, text = doc.get("ocr_passes"), doc.get("ocr_text")
+    if passes is None:
+        return [] if text is None else ["ocr_passes missing"]
+    if not isinstance(passes, list):
+        return ["ocr_passes is not a list"]
+    if text is None:
+        return [] if not passes else ["ocr_text null but passes present"]
+    if not isinstance(text, str):
+        return ["ocr_text is not a string"]
+    breaks: list[str] = []
+
+    def add(message: str) -> None:
+        if message not in breaks:
+            breaks.append(message)
+
+    records = [p for p in passes if isinstance(p, dict)]
+    if len(records) != len(passes):
+        add("a pass is not an object")
+    for n, rec in enumerate(records):
+        if rec.get("order") != n:
+            add("orders are not contiguous")
+        if rec.get("id") != ("general" if n == 0 else f"pass-{n - 1:02d}"):
+            add("ids are not contiguous")
+        if (rec.get("transform") == "general") != (n == 0):
+            add("general appears other than at 0")
+        readings = rec.get("readings")
+        if not isinstance(readings, list):
+            add("readings missing")
+        elif (rec.get("outcome") in EMPTY_PASS_OUTCOMES) != (len(readings) == 0):
+            add("readings disagree with the outcome")
+    accepted = [rec for rec in records if rec.get("outcome") == "accepted"]
+    stop = doc.get("retry_stop")
+    if stop in ACCEPTING_STOPS:
+        if len(accepted) != 1:
+            add(f"{len(accepted)} accepted passes with stop {stop}")
+        elif accepted[0].get("id") != doc.get("retry_variant_id") or accepted[0].get("order") != len(records) - 1:
+            add("the accepted pass is not the last, or is not retry_variant_id")
+    elif accepted:
+        add(f"{len(accepted)} accepted passes with stop {stop}")
+    tail = "".join(
+        "\n" + "\n".join(r["text"] for r in rec["readings"] if isinstance(r, dict) and isinstance(r.get("text"), str))
+        for rec in records[1:]
+        if rec.get("outcome") in ("appended", "accepted") and isinstance(rec.get("readings"), list))
+    if not text.endswith(tail):
+        add("the appended and accepted readings are not the tail of ocr_text")
+    return breaks
+
+
+def trace_failures(rows: dict, arm: str) -> list[str]:
+    """`<id> (<arm>: <first two breaks>)` for each row of `rows` with a break."""
+    out = []
+    for key, doc in rows.items():
+        breaks = trace_breaks(doc)
+        if breaks:
+            out.append(f"{key} ({arm}: {'; '.join(breaks[:2])})")
+    return out
+
+
+def budget_entries(prefix: str, stops: tuple[set, set], text_status) -> list[dict]:
+    """Every budget stop, by id, and the arms it happened in. `text_status(id)`
+    says whether the two arms' dumped texts agree, by hash."""
+    return [{"id": f"{prefix}{key}", "in": [key in stops[0], key in stops[1]],
+             "text": text_status(key)} for key in sorted(stops[0] | stops[1])]
+
+
+def neutral_synthetic(name: str, before: Path, after: Path, extra: list[str], check_trace: bool) -> dict:
+    report_b, report_a = load_json(before), load_json(after)
+    rows_b = {d["seed"]: d for d in report_b.get("results", [])}
+    rows_a = {d["seed"]: d for d in report_a.get("results", [])}
+    ignore, one_sided = ignored_keys(rows_b, rows_a, extra)
+    out: dict = {
+        "seeds": [len(rows_b), len(rows_a)],
+        "hits": [sum(1 for d in rows_b.values() if d.get("hit")), sum(1 for d in rows_a.values() if d.get("hit"))],
+        "also_ignored": one_sided,
+        "differs_in": [k for k in ("ocr_arms", "model_paths")
+                       if k in report_b and k in report_a and report_b[k] != report_a[k]],
+        "results_differ": failing(row_differences(rows_b, rows_a, ignore)),
+        "dump_blocks_differ": None,
+        "text_vs_dump_differ": None,
+        "text_checked": 0,
+        "trace_breaks": None,
+        "passes": 0,
+    }
+    stdout_b, stdout_a = before.with_suffix(".stdout"), after.with_suffix(".stdout")
+    blocks_b = dump_blocks(stdout_b) if stdout_b.is_file() else None
+    blocks_a = dump_blocks(stdout_a) if stdout_a.is_file() else None
+    hashed = [None if b is None else {s: {"block": digest("\n".join(v))} for s, v in b.items()}
+              for b in (blocks_b, blocks_a)]
+    if hashed[0] is not None and hashed[1] is not None:
+        out["dump_blocks_differ"] = failing(row_differences(hashed[0], hashed[1], set()))
+    # An arm with ocr_text must read what the other arm printed.
+    mismatched, checked = [], 0
+    for side, rows, other in (("before", rows_b, blocks_a), ("after", rows_a, blocks_b)):
+        if other is None:
+            continue
+        for seed in sorted(rows):
+            text = rows[seed].get("ocr_text")
+            if text is None:
+                continue
+            checked += 1
+            if seed not in other or block_text(other[seed]) != text:
+                mismatched.append(f"{seed} ({side})")
+    if checked:
+        out["text_vs_dump_differ"], out["text_checked"] = failing(mismatched), checked
+    if check_trace:
+        broken, traced = [], False
+        for side, rows in (("before", rows_b), ("after", rows_a)):
+            if any("ocr_passes" in r for r in rows.values()):
+                traced = True
+                broken += trace_failures(rows, side)
+                out["passes"] += sum(len(r.get("ocr_passes") or []) for r in rows.values())
+        if traced:
+            out["trace_breaks"] = failing(broken)
+
+    def text_status(seed):
+        if hashed[0] is None or hashed[1] is None or seed not in hashed[0] or seed not in hashed[1]:
+            return "not dumped"
+        return "same" if hashed[0][seed] == hashed[1][seed] else "differs"
+
+    out["budget"] = budget_entries(f"{name}:", ({s for s, r in rows_b.items() if is_budget_stop(r)},
+                                                {s for s, r in rows_a.items() if is_budget_stop(r)}),
+                                   text_status)
+    return out
+
+
+def neutral_real(before: Path, after: Path, extra: list[str], check_trace: bool) -> dict:
+    ledgers = [load_jsonl(d / OUTCOMES) for d in (before, after)]
+    ignore, _ = ignored_keys(*ledgers, extra)
+    out: dict = {
+        "documents": [len(ledgers[0]), len(ledgers[1])],
+        "ledger_differ": failing(row_differences(ledgers[0], ledgers[1], ignore)),
+        "dump_rows": None,
+        "dump_differ": None,
+        "trace_rows": None,
+        "trace_differ": None,
+        "trace": None,
+        "trace_documents_without_row": None,
+        "trace_breaks": None,
+        "trace_text_differs_from_dump": None,
+        "trace_retry_differs_from_ledger": None,
+        "passes": 0,
+    }
+    dumps = [load_jsonl(d / ZONES, PROVIDER) if (d / ZONES).is_file() else None for d in (before, after)]
+    if dumps[0] is not None and dumps[1] is not None:
+        dump_ignore, _ = ignored_keys(*dumps, extra)
+        out["dump_rows"] = [len(dumps[0]), len(dumps[1])]
+        out["dump_differ"] = failing(row_differences(dumps[0], dumps[1], dump_ignore))
+    traces = [load_jsonl(d / PASSES) if (d / PASSES).is_file() else None for d in (before, after)]
+    if traces[0] is not None and traces[1] is not None:
+        trace_ignore, _ = ignored_keys(*traces, extra)
+        out["trace_rows"] = [len(traces[0]), len(traces[1])]
+        out["trace_differ"] = failing(row_differences(traces[0], traces[1], trace_ignore))
+    if check_trace:
+        untraced, broken, text_bad, retry_bad = 0, [], [], []
+        for index, (side, ledger, dump) in enumerate((("before", ledgers[0], dumps[0]),
+                                                      ("after", ledgers[1], dumps[1]))):
+            rows = traces[index]
+            if rows is None:
+                continue
+            out["trace"] = out["trace"] or {"documents": [0, 0]}
+            out["trace"]["documents"][index] = len(rows)
+            out["passes"] += sum(len(r.get("ocr_passes") or []) for r in rows.values())
+            untraced += len(set(ledger) - set(rows))
+            broken += trace_failures(rows, side)
+            text_bad += [f"{k} ({side})" for k in sorted(rows) if dump is not None and k in dump
+                         and text_digest(rows[k].get("ocr_text")) != text_digest(dump[k].get("raw_ocr_text"))]
+            retry_bad += [f"{k} ({side})" for k in sorted(rows) if k in ledger
+                          and any(rows[k].get(f) != ledger[k].get(f) for f in RETRY_FIELDS)]
+        if out["trace"] is not None:
+            out["trace_documents_without_row"] = untraced
+            out["trace_breaks"] = failing(broken)
+            out["trace_text_differs_from_dump"] = failing(text_bad)
+            out["trace_retry_differs_from_ledger"] = failing(retry_bad)
+
+    def text_status(asset):
+        if dumps[0] is None or dumps[1] is None or asset not in dumps[0] or asset not in dumps[1]:
+            return "not dumped"
+        same = text_digest(dumps[0][asset].get("raw_ocr_text")) == text_digest(dumps[1][asset].get("raw_ocr_text"))
+        return "same" if same else "differs"
+
+    out["budget"] = budget_entries("", ({k for k, r in ledgers[0].items() if is_budget_stop(r)},
+                                        {k for k, r in ledgers[1].items() if is_budget_stop(r)}), text_status)
+    return out
+
+
+CHECK_KEYS = ("results_differ", "dump_blocks_differ", "text_vs_dump_differ", "trace_breaks",
+              "ledger_differ", "dump_differ", "trace_differ", "trace_text_differs_from_dump", "trace_retry_differs_from_ledger")
+
+
+def failed_checks(section: dict) -> int:
+    return sum((section.get(k) or {}).get("failed", 0) for k in CHECK_KEYS)
+
+
+def compare_neutral(before: Path, after: Path, base: dict, extra: list[str], check_trace: bool) -> dict:
+    """The neutrality verdict for two arms, given `compare_arms`'s result for
+    them. `exit` follows the default mode's codes, and adds 3, a pair that is an
+    A/B but not identical."""
+    problems = problems_of(base)
+    synthetic_b, synthetic_a = synthetic_reports(before), synthetic_reports(after)
+    synthetic = {name: neutral_synthetic(name, synthetic_b[name], synthetic_a[name], extra, check_trace)
+                 for name in base["synthetic"]}
+    real = neutral_real(before / "real", after / "real", extra, check_trace) if base["real"] else None
+    if check_trace and not any(s["trace_breaks"] is not None for s in synthetic.values()) \
+            and not (real and real["trace"]):
+        raise Refused("--check-pass-trace was asked, and neither arm has a pass trace to check")
+    if base["real"]:
+        real["differs_in"] = [k for k in base["real"]["identity"][0] if k != "git_commit"
+                              and base["real"]["identity"][0][k] != base["real"]["identity"][1][k]]
+    unpaired = [f"{name} only in the {side} arm" for side, names in base["synthetic_in_one_arm_only"].items()
+                for name in names]
+    if base["real_in_one_arm_only"]:
+        unpaired.append(f"real run only in the {base['real_in_one_arm_only']} arm")
+    budget = [e for s in synthetic.values() for e in s["budget"]] + (real["budget"] if real else [])
+    one_sided = [e["id"] for e in budget if e["in"][0] != e["in"][1]]
+    if one_sided:
+        problems.append(f"a budget stop in one arm only: {', '.join(one_sided[:MAX_IDS])}"
+                        + (f", and {len(one_sided) - MAX_IDS} more" if len(one_sided) > MAX_IDS else ""))
+    differing = sum(failed_checks(s) for s in synthetic.values()) + (failed_checks(real) if real else 0)
+    code = 1 if problems else (3 if differing or unpaired else 0)
+    return {
+        "ignored": sorted(set(ALWAYS_IGNORED) | set(extra)),
+        "ignored_when_one_arm_only": list(ONE_SIDED_IGNORED),
+        "problems": problems, "unpaired": unpaired,
+        "synthetic": synthetic, "real": real, "budget": budget,
+        "exit": code, "neutral": code == 0,
+    }
+
+
+def show_check(check: dict | None) -> str:
+    return "n/a" if check is None else str(check["failed"])
+
+
+def check_detail(label: str, check: dict | None) -> list[str]:
+    if not check or not check["failed"]:
+        return []
+    more = check["failed"] - len(check["ids"])
+    return [f"    {label}: {', '.join(check['ids'])}" + (f", and {more} more" if more else "")]
+
+
+def render_neutral(result: dict) -> str:
+    lines = [f"expect-identical: ignoring {', '.join(result['ignored'])} (at any depth); "
+             f"{' and '.join(result['ignored_when_one_arm_only'])} are ignored where only one arm has them"]
+    lines += [f"NOT AN A/B: {p}" for p in result["problems"]]
+    lines += [f"NOT COMPARED: {u}" for u in result["unpaired"]]
+    for name, s in result["synthetic"].items():
+        mark = "OK" if not failed_checks(s) else "DIFFERS"
+        lines.append(
+            f"{name}: seeds {s['seeds'][0]}/{s['seeds'][1]}, hits {s['hits'][0]}/{s['hits'][1]} | "
+            f"results[] differ {show_check(s['results_differ'])} | dump blocks differ {show_check(s['dump_blocks_differ'])} | "
+            f"ocr_text vs the other arm's dump differ {show_check(s['text_vs_dump_differ'])} (checked {s['text_checked']}) | "
+            f"trace breaks {show_check(s['trace_breaks'])} (passes {s['passes']}) -> {mark}"
+            + (f" | also ignored here: {', '.join(s['also_ignored'])}" if s["also_ignored"] else ""))
+        if s["differs_in"]:
+            lines.append(f"  note: the arms differ in {', '.join(s['differs_in'])}")
+        for label, key in (("results[] differ", "results_differ"), ("dump blocks differ", "dump_blocks_differ"),
+                           ("ocr_text differs from the other arm's dump", "text_vs_dump_differ"),
+                           ("trace breaks", "trace_breaks")):
+            lines += check_detail(label, s[key])
+    r = result["real"]
+    if r:
+        mark = "OK" if not failed_checks(r) else "DIFFERS"
+        dump = "not compared (an arm has no dump)" if r["dump_rows"] is None else \
+            f"{r['dump_rows'][0]}/{r['dump_rows'][1]} rows, differ {show_check(r['dump_differ'])} (raw_ocr_text by sha256)"
+        rows = "not compared (an arm has no trace file)" if r["trace_rows"] is None else \
+            f"{r['trace_rows'][0]}/{r['trace_rows'][1]} rows, differ {show_check(r['trace_differ'])}"
+        trace = "invariants not checked" if r["trace"] is None else (
+            f"{r['passes']} passes, documents without a row {r['trace_documents_without_row']}, "
+            f"ocr_text != dump {show_check(r['trace_text_differs_from_dump'])}, "
+            f"retry fields != ledger {show_check(r['trace_retry_differs_from_ledger'])}, "
+            f"breaks {show_check(r['trace_breaks'])}")
+        lines.append(f"real: documents {r['documents'][0]}/{r['documents'][1]} | ledger differ "
+                     f"{show_check(r['ledger_differ'])} | dump {dump} | trace rows {rows} | trace {trace} -> {mark}")
+        if r["differs_in"]:
+            lines.append(f"  note: the runs differ in {', '.join(r['differs_in'])}")
+        for label, key in (("ledger differ", "ledger_differ"), ("dump rows differ", "dump_differ"),
+                           ("trace rows differ", "trace_differ"),
+                           ("trace ocr_text differs from the dump", "trace_text_differs_from_dump"),
+                           ("trace retry fields differ from the ledger", "trace_retry_differs_from_ledger"),
+                           ("trace breaks", "trace_breaks")):
+            lines += check_detail(label, r[key])
+    if result["budget"]:
+        both = [f"{e['id']} (text {e['text']})" for e in result["budget"] if all(e["in"])]
+        single = [f"{e['id']} ({'before' if e['in'][0] else 'after'} only)"
+                  for e in result["budget"] if not all(e["in"])]
+        lines.append(f"budget stops: {len(both)} in both arms" + (f": {', '.join(both[:MAX_IDS])}" if both else "")
+                     + f"; {len(single)} in one arm only" + (f": {', '.join(single[:MAX_IDS])}" if single else ""))
+    else:
+        lines.append("budget stops: none")
+    lines.append("NEUTRAL" if result["neutral"] else "NOT NEUTRAL")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     ap.add_argument("before", type=Path, help="the before arm's directory")
@@ -657,13 +1162,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--asset", action="append", default=[],
                     help="a real specimen's asset_id to report whether or not it changed (repeatable)")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
+    ap.add_argument("--expect-identical", action="store_true",
+                    help="neutrality mode: exit 0 if every document reads the same in both arms, 3 if not; "
+                         "prints counts and ids, never OCR text")
+    ap.add_argument("--check-pass-trace", action="store_true",
+                    help="with --expect-identical: check the invariants of `ocr_passes` and the real pass trace")
+    ap.add_argument("--ignore", action="append", default=[], metavar="KEY",
+                    help="with --expect-identical: a row key to leave out of the comparison (repeatable)")
     args = ap.parse_args(argv)
+    if not args.expect_identical:
+        if args.check_pass_trace or args.ignore:
+            ap.error("--check-pass-trace and --ignore need --expect-identical")
+    elif args.asset:
+        ap.error("--asset does not apply to --expect-identical, which prints no zones")
     for arm in (args.before, args.after):
         if not arm.is_dir():
             print(f"bench_ab_diff: not a directory: {arm}", file=sys.stderr)
             return 2
     try:
         result = compare_arms(args.before, args.after, args.asset)
+        if args.expect_identical and (result["synthetic"] or result["real"]):
+            verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace)
     except Refused as e:
         print(f"bench_ab_diff: refused: {e}", file=sys.stderr)
         return 2
@@ -673,6 +1192,9 @@ def main(argv: list[str] | None = None) -> int:
     if not result["synthetic"] and not result["real"]:
         print("bench_ab_diff: the two arms have no synthetic report or real run in common", file=sys.stderr)
         return 2
+    if args.expect_identical:
+        print(json.dumps(verdict, indent=2) if args.json else render_neutral(verdict))
+        return verdict["exit"]
     print(json.dumps(result, indent=2) if args.json else render(result))
     return 1 if problems_of(result) else 0
 
