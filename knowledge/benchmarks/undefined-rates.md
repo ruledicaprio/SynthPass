@@ -10,9 +10,10 @@ rates are unavailable.
 | Tier-1 hit rate (`read_ok_rate` in flattened history) | Documents other than `no_mrz_expected`, `redacted_mrz` and `checksum_failed_specimen` |
 | Strict Tier-1 hit rate | Documents in that scored population with truth for both name fields |
 | Names exact among hits | Tier-1 hits with truth for both name fields |
-| Field match rate | Field comparisons with available truth |
-| Mean CER | Character-error-rate observations for fields with available truth |
-| Per-field mean CER | Observations with truth for that specific field |
+| Field match rate and mean CER, accepted reads (`accuracy.accepted_reads`) | Fields with truth on labelled documents with an accepted read: a Tier-1 hit or a `document_number_mismatch` |
+| Field match rate and mean CER, scored end-to-end (`accuracy.scored`) | Fields with truth on labelled documents in the Tier-1 scored population. An unread or errored document's fields score as absent |
+| Field match rate and mean CER, all labelled (top-level `field_match_rate`, `mean_cer`) | Fields with truth on every labelled document the reader answered, including `checksum_failed_specimen`. Kept for continuity, not quoted |
+| Per-field mean CER, in each of the three populations | Documents in that population with truth for that specific field; each mean carries its own document count |
 | Unsupported-assertion rate, overall and each anchor bucket | Nonempty asserted field values in that population |
 | JSON-repair fallback rate | Documents processed by the nondeterministic provider |
 
@@ -20,6 +21,12 @@ These populations differ. A labelled miss contributes to strict Tier-1 accuracy,
 but it contributes nothing to the denominator for names among accepted hits.
 An off-denominator MRZ document can still carry field truth or assertions; those
 rates remain measurable when their own denominators are positive.
+
+Read quality is measured over accepted reads, not over Tier-1 hits. A hit also
+requires the document number to equal the truth, so a hits-only population would
+make `document_number` correct by construction. A `checksum_failed_specimen` is
+outside both quoted populations: no read of it can be accepted, and the reader
+returns no fields for a failed checksum (#564).
 
 `bench-chart` skips null points in every rate panel. A null-only series has no
 bar; a measured zero remains a real plotted point or zero-height bar. The history

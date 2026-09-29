@@ -1,8 +1,12 @@
 """Synthetic-only tests for the local MRZ evidence classifier."""
 
+import contextlib
+import io
+from pathlib import Path
+import tempfile
 import unittest
 
-from classify_mrz_mechanisms import best_with_indel, classify, line_distance
+from classify_mrz_mechanisms import best_with_indel, classify, line_distance, verify_dump_run
 
 
 def ledger(asset_id, outcome="hit", **extra):
@@ -18,6 +22,36 @@ def dump(asset_id, truth=None, raw="", recovered=None, **extra):
 
 
 class MechanismClassifierTests(unittest.TestCase):
+    def test_dump_run_matches_pointer_and_archive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "provider-bench-ocr-current-run.txt").write_text("run.json\n", encoding="utf-8")
+            (directory / "run.json").write_text("{}\n", encoding="utf-8")
+            verify_dump_run(directory / "dump.jsonl", [dump("a")])
+
+    def test_stale_dump_row_names_both_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "provider-bench-ocr-current-run.txt").write_text("current.json\n", encoding="utf-8")
+            (directory / "current.json").write_text("{}\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "run.json.*current.json"):
+                verify_dump_run(directory / "dump.jsonl", [dump("a")])
+
+    def test_missing_archive_names_pointer_and_row(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "provider-bench-ocr-current-run.txt").write_text("run.json\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "run.json.*run.json"):
+                verify_dump_run(directory / "dump.jsonl", [dump("a")])
+
+    def test_legacy_dump_without_pointer_warns_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            warning = io.StringIO()
+            with contextlib.redirect_stderr(warning):
+                verify_dump_run(Path(tmp) / "dump.jsonl", [dump("a")])
+            self.assertEqual(len(warning.getvalue().splitlines()), 1)
+            self.assertIn("could not be verified", warning.getvalue())
+
     def test_indel_constrained_distance_separates_substitutions_from_ties(self):
         self.assertEqual(line_distance("ABCDEF", "ABXDEF")["relation"], "substitution")
         self.assertEqual(best_with_indel("ABCDEF", "ABXDEF"), 2)

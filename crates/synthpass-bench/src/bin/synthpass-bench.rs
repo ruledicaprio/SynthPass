@@ -1794,6 +1794,44 @@ mod tests {
         assert!(is_accepted_read(false, Some("document_number_mismatch")));
     }
 
+    /// This binary's `is_accepted_read` (over a result's `hit` and
+    /// `miss_kind`) and `synthpass_bench::is_accepted_read` (over the
+    /// `MissReason`, which `provider-bench`'s read-quality population uses)
+    /// state one rule. Pinned to agree on a hit and on every miss kind.
+    #[test]
+    fn accepted_read_agrees_with_the_library_predicate() {
+        use synthpass_bench::MissReason;
+        let reasons = [
+            None,
+            Some(MissReason::OcrError(String::new())),
+            Some(MissReason::NoMrzFound(String::new())),
+            Some(MissReason::ChecksumFailed {
+                check_states: Default::default(),
+                specimen_nonconforming: false,
+            }),
+            Some(MissReason::ChecksumFailed {
+                check_states: Default::default(),
+                specimen_nonconforming: true,
+            }),
+            Some(MissReason::DocumentNumberMismatch {
+                got: String::new(),
+                expected: String::new(),
+            }),
+            Some(MissReason::Redacted),
+            Some(MissReason::NoMrzExpected),
+            Some(MissReason::FalsePositiveMrz),
+            Some(MissReason::DocumentNumberLeadingFiller),
+        ];
+        for reason in &reasons {
+            let kind = reason.as_ref().map(synthpass_bench::miss_kind);
+            assert_eq!(
+                is_accepted_read(reason.is_none(), kind),
+                synthpass_bench::is_accepted_read(reason.as_ref()),
+                "{kind:?}"
+            );
+        }
+    }
+
     /// `accepted_reads` is hits plus `document_number_mismatch` misses.
     #[test]
     fn accepted_reads_are_hits_plus_document_number_mismatches() {
