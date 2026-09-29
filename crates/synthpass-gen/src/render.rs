@@ -568,11 +568,8 @@ mod tests {
         let scaled = font.as_scaled(px_scale);
         let y = line_rect.y as f32 + scaled.ascent();
         for (i, c) in NON_FILLERS.chars().enumerate() {
-            let cell = layout::mrz_char_rect_for_line(
-                line_rect,
-                NON_FILLERS.len() as u32,
-                i as u32,
-            );
+            let cell =
+                layout::mrz_char_rect_for_line(line_rect, NON_FILLERS.len() as u32, i as u32);
             let id = scaled.glyph_id(c);
             let advance = scaled.h_advance(id);
             let x = cell.x as f32 + ((cell.width as f32 - advance) / 2.0).max(0.0);
