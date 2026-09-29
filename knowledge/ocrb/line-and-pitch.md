@@ -108,6 +108,11 @@ provided the zone still reads in B900
   gave 1.63 cap, 0.35 mm, ±0.17 mm and 4.65-8.05 mm.
 - **Neither format's spacing prior can be one number.** TD3 has a wide band. TD1 is a different,
   much tighter value (see the findings file).
+- **What the generator draws ([#411](https://github.com/ruledicaprio/SynthPass/issues/411)):**
+  TD1's MRZ lines sit [`TD1_MRZ_LINE_PITCH`](../../crates/synthpass-gen/src/layout.rs) = 37 px =
+  **1.726 cap** apart, inside the 1.71-1.84 cap band above. Before #411, TD1 used the pitch every
+  format shares, `MRZ_LINE_HEIGHT` + `MRZ_LINE_SPACING` = 55 px = 2.565 cap. The other four formats
+  keep 55 px; TD3's nominal 6.35 mm is 2.58 cap.
 
 ## Doc 9303 transcription defects found while checking these figures
 

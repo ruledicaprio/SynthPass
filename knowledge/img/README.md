@@ -34,7 +34,7 @@ this folder — regenerate it from its source instead (see
 | `format-comparison.svg` | Bar chart comparing all five formats' latest Tier-1 hit rate | `bench-chart --bars` — see [`../benchmarks/README.md`](../benchmarks/README.md#per-format-comparison-chart-bench-chart---bars) |
 | `screenshot-synthpass-serve.png` | `synthpass serve` CLI output, hand-captured | manual |
 | `screenshot-web-mrz-validator.png` | The web MRZ validator UI, hand-captured | manual |
-| `synthetic_pass_example.png` | A generated synthetic passport specimen, hand-captured | manual |
+| `synthetic_pass_example.png` | A generated synthetic TD1 ID card: `synthpass generate --document-type td1 --count 1 --seed 1 --profile clean` | `bench-charts.yml` |
 
 Referenced from [`../../README.md`](../../README.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md),
 [`../archive/roadmap-execution-log.md`](../archive/roadmap-execution-log.md),

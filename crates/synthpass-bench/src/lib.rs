@@ -938,6 +938,22 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
     }
 }
 
+/// Whether a document's outcome is an *accepted read*: a Tier-1 hit
+/// (`reason` is `None`), or a [`MissReason::DocumentNumberMismatch`], a
+/// checksum-valid read whose document number disagrees with the truth.
+///
+/// The router accepts both, because their check digits verified; every other
+/// miss is refused or escalated. `provider-bench`'s read-quality population
+/// is built on this predicate, and `synthpass-bench`'s own `is_accepted_read`
+/// (over the report's `hit` and `miss_kind`) states the same rule; a test in
+/// that binary pins the two to agree on every [`MissReason`].
+pub fn is_accepted_read(reason: Option<&MissReason>) -> bool {
+    matches!(
+        reason,
+        None | Some(MissReason::DocumentNumberMismatch { .. })
+    )
+}
+
 /// Per-field read quality for one document.
 ///
 /// The point of this type: a binary hit tells you *that* a document failed,

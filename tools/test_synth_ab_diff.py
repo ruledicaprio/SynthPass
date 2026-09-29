@@ -1,5 +1,10 @@
 """Tests for synth_ab_diff.py: literal report fragments, no benchmark run."""
+import contextlib
+import io
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import synth_ab_diff as d
 
@@ -60,6 +65,23 @@ class State(unittest.TestCase):
 
 
 class Compare(unittest.TestCase):
+    def test_provider_report_is_refused_on_either_side(self):
+        provider = {"providers": [{"provider_id": "mrz", "documents": []}]}
+        synthetic = report(doc(0, True, False))
+        with tempfile.TemporaryDirectory() as tmp:
+            before = Path(tmp) / "before.json"
+            after = Path(tmp) / "after.json"
+            for left, right in [(provider, synthetic), (synthetic, provider)]:
+                before.write_text(json.dumps(left), encoding="utf-8")
+                after.write_text(json.dumps(right), encoding="utf-8")
+                out, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    code = d.main([str(before), str(after)])
+                self.assertEqual(code, 2)
+                self.assertEqual(out.getvalue(), "")
+                self.assertEqual(len(err.getvalue().splitlines()), 1)
+                self.assertIn("results list and document_type", err.getvalue())
+
     def test_wrong_to_refused_and_refused_to_correct(self):
         before = report(doc(18, True, True, PREFIX_WRONG), doc(99, False, fields=PREFIX_WRONG))
         after = report(doc(18, False, fields=[field("document_number", 1.0, "MZ6", "PRU")]),
