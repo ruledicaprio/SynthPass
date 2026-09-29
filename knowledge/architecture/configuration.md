@@ -17,7 +17,7 @@ same PR.
 | `SYNTHPASS_OCR_MODEL_DIR` | `.` | Directory holding `text-detection.rten` / `text-recognition.rten` (README quickstart convention: `models/`); also where `synthpass fetch-models` stages them. Also honoured by both `synthpass-bench` and `provider-bench` (issue #541); their fallback when it is unset is the build tree's own repo root (`crates/synthpass-bench`'s grandparent directory), not `.` |
 | `SYNTHPASS_OCR_DETECTION_SHA256` / `..._RECOGNITION_SHA256` | *(built-in)* | Override expected checksums |
 | `SYNTHPASS_OCR_MODEL_SKIP_VERIFY` | *(unset)* | Skip OCR model checksum verification |
-| `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `14` / `52` | Bound the MRZ retry loop |
+| `SYNTHPASS_OCR_MAX_PASSES` / `SYNTHPASS_OCR_MAX_SECONDS` | `14` / `52` | Allow at most 14 pass starts; stop starting retry passes once 52 s have passed since the general pass started; a pass in flight still finishes, and rotation and band detection run before the clock starts |
 | `SYNTHPASS_OCR_TEXTURE` | `on` | Trailing MRZ-band texture-suppression (median filter) passes after every other retry variant — `off`/`on`/`control`; see `synthpass-ocr`'s `TextureMode` doc comment |
 | `SYNTHPASS_OCR_ORDER` | `default` | Retry-variant ordering — `default`/`band-first`/`control`; see `synthpass-ocr`'s `OcrOrder` doc comment |
 | `SYNTHPASS_OCR_ROTATE` | `default` | Page-rotation detection — `default`/`legacy`/`off`; see `synthpass-ocr`'s `RotateMode` doc comment |
