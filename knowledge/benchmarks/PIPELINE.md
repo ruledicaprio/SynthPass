@@ -161,7 +161,7 @@ differs from CI's by float rounding.
 | `knowledge/benchmarks/ocr-order-ab/analyze.py` | positional per-document diff of two or three reports (the A/B attribution that the report does not do itself) |
 | `tools/synth_ab_diff.py` | per-seed diff of two `synthpass-bench` reports, classifying every seed whose scored state moved |
 | `tools/bench_ab_diff.py` | per-document diff of two whole arms, meaning every synthetic format plus the real run. Covers accepted reads (#578), reads that changed without a state move, flag-only changes, `retry_stop` in each arm, real outcome, names and zone changes with fixture agreement, and whether the two runs are comparable. It refuses private or local arms |
-| `tools/classify_mrz_mechanisms.py` | joins the real-specimen outcome ledger to an OCR dump and classifies each named miss by mechanism; checks the dump's current-run pointer and archive when present |
+| `tools/classify_mrz_mechanisms.py` | joins the real-specimen outcome ledger to an OCR dump and classifies each named miss by mechanism |
 
 ### 2.7 Documents
 
