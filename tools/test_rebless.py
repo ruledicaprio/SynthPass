@@ -71,6 +71,7 @@ class FlattenBaselineTests(unittest.TestCase):
         self.assertEqual(flat["false_positive_mrz"], 0)
         self.assertEqual(flat["ocr_error"], 0)
         self.assertEqual(flat["document_number_mismatch"], 0)
+        self.assertEqual(flat["document_number_leading_filler"], 0)
 
     def test_strict_names_fold_into_top_level(self):
         flat = rb.flatten_baseline(
@@ -94,6 +95,24 @@ class FlattenBaselineTests(unittest.TestCase):
 
 
 class ClassifyBaselineDiffTests(unittest.TestCase):
+    def test_new_zero_leading_filler_bucket_matches_old_baseline(self):
+        old = make_baseline()
+        new = make_baseline(
+            by_miss_kind={**old["by_miss_kind"], "document_number_leading_filler": 0}
+        )
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_IDENTICAL)
+        self.assertEqual(changed, [])
+
+    def test_new_nonzero_leading_filler_bucket_is_scored(self):
+        old = make_baseline()
+        new = make_baseline(
+            by_miss_kind={**old["by_miss_kind"], "document_number_leading_filler": 1}
+        )
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_SCORED)
+        self.assertIn(("document_number_leading_filler", 0, 1), changed)
+
     def test_only_provenance_moved_is_identical(self):
         old = make_baseline()
         new = make_baseline(measured_on_ci_sha="ccccccc", measured_date="2026-09-15", samples_data_sha="ddddddd")
