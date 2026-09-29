@@ -253,6 +253,40 @@ A benchmark change follows this lifecycle:
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
 
+## Replaying a captured run
+
+`provider-bench --real-specimens --mrz-only --replay-ocr-passes DIR` runs **no OCR**. It reads
+`DIR/provider-bench-ocr-passes.jsonl`, the pass file an earlier `--dump-ocr-passes` run wrote, rebuilds
+each public-corpus document's page from its row, and scores it with the same code a live run uses
+([ADR-0024, amendment 3](../decisions/ADR-0024-per-document-benchmark-archive.md)). It is for an A/B of a
+change downstream of the OCR text. The native retry loop is wall-clock budgeted, so two live runs can read
+different text; a capture is read once, and every arm replays the same text.
+
+    # once: the capture (the pass file is document text, so --out goes under artifacts/)
+    provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits --dump-ocr-passes \
+        --out artifacts/capture/real/report.json
+    # per arm: no OCR, seconds, the same dump flags
+    provider-bench --real-specimens --mrz-only --dump-ocr --dump-ocr-hits \
+        --replay-ocr-passes artifacts/capture/real --out artifacts/arm/real/report.json
+    python tools/bench_ab_diff.py artifacts/capture artifacts/arm --expect-identical --check-report
+
+How it follows the maintenance contract above:
+
+- **Freeze.** The capture is the frozen text. The replay's run manifest names it (`replay_of`: the
+  capture's run-manifest file name and its SHA-256) and copies its `ocr_arms`. The replaying process must
+  run under the capture's `SYNTHPASS_OCR_*` values, or it refuses.
+- **Reconcile.** Before anything is scored or written, a replay refuses a capture whose rows do not cover
+  the public corpus exactly once, whose `source_sha256` is not the corpus image's, whose
+  `corpus_manifest_sha256` is not the current `samples/corpus.jsonl`'s, or whose rows lack
+  `retry_damaged_recovery` or `mrz_band_score` (a capture from before replay existed).
+- **Inspect.** With every arm at its default, a replay must equal its capture in every recorded
+  per-document field. `bench_ab_diff --expect-identical --check-report` checks the ledger, the dump and the
+  `report.json` rows; only `ocr_ms` (zero in a replay), the run manifest's name and the pass trace a replay
+  does not write may differ. Any other difference stops the A/B.
+- **What it does not measure.** Nothing upstream of `OcrPage::text`: the OCR passes, their order and the
+  retry stop are the capture's, and it covers Tier 1 only. It is never a baseline: `--write-baseline` and
+  `--assert-baseline` are refused, as are `--include-private`, `--include-local` and `--dump-ocr-passes`.
+
 ## Record the rejections
 
 The most valuable entries are the signals that looked promising and did not

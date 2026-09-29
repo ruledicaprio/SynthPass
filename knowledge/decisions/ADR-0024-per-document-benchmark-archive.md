@@ -259,3 +259,76 @@ the same observation of one chargrid attempt.
   origin, the packing penalty or the glyph anchor one at a time.
 - The ink floor's margin can be measured from recorded per-cell ink and line-box heights.
 - The pass object gains one key, `chargrid`, which is `null` unless the arm ran.
+
+## Amendment 3 (2026-09-29) — replaying a captured pass file, for #574's arms
+
+**Status of this amendment:** Accepted (maintainer decision 2026-09-29, #574).
+
+### Context
+
+#574 compares three arms of a line-1 selector (off, control, on) that must read the same evidence. The
+native retry loop is wall-clock budgeted, so two live runs of one binary can execute different passes and
+read different text, and an A/B across live runs can attribute an OCR difference to the selector.
+Amendment 1 records every executed pass, and each `provider-bench-ocr-passes.jsonl` row carries the page
+text Tier 1 parsed (`ocr_text`); Tier 1 (`MrzReader`) is a pure function of that text. #575 E needs to
+replay amendment 2's chargrid record from the same file.
+
+### Decision
+
+1. `provider-bench --real-specimens --mrz-only --replay-ocr-passes DIR` runs no OCR and loads no model.
+   It builds each public-corpus document's page from DIR's pass-file row and runs the unchanged scoring
+   path, so the scoring is shared and never copied. It writes the report, the outcome ledger and, when
+   asked, the `--dump-ocr` and `--dump-ocr-hits` dumps a live run with the same flags writes. Unlike a
+   live run it always writes the run manifest and the ledger, because the manifest names the capture.
+   It covers Tier 1 only: Tier 2 would run an LLM over the replayed text, which is not measured here.
+2. It refuses, naming the problem:
+   - a row set that does not cover the public corpus exactly once (a missing `asset_id`, a duplicate, a
+     document with no row, a row for an asset the corpus does not hold);
+   - a row whose `source_sha256` differs from the corpus image's bytes;
+   - a capture whose `corpus_manifest_sha256` differs from the current `samples/corpus.jsonl`;
+   - a capture whose rows lack a key the replay needs (`retry_damaged_recovery`, `mrz_band_score`,
+     listed by name);
+   - `SYNTHPASS_OCR_*` arms that differ from the capture's, since the report's per-provider `ocr_arms`
+     is read from the environment and must be true of the text it replays;
+   - `--out` in the capture directory, which would replace the capture's own manifest and ledger;
+   - `--include-private`, `--include-local`, `--write-baseline`, `--assert-baseline` and
+     `--dump-ocr-passes`.
+3. Its run manifest names the capture it replayed, as `replay_of`: the capture's run-manifest file name
+   and the SHA-256 of that file. It copies the capture's `ocr_arms`. A live run's manifest has no such
+   key and is byte-identical to what it was. The report's `mrz_class_sweep_arm` is the replaying
+   process's, and its `model_paths` say that no OCR model was loaded.
+4. Fidelity is checked, not assumed. A replay with every arm at its default is compared with the capture's
+   own live outputs (`tools/bench_ab_diff.py --expect-identical --check-report`), and any difference
+   stops the A/B. Every `BenchPage` field scoring reads is either derived from the corpus document, or
+   carried by a row key. The row gains the two page values it did not carry, `retry_damaged_recovery` and
+   `mrz_band_score`, both text-free, added at the end: every earlier key keeps its name, order and
+   bytes. The file's text rules are unchanged.
+5. One reader serves every replay, including #575 E's chargrid replay: `ocr_passes::read_rows`. The row
+   types are owned and derive `Deserialize`, and a row written before a key existed reads back with the
+   key defaulted and named in the reader's `missing_keys`, so a consumer refuses rather than replays a
+   default.
+6. A replayed result is labelled as a replay of a named capture. OCR runtime and retry behaviour are the
+   capture's, never the replay's: `ocr_ms` is zero and a `budget` stop is the capture's.
+
+### Alternatives rejected
+
+- **Three live arms.** The same pass count is not guaranteed between runs, and a budget stop in one arm
+  only makes the pair not an A/B.
+- **A Python replay.** The parser and the selector are Rust; a mirror is a second implementation whose
+  agreement nothing checks.
+- **Replaying the miss dump.** It is written per provider and holds text only for dumped rows; the pass
+  file is written once per document and carries provenance.
+- **Overriding the report's `ocr_arms` with the capture's.** It would need the arms as values the report
+  can hold, and the replaying process would then run under arms that are not the ones it reports. The
+  replay is asked to run under the capture's arms instead.
+
+### Consequences
+
+- An arm A/B on the real corpus costs one live capture and seconds per arm, and every arm reads
+  byte-identical text.
+- A replay measures only code downstream of `OcrPage::text`. Anything upstream, the OCR passes, their
+  order and the retry loop's stopping rule, is the capture's.
+- The pass file is an input as well as an output: a schema change to it updates the reader too. A capture
+  written before this amendment lacks the two new keys and cannot be replayed; recapture it.
+- `mrz_band_score` is an `f64` the replay writes back into the dump row, so `synthpass-bench` parses
+  JSON with `serde_json`'s `float_roundtrip`, which reads it back as the identical value.
