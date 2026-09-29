@@ -127,6 +127,9 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
 A difference in the run identity (flags, OCR arms, model paths) is named as a
 note and does not change the verdict.
 
+`report.json` is not read in this mode, so `field_correctness` is not compared
+here. The ledger, dump and trace rows are.
+
 ## What it prints
 
 - **Synthetic, per report:**
@@ -156,6 +159,14 @@ note and does not change the verdict.
   - **An alarm** for any `false_positive_mrz`, and for any checksum-valid read of
     a `checksum_failed_specimen`.
   - Every document whose outcome, MRZ format or names result changed.
+  - **Field correctness per document** (`report.json`'s
+    `documents_detail[].field_correctness`, #574): per field, how many
+    documents went exact -> wrong, wrong -> exact, exact -> unread and
+    unread -> exact, and the documents with any exact -> non-exact field,
+    named by asset id and field name. The maps hold field names and the verdicts
+    `exact`, `wrong` and `unread`, never a value. A field is compared on the
+    documents whose map has it in both arms. An arm whose report lacks the maps
+    prints "not recorded".
   - Every document whose recovered zone changed, with its lines in each arm and,
     where the corpus has a fixture, which lines match it.
   - Every document dumped in one arm only, named, with its outcome in each arm.
@@ -171,6 +182,8 @@ A report written before a key existed is compared on what both arms have:
   accepted reads print `n/a`.
 - If either arm lacks `check_states`, no seed is classed a valid miss, and valid
   misses print `n/a`.
+- If either arm's `report.json` lacks `field_correctness`, or the report is
+  absent, the per-document field transitions print "not recorded".
 
 ## Privacy
 
@@ -207,6 +220,14 @@ PREFIX_FIELDS = ("document_type", "issuing_country")
 # The five formats in the order the dated notes list them; any other report
 # name sorts after them, alphabetically.
 FORMAT_ORDER = ("td1", "td2", "td3", "mrva", "mrvb")
+# `CoreField::ALL`'s order, the order the report's field names print in. A name
+# outside it (a field added later) sorts after these.
+FIELD_ORDER = ("document_type", "issuing_country", "document_number", "surname", "given_names",
+               "nationality", "date_of_birth", "sex", "date_of_expiry", "personal_number",
+               "optional_data_1", "optional_data_2")
+FIELD_VERDICTS = ("exact", "wrong", "unread")
+# The transitions counted per field: (before, after) verdicts.
+FIELD_TRANSITIONS = (("exact", "wrong"), ("wrong", "exact"), ("exact", "unread"), ("unread", "exact"))
 # Per-seed keys that record how a read was reached, not what it read.
 FLAG_KEYS = ("check_states", "line1_flagged", "tier1_damaged_recovery",
              "retry_damaged_recovery", "retry_stop", "retry_variant_id")
@@ -472,6 +493,55 @@ def real_summary(outcomes: dict[str, dict], report: dict | None) -> dict:
     }
 
 
+def field_correctness_maps(report: dict | None) -> dict[str, dict[str, str]] | None:
+    """The mrz provider's per-document `field_correctness`, by asset id: field
+    name -> `exact`, `wrong` or `unread`. `None` when the report is absent or
+    records none, an arm measured before #574 PR 2. A document without ground
+    truth has no map and is not in the result."""
+    rows = mrz_provider(report).get("documents_detail") or []
+    maps = {r["asset_id"]: r["field_correctness"] for r in rows
+            if r.get("asset_id") and isinstance(r.get("field_correctness"), dict)}
+    return maps or None
+
+
+def field_order(name: str) -> tuple[int, str]:
+    return (FIELD_ORDER.index(name) if name in FIELD_ORDER else len(FIELD_ORDER), name)
+
+
+def compare_field_correctness(before: dict | None, after: dict | None) -> dict:
+    """Per-field transitions between two arms' maps, by field name and asset id,
+    never by value. A field is compared on the documents whose map has it in
+    both arms. `transitions` and `regressions` are `None` unless both arms
+    recorded the maps."""
+    out = {"recorded": [before is not None, after is not None], "documents": [None, None],
+           "compared": None, "transitions": None, "regressions": None}
+    if before is None or after is None:
+        return out
+    common = sorted(set(before) & set(after))
+    counts: dict[str, Counter] = {}
+    regressions = []
+    for asset in common:
+        lost = {}
+        for name in sorted(set(before[asset]) & set(after[asset]), key=field_order):
+            # Only the three verdicts are ever kept: a map that carried anything
+            # else, a value, would still never reach the output.
+            pair = tuple(v if v in FIELD_VERDICTS else "other" for v in (before[asset][name], after[asset][name]))
+            if pair in FIELD_TRANSITIONS:
+                counts.setdefault(name, Counter())[f"{pair[0]}->{pair[1]}"] += 1
+            if pair[0] == "exact" and pair[1] != "exact":
+                lost[name] = pair[1]
+        if lost:
+            regressions.append({"asset": asset, "fields": lost})
+    out.update({
+        "documents": [len(before), len(after)],
+        "compared": len(common),
+        "transitions": {name: {f"{b}->{a}": counts[name][f"{b}->{a}"] for b, a in FIELD_TRANSITIONS}
+                        for name in sorted(counts, key=field_order)},
+        "regressions": regressions,
+    })
+    return out
+
+
 def real_state(row: dict | None) -> dict | None:
     if row is None:
         return None
@@ -551,6 +621,8 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
         "dumped": [len(zb), len(za)],
         "outcome_changes": outcome_changes,
         "names_changes": names_changes,
+        "field_correctness": compare_field_correctness(field_correctness_maps(report_b),
+                                                       field_correctness_maps(report_a)),
         "zone_changes": zone_changes,
         "dumped_in_one_arm_only": one_arm,
         "watched": watched,
@@ -633,6 +705,24 @@ def render_synthetic(name: str, r: dict) -> list[str]:
     return lines
 
 
+def render_field_correctness(fc: dict) -> list[str]:
+    """Field names, asset ids and counts only: the maps hold no value."""
+    if fc["transitions"] is None:
+        missing = [side for side, recorded in zip(("before", "after"), fc["recorded"]) if not recorded]
+        return [f"  field correctness: not recorded in the {' and '.join(missing)} arm's report.json "
+                f"(documents_detail.field_correctness)"]
+    lines = [f"  field correctness: {fc['compared']} documents compared "
+             f"({fc['documents'][0]} -> {fc['documents'][1]} with truth)"]
+    for name, counts in fc["transitions"].items():
+        lines.append(f"    {name}: " + ", ".join(f"{t} {n}" for t, n in counts.items()))
+    if not fc["transitions"]:
+        lines.append("    no transitions")
+    lines.append(f"  documents with an exact -> non-exact field: {len(fc['regressions'])}")
+    for r in fc["regressions"]:
+        lines.append(f"    {r['asset']}: " + ", ".join(f"{name} exact -> {now}" for name, now in r["fields"].items()))
+    return lines
+
+
 def render_real(real: dict) -> list[str]:
     sb, sa = real["summary"]
     lines = ["real specimens:",
@@ -667,6 +757,7 @@ def render_real(real: dict) -> list[str]:
         b, a = c["before"], c["after"]
         lines.append(f"    {c['asset']}: names_exact {b['names_exact']} -> {a['names_exact']}, "
                      f"name_error {b['name_error']} -> {a['name_error']}")
+    lines += render_field_correctness(real["field_correctness"])
     if real["zones_compared"]:
         lines.append(f"  zones dumped {arrow(real['dumped'])}; zone changes: {len(real['zone_changes'])}")
         for z in real["zone_changes"]:

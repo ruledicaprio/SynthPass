@@ -169,6 +169,14 @@ pub struct DocumentDetailReport {
     /// `Some(true)` and when it is `null`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_error: Option<&'static str>,
+    /// `synthpass_bench::provider_bench::DocumentDetail::field_correctness`,
+    /// serialized as `{"<field name>": "exact" | "wrong" | "unread"}` for every
+    /// field this document's ground truth defines (#574). **Field names and
+    /// the three verdicts only, never a value.** The key is **absent** for a
+    /// document without ground truth; older reports lack it too, which
+    /// `tools/bench_ab_diff.py` reports as "not recorded". Report-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_correctness: Option<BTreeMap<&'static str, &'static str>>,
     /// Wall-clock milliseconds of this document's OCR pass, the per-document
     /// cost a real-specimen run is made of. The provider-level `speed` block
     /// times `reader.read` alone, which for the deterministic `mrz` provider is
@@ -508,6 +516,12 @@ impl From<ProviderReport> for ProviderRow {
                     unsupported_fields: d.unsupported_fields,
                     names_exact: d.names_exact,
                     name_error: d.name_error,
+                    field_correctness: d.field_correctness.map(|fields| {
+                        fields
+                            .into_iter()
+                            .map(|(field, correctness)| (field, correctness.as_str()))
+                            .collect()
+                    }),
                     ocr_ms: d.ocr_elapsed.as_millis(),
                     retry_variant_id: d.retry_variant_id,
                     retry_damaged_recovery: d.retry_damaged_recovery,
@@ -1058,6 +1072,7 @@ mod tests {
                 unsupported_fields: Vec::new(),
                 names_exact: None,
                 name_error: None,
+                field_correctness: None,
                 ocr_ms: 0,
                 retry_variant_id: None,
                 retry_damaged_recovery: None,
@@ -1204,6 +1219,7 @@ mod tests {
             unsupported_fields: Vec::new(),
             names_exact: None,
             name_error: None,
+            field_correctness: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
             retry_damaged_recovery: None,
