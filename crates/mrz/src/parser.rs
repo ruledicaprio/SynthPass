@@ -1615,16 +1615,23 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
     find_and_parse_with(text, &ParseOptions::default())
 }
 
-/// Rejoin one OCR-inserted space only when the two adjacent tokens recover an
-/// exact MRZ line width. The caller still applies its existing long-token
-/// filter and physical-line fallback after this step.
+/// Rejoin one OCR-inserted space only when two adjacent fragments recover an
+/// exact MRZ line width. A token that is already 30, 36 or 44 cells is a
+/// complete candidate and is never consumed into its neighbour. The caller
+/// still applies its existing long-token filter and physical-line fallback
+/// after this step.
 fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
+    let is_line_width = |len| matches!(len, 30 | 36 | 44);
     let raw: Vec<&str> = line.split_whitespace().collect();
     let mut tokens = Vec::with_capacity(raw.len());
     let mut i = 0;
 
     while i < raw.len() {
-        if i + 1 < raw.len() && matches!(raw[i].len() + raw[i + 1].len(), 30 | 36 | 44) {
+        if i + 1 < raw.len()
+            && !is_line_width(raw[i].len())
+            && !is_line_width(raw[i + 1].len())
+            && is_line_width(raw[i].len() + raw[i + 1].len())
+        {
             let mut joined = String::with_capacity(raw[i].len() + raw[i + 1].len());
             joined.push_str(raw[i]);
             joined.push_str(raw[i + 1]);
