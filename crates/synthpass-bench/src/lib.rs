@@ -1376,7 +1376,11 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
+    // `read_tier1`, not `find_and_parse_with`: the same Tier-1 read the product's
+    // `MrzReader` makes, so a `SYNTHPASS_MRZ_LINE1_SELECT` arm (#574) reaches this
+    // benchmark too. With the arm `off` it is exactly `find_and_parse_with` under
+    // `mrz_parse_options()`.
+    let decoded = match synthpass_die::read_tier1(&text).parsed {
         Ok(decoded) => decoded,
         // #536: a structural refusal, not "nothing MRZ-shaped was found" —
         // give it its own miss bucket rather than folding it into

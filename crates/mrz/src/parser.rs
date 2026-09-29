@@ -1646,6 +1646,32 @@ fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
     tokens
 }
 
+/// The candidate MRZ lines of an OCR text, in reading order: the one line walk
+/// [`find_and_parse_with`] scans and [`crate::select_line1`] draws its
+/// alternatives from, so the two can never disagree about what counts as a line.
+///
+/// Markdown/HTML pipelines escape the filler character, so `&lt;` is undone
+/// first. OCR often emits several MRZ lines as ONE physical line,
+/// space-separated (docling renders the whole zone as a single paragraph), so
+/// long whitespace-separated tokens are treated as individual candidate lines.
+/// The lines are returned as read: `normalize_line` is the caller's step.
+pub(crate) fn candidate_lines(text: &str) -> Vec<String> {
+    let text = text.replace("&lt;", "<");
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let tokens: Vec<String> = rejoin_exact_width_tokens(line)
+            .into_iter()
+            .filter(|t| t.len() >= 20)
+            .collect();
+        if tokens.len() >= 2 {
+            out.extend(tokens);
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out
+}
+
 /// [`find_and_parse`] with an explicit [`ParseOptions`].
 ///
 /// Both entry points normalize the input the same way before scanning, which is
@@ -1664,24 +1690,8 @@ fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
 /// assert!(doc.valid());
 /// ```
 pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
-    // Markdown/HTML pipelines escape the filler character.
-    let text = text.replace("&lt;", "<");
-    // OCR often emits several MRZ lines as ONE physical line, space-separated
-    // (docling renders the whole zone as a single paragraph) — treat long
-    // whitespace-separated tokens as individual candidate lines.
-    let mut candidate_lines: Vec<String> = Vec::new();
-    for line in text.lines() {
-        let tokens: Vec<String> = rejoin_exact_width_tokens(line)
-            .into_iter()
-            .filter(|t| t.len() >= 20)
-            .collect();
-        if tokens.len() >= 2 {
-            candidate_lines.extend(tokens);
-        } else {
-            candidate_lines.push(line.to_string());
-        }
-    }
-    let lines: Vec<&str> = candidate_lines.iter().map(String::as_str).collect();
+    let owned_lines = candidate_lines(text);
+    let lines: Vec<&str> = owned_lines.iter().map(String::as_str).collect();
 
     // Best parseable-but-checksum-failed hit, reported when nothing fully
     // validates so callers can see which check digits failed and how close the

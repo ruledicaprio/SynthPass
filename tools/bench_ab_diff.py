@@ -169,11 +169,19 @@ Without `--check-report`, `report.json` is not read in this mode, so
 - **The flag-only changes,** grouped by the keys that moved.
 - **Real:**
   - **Each arm's identity:** commit, dirty tree, flags, OCR arms, corpus
-    manifest, class-sweep arm and model paths, and, for a replay
+    manifest, class-sweep arm, line-1 selector arm and model paths, and, for a replay
     (`provider-bench --replay-ocr-passes`), `replay_of`: the capture's run-manifest
     file name and its SHA-256. A different corpus or different
     image bytes means the pair is not an A/B. Any other difference is printed,
     since it may be the lever under test.
+  - **The shadow line-1 selector** (`report.json`'s `mrz_line1_select_arm` and
+    `documents_detail[].line1_selection`, #574), when either arm recorded it: each
+    arm's selector arm and verdict counts (`applied`, `proposed`, `unresolved`,
+    `ambiguous`, `none`), the asset ids with `applied`, `proposed` or `ambiguous`,
+    and a flag for every asset `proposed` in one arm whose counterpart arm, which
+    also recorded the selector, neither applied nor proposed it. Under a
+    `control` vs `on` pair the proposed and applied sets are equal, so a flag is a
+    fidelity failure. Verdict names and asset ids only, never a line of text.
   - **Tier-1 hits over both denominators,** and names exact among the hits with
     name truth.
   - **An alarm** for any `false_positive_mrz`, and for any checksum-valid read of
@@ -246,6 +254,10 @@ FIELD_ORDER = ("document_type", "issuing_country", "document_number", "surname",
                "nationality", "date_of_birth", "sex", "date_of_expiry", "personal_number",
                "optional_data_1", "optional_data_2")
 FIELD_VERDICTS = ("exact", "wrong", "unread")
+# The shadow line-1 selector's verdicts (#574), in the order the report counts them
+# and this script prints them; `LINE1_LISTED` are the ones whose asset ids are named.
+LINE1_VERDICTS = ("applied", "proposed", "unresolved", "ambiguous", "none")
+LINE1_LISTED = ("applied", "proposed", "ambiguous")
 # The transitions counted per field: (before, after) verdicts.
 FIELD_TRANSITIONS = (("exact", "wrong"), ("wrong", "exact"), ("exact", "unread"), ("unread", "exact"))
 # Per-seed keys that record how a read was reached, not what it read.
@@ -483,6 +495,7 @@ def identity(archive: dict | None, report: dict | None) -> dict:
         "corpus_manifest_sha256": archive.get("corpus_manifest_sha256"),
         "replay_of": archive.get("replay_of"),
         "mrz_class_sweep_arm": report.get("mrz_class_sweep_arm"),
+        "mrz_line1_select_arm": report.get("mrz_line1_select_arm"),
         "model_paths": report.get("model_paths"),
     }
 
@@ -561,6 +574,57 @@ def compare_field_correctness(before: dict | None, after: dict | None) -> dict:
         "regressions": regressions,
     })
     return out
+
+
+def line1_selection_rows(report: dict | None) -> dict[str, dict] | None:
+    """The mrz provider's per-document `line1_selection`, by asset id. `None`
+    when no document carries one: the arm was `off`, or the report predates the
+    selector. A document without an accepted read has none and is not in the
+    result."""
+    rows = mrz_provider(report).get("documents_detail") or []
+    selections = {r["asset_id"]: r["line1_selection"] for r in rows
+                  if r.get("asset_id") and isinstance(r.get("line1_selection"), dict)}
+    return selections or None
+
+
+def line1_verdict(row: dict | None) -> str | None:
+    """A row's verdict, kept only if it is one of the five the report writes:
+    anything else would be reported as `other`, never echoed."""
+    if row is None:
+        return None
+    verdict = row.get("verdict")
+    return verdict if verdict in LINE1_VERDICTS else "other"
+
+
+def line1_selection_summary(report: dict | None, rows: dict[str, dict] | None) -> dict:
+    """One arm's selector arm, verdict counts and the asset ids of the verdicts
+    worth naming. Ids and counts only."""
+    counts = Counter(line1_verdict(row) for row in (rows or {}).values())
+    return {
+        "arm": (report or {}).get("mrz_line1_select_arm"),
+        "recorded": rows is not None,
+        "counts": {v: counts[v] for v in (*LINE1_VERDICTS, "other") if counts[v] or v in LINE1_VERDICTS},
+        "assets": {v: sorted(a for a, row in (rows or {}).items() if line1_verdict(row) == v)
+                   for v in LINE1_LISTED},
+    }
+
+
+def compare_line1_selection(before: dict | None, after: dict | None) -> dict | None:
+    """The two arms' selector verdicts, and the assets whose verdicts disagree in
+    the way a `control` vs `on` pair must not: `proposed` in one arm, and in the
+    other neither `applied` nor `proposed`. Compared only when both arms recorded
+    the selector, and only on the assets both recorded. `None` when neither did."""
+    rb, ra = line1_selection_rows(before), line1_selection_rows(after)
+    if rb is None and ra is None:
+        return None
+    flags = []
+    if rb is not None and ra is not None:
+        for asset in sorted(set(rb) & set(ra)):
+            vb, va = line1_verdict(rb[asset]), line1_verdict(ra[asset])
+            if (vb == "proposed" and va not in ("applied", "proposed")) \
+                    or (va == "proposed" and vb not in ("applied", "proposed")):
+                flags.append({"asset": asset, "verdicts": [vb, va]})
+    return {"arms": [line1_selection_summary(before, rb), line1_selection_summary(after, ra)], "flags": flags}
 
 
 def real_state(row: dict | None) -> dict | None:
@@ -644,6 +708,7 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
         "names_changes": names_changes,
         "field_correctness": compare_field_correctness(field_correctness_maps(report_b),
                                                        field_correctness_maps(report_a)),
+        "line1_selection": compare_line1_selection(report_b, report_a),
         "zone_changes": zone_changes,
         "dumped_in_one_arm_only": one_arm,
         "watched": watched,
@@ -697,7 +762,8 @@ def short_identity(ident: dict) -> str:
     if replay:
         # The capture's manifest file name and hash: no document text.
         text += f"; replay of {na(replay.get('run_manifest'))} (sha256 {str(replay.get('sha256'))[:12]})"
-    return text
+    # Last, so what precedes it reads as it did before the selector existed.
+    return text + f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
 
 
 def render_synthetic(name: str, r: dict) -> list[str]:
@@ -749,6 +815,27 @@ def render_field_correctness(fc: dict) -> list[str]:
     return lines
 
 
+def render_line1_selection(sel: dict | None) -> list[str]:
+    """Verdict names, counts and asset ids only: the report holds no text."""
+    if sel is None:
+        return []
+    lines = ["  line-1 selection:"]
+    for side, arm in zip(("before", "after"), sel["arms"]):
+        if not arm["recorded"]:
+            lines.append(f"    {side}: arm {na(arm['arm'])}, not recorded")
+            continue
+        counts = ", ".join(f"{v} {n}" for v, n in arm["counts"].items())
+        lines.append(f"    {side}: arm {na(arm['arm'])}; {counts}")
+        for verdict in LINE1_LISTED:
+            if arm["assets"][verdict]:
+                lines.append(f"      {verdict}: {', '.join(arm['assets'][verdict])}")
+    lines.append(f"  assets proposed in one arm and neither applied nor proposed in the other: "
+                 f"{len(sel['flags'])}")
+    for flag in sel["flags"]:
+        lines.append(f"    FLAG {flag['asset']}: {arrow([na(v) for v in flag['verdicts']])}")
+    return lines
+
+
 def render_real(real: dict) -> list[str]:
     sb, sa = real["summary"]
     lines = ["real specimens:",
@@ -784,6 +871,7 @@ def render_real(real: dict) -> list[str]:
         lines.append(f"    {c['asset']}: names_exact {b['names_exact']} -> {a['names_exact']}, "
                      f"name_error {b['name_error']} -> {a['name_error']}")
     lines += render_field_correctness(real["field_correctness"])
+    lines += render_line1_selection(real.get("line1_selection"))
     if real["zones_compared"]:
         lines.append(f"  zones dumped {arrow(real['dumped'])}; zone changes: {len(real['zone_changes'])}")
         for z in real["zone_changes"]:

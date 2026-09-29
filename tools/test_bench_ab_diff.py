@@ -508,6 +508,139 @@ class FieldCorrectness(unittest.TestCase):
         self.assertNotIn("field correctness", out)
 
 
+def selection_row(verdict, reason=None, arm="control", **extra):
+    """A `documents_detail[].line1_selection` object, as `provider-bench` writes it."""
+    row = {"arm": arm, "verdict": verdict, "reason": reason, "eligible": 1, "distinct": 1,
+           "names_changed": verdict in ("applied", "proposed"), "source_passes": [], "source_transforms": []}
+    row.update(extra)
+    return row
+
+
+def selection_detail(asset, selection=None):
+    row = {"name": asset.rsplit("/", 1)[-1], "asset_id": asset, "read_ok": True}
+    if selection is not None:
+        row["line1_selection"] = selection
+    return row
+
+
+class Line1Selection(unittest.TestCase):
+    A, B, C, D = "passports/A.jpg", "passports/B.jpg", "id_cards/C.jpg", "misc/D.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def arm(self, name, details, select_arm=None):
+        assets = [row["asset_id"] for row in details] if details else [self.A]
+        real_report = provider_report(1.0, details=details)
+        if select_arm is not None:
+            real_report["mrz_line1_select_arm"] = select_arm
+        return write_arm(self.root, name, outcomes=[outcome_row(a, "hit") for a in assets],
+                         real_report=real_report)
+
+    def real(self, before, after, before_arm=None, after_arm=None):
+        n = len(list(Path(self.root).iterdir()))
+        arms = self.arm(f"before{n}", before, before_arm), self.arm(f"after{n}", after, after_arm)
+        return d.compare_arms(*arms, [])["real"]
+
+    def control_and_on(self):
+        control = [
+            selection_detail(self.A, selection_row("proposed")),
+            selection_detail(self.B, selection_row("none", "kept")),
+            selection_detail(self.C, selection_row("ambiguous")),
+            selection_detail(self.D, selection_row("unresolved", "issuer_unresolved")),
+        ]
+        on = [
+            selection_detail(self.A, selection_row("applied", arm="on")),
+            selection_detail(self.B, selection_row("none", "kept", arm="on")),
+            selection_detail(self.C, selection_row("ambiguous", arm="on")),
+            selection_detail(self.D, selection_row("unresolved", "issuer_unresolved", arm="on")),
+        ]
+        return control, on
+
+    def test_the_identity_block_names_each_arms_selector_arm(self):
+        control, on = self.control_and_on()
+        r = self.real(control, on, "control", "on")
+        self.assertEqual([i["mrz_line1_select_arm"] for i in r["identity"]], ["control", "on"])
+        self.assertIn("mrz_line1_select_arm differs: control -> on", r["notes"])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertIn("line-1 select control", next(x for x in out.splitlines() if x.startswith("  before:")))
+        self.assertTrue(next(x for x in out.splitlines() if x.startswith("  after:")).endswith("line-1 select on"))
+
+    def test_verdict_counts_and_the_named_assets_per_arm(self):
+        control, on = self.control_and_on()
+        sel = self.real(control, on, "control", "on")["line1_selection"]
+        before, after = sel["arms"]
+        self.assertEqual(before["counts"], {"applied": 0, "proposed": 1, "unresolved": 1, "ambiguous": 1, "none": 1})
+        self.assertEqual(after["counts"], {"applied": 1, "proposed": 0, "unresolved": 1, "ambiguous": 1, "none": 1})
+        self.assertEqual(before["assets"], {"applied": [], "proposed": [self.A], "ambiguous": [self.C]})
+        self.assertEqual(after["assets"], {"applied": [self.A], "proposed": [], "ambiguous": [self.C]})
+        self.assertEqual(sel["flags"], [], "control's proposal is on's application: no flag")
+
+    def test_an_asset_proposed_in_one_arm_and_not_applied_in_the_other_is_flagged(self):
+        control, on = self.control_and_on()
+        on[0] = selection_detail(self.A, selection_row("none", "no_candidate", arm="on"))
+        sel = self.real(control, on, "control", "on")["line1_selection"]
+        self.assertEqual(sel["flags"], [{"asset": self.A, "verdicts": ["proposed", "none"]}])
+        # Either direction.
+        flipped = self.real(on, control, "on", "control")["line1_selection"]
+        self.assertEqual(flipped["flags"], [{"asset": self.A, "verdicts": ["none", "proposed"]}])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(control, on, "control", "on"), "real_in_one_arm_only": None})
+        self.assertIn(f"FLAG {self.A}: proposed -> none", out)
+
+    def test_two_control_arms_are_not_flagged(self):
+        control, _ = self.control_and_on()
+        sel = self.real(control, control, "control", "control")["line1_selection"]
+        self.assertEqual(sel["flags"], [])
+
+    def test_an_arm_that_recorded_nothing_is_reported_not_flagged(self):
+        control, _ = self.control_and_on()
+        off = [selection_detail(row["asset_id"]) for row in control]
+        sel = self.real(off, control, "off", "control")["line1_selection"]
+        self.assertEqual([a["recorded"] for a in sel["arms"]], [False, True])
+        self.assertEqual(sel["flags"], [])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(off, control, "off", "control"), "real_in_one_arm_only": None})
+        self.assertIn("before: arm off, not recorded", out)
+
+    def test_neither_arm_recording_prints_nothing_and_an_old_report_still_compares(self):
+        plain = [selection_detail(self.A), selection_detail(self.B)]
+        r = self.real(plain, plain)
+        self.assertIsNone(r["line1_selection"])
+        self.assertEqual(r["notes"], [])
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": r, "real_in_one_arm_only": None})
+        self.assertNotIn("line-1 selection", out)
+        self.assertTrue(next(x for x in out.splitlines() if x.startswith("  before:")).endswith("line-1 select n/a"))
+
+    def test_the_rendering_names_verdicts_and_assets_and_never_a_line(self):
+        control, on = self.control_and_on()
+        # A row that carried document text under a key this script never reads.
+        control[0]["line1_selection"]["proposed_line1"] = "P<UTOSECRETLINE9<<"
+        control[1]["line1_selection"]["verdict"] = "SECRETLINE9"
+        out = d.render({"synthetic": {}, "synthetic_in_one_arm_only": {"before": [], "after": []},
+                        "real": self.real(control, on, "control", "on"), "real_in_one_arm_only": None})
+        self.assertIn("line-1 selection:", out)
+        self.assertIn(f"proposed: {self.A}", out)
+        self.assertIn(f"applied: {self.A}", out)
+        self.assertIn("other 1", out, "an unknown verdict is counted as `other`, never echoed")
+        self.assertNotIn("SECRETLINE9", out)
+        self.assertNotIn("P<UTO", out)
+
+    def test_the_json_result_carries_the_comparison(self):
+        control, on = self.control_and_on()
+        before = self.arm("jb", control, "control")
+        after = self.arm("ja", on, "on")
+        code, out, _ = run(before, after, "--json")
+        self.assertEqual(code, 0, out)
+        sel = json.loads(out)["real"]["line1_selection"]
+        self.assertEqual(sel["arms"][0]["arm"], "control")
+        self.assertEqual(sel["arms"][1]["assets"]["applied"], [self.A])
+
+
 SECRET = "SECRETLINE9"
 
 
