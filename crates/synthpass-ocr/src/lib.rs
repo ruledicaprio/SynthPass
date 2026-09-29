@@ -44,8 +44,9 @@
 //! `SYNTHPASS_OCR_MAX_PASSES` (default [`DEFAULT_MAX_PASSES`]) limits how many
 //! passes may start. `SYNTHPASS_OCR_MAX_SECONDS` (default
 //! [`DEFAULT_MAX_SECONDS`]) stops the loop from starting another retry pass
-//! once that much wall-clock time has elapsed; it does not interrupt a pass
-//! already in flight, so the whole call can finish later. Together they keep a
+//! once that much wall-clock time has elapsed since the general pass started;
+//! a pass already in flight still finishes, and rotation and band detection
+//! run before the clock starts. Together they keep a
 //! hopeless document (dense/photographic scan with no recoverable MRZ) from
 //! starting every remaining variant — the general pass's text is always
 //! returned regardless of where the budget cuts the loop off.
@@ -189,10 +190,10 @@ const MAX_RETRY_VARIANTS: usize = 13;
 /// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock threshold for starting
 /// another retry pass when the env var is unset or invalid. The loop checks
 /// elapsed time only before a pass starts; it does not interrupt a pass already
-/// in flight. This is therefore not a hard ceiling on the whole `recognize`
-/// call: the France ID 2020 back was observed taking 64.5s against the 52s
-/// default because its last pass started below the threshold and finished
-/// above it.
+/// in flight. This is therefore not a ceiling on the whole `recognize` call:
+/// the rotation probe and the geometry passes run before its clock starts, and
+/// a pass already in flight when the threshold passes still finishes. France
+/// ID 2020's back took 64.5 s against the 52 s default.
 ///
 /// Measured (`examples/mrz_corpus.rs`, post-Phase-1 variants, reference
 /// hardware): a full negative-control sweep (all retry variants run, none
