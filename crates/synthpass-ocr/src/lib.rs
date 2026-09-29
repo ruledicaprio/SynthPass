@@ -1767,8 +1767,9 @@ fn skew_mode() -> preprocess::SkewMode {
 
 /// Which post-hit chargrid name-line repair, if any, to run after a Tier-1
 /// hit. See `crate::chargrid`'s module doc for the mechanism this wires in:
-/// both engines emit isolated `<`, mostly on the name line as half of `<<`
-/// or a filler-tail cell, while dropped fillers still leave positions that a
+/// both engines emit isolated `<`; in name-line readings these are mostly
+/// half of `<<` or a filler-tail cell, while dropped fillers still leave
+/// positions that a
 /// fixed-pitch grid can recover. The observation is recorded in
 /// `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`; see
 /// [`chargrid_mode`] for the env var.
