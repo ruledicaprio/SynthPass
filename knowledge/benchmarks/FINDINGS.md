@@ -19,6 +19,8 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-09-29 | [#411 PR 2, TD1's MRZ at Doc 9303's 37 px line pitch: TD1 holds 57 while 20 seeds swap, and correct reads go 22 → 30](#2026-09-29--411-pr-2-td1s-mrz-at-doc-9303s-37-px-line-pitch-td1-holds-57-while-20-seeds-swap-and-correct-reads-go-22--30) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-29 | [isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone](#2026-09-29--isolated--and--per-ocr-pass-both-engines-emit-isolated--only-the-general-engine-emits--and-no--reaches-a-parsed-zone) | Observed | current | FINDINGS.md (Weak-spot findings) |
+| 2026-09-29 | [Isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone](ocr-filler-unknown-trace-2026-09-29.md) | Observed (one local release `provider-bench --real-specimens --mrz-only --dump-ocr-passes` run and five `synthpass-bench --profile clean --count 100 --seed 0 --ocr-passes` runs, all from #595's neutrality measurement; no OCR ran for this note) plus Derived (each reading aligned against truth; a reading of `ocrs` 0.13.1 and `mrz` source) plus Hypothesized (mechanisms, marked where used) | current | ocr-filler-unknown-trace-2026-09-29.md |
 | 2026-09-29 | [The TD1 MRZ at Doc 9303's 37 px pitch: TD1 holds 57 / 100 while 20 seeds swap, correct reads go 22 → 30, and the headline stays 389 / 500](synthetic-headline-2026-09-29.md) | Observed (two local release `synthpass-bench --document-type td1 --profile clean --count 100 --seed 0` runs on one Linux container, one per build; `synthpass generate` output hashed for five formats × two builds; `chargrid_repair_synthetic` at both commits) plus Derived (per-seed comparison of the JSON reports and label files, including against the 2026-09-28 reports; the five-format total) plus Hypothesized (mechanisms, marked where used) | current | synthetic-headline-2026-09-29.md |
 | 2026-09-28 | [#411 PR 1, the MRZ at the ISO pitch: the synthetic headline goes 368 → 389 / 500, half of it wrong accepts](#2026-09-28--411-pr-1-the-mrz-at-the-iso-pitch-the-synthetic-headline-goes-368--389--500-half-of-it-wrong-accepts) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-09-28 | [The MRZ at the ISO pitch: the synthetic headline goes 368 → 389 / 500, with 225 seeds churning under it](synthetic-headline-2026-09-28.md) | Observed (ten local release `synthpass-bench --profile clean --count 100 --seed 0` runs on one Linux container, five formats × two builds) plus Derived (per-seed comparison of the JSON reports, including against the 2026-09-27 reports) plus Hypothesized (mechanisms, marked where used) | current | synthetic-headline-2026-09-28.md |
@@ -1400,3 +1402,38 @@ byte-identical source in both arms. TD1 hits hold at **57 / 100**. Correct reads
 
 Tables, every flip attributed, and what this does not claim:
 [`synthetic-headline-2026-09-29.md`](synthetic-headline-2026-09-29.md).
+
+---
+
+### 2026-09-29 — isolated `<` and `?` per OCR pass: both engines emit isolated `<`, only the general engine emits `?`, and no `?` reaches a parsed zone
+
+**Observed**, local, no new OCR run: #595's per-pass records from one release `provider-bench
+--real-specimens --mrz-only --dump-ocr-passes` run (261 public documents, 1,894 passes, 0 outcomes
+changed against the committed ledger) and five `synthpass-bench --profile clean --count 100 --seed
+0 --ocr-passes` runs (500 seeds, 1,755 passes), both built at `76f914e`. Its `synthpass-ocr`
+source is `main`'s apart from #598's report-only chargrid capture. This is the trace #576 item 3
+asks for.
+
+- **The triage counts reproduce exactly.** `?` is in 462 of 2,044 real general-pass readings and
+  in 0 of 2,430 retry readings. Isolated `<` is in 197 general and 625 retry readings. On
+  synthetic, `?` is in 72 of 1,562 general readings and 0 of 1,854 retry readings.
+- **Every `?` is `ocrs` general-engine output, never `mrz::UNKNOWN`** (Derived from source; the
+  trace cannot tell `ocrs`'s `?` class from its out-of-range fallback). No `?` sits in any accepted
+  name-line reading or in any parsed zone (168 real, 467 synthetic). 632 of the 1,246 real `?`
+  are on the 90 documents with no zone to read.
+- **Both engines emit isolated `<`.** On labelled real documents a real single separator is kept
+  as `<` in 18 of 32 general reads and 105 of 199 retry reads. The comments saying `ocrs` never
+  emits it are wrong for both engines.
+- **Most isolated `<` in a name field are not separators.** On synthetic, all 595 are damage: 393
+  are half of a `<<` (almost always with the partner cell gone, Hypothesized CTC collapse), and
+  202 are in the filler tail. In the parsed name fields of the 33 labelled real hits, 9 of 27 are
+  real separators.
+- **The diagnosis's 9 of 18 (1 of 5 general, 8 of 13 retry) reproduces, but only grouped by the
+  pass that validated.** The general pass's own reading keeps 10 of the 16 cells it read.
+  Grouped by the reading the parsed name line matches, survival is 1 of 6 general and 8 of 12
+  retry: Nigeria 2022 moves, by one edit.
+- **Not `main`'s parsed zones:** the build lacks #593 and #566, so synthetic TD1 is the 55 px
+  generator. None of the 13 documents behind the 18 cells is among #593's seven re-reads.
+
+Tables per pass family, the `?`/`UNKNOWN` source reading, and what this does not claim:
+[`ocr-filler-unknown-trace-2026-09-29.md`](ocr-filler-unknown-trace-2026-09-29.md).
