@@ -90,6 +90,16 @@ pub fn name_cell_features(
     )
 }
 
+/// Measure `count` equal cells across `line`, from `line.x` to
+/// `line.x + line.w`.
+///
+/// The grid assumes that `line` spans exactly `count` cell pitches. An OCR
+/// line box is the ink extent instead, from the first glyph's left edge to the
+/// last glyph's right edge, which is about one inter-glyph gap short of
+/// `count` pitches. On such a box the cells come out slightly narrow and drift
+/// against the printed cells by up to about one gap across the line. A caller
+/// that passes an OCR box should measure that drift before choosing a
+/// threshold.
 fn measure_row(image: &GrayImage, line: BBox, count: usize) -> Option<Vec<RawFeatures>> {
     let y0 = line.y.ceil() as i64;
     let y1 = (line.y + line.h).floor() as i64;
@@ -106,31 +116,37 @@ fn measure_row(image: &GrayImage, line: BBox, count: usize) -> Option<Vec<RawFea
             return None;
         }
         let (x0, x1, y0, y1) = (x0 as u32, x1 as u32, y0 as u32, y1 as u32);
-        let n = (x1 - x0) as f32 * (y1 - y0) as f32;
-        let mut sum = 0.0f32;
-        let mut sum_sq = 0.0f32;
-        let mut detail = 0.0f32;
-        let mut detail_count = 0u32;
+        // Pixels are `u8`, so every sum is an exact integer, converted once at
+        // the end. An `f32` sum stops being exact past 2^24, and would give a
+        // 48 x 56 cell filled at 253 a variance of about 0.86.
+        let n = u64::from(x1 - x0) * u64::from(y1 - y0);
+        let mut sum = 0u64;
+        let mut sum_sq = 0u64;
+        let mut detail = 0u64;
+        let mut detail_count = 0u64;
         for y in y0..y1 {
             for x in x0..x1 {
-                let p = f32::from(image.get_pixel(x, y)[0]);
+                let p = u64::from(image.get_pixel(x, y)[0]);
                 sum += p;
                 sum_sq += p * p;
                 if x > x0 && x + 1 < x1 && y > y0 && y + 1 < y1 {
-                    let neighbors = f32::from(image.get_pixel(x - 1, y)[0])
-                        + f32::from(image.get_pixel(x + 1, y)[0])
-                        + f32::from(image.get_pixel(x, y - 1)[0])
-                        + f32::from(image.get_pixel(x, y + 1)[0]);
-                    detail += (p - neighbors / 4.0).abs();
+                    let neighbors = u64::from(image.get_pixel(x - 1, y)[0])
+                        + u64::from(image.get_pixel(x + 1, y)[0])
+                        + u64::from(image.get_pixel(x, y - 1)[0])
+                        + u64::from(image.get_pixel(x, y + 1)[0]);
+                    // |4p - neighbours| is four times |p - their mean|.
+                    detail += (4 * p).abs_diff(neighbors);
                     detail_count += 1;
                 }
             }
         }
-        let mean = sum / n;
+        // n * sum_sq - sum^2 is n^2 times the variance. It is never negative,
+        // and it is exactly 0 for a uniform fill.
+        let spread = u128::from(n) * u128::from(sum_sq) - u128::from(sum) * u128::from(sum);
         cells.push(RawFeatures {
-            mean,
-            variance: (sum_sq / n - mean * mean).max(0.0),
-            edge: detail / detail_count as f32,
+            mean: (sum as f64 / n as f64) as f32,
+            variance: (spread as f64 / (n as f64 * n as f64)) as f32,
+            edge: (detail as f64 / (4 * detail_count) as f64) as f32,
         });
     }
     Some(cells)
@@ -144,13 +160,18 @@ mod tests {
     const CELL: u32 = 16;
 
     fn printed_rows() -> GrayImage {
-        let mut image = GrayImage::from_pixel(4 * CELL, 2 * CELL, Luma([240]));
+        printed_rows_of(CELL, CELL)
+    }
+
+    /// Two rows of four `width` x `height` cells, each holding the same glyph.
+    fn printed_rows_of(width: u32, height: u32) -> GrayImage {
+        let mut image = GrayImage::from_pixel(4 * width, 2 * height, Luma([240]));
         for row in 0..2 {
             for cell in 0..4 {
-                let x0 = cell * CELL;
-                let y0 = row * CELL;
-                for y in 2..CELL - 2 {
-                    for x in 2..CELL - 2 {
+                let x0 = cell * width;
+                let y0 = row * height;
+                for y in 2..height - 2 {
+                    for x in 2..width - 2 {
                         if x == 4 || x == 9 || y == 8 {
                             image.put_pixel(x0 + x, y0 + y, Luma([20]));
                         }
@@ -162,17 +183,22 @@ mod tests {
     }
 
     fn features(image: &GrayImage) -> Vec<CellPixelFeatures> {
+        features_of(image, CELL, CELL)
+    }
+
+    /// The name row's cells, measured against the verified second row.
+    fn features_of(image: &GrayImage, width: u32, height: u32) -> Vec<CellPixelFeatures> {
         name_cell_features(
             image,
             BBox {
                 x: 0.0,
-                y: CELL as f32,
-                w: (4 * CELL) as f32,
-                h: CELL as f32,
+                y: height as f32,
+                w: (4 * width) as f32,
+                h: height as f32,
             },
             4,
             -1,
-            CELL as f32,
+            height as f32,
         )
         .expect("constructed verified line is textured")
     }
@@ -233,5 +259,26 @@ mod tests {
         assert!(name_cell_features(&printed, verified, 0, -1, CELL as f32).is_none());
         assert!(name_cell_features(&printed, verified, 4, -2, CELL as f32).is_none());
         assert!(name_cell_features(&printed, verified, 4, -1, f32::NAN).is_none());
+    }
+
+    /// A uniform fill measures exactly 0 on a cell the size of a real MRZ
+    /// cell, not only on the 16 x 16 cells above. An `f32` accumulation gives
+    /// this 48 x 56 cell at tone 253 a variance of about 0.86.
+    #[test]
+    fn a_uniform_fill_measures_zero_on_a_large_cell() {
+        let (width, height) = (48, 56);
+        let mut image = printed_rows_of(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                image.put_pixel(x, y, Luma([253]));
+            }
+        }
+        let measured = features_of(&image, width, height);
+        assert_eq!(measured[0].mean_luma, 253.0);
+        assert_eq!(measured[0].variance, 0.0);
+        assert_eq!(measured[0].relative_variance, 0.0);
+        assert_eq!(measured[0].edge_detail, 0.0);
+        assert_eq!(measured[0].relative_edge_detail, 0.0);
+        assert!(measured[1].relative_variance > 0.5);
     }
 }
