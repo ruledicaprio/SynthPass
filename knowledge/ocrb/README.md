@@ -99,8 +99,9 @@ repository holds the transcription this page is drawn from. Follow `glyph-dimens
    constrain — for example `crates/synthpass-ocr/src/lib.rs`'s `MRZ_CHARSET`/`build_mrz`,
    `crates/mrz`'s registries and check program, [ADR-0014](../decisions/ADR-0014-per-cell-ocrb-classification.md)
    (per-cell OCR-B classification masks), [ADR-0015](../decisions/ADR-0015-geometric-mrz-band-location.md)
-   (the geometric locator tracked in
-   [#433](https://github.com/ruledicaprio/SynthPass/issues/433)), and
+   (the geometric locator; [#433](https://github.com/ruledicaprio/SynthPass/issues/433) is the
+   separate glyph-atlas measurement, which reads the detection map and the CTC matrix on
+   synthetic renders and is not that locator), and
    [ADR-0021](../decisions/ADR-0021-fixed-grid-mrz-strips.md) (the fixed-grid strip template and
    its check-digit anchors). A page with no code or ADR to constrain has not yet cleared the 80/20
    filter [`../README.md`](../README.md#subject-folders) states for this tree.

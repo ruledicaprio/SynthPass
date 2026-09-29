@@ -157,7 +157,7 @@ fn td2_seed22_shape_only_unshifted_resolves_is_accepted() {
 
 /// A genuine TD2 issuer-defined two-letter document code (`IP`) must survive
 /// `damaged_pass` unchanged when line 2 separately needs a substitution
-/// repair -- `two_line_line1_admissible`'s country-resolve-only check keeps
+/// repair -- `line1_admissible`'s country-resolve-only check keeps
 /// the as-read line whenever the unshifted alternative's issuer does not
 /// itself resolve, exactly as `unshift_if_country_resolves` already does for
 /// the ordinary scan.
@@ -311,10 +311,12 @@ fn mrv_a_genuine_second_letter_code_survives_damaged_pass() {
 
 /// A genuine TD1 issuer-defined two-letter document code (`ID`) must survive
 /// `damaged_pass` unchanged when line 2 separately needs a substitution
-/// repair. Unlike TD2/MRV-A/MRV-B, no country-resolve admissibility filter
-/// gates TD1's extra candidate: `repair_td1_line1_unshifted` applied to an
-/// already-genuine line corrupts the document number, so its own check digit
-/// -- not a heuristic -- keeps it out of `damaged_pass`'s `hits`.
+/// repair. `repair_td1_line1_unshifted` applied to an already-genuine line
+/// corrupts the document number, so its own check digit keeps it out of
+/// `damaged_pass`'s `hits`; and TD1's candidates go through the same
+/// country-resolve admissibility preference as TD2/MRV-A/MRV-B's
+/// (`line1_admissible`), which keeps the as-read line here because its
+/// issuer resolves while the unshifted alternative's (`DUT`) does not.
 #[test]
 fn td1_genuine_two_letter_code_survives_damaged_pass() {
     let mrz = format_td1(&Td1Fields {

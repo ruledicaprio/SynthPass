@@ -153,6 +153,14 @@ jobs:
           SYNTHPASS_OCR_MAX_PASSES: "1"
         run: cargo test -p synthpass-ocr --release --test native_ocr_e2e -- --ignored
 
+      # Not a smoke test: it asserts that the chargrid capture follows the arm
+      # (`on`, `control`, unset) and replays. Its specimen, Serbia 2012,
+      # validates on the general pass, so it holds under the pass cap too.
+      - name: Native OCR chargrid capture test (real ocrs/rten models)
+        env:
+          SYNTHPASS_OCR_MAX_PASSES: "1"
+        run: cargo test -p synthpass-ocr --release --test native_ocr_chargrid_trace -- --ignored
+
       - name: Native-rust OCR pipeline smoke test (real ocrs/rten models)
         env:
           SYNTHPASS_OCR_MAX_PASSES: "1"

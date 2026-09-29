@@ -118,6 +118,21 @@ pub const MRVB_MRZ_CHARS: u32 = 36;
 pub const MRZ_LINE_HEIGHT: u32 = 50;
 pub const MRZ_LINE_SPACING: u32 = 5;
 
+/// The pixel font size `render.rs` rasterizes the MRZ glyphs at, independent
+/// of any one format's MRZ line rect height.
+///
+/// Before [#411](https://github.com/ruledicaprio/SynthPass/issues/411), the
+/// font size was derived as `line_rect.height as f32 * 0.8`, which tied
+/// glyph size to whatever height a format's MRZ line rects happened to use.
+/// TD1's line rects shrink independently of the other formats (see
+/// [`TD1_MRZ_LINE_PITCH`]), so the font size is now this free-standing
+/// constant instead: today's `MRZ_LINE_HEIGHT as f32 * 0.8 = 40.0` px, the
+/// same value every format rendered at before. At `MRZ_FONT_PX` = 40 px, 1
+/// font unit = `40 / 1651` px (`hhea` ascender 1319 minus descender −332),
+/// so the font's 885-unit flat-capital median rasterizes to a **21.44 px
+/// cap** — the same cap height [`MRZ_CELL_WIDTH`]'s derivation uses.
+pub const MRZ_FONT_PX: f32 = 40.0;
+
 /// The MRZ character pitch, in pixels, shared by every format's MRZ cells —
 /// one physical constant instead of each line rect's width divided by its
 /// character count.
@@ -126,10 +141,10 @@ pub const MRZ_LINE_SPACING: u32 = 5;
 /// [#411](https://github.com/ruledicaprio/SynthPass/issues/411)):
 /// ICAO's fixed MRZ pitch is 2.54 mm (Doc 9303-3 §4.4 / ISO 1073-2 §3.8)
 /// against OCR-B's 2.46 mm nominal capital height, a ratio of 1.033 cap.
-/// `render.rs` rasterizes the vendored font at `px_scale = MRZ_LINE_HEIGHT as
-/// f32 * 0.8 = 40` px, where 1 font unit = `40 / 1651` px (`hhea` ascender
-/// 1319 minus descender −332); at the font's 885-unit flat-capital median
-/// that is a rendered cap of 21.44 px. 2.54 / 2.46 × 21.44 px = 22.15 px, and
+/// `render.rs` rasterizes the vendored font at [`MRZ_FONT_PX`] = 40 px,
+/// where 1 font unit = `40 / 1651` px (`hhea` ascender 1319 minus descender
+/// −332); at the font's 885-unit flat-capital median that is a rendered cap
+/// of 21.44 px. 2.54 / 2.46 × 21.44 px = 22.15 px, and
 /// the nearest integer cell is **22 px = 1.026 cap** — inside ISO 1831's
 /// 0.935 cap pitch floor and the measured real-TD3 range, and closer to
 /// nominal than the next integer up (23 px = 1.073 cap).
@@ -268,9 +283,31 @@ fn td2_layout() -> PageLayout {
     }
 }
 
+/// TD1's own MRZ line pitch, in pixels — denser than every other format's
+/// [`MRZ_LINE_HEIGHT`] + [`MRZ_LINE_SPACING`] (55 px = 2.565 cap), because
+/// Doc 9303-5 Figure 6 sets TD1's line spacing at 4.23 mm, the densest
+/// packing ISO 1831 permits.
+///
+/// **Derivation** (`knowledge/ocrb/line-and-pitch.md`, the 2026-09-28
+/// amendment to `knowledge/decisions/ADR-0015-geometric-mrz-band-location.md`,
+/// [#411](https://github.com/ruledicaprio/SynthPass/issues/411)): 4.23 mm ÷
+/// 2.46 mm nominal cap = 1.72 cap, which is 36.88 px at the 21.44 px cap
+/// [`MRZ_CELL_WIDTH`]'s derivation computes. **37 px = 1.726 cap** is the
+/// nearest integer. The conforming band, from TD1's 2.95 mm printing zone
+/// against the 2.66 mm constant-strokewidth digit, is 4.20-4.52 mm =
+/// 1.71-1.84 cap = 36.6-39.4 px; 37 px sits inside it. TD1's three MRZ line
+/// rects are exactly this pitch tall, stacked with **no gap** — unlike every
+/// other format's rects, which are shorter than their pitch and leave a gap
+/// (`MRZ_LINE_SPACING`) between them. Keeping the same 50 px rects and
+/// stepping them by 37 was rejected: overlapping line rects would make
+/// per-character label boxes overlap across lines.
+pub const TD1_MRZ_LINE_PITCH: u32 = 37;
+
 /// TD1 (ID-1, 85.6mm x 54mm) → 822x518. Same arrangement as TD2, but a
 /// third MRZ line (30 chars/line vs TD2's 36) needs more of the card's
-/// proportionally smaller height, so rows are packed tighter.
+/// proportionally smaller height, so rows are packed tighter, at TD1's own
+/// [`TD1_MRZ_LINE_PITCH`] rather than the shared [`MRZ_LINE_HEIGHT`] +
+/// [`MRZ_LINE_SPACING`] every other format uses.
 fn td1_layout() -> PageLayout {
     const WIDTH: u32 = 822;
     const HEIGHT: u32 = 518;
@@ -307,7 +344,7 @@ fn td1_layout() -> PageLayout {
     // narrower MRZ cell width.
     let band_width = WIDTH - 2 * MARGIN;
     let mrz_width = TD1_MRZ_CHARS * MRZ_CELL_WIDTH;
-    let mrz_height = 3 * MRZ_LINE_HEIGHT + 2 * MRZ_LINE_SPACING;
+    let mrz_height = 3 * TD1_MRZ_LINE_PITCH;
     let mrz_start_y = HEIGHT - MRZ_BOTTOM_MARGIN - mrz_height;
 
     // Center the watermark band in the window between the VIZ rows and the
@@ -334,18 +371,18 @@ fn td1_layout() -> PageLayout {
         personal_number: Rect::new(viz_x, row_y(6), 320, row_h),
         watermark: Rect::new(MARGIN, watermark_y, band_width, WATERMARK_HEIGHT),
         mrz_lines: vec![
-            Rect::new(MARGIN, mrz_start_y, mrz_width, MRZ_LINE_HEIGHT),
+            Rect::new(MARGIN, mrz_start_y, mrz_width, TD1_MRZ_LINE_PITCH),
             Rect::new(
                 MARGIN,
-                mrz_start_y + MRZ_LINE_HEIGHT + MRZ_LINE_SPACING,
+                mrz_start_y + TD1_MRZ_LINE_PITCH,
                 mrz_width,
-                MRZ_LINE_HEIGHT,
+                TD1_MRZ_LINE_PITCH,
             ),
             Rect::new(
                 MARGIN,
-                mrz_start_y + 2 * (MRZ_LINE_HEIGHT + MRZ_LINE_SPACING),
+                mrz_start_y + 2 * TD1_MRZ_LINE_PITCH,
                 mrz_width,
-                MRZ_LINE_HEIGHT,
+                TD1_MRZ_LINE_PITCH,
             ),
         ],
         mrz_chars: TD1_MRZ_CHARS,
@@ -640,6 +677,15 @@ mod tests {
     /// formats are covered by one test. Every value is the same one
     /// `for_format` returned before #411's pitch change — this test would
     /// fail if the split were ever missed or undone.
+    ///
+    /// **TD1 is the one exception, on purpose.** #411's TD1 line-pitch change
+    /// (`TD1_MRZ_LINE_PITCH`) shrinks `mrz_height` from 160 to 111 px, which
+    /// moves `mrz_start_y` down and re-centres the watermark in the taller
+    /// gap that opens up between the VIZ rows and the MRZ — `watermark_y`
+    /// moves from 291 to 315. Only TD1's `y` is updated here; its `x`,
+    /// `width` and `height` are pinned exactly as before, same as every
+    /// other format's full rect, because the pitch change touches TD1's MRZ
+    /// band alone.
     #[test]
     fn watermark_rect_is_unchanged_by_the_mrz_pitch_split() {
         assert_eq!(
@@ -652,7 +698,7 @@ mod tests {
         );
         assert_eq!(
             for_format(DocumentType::TD1).watermark,
-            Rect::new(40, 291, 742, 32)
+            Rect::new(40, 315, 742, 32)
         );
         assert_eq!(
             for_format(DocumentType::MrvA).watermark,
@@ -683,7 +729,7 @@ mod tests {
         let font = &fonts.mrz;
 
         // Mirrors `render.rs::draw_mrz_glyphs`'s own px_scale derivation.
-        let px_scale = MRZ_LINE_HEIGHT as f32 * 0.8;
+        let px_scale = MRZ_FONT_PX;
         let outline = font
             .outline(font.glyph_id('H'))
             .expect("'H' must have an outline in the vendored OCR-B font");
@@ -699,6 +745,64 @@ mod tests {
             "MRZ_CELL_WIDTH ({MRZ_CELL_WIDTH}) / rendered cap ({cap_px} px) = {ratio}, \
              expected within [1.02, 1.04] per the ISO 1073-2/1831 pitch-to-cap \
              derivation in MRZ_CELL_WIDTH's doc comment"
+        );
+    }
+
+    /// [`TD1_MRZ_LINE_PITCH`]'s doc comment derives 37px as 1.726 cap by
+    /// hand; this test checks that arithmetic against the *actual* rendered
+    /// glyph, the same way `mrz_cell_width_is_1_02_to_1_04_of_the_rendered_cap_height`
+    /// does for [`MRZ_CELL_WIDTH`] — reading `H`'s outline bounds from the
+    /// real vendored font rather than trusting a constant the test itself
+    /// would otherwise have to write down.
+    #[cfg(feature = "embedded-fonts")]
+    #[test]
+    fn td1_line_pitch_is_1_71_to_1_84_of_the_rendered_cap_height() {
+        use ab_glyph::Font;
+
+        let fonts = crate::fonts::load_fonts()
+            .expect("embedded-fonts is on by default and vendors both fonts");
+        let font = &fonts.mrz;
+
+        // Mirrors `render.rs::draw_mrz_glyphs`'s own px_scale derivation.
+        let px_scale = MRZ_FONT_PX;
+        let outline = font
+            .outline(font.glyph_id('H'))
+            .expect("'H' must have an outline in the vendored OCR-B font");
+        let cap_units = outline.bounds.height().abs();
+        let cap_px = cap_units * px_scale / font.height_unscaled();
+
+        let ratio = TD1_MRZ_LINE_PITCH as f32 / cap_px;
+        assert!(
+            (1.71..=1.84).contains(&ratio),
+            "TD1_MRZ_LINE_PITCH ({TD1_MRZ_LINE_PITCH}) / rendered cap ({cap_px} px) = \
+             {ratio}, expected within [1.71, 1.84], TD1's conforming line-spacing band \
+             per TD1_MRZ_LINE_PITCH's doc comment"
+        );
+    }
+
+    /// #411's TD1 line-pitch change (`TD1_MRZ_LINE_PITCH`) touches only
+    /// TD1's `PageLayout`. This pins the other four formats' `mrz_lines` to
+    /// the exact values `origin/main` at `d489fd3` (after #411 PR 1, before
+    /// this PR) produces, so a regression that leaked the TD1 change into a
+    /// shared constant would fail here instead of only showing up as a
+    /// pixel difference in a benchmark.
+    #[test]
+    fn non_td1_mrz_lines_are_unchanged_by_the_td1_line_pitch() {
+        assert_eq!(
+            for_format(DocumentType::TD3).mrz_lines,
+            vec![Rect::new(60, 720, 968, 50), Rect::new(60, 775, 968, 50)]
+        );
+        assert_eq!(
+            for_format(DocumentType::TD2).mrz_lines,
+            vec![Rect::new(50, 555, 792, 50), Rect::new(50, 610, 792, 50)]
+        );
+        assert_eq!(
+            for_format(DocumentType::MrvA).mrz_lines,
+            vec![Rect::new(50, 613, 968, 50), Rect::new(50, 668, 968, 50)]
+        );
+        assert_eq!(
+            for_format(DocumentType::MrvB).mrz_lines,
+            vec![Rect::new(50, 555, 792, 50), Rect::new(50, 610, 792, 50)]
         );
     }
 }

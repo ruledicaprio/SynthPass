@@ -354,6 +354,9 @@ impl FieldConfidence {
         };
         for reason in reasons {
             match reason {
+                // Report-only: they describe the zone's text, not a parsed
+                // field (`FindingKind::is_report_only`).
+                Finding::RawNameSeparatorMissing | Finding::RawInteriorFillerRun => {}
                 Finding::UnrecognizedIssuingCountry { .. } => {
                     self.issuing_country = IMPLAUSIBLE;
                 }
@@ -911,10 +914,11 @@ pub struct ExtractionTrace {
     /// Non-default configuration a producer ran under, env var name →
     /// effective value. General across producers — this is not OCR-only
     /// vocabulary, `synthpass-core` holds none of it, and a future provider
-    /// could fill it with its own knobs — though today only the OCR engine
+    /// could fill it with its own knobs — though today the OCR engine
     /// does (`synthpass_pipeline::OcrEngine::config_overrides`,
-    /// issue #495). **Configuration only**: a per-run observation about
-    /// *this* document — e.g. that a retry pass, not the first, produced the
+    /// issue #495), and the pipeline adds the two `SYNTHPASS_MRZ_*` arms
+    /// (`synthpass_die::mrz_config_overrides`, #574). **Configuration
+    /// only**: a per-run observation about *this* document — e.g. that a retry pass, not the first, produced the
     /// accepted read — never belongs here, only settings that hold for
     /// every document this process reads for as long as they're set. Lists
     /// only the knobs whose effective value differs from its own default, so
@@ -1519,6 +1523,19 @@ mod tests {
         assert_eq!(confidence.sex, IMPLAUSIBLE);
         // An unrelated field must survive at its prior score, untouched.
         assert_eq!(confidence.given_names, MRZ_STRUCTURAL);
+    }
+
+    #[test]
+    fn report_only_findings_lower_no_confidence() {
+        let mut confidence = FieldConfidence::mrz_checksum_scope();
+        let before = confidence;
+        confidence.downgrade_flagged(&crate::fusion::Verdict::NeedsReview {
+            reasons: vec![
+                crate::fusion::Finding::RawNameSeparatorMissing,
+                crate::fusion::Finding::RawInteriorFillerRun,
+            ],
+        });
+        assert_eq!(confidence, before);
     }
 
     // ── ADR-0026: occlusion ──

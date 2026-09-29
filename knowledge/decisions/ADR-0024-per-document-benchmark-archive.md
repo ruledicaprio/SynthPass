@@ -134,3 +134,201 @@ From the 2026-09-27 design pass; each step is its own PR.
 5. **3, the query and diff tool** (`tools/`, standard library only, disclosure-safe output).
 6. **4, schema 2**, after #508 settles which OCR pass Tier 1 reads.
 7. **5, the private track's text-free records** (Decision 7).
+
+## Amendment (2026-09-29) — the nightly synthetic dataset is not an archive publication
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29).
+
+Decision 8 governs archive records and is unchanged. The nightly synthetic dataset on `bench-data`
+predates this ADR and is not an archive record. It is a separate, allowlisted projection of synthetic
+results. [ADR-0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) sets its scope,
+including that it publishes no text, and what CI may publish at all.
+
+## Amendment 1 (2026-09-29) — per-pass OCR readings for #574, behind a benchmark-only entry point
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29). It is the separate decision the rejected
+alternative "Add every OCR pass's lines to `OcrPage`" asks for before pass attribution is built.
+
+### Context
+
+[#574](https://github.com/ruledicaprio/SynthPass/issues/574) measures line-1 attempt selection,
+which [ADR-0021](ADR-0021-fixed-grid-mrz-strips.md)'s 2026-09-24 decision takes as a narrow task.
+A selector has to say which OCR pass a line-1 reading came from. The native retry loop appends
+each pass's MRZ-shaped lines to one page text, so that provenance is gone before Tier 1 sees the
+text, and `OcrPage::retry_variant_id` names only the pass that stopped the loop, by an index that
+depends on which OCR arms are on.
+
+### Decision
+
+1. `synthpass-ocr` gains `NativeOcr::recognize_detailed_traced`. It returns the same `OcrPage` as
+   `recognize_detailed`, plus one record per executed pass, in execution order: the pass id
+   (`general` or `pass-NN`, the `retry_variant_id` vocabulary), the transform that produced its
+   pixels, its image size, whether it failed, added nothing, was appended or was accepted, and
+   every MRZ-shaped line it read with the line's index and bounding box.
+2. It records every MRZ-shaped line — the lines the loop already appends — not a line-1
+   classification. Choosing a line-1 candidate is interpretation, which `synthpass-ocr` does not
+   do (ARCHITECTURE §13.1), and the lines around line 1 are the evidence a selector needs.
+3. One code path: the product's OCR pass runs the same three ocrs steps the traced entry point
+   reads its boxes from, so the benchmark measures what ships.
+4. `OcrPage`, `recognize`, `recognize_detailed`, `synthpass-imageprep`, `synthpass-pipeline`,
+   `ExtractionTrace` and every `SYNTHPASS_OCR_*` variable are unchanged. No extraction-path caller
+   uses the traced entry point, and its types derive no `Serialize`.
+5. The benchmarks report the records only when asked: `synthpass-bench --ocr-passes`, and
+   `provider-bench --real-specimens --dump-ocr-passes`, which writes a separate JSONL next to
+   `--out`, refuses `--include-private`, and refuses a destination inside the working tree that
+   git does not ignore. The records never enter the `--out` trend report or the outcome ledger.
+6. The change must be behaviour-neutral: the introducing PR shows byte-identical OCR text and
+   identical per-document outcomes, retry stops and accepted passes before and after, on the five
+   synthetic formats and on the real-specimen run.
+7. When this archive's record schema lands, the public and local tracks carry these records under
+   the same field names. The private track carries none (Decision 7).
+
+### Alternatives rejected
+
+- **A per-pass vector on `OcrPage`.** Rejected above for this ADR, for the same reason: it would
+  carry diagnostic zone text through every production extraction.
+- **An `SYNTHPASS_OCR_*` arm.** Capturing is not a treatment. An arm would enter `OcrArms`,
+  `config_overrides` and the baseline refusal for a switch that changes no output.
+- **Only line-1 candidates.** Bakes the selector's classification into the observation, so a
+  selector's arms could no longer replay the same evidence.
+- **Two OCR pass implementations** (the product on `get_text`, the trace on the explicit steps). Their
+  agreement would rest on ocrs internals, and an ocrs bump could split them.
+- **Waiting for the archive.** Blocks #574 on build steps 1–4 for a record a flag can produce now.
+
+### Consequences
+
+- A selector can name the pass, transform and position behind every line it considers.
+- A second opt-in file format exists until the archive absorbs it.
+- Boxes are in each pass's own image space (crop, upscale, deskew, turn), so they compare within a
+  pass, not across passes.
+
+## Amendment 2 (2026-09-29) — the chargrid capture for #575, on the same trace
+
+**Status of this amendment:** Accepted (maintainer, 2026-09-29).
+
+### Context
+
+[#575](https://github.com/ruledicaprio/SynthPass/issues/575) part E reports that the chargrid name-line
+repair (`SYNTHPASS_OCR_CHARGRID`, off by default) sometimes restores a filler one cell right of where it is
+printed, and names candidate causes without evidence for any. The 2026-09-18 chargrid A/B could show that a
+repaired name line was wrong, not why, because its reports held no read characters and no grid geometry
+([reconciliation](../benchmarks/chargrid-ab-reconciliation-2026-09-24.md)).
+[#411](https://github.com/ruledicaprio/SynthPass/issues/411) asks for the `ocrs` line-box height beside
+chargrid's reads, so the ink floor's margin is measured on real documents rather than modelled. Both need
+the same observation of one chargrid attempt.
+
+### Decision
+
+1. When the chargrid arm runs (`on` or `control`), `recognize_detailed_traced` attaches one chargrid record
+   to the accepted pass, whose pixels the attempt read. It holds the arm and the verdict `OcrPage::chargrid`
+   reports. Once a recognized line has matched the name line, it also holds: the name line's MRZ index and
+   width, the parsed name line, the matched line's index and text, whether it was downscaled, the working
+   image size, the `ocrs` line box, a SHA-256 of the grayscale band the ink is measured on, each glyph's
+   character and edges, the dark-pixel count of every column of that band, and the ink floor. When a grid
+   was fitted, it also holds the grid's origin and pitch, each glyph's cell, each cell's ink and the repair
+   outcome.
+2. The record is enough to replay the grid fit, the alignment, the ink measurement and both gates offline,
+   with one input varied, without re-running OCR. Outputs are recorded as well as inputs, so a replay is
+   checked against what ran before anything is varied.
+3. The band is identified by its hash and never written. The column profile, the glyph characters and the
+   lines are document content under the same rules as a pass's readings: the same opt-in flags, the same
+   file, the same destination guard, the same refusal of `--include-private`, and never stdout, stderr, a
+   log, `--out`, the outcome ledger or a tracked document. A dated note may cite positions, pitches, cell
+   indices, per-cell ink and line-box heights by asset ID, as this ADR's disclosure rule allows.
+4. It is behaviour-neutral, as amendment 1's Decision 6 requires. With the arm off nothing is recorded and
+   nothing changes. With it on, the page and every outcome are identical with and without tracing, and
+   identical to the arm before this change. The arm stays off by default, and its algorithm, constants and
+   gates are unchanged.
+5. The private track carries none of it (Decision 7), the hash included.
+
+### Alternatives rejected
+
+- **A second entry point or file.** Two traces of one OCR call could disagree about which pass the attempt
+  read, and every reader would have to join them.
+- **Log it under `SYNTHPASS_OCR_VERBOSE`.** That prints zone text and pixel profiles to a log, which this ADR
+  forbids, and a log is not a schema a replay can check.
+- **Write the band crop.** It moves a real document's pixels out of the image file. The hash lets a local
+  analysis find and verify the same pixels from the image.
+- **Record per-cell ink only.** Per-cell ink depends on the grid, so a replay that moves the origin or the
+  pitch could not recompute it. The column profile can.
+- **A separate logging path for #411.** Two records of one line box would drift.
+
+### Consequences
+
+- The note #575 asks for can overlay hand-marked cells on the recorded grid, and vary the pitch, the
+  origin, the packing penalty or the glyph anchor one at a time.
+- The ink floor's margin can be measured from recorded per-cell ink and line-box heights.
+- The pass object gains one key, `chargrid`, which is `null` unless the arm ran.
+
+## Amendment 3 (2026-09-29) — replaying a captured pass file, for #574's arms
+
+**Status of this amendment:** Accepted (maintainer decision 2026-09-29, #574).
+
+### Context
+
+#574 compares three arms of a line-1 selector (off, control, on) that must read the same evidence. The
+native retry loop is wall-clock budgeted, so two live runs of one binary can execute different passes and
+read different text, and an A/B across live runs can attribute an OCR difference to the selector.
+Amendment 1 records every executed pass, and each `provider-bench-ocr-passes.jsonl` row carries the page
+text Tier 1 parsed (`ocr_text`); Tier 1 (`MrzReader`) is a pure function of that text. #575 E needs to
+replay amendment 2's chargrid record from the same file.
+
+### Decision
+
+1. `provider-bench --real-specimens --mrz-only --replay-ocr-passes DIR` runs no OCR and loads no model.
+   It builds each public-corpus document's page from DIR's pass-file row and runs the unchanged scoring
+   path, so the scoring is shared and never copied. It writes the report, the outcome ledger and, when
+   asked, the `--dump-ocr` and `--dump-ocr-hits` dumps a live run with the same flags writes. Unlike a
+   live run it always writes the run manifest and the ledger, because the manifest names the capture.
+   It covers Tier 1 only: Tier 2 would run an LLM over the replayed text, which is not measured here.
+2. It refuses, naming the problem:
+   - a row set that does not cover the public corpus exactly once (a missing `asset_id`, a duplicate, a
+     document with no row, a row for an asset the corpus does not hold);
+   - a row whose `source_sha256` differs from the corpus image's bytes;
+   - a capture whose `corpus_manifest_sha256` differs from the current `samples/corpus.jsonl`;
+   - a capture whose rows lack a key the replay needs (`retry_damaged_recovery`, `mrz_band_score`,
+     listed by name);
+   - `SYNTHPASS_OCR_*` arms that differ from the capture's, since the report's per-provider `ocr_arms`
+     is read from the environment and must be true of the text it replays;
+   - `--out` in the capture directory, which would replace the capture's own manifest and ledger;
+   - `--include-private`, `--include-local`, `--write-baseline`, `--assert-baseline` and
+     `--dump-ocr-passes`.
+3. Its run manifest names the capture it replayed, as `replay_of`: the capture's run-manifest file name
+   and the SHA-256 of that file. It copies the capture's `ocr_arms`. A live run's manifest has no such
+   key and is byte-identical to what it was. The report's `mrz_class_sweep_arm` is the replaying
+   process's, and its `model_paths` say that no OCR model was loaded.
+4. Fidelity is checked, not assumed. A replay with every arm at its default is compared with the capture's
+   own live outputs (`tools/bench_ab_diff.py --expect-identical --check-report`), and any difference
+   stops the A/B. Every `BenchPage` field scoring reads is either derived from the corpus document, or
+   carried by a row key. The row gains the two page values it did not carry, `retry_damaged_recovery` and
+   `mrz_band_score`, both text-free, added at the end: every earlier key keeps its name, order and
+   bytes. The file's text rules are unchanged.
+5. One reader serves every replay, including #575 E's chargrid replay: `ocr_passes::read_rows`. The row
+   types are owned and derive `Deserialize`, and a row written before a key existed reads back with the
+   key defaulted and named in the reader's `missing_keys`, so a consumer refuses rather than replays a
+   default.
+6. A replayed result is labelled as a replay of a named capture. OCR runtime and retry behaviour are the
+   capture's, never the replay's: `ocr_ms` is zero and a `budget` stop is the capture's.
+
+### Alternatives rejected
+
+- **Three live arms.** The same pass count is not guaranteed between runs, and a budget stop in one arm
+  only makes the pair not an A/B.
+- **A Python replay.** The parser and the selector are Rust; a mirror is a second implementation whose
+  agreement nothing checks.
+- **Replaying the miss dump.** It is written per provider and holds text only for dumped rows; the pass
+  file is written once per document and carries provenance.
+- **Overriding the report's `ocr_arms` with the capture's.** It would need the arms as values the report
+  can hold, and the replaying process would then run under arms that are not the ones it reports. The
+  replay is asked to run under the capture's arms instead.
+
+### Consequences
+
+- An arm A/B on the real corpus costs one live capture and seconds per arm, and every arm reads
+  byte-identical text.
+- A replay measures only code downstream of `OcrPage::text`. Anything upstream, the OCR passes, their
+  order and the retry loop's stopping rule, is the capture's.
+- The pass file is an input as well as an output: a schema change to it updates the reader too. A capture
+  written before this amendment lacks the two new keys and cannot be replayed; recapture it.
+- `mrz_band_score` is an `f64` the replay writes back into the dump row, so `synthpass-bench` parses
+  JSON with `serde_json`'s `float_roundtrip`, which reads it back as the identical value.

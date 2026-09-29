@@ -16,7 +16,8 @@
 //! ```text
 //! provider-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out PATH]
 //!                [--measure-memory] [--real-specimens] [--limit N] [--mrz-only]
-//!                [--format NAME] [--verbose] [--dump-ocr]
+//!                [--format NAME] [--verbose] [--dump-ocr] [--dump-ocr-passes]
+//!                [--replay-ocr-passes DIR]
 //!                [--write-baseline PATH] [--assert-baseline PATH]
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
@@ -49,16 +50,53 @@
 //!                      --dump-ocr, scoped to this one miss kind since a
 //!                      real-specimen run is much larger than a synthetic
 //!                      diagnostic one
+//!   --dump-ocr-passes  with --real-specimens: write
+//!                      <out-dir>/provider-bench-ocr-passes.jsonl, one row per OCR'd
+//!                      document (whatever its outcome, written once from the OCR
+//!                      prep, not once per provider): the full OCR text and every
+//!                      executed OCR pass in order — its id, the transform that
+//!                      produced its pixels, its image size, what the retry loop did
+//!                      with it, and each MRZ-shaped line it read with its bounding
+//!                      box (ADR-0024, amendment 1). Each row also carries `chargrid`,
+//!                      the verdict the page reports (`null` with the arm off), and,
+//!                      when SYNTHPASS_OCR_CHARGRID is `on` or `control`, the pass that
+//!                      read the MRZ carries a `chargrid` object: the name-line repair's
+//!                      matched line, glyph positions, fitted grid and ink (amendment
+//!                      2). Refuses --include-private, and
+//!                      refuses an output directory inside the working tree that git
+//!                      does not ignore. The readings never enter the --out report,
+//!                      the outcome ledger, stdout or stderr
+//!   --replay-ocr-passes DIR
+//!                      with --real-specimens --mrz-only: run **no OCR**. Read
+//!                      DIR/provider-bench-ocr-passes.jsonl, a captured run's pass file
+//!                      (`--dump-ocr-passes`), rebuild each public-corpus document's page
+//!                      from its row, and score it with the same code a live run uses
+//!                      (ADR-0024, amendment 3). Writes the same report, and, with
+//!                      --dump-ocr / --dump-ocr-hits, the same dumps a live run with those
+//!                      flags writes; it always writes the run manifest and the outcome
+//!                      ledger, because the manifest names the capture: `replay_of` is the
+//!                      capture's run-manifest file name and its SHA-256, and `ocr_arms`
+//!                      is the capture's. Refuses, naming the problem: a row set that does
+//!                      not cover the corpus exactly once; a row whose `source_sha256` is
+//!                      not the corpus image's; a capture measured against another
+//!                      `samples/corpus.jsonl`; a capture whose rows lack `retry_damaged_recovery`
+//!                      or `mrz_band_score`; SYNTHPASS_OCR_* arms that differ from the
+//!                      capture's; --out in DIR itself; and --include-private,
+//!                      --include-local, --write-baseline, --assert-baseline and
+//!                      --dump-ocr-passes. It measures only what happens to the captured
+//!                      text (Tier 1): OCR runtime and retry behaviour are the capture's,
+//!                      and the report's `model_paths` say no OCR model was loaded
 //!   --progress         force the per-document stderr progress log on even
 //!                      when stderr is redirected. It is already on by
 //!                      default whenever stderr is a terminal, so this flag
 //!                      is only needed to keep it when piping to a file
 //!   --mrz-only         register only the deterministic `mrz` reader, skipping
 //!                      the Tier-2 LLM provider (and its ~1 GB GGUF, never
-//!                      loaded). Turns a full real-specimen run from hours into
-//!                      the ~1-minute deterministic pass — what the per-PR
-//!                      `real-specimen-gate.yml` CI job runs. Valid over either
-//!                      corpus source.
+//!                      loaded). Leaves the deterministic OCR + Tier-1 pass, without
+//!                      the LLM pass that dominates a full real-specimen run
+//!                      (hours) — what the per-PR `real-specimen-gate.yml` CI job
+//!                      runs (tens of minutes: the OCR retry chain is most of it).
+//!                      Valid over either corpus source.
 //!   --write-baseline PATH
 //!                      after the run, write the `mrz` provider's Tier-1
 //!                      snapshot (HIT count + miss-kind histogram + denominator)
@@ -76,9 +114,17 @@
 //!                      (`checksum_failed`, `no_mrz_found`, …) grew, or the
 //!                      outcome ledger next to PATH no longer hashes to
 //!                      `outcomes_sha256`. A missing PATH is written and passes
-//!                      (first-run bootstrap). When a committed ledger is
-//!                      present, also prints an informational (non-failing)
-//!                      per-document outcome diff against this run. The per-PR
+//!                      (first-run bootstrap). Writes a text-free projection of
+//!                      this run's own outcome ledger
+//!                      (`real-specimen-outcomes-text-free.jsonl`, every
+//!                      `miss_reason` reduced to its kind) under the `--out`
+//!                      directory, never next to the baseline. When a committed
+//!                      ledger is present,
+//!                      also prints an informational (non-failing) per-document
+//!                      diff against this run: the outcome changes, then every
+//!                      other recorded field in two groups (deterministic;
+//!                      timing-sensitive), also appended to
+//!                      `$GITHUB_STEP_SUMMARY` when that is set. The per-PR
 //!                      no-regression gate. Refuses to run (exit non-zero,
 //!                      writes nothing) unless every `SYNTHPASS_OCR_*`
 //!                      measurement arm is at its default — a baseline is only
@@ -90,7 +136,7 @@
 //! 20-document synthetic run that also loads and runs the `llm` provider,
 //! never what a bare invocation was meant to start (issue #510).
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -98,8 +144,9 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use synthpass_bench::provider_bench::{
-    run_provider_bench, run_provider_bench_real_with_dump_options, AssertionBucket, ProviderReport,
-    StrictNameHitRate, Tier1HitRate, UnsupportedAssertion,
+    run_provider_bench, run_provider_bench_real_with_options, run_provider_bench_replay,
+    AssertionBucket, PopulationAccuracy, ProviderReport, RealDumpOptions, StrictNameHitRate,
+    Tier1HitRate, UnsupportedAssertion,
 };
 use synthpass_bench::report::{
     ModelPathsReport, OutcomeRow, ProviderRow, RealSpecimenBaseline, RealSpecimenSnapshot, Report,
@@ -149,6 +196,22 @@ struct Args {
     /// document the way `synthpass-bench --dump-ocr` is.
     dump_ocr: bool,
     dump_ocr_hits: bool,
+    /// With `real_specimens`: write `<out-dir>/provider-bench-ocr-passes.jsonl`,
+    /// one row per OCR'd document with the full OCR text and every executed
+    /// OCR pass's MRZ-shaped lines (transform, outcome, bounding box) — #574,
+    /// ADR-0024 amendment 1. Its own flag, not a widening of `--dump-ocr`: the
+    /// miss dump's row shape is depended on by
+    /// `tools/classify_mrz_mechanisms.py`. Refuses `--include-private` (same
+    /// rule as the OCR dumps) and an output directory inside the working tree
+    /// that git does not ignore. Not an `SYNTHPASS_OCR_*` arm: it changes no
+    /// output, so it does not enter the baseline refusal.
+    dump_ocr_passes: bool,
+    /// With `real_specimens` and `mrz_only`: run no OCR and replay the pass file
+    /// in this directory instead (`provider-bench-ocr-passes.jsonl`, from an
+    /// earlier `--dump-ocr-passes` run) — ADR-0024 amendment 3. See
+    /// `load_replay` for what it refuses, and `check_replay_flags` for the
+    /// flags it cannot be combined with.
+    replay_ocr_passes: Option<String>,
     /// Force the per-document progress log on even when stderr is not a
     /// terminal. Progress is *already* on by default for an interactive run
     /// (see `show_progress` in `main`) — a full real-specimen pass takes over
@@ -224,6 +287,8 @@ impl Default for Args {
             verbose: false,
             dump_ocr: false,
             dump_ocr_hits: false,
+            dump_ocr_passes: false,
+            replay_ocr_passes: None,
             progress: false,
             format: None,
             document_type: None,
@@ -278,6 +343,24 @@ fn usage() {
     eprintln!(
         "  --dump-ocr-hits    with --real-specimens: add Tier-1 hits to the same OCR dump; \
          without this flag --dump-ocr remains miss-only"
+    );
+    eprintln!(
+        "  --dump-ocr-passes  with --real-specimens: write <out-dir>/provider-bench-ocr-passes.jsonl, \
+         one row per OCR'd document: the full OCR text and every executed OCR pass with its \
+         transform, outcome and the MRZ-shaped lines it read (with boxes), each row's \
+         chargrid verdict, and, with SYNTHPASS_OCR_CHARGRID on or control, a chargrid object \
+         on the pass that read the MRZ. Refuses --include-private and an output directory \
+         git does not ignore"
+    );
+    eprintln!(
+        "  --replay-ocr-passes DIR  with --real-specimens --mrz-only: run no OCR; rebuild each \
+         document's page from DIR/provider-bench-ocr-passes.jsonl (a captured --dump-ocr-passes \
+         run) and score it with the same code. Writes the report, the outcome ledger and the run \
+         manifest (whose replay_of names the capture), plus the --dump-ocr/--dump-ocr-hits dumps \
+         when asked. Refuses a capture that does not cover the corpus exactly once, that read \
+         other image bytes or another samples/corpus.jsonl, or that lacks retry_damaged_recovery \
+         or mrz_band_score; --out in DIR; and --include-private, --include-local, \
+         --write-baseline, --assert-baseline and --dump-ocr-passes"
     );
     eprintln!(
         "  --progress         force the per-document stderr progress log on when stderr is \
@@ -381,6 +464,17 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.dump_ocr_hits = true;
                 i += 1;
             }
+            "--dump-ocr-passes" => {
+                parsed.dump_ocr_passes = true;
+                i += 1;
+            }
+            "--replay-ocr-passes" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--replay-ocr-passes requires a directory".to_string())?;
+                parsed.replay_ocr_passes = Some(v.clone());
+                i += 2;
+            }
             // Deliberately not gated on --real-specimens the way --dump-ocr
             // is: the synthetic corpus is slow enough to want progress too,
             // and a flag that only forces on an already-default behaviour has
@@ -461,7 +555,11 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
     if parsed.include_private && !parsed.real_specimens {
         return Err("--include-private is only valid together with --real-specimens".to_string());
     }
-    if parsed.include_private && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+    if parsed.dump_ocr_passes && !parsed.real_specimens {
+        return Err("--dump-ocr-passes is only valid together with --real-specimens".to_string());
+    }
+    if parsed.include_private && (parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes)
+    {
         return Err("OCR dumps cannot include samples/private/".to_string());
     }
     if parsed.include_local && !parsed.real_specimens {
@@ -498,7 +596,62 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 .to_string(),
         );
     }
+    if parsed.replay_ocr_passes.is_some() {
+        check_replay_flags(&parsed)?;
+    }
     Ok(parsed)
+}
+
+/// What `--replay-ocr-passes` cannot be combined with, each with its reason.
+///
+/// A replay is Tier 1 over the public corpus, scored by the code a live run
+/// uses, from text a capture recorded: anything that would make it something
+/// else is refused rather than quietly ignored.
+fn check_replay_flags(parsed: &Args) -> Result<(), String> {
+    if !parsed.real_specimens {
+        return Err("--replay-ocr-passes is only valid together with --real-specimens".to_string());
+    }
+    if !parsed.mrz_only {
+        return Err(
+            "--replay-ocr-passes requires --mrz-only: a replay covers Tier 1 only, and Tier 2 \
+             would run an LLM over the replayed text, which this replay does not measure"
+                .to_string(),
+        );
+    }
+    for (flag, given, why) in [
+        (
+            "--include-private",
+            parsed.include_private,
+            "a replay covers the public corpus only, and a capture never holds the private track",
+        ),
+        (
+            "--include-local",
+            parsed.include_local,
+            "a replay covers the public corpus only",
+        ),
+        (
+            "--write-baseline",
+            parsed.write_baseline.is_some(),
+            "the committed baseline is measured by a live run",
+        ),
+        (
+            "--assert-baseline",
+            parsed.assert_baseline.is_some(),
+            "the committed baseline is measured by a live run",
+        ),
+        (
+            "--dump-ocr-passes",
+            parsed.dump_ocr_passes,
+            "a replay reads the pass file and writes none",
+        ),
+    ] {
+        if given {
+            return Err(format!(
+                "{flag} cannot be combined with --replay-ocr-passes: {why}"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Take `n` specimens spread evenly across `all`, preserving order.
@@ -687,6 +840,358 @@ fn diff_outcomes(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<String>
     lines
 }
 
+/// Most document lines any one group of [`diff_ledger_fields`] prints; the
+/// per-field totals above them are never capped.
+const DOC_LINE_CAP: usize = 20;
+
+/// The per-document fields [`diff_ledger_fields`] compares, in
+/// [`OutcomeRow`] schema (declaration) order — the order its totals print in.
+/// `outcome` is left to [`diff_outcomes`], and `ocr_ms` has its own summary
+/// line, so neither is here.
+const DIFFED_FIELDS: &[&str] = &[
+    "miss_reason",
+    "mrz_format",
+    "mrz_found",
+    "mrz_checksums_valid",
+    "names_exact",
+    "name_error",
+    "retry_variant_id",
+    "retry_budget_hit",
+    "retry_stop",
+];
+
+/// One field that differs on one document, already rendered for printing.
+struct FieldChange {
+    field: &'static str,
+    /// `field old -> new`, or `miss_reason kind (detail changed)`. Built only
+    /// from enumerated values (format labels, booleans, retry ids, stop kinds,
+    /// name-error classes) and the miss *kind*: the step summary this reaches
+    /// is public, so nothing here may carry the ledger's `miss_reason` text
+    /// (it can hold both document numbers, ADR-0024 build step 0a) or any
+    /// value read from a document.
+    text: String,
+}
+
+fn render_optional(value: Option<&str>) -> String {
+    value.unwrap_or("null").to_string()
+}
+
+fn render_optional_bool(value: Option<bool>) -> String {
+    value.map_or_else(|| "null".to_string(), |b| b.to_string())
+}
+
+fn push_transition(changes: &mut Vec<FieldChange>, field: &'static str, old: String, new: String) {
+    if old != new {
+        changes.push(FieldChange {
+            field,
+            text: format!("{field} {old} -> {new}"),
+        });
+    }
+}
+
+/// Every [`DIFFED_FIELDS`] entry that differs between two rows of the same
+/// document, in schema order.
+fn field_changes(old: &OutcomeRow, new: &OutcomeRow) -> Vec<FieldChange> {
+    let mut changes = Vec::new();
+    // The kind is `outcome`; the text behind it is never printed.
+    if old.miss_reason != new.miss_reason {
+        let text = if old.outcome == new.outcome {
+            format!("miss_reason {} (detail changed)", new.outcome)
+        } else {
+            format!(
+                "miss_reason {} -> {} (detail changed)",
+                old.outcome, new.outcome
+            )
+        };
+        changes.push(FieldChange {
+            field: "miss_reason",
+            text,
+        });
+    }
+    push_transition(
+        &mut changes,
+        "mrz_format",
+        render_optional(old.mrz_format.as_deref()),
+        render_optional(new.mrz_format.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "mrz_found",
+        old.mrz_found.to_string(),
+        new.mrz_found.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "mrz_checksums_valid",
+        old.mrz_checksums_valid.to_string(),
+        new.mrz_checksums_valid.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "names_exact",
+        render_optional_bool(old.names_exact),
+        render_optional_bool(new.names_exact),
+    );
+    push_transition(
+        &mut changes,
+        "name_error",
+        render_optional(old.name_error.as_deref()),
+        render_optional(new.name_error.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_variant_id",
+        render_optional(old.retry_variant_id.as_deref()),
+        render_optional(new.retry_variant_id.as_deref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_budget_hit",
+        old.retry_budget_hit.to_string(),
+        new.retry_budget_hit.to_string(),
+    );
+    push_transition(
+        &mut changes,
+        "retry_stop",
+        render_optional(old.retry_stop.as_deref()),
+        render_optional(new.retry_stop.as_deref()),
+    );
+    changes
+}
+
+/// A document that hit the OCR retry-pass time budget on either side. Which
+/// passes finished depends on runner speed, so nothing about such a document
+/// is a stable signal.
+fn is_budget_limited(old: &OutcomeRow, new: &OutcomeRow) -> bool {
+    old.retry_budget_hit
+        || new.retry_budget_hit
+        || old.retry_stop.as_deref() == Some("budget")
+        || new.retry_stop.as_deref() == Some("budget")
+}
+
+/// `field count, field count, …` in [`DIFFED_FIELDS`] order, zero counts left
+/// out. Counts are documents, and are never capped.
+fn field_totals(docs: &[(&str, Vec<FieldChange>)]) -> String {
+    DIFFED_FIELDS
+        .iter()
+        .filter_map(|field| {
+            let count = docs
+                .iter()
+                .filter(|(_, changes)| changes.iter().any(|c| c.field == *field))
+                .count();
+            (count > 0).then(|| format!("{field} {count}"))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `  key: change; change` per document (at most [`DOC_LINE_CAP`]), then
+/// `  ... and N more`.
+fn push_document_lines(lines: &mut Vec<String>, docs: &[(&str, Vec<FieldChange>)]) {
+    for (key, changes) in docs.iter().take(DOC_LINE_CAP) {
+        let texts: Vec<&str> = changes.iter().map(|c| c.text.as_str()).collect();
+        lines.push(format!("  {key}: {}", texts.join("; ")));
+    }
+    if docs.len() > DOC_LINE_CAP {
+        lines.push(format!("  ... and {} more", docs.len() - DOC_LINE_CAP));
+    }
+}
+
+/// Median of `values`, sorted in place; the integer mean of the two middle
+/// values (rounded down) when the count is even. `0` for an empty slice.
+fn median(values: &mut [u128]) -> u128 {
+    values.sort_unstable();
+    let n = values.len();
+    match n {
+        0 => 0,
+        _ if n % 2 == 1 => values[n / 2],
+        _ => (values[n / 2 - 1] + values[n / 2]) / 2,
+    }
+}
+
+/// Informational per-field diff of every [`OutcomeRow`] field other than
+/// `outcome` (which [`diff_outcomes`] reports) between the committed ledger
+/// and this run's rows, joined on [`OutcomeRow::sort_key`] (issue #557).
+/// **Never a gate failure**: like [`diff_outcomes`] the return type has no
+/// failure variant. Documents present on one side only are counted by
+/// [`diff_outcomes`] and skipped here.
+///
+/// Two groups, so a reviewer reads the stable signal separately from the
+/// timing-sensitive one:
+///
+/// - **Deterministic** — `miss_reason` (the kind and "detail changed", never
+///   the text), `mrz_format`, `mrz_found`, `mrz_checksums_valid`,
+///   `names_exact`, `name_error`, `retry_variant_id` and `retry_stop`. One
+///   totals line (documents per field, always complete), then one line per
+///   document, at most [`DOC_LINE_CAP`].
+/// - **Timing-sensitive** — `ocr_ms` (one summary line: documents that differ,
+///   median |delta|, both totals) and every change on a *budget-limited*
+///   document (see [`is_budget_limited`]), which includes `retry_budget_hit`
+///   and `retry_stop == "budget"`.
+///
+/// Nothing is printed for a group with nothing in it. Documents come in
+/// `sort_key` order and fields in schema order, so the output is a pure
+/// function of the two inputs.
+fn diff_ledger_fields(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<String> {
+    let committed_by_key: BTreeMap<&str, &OutcomeRow> =
+        committed.iter().map(|r| (r.sort_key(), r)).collect();
+    let actual_by_key: BTreeMap<&str, &OutcomeRow> =
+        actual.iter().map(|r| (r.sort_key(), r)).collect();
+
+    let mut deterministic: Vec<(&str, Vec<FieldChange>)> = Vec::new();
+    let mut budget_limited: Vec<(&str, Vec<FieldChange>)> = Vec::new();
+    let mut ocr_deltas: Vec<u128> = Vec::new();
+    let mut common = 0usize;
+    let mut ocr_old_total = 0u128;
+    let mut ocr_new_total = 0u128;
+    for (key, old) in &committed_by_key {
+        let Some(new) = actual_by_key.get(key) else {
+            continue;
+        };
+        common += 1;
+        ocr_old_total += old.ocr_ms;
+        ocr_new_total += new.ocr_ms;
+        if old.ocr_ms != new.ocr_ms {
+            ocr_deltas.push(old.ocr_ms.abs_diff(new.ocr_ms));
+        }
+        let changes = field_changes(old, new);
+        if changes.is_empty() {
+            continue;
+        }
+        if is_budget_limited(old, new) {
+            budget_limited.push((*key, changes));
+        } else {
+            deterministic.push((*key, changes));
+        }
+    }
+
+    let mut lines = Vec::new();
+    if !deterministic.is_empty() {
+        lines.push(format!(
+            "deterministic field diff vs committed (report-only): {} document(s); {}",
+            deterministic.len(),
+            field_totals(&deterministic),
+        ));
+        push_document_lines(&mut lines, &deterministic);
+    }
+    if !ocr_deltas.is_empty() {
+        lines.push(format!(
+            "timing-sensitive field diff vs committed (report-only): ocr_ms differs on {} of \
+             {common} document(s), median |delta| {} ms, total {ocr_old_total} ms -> \
+             {ocr_new_total} ms",
+            ocr_deltas.len(),
+            median(&mut ocr_deltas),
+        ));
+    }
+    if !budget_limited.is_empty() {
+        lines.push(format!(
+            "budget-limited document(s) vs committed (report-only; every change on them is \
+             timing-sensitive): {} document(s); {}",
+            budget_limited.len(),
+            field_totals(&budget_limited),
+        ));
+        push_document_lines(&mut lines, &budget_limited);
+    }
+    lines
+}
+
+/// Appends `lines` to the GitHub step summary at `path` as one fenced block,
+/// or does nothing when `path` is `None` (`GITHUB_STEP_SUMMARY` unset). The
+/// caller warns and carries on if this fails: the summary is evidence, never
+/// a gate condition.
+///
+/// The repository is public, so the summary is public too: `lines` must
+/// already be limited to asset ids, field names, enumerated values and counts
+/// — see [`FieldChange`].
+fn append_step_summary(path: Option<&Path>, lines: &[String]) -> std::io::Result<()> {
+    use std::io::Write as _;
+
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let mut body =
+        String::from("### Real-specimen per-document ledger diff (report-only)\n\n```text\n");
+    for line in lines {
+        body.push_str(line);
+        body.push('\n');
+    }
+    body.push_str("```\n");
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(body.as_bytes())
+}
+
+/// The step summary file GitHub Actions names in `GITHUB_STEP_SUMMARY`; `None`
+/// outside Actions (unset or empty).
+fn step_summary_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("GITHUB_STEP_SUMMARY")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+/// The fixed name of the text-free projection of an assert run's ledger,
+/// written under the `--out` directory (see [`write_run_ledger_projection`]).
+/// Deliberately not [`OUTCOMES_LEDGER_FILENAME`]: the name says it is a
+/// projection, and it can never be mistaken for, or written over, the
+/// committed ledger.
+const RUN_LEDGER_PROJECTION_FILENAME: &str = "real-specimen-outcomes-text-free.jsonl";
+
+/// `rows` with every `miss_reason` reduced to its kind (`outcome`); every other
+/// field is kept as it is. Rows stay [`OutcomeRow`]s, so the file parses with
+/// [`parse_ledger`] and diffs like a ledger.
+///
+/// Why: the full `miss_reason` text can carry values read from the document.
+/// The audit of every `MissReason` `Display`
+/// format (`crates/synthpass-bench/src/lib.rs`):
+///
+/// - `DocumentNumberMismatch`: `got {got:?}, expected {expected:?}` — **both
+///   document numbers**, one of them OCR-read from the specimen.
+/// - `NoMrzFound`: the `Debug` of an `mrz::MrzError` — `BadCharacter` carries
+///   the offending character and `BadDocumentCode` the first characters of
+///   line 1, both OCR-read from the specimen. (`BadLength`, `BadChecksum`,
+///   `LeadingFiller`, `IncompleteSequence`, `NotFound` carry numbers and
+///   enums only.)
+/// - `OcrError`: the OCR engine's error string, unaudited for values, so
+///   treated as carrying them.
+/// - `ChecksumFailed`: check-digit field names and a fixed suffix only;
+///   `Redacted`, `NoMrzExpected`, `FalsePositiveMrz` and
+///   `DocumentNumberLeadingFiller`: fixed strings.
+///
+/// CI never publishes real-specimen text, even as a short-lived artifact
+/// (ADR-0027 Decision 5), so what an assert run uploads is this projection,
+/// never the full rows. Making the committed ledger itself value-free is
+/// ADR-0024 build step 0a, a separate change; until then the write-baseline
+/// path still writes the full ledger, unchanged.
+fn text_free_projection(rows: &[OutcomeRow]) -> Vec<OutcomeRow> {
+    rows.iter()
+        .map(|row| OutcomeRow {
+            miss_reason: row.miss_reason.as_ref().map(|_| row.outcome.clone()),
+            ..row.clone()
+        })
+        .collect()
+}
+
+/// Writes the [`text_free_projection`] of this run's rows next to the report
+/// `--out`, so the workflow can upload the evidence behind the per-document
+/// diff. Returns the path written. It is under the `--out` directory and under
+/// [`RUN_LEDGER_PROJECTION_FILENAME`], so it can never overwrite the committed
+/// ledger.
+fn write_run_ledger_projection(
+    out: &str,
+    rows: &[OutcomeRow],
+) -> std::io::Result<std::path::PathBuf> {
+    let path = outcomes_ledger_path(out).with_file_name(RUN_LEDGER_PROJECTION_FILENAME);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&path, ledger_bytes(&text_free_projection(rows)))?;
+    Ok(path)
+}
+
 const BASELINE_NOTE: &str = "Real-specimen Tier-1 no-regression baseline for the deterministic \
     `mrz` provider. Regenerate ONLY via CI: `gh workflow run real-specimen-gate.yml -f \
     mode=write-baseline`, download the artifact, commit it. Local numbers differ from CI \
@@ -843,23 +1348,35 @@ fn write_baseline_and_ledger(
 }
 
 /// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
-/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`], `Some(message)`
-/// otherwise. A pure function of `arms` alone (no env reads, no I/O) so it is
-/// directly unit-testable without setting process environment variables —
-/// see `knowledge/benchmarks/README.md`'s maintenance contract for why a
-/// baseline may only describe the default provider configuration: every
-/// other arm is a measurement in progress, and committing a baseline against
-/// one would make its own A/B look like a regression against itself the
-/// moment the env var is unset again.
-fn refuse_non_default_baseline(arms: &synthpass_ocr::OcrArms) -> Option<String> {
-    if arms.is_default() {
+/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and both `SYNTHPASS_MRZ_*`
+/// arms are `off`, `Some(message)` otherwise. A pure function of its arguments
+/// alone (no env reads, no I/O) so it is directly unit-testable without setting
+/// process environment variables — see `knowledge/benchmarks/README.md`'s
+/// maintenance contract for why a baseline may only describe the default
+/// provider configuration: every other arm is a measurement in progress, and
+/// committing a baseline against one would make its own A/B look like a
+/// regression against itself the moment the env var is unset again.
+///
+/// `class_sweep` and `line1_select` are the arm names
+/// `synthpass_die::class_sweep_arm` and `synthpass_die::line1_select_arm`
+/// return. Both change what Tier 1 reads, so a baseline written under either
+/// would describe a configuration nobody runs by default (#574). `control` is
+/// refused as well: it is a placebo, but a baseline is a claim about the default.
+fn refuse_non_default_baseline(
+    arms: &synthpass_ocr::OcrArms,
+    class_sweep: &str,
+    line1_select: &str,
+) -> Option<String> {
+    if arms.is_default() && class_sweep == "off" && line1_select == "off" {
         return None;
     }
     Some(format!(
         "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
-         (texture=on, order=default, rotate=default, skew=default, chargrid=off) — a baseline is \
-         only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
-         This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}.",
+         (texture=on, order=default, rotate=default, skew=default, chargrid=off) and \
+         SYNTHPASS_MRZ_CLASS_SWEEP and SYNTHPASS_MRZ_LINE1_SELECT at off — a baseline is only \
+         valid for the default provider configuration (see knowledge/benchmarks/README.md). \
+         This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}, \
+         mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}.",
         arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
     ))
 }
@@ -871,7 +1388,11 @@ fn run_baseline_step(
     snapshot: Option<(RealSpecimenSnapshot, Vec<OutcomeRow>)>,
     ts_unix: u64,
 ) {
-    if let Some(msg) = refuse_non_default_baseline(&synthpass_ocr::OcrArms::from_env()) {
+    if let Some(msg) = refuse_non_default_baseline(
+        &synthpass_ocr::OcrArms::from_env(),
+        synthpass_die::class_sweep_arm().0,
+        synthpass_die::line1_select_arm().0,
+    ) {
         eprintln!("{msg}");
         std::process::exit(1);
     }
@@ -918,6 +1439,20 @@ fn run_baseline_step(
 
     print_baseline_table(&baseline, &snapshot);
 
+    // A text-free projection of this run's own ledger, under the `--out`
+    // directory (never next to the committed baseline), so the workflow can
+    // upload the evidence behind the diff below — see `text_free_projection`
+    // for why it is not the full ledger. Written before anything here can exit
+    // non-zero. A failure to write it is a warning: the evidence is not a gate
+    // condition.
+    match write_run_ledger_projection(&parsed.out, &rows) {
+        Ok(projection) => println!(
+            "text-free projection of this run's outcome ledger written to {}",
+            projection.display()
+        ),
+        Err(e) => eprintln!("⚠ could not write the text-free ledger projection: {e}"),
+    }
+
     // Outcome-ledger integrity + an informational per-document diff, only
     // when a committed ledger actually sits next to the baseline (absent for
     // one written before this change). A sha mismatch is a gate failure in
@@ -935,8 +1470,15 @@ fn run_baseline_step(
         }
         match parse_ledger(&committed_bytes) {
             Ok(committed_rows) => {
-                for line in diff_outcomes(&committed_rows, &rows) {
+                let mut diff_lines = diff_outcomes(&committed_rows, &rows);
+                diff_lines.extend(diff_ledger_fields(&committed_rows, &rows));
+                for line in &diff_lines {
                     println!("{line}");
+                }
+                // The same lines go to the job's step summary. Report-only:
+                // a failed write warns and never changes the gate result.
+                if let Err(e) = append_step_summary(step_summary_path().as_deref(), &diff_lines) {
+                    eprintln!("⚠ could not write the step summary: {e}");
                 }
             }
             Err(e) => eprintln!(
@@ -1124,7 +1666,12 @@ struct OcrDumpRunManifest<'a> {
     working_tree_dirty: bool,
     flags: &'a [String],
     pivot_yy: u32,
-    ocr_arms: BTreeMap<&'static str, &'static str>,
+    ocr_arms: BTreeMap<String, String>,
+    /// The `SYNTHPASS_MRZ_*` arms this process ran under, as it resolved them
+    /// (#574). Always this process's own, also in a replay: the capture's OCR
+    /// arms are copied above because the text came from that OCR, but the MRZ
+    /// arms describe the read a replay makes.
+    mrz_arms: MrzArms,
     corpus_manifest: &'static str,
     corpus_manifest_sha256: Option<String>,
     documents_loaded: usize,
@@ -1132,26 +1679,257 @@ struct OcrDumpRunManifest<'a> {
     raw_ocr_stage: &'static str,
     source_hash_stage: &'static str,
     outcome_ledger: &'static str,
+    /// Present only in a replay's manifest: which capture the text came from.
+    /// Skipped otherwise, so a live run's manifest is byte-identical to what it
+    /// was before replay existed (its file name is a hash of these bytes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    replay_of: Option<ReplayOf<'a>>,
+}
+
+/// The `SYNTHPASS_MRZ_*` arms as the run manifest spells them: each name is
+/// what the binary resolved, never the variable's raw value (an unrecognised
+/// value falls back to `off`).
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct MrzArms {
+    class_sweep: &'static str,
+    line1_select: &'static str,
+}
+
+impl MrzArms {
+    fn from_env() -> Self {
+        Self {
+            class_sweep: synthpass_die::class_sweep_arm().0,
+            line1_select: synthpass_die::line1_select_arm().0,
+        }
+    }
+}
+
+/// What a replay's manifest says about the capture it replayed (ADR-0024,
+/// amendment 3, Decision 3): the capture's run-manifest file name and the
+/// SHA-256 of that file's bytes. Neither holds document text.
+#[derive(Serialize)]
+struct ReplayOf<'a> {
+    run_manifest: &'a str,
+    sha256: &'a str,
+}
+
+/// The five `SYNTHPASS_OCR_*` arms as the run manifest and the replay's arm
+/// check spell them.
+fn ocr_arms_map(arms: &synthpass_ocr::OcrArms) -> BTreeMap<String, String> {
+    [
+        ("texture", arms.texture),
+        ("order", arms.order),
+        ("rotate", arms.rotate),
+        ("skew", arms.skew),
+        ("chargrid", arms.chargrid),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .collect()
+}
+
+/// SHA-256 of `samples/corpus.jsonl`, `None` when it cannot be read.
+fn corpus_manifest_sha256(root: &Path) -> Option<String> {
+    std::fs::read(root.join("samples/corpus.jsonl"))
+        .ok()
+        .map(|bytes| sha256_hex(&bytes))
+}
+
+/// A capture, as far as its manifest tells a replay: which file it is, and the
+/// OCR arms its text was read under.
+#[derive(Debug, PartialEq)]
+struct ReplaySource {
+    /// The capture's run-manifest file name, as its rows name it.
+    run_manifest: String,
+    /// SHA-256 of that file's bytes.
+    run_manifest_sha256: String,
+    /// The capture's `ocr_arms`, copied into the replay's manifest: the text
+    /// came from that OCR.
+    ocr_arms: BTreeMap<String, String>,
+}
+
+/// The parts of a capture's run manifest a replay reads. Everything else in it
+/// (flags, commit, timing) is the capture's own record and is not interpreted.
+#[derive(Deserialize)]
+struct CaptureManifest {
+    ocr_arms: Option<BTreeMap<String, String>>,
+    corpus_manifest_sha256: Option<String>,
+}
+
+/// The first 12 characters of a hash, for a message.
+fn short_hash(hash: &str) -> &str {
+    hash.get(..12).unwrap_or(hash)
+}
+
+/// The one run manifest a capture's rows name (`OcrPassesRow::run_manifest`).
+/// `Err` when there is none, when the rows name more than one, or when the name
+/// is not a plain file name (it is joined onto the capture directory, so a path
+/// is refused rather than followed).
+fn capture_manifest_name(
+    rows: &[synthpass_bench::ocr_passes::OcrPassesRow],
+) -> Result<&str, String> {
+    let mut names = rows.iter().map(|row| row.run_manifest.as_deref());
+    let first = names
+        .next()
+        .flatten()
+        .ok_or_else(|| "the capture's rows name no run manifest".to_string())?;
+    if names.any(|name| name != Some(first)) {
+        return Err(
+            "the capture's rows name more than one run manifest, or some name none: a capture is \
+             one run"
+                .to_string(),
+        );
+    }
+    if Path::new(first).file_name() != Some(std::ffi::OsStr::new(first)) {
+        return Err("the capture's run manifest name is not a plain file name".to_string());
+    }
+    Ok(first)
+}
+
+/// Checks a capture's run manifest against this process and returns what a
+/// replay records about it. `bytes` is the manifest file's content.
+///
+/// Refuses, naming the problem:
+/// - a manifest that does not parse, or records no `ocr_arms` or no
+///   `corpus_manifest_sha256`: a replay cannot say what it replays;
+/// - a `corpus_manifest_sha256` that is not `current_corpus`: the capture ran on
+///   another `samples/corpus.jsonl`;
+/// - `ocr_arms` that are not `current_arms`. The report's per-provider
+///   `ocr_arms` comes from this process's environment, and it must be true of the
+///   text being replayed, so the replaying process runs with the capture's
+///   `SYNTHPASS_OCR_*` values.
+fn replay_source_from(
+    name: &str,
+    bytes: &[u8],
+    current_corpus: Option<&str>,
+    current_arms: &BTreeMap<String, String>,
+) -> Result<ReplaySource, String> {
+    let manifest: CaptureManifest = serde_json::from_slice(bytes).map_err(|e| {
+        format!(
+            "the capture's run manifest {name} does not parse ({:?})",
+            e.classify()
+        )
+    })?;
+    let Some(captured_corpus) = manifest.corpus_manifest_sha256 else {
+        return Err(format!(
+            "the capture's run manifest {name} records no corpus_manifest_sha256, so a replay \
+             cannot tell which corpus it was measured on"
+        ));
+    };
+    let Some(current_corpus) = current_corpus else {
+        return Err(
+            "cannot read samples/corpus.jsonl to compare it with the capture's".to_string(),
+        );
+    };
+    if captured_corpus != current_corpus {
+        return Err(format!(
+            "the capture was measured against a different samples/corpus.jsonl (capture {}, \
+             current {}): a replay needs the corpus the capture ran on",
+            short_hash(&captured_corpus),
+            short_hash(current_corpus),
+        ));
+    }
+    let Some(ocr_arms) = manifest.ocr_arms else {
+        return Err(format!(
+            "the capture's run manifest {name} records no ocr_arms, so a replay cannot say which \
+             OCR the text came from"
+        ));
+    };
+    if ocr_arms != *current_arms {
+        return Err(format!(
+            "the capture read its text under ocr_arms {ocr_arms:?}, and this process's \
+             SYNTHPASS_OCR_* environment gives {current_arms:?}: run the replay with the \
+             capture's values, so the report's ocr_arms is true of the text it replays"
+        ));
+    }
+    Ok(ReplaySource {
+        run_manifest: name.to_string(),
+        run_manifest_sha256: sha256_hex(bytes),
+        ocr_arms,
+    })
+}
+
+/// Reads the run manifest `capture`'s rows name from `dir` and checks it
+/// ([`replay_source_from`]).
+fn replay_source(
+    dir: &Path,
+    rows: &[synthpass_bench::ocr_passes::OcrPassesRow],
+    current_corpus: Option<&str>,
+    current_arms: &BTreeMap<String, String>,
+) -> Result<ReplaySource, String> {
+    let name = capture_manifest_name(rows)?;
+    let path = dir.join(name);
+    let bytes = std::fs::read(&path).map_err(|e| {
+        format!(
+            "cannot read the capture's run manifest {}: {e}",
+            path.display()
+        )
+    })?;
+    replay_source_from(name, &bytes, current_corpus, current_arms)
+}
+
+/// Everything `--replay-ocr-passes DIR` checks before it writes a file: reads the
+/// capture, checks its run manifest against this corpus and these arms, and
+/// checks its rows against the loaded `specimens` (coverage, image bytes and the
+/// keys a replay needs). Returns the capture and what to record about it.
+fn load_replay(
+    dir: &Path,
+    root: &Path,
+    specimens: &[synthpass_bench::RealSpecimenDoc],
+) -> Result<(synthpass_bench::ocr_passes::PassesFile, ReplaySource), String> {
+    let capture = synthpass_bench::ocr_passes::read_rows(dir)?;
+    let source = replay_source(
+        dir,
+        &capture.rows,
+        corpus_manifest_sha256(root).as_deref(),
+        &ocr_arms_map(&synthpass_ocr::OcrArms::from_env()),
+    )?;
+    synthpass_bench::provider_bench::check_replay(specimens, &capture)?;
+    Ok((capture, source))
+}
+
+/// Whether two paths name the same existing directory. `false` when either does
+/// not exist (a replay's `--out` directory may not yet).
+fn same_directory(a: &Path, b: &Path) -> bool {
+    matches!(
+        (std::fs::canonicalize(a), std::fs::canonicalize(b)),
+        (Ok(a), Ok(b)) if a == b
+    )
+}
+
+/// What the report's `model_paths` say when no OCR model was loaded.
+const NO_MODEL_LOADED: &str = "(replay: no OCR model loaded)";
+
+/// The directory the dumps next to `--out` go in: its parent, or the current
+/// directory when `--out` has no directory part.
+fn out_dir(out: &str) -> std::path::PathBuf {
+    std::path::Path::new(out)
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
 }
 
 /// Persist a content-addressed run description next to the raw OCR dump.
 /// A row's `run_manifest` is a filename relative to its JSONL, so repeated
 /// runs in one output directory cannot silently re-point old rows.
+///
+/// For a replay, `replay` names the capture: the manifest records it as
+/// `replay_of` and copies the capture's `ocr_arms`, because the text came from
+/// that OCR. With `None` the manifest is a live run's, byte for byte what it was
+/// before replay existed.
 fn write_ocr_run_manifest(
     root: &Path,
     dir: &Path,
     flags: &[String],
     documents_loaded: usize,
     labelled_loaded: usize,
+    replay: Option<&ReplaySource>,
 ) -> Result<String, String> {
-    let arms = synthpass_ocr::OcrArms::from_env();
-    let ocr_arms = BTreeMap::from([
-        ("texture", arms.texture),
-        ("order", arms.order),
-        ("rotate", arms.rotate),
-        ("skew", arms.skew),
-        ("chargrid", arms.chargrid),
-    ]);
+    let ocr_arms = match replay {
+        Some(source) => source.ocr_arms.clone(),
+        None => ocr_arms_map(&synthpass_ocr::OcrArms::from_env()),
+    };
     let commit_output = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(root)
@@ -1182,15 +1960,18 @@ fn write_ocr_run_manifest(
         flags,
         pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
         ocr_arms,
+        mrz_arms: MrzArms::from_env(),
         corpus_manifest: "samples/corpus.jsonl",
-        corpus_manifest_sha256: std::fs::read(root.join("samples/corpus.jsonl"))
-            .ok()
-            .map(|bytes| sha256_hex(&bytes)),
+        corpus_manifest_sha256: corpus_manifest_sha256(root),
         documents_loaded,
         labelled_loaded,
         raw_ocr_stage: "provider input after any OCR retries (may join attempts)",
         source_hash_stage: "original encoded image bytes",
         outcome_ledger: "provider-bench-ocr-outcomes.jsonl",
+        replay_of: replay.map(|source| ReplayOf {
+            run_manifest: &source.run_manifest,
+            sha256: &source.run_manifest_sha256,
+        }),
     };
     let body = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
     let name = format!("provider-bench-ocr-run-{}.json", sha256_hex(&body));
@@ -1260,27 +2041,62 @@ async fn main() {
     let show_progress = parsed.progress || std::io::stderr().is_terminal();
 
     let root = repo_root();
+    // Refused before any model loads or document is read: the pass readings are
+    // document OCR, and a destination git would stage is not a place for them.
+    if parsed.dump_ocr_passes {
+        let dir = out_dir(&parsed.out);
+        let cwd = std::env::current_dir().unwrap_or_else(|e| {
+            eprintln!("❌ cannot determine the working directory: {e}");
+            std::process::exit(1);
+        });
+        if let Err(e) =
+            synthpass_bench::ocr_passes::check_passes_destination(&root, &cwd, &dir, |relative| {
+                synthpass_bench::ocr_passes::git_ignores(&root, relative)
+            })
+        {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        }
+    }
+    // A replay runs no OCR and loads no model. It also writes a run manifest and
+    // an outcome ledger next to `--out`, and the capture's own are named the same:
+    // `--out` in the capture directory would replace them.
+    let replay_dir = parsed.replay_ocr_passes.as_deref().map(Path::new);
+    if let Some(dir) = replay_dir {
+        if same_directory(&out_dir(&parsed.out), dir) {
+            eprintln!(
+                "❌ --out is in the capture directory {}: a replay writes a run manifest and an \
+                 outcome ledger there, replacing the capture's own",
+                dir.display()
+            );
+            std::process::exit(1);
+        }
+    }
     // `SYNTHPASS_OCR_MODEL_DIR` if set, otherwise this binary's own
     // build-tree repo root (today's behaviour, unchanged) — issue #541.
     let model_dir = synthpass_bench::resolve_model_dir(&root, |k| std::env::var_os(k));
     let detection_path = model_dir.join("text-detection.rten");
     let recognition_path = model_dir.join("text-recognition.rten");
-    eprintln!(
-        "OCR models: detection={} recognition={}",
-        detection_path.display(),
-        recognition_path.display()
-    );
-    let ocr = NativeOcr::load(&detection_path, &recognition_path).expect(
-        "failed to load OCR models — run from the repo root, or set SYNTHPASS_OCR_MODEL_DIR",
-    );
+    let ocr: Option<NativeOcr> = if replay_dir.is_some() {
+        None
+    } else {
+        eprintln!(
+            "OCR models: detection={} recognition={}",
+            detection_path.display(),
+            recognition_path.display()
+        );
+        Some(NativeOcr::load(&detection_path, &recognition_path).expect(
+            "failed to load OCR models — run from the repo root, or set SYNTHPASS_OCR_MODEL_DIR",
+        ))
+    };
 
     // The full M7 catalog is `mrz` + the Tier-2 `LlmFieldReader`, and the only
     // way to reach the latter's registered instance is through a `Pipeline`
     // (`LlmFieldReader` is `pub(crate)` there). `--mrz-only` skips all of it —
     // no second OCR engine, no `NativeInferer`, no GGUF ever touched — and
-    // builds a one-reader catalog directly instead, turning a real-specimen
-    // run from hours into the ~1-minute deterministic pass the per-PR
-    // `real-specimen-gate.yml` CI job needs.
+    // builds a one-reader catalog directly instead, leaving the deterministic
+    // OCR + Tier-1 pass the per-PR `real-specimen-gate.yml` CI job needs
+    // without the LLM pass that turns a real-specimen run into hours.
     let pipeline;
     let deterministic_only;
     let catalog: &ProviderCatalog = if parsed.mrz_only {
@@ -1333,33 +2149,71 @@ async fn main() {
             specimens.len(),
             specimens.len() - labelled,
         );
-        // `--dump-ocr` writes its JSONL next to the `--out` report; an --out
-        // with no directory part means the current directory.
-        let dump_dir = (parsed.dump_ocr || parsed.dump_ocr_hits).then(|| {
-            std::path::Path::new(&parsed.out)
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-        });
+        // A replay is checked against the loaded corpus before anything is
+        // written: a refused replay leaves no manifest or ledger behind.
+        let replay = replay_dir
+            .map(|dir| load_replay(dir, &root, &specimens))
+            .transpose()
+            .unwrap_or_else(|e| {
+                eprintln!("❌ {e}");
+                std::process::exit(1);
+            });
+        // `--dump-ocr` and `--dump-ocr-passes` write their JSONL next to the
+        // `--out` report; an --out with no directory part means the current
+        // directory. A replay always writes the run manifest, because it names
+        // the capture the text came from.
+        let dump_dir =
+            (parsed.dump_ocr || parsed.dump_ocr_hits || parsed.dump_ocr_passes || replay.is_some())
+                .then(|| out_dir(&parsed.out));
         if let Some(dir) = dump_dir.as_deref() {
-            write_ocr_run_manifest(&root, dir, &args, specimens.len(), labelled).unwrap_or_else(
-                |e| {
+            let source = replay.as_ref().map(|(_, source)| source);
+            write_ocr_run_manifest(&root, dir, &args, specimens.len(), labelled, source)
+                .unwrap_or_else(|e| {
                     eprintln!("❌ cannot write OCR run manifest: {e}");
                     std::process::exit(1);
-                },
-            );
+                });
         }
-        let reports = run_provider_bench_real_with_dump_options(
-            catalog,
-            &ocr,
-            &specimens,
-            parsed.measure_memory,
-            dump_dir.as_deref(),
-            parsed.dump_ocr_hits,
-            show_progress,
-        )
-        .await;
+        let dumps = RealDumpOptions {
+            ocr_dir: dump_dir
+                .as_deref()
+                .filter(|_| parsed.dump_ocr || parsed.dump_ocr_hits),
+            ocr_hits: parsed.dump_ocr_hits,
+            ocr_passes_dir: dump_dir.as_deref().filter(|_| parsed.dump_ocr_passes),
+        };
+        let outcome = match (&replay, ocr.as_ref()) {
+            (Some((capture, source)), _) => {
+                eprintln!(
+                    "replaying {} documents from {} (no OCR)",
+                    specimens.len(),
+                    source.run_manifest
+                );
+                run_provider_bench_replay(
+                    catalog,
+                    &specimens,
+                    capture,
+                    parsed.measure_memory,
+                    &dumps,
+                    show_progress,
+                )
+                .await
+            }
+            (None, Some(ocr)) => {
+                run_provider_bench_real_with_options(
+                    catalog,
+                    ocr,
+                    &specimens,
+                    parsed.measure_memory,
+                    &dumps,
+                    show_progress,
+                )
+                .await
+            }
+            (None, None) => Err("no OCR models were loaded for a live run".to_string()),
+        };
+        let reports = outcome.unwrap_or_else(|e| {
+            eprintln!("❌ {e}");
+            std::process::exit(1);
+        });
         (
             reports,
             "real-specimens",
@@ -1374,8 +2228,13 @@ async fn main() {
             parsed.count,
             parsed.document_type.unwrap_or(DocumentType::TD3),
         );
+        let Some(ocr) = ocr.as_ref() else {
+            // `--replay-ocr-passes` needs `--real-specimens`, which `parse_args` enforces.
+            eprintln!("❌ the synthetic corpus needs the OCR models, which this run did not load");
+            std::process::exit(1);
+        };
         let reports =
-            run_provider_bench(catalog, &ocr, &corpus, parsed.measure_memory, show_progress).await;
+            run_provider_bench(catalog, ocr, &corpus, parsed.measure_memory, show_progress).await;
         (
             reports,
             "synthetic-corpus",
@@ -1388,7 +2247,14 @@ async fn main() {
     // The committed baseline ledger may describe a different OCR run. Keep
     // this run's exact outcomes beside its dump so the classifier never has
     // to guess that historical outcomes still match the current pass.
-    if parsed.real_specimens && (parsed.dump_ocr || parsed.dump_ocr_hits) {
+    // The run manifest names this ledger, so any dump flag that writes the
+    // manifest writes it too.
+    if parsed.real_specimens
+        && (parsed.dump_ocr
+            || parsed.dump_ocr_hits
+            || parsed.dump_ocr_passes
+            || replay_dir.is_some())
+    {
         let mrz = reports
             .iter()
             .find(|r| r.provider_id == "mrz")
@@ -1408,16 +2274,10 @@ async fn main() {
     }
 
     for r in &reports {
-        let field_match = r
-            .accuracy
-            .field_match_rate
-            .map(|v| format!("{:.1}%", v * 100.0))
-            .unwrap_or_else(|| "n/a".to_string());
-        let mean_cer = r
-            .accuracy
-            .mean_cer
-            .map(|v| format!("{v:.3}"))
-            .unwrap_or_else(|| "n/a".to_string());
+        let cer = |mean: Option<f64>| {
+            mean.map(|v| format!("{v:.3}"))
+                .unwrap_or_else(|| "n/a".to_string())
+        };
         let unsupported = match &r.unsupported_assertion {
             UnsupportedAssertion::Computed {
                 overall,
@@ -1457,14 +2317,63 @@ async fn main() {
         };
         let tier1_hit_rate: &Tier1HitRate = &r.tier1_hit_rate;
         println!(
-            "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, field match \
-             {field_match}, mean CER {mean_cer}, mean {} ms, unsupported-assertion rate \
-             {unsupported}",
+            "{}: {} docs ({} labelled), Tier-1 hit rate {tier1_hit_rate}, mean {} ms, \
+             unsupported-assertion rate {unsupported}",
             r.provider_id,
             r.documents,
             r.accuracy.labelled_documents,
             r.speed.mean.as_millis(),
         );
+
+        // Field accuracy over three populations, each with its size (#564).
+        // Read quality and end-to-end are the two to quote; the all-labelled
+        // figure is kept for continuity with the bench history and mixes in
+        // misses and non-conforming specimens. See
+        // `synthpass_bench::provider_bench::AccuracyStats`'s doc.
+        let accepted = &r.accuracy.accepted_reads;
+        let scored = &r.accuracy.scored;
+        println!(
+            "  field accuracy, accepted reads ({} docs): field match {}, mean CER {}",
+            accepted.documents,
+            format_percentage(accepted.field_match_rate),
+            cer(accepted.mean_cer),
+        );
+        println!(
+            "  field accuracy, scored end-to-end ({} docs): field match {}, mean CER {}",
+            scored.documents,
+            format_percentage(scored.field_match_rate),
+            cer(scored.mean_cer),
+        );
+        println!(
+            "  field accuracy, all labelled incl. non-conforming ({} docs): field match {}, \
+             mean CER {}",
+            r.accuracy.labelled_documents,
+            format_percentage(r.accuracy.field_match_rate),
+            cer(r.accuracy.mean_cer),
+        );
+        let in_population = |population: &PopulationAccuracy, field: &str| {
+            population
+                .per_field
+                .iter()
+                .find(|entry| entry.field == field)
+                .map(|entry| (entry.mean_cer, entry.documents))
+                .unwrap_or((None, 0))
+        };
+        println!("  per-field mean CER (docs): accepted reads | scored | all labelled");
+        for (field, all_mean, all_documents) in &r.accuracy.per_field_cer {
+            let (accepted_mean, accepted_documents) = in_population(accepted, field);
+            let (scored_mean, scored_documents) = in_population(scored, field);
+            if accepted_documents + scored_documents + all_documents == 0 {
+                continue;
+            }
+            println!(
+                "    {field}: {} ({accepted_documents}) | {} ({scored_documents}) | {} \
+                 ({all_documents})",
+                cer(accepted_mean),
+                cer(scored_mean),
+                cer(*all_mean),
+            );
+        }
 
         // Two name-accuracy rates over two different denominators — no ICAO
         // check digit covers `surname`/`given_names`, so `tier1_hit_rate`
@@ -1734,7 +2643,15 @@ async fn main() {
         count,
         seed_start,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
-        model_paths: ModelPathsReport::resolve(&detection_path, &recognition_path),
+        mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
+        model_paths: if replay_dir.is_some() {
+            ModelPathsReport {
+                detection: NO_MODEL_LOADED.to_string(),
+                recognition: NO_MODEL_LOADED.to_string(),
+            }
+        } else {
+            ModelPathsReport::resolve(&detection_path, &recognition_path)
+        },
         providers: reports.into_iter().map(ProviderRow::from).collect(),
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
@@ -1748,7 +2665,14 @@ async fn main() {
         "mrz class-sweep arm measured: {}",
         synthpass_die::class_sweep_arm().0
     );
+    println!(
+        "mrz line-1 select arm measured: {}",
+        synthpass_die::line1_select_arm().0
+    );
     println!("report written to {}", parsed.out);
+    if let Some(dir) = replay_dir {
+        println!("replay of the capture in {}", dir.display());
+    }
 
     // Baseline write / assert — the per-PR real-specimen no-regression gate.
     // Runs last, after the report JSON is safely on disk, and may
@@ -1794,7 +2718,7 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_allows_the_default_arms() {
         assert_eq!(
-            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT),
+            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "off"),
             None
         );
     }
@@ -1803,12 +2727,28 @@ mod tests {
     fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.chargrid = "on";
-        let msg = refuse_non_default_baseline(&arms).expect("must refuse");
+        let msg = refuse_non_default_baseline(&arms, "off", "off").expect("must refuse");
         assert!(msg.contains("chargrid=on"), "message: {msg}");
 
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.texture = "off";
-        assert!(refuse_non_default_baseline(&arms).is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "off").is_some());
+    }
+
+    /// #574: both `SYNTHPASS_MRZ_*` arms change what Tier 1 reads, so a baseline
+    /// may not be written or asserted under either, `control` included.
+    #[test]
+    fn refuse_non_default_baseline_rejects_either_mrz_arm() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        for value in ["on", "control"] {
+            let msg = refuse_non_default_baseline(&arms, value, "off").expect("class sweep");
+            assert!(msg.contains(&format!("mrz_class_sweep={value}")), "{msg}");
+            let msg = refuse_non_default_baseline(&arms, "off", value).expect("line-1 select");
+            assert!(msg.contains(&format!("mrz_line1_select={value}")), "{msg}");
+        }
+        // Both moved at once is refused once, and the message names both.
+        let msg = refuse_non_default_baseline(&arms, "on", "on").expect("both");
+        assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=on"));
     }
 
     #[test]
@@ -1924,6 +2864,68 @@ mod tests {
             .contains("samples/private/"));
     }
 
+    fn args_of(flags: &[&str]) -> Vec<String> {
+        flags.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// #574 / ADR-0024 amendment 1: the pass readings are document OCR, so the
+    /// flag is real-specimen-only like the other OCR dumps, and off by default.
+    #[test]
+    fn dump_ocr_passes_needs_real_specimens_and_is_off_by_default() {
+        assert!(
+            !parse_args(&args_of(&["--real-specimens"]))
+                .expect("parses")
+                .dump_ocr_passes
+        );
+        let parsed = parse_args(&args_of(&["--real-specimens", "--dump-ocr-passes"]))
+            .expect("valid combination");
+        assert!(parsed.dump_ocr_passes);
+        assert!(
+            !parsed.dump_ocr && !parsed.dump_ocr_hits,
+            "the pass dump is its own flag, not a widening of --dump-ocr"
+        );
+        let err = parse_args(&args_of(&["--dump-ocr-passes"]))
+            .err()
+            .expect("refused without --real-specimens");
+        assert!(err.contains("--real-specimens"), "{err}");
+    }
+
+    /// Same message and rule as `--dump-ocr`'s: a private specimen never gets
+    /// an OCR dump, whichever dump flag asks.
+    #[test]
+    fn dump_ocr_passes_rejects_the_private_track() {
+        let err = parse_args(&args_of(&[
+            "--real-specimens",
+            "--include-private",
+            "--dump-ocr-passes",
+        ]))
+        .err()
+        .expect("private pass dump must be rejected");
+        assert_eq!(err, "OCR dumps cannot include samples/private/");
+    }
+
+    /// `--include-local` follows `--dump-ocr`'s rule, which allows it (the
+    /// local track is gitignored).
+    #[test]
+    fn dump_ocr_passes_allows_the_local_track() {
+        let parsed = parse_args(&args_of(&[
+            "--real-specimens",
+            "--include-local",
+            "--dump-ocr-passes",
+        ]))
+        .expect("local track is allowed");
+        assert!(parsed.include_local && parsed.dump_ocr_passes);
+    }
+
+    #[test]
+    fn out_dir_is_the_parent_of_out_or_the_current_directory() {
+        assert_eq!(
+            out_dir("artifacts/provider-bench-report.json"),
+            std::path::PathBuf::from("artifacts")
+        );
+        assert_eq!(out_dir("report.json"), std::path::PathBuf::from("."));
+    }
+
     #[test]
     fn ocr_run_manifest_pins_flags_pivot_and_corpus_hash() {
         let dir = std::env::temp_dir().join(format!(
@@ -1931,7 +2933,7 @@ mod tests {
             std::process::id()
         ));
         let flags = vec!["--real-specimens".to_string(), "--dump-ocr".to_string()];
-        let name = write_ocr_run_manifest(&repo_root(), &dir, &flags, 2, 1)
+        let name = write_ocr_run_manifest(&repo_root(), &dir, &flags, 2, 1, None)
             .expect("write local run manifest");
         let body = std::fs::read(dir.join(&name)).expect("manifest exists");
         assert_eq!(
@@ -1948,6 +2950,14 @@ mod tests {
             synthpass_die::mrz_parse_options().pivot_yy
         );
         assert_eq!(manifest["git_commit"], git_head());
+        // #574: both MRZ arms, as this process resolved them.
+        assert_eq!(
+            manifest["mrz_arms"],
+            serde_json::json!({
+                "class_sweep": synthpass_die::class_sweep_arm().0,
+                "line1_select": synthpass_die::line1_select_arm().0,
+            })
+        );
         assert_eq!(manifest["corpus_manifest"], "samples/corpus.jsonl");
         assert!(manifest["corpus_manifest_sha256"]
             .as_str()
@@ -2523,6 +3533,7 @@ mod tests {
             unsupported_fields: Vec::new(),
             names_exact: None,
             name_error: None,
+            field_correctness: None,
             ocr_elapsed: Duration::from_millis(7),
             retry_variant_id: None,
             retry_damaged_recovery: None,
@@ -2530,6 +3541,7 @@ mod tests {
             retry_stop: None,
             chargrid: None,
             tier1_damaged_recovery: None,
+            line1_selection: None,
         }
     }
 
@@ -2551,6 +3563,8 @@ mod tests {
                 field_match_rate: None,
                 mean_cer: None,
                 per_field_cer: Vec::new(),
+                accepted_reads: Default::default(),
+                scored: Default::default(),
             },
             speed: SpeedStats {
                 mean: Duration::ZERO,
@@ -2747,6 +3761,339 @@ mod tests {
         assert_eq!(lines.len(), 1, "no per-document rows when nothing moved");
     }
 
+    /// `outcome_row(asset_id, "hit")` with `edit` applied — a one-line way to
+    /// vary the field a `diff_ledger_fields` test is about.
+    fn hit_row_with(asset_id: &str, edit: impl FnOnce(&mut OutcomeRow)) -> OutcomeRow {
+        let mut row = outcome_row(asset_id, "hit");
+        edit(&mut row);
+        row
+    }
+
+    #[test]
+    fn diff_ledger_fields_prints_nothing_when_no_field_moved() {
+        let rows = vec![outcome_row("a", "hit"), outcome_row("b", "checksum_failed")];
+        // Only the existing outcome line remains for an unchanged ledger.
+        assert_eq!(diff_ledger_fields(&rows, &rows), Vec::<String>::new());
+        assert_eq!(diff_outcomes(&rows, &rows).len(), 1);
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_deterministic_change_in_schema_order() {
+        // Like `diff_outcomes`, the return type has no failure variant: a
+        // per-field diff is informational whatever it finds.
+        let committed = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("MRVA".to_string())
+        })];
+        let actual = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("TD3".to_string());
+            r.mrz_checksums_valid = false;
+        })];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format \
+                 1, mrz_checksums_valid 1"
+                    .to_string(),
+                "  a: mrz_format MRVA -> TD3; mrz_checksums_valid true -> false".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_prints_the_miss_kind_and_never_the_miss_reason_text() {
+        let mismatch = |got: &str, expected: &str| {
+            hit_row_with("d", |r| {
+                r.outcome = "document_number_mismatch".to_string();
+                r.miss_reason = Some(format!(
+                    "document number mismatch: got {got:?}, expected {expected:?}"
+                ));
+            })
+        };
+        let committed = vec![mismatch("X1234567", "Y7654321")];
+        let actual = vec![mismatch("X1234568", "Y7654321")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines,
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); miss_reason 1"
+                    .to_string(),
+                "  d: miss_reason document_number_mismatch (detail changed)".to_string(),
+            ]
+        );
+        let printed = lines.join("\n");
+        for text in ["X1234567", "X1234568", "Y7654321", "got", "expected"] {
+            assert!(
+                !printed.contains(text),
+                "the miss_reason text must never be printed: {printed}"
+            );
+        }
+    }
+
+    #[test]
+    fn diff_ledger_fields_names_both_kinds_when_the_kind_changed() {
+        let committed = vec![hit_row_with("d", |r| {
+            r.outcome = "checksum_failed".to_string();
+            r.miss_reason = Some("checksum invalid: composite".to_string());
+        })];
+        let actual = vec![outcome_row("d", "hit")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert!(
+            lines.contains(&"  d: miss_reason checksum_failed -> hit (detail changed)".to_string()),
+            "{lines:?}"
+        );
+        assert!(
+            !lines.join("\n").contains("composite"),
+            "the miss_reason text must never be printed"
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_ocr_ms_only_changes_as_one_timing_line() {
+        let with_ms = |id: &str, ms: u128| hit_row_with(id, |r| r.ocr_ms = ms);
+        let committed = vec![with_ms("a", 1000), with_ms("b", 2000), with_ms("c", 300)];
+        let actual = vec![with_ms("a", 1500), with_ms("b", 1000), with_ms("c", 300)];
+        // |delta| is 500 and 1000: the median of an even count is the integer
+        // mean of the middle two. `c` did not move and is not counted as
+        // differing, but is in the "of 3" and in both totals.
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "timing-sensitive field diff vs committed (report-only): ocr_ms differs on 2 of 3 \
+                 document(s), median |delta| 750 ms, total 3300 ms -> 2800 ms"
+                    .to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_moves_every_change_on_a_budget_limited_document_to_the_timing_group() {
+        let committed = vec![
+            hit_row_with("b", |r| {
+                r.mrz_format = Some("TD3".to_string());
+                r.retry_stop = Some("exhausted".to_string());
+            }),
+            // Budget-limited on the committed side only.
+            hit_row_with("c", |r| r.retry_stop = Some("budget".to_string())),
+            hit_row_with("d", |r| r.mrz_found = true),
+        ];
+        let actual = vec![
+            hit_row_with("b", |r| {
+                r.mrz_format = Some("MRVA".to_string());
+                r.retry_budget_hit = true;
+                r.retry_stop = Some("budget".to_string());
+            }),
+            hit_row_with("c", |r| {
+                r.names_exact = Some(true);
+                r.retry_stop = Some("exhausted".to_string());
+            }),
+            hit_row_with("d", |r| r.mrz_found = false),
+        ];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                // `d` is not budget-limited, so it alone is deterministic.
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_found 1"
+                    .to_string(),
+                "  d: mrz_found true -> false".to_string(),
+                "budget-limited document(s) vs committed (report-only; every change on them is \
+                 timing-sensitive): 2 document(s); mrz_format 1, names_exact 1, retry_budget_hit \
+                 1, retry_stop 2"
+                    .to_string(),
+                "  b: mrz_format TD3 -> MRVA; retry_budget_hit false -> true; retry_stop \
+                 exhausted -> budget"
+                    .to_string(),
+                "  c: names_exact null -> true; retry_stop budget -> exhausted".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_caps_document_lines_at_twenty_but_keeps_complete_totals() {
+        let ids: Vec<String> = (0..25).map(|i| format!("doc-{i:02}")).collect();
+        let committed: Vec<OutcomeRow> = ids.iter().map(|id| outcome_row(id, "hit")).collect();
+        let actual: Vec<OutcomeRow> = ids
+            .iter()
+            .map(|id| hit_row_with(id, |r| r.mrz_found = false))
+            .collect();
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 25 document(s); mrz_found 25"
+        );
+        assert_eq!(
+            lines.len(),
+            22,
+            "totals, 20 document lines, the overflow line"
+        );
+        assert!(lines[1].starts_with("  doc-00: "));
+        assert!(lines[20].starts_with("  doc-19: "));
+        assert_eq!(lines[21], "  ... and 5 more");
+    }
+
+    #[test]
+    fn diff_ledger_fields_is_ordered_by_key_whatever_the_input_order() {
+        let changed = |id: &str| hit_row_with(id, |r| r.name_error = Some("swapped".to_string()));
+        let committed = vec![
+            outcome_row("c", "hit"),
+            outcome_row("a", "hit"),
+            outcome_row("b", "hit"),
+        ];
+        let actual = vec![changed("b"), changed("c"), changed("a")];
+        let lines = diff_ledger_fields(&committed, &actual);
+        let keys: Vec<&str> = lines[1..]
+            .iter()
+            .map(|l| l.trim_start().split(':').next().expect("key before colon"))
+            .collect();
+        assert_eq!(keys, vec!["a", "b", "c"]);
+        let mut committed_sorted = committed.clone();
+        committed_sorted.sort_by(|x, y| x.sort_key().cmp(y.sort_key()));
+        assert_eq!(diff_ledger_fields(&committed_sorted, &actual), lines);
+    }
+
+    #[test]
+    fn diff_ledger_fields_skips_a_document_present_on_one_side_only() {
+        let committed = vec![
+            outcome_row("a", "hit"),
+            hit_row_with("only-committed", |r| r.mrz_found = false),
+        ];
+        let actual = vec![
+            hit_row_with("a", |r| r.mrz_format = Some("TD3".to_string())),
+            hit_row_with("only-actual", |r| r.ocr_ms = 99_999),
+        ];
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines,
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format 1"
+                    .to_string(),
+                "  a: mrz_format null -> TD3".to_string(),
+            ],
+            "documents on one side only are counted by `diff_outcomes`, not diffed here"
+        );
+    }
+
+    /// A fresh scratch directory under the system temp dir, unique per test.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass-field-diff-test-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch dir");
+        dir
+    }
+
+    #[test]
+    fn append_step_summary_writes_the_diff_lines_and_nothing_without_a_path() {
+        let dir = scratch_dir("step-summary");
+        let summary = dir.join("summary.md");
+        let lines = vec![
+            "outcome ledger diff vs committed: 0 document(s) changed outcome".to_string(),
+            "  a: mrz_format null -> TD3".to_string(),
+        ];
+
+        append_step_summary(None, &lines).expect("no path is a no-op");
+        assert!(!summary.exists(), "an unset variable must write nothing");
+
+        append_step_summary(Some(summary.as_path()), &lines).expect("write the summary");
+        let text = std::fs::read_to_string(&summary).expect("summary exists");
+        for line in &lines {
+            assert!(text.contains(&format!("{line}\n")), "{text}");
+        }
+        assert!(text.contains("```text\n") && text.ends_with("```\n"));
+
+        // GitHub steps append to one shared file; a second call must not truncate.
+        append_step_summary(Some(summary.as_path()), &lines).expect("append again");
+        let twice = std::fs::read_to_string(&summary).expect("summary exists");
+        assert_eq!(twice.matches("  a: mrz_format null -> TD3\n").count(), 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_free_projection_holds_no_miss_reason_text_for_a_document_number_mismatch() {
+        let mismatch = hit_row_with("d", |r| {
+            r.outcome = "document_number_mismatch".to_string();
+            r.miss_reason = Some(
+                "document number mismatch: got \"X1234567\", expected \"Y7654321\"".to_string(),
+            );
+            r.mrz_format = Some("TD3".to_string());
+        });
+        let bad_code = hit_row_with("e", |r| {
+            r.outcome = "no_mrz_found".to_string();
+            r.miss_reason = Some("no MRZ found: BadDocumentCode(\"PZ\")".to_string());
+        });
+        let hit = outcome_row("h", "hit");
+        let rows = vec![mismatch.clone(), bad_code, hit.clone()];
+
+        let projected = text_free_projection(&rows);
+        let bytes = String::from_utf8(ledger_bytes(&projected)).expect("valid UTF-8");
+        for text in [
+            "X1234567",
+            "Y7654321",
+            "got",
+            "expected",
+            "BadDocumentCode",
+            "PZ",
+        ] {
+            assert!(
+                !bytes.contains(text),
+                "the projection must hold no miss_reason text, found {text:?}: {bytes}"
+            );
+        }
+        // The kind survives, every other field is kept, and a hit stays a hit.
+        assert_eq!(
+            projected[0].miss_reason.as_deref(),
+            Some("document_number_mismatch")
+        );
+        assert_eq!(
+            projected[0],
+            OutcomeRow {
+                miss_reason: Some("document_number_mismatch".to_string()),
+                ..mismatch
+            }
+        );
+        assert_eq!(projected[1].miss_reason.as_deref(), Some("no_mrz_found"));
+        assert_eq!(projected[2], hit);
+        // Still a ledger: it parses back and diffs like one.
+        assert_eq!(
+            parse_ledger(&ledger_bytes(&projected)).expect("projection parses"),
+            projected
+        );
+    }
+
+    #[test]
+    fn write_run_ledger_projection_writes_under_out_and_never_as_the_committed_ledger() {
+        let dir = scratch_dir("run-ledger");
+        let out_dir = dir.join("artifacts");
+        let rows = vec![hit_row_with("a", |r| {
+            r.outcome = "document_number_mismatch".to_string();
+            r.miss_reason =
+                Some("document number mismatch: got \"X1\", expected \"Y2\"".to_string());
+        })];
+
+        let out = out_dir.join("report.json");
+        let written =
+            write_run_ledger_projection(out.to_str().expect("utf8"), &rows).expect("write");
+        assert_eq!(written, out_dir.join(RUN_LEDGER_PROJECTION_FILENAME));
+        assert_ne!(
+            written.file_name().expect("file name"),
+            OUTCOMES_LEDGER_FILENAME,
+            "the projection must not share the committed ledger's name"
+        );
+        let on_disk = std::fs::read_to_string(&written).expect("projection on disk");
+        assert!(
+            !on_disk.contains("X1") && !on_disk.contains("Y2"),
+            "{on_disk}"
+        );
+        assert_eq!(
+            on_disk.as_bytes(),
+            ledger_bytes(&text_free_projection(&rows)).as_slice()
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn parse_ledger_round_trips_what_ledger_bytes_writes() {
         let report = mrz_report_with_details(vec![
@@ -2757,5 +4104,330 @@ mod tests {
         let bytes = ledger_bytes(&rows);
         let parsed = parse_ledger(&bytes).expect("well-formed ledger bytes parse");
         assert_eq!(parsed, rows);
+    }
+
+    // --- --replay-ocr-passes (ADR-0024, amendment 3) ------------------------
+
+    const REPLAY_BASE: [&str; 4] = [
+        "--real-specimens",
+        "--mrz-only",
+        "--replay-ocr-passes",
+        "capture-dir",
+    ];
+
+    fn replay_args(extra: &[&str]) -> Vec<String> {
+        REPLAY_BASE
+            .iter()
+            .chain(extra)
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    #[test]
+    fn replay_is_off_by_default_and_parses_with_its_directory() {
+        assert_eq!(Args::default().replay_ocr_passes, None);
+        assert_eq!(
+            parse_args(&argv(&["--real-specimens", "--mrz-only"]))
+                .expect("parses")
+                .replay_ocr_passes,
+            None
+        );
+        let parsed = parse_args(&replay_args(&[])).expect("a valid replay");
+        assert_eq!(parsed.replay_ocr_passes.as_deref(), Some("capture-dir"));
+        let err = parse_args(&argv(&["--real-specimens", "--replay-ocr-passes"]))
+            .err()
+            .expect("needs a value");
+        assert_eq!(err, "--replay-ocr-passes requires a directory");
+    }
+
+    #[test]
+    fn replay_needs_real_specimens_and_mrz_only() {
+        let err = parse_args(&argv(&["--mrz-only", "--replay-ocr-passes", "d"]))
+            .err()
+            .expect("refused without --real-specimens");
+        assert!(err.contains("--real-specimens"), "{err}");
+        let err = parse_args(&argv(&["--real-specimens", "--replay-ocr-passes", "d"]))
+            .err()
+            .expect("refused without --mrz-only");
+        assert!(
+            err.contains("--mrz-only") && err.contains("Tier 1 only"),
+            "{err}"
+        );
+    }
+
+    /// Each flag that would make a replay something else is refused, and the
+    /// message names both the flag and the replay.
+    #[test]
+    fn replay_refuses_each_flag_that_contradicts_it() {
+        for extra in [
+            &["--include-private"][..],
+            &["--include-local"],
+            &["--write-baseline", "baseline.json"],
+            &["--assert-baseline", "baseline.json"],
+            &["--dump-ocr-passes"],
+        ] {
+            let err = parse_args(&replay_args(extra))
+                .err()
+                .unwrap_or_else(|| panic!("{extra:?} must be refused with --replay-ocr-passes"));
+            assert!(
+                err.starts_with(&format!(
+                    "{} cannot be combined with --replay-ocr-passes",
+                    extra[0]
+                )),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn replay_allows_the_dump_flags_and_the_corpus_scoping_flags() {
+        let parsed = parse_args(&replay_args(&[
+            "--dump-ocr",
+            "--dump-ocr-hits",
+            "--limit",
+            "5",
+            "--format",
+            "passport",
+            "--include-covers",
+            "--out",
+            "artifacts/replay/real/report.json",
+        ]))
+        .expect("a replay is scoped and dumped like a live run");
+        assert!(parsed.dump_ocr && parsed.dump_ocr_hits && parsed.include_covers);
+        assert_eq!(parsed.limit, Some(5));
+    }
+
+    fn arms(chargrid: &str) -> BTreeMap<String, String> {
+        let mut arms = ocr_arms_map(&synthpass_ocr::OcrArms::DEFAULT);
+        arms.insert("chargrid".to_string(), chargrid.to_string());
+        arms
+    }
+
+    fn capture_manifest(
+        corpus: Option<&str>,
+        ocr_arms: Option<&BTreeMap<String, String>>,
+    ) -> Vec<u8> {
+        let mut manifest = serde_json::json!({
+            "flags": ["--real-specimens", "--dump-ocr-passes", "--out", "cap/real/report.json"],
+            "git_commit": "0".repeat(40),
+        });
+        if let Some(corpus) = corpus {
+            manifest["corpus_manifest_sha256"] = corpus.into();
+        }
+        if let Some(ocr_arms) = ocr_arms {
+            manifest["ocr_arms"] = serde_json::json!(ocr_arms);
+        }
+        serde_json::to_vec_pretty(&manifest).unwrap()
+    }
+
+    #[test]
+    fn the_ocr_arms_map_has_the_five_keys_the_manifest_always_had() {
+        let map = ocr_arms_map(&synthpass_ocr::OcrArms::DEFAULT);
+        assert_eq!(
+            map.into_iter().collect::<Vec<_>>(),
+            [
+                ("chargrid".to_string(), "off".to_string()),
+                ("order".to_string(), "default".to_string()),
+                ("rotate".to_string(), "default".to_string()),
+                ("skew".to_string(), "default".to_string()),
+                ("texture".to_string(), "on".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_matching_capture_manifest_is_named_hashed_and_its_arms_copied() {
+        let corpus = "c".repeat(64);
+        let bytes = capture_manifest(Some(&corpus), Some(&arms("off")));
+        let source = replay_source_from("cap-run.json", &bytes, Some(&corpus), &arms("off"))
+            .expect("the capture matches");
+        assert_eq!(
+            source,
+            ReplaySource {
+                run_manifest: "cap-run.json".to_string(),
+                run_manifest_sha256: sha256_hex(&bytes),
+                ocr_arms: arms("off"),
+            }
+        );
+    }
+
+    #[test]
+    fn a_capture_measured_against_another_corpus_manifest_is_refused() {
+        let bytes = capture_manifest(Some(&"a".repeat(64)), Some(&arms("off")));
+        let err = replay_source_from("m.json", &bytes, Some(&"b".repeat(64)), &arms("off"))
+            .expect_err("refused");
+        assert!(err.contains("different samples/corpus.jsonl"), "{err}");
+        assert!(
+            err.contains(&"a".repeat(12)) && err.contains(&"b".repeat(12)),
+            "{err}"
+        );
+        assert!(
+            !err.contains(&"a".repeat(13)),
+            "a short prefix, not the hash: {err}"
+        );
+        let err = replay_source_from("m.json", &bytes, None, &arms("off")).expect_err("refused");
+        assert!(err.contains("cannot read samples/corpus.jsonl"), "{err}");
+    }
+
+    #[test]
+    fn a_capture_manifest_that_says_too_little_or_is_unreadable_is_refused() {
+        let corpus = "c".repeat(64);
+        let err = replay_source_from(
+            "m.json",
+            &capture_manifest(None, Some(&arms("off"))),
+            Some(&corpus),
+            &arms("off"),
+        )
+        .expect_err("no corpus hash");
+        assert!(err.contains("records no corpus_manifest_sha256"), "{err}");
+        let err = replay_source_from(
+            "m.json",
+            &capture_manifest(Some(&corpus), None),
+            Some(&corpus),
+            &arms("off"),
+        )
+        .expect_err("no arms");
+        assert!(err.contains("records no ocr_arms"), "{err}");
+        let err = replay_source_from(
+            "m.json",
+            b"{ not json SECRET-TEXT",
+            Some(&corpus),
+            &arms("off"),
+        )
+        .expect_err("unparsable");
+        assert!(err.contains("does not parse"), "{err}");
+        assert!(!err.contains("SECRET-TEXT"), "{err}");
+    }
+
+    /// The report's per-provider `ocr_arms` comes from this process's
+    /// environment, so a replay under other arms than the capture's would label
+    /// the text with OCR that did not read it.
+    #[test]
+    fn a_replay_under_other_ocr_arms_than_the_capture_is_refused() {
+        let corpus = "c".repeat(64);
+        let bytes = capture_manifest(Some(&corpus), Some(&arms("on")));
+        let err = replay_source_from("m.json", &bytes, Some(&corpus), &arms("off"))
+            .expect_err("arms differ");
+        assert!(err.contains("chargrid"), "{err}");
+        assert!(err.contains("SYNTHPASS_OCR_*"), "{err}");
+        assert!(replay_source_from("m.json", &bytes, Some(&corpus), &arms("on")).is_ok());
+    }
+
+    fn row_naming(manifest: Option<&str>) -> synthpass_bench::ocr_passes::OcrPassesRow {
+        synthpass_bench::ocr_passes::OcrPassesRow {
+            run_manifest: manifest.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_capture_names_exactly_one_plain_run_manifest_file() {
+        assert_eq!(
+            capture_manifest_name(&[row_naming(Some("m.json")), row_naming(Some("m.json"))]),
+            Ok("m.json")
+        );
+        for rows in [
+            vec![],
+            vec![row_naming(None)],
+            vec![row_naming(Some("m.json")), row_naming(None)],
+            vec![row_naming(Some("m.json")), row_naming(Some("n.json"))],
+        ] {
+            assert!(capture_manifest_name(&rows).is_err(), "{rows:?}");
+        }
+        for name in ["../m.json", "sub/m.json", "/etc/passwd", ".."] {
+            assert!(
+                capture_manifest_name(&[row_naming(Some(name))]).is_err(),
+                "{name} is a path, not a file name"
+            );
+        }
+    }
+
+    #[test]
+    fn the_capture_manifest_is_read_from_the_capture_directory() {
+        let dir =
+            std::env::temp_dir().join(format!("provider-bench-capture-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let corpus = "c".repeat(64);
+        let bytes = capture_manifest(Some(&corpus), Some(&arms("off")));
+        std::fs::write(dir.join("cap-run.json"), &bytes).unwrap();
+        let source = replay_source(
+            &dir,
+            &[row_naming(Some("cap-run.json"))],
+            Some(&corpus),
+            &arms("off"),
+        )
+        .expect("read and checked");
+        assert_eq!(source.run_manifest, "cap-run.json");
+        assert_eq!(source.run_manifest_sha256, sha256_hex(&bytes));
+        let err = replay_source(
+            &dir,
+            &[row_naming(Some("gone.json"))],
+            Some(&corpus),
+            &arms("off"),
+        )
+        .expect_err("no such manifest");
+        assert!(err.contains("gone.json"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn out_in_the_capture_directory_is_the_same_directory_and_a_new_one_is_not() {
+        let dir =
+            std::env::temp_dir().join(format!("provider-bench-samedir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(same_directory(&dir, &dir.join(".")));
+        assert!(same_directory(&dir, &dir));
+        assert!(!same_directory(&dir, &std::env::temp_dir()));
+        assert!(
+            !same_directory(&dir, &dir.join("not-yet-created")),
+            "a directory that does not exist is no one's capture"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A replay's manifest names the capture and copies its arms; a live run's
+    /// carries no `replay_of` at all, so its bytes (and its hash-derived file
+    /// name) are what they were before replay existed.
+    #[test]
+    fn a_replay_manifest_records_the_capture_and_a_live_one_does_not() {
+        let dir =
+            std::env::temp_dir().join(format!("provider-bench-replay-run-{}", std::process::id()));
+        let flags = vec![
+            "--real-specimens".to_string(),
+            "--replay-ocr-passes".to_string(),
+        ];
+        let source = ReplaySource {
+            run_manifest: "provider-bench-ocr-run-cap.json".to_string(),
+            run_manifest_sha256: "d".repeat(64),
+            // Not the environment's arms: the manifest must copy the capture's.
+            ocr_arms: arms("on"),
+        };
+        let name = write_ocr_run_manifest(&repo_root(), &dir, &flags, 2, 1, Some(&source))
+            .expect("write the replay manifest");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join(&name)).unwrap()).unwrap();
+        assert_eq!(
+            manifest["replay_of"],
+            serde_json::json!({
+                "run_manifest": "provider-bench-ocr-run-cap.json",
+                "sha256": "d".repeat(64),
+            })
+        );
+        assert_eq!(manifest["ocr_arms"]["chargrid"], "on");
+        assert_eq!(manifest["flags"], serde_json::json!(flags));
+
+        let live = write_ocr_run_manifest(&repo_root(), &dir, &flags, 2, 1, None)
+            .expect("write a live manifest");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join(&live)).unwrap()).unwrap();
+        assert!(
+            !manifest.as_object().unwrap().contains_key("replay_of"),
+            "a live manifest has no replay_of key"
+        );
+        assert_eq!(
+            manifest["ocr_arms"],
+            serde_json::json!(ocr_arms_map(&synthpass_ocr::OcrArms::from_env()))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -21,6 +21,7 @@ use synthpass_ocr::NativeOcr;
 
 pub mod bench_report;
 pub mod ground_truth;
+pub mod ocr_passes;
 pub mod provider_bench;
 pub mod report;
 
@@ -185,6 +186,28 @@ pub fn generate_corpus(
                 labels,
             }
         })
+        .collect()
+}
+
+/// Lowercase hex SHA-256 of the rendered image a synthetic document feeds OCR:
+/// its width and height (each a little-endian `u32`), then its RGBA8 pixels.
+///
+/// The nightly bench publishes this per document as the generator fingerprint.
+/// A seed renders the same pixels until the generator or a degrade profile
+/// changes, and then the hash changes with it, so a re-render is visible in the
+/// data without a list of the commits that could cause one. It covers the image
+/// only: `labels` are not hashed, and a change that moves only a label leaves
+/// it unchanged.
+pub fn render_sha256(image: &DynamicImage) -> String {
+    let rgba = image.to_rgba8();
+    let mut hasher = Sha256::new();
+    hasher.update(rgba.width().to_le_bytes());
+    hasher.update(rgba.height().to_le_bytes());
+    hasher.update(rgba.as_raw());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
         .collect()
 }
 
@@ -937,6 +960,22 @@ pub fn miss_kind(reason: &MissReason) -> &'static str {
     }
 }
 
+/// Whether a document's outcome is an *accepted read*: a Tier-1 hit
+/// (`reason` is `None`), or a [`MissReason::DocumentNumberMismatch`], a
+/// checksum-valid read whose document number disagrees with the truth.
+///
+/// The router accepts both, because their check digits verified; every other
+/// miss is refused or escalated. `provider-bench`'s read-quality population
+/// is built on this predicate, and `synthpass-bench`'s own `is_accepted_read`
+/// (over the report's `hit` and `miss_kind`) states the same rule; a test in
+/// that binary pins the two to agree on every [`MissReason`].
+pub fn is_accepted_read(reason: Option<&MissReason>) -> bool {
+    matches!(
+        reason,
+        None | Some(MissReason::DocumentNumberMismatch { .. })
+    )
+}
+
 /// Per-field read quality for one document.
 ///
 /// The point of this type: a binary hit tells you *that* a document failed,
@@ -1155,6 +1194,30 @@ pub struct HitResult {
 /// in-memory entry point today, so a temp file is the same pattern every
 /// other OCR call site in this workspace already uses.
 pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) -> HitResult {
+    check_document_inner(ocr, image, expected, None)
+}
+
+/// [`check_document`] plus one [`synthpass_ocr::PassRecord`] per OCR pass that
+/// ran, for `synthpass-bench --ocr-passes` (ADR-0024, amendment 1). The
+/// [`HitResult`] is what `check_document` returns for the same input: the
+/// traced OCR call returns the same page as the untraced one. The records are
+/// empty when OCR itself failed.
+pub fn check_document_traced(
+    ocr: &NativeOcr,
+    image: &DynamicImage,
+    expected: &Labels,
+) -> (HitResult, Vec<synthpass_ocr::PassRecord>) {
+    let mut records = Vec::new();
+    let result = check_document_inner(ocr, image, expected, Some(&mut records));
+    (result, records)
+}
+
+fn check_document_inner(
+    ocr: &NativeOcr,
+    image: &DynamicImage,
+    expected: &Labels,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
+) -> HitResult {
     let start = Instant::now();
 
     let path = std::env::temp_dir().join(format!(
@@ -1175,7 +1238,7 @@ pub fn check_document(ocr: &NativeOcr, image: &DynamicImage, expected: &Labels) 
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
-    ) = run_check(&path, write_result, ocr, expected);
+    ) = run_check(&path, write_result, ocr, expected, trace);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -1252,6 +1315,7 @@ fn run_check(
     write_result: image::ImageResult<()>,
     ocr: &NativeOcr,
     expected: &Labels,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
 ) -> CheckOutcome {
     if let Err(e) = write_result {
         return (
@@ -1275,7 +1339,14 @@ fn run_check(
     // thin wrapper over the former that discards everything but `text` (see
     // `NativeOcr::recognize`'s doc comment), so this call does no extra OCR
     // work — it just keeps `retry_stop` this report now carries (issue #510).
-    let page = match ocr.recognize_detailed(path) {
+    let recognized = match trace {
+        Some(records) => ocr.recognize_detailed_traced(path).map(|(page, passes)| {
+            *records = passes;
+            page
+        }),
+        None => ocr.recognize_detailed(path),
+    };
+    let page = match recognized {
         Ok(page) => page,
         Err(e) => {
             return (
@@ -1327,7 +1398,11 @@ fn run_check(
         }
     };
 
-    let decoded = match mrz::find_and_parse_with(&text, &synthpass_die::mrz_parse_options()) {
+    // `read_tier1`, not `find_and_parse_with`: the same Tier-1 read the product's
+    // `MrzReader` makes, so a `SYNTHPASS_MRZ_LINE1_SELECT` arm (#574) reaches this
+    // benchmark too. With the arm `off` it is exactly `find_and_parse_with` under
+    // `mrz_parse_options()`.
+    let decoded = match synthpass_die::read_tier1(&text).parsed {
         Ok(decoded) => decoded,
         // #536: a structural refusal, not "nothing MRZ-shaped was found" —
         // give it its own miss bucket rather than folding it into
@@ -2510,6 +2585,56 @@ mod tests {
             2,
             "include-covers walk: both files are returned: {with_covers:?}"
         );
+    }
+
+    /// The nightly's generator fingerprint: the same seed and profile hash to
+    /// the same 64 hex characters on every render, and a different seed or a
+    /// different profile hashes differently. Pins determinism of the render,
+    /// not any particular value, so a deliberate generator change does not
+    /// break it.
+    #[test]
+    fn render_sha256_is_deterministic_for_a_fixed_seed_and_profile() {
+        let hashes = |profile: super::ProfileChoice, seed: u64| -> Vec<String> {
+            super::generate_corpus(profile, seed, 2, synthpass_gen::DocumentType::TD3)
+                .iter()
+                .map(|doc| super::render_sha256(&doc.image))
+                .collect()
+        };
+        for profile in [super::ProfileChoice::Clean, super::ProfileChoice::Worn] {
+            let first = hashes(profile, 7);
+            assert_eq!(
+                first,
+                hashes(profile, 7),
+                "{profile:?}: a re-render differs"
+            );
+            assert!(
+                first
+                    .iter()
+                    .all(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit())),
+                "{profile:?}: not lowercase hex SHA-256: {first:?}"
+            );
+            assert_ne!(first[0], first[1], "{profile:?}: two seeds share a hash");
+        }
+        assert_ne!(
+            hashes(super::ProfileChoice::Clean, 7),
+            hashes(super::ProfileChoice::Worn, 7),
+            "a profile that degrades the image must change the hash"
+        );
+    }
+
+    /// The hash covers dimensions and every pixel: one changed pixel, or the
+    /// same pixel count in another shape, is a different fingerprint.
+    #[test]
+    fn render_sha256_covers_dimensions_and_pixels() {
+        let base = image::DynamicImage::ImageRgba8(image::RgbaImage::new(4, 2));
+        let reshaped = image::DynamicImage::ImageRgba8(image::RgbaImage::new(2, 4));
+        let mut touched = image::RgbaImage::new(4, 2);
+        touched.put_pixel(3, 1, image::Rgba([1, 0, 0, 0]));
+        let touched = image::DynamicImage::ImageRgba8(touched);
+        let hash = super::render_sha256(&base);
+        assert_eq!(hash, super::render_sha256(&base));
+        assert_ne!(hash, super::render_sha256(&reshaped));
+        assert_ne!(hash, super::render_sha256(&touched));
     }
 
     /// The full, real end-to-end load — every image under `samples/`

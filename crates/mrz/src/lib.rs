@@ -90,6 +90,7 @@
 //! re-exported at the crate root:
 //!
 //! - `parser` — the five fixed-layout parsers and the free-text scanner
+//! - `line1_select` — the shadow line-1 selector, [`select_line1`] (off by default, unmeasured)
 //! - `emit` — the five emitters and Part 3 §4.6 name encoding
 //! - `checksum` — check-digit math and OCR line normalization
 //! - `repair` — check-digit-guided recovery of damaged or misread fields
@@ -125,9 +126,11 @@ mod countries;
 mod dates;
 mod doccode;
 mod emit;
+mod line1_select;
 mod mrz_date;
 mod occlusion;
 mod parser;
+mod rank;
 mod repair;
 mod sex;
 mod strip;
@@ -145,6 +148,7 @@ pub use emit::{
     encode_name_component, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3,
     MrvAFields, MrvBFields, Td1Fields, Td2Fields, Td3Fields,
 };
+pub use line1_select::{select_line1, Line1Selection, Line1Unresolved, Line1Verdict};
 pub use mrz_date::{DateRole, InvalidRawDateField, MrzDate, ParseMrzDateError, RawDateField};
 pub use occlusion::{apply_occlusion, CellMask, Occluded, ZoneField};
 pub use parser::{

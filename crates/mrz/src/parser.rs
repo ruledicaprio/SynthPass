@@ -748,13 +748,14 @@ pub fn parse_mrv_b_with(
 /// check digit (the document number's) arbitrates which candidate — if
 /// either — is real. TD3/MRV-A/MRV-B have no check digit on line 1 at all,
 /// so `consider()` in `find_and_parse_with` accepts the *first*
-/// checksum-passing line-1/line-2 combination it tries, regardless of what
-/// line 1 says — meaning an unshifted candidate offered only *after* the
-/// unrepaired one is dead code in practice: the unrepaired reading already
-/// satisfies line 2's checksums just as well (line 1 never gates them), so
-/// it always wins first and the unshifted candidate never gets a chance to
-/// matter. The call sites (TD3/MRV-A/MRV-B in `find_and_parse_with`)
-/// therefore try `repair_*_line1_unshifted` *before* `repair_*_line1`.
+/// checksum-passing line-1/line-2 combination it tries that no `rank` check
+/// flags, regardless of what line 1 says — meaning an unshifted candidate
+/// offered only *after* the unrepaired one is dead code in practice: the
+/// unrepaired reading already satisfies line 2's checksums just as well (line
+/// 1 never gates them), so it always wins first and the unshifted candidate
+/// never gets a chance to matter. The call sites (TD3/MRV-A/MRV-B in
+/// `find_and_parse_with`) therefore try `repair_*_line1_unshifted` *before*
+/// `repair_*_line1`.
 ///
 /// This is also why the fix is a **second candidate at all**, rather than
 /// applied unconditionally inside `repair_td3_line1`/`repair_mrv_line1`
@@ -821,7 +822,7 @@ fn unshift_line1_prefix(repaired: String, target_width: usize) -> String {
 /// whose line 1 had lost its position-1 filler. `D` is the only sub-3-character
 /// code in the table, so trimming cannot make any other slice newly resolve;
 /// `<<<` trims to the empty string, which still does not resolve.
-fn country_resolves(slice: &str) -> bool {
+pub(crate) fn country_resolves(slice: &str) -> bool {
     country_name(slice.trim_end_matches('<')).is_some()
 }
 
@@ -1158,13 +1159,25 @@ fn td3_line1_variants(
     }
 }
 
-/// [`td3_line1_admissible`] generalized to MRV-A/TD2/MRV-B: the right width,
-/// one of the format's own first-character prefixes, and an issuing state
-/// (positions 2..5, letterized) that resolves in [`country_name`]. Unlike
-/// TD3, none of these three formats has a closed document-code table (see
-/// [`repair_td2_line1`]'s doc comment), so admissibility here can never rest
-/// on "the code is in the table" — only on the issuer resolving.
-fn two_line_line1_admissible(line1: &str, width: usize, prefixes: &[u8]) -> bool {
+/// [`td3_line1_admissible`] generalized to MRV-A/TD2/MRV-B/TD1: the right
+/// width, one of the format's own first-character prefixes, and an issuing
+/// state (positions 2..5, letterized) that resolves in [`country_name`].
+/// Unlike TD3, none of these four formats has a closed document-code table
+/// (see [`repair_td2_line1`]'s doc comment), so admissibility here can never
+/// rest on "the code is in the table" — only on the issuer resolving.
+///
+/// TD1 is here although its line 1 carries a check digit. That digit covers
+/// the nine document-number cells and the composite covers line 1's cells
+/// 5..30, so neither ever looks at the document code or the issuing state. A
+/// line 1 that lost its position-1 filler moves the document number one
+/// cell left; with empty optional data the shifted reading's
+/// document-number check cell is then the first optional-data cell, `<`
+/// (value 0), and the shifted document number validates against it about
+/// one time in ten. The shifted composite then differs from the true one by
+/// `8 * c`, `c` being the true check digit, so it passes as well whenever
+/// `c` is `0` or `5`. The check digits cannot tell the two readings apart;
+/// the issuer can (see [`prefer_admissible_line1`]).
+fn line1_admissible(line1: &str, width: usize, prefixes: &[u8]) -> bool {
     if line1.len() != width || !line1.bytes().next().is_some_and(|c| prefixes.contains(&c)) {
         return false;
     }
@@ -1172,8 +1185,29 @@ fn two_line_line1_admissible(line1: &str, width: usize, prefixes: &[u8]) -> bool
     country_resolves(&issuer)
 }
 
+/// The selection step every line-1 candidate list built by
+/// [`two_line_line1_variants_shifted`] and [`td1_line1_variants`] (and TD1's
+/// merged-line scan) goes through: when at least one candidate is
+/// [`line1_admissible`], keep only the admissible ones, in their existing
+/// order; when none is, return every candidate unchanged. A document whose
+/// issuer is not in [`country_name`] is therefore never refused on this
+/// basis, and no candidate is ever invented — the filter only removes.
+fn prefer_admissible_line1(candidates: Vec<String>, width: usize, prefixes: &[u8]) -> Vec<String> {
+    if candidates
+        .iter()
+        .any(|c| line1_admissible(c, width, prefixes))
+    {
+        candidates
+            .into_iter()
+            .filter(|c| line1_admissible(c, width, prefixes))
+            .collect()
+    } else {
+        candidates
+    }
+}
+
 /// [`td3_line1_variants`]'s `Keep` arm, generalized to MRV-A/TD2/MRV-B —
-/// [`two_line_line1_admissible`]'s doc comment explains why these three
+/// [`line1_admissible`]'s doc comment explains why these three
 /// formats get [`country_name`]-only admissibility rather than TD3's table
 /// check. `class_sweep_pass` and `damaged_pass` share `td3_line1_variants`
 /// across all four two-line formats (see its own doc comment), so before
@@ -1209,17 +1243,7 @@ fn two_line_line1_variants_shifted(
         .into_iter()
         .chain(line1_variants(raw, width, rep1))
         .collect();
-    if candidates
-        .iter()
-        .any(|c| two_line_line1_admissible(c, width, prefixes))
-    {
-        candidates
-            .into_iter()
-            .filter(|c| two_line_line1_admissible(c, width, prefixes))
-            .collect()
-    } else {
-        candidates
-    }
+    prefer_admissible_line1(candidates, width, prefixes)
 }
 
 fn repair_td3_line2(l: &str) -> String {
@@ -1253,10 +1277,11 @@ fn repair_td3_line2(l: &str) -> String {
 /// dropped filler here the way it is for TD3/MRV-A/MRV-B (whose document
 /// code is always a single letter plus filler, no exceptions modeled
 /// anywhere in this crate). TD1 resolves that ambiguity by trying the
-/// unshifted reading as a *second* candidate and letting its own line-1
-/// check digit (the document number's) decide — but TD2 has no check
-/// digit on line 1 either, so a checksum can't arbitrate an unshifted TD2
-/// candidate against the unrepaired one the way TD1's can. See
+/// unshifted reading as a *second* candidate, letting its own line-1
+/// check digit (the document number's) and the issuer's resolution decide —
+/// but TD2 has no check digit on line 1 either, so a checksum can't
+/// arbitrate an unshifted TD2 candidate against the unrepaired one the way
+/// TD1's can. See
 /// [`repair_td2_line1_shifted`] for the fix: an issuing-country-based gate,
 /// not a checksum, arbitrates instead.
 fn repair_td2_line1(l: &str) -> String {
@@ -1358,7 +1383,10 @@ fn repair_td1_line1(l: &str) -> String {
 /// unshifting an already-correct line would wrongly discard a real
 /// character). Like every repair candidate in this module, this is not an
 /// assumption — `variants` tries it *alongside* the unshifted reading, and
-/// the printed check digits are what decide which one, if either, is real.
+/// the printed check digits decide which one, if either, is real. They do
+/// not decide alone: a shifted reading can validate too, so
+/// [`td1_line1_variants`] and the merged-line scan then prefer the candidates
+/// whose issuing state resolves (see [`line1_admissible`]).
 fn repair_td1_line1_unshifted(l: &str) -> String {
     let repaired = repair_td1_line1(l);
     if repaired.len() != 30 || repaired.as_bytes().get(1) == Some(&b'<') {
@@ -1368,21 +1396,67 @@ fn repair_td1_line1_unshifted(l: &str) -> String {
 }
 
 /// [`repair_td1_line1`]'s plain candidates chained with
-/// [`repair_td1_line1_unshifted`]'s — the ordinary TD1 scan in
-/// `find_and_parse_with` already builds exactly this chain inline;
-/// `class_sweep_pass` and `damaged_pass` share this helper so a line 1 that
+/// [`repair_td1_line1_unshifted`]'s, narrowed by [`prefer_admissible_line1`]:
+/// when at least one candidate has the width, a leading `I`/`A`/`C` and an
+/// issuing state that resolves in [`country_name`], only those are returned,
+/// in their existing order; when none does, every candidate is returned
+/// unchanged. The ordinary TD1 scan in `find_and_parse_with`,
+/// `class_sweep_pass` and `damaged_pass` share this helper, so a line 1 that
 /// needs unshifting *and* whose line 2 or line 3 separately needs damaged-
 /// pass recovery isn't left with only the plain (still-shifted, checksum-
 /// failing) candidate to offer — #476's TD1 side of #468/#469's TD3
-/// generalization. No admissibility filter is needed here the way
-/// [`two_line_line1_variants_shifted`] needs one: TD1's own document-number
-/// check digit, not a country-resolution heuristic, decides which candidate
-/// (if either) is real, exactly as it already does in the ordinary scan.
+/// generalization.
+///
+/// TD1's own check digits do not make the filter redundant, as they do not
+/// cover the document code or the issuing state: a shifted reading can
+/// validate too, and would be returned ahead of the unshifted one. See
+/// [`line1_admissible`] for how that happens.
 fn td1_line1_variants(raw: &str) -> Vec<String> {
-    variants(raw, 30, repair_td1_line1)
+    let candidates: Vec<String> = variants(raw, 30, repair_td1_line1)
         .into_iter()
         .chain(variants(raw, 30, repair_td1_line1_unshifted))
-        .collect()
+        .collect();
+    prefer_admissible_line1(candidates, 30, b"IAC")
+}
+
+/// The same preference for the damaged-capture searches that build TD1 line 1
+/// candidates from one search of their own ([`substituted`] and
+/// [`class_swept`]) rather than from [`variants`]. `search` is run once with
+/// [`repair_td1_line1`] and once with [`repair_td1_line1_unshifted`], the
+/// pairing [`td1_line1_variants`] uses, so a line 1 that lost its position-1
+/// filler is also offered with the filler put back and the same one-cell (or
+/// one-field) repair applied to it.
+///
+/// When at least one of the combined candidates is [`line1_admissible`], only
+/// the admissible ones are returned, in order and without repeats. When none
+/// is, the result is exactly `search(repair_td1_line1)`, the list these sites
+/// produced before the unshifted reading was added: a document whose issuer is
+/// unknown gains no candidate here. Before this, a 30-cell line 1 with its
+/// filler dropped and one further misread cell reached the search only as the
+/// shifted line, and a shifted reading that validates was recorded as the
+/// answer (`IFRAE0E0W2012...`, issuer `RAE`).
+///
+/// [`restored`] does not use this. Its candidates are built by inserting the
+/// missing cell at every position, so the unshifted alignment is already
+/// among them, and no shifted reading was found to win there.
+fn td1_line1_searched(search: impl Fn(fn(&str) -> String) -> Vec<String>) -> Vec<String> {
+    let plain = search(repair_td1_line1);
+    if plain.is_empty() {
+        return plain;
+    }
+    let unshifted = search(repair_td1_line1_unshifted);
+    let mut seen = std::collections::HashSet::new();
+    let admissible: Vec<String> = plain
+        .iter()
+        .chain(&unshifted)
+        .filter(|c| line1_admissible(c, 30, b"IAC") && seen.insert(c.as_str()))
+        .cloned()
+        .collect();
+    if admissible.is_empty() {
+        plain
+    } else {
+        admissible
+    }
 }
 
 fn repair_td1_line2(l: &str) -> String {
@@ -1497,8 +1571,24 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// Tries TD3, MRV-B, MRV-A, TD1, then TD2. Tolerates HTML-escaped fillers (`&lt;`, as produced by
 /// docling's Markdown) and MRZ lines merged onto a single physical line.
 ///
-/// A reading whose check digits all validate is returned immediately. When no
-/// candidate fully validates, a damaged-capture pass may reconstruct one.
+/// A reading whose check digits all validate is returned immediately, unless a
+/// line check flags it as probably holding a wrong physical line: check digits
+/// cannot tell, because a format's line 1 (and, on TD1, line 3) enters few or
+/// none of them, so a second reading of line 2, a visual-zone header or a name
+/// line can stand in for it and the zone still validates. A flagged zone is
+/// kept aside while the scan (and the damaged-capture pass below) looks for an
+/// unflagged valid one, which then wins; when there is none, the flagged zone
+/// is returned. The checks only re-rank between valid zones — they never
+/// refuse one. A zone is flagged when
+///
+/// - line 1's issuing state (cells 2..5) is not in [`country_name`]'s table;
+/// - two of its lines are near-identical (similarity of at least 0.6 after
+///   dropping fillers and folding lookalike characters, where the most similar
+///   pair in a correctly read zone scores at most 0.30); or
+/// - a two-line format's line 1 holds a digit from cell 5 on, where the name
+///   field is (TD1 is exempt).
+///
+/// When no candidate fully validates, a damaged-capture pass may reconstruct one.
 /// Otherwise the fallback ranks by verified/applicable check-digit fraction,
 /// then applicable count, and returns the best reading with its honest (partially `false`)
 /// [`Checks`], so callers can see how close the read came and decide whether to
@@ -1525,6 +1615,63 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
     find_and_parse_with(text, &ParseOptions::default())
 }
 
+/// Rejoin one OCR-inserted space only when two adjacent fragments recover an
+/// exact MRZ line width. A token that is already 30, 36 or 44 cells is a
+/// complete candidate and is never consumed into its neighbour. The caller
+/// still applies its existing long-token filter and physical-line fallback
+/// after this step.
+fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
+    let is_line_width = |len| matches!(len, 30 | 36 | 44);
+    let raw: Vec<&str> = line.split_whitespace().collect();
+    let mut tokens = Vec::with_capacity(raw.len());
+    let mut i = 0;
+
+    while i < raw.len() {
+        if i + 1 < raw.len()
+            && !is_line_width(raw[i].len())
+            && !is_line_width(raw[i + 1].len())
+            && is_line_width(raw[i].len() + raw[i + 1].len())
+        {
+            let mut joined = String::with_capacity(raw[i].len() + raw[i + 1].len());
+            joined.push_str(raw[i]);
+            joined.push_str(raw[i + 1]);
+            tokens.push(joined);
+            i += 2;
+        } else {
+            tokens.push(raw[i].to_string());
+            i += 1;
+        }
+    }
+
+    tokens
+}
+
+/// The candidate MRZ lines of an OCR text, in reading order: the one line walk
+/// [`find_and_parse_with`] scans and [`crate::select_line1`] draws its
+/// alternatives from, so the two can never disagree about what counts as a line.
+///
+/// Markdown/HTML pipelines escape the filler character, so `&lt;` is undone
+/// first. OCR often emits several MRZ lines as ONE physical line,
+/// space-separated (docling renders the whole zone as a single paragraph), so
+/// long whitespace-separated tokens are treated as individual candidate lines.
+/// The lines are returned as read: `normalize_line` is the caller's step.
+pub(crate) fn candidate_lines(text: &str) -> Vec<String> {
+    let text = text.replace("&lt;", "<");
+    let mut out: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let tokens: Vec<String> = rejoin_exact_width_tokens(line)
+            .into_iter()
+            .filter(|t| t.len() >= 20)
+            .collect();
+        if tokens.len() >= 2 {
+            out.extend(tokens);
+        } else {
+            out.push(line.to_string());
+        }
+    }
+    out
+}
+
 /// [`find_and_parse`] with an explicit [`ParseOptions`].
 ///
 /// Both entry points normalize the input the same way before scanning, which is
@@ -1543,20 +1690,8 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
 /// assert!(doc.valid());
 /// ```
 pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, MrzError> {
-    // Markdown/HTML pipelines escape the filler character.
-    let text = text.replace("&lt;", "<");
-    // OCR often emits several MRZ lines as ONE physical line, space-separated
-    // (docling renders the whole zone as a single paragraph) — treat long
-    // whitespace-separated tokens as individual candidate lines.
-    let mut lines: Vec<&str> = Vec::new();
-    for line in text.lines() {
-        let tokens: Vec<&str> = line.split_whitespace().filter(|t| t.len() >= 20).collect();
-        if tokens.len() >= 2 {
-            lines.extend(tokens);
-        } else {
-            lines.push(line);
-        }
-    }
+    let owned_lines = candidate_lines(text);
+    let lines: Vec<&str> = owned_lines.iter().map(String::as_str).collect();
 
     // Best parseable-but-checksum-failed hit, reported when nothing fully
     // validates so callers can see which check digits failed and how close the
@@ -1564,8 +1699,18 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // most conservative variants first, so the first reading at a given score
     // is the one that assumed least about the OCR noise.
     let mut fallback: Option<MrzData> = None;
+    // The first checksum-valid zone that a `crate::rank` check flagged as
+    // probably holding a wrong physical line. It is not returned by
+    // `consider`: the scan keeps looking for an unflagged valid zone, and this
+    // one is returned only when none turns up (see its use after the damaged
+    // pass). First wins, like `fallback`, for the same reason.
+    let mut flagged_first: Option<MrzData> = None;
     let mut consider = |data: MrzData| -> Option<MrzData> {
         if data.valid() {
+            if crate::rank::flagged(&data) {
+                flagged_first.get_or_insert(data);
+                return None;
+            }
             return Some(data);
         }
         match &fallback {
@@ -1827,11 +1972,18 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             let head = &merged[0..30];
             let mid = &merged[30..60];
             let tail = &merged[60..];
-            for l1 in [
-                repair_td1_line1(head),
-                repair_td1_line1_unshifted(head),
-                head.to_string(),
-            ] {
+            // The same admissibility preference `td1_line1_variants` applies
+            // to the per-line scan below: a shifted `head` can validate too.
+            let l1_candidates = prefer_admissible_line1(
+                vec![
+                    repair_td1_line1(head),
+                    repair_td1_line1_unshifted(head),
+                    head.to_string(),
+                ],
+                30,
+                b"IAC",
+            );
+            for l1 in l1_candidates {
                 for l2 in [repair_td1_line2(mid), mid.to_string()] {
                     for l3 in variants(tail, 30, repair_td1_line3) {
                         if let Some(data) = note_refusal(parse_td1_with(&l1, &l2, &l3, opts)) {
@@ -1844,10 +1996,7 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
             }
         }
 
-        let l1_candidates = variants(lines[i], 30, repair_td1_line1)
-            .into_iter()
-            .chain(variants(lines[i], 30, repair_td1_line1_unshifted));
-        for l1 in l1_candidates {
+        for l1 in td1_line1_variants(lines[i]) {
             if !matches!(l1.as_bytes().first(), Some(b'I' | b'A' | b'C')) {
                 continue;
             }
@@ -1934,15 +2083,28 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // candidate hit `LeadingFiller` never sets `fallback` (its `Err` skips
     // `consider` entirely), so without it a refused reading would fall
     // through to `IncompleteSequence` instead of getting a chance at repair.
-    if fallback.is_some() || refused.is_some() {
+    // A flagged valid zone opens this gate too: it may have an unflagged
+    // alternative that only the damaged pass can build.
+    if fallback.is_some() || refused.is_some() || flagged_first.is_some() {
         if let Some(mut data) = damaged_pass(&lines, opts, &intact_td1_starts) {
             // `damaged_pass` (and `class_sweep_pass`, which it tries first)
             // is the only path a reading can take here — see
             // `MrzData::damaged_recovery`'s doc comment for what this flags
             // and why a caller re-reading the source image might care.
             data.damaged_recovery = true;
-            return Ok(data);
+            if !crate::rank::flagged(&data) {
+                return Ok(data);
+            }
+            flagged_first.get_or_insert(data);
         }
+    }
+
+    // No unflagged valid zone exists, so the flagged one is the answer: the
+    // ordinary scan's if it found one, else the damaged pass's. Ranking only
+    // ever prefers between valid zones, so this comes before the fallback and
+    // refusal precedence below and never lets a flagged zone be refused.
+    if let Some(data) = flagged_first {
+        return Ok(data);
     }
 
     // A best-scoring reading that never validated *and* fails every structural
@@ -2233,7 +2395,7 @@ fn class_sweep_pass(
         let v3 = variants(c, 30, repair_td1_line3);
         for (v1, v2) in [
             (
-                class_swept(a, 30, repair_td1_line1, TD1_LINE1_CD_FIELDS),
+                td1_line1_searched(|repair| class_swept(a, 30, repair, TD1_LINE1_CD_FIELDS)),
                 variants(b, 30, repair_td1_line2),
             ),
             (
@@ -2419,7 +2581,7 @@ fn damaged_pass(
                 restored(c, 30, repair_td1_line3),
             ),
             (
-                substituted(a, 30, repair_td1_line1),
+                td1_line1_searched(|repair| substituted(a, 30, repair)),
                 variants(b, 30, repair_td1_line2),
                 variants(c, 30, repair_td1_line3),
             ),
@@ -2671,6 +2833,103 @@ mod tests {
             .expect("the unshifted candidate parses");
         assert_eq!(recovered.document_number, document_number);
         assert!(recovered.valid());
+    }
+
+    /// [`prefer_admissible_line1`]'s contract: with at least one admissible
+    /// candidate only the admissible ones survive, in their existing order
+    /// (duplicates included); with none, every candidate comes back unchanged.
+    #[test]
+    fn prefer_admissible_line1_keeps_admissible_in_order_or_everything() {
+        let good_a = "I<FRAAHGEK9H885<<<<<<<<<<<<<<<".to_string();
+        let good_b = "IDFRAAHGEK9H885<<<<<<<<<<<<<<<".to_string();
+        let shifted = "IFRAAHGEK9H885<<<<<<<<<<<<<<<<".to_string();
+        let short = "I<FRA".to_string();
+        for line in [&good_a, &good_b, &shifted] {
+            assert_eq!(line.len(), 30, "sanity: {line}");
+        }
+
+        let mixed = vec![
+            shifted.clone(),
+            good_b.clone(),
+            short.clone(),
+            good_a.clone(),
+            good_b.clone(),
+        ];
+        assert_eq!(
+            prefer_admissible_line1(mixed, 30, b"IAC"),
+            vec![good_b.clone(), good_a.clone(), good_b.clone()]
+        );
+
+        let none = vec![
+            shifted.clone(),
+            short.clone(),
+            "I<QQQAAAAAAAAAA<<<<<<<<<<<<<<<".into(),
+        ];
+        assert_eq!(prefer_admissible_line1(none.clone(), 30, b"IAC"), none);
+        assert_eq!(
+            prefer_admissible_line1(Vec::new(), 30, b"IAC"),
+            Vec::<String>::new()
+        );
+
+        // The prefix and width are part of admissibility, not just the issuer.
+        assert!(!line1_admissible(&good_a.replacen('I', "P", 1), 30, b"IAC"));
+        assert!(!line1_admissible(&good_a, 36, b"IAC"));
+        assert!(line1_admissible(&good_a.replacen('I', "C", 1), 30, b"IAC"));
+    }
+
+    /// The composite blind spot, white-box: a TD1 line 1 whose true check
+    /// digit is `5`, read with its position-1 filler dropped. Both readings
+    /// validate against the same lines 2 and 3, and [`td1_line1_variants`]
+    /// returns only the one whose issuer resolves.
+    #[test]
+    fn td1_line1_variants_drops_a_validating_shifted_reading() {
+        use crate::{format_td1, Td1Fields};
+
+        let mrz = format_td1(&Td1Fields {
+            document_code: "I".to_string(),
+            issuing_country: "FRA".to_string(),
+            document_number: "AHGEK9H88".to_string(),
+            optional_data_1: None,
+            surname: "MARTIN".to_string(),
+            given_names: "CLAIRE".to_string(),
+            nationality: "FRA".to_string(),
+            date_of_birth: MrzDate::from_field(
+                RawDateField::try_from("070707").expect("six MRZ date characters"),
+                DateRole::Birth,
+                crate::CURRENT_YY,
+            ),
+            sex: Sex::Female,
+            date_of_expiry: MrzDate::from_field(
+                RawDateField::try_from("330615").expect("six MRZ date characters"),
+                DateRole::Expiry,
+                crate::CURRENT_YY,
+            ),
+            optional_data_2: None,
+        });
+        let lines: Vec<&str> = mrz.lines().collect();
+        let (l1, l2, l3) = (lines[0], lines[1], lines[2]);
+        let opts = ParseOptions::default();
+        let shifted = format!("{}{}<", &l1[..1], &l1[2..]);
+
+        assert_eq!(l1.as_bytes()[14], b'5', "sanity: the true check digit");
+        assert!(parse_td1_with(l1, l2, l3, &opts)
+            .expect("truth parses")
+            .valid());
+        assert!(
+            parse_td1_with(&shifted, l2, l3, &opts)
+                .expect("shifted parses")
+                .valid(),
+            "sanity: the shifted reading validates too"
+        );
+
+        let dropped = &shifted[..29];
+        let candidates = td1_line1_variants(dropped);
+        assert!(candidates.contains(&l1.to_string()), "{candidates:?}");
+        assert!(
+            candidates.iter().all(|c| line1_admissible(c, 30, b"IAC")),
+            "no inadmissible candidate may survive when one is admissible: {candidates:?}"
+        );
+        assert!(!candidates.contains(&shifted), "{candidates:?}");
     }
 
     /// `single` treats readings as one answer only when every exposed field and

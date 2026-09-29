@@ -23,12 +23,18 @@
 //! Both entry points funnel into [`run_prepped`], the one place accuracy and
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
+//!
+//! A third source is a **replay** ([`run_provider_bench_replay`], ADR-0024
+//! amendment 3): the public corpus's pages are rebuilt from a captured
+//! `provider-bench-ocr-passes.jsonl` instead of by OCR, and then run through the
+//! same [`run_prepped`]. Tier 1 is a pure function of the page text, so a replay
+//! measures everything downstream of `OcrPage::text` and nothing upstream.
 
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
-use synthpass_core::v2::{CoreField, MrzFormat};
+use synthpass_core::v2::{CoreField, ExtractionFields, MrzFormat};
 use synthpass_die::{Capability, CostClass, DocumentContext, Evidence, ProviderCatalog};
 use synthpass_ocr::{NativeOcr, OcrPage};
 
@@ -858,9 +864,9 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
 /// One in-denominator real-specimen miss (`checksum_failed` or
 /// `no_mrz_found`), as written to `provider-bench-miss-ocr-dump.jsonl` when
 /// `run_prepped` is given a `dump_ocr_dir`. Owned strings throughout — the
-/// per-document `read_mrz` it draws `recovered_mrz_lines` from is a loop
-/// local that does not outlive the iteration. This is a diagnostic artifact,
-/// not a hot path.
+/// per-document Tier-1 read it draws `recovered_mrz_lines` from
+/// (`synthpass_die::read_tier1`) is a loop local that does not outlive the
+/// iteration. This is a diagnostic artifact, not a hot path.
 ///
 /// For a `no_mrz_found` row `recovered_mrz_lines` is empty, `check_states` is
 /// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
@@ -890,8 +896,11 @@ struct MissOcrDump {
     mrz_band_score: Option<f64>,
     /// The full pre-parse OCR text the provider was handed.
     raw_ocr_text: String,
-    /// The MRZ zone `mrz::find_and_parse` recovered (post width/substitution
-    /// repair), one entry per line; empty if nothing parsed.
+    /// The MRZ zone `synthpass_die::read_tier1` recovered (post
+    /// width/substitution repair, and post line-1 selection under
+    /// `SYNTHPASS_MRZ_LINE1_SELECT=on`), one entry per line; empty if nothing
+    /// parsed. With every `SYNTHPASS_MRZ_*` arm `off` this is what
+    /// `mrz::find_and_parse` recovers, as it was before the arms reached it.
     recovered_mrz_lines: Vec<String>,
     /// Per-check-digit state: `true` verified, `false` failed, `null` not
     /// printed by this layout.
@@ -1087,6 +1096,25 @@ pub struct DocumentDetail {
     /// values themselves. `None` both when `names_exact` is `Some(true)` and
     /// when it is `None`.
     pub name_error: Option<&'static str>,
+    /// Per-field correctness of this document's **accepted read**, for every
+    /// field its ground truth defines, keyed by [`CoreField::as_str`]. **Field
+    /// names and the [`FieldCorrectness`] enum only, never a value**: the
+    /// report is uploaded from CI and the truth is real-specimen text
+    /// (ADR-0027).
+    ///
+    /// `None` when the document has no ground truth (or truth for none of the
+    /// twelve fields), the same population `labelled_documents` counts.
+    /// Report-only: nothing gates on it (#574).
+    ///
+    /// Derived from the comparison `FieldTally` runs (see `compare_document`),
+    /// so summing `Exact` over the documents reproduces
+    /// [`AccuracyStats::accepted_reads`]'s per-field exact counts. A document
+    /// whose read was not accepted ([`crate::is_accepted_read`]), and one whose
+    /// reader errored, reads every field `Unread`: there is no accepted read
+    /// to have got anything right or wrong. That is what makes this a
+    /// per-document view of the read-quality population rather than of the
+    /// looser all-answers one.
+    pub field_correctness: Option<BTreeMap<&'static str, FieldCorrectness>>,
     /// Wall-clock time of this document's OCR pass (`recognize_detailed`),
     /// carried through from preparation. The same for every reader, since OCR
     /// runs once per document and is shared. Recorded per document because a
@@ -1114,6 +1142,142 @@ pub struct DocumentDetail {
     /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
     /// `None` when Tier 1 found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,
+    /// The shadow line-1 selector's verdict on this document's Tier-1 read
+    /// (#574), text-free. `None` when the arm is `off`, for a provider whose
+    /// reading records none (only the deterministic `mrz` provider does), and
+    /// when Tier 1 accepted nothing to select on.
+    pub line1_selection: Option<Line1SelectionDetail>,
+}
+
+/// What the shadow line-1 selector said about one document, for the report:
+/// [`synthpass_die::Line1Summary`] plus where the proposed line was read.
+///
+/// **Text-free (ADR-0027).** Every string here is a verdict kind, a reason
+/// kind, a pass id (`pass-03`, `general`) or a `PassTransform` wire label
+/// (`mrz_variants:2`): none is document text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Line1SelectionDetail {
+    /// `control` or `on`; a document has none under `off`.
+    pub arm: &'static str,
+    /// `applied`, `proposed`, `unresolved`, `ambiguous` or `none`
+    /// ([`synthpass_die::Line1Outcome::as_str`]).
+    pub verdict: &'static str,
+    /// Why the selector did nothing, for `none` and `unresolved`
+    /// ([`synthpass_die::Line1Reason::as_str`]).
+    pub reason: Option<&'static str>,
+    /// Candidate lines that passed every eligibility check, duplicates included.
+    pub eligible: usize,
+    /// Distinct name fields among them.
+    pub distinct: usize,
+    /// Whether the proposal's `surname` or `given_names` differ from the
+    /// accepted read's.
+    pub names_changed: bool,
+    /// The OCR passes whose readings include the proposed line 1, in execution
+    /// order. Empty unless the verdict is `proposed` or `applied` **and** a pass
+    /// trace exists: a replay, or a live run with `--dump-ocr-passes`.
+    pub source_passes: Vec<String>,
+    /// The `PassTransform` labels of those passes, each once, in the order
+    /// they first appear.
+    pub source_transforms: Vec<String>,
+}
+
+/// One OCR pass's readings, kept beside a document's page so a line-1 proposal
+/// can be traced to the passes that read it (#574). **Document text**: it is
+/// compared and never written anywhere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PassProvenance {
+    id: String,
+    /// The `synthpass_ocr::PassTransform` wire label.
+    transform: String,
+    /// The text of each MRZ-shaped line the pass read.
+    readings: Vec<String>,
+}
+
+/// The provenance of a pass trace, in execution order.
+fn pass_provenance(passes: &[crate::ocr_passes::PassObject]) -> Vec<PassProvenance> {
+    passes
+        .iter()
+        .map(|pass| PassProvenance {
+            id: pass.id.clone(),
+            transform: pass.transform.clone(),
+            readings: pass
+                .readings
+                .iter()
+                .map(|reading| reading.text.clone())
+                .collect(),
+        })
+        .collect()
+}
+
+/// A reading with whitespace stripped and case folded: the form
+/// `mrz`'s line walk compares, so a proposal's line 1 (already in that form)
+/// can be found in a pass's raw reading.
+fn comparable_reading(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace())
+        .collect::<String>()
+        .to_ascii_uppercase()
+}
+
+/// The report detail for `summary`, with provenance from `passes`.
+///
+/// `proposed_line1` is the proposal's line 1 (`synthpass_die::Tier1Read::
+/// proposed_line1`); it is compared against the passes' readings and never
+/// stored. The source lists stay empty unless the verdict is `proposed` or
+/// `applied`, so a `kept` document never claims a source.
+fn line1_selection_detail(
+    summary: &synthpass_die::Line1Summary,
+    proposed_line1: Option<&str>,
+    passes: &[PassProvenance],
+) -> Line1SelectionDetail {
+    let mut source_passes: Vec<String> = Vec::new();
+    let mut source_transforms: Vec<String> = Vec::new();
+    let proposed = matches!(
+        summary.outcome,
+        synthpass_die::Line1Outcome::Proposed | synthpass_die::Line1Outcome::Applied
+    );
+    if let (true, Some(line1)) = (proposed, proposed_line1) {
+        for pass in passes {
+            if pass
+                .readings
+                .iter()
+                .any(|reading| comparable_reading(reading) == line1)
+            {
+                source_passes.push(pass.id.clone());
+                if !source_transforms.contains(&pass.transform) {
+                    source_transforms.push(pass.transform.clone());
+                }
+            }
+        }
+    }
+    Line1SelectionDetail {
+        arm: summary.arm.name(),
+        verdict: summary.outcome.as_str(),
+        reason: summary.reason.map(synthpass_die::Line1Reason::as_str),
+        eligible: summary.eligible,
+        distinct: summary.distinct,
+        names_changed: summary.names_changed,
+        source_passes,
+        source_transforms,
+    }
+}
+
+/// `documents_detail`'s verdicts, counted: every verdict kind is a key, so an
+/// arm that never proposed reads `proposed: 0` rather than an absent key.
+/// `None` when no document carries a selection (the arm is `off`, or the
+/// provider records none), so the key is absent from such a report.
+pub fn line1_selection_counts(details: &[DocumentDetail]) -> Option<BTreeMap<&'static str, usize>> {
+    let mut counts: Option<BTreeMap<&'static str, usize>> = None;
+    for selection in details.iter().filter_map(|d| d.line1_selection.as_ref()) {
+        let counts = counts.get_or_insert_with(|| {
+            ["applied", "proposed", "unresolved", "ambiguous", "none"]
+                .into_iter()
+                .map(|verdict| (verdict, 0))
+                .collect()
+        });
+        *counts.entry(selection.verdict).or_insert(0) += 1;
+    }
+    counts
 }
 
 pub struct CapabilitySnapshot {
@@ -1150,6 +1314,14 @@ impl CapabilitySnapshot {
 /// `labelled_documents` alongside makes the `Option` legible on its own: a
 /// report can always say *how many* documents a rate (or its absence) was
 /// computed over.
+///
+/// **Three populations (#564).** `field_match_rate`, `mean_cer` and
+/// `per_field_cer` cover every labelled document the reader answered,
+/// whatever its outcome. That mixes read quality with the corpus's share of
+/// misses and non-conforming specimens, so they are kept for continuity with
+/// the bench history and not quoted as accuracy. The two populations to quote
+/// are [`Self::accepted_reads`] (read quality) and [`Self::scored`]
+/// (end-to-end), each with its own document count.
 pub struct AccuracyStats {
     /// How many of `documents` contributed at least one ground-truth field.
     /// Always equal to `documents` for the synthetic corpus (every
@@ -1159,19 +1331,253 @@ pub struct AccuracyStats {
     pub labelled_documents: usize,
     /// Fraction of `(document, field)` pairs where the provider's answer
     /// exactly matches ground truth, over fields ground truth actually has a
-    /// value for. `None` iff `labelled_documents == 0`.
+    /// value for, on every labelled document. `None` iff
+    /// `labelled_documents == 0`.
     pub field_match_rate: Option<f64>,
     /// Mean character error rate over the same population, via
     /// [`crate::cer`] — reuses the exact metric `synthpass-bench`'s Tier-1
     /// report already uses, so the two numbers are comparable. `None` iff
     /// `labelled_documents == 0`.
     pub mean_cer: Option<f64>,
-    /// Per-field mean CER. A field's entry is `None` when no document in the
-    /// labelled population had ground truth for that specific field (for
+    /// Per-field mean CER over the same population, with the number of
+    /// documents that had truth for the field. A field's mean is `None` when
+    /// no labelled document had ground truth for that specific field (for
     /// instance every real specimen loaded so far omitting
     /// `personal_number`), for the same reason the whole-report rate is
     /// `Option`.
-    pub per_field_cer: Vec<(&'static str, Option<f64>)>,
+    pub per_field_cer: Vec<(&'static str, Option<f64>, usize)>,
+    /// **Read quality:** field accuracy over the labelled documents with an
+    /// accepted read ([`crate::is_accepted_read`]), what a caller receives
+    /// when the check digits verify.
+    ///
+    /// Not "Tier-1 hits": a hit also requires the document number to equal
+    /// the truth, so a hits-only population would make `document_number`
+    /// right by construction and keep only the reads that already agree with
+    /// the truth. A document-number mismatch is an accepted read, and its
+    /// wrong fields count here.
+    pub accepted_reads: PopulationAccuracy,
+    /// **End-to-end:** field accuracy over the labelled documents in
+    /// [`Tier1HitRate`]'s scored population ([`in_scored_tier1_population`]),
+    /// the same documents the hit rate is computed over.
+    ///
+    /// A scored document the reader did not read contributes every field it
+    /// has truth for, scored as absent, and so does one the reader errored
+    /// on. A `checksum_failed_specimen` is outside it: its printed zone fails
+    /// its own check digits, so no read of it can be accepted, and the reader
+    /// returns no fields for a failed checksum.
+    pub scored: PopulationAccuracy,
+}
+
+/// Field-match rate and mean CER over one population of labelled documents,
+/// with the population's size and a per-field breakdown.
+///
+/// `documents` counts the documents that contributed at least one field
+/// comparison. The rates are `None` iff it is zero, for the reason
+/// [`AccuracyStats`]'s doc gives: no population is not 0% accuracy.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PopulationAccuracy {
+    pub documents: usize,
+    pub field_match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+    /// One entry per [`CoreField`], in [`CoreField::ALL`] order.
+    pub per_field: Vec<FieldAccuracy>,
+}
+
+/// One field's accuracy within a [`PopulationAccuracy`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldAccuracy {
+    pub field: &'static str,
+    /// How many documents in the population had truth for this field. Each
+    /// rate is over these documents only, so a mean over one document is
+    /// visibly one document.
+    pub documents: usize,
+    pub match_rate: Option<f64>,
+    pub mean_cer: Option<f64>,
+}
+
+/// Running counts behind one [`PopulationAccuracy`].
+struct FieldTally {
+    documents: usize,
+    comparisons: usize,
+    exact: usize,
+    cer_sum: f64,
+    /// Indexed like [`CoreField::ALL`]: `(comparisons, exact, cer_sum)`.
+    per_field: Vec<(usize, usize, f64)>,
+}
+
+impl FieldTally {
+    fn new() -> Self {
+        Self {
+            documents: 0,
+            comparisons: 0,
+            exact: 0,
+            cer_sum: 0.0,
+            per_field: vec![(0, 0, 0.0); CoreField::ALL.len()],
+        }
+    }
+
+    /// Adds one document's field comparisons, each `(index into
+    /// CoreField::ALL, exact, cer)`. A document with none is not counted.
+    fn add_document(&mut self, comparisons: &[(usize, bool, f64)]) {
+        if comparisons.is_empty() {
+            return;
+        }
+        self.documents += 1;
+        for &(field, exact, cer) in comparisons {
+            self.comparisons += 1;
+            self.exact += usize::from(exact);
+            self.cer_sum += cer;
+            let (n, field_exact, field_cer) = &mut self.per_field[field];
+            *n += 1;
+            *field_exact += usize::from(exact);
+            *field_cer += cer;
+        }
+    }
+
+    fn finish(self) -> PopulationAccuracy {
+        let rate = |sum: f64, count: usize| (count > 0).then(|| sum / count as f64);
+        PopulationAccuracy {
+            documents: self.documents,
+            field_match_rate: rate(self.exact as f64, self.comparisons),
+            mean_cer: rate(self.cer_sum, self.comparisons),
+            per_field: CoreField::ALL
+                .iter()
+                .zip(self.per_field)
+                .map(|(field, (n, exact, cer_sum))| FieldAccuracy {
+                    field: field.as_str(),
+                    documents: n,
+                    match_rate: rate(exact as f64, n),
+                    mean_cer: rate(cer_sum, n),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// How one field of one document came out against its ground truth.
+///
+/// A name and a verdict, never the value: see
+/// [`DocumentDetail::field_correctness`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldCorrectness {
+    /// The read equals the truth exactly.
+    Exact,
+    /// A value was read and it differs from the truth.
+    Wrong,
+    /// No accepted read, or the field is absent from the read.
+    Unread,
+}
+
+impl FieldCorrectness {
+    /// The lower-case wire name used in the report JSON.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Exact => "exact",
+            Self::Wrong => "wrong",
+            Self::Unread => "unread",
+        }
+    }
+}
+
+/// One field's comparison against its truth, the single rule behind the
+/// aggregates ([`FieldTally`], the all-labelled rate and CER) and the
+/// per-document [`FieldCorrectness`] map.
+struct FieldComparison {
+    exact: bool,
+    cer: f64,
+    correctness: FieldCorrectness,
+}
+
+/// Compares one field. `got` is `None` when the field is absent from the read
+/// (`ExtractionFields::get` also returns `None` for an empty or blank value).
+///
+/// Exactness is decided first and by the aggregates' rule (`got == expected`,
+/// an absent read being `""`), so the map's `Exact` count cannot differ from
+/// the tally's. Only a non-exact answer is split into `Unread` and `Wrong`.
+fn compare_field(expected: &str, got: Option<&str>) -> FieldComparison {
+    let got_str = got.unwrap_or("");
+    let exact = got_str == expected;
+    let correctness = if exact {
+        FieldCorrectness::Exact
+    } else if got_str.is_empty() {
+        FieldCorrectness::Unread
+    } else {
+        FieldCorrectness::Wrong
+    };
+    FieldComparison {
+        exact,
+        cer: crate::cer(expected, got_str),
+        correctness,
+    }
+}
+
+/// One document's field comparisons in both forms the harness needs.
+struct DocumentComparison {
+    /// `(index into CoreField::ALL, exact, cer)` for each field the document
+    /// has truth for, in `CoreField::ALL` order: [`FieldTally::add_document`]'s
+    /// input.
+    tally: Vec<(usize, bool, f64)>,
+    /// The same comparisons as a verdict per field name.
+    correctness: BTreeMap<&'static str, FieldCorrectness>,
+}
+
+impl DocumentComparison {
+    /// The map for [`DocumentDetail::field_correctness`]. `None` when the
+    /// document has no truth to compare against. When the read was not an
+    /// accepted one, every field is `Unread` whatever the tally scored.
+    fn field_correctness(
+        &self,
+        accepted: bool,
+    ) -> Option<BTreeMap<&'static str, FieldCorrectness>> {
+        if self.correctness.is_empty() {
+            return None;
+        }
+        Some(
+            self.correctness
+                .iter()
+                .map(|(field, correctness)| {
+                    let correctness = if accepted {
+                        *correctness
+                    } else {
+                        FieldCorrectness::Unread
+                    };
+                    (*field, correctness)
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Compares a document's read, when it has one, against its ground truth,
+/// field by field. `fields` is `None` when the reader returned nothing: every
+/// field the document has truth for is then scored as absent.
+///
+/// Only fields the truth has a value for are compared, see
+/// [`AccuracyStats`]'s doc on why an absent label must not be scored as a
+/// miss. A document without truth yields no comparisons.
+fn compare_document(
+    ground_truth: Option<&HashMap<CoreField, String>>,
+    fields: Option<&ExtractionFields>,
+) -> DocumentComparison {
+    let mut comparison = DocumentComparison {
+        tally: Vec::new(),
+        correctness: BTreeMap::new(),
+    };
+    let Some(truth) = ground_truth else {
+        return comparison;
+    };
+    for (i, field) in CoreField::ALL.iter().enumerate() {
+        let Some(expected) = truth.get(field) else {
+            continue;
+        };
+        let got = fields.and_then(|fields| fields.get(*field));
+        let compared = compare_field(expected, got);
+        comparison.tally.push((i, compared.exact, compared.cer));
+        comparison
+            .correctness
+            .insert(field.as_str(), compared.correctness);
+    }
+    comparison
 }
 
 /// The unsupported-assertion metric outcome for one provider: either a
@@ -1538,6 +1944,11 @@ struct BenchPage {
     /// once in [`prep_specimens`]/[`prep_corpus`] and shared by every reader,
     /// the same way the OCR text is.
     ocr_elapsed: Duration,
+    /// The readings of every OCR pass, when a pass trace exists for this
+    /// document: a replay, or a live run with `--dump-ocr-passes`. Empty
+    /// otherwise. Used only to say which passes read a line-1 proposal
+    /// ([`line1_selection_detail`]); document text, never written out.
+    pass_readings: Vec<PassProvenance>,
 }
 
 /// Process-wide sequence keeps duplicate display names and concurrent runs distinct.
@@ -1560,16 +1971,27 @@ fn temporary_image_path() -> PathBuf {
 /// file write, so it measures the OCR pipeline rather than the disk. It is
 /// where a real-specimen run spends almost all of its time, and until it was
 /// recorded nothing said which documents that time went to (ADR-0010, step 5).
+///
+/// With `trace` `Some`, the OCR call is `recognize_detailed_traced`, which
+/// returns the same page and fills the vector with one record per executed
+/// pass (ADR-0024, amendment 1); with `None` it is `recognize_detailed`.
 fn ocr_and_keep_path(
     ocr: &NativeOcr,
     image: &image::DynamicImage,
+    trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
 ) -> Result<(OcrPage, PathBuf, Duration), String> {
     let path = temporary_image_path();
     image
         .save(&path)
         .map_err(|e| format!("failed to write temp image: {e}"))?;
     let started = Instant::now();
-    let result = ocr.recognize_detailed(&path);
+    let result = match trace {
+        Some(records) => ocr.recognize_detailed_traced(&path).map(|(page, passes)| {
+            *records = passes;
+            page
+        }),
+        None => ocr.recognize_detailed(&path),
+    };
     let ocr_elapsed = started.elapsed();
     match result {
         Ok(page) => Ok((page, path, ocr_elapsed)),
@@ -1596,7 +2018,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.seed);
             }
-            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
+            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image, None).ok()?;
             let truth = crate::parse_ground_truth_mrz(&doc.labels).ok()?;
             // Read from the OCR text, never from `labels`: the question is
             // what this run's OCR pass actually recovered, which is what a
@@ -1623,6 +2045,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
                 ocr_elapsed,
+                pass_readings: Vec::new(),
             })
         })
         .collect()
@@ -1632,10 +2055,16 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
 /// ground truth (`None` when the specimen had no `samples/ocr_fixtures/
 /// <stem>.json` label). Unlike [`prep_corpus`], a missing label is not a
 /// reason to drop the document — only an OCR failure is.
+///
+/// `passes`, when `Some`, receives one [`OcrPassesRow`](crate::ocr_passes::OcrPassesRow)
+/// per OCR'd document. This is the only place the rows are made, and this runs
+/// once per run, so the rows are per document however many providers read the
+/// documents afterwards.
 fn prep_specimens(
     ocr: &NativeOcr,
     specimens: &[RealSpecimenDoc],
     progress: bool,
+    mut passes: Option<&mut crate::ocr_passes::OcrPassesCollector>,
 ) -> Vec<Option<BenchPage>> {
     let total = specimens.len();
     specimens
@@ -1645,66 +2074,98 @@ fn prep_specimens(
             if progress {
                 eprintln!("[ocr {}/{total}] {}", i + 1, doc.name);
             }
-            let (page, image_path, ocr_elapsed) = ocr_and_keep_path(ocr, &doc.image).ok()?;
-            let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
-            // The hand-transcribed true printed MRZ zone, when this specimen
-            // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
-            // compares the run's recovered zone against it to tell a genuine
-            // OCR misread apart from a specimen whose *printed* check digits
-            // are wrong by design.
-            let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
-            // Does the *printed* zone pass its own check digits? Parsed from
-            // the hand transcription, not from OCR, so the answer describes the
-            // document and stays the same whatever the run reads off it.
-            // `None` (unlabelled) is not evidence of non-conformance — see
-            // `BenchPage::printed_zone_nonconforming`.
-            let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
-                !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
-                    .is_ok_and(|d| d.valid())
-            });
-            let found = mrz::find_and_parse(&page.text);
-            let mrz_found = found.is_ok();
-            let document_number_leading_filler =
-                matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
-            // Derived from the filename, the same way the corpus manifest
-            // generator records `mrz.redacted` (`corpus_manifest.rs`). The
-            // bench never reads `samples/corpus.jsonl` — it walks the image
-            // directory — so the stem is the signal it has.
-            let redacted = doc.name.to_ascii_lowercase().contains("redacted");
-            // Best-effort fallback only — used in `run_prepped` when no
-            // provider's own Tier-1 read resolves a format for this
-            // document. Reuses `MrzFormat::guess_from_lines` rather than a
-            // new heuristic; `None` when there is no ground-truth `mrz_line`
-            // to guess from at all (most of `samples/`, by construction).
-            let known_or_guessed_format = doc
-                .labels
-                .as_ref()
-                .and_then(|l| l.mrz_line.as_deref())
-                .and_then(MrzFormat::guess_from_lines)
-                .map(mrz_format_str);
-            Some(BenchPage {
-                name: doc.name.clone(),
-                asset_id: Some(doc.asset_id.clone()),
-                source_sha256: Some(doc.source_sha256.clone()),
-                page,
-                ground_truth,
-                ground_truth_mrz,
-                image_path,
-                mrz_found,
-                document_number_leading_filler,
-                redacted,
-                // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
-                // time — unlike `redacted`, which the stem can carry on its own.
-                // The manifest is the signal here because two driving-license
-                // fronts predate the `_no_mrz` naming convention entirely.
-                mrz_expected: doc.mrz_expected,
-                printed_zone_nonconforming,
-                synthetic: false,
-                known_or_guessed_format,
-                ocr_elapsed,
-            })
+            let mut records = Vec::new();
+            let (page, image_path, ocr_elapsed) =
+                ocr_and_keep_path(ocr, &doc.image, passes.is_some().then_some(&mut records))
+                    .ok()?;
+            let pass_readings = pass_provenance(&crate::ocr_passes::pass_objects(&records));
+            if let Some(collector) = passes.as_deref_mut() {
+                collector.push(
+                    &doc.name,
+                    Some(&doc.asset_id),
+                    Some(&doc.source_sha256),
+                    &page,
+                    &records,
+                );
+            }
+            let mut bench_page = specimen_bench_page(doc, page, image_path, ocr_elapsed);
+            bench_page.pass_readings = pass_readings;
+            Some(bench_page)
         })
         .collect()
+}
+
+/// One real specimen's [`BenchPage`], from its corpus document and the OCR page
+/// of its run.
+///
+/// The one place a specimen's page is built, shared by the live prep
+/// ([`prep_specimens`]) and the replay ([`replay_pages`]), so the two cannot
+/// disagree about anything that is not the OCR. `mrz_found` and
+/// `document_number_leading_filler` are recomputed from `page.text` here, which
+/// is why a replay needs only the text, not those two values.
+fn specimen_bench_page(
+    doc: &RealSpecimenDoc,
+    page: OcrPage,
+    image_path: PathBuf,
+    ocr_elapsed: Duration,
+) -> BenchPage {
+    let ground_truth = doc.labels.as_ref().map(extraction_ground_truth);
+    // The hand-transcribed true printed MRZ zone, when this specimen
+    // has a `samples/ocr_fixtures/<stem>.json` label. `run_prepped`
+    // compares the run's recovered zone against it to tell a genuine
+    // OCR misread apart from a specimen whose *printed* check digits
+    // are wrong by design.
+    let ground_truth_mrz = doc.labels.as_ref().and_then(|l| l.mrz_line.clone());
+    // Does the *printed* zone pass its own check digits? Parsed from
+    // the hand transcription, not from OCR, so the answer describes the
+    // document and stays the same whatever the run reads off it.
+    // `None` (unlabelled) is not evidence of non-conformance — see
+    // `BenchPage::printed_zone_nonconforming`.
+    let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
+        !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
+            .is_ok_and(|d| d.valid())
+    });
+    let found = mrz::find_and_parse(&page.text);
+    let mrz_found = found.is_ok();
+    let document_number_leading_filler = matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
+    // Derived from the filename, the same way the corpus manifest
+    // generator records `mrz.redacted` (`corpus_manifest.rs`). The
+    // bench never reads `samples/corpus.jsonl` — it walks the image
+    // directory — so the stem is the signal it has.
+    let redacted = doc.name.to_ascii_lowercase().contains("redacted");
+    // Best-effort fallback only — used in `run_prepped` when no
+    // provider's own Tier-1 read resolves a format for this
+    // document. Reuses `MrzFormat::guess_from_lines` rather than a
+    // new heuristic; `None` when there is no ground-truth `mrz_line`
+    // to guess from at all (most of `samples/`, by construction).
+    let known_or_guessed_format = doc
+        .labels
+        .as_ref()
+        .and_then(|l| l.mrz_line.as_deref())
+        .and_then(MrzFormat::guess_from_lines)
+        .map(mrz_format_str);
+    BenchPage {
+        name: doc.name.clone(),
+        asset_id: Some(doc.asset_id.clone()),
+        source_sha256: Some(doc.source_sha256.clone()),
+        page,
+        ground_truth,
+        ground_truth_mrz,
+        image_path,
+        mrz_found,
+        document_number_leading_filler,
+        redacted,
+        // From `samples/corpus.jsonl`'s `mrz.present`, resolved at load
+        // time — unlike `redacted`, which the stem can carry on its own.
+        // The manifest is the signal here because two driving-license
+        // fronts predate the `_no_mrz` naming convention entirely.
+        mrz_expected: doc.mrz_expected,
+        printed_zone_nonconforming,
+        synthetic: false,
+        known_or_guessed_format,
+        ocr_elapsed,
+        pass_readings: Vec::new(),
+    }
 }
 
 /// Runs every reader in `catalog` against every document in `corpus`,
@@ -1757,16 +2218,8 @@ pub async fn run_provider_bench_real_with_dump_options(
     dump_ocr_hits: bool,
     progress: bool,
 ) -> Vec<ProviderReport> {
-    // The CLI writes this pointer immediately before the run. Reading it
-    // here keeps the existing public benchmark function signature intact.
-    let run_manifest = dump_ocr_dir.and_then(|dir| {
-        std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt"))
-            .ok()
-            .filter(|name| {
-                !name.is_empty() && !name.chars().any(|c| matches!(c, '/' | '\\' | '\n' | '\r'))
-            })
-    });
-    let prepped = prep_specimens(ocr, specimens, progress);
+    let run_manifest = current_run_manifest(dump_ocr_dir);
+    let prepped = prep_specimens(ocr, specimens, progress, None);
     run_prepped_with_dump_options(
         catalog,
         &prepped,
@@ -1777,6 +2230,284 @@ pub async fn run_provider_bench_real_with_dump_options(
         progress,
     )
     .await
+}
+
+/// The run manifest file name the CLI wrote next to the dumps, if any. The CLI
+/// writes this pointer immediately before the run; reading it here keeps the
+/// public benchmark function signatures free of it.
+fn current_run_manifest(dir: Option<&Path>) -> Option<String> {
+    dir.and_then(|dir| {
+        std::fs::read_to_string(dir.join("provider-bench-ocr-current-run.txt"))
+            .ok()
+            .filter(|name| {
+                !name.is_empty() && !name.chars().any(|c| matches!(c, '/' | '\\' | '\n' | '\r'))
+            })
+    })
+}
+
+/// The opt-in dumps a real-specimen run can write, next to the `--out` report.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RealDumpOptions<'a> {
+    /// `--dump-ocr`: directory for the miss OCR dump.
+    pub ocr_dir: Option<&'a Path>,
+    /// `--dump-ocr-hits`: add Tier-1 hits to that dump.
+    pub ocr_hits: bool,
+    /// `--dump-ocr-passes`: directory for
+    /// [`OCR_PASSES_FILENAME`](crate::ocr_passes::OCR_PASSES_FILENAME). The
+    /// caller has already checked the destination
+    /// ([`crate::ocr_passes::check_passes_destination`]) and refused the
+    /// private track.
+    pub ocr_passes_dir: Option<&'a Path>,
+}
+
+/// [`run_provider_bench_real_with_dump_options`] with the full set of dumps.
+///
+/// With `dumps.ocr_passes_dir` set, every document is OCR'd through the traced
+/// entry point, which returns the same page as the untraced one, and one row
+/// per OCR'd document is written to `provider-bench-ocr-passes.jsonl` right
+/// after the corpus prep — once, before any provider reads a document. The
+/// readings never reach a [`ProviderReport`], [`DocumentDetail`] or the outcome
+/// ledger. `Err` only when that file cannot be written, and it is returned
+/// before any provider runs.
+pub async fn run_provider_bench_real_with_options(
+    catalog: &ProviderCatalog,
+    ocr: &NativeOcr,
+    specimens: &[RealSpecimenDoc],
+    measure_memory: bool,
+    dumps: &RealDumpOptions<'_>,
+    progress: bool,
+) -> Result<Vec<ProviderReport>, String> {
+    let run_manifest = current_run_manifest(dumps.ocr_dir.or(dumps.ocr_passes_dir));
+    let mut passes = dumps
+        .ocr_passes_dir
+        .map(|_| crate::ocr_passes::OcrPassesCollector::new(run_manifest.clone()));
+    let prepped = prep_specimens(ocr, specimens, progress, passes.as_mut());
+    if let (Some(dir), Some(collector)) = (dumps.ocr_passes_dir, passes.as_ref()) {
+        // The path and a count only: the readings are document OCR.
+        let (path, rows) = collector.write(dir).inspect_err(|_| {
+            // `run_prepped` removes these after the last reader; nobody will.
+            for bench_page in prepped.iter().flatten() {
+                let _ = std::fs::remove_file(&bench_page.image_path);
+            }
+        })?;
+        eprintln!(
+            "OCR pass readings written to {} ({rows} rows)",
+            path.display()
+        );
+    }
+    Ok(run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        dumps.ocr_dir,
+        dumps.ocr_hits,
+        run_manifest.as_deref(),
+        progress,
+    )
+    .await)
+}
+
+/// The `OcrPage` a captured row stands for: the text and every value scoring,
+/// the report, the ledger or a dump reads from the page. The rest of `OcrPage`
+/// (lines, band box, portrait, text sanity) is read by none of them and stays at
+/// its default.
+fn replayed_page(row: &crate::ocr_passes::OcrPassesRow) -> OcrPage {
+    OcrPage {
+        text: row.ocr_text.clone(),
+        rotation: row.rotation,
+        mrz_band_score: row.mrz_band_score,
+        retry_variant_id: row.retry_variant_id.clone(),
+        retry_damaged_recovery: row.retry_damaged_recovery,
+        retry_budget_hit: row.retry_budget_hit,
+        retry_stop: row.retry_stop.clone(),
+        chargrid: row.chargrid.clone(),
+        ..OcrPage::default()
+    }
+}
+
+/// At most five ids for an error message, then a count of the rest.
+fn some_ids(ids: &[&str]) -> String {
+    const SHOWN: usize = 5;
+    let mut out = ids
+        .iter()
+        .take(SHOWN)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if ids.len() > SHOWN {
+        out.push_str(&format!(", and {} more", ids.len() - SHOWN));
+    }
+    out
+}
+
+/// One page per corpus document, in corpus order, from `capture`'s rows: what a
+/// replay scores. `Err` says why the capture cannot stand in for this corpus,
+/// checked in this order:
+///
+/// 1. the rows lack a key the replay needs ([`PassesFile::missing_keys`]);
+/// 2. the rows do not cover the corpus exactly once: a row with no `asset_id`,
+///    two rows for one asset, a corpus document with no row, a row for an asset
+///    the corpus does not hold;
+/// 3. a row's `source_sha256` is not the SHA-256 of the corpus image's bytes
+///    (`RealSpecimenDoc::source_sha256`): the capture read other bytes.
+///
+/// The corpus manifest's hash is the caller's to check; it is not on the rows.
+/// Each page is built by [`specimen_bench_page`], the function the live prep
+/// uses, so `mrz_found`, the ground truth and every flag derived from the
+/// document are computed the same way; the page's own values come from the row
+/// ([`replayed_page`]) and `ocr_elapsed` is zero, since no OCR ran. No image is
+/// written: `image_path` names a file that does not exist, which no reader in
+/// a `--mrz-only` run opens and which [`run_prepped`]'s cleanup ignores.
+///
+/// [`PassesFile::missing_keys`]: crate::ocr_passes::PassesFile::missing_keys
+fn replay_pages(
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+) -> Result<Vec<Option<BenchPage>>, String> {
+    if !capture.missing_keys.is_empty() {
+        return Err(format!(
+            "the capture's rows lack {}: a replay needs {} to reproduce the live run's report; \
+             recapture with a build that writes them",
+            capture.missing_keys.join(", "),
+            if capture.missing_keys.len() == 1 {
+                "that key"
+            } else {
+                "those keys"
+            },
+        ));
+    }
+
+    let mut by_asset: BTreeMap<&str, &crate::ocr_passes::OcrPassesRow> = BTreeMap::new();
+    let mut repeated: Vec<&str> = Vec::new();
+    for (index, row) in capture.rows.iter().enumerate() {
+        let Some(asset) = row.asset_id.as_deref() else {
+            return Err(format!("capture row {} has no asset_id", index + 1));
+        };
+        if by_asset.insert(asset, row).is_some() && !repeated.contains(&asset) {
+            repeated.push(asset);
+        }
+    }
+    let corpus: std::collections::BTreeSet<&str> =
+        specimens.iter().map(|doc| doc.asset_id.as_str()).collect();
+    let without_row: Vec<&str> = corpus
+        .iter()
+        .copied()
+        .filter(|asset| !by_asset.contains_key(asset))
+        .collect();
+    let outside_corpus: Vec<&str> = by_asset
+        .keys()
+        .copied()
+        .filter(|asset| !corpus.contains(asset))
+        .collect();
+    let mut coverage: Vec<String> = Vec::new();
+    if !repeated.is_empty() {
+        coverage.push(format!(
+            "{} asset(s) have more than one row: {}",
+            repeated.len(),
+            some_ids(&repeated)
+        ));
+    }
+    if !without_row.is_empty() {
+        coverage.push(format!(
+            "{} corpus document(s) have no row: {}",
+            without_row.len(),
+            some_ids(&without_row)
+        ));
+    }
+    if !outside_corpus.is_empty() {
+        coverage.push(format!(
+            "{} row(s) are for assets this corpus does not hold: {}",
+            outside_corpus.len(),
+            some_ids(&outside_corpus)
+        ));
+    }
+    if !coverage.is_empty() {
+        return Err(format!(
+            "the capture does not cover the corpus exactly once ({}); a capture and its replay \
+             must run over the same documents, with the same --format, --limit and --include-* \
+             flags",
+            coverage.join("; ")
+        ));
+    }
+
+    let other_bytes: Vec<&str> = specimens
+        .iter()
+        .filter(|doc| {
+            by_asset[doc.asset_id.as_str()].source_sha256.as_deref()
+                != Some(doc.source_sha256.as_str())
+        })
+        .map(|doc| doc.asset_id.as_str())
+        .collect();
+    if !other_bytes.is_empty() {
+        return Err(format!(
+            "{} capture row(s) were read from image bytes this corpus does not hold \
+             (source_sha256 differs): {}; the capture was measured on another samples revision",
+            other_bytes.len(),
+            some_ids(&other_bytes)
+        ));
+    }
+
+    Ok(specimens
+        .iter()
+        .map(|doc| {
+            let row = by_asset[doc.asset_id.as_str()];
+            let mut bench_page = specimen_bench_page(
+                doc,
+                replayed_page(row),
+                temporary_image_path(),
+                Duration::ZERO,
+            );
+            bench_page.pass_readings = pass_provenance(&row.ocr_passes);
+            Some(bench_page)
+        })
+        .collect())
+}
+
+/// Whether `capture` can stand in for `specimens`: [`replay_pages`]'s checks,
+/// without running anything. Called before a replay writes a file, so a refused
+/// replay leaves nothing behind.
+pub fn check_replay(
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+) -> Result<(), String> {
+    replay_pages(specimens, capture).map(|_| ())
+}
+
+/// Runs every reader in `catalog` over the real specimens in `specimens` **without
+/// OCR**, reading each document's page from `capture` (ADR-0024, amendment 3).
+///
+/// The scoring is [`run_prepped_with_dump_options`], the function a live run
+/// uses, so the report, the outcome rows and the dumps come out of the same code;
+/// only where the page came from differs. `dumps.ocr_dir` and `dumps.ocr_hits`
+/// behave as in [`run_provider_bench_real_with_options`]. `dumps.ocr_passes_dir`
+/// must be `None`: a replay reads the pass trace and writes none.
+///
+/// A replay measures only what happens to `OcrPage::text` and the values beside
+/// it; OCR runtime and retry behaviour are the capture's. `Err` is
+/// [`replay_pages`]'s refusal, returned before any reader runs.
+pub async fn run_provider_bench_replay(
+    catalog: &ProviderCatalog,
+    specimens: &[RealSpecimenDoc],
+    capture: &crate::ocr_passes::PassesFile,
+    measure_memory: bool,
+    dumps: &RealDumpOptions<'_>,
+    progress: bool,
+) -> Result<Vec<ProviderReport>, String> {
+    if dumps.ocr_passes_dir.is_some() {
+        return Err("a replay reads the pass file and writes none".to_string());
+    }
+    let prepped = replay_pages(specimens, capture)?;
+    let run_manifest = current_run_manifest(dumps.ocr_dir);
+    Ok(run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        dumps.ocr_dir,
+        dumps.ocr_hits,
+        run_manifest.as_deref(),
+        progress,
+    )
+    .await)
 }
 
 /// The literal MRZ substring a date field's ISO value (`YYYY-MM-DD`) was
@@ -1949,6 +2680,9 @@ async fn run_prepped_with_dump_options(
         let mut field_total = 0usize;
         let mut cer_sum = 0.0f64;
         let mut cer_count = 0usize;
+        // The two quoted populations (#564); see `AccuracyStats`.
+        let mut accepted_reads = FieldTally::new();
+        let mut scored = FieldTally::new();
         let mut per_field: Vec<(&'static str, f64, usize)> = CoreField::ALL
             .iter()
             .map(|f| (f.as_str(), 0.0, 0))
@@ -1982,6 +2716,14 @@ async fn run_prepped_with_dump_options(
             // this harness measures exactly the same gate the pipeline does.
             let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
             let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
+            // The Tier-1 read the reader itself makes, under this process's
+            // arms (`SYNTHPASS_MRZ_CLASS_SWEEP`, `SYNTHPASS_MRZ_LINE1_SELECT`).
+            // `read_mrz` above stays the hint's parse, as production's is; the
+            // dump zone below is this read, so with an arm set it shows the zone
+            // the reader returned (#574, finding 3). With every arm `off` the two
+            // are one parse: `mrz_parse_options()` is then the crate default.
+            let tier1 = synthpass_die::read_tier1(&bench_page.page.text);
+            let dump_zone: Option<&mrz::MrzData> = tier1.parsed.as_ref().ok();
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
@@ -2021,6 +2763,7 @@ async fn run_prepped_with_dump_options(
                     // aggregate, and a per-document view that simply omitted
                     // the row would make that indistinguishable from a
                     // document it handled cleanly with no assertions.
+                    let error_comparison = compare_document(bench_page.ground_truth.as_ref(), None);
                     documents_detail.push(DocumentDetail {
                         name: bench_page.name.clone(),
                         asset_id: bench_page.asset_id.clone(),
@@ -2042,6 +2785,9 @@ async fn run_prepped_with_dump_options(
                         names_exact: has_name_ground_truth(bench_page.ground_truth.as_ref())
                             .then_some(false),
                         name_error: None,
+                        // No read, so no accepted read: every field with
+                        // truth is `Unread`.
+                        field_correctness: error_comparison.field_correctness(false),
                         ocr_elapsed: bench_page.ocr_elapsed,
                         retry_variant_id: bench_page.page.retry_variant_id.clone(),
                         retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
@@ -2049,7 +2795,14 @@ async fn run_prepped_with_dump_options(
                         retry_stop: bench_page.page.retry_stop.clone(),
                         chargrid: bench_page.page.chargrid.clone(),
                         tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                        // No reading, so no selection was recorded.
+                        line1_selection: None,
                     });
+                    // `OcrError` sits inside the scored population: a reader
+                    // that errored read nothing, so end-to-end counts every
+                    // field this document has truth for as absent. It is not
+                    // an accepted read.
+                    scored.add_document(&error_comparison.tally);
                     if progress {
                         eprintln!(
                             "[{} {}/{ocr_documents}] {} MISS ocr_error ({elapsed:.1?})",
@@ -2068,29 +2821,29 @@ async fn run_prepped_with_dump_options(
             // Identical for every field in the loop below — computed once
             // per document rather than once per assertion.
             let ocr_text_lower = bench_page.page.text.to_lowercase();
+            // Each field this document has truth for, compared once. The
+            // tally goes to the populations once `miss_reason` is known, and
+            // the same comparisons make `DocumentDetail::field_correctness`,
+            // so the per-document map cannot disagree with the aggregates.
+            let comparison = compare_document(
+                bench_page.ground_truth.as_ref(),
+                Some(&reading.extraction.fields),
+            );
+            // Field-match / CER: only over fields this document has ground
+            // truth for — see `AccuracyStats`'s doc on why an absent label
+            // must not be scored as a miss. Summed in `CoreField::ALL` order,
+            // as the comparisons are made.
+            for &(i, exact, field_cer) in &comparison.tally {
+                field_total += 1;
+                field_hits += usize::from(exact);
+                cer_sum += field_cer;
+                cer_count += 1;
+                per_field[i].1 += field_cer;
+                per_field[i].2 += 1;
+            }
 
-            for (i, field) in CoreField::ALL.iter().enumerate() {
+            for field in CoreField::ALL.iter() {
                 let got = reading.extraction.fields.get(*field);
-
-                // Field-match / CER: only over fields this document has
-                // ground truth for — see `AccuracyStats`'s doc on why an
-                // absent label must not be scored as a miss.
-                if let Some(expected) = bench_page
-                    .ground_truth
-                    .as_ref()
-                    .and_then(|gt| gt.get(field))
-                {
-                    field_total += 1;
-                    let got_str = got.unwrap_or("");
-                    if got_str == expected.as_str() {
-                        field_hits += 1;
-                    }
-                    let field_cer = crate::cer(expected, got_str);
-                    cer_sum += field_cer;
-                    cer_count += 1;
-                    per_field[i].1 += field_cer;
-                    per_field[i].2 += 1;
-                }
 
                 // Unsupported-assertion: needs no ground truth at all — only
                 // the OCR text this provider was given — but is only a
@@ -2225,6 +2978,17 @@ async fn run_prepped_with_dump_options(
                     })
             };
 
+            // One predicate each, shared with the rates they sit beside, so
+            // "accepted" and "scored" cannot drift from `accepted_reads` and
+            // `tier1_hit_rate`.
+            let accepted = crate::is_accepted_read(miss_reason.as_ref());
+            if accepted {
+                accepted_reads.add_document(&comparison.tally);
+            }
+            if in_scored_tier1_population(&miss_reason) {
+                scored.add_document(&comparison.tally);
+            }
+
             let dump_miss_kind = match &miss_reason {
                 Some(
                     r @ (MissReason::ChecksumFailed { .. }
@@ -2261,7 +3025,7 @@ async fn run_prepped_with_dump_options(
                 let (recovered, check_states): (
                     Vec<String>,
                     Option<BTreeMap<String, Option<bool>>>,
-                ) = match &read_mrz {
+                ) = match dump_zone {
                     Some(data) => {
                         let recovered: Vec<String> =
                             data.mrz_lines.lines().map(str::to_string).collect();
@@ -2293,11 +3057,11 @@ async fn run_prepped_with_dump_options(
                     }
                 };
 
-                let compared_cells = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                let compared_cells = match (dump_zone, &bench_page.ground_truth_mrz) {
                     (Some(data), Some(truth)) => Some(compared_cells(&data.mrz_lines, truth)),
                     _ => None,
                 };
-                let zone_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz) {
+                let zone_mismatch = match (dump_zone, &bench_page.ground_truth_mrz) {
                     (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
                     _ => None,
                 };
@@ -2305,7 +3069,7 @@ async fn run_prepped_with_dump_options(
                 // which table to look positions up against) on top of
                 // `zone_mismatch`'s own two preconditions — see
                 // `MissOcrDump::field_mismatch_counts`'s doc.
-                let field_mismatch = match (&read_mrz, &bench_page.ground_truth_mrz, mrz_format) {
+                let field_mismatch = match (dump_zone, &bench_page.ground_truth_mrz, mrz_format) {
                     (Some(data), Some(truth), Some(format)) => {
                         mrz_field_mismatch(format, &data.mrz_lines, truth)
                     }
@@ -2420,6 +3184,7 @@ async fn run_prepped_with_dump_options(
                 unsupported_fields: doc_unsupported_fields,
                 names_exact,
                 name_error,
+                field_correctness: comparison.field_correctness(accepted),
                 ocr_elapsed: bench_page.ocr_elapsed,
                 retry_variant_id: bench_page.page.retry_variant_id.clone(),
                 retry_damaged_recovery: bench_page.page.retry_damaged_recovery,
@@ -2427,6 +3192,16 @@ async fn run_prepped_with_dump_options(
                 retry_stop: bench_page.page.retry_stop.clone(),
                 chargrid: bench_page.page.chargrid.clone(),
                 tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                // From the reading's own evidence, so a provider that made no
+                // Tier-1 read records none; the proposal's line 1 is looked up
+                // in the pass trace, when there is one, and never stored.
+                line1_selection: reading.evidence.line1_selection.as_ref().map(|summary| {
+                    line1_selection_detail(
+                        summary,
+                        tier1.proposed_line1.as_deref(),
+                        &bench_page.pass_readings,
+                    )
+                }),
             });
         }
 
@@ -2568,8 +3343,10 @@ async fn run_prepped_with_dump_options(
                 mean_cer: (cer_count > 0).then(|| cer_sum / cer_count as f64),
                 per_field_cer: per_field
                     .into_iter()
-                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64)))
+                    .map(|(name, sum, n)| (name, (n > 0).then(|| sum / n as f64), n))
                     .collect(),
+                accepted_reads: accepted_reads.finish(),
+                scored: scored.finish(),
             },
             speed,
             json_validity: (!capability.deterministic).then(|| JsonValidityStats {
@@ -2776,6 +3553,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed: Duration::ZERO,
+            pass_readings: Vec::new(),
         }
     }
 
@@ -3058,6 +3836,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -3078,6 +3857,7 @@ mod tests {
                 ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -3105,6 +3885,170 @@ mod tests {
         assert_eq!(report.accuracy.field_match_rate, Some(1.0));
     }
 
+    /// #564: read quality is over accepted reads, end-to-end is over the
+    /// scored population, and a non-conforming specimen is in neither.
+    #[tokio::test]
+    async fn field_accuracy_populations_follow_the_accepted_and_scored_predicates() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "DOE",
+            given_names: "",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("one reader");
+        let page = |truth: &[(CoreField, &str)]| {
+            let mut page = rate_test_page();
+            page.mrz_expected = true;
+            page.mrz_found = true;
+            page.ground_truth = Some(
+                truth
+                    .iter()
+                    .map(|(field, value)| (*field, value.to_string()))
+                    .collect(),
+            );
+            page
+        };
+        // A hit.
+        let hit = page(&[(CoreField::Surname, "DOE")]);
+        // Checksum-valid, but the reader returns no document number: an
+        // accepted read that the scorer files as a document-number mismatch.
+        let mismatch = page(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C3"),
+        ]);
+        // A scored miss: nothing MRZ-shaped was found.
+        let mut unread = page(&[(CoreField::Surname, "SMITH")]);
+        unread.mrz_found = false;
+        // A printed zone that fails its own check digits.
+        let mut nonconforming = page(&[(CoreField::Surname, "DOE")]);
+        nonconforming.printed_zone_nonconforming = true;
+
+        let reports = run_prepped(
+            &catalog,
+            &[Some(hit), Some(mismatch), Some(unread), Some(nonconforming)],
+            false,
+            None,
+            false,
+        )
+        .await;
+        let accuracy = &reports[0].accuracy;
+
+        // All labelled, kept for continuity: 3 of 5 comparisons exact.
+        assert_eq!(accuracy.labelled_documents, 4);
+        assert_eq!(accuracy.field_match_rate, Some(0.6));
+
+        // Read quality: the hit and the mismatch, whose missing document
+        // number counts against it.
+        let accepted = &accuracy.accepted_reads;
+        assert_eq!(accepted.documents, 2);
+        assert_eq!(accepted.field_match_rate, Some(2.0 / 3.0));
+        let document_number = accepted
+            .per_field
+            .iter()
+            .find(|field| field.field == "document_number")
+            .expect("document_number");
+        assert_eq!(document_number.documents, 1);
+        assert_eq!(document_number.match_rate, Some(0.0));
+        assert_eq!(document_number.mean_cer, Some(1.0));
+
+        // End-to-end: the hit, the mismatch and the unread miss, but not the
+        // non-conforming specimen.
+        let scored = &accuracy.scored;
+        assert_eq!(scored.documents, 3);
+        assert_eq!(scored.field_match_rate, Some(0.5));
+        let surname = scored
+            .per_field
+            .iter()
+            .find(|field| field.field == "surname")
+            .expect("surname");
+        assert_eq!(surname.documents, 3);
+
+        let json = serde_json::to_value(crate::report::ProviderRow::from(
+            reports.into_iter().next().expect("one report"),
+        ))
+        .expect("serialize report");
+        assert_eq!(json["accuracy"]["accepted_reads"]["documents"], 2);
+        assert_eq!(json["accuracy"]["scored"]["documents"], 3);
+        let scored_surname = json["accuracy"]["scored"]["per_field"]
+            .as_array()
+            .expect("per_field")
+            .iter()
+            .find(|field| field["field"] == "surname")
+            .expect("surname")
+            .clone();
+        assert_eq!(scored_surname["documents"], 3);
+        let all_labelled_surname = json["accuracy"]["per_field_cer"]
+            .as_array()
+            .expect("per_field_cer")
+            .iter()
+            .find(|field| field["field"] == "surname")
+            .expect("surname")
+            .clone();
+        assert_eq!(all_labelled_surname["documents"], 4);
+    }
+
+    /// A reader that fails on every document.
+    struct ErroringReader {
+        capability: Capability,
+    }
+
+    #[async_trait::async_trait]
+    impl IntelligenceProvider for ErroringReader {
+        fn id(&self) -> ProviderId {
+            ProviderId("erroring-test-reader")
+        }
+        fn capability(&self) -> &Capability {
+            &self.capability
+        }
+        fn describe(&self) -> String {
+            "always-failing test reader".into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FieldReader for ErroringReader {
+        async fn read(&self, _ctx: &DocumentContext<'_>) -> Result<Reading, ProviderError> {
+            Err(ProviderError::Failed {
+                detail: "test failure".into(),
+            })
+        }
+    }
+
+    /// A reader error is a failed read: end-to-end scores the document's
+    /// fields as absent, and it is not an accepted read.
+    #[tokio::test]
+    async fn a_reader_error_scores_absent_fields_end_to_end_only() {
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(ErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("one reader");
+        let mut page = rate_test_page();
+        page.mrz_expected = true;
+        page.mrz_found = true;
+        page.ground_truth = Some(HashMap::from([
+            (CoreField::Surname, "DOE".to_string()),
+            (CoreField::GivenNames, "JOHN".to_string()),
+        ]));
+
+        let reports = run_prepped(&catalog, &[Some(page)], false, None, false).await;
+        let accuracy = &reports[0].accuracy;
+        assert_eq!(accuracy.scored.documents, 1);
+        assert_eq!(accuracy.scored.field_match_rate, Some(0.0));
+        assert_eq!(accuracy.scored.mean_cer, Some(1.0));
+        assert_eq!(accuracy.accepted_reads.documents, 0);
+        assert_eq!(accuracy.accepted_reads.field_match_rate, None);
+        // The all-labelled figure, kept for continuity, never counted an
+        // errored read.
+        assert_eq!(accuracy.field_match_rate, None);
+    }
+
     /// An entirely unlabelled corpus must report `None`, not a fabricated
     /// `0.0` that would read as "0% accuracy" instead of "nothing measured."
     #[tokio::test]
@@ -3121,6 +4065,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -3166,6 +4111,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -3246,6 +4192,7 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: Some("passports/corrupted-td3-fixture.png".to_string()),
             source_sha256: Some("a".repeat(64)),
             name: "corrupted-td3-fixture".to_string(),
@@ -3360,6 +4307,7 @@ mod tests {
         // OCR text with nothing MRZ-shaped in it: an MRZ is expected
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "no-mrz-found-fixture".to_string(),
@@ -3442,6 +4390,7 @@ mod tests {
         assert!(!recovered.valid());
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "labelled-nonconforming-specimen".to_string(),
@@ -3512,6 +4461,7 @@ mod tests {
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "labelled-ocr-misread".to_string(),
@@ -3607,6 +4557,7 @@ mod tests {
         let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -3662,6 +4613,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -3711,6 +4663,7 @@ mod tests {
 
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -3775,6 +4728,7 @@ mod tests {
         // so it lands in `no_mrz_expected`.
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
+                pass_readings: Vec::new(),
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -3841,6 +4795,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -3895,6 +4850,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -4604,6 +5560,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4653,6 +5610,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4708,6 +5666,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
+            pass_readings: Vec::new(),
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4775,6 +5734,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed,
+            pass_readings: Vec::new(),
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -4847,6 +5807,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
             // this document's true given names.
@@ -4866,6 +5827,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 3: no MRZ found, but still labelled with a name truth —
             // name-scorable, not a hit.
@@ -4885,6 +5847,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 4: a Tier-1 hit with no ground truth for either name field —
             // not name-scorable.
@@ -4904,6 +5867,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
             // 5: carries a name truth, but is outside `tier1_hit_rate`'s own
             // scored population (`mrz_expected: false` and `mrz_found:
@@ -4926,6 +5890,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
+                pass_readings: Vec::new(),
             }),
         ];
         // `FixedReader` returns the same `hit_evidence` for every document
@@ -4995,6 +5960,846 @@ mod tests {
             StrictNameHitRate::NotApplicable { reason } => {
                 panic!("expected a computed strict name hit rate, got NotApplicable: {reason}")
             }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // #574: per-document field correctness (`DocumentDetail::field_correctness`).
+    // ---------------------------------------------------------------------
+
+    /// A read carrying exactly `values`; every other field is absent.
+    fn read_fields(values: &[(CoreField, &str)]) -> ExtractionFields {
+        let mut fields = ExtractionFields::default();
+        for (field, value) in values {
+            fields.set(*field, Some((*value).to_string()));
+        }
+        fields
+    }
+
+    fn truth_of(values: &[(CoreField, &str)]) -> HashMap<CoreField, String> {
+        values
+            .iter()
+            .map(|(field, value)| (*field, (*value).to_string()))
+            .collect()
+    }
+
+    /// Exact, wrong and unread, per field, on one document; a field the truth
+    /// does not define is not in the map at all.
+    #[test]
+    fn field_correctness_is_exact_wrong_or_unread_per_field_with_truth() {
+        let truth = truth_of(&[
+            (CoreField::IssuingCountry, "UTO"),
+            (CoreField::DocumentNumber, "L898902C3"),
+            (CoreField::Surname, "ERIKSSON"),
+            (CoreField::DateOfBirth, "1974-08-12"),
+            (CoreField::PersonalNumber, "ZE184226B"),
+        ]);
+        let read = read_fields(&[
+            (CoreField::IssuingCountry, "UTO"),
+            (CoreField::DocumentNumber, "L898902C8"),
+            // A blank answer is no answer.
+            (CoreField::Surname, "   "),
+            // Read but not in the truth: never in the map.
+            (CoreField::Sex, "F"),
+        ]);
+        let comparison = compare_document(Some(&truth), Some(&read));
+        let map = comparison
+            .field_correctness(true)
+            .expect("a document with truth has a map");
+        assert_eq!(
+            map,
+            BTreeMap::from([
+                ("issuing_country", FieldCorrectness::Exact),
+                ("document_number", FieldCorrectness::Wrong),
+                ("surname", FieldCorrectness::Unread),
+                ("date_of_birth", FieldCorrectness::Unread),
+                ("personal_number", FieldCorrectness::Unread),
+            ])
+        );
+    }
+
+    /// No accepted read means no field was read, however the fields compare.
+    #[test]
+    fn field_correctness_is_all_unread_without_an_accepted_read() {
+        let truth = truth_of(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C3"),
+        ]);
+        let read = read_fields(&[
+            (CoreField::Surname, "DOE"),
+            (CoreField::DocumentNumber, "L898902C8"),
+        ]);
+        let comparison = compare_document(Some(&truth), Some(&read));
+        assert_eq!(
+            comparison.field_correctness(false),
+            Some(BTreeMap::from([
+                ("surname", FieldCorrectness::Unread),
+                ("document_number", FieldCorrectness::Unread),
+            ]))
+        );
+        // A reader that returned nothing at all scores the same way.
+        let errored = compare_document(Some(&truth), None);
+        assert_eq!(
+            errored.field_correctness(false),
+            comparison.field_correctness(false)
+        );
+    }
+
+    #[test]
+    fn a_document_without_truth_has_no_field_correctness() {
+        let read = read_fields(&[(CoreField::Surname, "DOE")]);
+        assert!(compare_document(None, Some(&read))
+            .field_correctness(true)
+            .is_none());
+        // Truth that defines none of the fields is no truth either.
+        let empty = HashMap::new();
+        assert!(compare_document(Some(&empty), Some(&read))
+            .field_correctness(true)
+            .is_none());
+        assert!(compare_document(None, None)
+            .field_correctness(false)
+            .is_none());
+    }
+
+    /// The per-document maps and the aggregate tally are one comparison:
+    /// summing `Exact` over the documents' maps reproduces the tally's
+    /// per-field exact counts, and every truth field is either exact, wrong or
+    /// unread. Issuer and name fields get no normalisation the aggregate path
+    /// does not: case and padding differences are `Wrong` in both.
+    #[test]
+    fn summed_field_correctness_reproduces_the_tally_exact_counts() {
+        let documents = [
+            (
+                truth_of(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::DocumentNumber, "L898902C3"),
+                ]),
+                read_fields(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::DocumentNumber, "L898902C3"),
+                ]),
+            ),
+            (
+                truth_of(&[
+                    (CoreField::IssuingCountry, "GBR"),
+                    (CoreField::Surname, "SMITH"),
+                    (CoreField::GivenNames, "ANNA MARIA"),
+                    (CoreField::Sex, "F"),
+                ]),
+                read_fields(&[
+                    // Differences of case and padding only.
+                    (CoreField::IssuingCountry, "gbr"),
+                    (CoreField::Surname, " SMITH"),
+                    (CoreField::GivenNames, "ANNA"),
+                ]),
+            ),
+            (
+                truth_of(&[(CoreField::IssuingCountry, "D"), (CoreField::Sex, "M")]),
+                read_fields(&[(CoreField::IssuingCountry, "D"), (CoreField::Sex, "F")]),
+            ),
+        ];
+
+        let mut tally = FieldTally::new();
+        let mut summed_exact = vec![0usize; CoreField::ALL.len()];
+        let mut summed_truth = vec![0usize; CoreField::ALL.len()];
+        for (truth, read) in &documents {
+            let comparison = compare_document(Some(truth), Some(read));
+            tally.add_document(&comparison.tally);
+            let map = comparison
+                .field_correctness(true)
+                .expect("every document here has truth");
+            assert_eq!(map.len(), truth.len());
+            for (i, field) in CoreField::ALL.iter().enumerate() {
+                if let Some(verdict) = map.get(field.as_str()) {
+                    summed_truth[i] += 1;
+                    summed_exact[i] += usize::from(*verdict == FieldCorrectness::Exact);
+                }
+            }
+        }
+
+        for (i, field) in CoreField::ALL.iter().enumerate() {
+            let (comparisons, exact, _) = tally.per_field[i];
+            assert_eq!(
+                summed_truth[i], comparisons,
+                "{field}: documents with truth"
+            );
+            assert_eq!(summed_exact[i], exact, "{field}: exact count");
+        }
+        // The rules the two paths share, pinned on the fields named above.
+        let second = compare_document(Some(&documents[1].0), Some(&documents[1].1))
+            .field_correctness(true)
+            .expect("truth");
+        assert_eq!(second["issuing_country"], FieldCorrectness::Wrong);
+        assert_eq!(second["surname"], FieldCorrectness::Wrong);
+        assert_eq!(second["given_names"], FieldCorrectness::Wrong);
+        assert_eq!(second["sex"], FieldCorrectness::Unread);
+        let third = compare_document(Some(&documents[2].0), Some(&documents[2].1))
+            .field_correctness(true)
+            .expect("truth");
+        assert_eq!(third["issuing_country"], FieldCorrectness::Exact);
+        assert_eq!(third["sex"], FieldCorrectness::Wrong);
+    }
+
+    /// End to end through `run_prepped`: the report's maps sum to
+    /// `accepted_reads`' exact counts, the serialized key set is pinned, and
+    /// no field value, truth or read, reaches the map.
+    #[tokio::test]
+    async fn report_field_correctness_matches_accepted_reads_and_holds_no_values() {
+        let mut evidence = Evidence::default();
+        evidence.mrz_checksums_valid = true;
+        let reader = std::sync::Arc::new(FixedReader {
+            capability: Capability::deterministic_reader(),
+            surname: "READSURNAME",
+            given_names: "",
+            evidence,
+        });
+        let catalog = synthpass_die::ProviderCatalog::builder()
+            .with_reader(reader)
+            .build()
+            .expect("one reader");
+        let page = |name: &str, truth: &[(CoreField, &str)], mrz_found: bool| {
+            let mut page = rate_test_page();
+            page.name = name.to_string();
+            page.mrz_expected = true;
+            page.mrz_found = mrz_found;
+            if !truth.is_empty() {
+                page.ground_truth = Some(truth_of(truth));
+            }
+            page
+        };
+        let pages = [
+            // Accepted: surname exact, given names unread (the reader answers
+            // an empty string), document number unread (no such answer).
+            Some(page(
+                "accepted-a",
+                &[
+                    (CoreField::Surname, "READSURNAME"),
+                    (CoreField::GivenNames, "TRUTHGIVEN"),
+                    (CoreField::DocumentNumber, "TRUTHNUMBER1"),
+                ],
+                true,
+            )),
+            // Accepted: surname wrong.
+            Some(page(
+                "accepted-b",
+                &[(CoreField::Surname, "TRUTHSURNAME")],
+                true,
+            )),
+            // No MRZ found: not an accepted read, so every field is unread
+            // although the surname would have matched.
+            Some(page(
+                "not-accepted",
+                &[(CoreField::Surname, "READSURNAME")],
+                false,
+            )),
+            // No truth at all.
+            Some(page("no-truth", &[], true)),
+        ];
+        let reports = run_prepped(&catalog, &pages, false, None, false).await;
+        let detail = &reports[0].documents_detail;
+
+        let mut exact_per_field: BTreeMap<&str, usize> = BTreeMap::new();
+        for d in detail {
+            for (field, verdict) in d.field_correctness.iter().flatten() {
+                if *verdict == FieldCorrectness::Exact {
+                    *exact_per_field.entry(*field).or_default() += 1;
+                }
+            }
+        }
+        for field in &reports[0].accuracy.accepted_reads.per_field {
+            let expected = field
+                .match_rate
+                .map_or(0, |rate| (rate * field.documents as f64).round() as usize);
+            assert_eq!(
+                exact_per_field.get(field.field).copied().unwrap_or(0),
+                expected,
+                "{}",
+                field.field
+            );
+        }
+
+        assert!(detail[3].field_correctness.is_none());
+        let json = serde_json::to_value(crate::report::ProviderRow::from(
+            reports.into_iter().next().expect("one report"),
+        ))
+        .expect("serialize report");
+        let rows = json["documents_detail"].as_array().expect("rows");
+        assert!(
+            !rows[3]
+                .as_object()
+                .expect("row")
+                .contains_key("field_correctness"),
+            "a document without truth has no key: {}",
+            rows[3]
+        );
+        assert_eq!(
+            rows[0]["field_correctness"],
+            serde_json::json!({
+                "document_number": "unread",
+                "given_names": "unread",
+                "surname": "exact",
+            })
+        );
+        assert_eq!(
+            rows[1]["field_correctness"],
+            serde_json::json!({ "surname": "wrong" })
+        );
+        assert_eq!(
+            rows[2]["field_correctness"],
+            serde_json::json!({ "surname": "unread" })
+        );
+        // Names and verdicts only: no value, truth or read, is in any map.
+        for row in &rows[..3] {
+            let map = row["field_correctness"].to_string();
+            for value in ["READSURNAME", "TRUTHSURNAME", "TRUTHGIVEN", "TRUTHNUMBER1"] {
+                assert!(!map.contains(value), "{value} leaked into {map}");
+            }
+        }
+    }
+
+    // --- replay (ADR-0024, amendment 3) -----------------------------------
+    //
+    // Synthetic text throughout: the zone below is the same made-up specimen
+    // the tests above use, never a real document's OCR (ADR-0027).
+
+    const REPLAY_LINE_1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const REPLAY_LINE_2_VALID: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// The same line with a malformed date of birth: it parses, and fails a check.
+    const REPLAY_LINE_2_BROKEN: &str = "L898902C36UTO7413122F1204159ZE184226B<<<<<10";
+
+    fn replay_doc(name: &str, labels: Option<synthpass_core::Extraction>) -> RealSpecimenDoc {
+        RealSpecimenDoc {
+            name: name.to_string(),
+            asset_id: format!("passports/{name}.png"),
+            source_sha256: format!("{name:0<64}"),
+            image: image::DynamicImage::new_rgb8(1, 1),
+            labels,
+            class: crate::SpecimenClass::Passport,
+            mrz_expected: true,
+        }
+    }
+
+    fn replay_labels() -> synthpass_core::Extraction {
+        let mut labels = synthpass_core::Extraction::default();
+        labels.document_number = Some("L898902C3".to_string());
+        labels.surname = Some("ERIKSSON".to_string());
+        labels.given_names = Some("ANNA MARIA".to_string());
+        labels.mrz_line = Some(format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"));
+        labels
+    }
+
+    /// Three documents, each exercising other page values: a labelled hit with a
+    /// retry variant, a checksum miss with a band score and a spent budget, and a
+    /// page with no MRZ at all.
+    fn replay_corpus() -> Vec<(RealSpecimenDoc, OcrPage)> {
+        vec![
+            (
+                replay_doc("specimen-a", Some(replay_labels())),
+                OcrPage {
+                    text: format!("REPUBLIC OF UTOPIA\n{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"),
+                    rotation: 0,
+                    mrz_band_score: Some(0.8125),
+                    retry_variant_id: Some("pass-01".to_string()),
+                    retry_damaged_recovery: Some(false),
+                    retry_stop: Some("variant_valid".to_string()),
+                    chargrid: Some("unchanged".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+            (
+                replay_doc("specimen-b", None),
+                OcrPage {
+                    text: format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_BROKEN}"),
+                    rotation: 90,
+                    mrz_band_score: Some(0.6125),
+                    retry_budget_hit: true,
+                    retry_stop: Some("budget".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+            (
+                replay_doc("specimen-c", None),
+                OcrPage {
+                    text: "NOTHING MRZ-SHAPED HERE".to_string(),
+                    rotation: 180,
+                    retry_stop: Some("exhausted".to_string()),
+                    ..OcrPage::default()
+                },
+            ),
+        ]
+    }
+
+    /// The capture file a live run over `corpus` would have written.
+    fn replay_capture(corpus: &[(RealSpecimenDoc, OcrPage)]) -> crate::ocr_passes::PassesFile {
+        let mut collector = crate::ocr_passes::OcrPassesCollector::new(Some("run.json".into()));
+        for (doc, page) in corpus {
+            collector.push(
+                &doc.name,
+                Some(&doc.asset_id),
+                Some(&doc.source_sha256),
+                page,
+                &[],
+            );
+        }
+        crate::ocr_passes::PassesFile {
+            rows: collector.rows().to_vec(),
+            missing_keys: Vec::new(),
+        }
+    }
+
+    fn replay_specimens(corpus: &[(RealSpecimenDoc, OcrPage)]) -> Vec<RealSpecimenDoc> {
+        corpus.iter().map(|(doc, _)| doc.clone()).collect()
+    }
+
+    fn mrz_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .build()
+            .expect("one reader")
+    }
+
+    fn scratch_dir(tag: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "provider-bench-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// The property the whole feature rests on: for the same page, a replayed row
+    /// yields the same `DocumentDetail`, the same ledger row and the same dump
+    /// row as the live path. Only `ocr_ms` differs, because no OCR ran.
+    #[tokio::test]
+    async fn a_replayed_row_scores_exactly_as_the_live_page_does() {
+        let corpus = replay_corpus();
+        let live: Vec<Option<BenchPage>> = corpus
+            .iter()
+            .map(|(doc, page)| {
+                Some(specimen_bench_page(
+                    doc,
+                    page.clone(),
+                    PathBuf::from("live-unused.png"),
+                    Duration::from_millis(1234),
+                ))
+            })
+            .collect();
+        let capture = replay_capture(&corpus);
+        let replayed = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("the capture covers the corpus: {e}"));
+
+        let catalog = mrz_catalog();
+        let (live_dir, replay_dir) = (scratch_dir("live"), scratch_dir("replay"));
+        // Hits are dumped too, so the dump holds a row of every kind.
+        let live_reports = run_prepped_with_dump_options(
+            &catalog,
+            &live,
+            false,
+            Some(&live_dir),
+            true,
+            Some("run.json"),
+            false,
+        )
+        .await;
+        let replay_reports = run_prepped_with_dump_options(
+            &catalog,
+            &replayed,
+            false,
+            Some(&replay_dir),
+            true,
+            Some("run.json"),
+            false,
+        )
+        .await;
+
+        // The ledger rows, with the one timing field zeroed.
+        let ledger = |reports: &[ProviderReport]| -> Vec<crate::report::OutcomeRow> {
+            reports[0]
+                .documents_detail
+                .iter()
+                .map(|d| crate::report::OutcomeRow {
+                    ocr_ms: 0,
+                    ..crate::report::OutcomeRow::from(d)
+                })
+                .collect()
+        };
+        assert_eq!(ledger(&live_reports), ledger(&replay_reports));
+        assert_eq!(
+            live_reports[0].documents_detail[0].ocr_elapsed.as_millis(),
+            1234
+        );
+        assert_eq!(
+            replay_reports[0].documents_detail[0].ocr_elapsed,
+            Duration::ZERO
+        );
+
+        // Every recorded per-document field, as the report writes it.
+        let detail = |reports: Vec<ProviderReport>| -> Vec<serde_json::Value> {
+            let json = serde_json::to_value(crate::report::ProviderRow::from(
+                reports.into_iter().next().expect("one report"),
+            ))
+            .expect("serialize");
+            let mut rows = json["documents_detail"].as_array().expect("rows").clone();
+            for row in &mut rows {
+                row.as_object_mut().expect("row").remove("ocr_ms");
+            }
+            rows
+        };
+        let (live_rows, replay_rows) = (detail(live_reports), detail(replay_reports));
+        assert_eq!(live_rows, replay_rows);
+        // The two values the row gained are what this comparison could not
+        // have passed without.
+        assert_eq!(live_rows[0]["retry_damaged_recovery"], false);
+        assert_eq!(live_rows[0]["chargrid"], "unchanged");
+        assert_eq!(live_rows[1]["retry_budget_hit"], true);
+        assert_eq!(live_rows[1]["miss_reason"], "checksum_failed");
+
+        // The dump: byte-identical files, with a row for the hit, the checksum
+        // miss and the page with no zone.
+        let dump = |dir: &Path| {
+            std::fs::read_to_string(dir.join("provider-bench-miss-ocr-dump.jsonl"))
+                .expect("dump written")
+        };
+        let (live_dump, replay_dump) = (dump(&live_dir), dump(&replay_dir));
+        let _ = std::fs::remove_dir_all(&live_dir);
+        let _ = std::fs::remove_dir_all(&replay_dir);
+        assert_eq!(live_dump, replay_dump);
+        let dump_rows: Vec<serde_json::Value> = live_dump
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("row"))
+            .collect();
+        assert_eq!(dump_rows.len(), 3);
+        assert_eq!(dump_rows[0]["mrz_band_score"], 0.8125);
+        assert_eq!(dump_rows[1]["mrz_band_score"], 0.6125);
+        assert!(dump_rows[2]["mrz_band_score"].is_null());
+    }
+
+    #[test]
+    fn a_replayed_page_takes_the_documents_own_values_from_the_corpus_not_the_row() {
+        let corpus = replay_corpus();
+        let capture = replay_capture(&corpus);
+        let pages = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("covered: {e}"));
+        let labelled = pages[0].as_ref().expect("a page per document");
+        assert_eq!(labelled.name, "specimen-a");
+        assert_eq!(
+            labelled.asset_id.as_deref(),
+            Some("passports/specimen-a.png")
+        );
+        assert!(labelled.mrz_found, "recomputed from the row's text");
+        assert!(labelled.ground_truth.is_some() && labelled.ground_truth_mrz.is_some());
+        assert!(!labelled.synthetic && labelled.mrz_expected);
+        assert_eq!(labelled.ocr_elapsed, Duration::ZERO);
+        assert_eq!(labelled.page.mrz_band_score, Some(0.8125));
+        assert_eq!(labelled.page.retry_damaged_recovery, Some(false));
+        assert_eq!(labelled.page.rotation, 0);
+        assert!(!pages[2].as_ref().expect("page").mrz_found);
+        assert_eq!(pages[1].as_ref().expect("page").page.rotation, 90);
+    }
+
+    #[test]
+    fn rows_are_matched_by_asset_id_and_come_out_in_corpus_order() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.rows.reverse();
+        let pages = replay_pages(&replay_specimens(&corpus), &capture)
+            .unwrap_or_else(|e| panic!("covered: {e}"));
+        let names: Vec<&str> = pages
+            .iter()
+            .map(|page| page.as_ref().expect("page").name.as_str())
+            .collect();
+        assert_eq!(names, ["specimen-a", "specimen-b", "specimen-c"]);
+        assert_eq!(
+            pages[2].as_ref().expect("page").page.text,
+            "NOTHING MRZ-SHAPED HERE"
+        );
+    }
+
+    #[test]
+    fn a_capture_lacking_a_key_the_replay_needs_is_refused_naming_the_keys() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.missing_keys = vec!["retry_damaged_recovery", "mrz_band_score"];
+        let err = check_replay(&replay_specimens(&corpus), &capture).expect_err("refused");
+        assert!(
+            err.contains("retry_damaged_recovery, mrz_band_score"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_capture_that_does_not_cover_the_corpus_exactly_once_is_refused() {
+        let corpus = replay_corpus();
+        let specimens = replay_specimens(&corpus);
+
+        let mut duplicated = replay_capture(&corpus);
+        duplicated.rows.push(duplicated.rows[1].clone());
+        let err = check_replay(&specimens, &duplicated).expect_err("a duplicate row");
+        assert!(
+            err.contains("more than one row: passports/specimen-b.png"),
+            "{err}"
+        );
+
+        let mut short = replay_capture(&corpus);
+        short.rows.remove(0);
+        let err = check_replay(&specimens, &short).expect_err("a missing row");
+        assert!(err.contains("no row: passports/specimen-a.png"), "{err}");
+
+        let mut extra = replay_capture(&corpus);
+        extra.rows.push(crate::ocr_passes::OcrPassesRow {
+            asset_id: Some("passports/other.png".to_string()),
+            ..extra.rows[0].clone()
+        });
+        let err = check_replay(&specimens, &extra).expect_err("a row for another asset");
+        assert!(err.contains("does not hold: passports/other.png"), "{err}");
+
+        let mut anonymous = replay_capture(&corpus);
+        anonymous.rows[2].asset_id = None;
+        let err = check_replay(&specimens, &anonymous).expect_err("a row with no asset_id");
+        assert!(err.contains("capture row 3 has no asset_id"), "{err}");
+
+        // A replay over a subset of a capture is not the capture's corpus either.
+        let err = check_replay(&specimens[..2], &replay_capture(&corpus)).expect_err("a subset");
+        assert!(err.contains("passports/specimen-c.png"), "{err}");
+        assert!(err.contains("exactly once"), "{err}");
+    }
+
+    #[test]
+    fn a_row_read_from_other_image_bytes_is_refused_naming_the_asset() {
+        let corpus = replay_corpus();
+        let mut capture = replay_capture(&corpus);
+        capture.rows[1].source_sha256 = Some("f".repeat(64));
+        let err = check_replay(&replay_specimens(&corpus), &capture).expect_err("refused");
+        assert!(err.contains("source_sha256 differs"), "{err}");
+        assert!(err.contains("passports/specimen-b.png"), "{err}");
+        assert!(
+            !err.contains("specimen-a"),
+            "only the differing asset: {err}"
+        );
+        capture.rows[1].source_sha256 = None;
+        assert!(check_replay(&replay_specimens(&corpus), &capture).is_err());
+    }
+
+    #[test]
+    fn a_long_list_of_offending_ids_is_cut_to_five() {
+        let ids: Vec<String> = (0..8).map(|n| format!("passports/{n}.png")).collect();
+        let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let listed = some_ids(&refs);
+        assert!(listed.ends_with(", and 3 more"), "{listed}");
+        assert!(listed.contains("passports/4.png") && !listed.contains("passports/5.png"));
+        assert_eq!(some_ids(&refs[..2]), "passports/0.png, passports/1.png");
+    }
+
+    #[tokio::test]
+    async fn a_replay_refuses_to_write_a_pass_trace() {
+        let corpus = replay_corpus();
+        let dir = scratch_dir("no-trace");
+        let dumps = RealDumpOptions {
+            ocr_passes_dir: Some(dir.as_path()),
+            ..RealDumpOptions::default()
+        };
+        let err = run_provider_bench_replay(
+            &mrz_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &dumps,
+            false,
+        )
+        .await
+        .err()
+        .expect("refused");
+        assert!(err.contains("writes none"), "{err}");
+        assert!(!dir.exists(), "nothing was written");
+    }
+
+    #[tokio::test]
+    async fn a_replay_runs_the_scoring_path_and_reports_the_captured_retry_state() {
+        let corpus = replay_corpus();
+        let reports = run_provider_bench_replay(
+            &mrz_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions::default(),
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        let detail = &reports[0].documents_detail;
+        assert_eq!(detail.len(), 3);
+        assert!(
+            detail[0].miss_reason.is_none(),
+            "the labelled zone is a hit"
+        );
+        assert_eq!(detail[0].names_exact, Some(true));
+        assert_eq!(detail[0].retry_variant_id.as_deref(), Some("pass-01"));
+        assert_eq!(detail[0].retry_damaged_recovery, Some(false));
+        assert!(detail[1].retry_budget_hit);
+        assert_eq!(detail[1].ocr_elapsed, Duration::ZERO);
+    }
+
+    // ---- #574: the shadow line-1 selector in the benchmark ----
+
+    /// The ICAO specimen's line 2, which every selector case pairs with a line 1
+    /// of its own making. Constructed text only: no real-specimen OCR.
+    const SELECTOR_LINE2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// A TD3 line 1 for the specimen's issuer, filler-padded to 44 cells. No
+    /// name holds a `K` or an `L`, which the scanner's repairs read as fillers.
+    fn selector_line1(name_field: &str) -> String {
+        let mut line = format!("P<UTO{name_field}");
+        while line.len() < 44 {
+            line.push('<');
+        }
+        line
+    }
+
+    /// The scanner accepts the first line 1 as read (its name field breaks the
+    /// grammar), and the second is the well-formed reading of the same line.
+    fn broken_then_good_text() -> String {
+        format!(
+            "{}\n{SELECTOR_LINE2}\n\n{}\n{SELECTOR_LINE2}",
+            selector_line1("SPECIMEN<<TESTXYZ<<<<Q"),
+            selector_line1("SPECIMEN<<TESTXYZ"),
+        )
+    }
+
+    fn control_read(text: &str) -> synthpass_die::Tier1Read {
+        synthpass_die::read_tier1_with(
+            text,
+            &synthpass_die::mrz_parse_options_for(false),
+            synthpass_die::Line1Arm::Control,
+        )
+    }
+
+    fn provenance(id: &str, transform: &str, readings: &[&str]) -> PassProvenance {
+        PassProvenance {
+            id: id.to_string(),
+            transform: transform.to_string(),
+            readings: readings.iter().map(|r| r.to_string()).collect(),
+        }
+    }
+
+    /// The source fields name the passes whose readings hold the proposed
+    /// line 1 once whitespace is stripped, in execution order, each transform
+    /// once.
+    #[test]
+    fn a_proposal_is_traced_to_the_passes_that_read_it() {
+        let read = control_read(&broken_then_good_text());
+        let summary = read.line1.expect("control records a verdict");
+        assert_eq!(summary.outcome, synthpass_die::Line1Outcome::Proposed);
+        let good = selector_line1("SPECIMEN<<TESTXYZ");
+        assert_eq!(read.proposed_line1.as_deref(), Some(good.as_str()));
+
+        let spaced = format!("{} {}", &good[..12], &good[12..]);
+        let passes = vec![
+            provenance(
+                "general",
+                "general",
+                &[&selector_line1("SPECIMEN<<TESTXYZ<<<<Q"), SELECTOR_LINE2],
+            ),
+            provenance("pass-02", "mrz_variants:2", &[&spaced, SELECTOR_LINE2]),
+            provenance("pass-03", "mrz_variants:2", &[&good]),
+            provenance("pass-04", "mrz_variants:3", &["NOT<A<ZONE"]),
+        ];
+        let detail = line1_selection_detail(&summary, read.proposed_line1.as_deref(), &passes);
+
+        assert_eq!(detail.arm, "control");
+        assert_eq!(detail.verdict, "proposed");
+        assert_eq!(detail.reason, None);
+        assert_eq!((detail.eligible, detail.distinct), (1, 1));
+        assert!(detail.names_changed);
+        assert_eq!(detail.source_passes, vec!["pass-02", "pass-03"]);
+        assert_eq!(detail.source_transforms, vec!["mrz_variants:2"]);
+
+        // No pass trace, no provenance; the verdict is still reported.
+        let untraced = line1_selection_detail(&summary, read.proposed_line1.as_deref(), &[]);
+        assert!(untraced.source_passes.is_empty() && untraced.source_transforms.is_empty());
+        assert_eq!(untraced.verdict, "proposed");
+    }
+
+    /// A verdict that is not a proposal never claims a source, even when a
+    /// pass happens to hold the same line.
+    #[test]
+    fn only_a_proposal_carries_a_source() {
+        let zone = format!("{}\n{SELECTOR_LINE2}", selector_line1("SPECIMEN<<TESTXYZ"));
+        let read = control_read(&zone);
+        let summary = read.line1.expect("control records a verdict");
+        assert_eq!(summary.outcome, synthpass_die::Line1Outcome::NoAction);
+        let passes = vec![provenance(
+            "pass-01",
+            "general",
+            &[&selector_line1("SPECIMEN<<TESTXYZ")],
+        )];
+        let detail = line1_selection_detail(
+            &summary,
+            Some(&selector_line1("SPECIMEN<<TESTXYZ")),
+            &passes,
+        );
+        assert_eq!(detail.verdict, "none");
+        assert_eq!(detail.reason, Some("kept"));
+        assert!(detail.source_passes.is_empty());
+    }
+
+    /// The reading's own evidence decides whether a document carries a
+    /// selection: absent (the arm is `off`) writes none, present is passed
+    /// through.
+    #[tokio::test]
+    async fn a_document_carries_the_selection_its_reading_recorded() {
+        let read = control_read(&broken_then_good_text());
+        let mut recording = Evidence::default();
+        recording.line1_selection = read.line1;
+
+        let mut page = rate_test_page();
+        page.page = OcrPage {
+            text: "no zone here".to_string(),
+            ..OcrPage::default()
+        };
+        let prepped = vec![Some(page)];
+        for (evidence, expected) in [(Evidence::default(), None), (recording, Some("proposed"))] {
+            let catalog = synthpass_die::ProviderCatalog::builder()
+                .with_reader(std::sync::Arc::new(FixedReader {
+                    evidence,
+                    ..FixedReader::default()
+                }))
+                .build()
+                .expect("no duplicate ids");
+            let reports = run_prepped(&catalog, &prepped, false, None, false).await;
+            let detail = &reports[0].documents_detail[0];
+            assert_eq!(detail.line1_selection.as_ref().map(|s| s.verdict), expected);
+        }
+    }
+
+    /// With every `SYNTHPASS_MRZ_*` arm `off` the dump zone comes from
+    /// `read_tier1`, which is what `mrz::find_and_parse` returns: the dump is
+    /// byte-identical to what it was before the arms reached it (#574, finding
+    /// 3). Pins the equivalence over the shapes a dump sees: a clean zone, a
+    /// broken-name zone, a checksum failure, prose and a merged zone.
+    #[test]
+    fn the_dump_zone_with_every_arm_off_is_what_find_and_parse_returns() {
+        let specimen = format!("P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n{SELECTOR_LINE2}");
+        let texts = [
+            specimen.clone(),
+            broken_then_good_text(),
+            specimen.replace("L898902C36UTO", "L898902C35UTO"),
+            "just some ordinary prose with no machine readable zone".to_string(),
+            format!("{} {SELECTOR_LINE2}", selector_line1("SPECIMEN<<TESTXYZ")),
+        ];
+        for text in &texts {
+            let off = synthpass_die::read_tier1_with(
+                text,
+                &synthpass_die::mrz_parse_options_for(false),
+                synthpass_die::Line1Arm::Off,
+            );
+            assert_eq!(off.parsed, mrz::find_and_parse(text), "{text}");
+            assert_eq!(off.line1, None, "{text}");
         }
     }
 }

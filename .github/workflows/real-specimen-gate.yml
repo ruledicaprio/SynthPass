@@ -24,6 +24,13 @@ name: Real-specimen Tier-1 gate
 # `tolerance`. See `knowledge/benchmarks/README.md` for the design and the
 # re-bless flow.
 #
+# It also prints, and appends to the job's step summary, a report-only
+# per-document diff against the committed outcome ledger: the outcome changes,
+# then every other recorded field (deterministic fields separately from the
+# timing-sensitive ones). The diff never fails the job. The repository is
+# public, so the summary carries asset ids, field names, enumerated values and
+# counts only -- never OCR text or `miss_reason` text (#557).
+#
 # Path-filtered so it never runs on a docs-only or unrelated PR. Advisory at
 # first (not a required check) — see the README section for the rollout to
 # required once run-to-run variance across CI runner hardware is measured.
@@ -225,11 +232,24 @@ jobs:
           path: artifacts/identity-audit.json
           if-no-files-found: ignore
 
-      - name: Preserve the run report
+      # The report, plus the text-free projection of this run's outcome ledger
+      # (`--assert-baseline` writes it under `--out`'s directory, never next to
+      # the committed baseline). It is the evidence behind the per-document
+      # field diff in the job log and the step summary: every row as the run
+      # measured it, except that each `miss_reason` is reduced to its kind --
+      # the full text can hold both document numbers of a
+      # `document_number_mismatch`, and CI never publishes real-specimen text
+      # (ADR-0027 Decision 5). In write-baseline mode the projection is absent
+      # (the regenerated full ledger goes up in the step above) and
+      # `if-no-files-found: ignore` covers it. `if: always()`: a failed gate is
+      # the run whose diff matters most.
+      - name: Preserve the run report and the text-free ledger projection
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: real-specimen-gate-report
-          path: artifacts/real-specimen-gate-report.json
+          path: |
+            artifacts/real-specimen-gate-report.json
+            artifacts/real-specimen-outcomes-text-free.jsonl
           if-no-files-found: ignore
           retention-days: 90

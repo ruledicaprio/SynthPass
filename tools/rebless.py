@@ -28,6 +28,13 @@ hand, in order; this tool automates the mechanical parts and stops for a human
    - **scored delta** -- anything scored moved, or an unrecognized field
      moved (never guessed at: an unknown field is treated as a scored delta
      on purpose, the conservative direction).
+   The baseline diff compares aggregates only, so it also diffs the two
+   *ledgers* document by document (`format_ledger_diff`, the same field
+   classes and wording `provider-bench`'s gate prints): the outcome changes,
+   then every other recorded field in a deterministic group and a
+   timing-sensitive one. That diff is printed, and carried into the commit
+   message and the FINDINGS entry. `miss_reason` text is never printed, only
+   its kind.
 4. Install the new baseline and outcome ledger. For an "identical" or
    "non-scored delta" result, mechanically rewrite the numbers this loop has
    hand-edited every time so far: `README.md`'s gap sentence and corpus-wide
@@ -46,7 +53,13 @@ hand, in order; this tool automates the mechanical parts and stops for a human
    baseline and printing the diff table. It never writes prose for a result
    that moved the numbers accuracy work is scored on -- that entry is
    `synthpass-analyst`'s to write, same discipline as
-   `tools/apply_cohort.py`'s labelled DRAFT notes.
+   `tools/apply_cohort.py`'s labelled DRAFT notes. It stops the same way, with
+   the distinct exit code 3, when the class is "identical" but the ledger diff
+   shows a document whose `outcome` changed: equal counts can hide two
+   documents swapping bucket, so that change is never committed mechanically.
+   Changes in every other ledger field are print-only, and so is an outcome
+   change under a "non-scored delta" (it is printed, and carried into the
+   commit message and the FINDINGS entry).
 6. Commit, push, dispatch the `mode=assert` run and wait for it, `gh pr
    ready`, and PATCH the PR body with a "Re-bless result" paragraph -- all
    gated behind `--confirm` (see "Two independent safety layers" below).
@@ -120,7 +133,7 @@ import index_findings as ixf  # noqa: E402 -- regenerates FINDINGS.md's generate
 
 # --------------------------------------------------------------------------
 # Baseline schema constants, mirrored from
-# crates/synthpass-bench/src/bin/provider-bench.rs (`OFF_DENOMINATOR_KINDS`,
+# crates/synthpass-bench/src/report.rs (`OFF_DENOMINATOR_KINDS`,
 # `REGRESSION_BUCKETS`) the same way apply_cohort.py mirrors the manifest
 # contract: that Rust source, not this file, is what CI actually enforces.
 # --------------------------------------------------------------------------
@@ -178,12 +191,17 @@ SCORED_KEYS = ("scored", "tier1_hits")
 # The full REGRESSION_BUCKETS set, not just the three the task narrative names
 # (the three that happen to be non-zero in the corpus today) -- an unnamed
 # member moving is still a scored miss and must never be classified otherwise.
-SCORED_MISS_KEYS = ("checksum_failed", "no_mrz_found", "ocr_error", "document_number_mismatch", "false_positive_mrz")
-# `by_miss_kind` is a Rust BTreeMap built with `.entry(kind).or_default()` --
-# a miss kind with zero occurrences is simply absent from the JSON, not
-# present with a 0 value. Every key in this tuple must default to 0 when
-# flattening, not just `false_positive_mrz` (the one the committed baseline
-# happens to omit today).
+SCORED_MISS_KEYS = (
+    "checksum_failed",
+    "no_mrz_found",
+    "ocr_error",
+    "document_number_mismatch",
+    "false_positive_mrz",
+    "document_number_leading_filler",
+)
+# Current CI pre-fills every known miss kind with zero in `report.rs`.
+# Older committed baselines did not, so flattening still defaults each known
+# miss kind to zero before comparing an old baseline with a current one.
 ALL_MISS_KIND_KEYS = tuple(sorted(set(SCORED_MISS_KEYS) | {"redacted_mrz", "no_mrz_expected", "checksum_failed_specimen"}))
 
 CLASS_IDENTICAL = "identical"
@@ -276,6 +294,228 @@ def format_diff_table(changed: list[tuple[str, object, object]], new_flat: dict)
     return "\n".join(lines)
 
 
+# ==========================================================================
+# Ledger diffing (pure) -- the per-document half of "inspect" (#557)
+# ==========================================================================
+#
+# The baseline diff above compares aggregates, so two documents swapping
+# buckets leave every count equal and the re-bless classifies as `identical`.
+# These functions diff the *ledger* the same way `provider-bench` does in the
+# gate (`diff_outcomes` + `diff_ledger_fields` in
+# crates/synthpass-bench/src/bin/provider-bench.rs): the same field classes,
+# the same order, the same wording, so the text this tool puts in a commit
+# message matches the text the gate printed. That Rust source is what CI runs;
+# this is its mirror, kept in step by hand the way the baseline constants
+# above are.
+#
+# Report-only except for `outcome`: see `EXIT_OUTCOME_CHANGED` in `main()`.
+#
+# Privacy: the output holds asset ids, field names, enumerated values (format
+# labels, booleans, retry ids, stop kinds, name-error classes) and counts. It
+# never holds the ledger's `miss_reason` text -- for a document-number mismatch
+# that text carries both document numbers -- only the miss *kind* (`outcome`).
+
+# `OutcomeRow`'s schema order, minus the join keys, `outcome` (its own summary
+# below) and `ocr_ms` (its own timing line).
+LEDGER_DIFFED_FIELDS = (
+    "miss_reason",
+    "mrz_format",
+    "mrz_found",
+    "mrz_checksums_valid",
+    "names_exact",
+    "name_error",
+    "retry_variant_id",
+    "retry_budget_hit",
+    "retry_stop",
+)
+LEDGER_DOC_LINE_CAP = 20
+
+
+def load_ledger(path: Path) -> list[dict]:
+    """A ledger file's rows, one JSON object per non-empty line."""
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _ledger_key(row: dict) -> str:
+    """The join key: `asset_id`, falling back to `name` (`OutcomeRow::sort_key`)."""
+    return row.get("asset_id") or row["name"]
+
+
+def _ledger_by_key(rows: list[dict]) -> dict[str, dict]:
+    return {_ledger_key(row): row for row in rows}
+
+
+def _render_value(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def ledger_outcome_changes(old_rows: list[dict], new_rows: list[dict]) -> tuple[list[tuple[str, str, str]], int, int]:
+    """`(moved, only_old, only_new)`: the documents whose `outcome` differs,
+    `(key, old_outcome, new_outcome)` sorted by key, then how many documents
+    only the old ledger and only the new ledger hold."""
+    old_by_key, new_by_key = _ledger_by_key(old_rows), _ledger_by_key(new_rows)
+    moved = sorted(
+        (key, row["outcome"], new_by_key[key]["outcome"])
+        for key, row in old_by_key.items()
+        if key in new_by_key and new_by_key[key]["outcome"] != row["outcome"]
+    )
+    only_old = sum(1 for key in old_by_key if key not in new_by_key)
+    only_new = sum(1 for key in new_by_key if key not in old_by_key)
+    return moved, only_old, only_new
+
+
+def format_outcome_diff_lines(old_rows: list[dict], new_rows: list[dict]) -> list[str]:
+    """`diff_outcomes`'s output: a one-line summary, then up to 20
+    `key: old -> new` rows and `... and N more`."""
+    moved, only_old, only_new = ledger_outcome_changes(old_rows, new_rows)
+    lines = [
+        f"outcome ledger diff vs committed: {len(moved)} document(s) changed outcome, {only_old} only "
+        f"in the committed ledger, {only_new} only in this run"
+    ]
+    for key, old, new in moved[:LEDGER_DOC_LINE_CAP]:
+        lines.append(f"  {key}: {old} -> {new}")
+    if len(moved) > LEDGER_DOC_LINE_CAP:
+        lines.append(f"  ... and {len(moved) - LEDGER_DOC_LINE_CAP} more")
+    return lines
+
+
+def _ledger_field_changes(old: dict, new: dict) -> list[tuple[str, str]]:
+    """`(field, text)` for every `LEDGER_DIFFED_FIELDS` entry that differs on
+    one document, in schema order. `miss_reason` yields the kind and "detail
+    changed", never the text."""
+    changes: list[tuple[str, str]] = []
+    for field in LEDGER_DIFFED_FIELDS:
+        old_value, new_value = old.get(field), new.get(field)
+        if old_value == new_value:
+            continue
+        if field == "miss_reason":
+            if old["outcome"] == new["outcome"]:
+                text = f"miss_reason {new['outcome']} (detail changed)"
+            else:
+                text = f"miss_reason {old['outcome']} -> {new['outcome']} (detail changed)"
+        else:
+            text = f"{field} {_render_value(old_value)} -> {_render_value(new_value)}"
+        changes.append((field, text))
+    return changes
+
+
+def _is_budget_limited(old: dict, new: dict) -> bool:
+    """A document that hit the retry-pass time budget on either side: which
+    passes finished depends on runner speed, so none of its fields is stable."""
+    return bool(
+        old.get("retry_budget_hit")
+        or new.get("retry_budget_hit")
+        or old.get("retry_stop") == "budget"
+        or new.get("retry_stop") == "budget"
+    )
+
+
+def _ledger_field_totals(docs: list[tuple[str, list[tuple[str, str]]]]) -> str:
+    parts = []
+    for field in LEDGER_DIFFED_FIELDS:
+        count = sum(1 for _key, changes in docs if any(name == field for name, _text in changes))
+        if count:
+            parts.append(f"{field} {count}")
+    return ", ".join(parts)
+
+
+def _ledger_document_lines(docs: list[tuple[str, list[tuple[str, str]]]]) -> list[str]:
+    lines = [f"  {key}: " + "; ".join(text for _name, text in changes) for key, changes in docs[:LEDGER_DOC_LINE_CAP]]
+    if len(docs) > LEDGER_DOC_LINE_CAP:
+        lines.append(f"  ... and {len(docs) - LEDGER_DOC_LINE_CAP} more")
+    return lines
+
+
+def _median(values: list[int]) -> int:
+    """The middle value; the integer mean, rounded down, of the two middle
+    values when the count is even; 0 for none."""
+    ordered = sorted(values)
+    n = len(ordered)
+    if n == 0:
+        return 0
+    if n % 2 == 1:
+        return ordered[n // 2]
+    return (ordered[n // 2 - 1] + ordered[n // 2]) // 2
+
+
+def format_ledger_field_diff_lines(old_rows: list[dict], new_rows: list[dict]) -> list[str]:
+    """`diff_ledger_fields`'s output. Two groups:
+
+    - **deterministic** -- `miss_reason` (kind only), `mrz_format`,
+      `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
+      `retry_variant_id`, `retry_stop`: one totals line, then one line per
+      document (at most 20, then `... and N more`);
+    - **timing-sensitive** -- `ocr_ms` (one summary line) and every change on a
+      budget-limited document (`retry_budget_hit`, `retry_stop == "budget"`,
+      and whatever else moved on it).
+
+    Documents present on one side only are counted by
+    `format_outcome_diff_lines` and skipped here. Nothing is printed for a
+    group with nothing in it."""
+    old_by_key, new_by_key = _ledger_by_key(old_rows), _ledger_by_key(new_rows)
+    deterministic: list[tuple[str, list[tuple[str, str]]]] = []
+    budget_limited: list[tuple[str, list[tuple[str, str]]]] = []
+    ocr_deltas: list[int] = []
+    common = ocr_old_total = ocr_new_total = 0
+    for key in sorted(old_by_key):
+        if key not in new_by_key:
+            continue
+        old, new = old_by_key[key], new_by_key[key]
+        common += 1
+        ocr_old_total += int(old["ocr_ms"])
+        ocr_new_total += int(new["ocr_ms"])
+        if old["ocr_ms"] != new["ocr_ms"]:
+            ocr_deltas.append(abs(int(old["ocr_ms"]) - int(new["ocr_ms"])))
+        changes = _ledger_field_changes(old, new)
+        if not changes:
+            continue
+        (budget_limited if _is_budget_limited(old, new) else deterministic).append((key, changes))
+
+    lines: list[str] = []
+    if deterministic:
+        lines.append(
+            f"deterministic field diff vs committed (report-only): {len(deterministic)} document(s); "
+            f"{_ledger_field_totals(deterministic)}"
+        )
+        lines.extend(_ledger_document_lines(deterministic))
+    if ocr_deltas:
+        lines.append(
+            f"timing-sensitive field diff vs committed (report-only): ocr_ms differs on {len(ocr_deltas)} of "
+            f"{common} document(s), median |delta| {_median(ocr_deltas)} ms, total {ocr_old_total} ms -> "
+            f"{ocr_new_total} ms"
+        )
+    if budget_limited:
+        lines.append(
+            "budget-limited document(s) vs committed (report-only; every change on them is "
+            f"timing-sensitive): {len(budget_limited)} document(s); {_ledger_field_totals(budget_limited)}"
+        )
+        lines.extend(_ledger_document_lines(budget_limited))
+    return lines
+
+
+def format_ledger_diff(old_rows: list[dict], new_rows: list[dict]) -> list[str]:
+    """The whole per-document diff, in the order the gate prints it: the
+    outcome summary, then the per-field groups."""
+    return format_outcome_diff_lines(old_rows, new_rows) + format_ledger_field_diff_lines(old_rows, new_rows)
+
+
+def format_outcome_stop_message(moved: list[tuple[str, str, str]]) -> str:
+    """What the tool says when it stops for a document whose `outcome`
+    changed: every document, uncapped, since a human must read each one."""
+    rows = "\n".join(f"  {key}: {old} -> {new}" for key, old, new in moved)
+    return (
+        f"OUTCOME changed on {len(moved)} document(s) while the baseline aggregates did not move (or moved "
+        f"only off-denominator): the counts hide which documents changed bucket.\n{rows}\n"
+        "A per-document outcome change is never committed mechanically. The new baseline and ledger have been "
+        "installed for review; read the documents above, then commit by hand (or have synthpass-analyst write "
+        "the FINDINGS entry)."
+    )
+
+
 def format_rate(hits: int, denom: int) -> str:
     """One decimal place, rounded half-up -- the same convention
     `scripts/check-headline-numbers.sh`'s `awk '%.1f'` uses, via `Decimal`
@@ -292,11 +532,30 @@ def format_rate(hits: int, denom: int) -> str:
 # ==========================================================================
 
 
-def build_rebless_commit_message(cohort_branch: str, cls: str, changed: list[tuple[str, object, object]], run_id: str, new_flat: dict) -> str:
+def format_ledger_diff_block(ledger_diff: list[str] | None) -> str:
+    """The per-document ledger diff as a titled block for a commit message, or
+    `""` when there is none (`ledger_diff` is `None` when the old or the new
+    ledger was absent, so nothing could be diffed)."""
+    if not ledger_diff:
+        return ""
+    return "Per-document ledger diff, old ledger -> new ledger (report-only):\n\n" + "\n".join(ledger_diff) + "\n"
+
+
+def build_rebless_commit_message(
+    cohort_branch: str,
+    cls: str,
+    changed: list[tuple[str, object, object]],
+    run_id: str,
+    new_flat: dict,
+    ledger_diff: list[str] | None = None,
+) -> str:
     cycle = cohort_branch.removeprefix("cohort-")
     subject = f"bench: re-bless the real-specimen baseline for cohort {cycle} ({cls})"
     table = format_diff_table(changed, new_flat)
     body = f"CI run {run_id} (`{WORKFLOW}`, mode=write-baseline) on `{cohort_branch}`:\n\n{table}\n"
+    ledger_block = format_ledger_diff_block(ledger_diff)
+    if ledger_block:
+        body += f"\n{ledger_block}"
     return f"{subject}\n\n{body}"
 
 
@@ -312,7 +571,15 @@ def build_rebless_result_paragraph(cls: str, changed: list[tuple[str, object, ob
     )
 
 
-def build_weakspot_entry(cohort_branch: str, n_specimens: int, changed: list[tuple[str, object, object]], run_id: str, old_flat: dict, new_flat: dict) -> str:
+def build_weakspot_entry(
+    cohort_branch: str,
+    n_specimens: int,
+    changed: list[tuple[str, object, object]],
+    run_id: str,
+    old_flat: dict,
+    new_flat: dict,
+    ledger_diff: list[str] | None = None,
+) -> str:
     """A dated entry in the house shape (`knowledge/benchmarks/FINDINGS.md`'s
     `## Weak-spot findings`, e.g. the 2026-09-15 cohort c10/c12 entry): a
     heading naming the cohort and what moved, a paragraph naming the run and
@@ -334,6 +601,9 @@ def build_weakspot_entry(cohort_branch: str, n_specimens: int, changed: list[tup
         f"only non-scored bucket(s) moved.\n\n```\n{table}\n```\n\n"
         f"The scored rate did not move: **{hits} / {scored} = {rate}%**, unchanged.\n"
     )
+    if ledger_diff:
+        fenced = "\n".join(ledger_diff)
+        body += f"\nPer-document ledger diff, old ledger -> new ledger (report-only):\n\n```\n{fenced}\n```\n"
     return f"\n{heading}\n\n{body}"
 
 
@@ -728,6 +998,13 @@ def install_baseline_and_ledger(new_baseline: dict, ledger_artifact: Path, workt
 # ==========================================================================
 
 
+# `main()`'s exit codes when it stops for a human rather than committing:
+# a scored delta, and (distinct, so a caller can tell them apart) a document
+# whose outcome changed behind aggregates that did not move.
+EXIT_SCORED_DELTA = 2
+EXIT_OUTCOME_CHANGED = 3
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--cohort-branch", required=True)
@@ -783,6 +1060,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nbaseline diff classification: {cls}")
     print(format_diff_table(changed, new_flat))
 
+    # The per-document ledger diff. Read the committed ledger BEFORE
+    # `install_baseline_and_ledger` below overwrites it. `None` when either
+    # side has no ledger (a pre-ledger CI run): nothing to diff, said so.
+    old_ledger_path = worktree / LEDGER_REL_PATH
+    ledger_diff: list[str] | None = None
+    outcome_moved: list[tuple[str, str, str]] = []
+    if old_ledger_path.is_file() and ledger_artifact.is_file():
+        old_rows, new_rows = load_ledger(old_ledger_path), load_ledger(ledger_artifact)
+        ledger_diff = format_ledger_diff(old_rows, new_rows)
+        outcome_moved, _only_old, _only_new = ledger_outcome_changes(old_rows, new_rows)
+        print("\nper-document ledger diff (old ledger -> new ledger, report-only):")
+        print("\n".join(ledger_diff))
+    else:
+        print("\nno per-document ledger diff: the committed ledger or the downloaded artifact's ledger is absent")
+
     # Install the new baseline (and its outcome ledger, when the artifact
     # carries one) unconditionally: CI's freshly measured numbers are always
     # the new source of truth, whatever class the diff falls into -- an
@@ -795,7 +1087,12 @@ def main(argv: list[str] | None = None) -> int:
         print("This needs prose from synthpass-analyst -- the benchmarks/FINDINGS.md Weak-spot entry and")
         print("the README.md headline numbers -- before it can be committed. The new baseline has been")
         print(f"installed at {baseline_path} for the analyst to work from; nothing else was written.")
-        return 2
+        return EXIT_SCORED_DELTA
+
+    if cls == CLASS_IDENTICAL and outcome_moved:
+        print("\nbaseline classified 'identical', but a document's outcome changed -- stopping for a human.")
+        print(format_outcome_stop_message(outcome_moved))
+        return EXIT_OUTCOME_CHANGED
 
     if cls == CLASS_NON_SCORED:
         readme_path = worktree / README_REL_PATH
@@ -816,7 +1113,7 @@ def main(argv: list[str] | None = None) -> int:
         # the same step, so the index is never one commit behind the log it
         # summarizes.
         n_specimens = int(new_flat["documents"]) - int(old_flat["documents"])
-        entry = build_weakspot_entry(args.cohort_branch, n_specimens, changed, run_id, old_flat, new_flat)
+        entry = build_weakspot_entry(args.cohort_branch, n_specimens, changed, run_id, old_flat, new_flat, ledger_diff)
         findings_path = worktree / FINDINGS_REL_PATH
         findings_path.write_text(findings_path.read_text(encoding="utf-8").rstrip("\n") + "\n" + entry, encoding="utf-8")
         ixf.write_index(worktree)
@@ -833,7 +1130,7 @@ def main(argv: list[str] | None = None) -> int:
         print("and PATCH the PR body. Re-run with --confirm once the rewritten prose has been reviewed.")
         return 0
 
-    commit_message = build_rebless_commit_message(args.cohort_branch, cls, changed, run_id, new_flat)
+    commit_message = build_rebless_commit_message(args.cohort_branch, cls, changed, run_id, new_flat, ledger_diff)
     print("--- commit message ---")
     print(commit_message)
     print("--- end ---")

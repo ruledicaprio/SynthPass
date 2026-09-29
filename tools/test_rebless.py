@@ -71,6 +71,7 @@ class FlattenBaselineTests(unittest.TestCase):
         self.assertEqual(flat["false_positive_mrz"], 0)
         self.assertEqual(flat["ocr_error"], 0)
         self.assertEqual(flat["document_number_mismatch"], 0)
+        self.assertEqual(flat["document_number_leading_filler"], 0)
 
     def test_strict_names_fold_into_top_level(self):
         flat = rb.flatten_baseline(
@@ -94,6 +95,24 @@ class FlattenBaselineTests(unittest.TestCase):
 
 
 class ClassifyBaselineDiffTests(unittest.TestCase):
+    def test_new_zero_leading_filler_bucket_matches_old_baseline(self):
+        old = make_baseline()
+        new = make_baseline(
+            by_miss_kind={**old["by_miss_kind"], "document_number_leading_filler": 0}
+        )
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_IDENTICAL)
+        self.assertEqual(changed, [])
+
+    def test_new_nonzero_leading_filler_bucket_is_scored(self):
+        old = make_baseline()
+        new = make_baseline(
+            by_miss_kind={**old["by_miss_kind"], "document_number_leading_filler": 1}
+        )
+        cls, changed = rb.classify_baseline_diff(old, new)
+        self.assertEqual(cls, rb.CLASS_SCORED)
+        self.assertIn(("document_number_leading_filler", 0, 1), changed)
+
     def test_only_provenance_moved_is_identical(self):
         old = make_baseline()
         new = make_baseline(measured_on_ci_sha="ccccccc", measured_date="2026-09-15", samples_data_sha="ddddddd")
@@ -814,6 +833,260 @@ class InstallBaselineAndLedgerTests(unittest.TestCase):
             self.assertEqual(touched, {rb.BASELINE_REL_PATH})
             self.assertFalse((worktree / rb.LEDGER_REL_PATH).exists())
             self.assertTrue((worktree / rb.BASELINE_REL_PATH).is_file())
+
+
+# --------------------------------------------------------------------------
+# The per-document ledger diff (#557). Literal rows, the same cases as the
+# Rust tests of `diff_ledger_fields` in provider-bench.rs: the two must print
+# the same text, since this tool's output goes into a commit message.
+# --------------------------------------------------------------------------
+
+
+def ledger_row(asset_id: str, **overrides) -> dict:
+    row = {
+        "asset_id": asset_id,
+        "name": asset_id,
+        "outcome": "hit",
+        "miss_reason": None,
+        "mrz_format": None,
+        "mrz_found": True,
+        "mrz_checksums_valid": True,
+        "names_exact": None,
+        "name_error": None,
+        "ocr_ms": 1,
+        "retry_variant_id": None,
+        "retry_budget_hit": False,
+        "retry_stop": None,
+    }
+    row.update(overrides)
+    return row
+
+
+class LedgerDiffTests(unittest.TestCase):
+    def test_no_change_prints_only_the_outcome_summary_line(self):
+        rows = [ledger_row("a"), ledger_row("b", outcome="checksum_failed")]
+        self.assertEqual(
+            rb.format_ledger_diff(rows, rows),
+            [
+                "outcome ledger diff vs committed: 0 document(s) changed outcome, 0 only in the "
+                "committed ledger, 0 only in this run"
+            ],
+        )
+        self.assertEqual(rb.format_ledger_field_diff_lines(rows, rows), [])
+
+    def test_outcome_summary_names_the_moved_and_one_sided_documents(self):
+        old = [ledger_row("a"), ledger_row("b", outcome="no_mrz_found"), ledger_row("only-old")]
+        new = [ledger_row("a"), ledger_row("b"), ledger_row("only-new")]
+        self.assertEqual(
+            rb.format_outcome_diff_lines(old, new),
+            [
+                "outcome ledger diff vs committed: 1 document(s) changed outcome, 1 only in the "
+                "committed ledger, 1 only in this run",
+                "  b: no_mrz_found -> hit",
+            ],
+        )
+
+    def test_one_deterministic_field_change_in_schema_order(self):
+        old = [ledger_row("a", mrz_format="MRVA")]
+        new = [ledger_row("a", mrz_format="TD3", mrz_checksums_valid=False)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format 1, "
+                "mrz_checksums_valid 1",
+                "  a: mrz_format MRVA -> TD3; mrz_checksums_valid true -> false",
+            ],
+        )
+
+    def test_miss_reason_prints_the_kind_and_never_the_text(self):
+        def mismatch(got: str) -> dict:
+            return ledger_row(
+                "d",
+                outcome="document_number_mismatch",
+                miss_reason=f'document number mismatch: got "{got}", expected "Y7654321"',
+            )
+
+        lines = rb.format_ledger_field_diff_lines([mismatch("X1234567")], [mismatch("X1234568")])
+        self.assertEqual(
+            lines,
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); miss_reason 1",
+                "  d: miss_reason document_number_mismatch (detail changed)",
+            ],
+        )
+        printed = "\n".join(lines)
+        for text in ("X1234567", "X1234568", "Y7654321", "got", "expected"):
+            self.assertNotIn(text, printed)
+
+    def test_miss_reason_with_a_changed_kind_names_both_kinds(self):
+        old = [ledger_row("d", outcome="checksum_failed", miss_reason="checksum invalid: composite")]
+        new = [ledger_row("d")]
+        lines = rb.format_ledger_field_diff_lines(old, new)
+        self.assertIn("  d: miss_reason checksum_failed -> hit (detail changed)", lines)
+        self.assertNotIn("composite", "\n".join(lines))
+
+    def test_ocr_ms_only_changes_print_one_timing_line(self):
+        old = [ledger_row("a", ocr_ms=1000), ledger_row("b", ocr_ms=2000), ledger_row("c", ocr_ms=300)]
+        new = [ledger_row("a", ocr_ms=1500), ledger_row("b", ocr_ms=1000), ledger_row("c", ocr_ms=300)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "timing-sensitive field diff vs committed (report-only): ocr_ms differs on 2 of 3 "
+                "document(s), median |delta| 750 ms, total 3300 ms -> 2800 ms"
+            ],
+        )
+
+    def test_a_budget_limited_document_reports_all_its_changes_in_the_timing_group(self):
+        old = [
+            ledger_row("b", mrz_format="TD3", retry_stop="exhausted"),
+            ledger_row("c", retry_stop="budget"),  # budget-limited on the old side only
+            ledger_row("d"),
+        ]
+        new = [
+            ledger_row("b", mrz_format="MRVA", retry_budget_hit=True, retry_stop="budget"),
+            ledger_row("c", names_exact=True, retry_stop="exhausted"),
+            ledger_row("d", mrz_found=False),
+        ]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_found 1",
+                "  d: mrz_found true -> false",
+                "budget-limited document(s) vs committed (report-only; every change on them is "
+                "timing-sensitive): 2 document(s); mrz_format 1, names_exact 1, retry_budget_hit 1, "
+                "retry_stop 2",
+                "  b: mrz_format TD3 -> MRVA; retry_budget_hit false -> true; retry_stop exhausted -> budget",
+                "  c: names_exact null -> true; retry_stop budget -> exhausted",
+            ],
+        )
+
+    def test_document_lines_are_capped_at_twenty_but_the_totals_stay_complete(self):
+        ids = [f"doc-{i:02d}" for i in range(25)]
+        old = [ledger_row(i) for i in ids]
+        new = [ledger_row(i, mrz_found=False) for i in ids]
+        lines = rb.format_ledger_field_diff_lines(old, new)
+        self.assertEqual(lines[0], "deterministic field diff vs committed (report-only): 25 document(s); mrz_found 25")
+        self.assertEqual(len(lines), 22)
+        self.assertTrue(lines[1].startswith("  doc-00: "))
+        self.assertTrue(lines[20].startswith("  doc-19: "))
+        self.assertEqual(lines[21], "  ... and 5 more")
+
+    def test_output_is_ordered_by_key_whatever_the_input_order(self):
+        old = [ledger_row("c"), ledger_row("a"), ledger_row("b")]
+        new = [ledger_row(i, name_error="swapped") for i in ("b", "c", "a")]
+        lines = rb.format_ledger_field_diff_lines(old, new)
+        self.assertEqual([line.split(":")[0].strip() for line in lines[1:]], ["a", "b", "c"])
+        self.assertEqual(rb.format_ledger_field_diff_lines(sorted(old, key=lambda r: r["asset_id"]), new), lines)
+
+    def test_a_document_on_one_side_only_is_not_field_diffed(self):
+        old = [ledger_row("a"), ledger_row("only-old", mrz_found=False)]
+        new = [ledger_row("a", mrz_format="TD3"), ledger_row("only-new", ocr_ms=99999)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); mrz_format 1",
+                "  a: mrz_format null -> TD3",
+            ],
+        )
+
+    def test_a_row_without_an_asset_id_joins_on_its_name(self):
+        old = [ledger_row(None, name="seed-7")]
+        new = [ledger_row(None, name="seed-7", mrz_found=False)]
+        self.assertEqual(rb.format_ledger_field_diff_lines(old, new)[1], "  seed-7: mrz_found true -> false")
+
+
+class LedgerDiffBlockTests(unittest.TestCase):
+    def test_commit_message_carries_the_ledger_diff(self):
+        diff = ["outcome ledger diff vs committed: 0 document(s) changed outcome", "  a: mrz_format null -> TD3"]
+        msg = rb.build_rebless_commit_message("cohort-c9", rb.CLASS_IDENTICAL, [], "1", make_baseline(), diff)
+        self.assertIn("Per-document ledger diff", msg)
+        self.assertIn("  a: mrz_format null -> TD3", msg)
+
+    def test_commit_message_is_unchanged_without_a_ledger_diff(self):
+        msg = rb.build_rebless_commit_message("cohort-c9", rb.CLASS_IDENTICAL, [], "1", make_baseline())
+        self.assertNotIn("Per-document ledger diff", msg)
+
+    def test_findings_entry_carries_the_ledger_diff(self):
+        old_flat, new_flat = rb.flatten_baseline(make_baseline()), rb.flatten_baseline(make_baseline(documents=266))
+        changed = [("documents", 265, 266)]
+        entry = rb.build_weakspot_entry(
+            "cohort-c9", 1, changed, "1", old_flat, new_flat, ["  a: mrz_format null -> TD3"]
+        )
+        self.assertIn("Per-document ledger diff", entry)
+        self.assertIn("  a: mrz_format null -> TD3", entry)
+
+
+class MainLedgerGateTests(unittest.TestCase):
+    """`main()` with every network, git and process call faked: the
+    aggregates below never move (only CI provenance does), so the class is
+    `identical` and the ledger diff alone decides what happens next."""
+
+    def _run_main(self, old_rows: list[dict], new_rows: list[dict], confirm: bool) -> tuple[int, str, list[list[str]]]:
+        import contextlib
+        import io
+
+        def write_ledger(path: Path, rows: list[dict]) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            worktree = root / "wt"
+            baseline_path = worktree / rb.BASELINE_REL_PATH
+            baseline_path.parent.mkdir(parents=True)
+            baseline_path.write_text(json.dumps(make_baseline()), encoding="utf-8")
+            write_ledger(worktree / rb.LEDGER_REL_PATH, old_rows)
+
+            artifact = root / "artifact"
+            artifact.mkdir()
+            new_baseline = artifact / "real-specimen-mrz-baseline.json"
+            new_baseline.write_text(json.dumps(make_baseline(measured_on_ci_sha="ccccccc")), encoding="utf-8")
+            new_ledger = artifact / "real-specimen-outcomes.jsonl"
+            write_ledger(new_ledger, new_rows)
+
+            commands: list[list[str]] = []
+            argv = ["--cohort-branch", "cohort-c99", "--repo-root", str(root / "repo"), "--worktree", str(worktree), "--run-id", "123"]
+            if confirm:
+                argv += ["--confirm", "--skip-assert"]
+            out = io.StringIO()
+            with mock.patch.object(rb, "verify_worktree_on_branch"), mock.patch.object(
+                rb, "download_baseline_artifacts", return_value=(new_baseline, new_ledger, artifact / "report.json")
+            ), mock.patch.object(rb.ac, "find_git_bash", return_value="bash"), mock.patch.object(
+                rb.ac, "run_bash_script", return_value=""
+            ), mock.patch.object(
+                rb.ac, "run_cmd", side_effect=lambda cmd, **kw: commands.append(list(cmd)) or ""
+            ), mock.patch.object(rb.ac, "gh_pr_number_for_branch", return_value=None), contextlib.redirect_stdout(out):
+                code = rb.main(argv)
+            return code, out.getvalue(), commands
+
+    def test_identical_aggregates_but_an_outcome_change_stops_for_a_human(self):
+        old = [ledger_row("a"), ledger_row("b", outcome="checksum_failed")]
+        new = [ledger_row("a", outcome="checksum_failed"), ledger_row("b")]  # the two swapped buckets
+        code, out, commands = self._run_main(old, new, confirm=True)
+        self.assertEqual(code, rb.EXIT_OUTCOME_CHANGED)
+        self.assertNotIn(code, (0, rb.EXIT_SCORED_DELTA), "a distinct exit code")
+        self.assertIn("a: hit -> checksum_failed", out)
+        self.assertIn("b: checksum_failed -> hit", out)
+        self.assertFalse(any("commit" in c for c in commands), f"nothing may be committed: {commands}")
+
+    def test_identical_aggregates_and_a_non_outcome_change_proceeds_with_the_diff_in_the_commit_message(self):
+        old = [ledger_row("a", retry_variant_id="pass-03", retry_stop="variant_valid"), ledger_row("b")]
+        new = [ledger_row("a", retry_variant_id="general", retry_stop="general_valid"), ledger_row("b")]
+        code, out, commands = self._run_main(old, new, confirm=True)
+        self.assertEqual(code, 0)
+        self.assertIn("retry_variant_id pass-03 -> general", out)
+        commits = [c for c in commands if "commit" in c]
+        self.assertEqual(len(commits), 1, commands)
+        message = commits[0][commits[0].index("-m") + 1]
+        self.assertIn("Per-document ledger diff", message)
+        self.assertIn("  a: retry_variant_id pass-03 -> general; retry_stop variant_valid -> general_valid", message)
+
+    def test_no_ledger_change_commits_without_a_field_diff_section_body(self):
+        rows = [ledger_row("a"), ledger_row("b")]
+        code, _out, commands = self._run_main(rows, rows, confirm=True)
+        self.assertEqual(code, 0)
+        message = [c for c in commands if "commit" in c][0][-1]
+        self.assertNotIn("deterministic field diff", message)
 
 
 if __name__ == "__main__":

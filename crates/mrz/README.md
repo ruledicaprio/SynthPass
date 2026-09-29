@@ -94,7 +94,10 @@ assert!(doc.valid()); // every check digit this format prints verified
 noisy OCR text — HTML-escaped fillers, lines merged onto one physical line — and runs a
 check-digit-guided repair pass. A repaired reading is accepted only when its check digits agree
 with it. When nothing validates, you get the best-scoring partial read with its honest `Checks`, or
-`NotFound` if the text only looked like an MRZ.
+`NotFound` if the text only looked like an MRZ. A zone that validates but shows a symptom of holding
+a wrong physical line (an issuing state that is in no registry, two near-identical lines, a digit in
+a two-line format's name field) is ranked below any unflagged valid zone in the same text, and is
+returned when there is none; the rank never refuses a valid read.
 
 ```rust
 let text = "## REPUBLIC OF UTOPIA\n\
@@ -124,6 +127,14 @@ Two cases that are easy to get wrong, both documented with runnable examples on 
 - **A sex cell other than `M`, `F` or `<`** is kept as read, as
   [`Sex::NonConformant`](https://docs.rs/mrz/latest/mrz/enum.Sex.html), not rewritten to `X`. No
   check digit covers the cell, so a misread there is otherwise invisible.
+- **`select_line1`** is an opt-in look at the one field no check digit covers on a two-line format:
+  line 1's name field. Given the OCR text and the zone `find_and_parse_with` accepted, it reports
+  whether the accepted name field is well formed (`Kept`), whether exactly one other line of the
+  same width, document code and issuing state would replace an ill-formed one without changing
+  anything else (`Proposed`), or why it left the zone alone. It never applies a change, never
+  touches a field other than the names, and nothing in the crate calls it. **Off by default, and
+  unmeasured**, like `ParseOptions::class_sweep`: how many correct names it would break has not
+  been established, so it exists to be A/B'd against a control.
 
 ## Emitting
 
