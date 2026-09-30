@@ -1180,11 +1180,8 @@ fn td1_optional_data_slots_are_distinguishable_after_parsing() {
     assert_eq!(a.optional_data_2, None);
     assert_eq!(b.optional_data_1, None);
     assert_eq!(b.optional_data_2.as_deref(), Some(PAYLOAD));
-    assert_ne!(
-        (a.optional_data_1.clone(), a.optional_data_2.clone()),
-        (b.optional_data_1.clone(), b.optional_data_2.clone()),
-        "once the slots are named, these two zones must no longer collapse to the same value"
-    );
+    // (The four assertions above already say the two zones no longer collapse
+    // to the same value, so no separate inequality is asserted.)
     // And neither is a personal number: a TD1 does not print one.
     assert_eq!(a.personal_number(), None);
     assert_eq!(b.personal_number(), None);

@@ -642,6 +642,12 @@ pub struct Report {
     /// value falls back to `off` silently, so quote this field, never the
     /// variable you believe you set.
     pub mrz_refuse_repeated_line_arm: &'static str,
+    /// The date-digits arm this run measured (#579, the C6 rule), as the binary
+    /// resolved it -- `off` (the default), `control` or `on`, from
+    /// `SYNTHPASS_MRZ_DATE_DIGITS`. **Always serialized**, beside the other two
+    /// arms and for the same reason: an unrecognised value falls back to `off`,
+    /// silently, so quote this field, never the variable you believe you set.
+    pub mrz_date_digits_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded — one `NativeOcr` instance shared across every
     /// provider row, so this is a single run-level fact, not per-provider.
@@ -1083,6 +1089,7 @@ mod tests {
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
             mrz_refuse_repeated_line_arm: "off",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1114,6 +1121,7 @@ mod tests {
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
             mrz_refuse_repeated_line_arm: "off",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1561,6 +1569,7 @@ mod tests {
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "control",
             mrz_refuse_repeated_line_arm: "control",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport::default(),
             providers: Vec::new(),
         };
@@ -1569,5 +1578,29 @@ mod tests {
         assert_eq!(json["mrz_class_sweep_arm"], "off");
         // #579: the refusal arm is always serialized too.
         assert_eq!(json["mrz_refuse_repeated_line_arm"], "control");
+    }
+
+    /// #579: the date-digits arm is always serialized too, "off" included, so a
+    /// report names it whether or not it was set.
+    #[test]
+    fn the_report_always_carries_the_date_digits_arm() {
+        for arm in ["off", "control", "on"] {
+            let report = Report {
+                timestamp_unix: 0,
+                source: "real-specimens",
+                profile: None,
+                format: None,
+                count: 0,
+                seed_start: None,
+                mrz_class_sweep_arm: "off",
+                mrz_line1_select_arm: "on",
+                mrz_refuse_repeated_line_arm: "off",
+                mrz_date_digits_arm: arm,
+                model_paths: ModelPathsReport::default(),
+                providers: Vec::new(),
+            };
+            let json = serde_json::to_value(&report).expect("serialize report");
+            assert_eq!(json["mrz_date_digits_arm"], arm);
+        }
     }
 }

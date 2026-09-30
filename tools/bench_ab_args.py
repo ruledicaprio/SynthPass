@@ -87,7 +87,7 @@ PINNED = {"SYNTHPASS_OCR_MAX_SECONDS": "600"}
 
 # Knobs that change what an arm reads. Each is documented in
 # `knowledge/architecture/configuration.md` (a test pins that) and read by the code in
-# `synthpass-ocr` or `synthpass-die`. `SYNTHPASS_MRZ_DATE_DIGITS` joins this list when #631 merges.
+# `synthpass-ocr` or `synthpass-die`.
 #
 # Left out on purpose:
 # - `SYNTHPASS_OCR_STOP` and `SYNTHPASS_OCR_CONFIRM_PASSES` are gone (#473): the code only warns that
@@ -96,6 +96,7 @@ PINNED = {"SYNTHPASS_OCR_MAX_SECONDS": "600"}
 #   (concurrency, and diagnostics that write to the log or the disk).
 ALLOWED_ENV = (
     "SYNTHPASS_MRZ_CLASS_SWEEP",
+    "SYNTHPASS_MRZ_DATE_DIGITS",
     "SYNTHPASS_MRZ_LINE1_SELECT",
     "SYNTHPASS_MRZ_REFUSE_REPEATED_LINE",
     "SYNTHPASS_OCR_CHARGRID",

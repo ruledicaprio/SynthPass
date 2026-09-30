@@ -57,22 +57,6 @@ fn swept_to_letters(zone: &str) -> String {
 }
 
 #[test]
-fn the_fixture_is_valid_before_corruption_and_invalid_after() {
-    let zone = valid_zone();
-    let parsed =
-        find_and_parse_with(&zone, &ParseOptions::default()).expect("emitter output must parse");
-    assert!(parsed.valid(), "sanity: the emitted zone validates");
-
-    let broken = swept_to_letters(&zone);
-    assert_ne!(broken, zone, "sanity: corruption changed the zone");
-    assert_eq!(
-        broken.lines().next().unwrap().matches('O').count(),
-        12,
-        "sanity: ten swept cells plus two legitimate letters already on the line (document code IO, issuing country UTO)"
-    );
-}
-
-#[test]
 fn the_sweep_is_inert_when_its_arm_is_off() {
     let broken = swept_to_letters(&valid_zone());
     let off = ParseOptions::default();

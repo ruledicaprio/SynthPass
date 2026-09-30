@@ -340,6 +340,7 @@ pub fn parse_td3_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         // only place that sets it `true`, on the specific reading its
         // damaged-capture search returns.
         damaged_recovery: false,
+        date_digits_required: opts.date_digits,
     })
 }
 
@@ -442,6 +443,7 @@ pub fn parse_td2_with(line1: &str, line2: &str, opts: &ParseOptions) -> Result<M
         // only place that sets it `true`, on the specific reading its
         // damaged-capture search returns.
         damaged_recovery: false,
+        date_digits_required: opts.date_digits,
     })
 }
 
@@ -555,6 +557,7 @@ pub fn parse_td1_with(
         // only place that sets it `true`, on the specific reading its
         // damaged-capture search returns.
         damaged_recovery: false,
+        date_digits_required: opts.date_digits,
     })
 }
 
@@ -645,6 +648,7 @@ pub fn parse_mrv_a_with(
         // only place that sets it `true`, on the specific reading its
         // damaged-capture search returns.
         damaged_recovery: false,
+        date_digits_required: opts.date_digits,
     })
 }
 
@@ -735,6 +739,7 @@ pub fn parse_mrv_b_with(
         // only place that sets it `true`, on the specific reading its
         // damaged-capture search returns.
         damaged_recovery: false,
+        date_digits_required: opts.date_digits,
     })
 }
 

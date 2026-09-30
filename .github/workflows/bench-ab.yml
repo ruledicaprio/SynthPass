@@ -46,10 +46,10 @@ name: Bench A/B (synthetic)
 #
 # Scope. The five synthetic formats only. The public real-specimen corpus arm is a follow-up: its
 # artifacts and log must first be proven text-free (ADR-0027 decision 5: CI never dumps real
-# OCR text, not even as a short-lived artifact). tools/bench_ab_diff.py compares arms measured on
-# different machines without complaint today; that refusal is build-order item 6. Until then each
-# arm's `arm.json` records the runner (its `context` block is the nightly's), and the two arms of
-# this job share one.
+# OCR text, not even as a short-lived artifact). Each arm's `arm.json` records the runner (its
+# `context` block is the nightly's), and tools/bench_ab_diff.py refuses arms whose records differ
+# in any runner fact or role, or where only one arm has a record (ADR-0027 decision 4, build item
+# 6). The two arms of this job share one runner, so the refusal fires only for a broken job.
 #
 # Verify the workflow with an A/A dispatch: the same ref in both arms and `expect_identical`
 # true. Both arms then run the same code with the same knobs, and the job must end NEUTRAL:
@@ -240,7 +240,8 @@ jobs:
 
       # The full diff (zone text and all) goes to ab/diff.txt and ab/diff.json, which are in the
       # artifact and nowhere else. Exit 0: an A/B; 1: not an A/B (different documents, or a report
-      # that disagrees with its own counts); 2: unreadable.
+      # that disagrees with its own counts); 2: unreadable, or refused (arms not from this run's one
+      # runner).
       - name: Diff the arms
         env:
           EXPECT_IDENTICAL: ${{ steps.plan.outputs.expect_identical }}
