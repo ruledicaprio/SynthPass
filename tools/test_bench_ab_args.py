@@ -166,8 +166,7 @@ class EnvAssignments(Refusals):
 
     def test_removed_and_diagnostic_knobs_are_not_allowed(self):
         for name in ("SYNTHPASS_OCR_STOP", "SYNTHPASS_OCR_CONFIRM_PASSES", "SYNTHPASS_OCR_THREADS",
-                     "SYNTHPASS_OCR_VERBOSE", "SYNTHPASS_OCR_DUMP_VARIANTS", "SYNTHPASS_OCR_ENGINE",
-                     "SYNTHPASS_MRZ_DATE_DIGITS"):
+                     "SYNTHPASS_OCR_VERBOSE", "SYNTHPASS_OCR_DUMP_VARIANTS", "SYNTHPASS_OCR_ENGINE"):
             with self.subTest(name=name):
                 self.refuses("not one of the allowed", AB_AFTER_ENV=f"{name}=on")
 

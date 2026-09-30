@@ -529,6 +529,11 @@ struct Report {
     /// `mrz_class_sweep_arm` above. Always serialized; `provider-bench`
     /// records it under the same name.
     mrz_refuse_repeated_line_arm: &'static str,
+    /// The date-digits arm this run measured (#579), from
+    /// `SYNTHPASS_MRZ_DATE_DIGITS` (default `off`), as `mrz_class_sweep_arm`
+    /// above. Always serialized; `provider-bench` records it under the same
+    /// name. It reaches every synthetic result through `synthpass_die::read_tier1`.
+    mrz_date_digits_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded (issue #541) — a run-level fact next to `ocr_arms`,
     /// since this binary loads one `NativeOcr` instance for the whole run.
@@ -995,6 +1000,7 @@ fn main() {
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
         mrz_refuse_repeated_line_arm: synthpass_die::refuse_repeated_line_arm().0,
+        mrz_date_digits_arm: synthpass_die::date_digits_arm().0,
         model_paths: synthpass_bench::report::ModelPathsReport::resolve(
             &detection_path,
             &recognition_path,
@@ -1417,6 +1423,7 @@ mod tests {
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
             mrz_refuse_repeated_line_arm: "off",
+            mrz_date_digits_arm: "off",
             model_paths: synthpass_bench::report::ModelPathsReport::default(),
             hits,
             hit_rate: hits as f64,
@@ -1505,7 +1512,7 @@ mod tests {
         assert_eq!(json["results"][0]["render_sha256"], "0".repeat(64));
     }
 
-    /// #574, #579: the MRZ arms are run-level fields, always present in the
+    /// #574, #579: every MRZ arm is a run-level field, always present in the
     /// JSON, so a report says which arm produced its numbers.
     #[test]
     fn report_carries_every_mrz_arm() {
@@ -1513,10 +1520,13 @@ mod tests {
         let json = serde_json::to_value(&report).expect("serialize synthetic report");
         assert_eq!(json["mrz_class_sweep_arm"], "off");
         assert_eq!(json["mrz_line1_select_arm"], "off");
+        assert_eq!(json["mrz_date_digits_arm"], "off");
 
         report.mrz_line1_select_arm = "control";
+        report.mrz_date_digits_arm = "on";
         let json = serde_json::to_value(&report).expect("serialize synthetic report");
         assert_eq!(json["mrz_line1_select_arm"], "control");
+        assert_eq!(json["mrz_date_digits_arm"], "on");
 
         assert_eq!(json["mrz_refuse_repeated_line_arm"], "off");
         report.mrz_refuse_repeated_line_arm = "on";

@@ -1937,7 +1937,7 @@ mod tests {
             Box::new(MockBackend),
         );
         pipeline.mrz_config_overrides =
-            synthpass_die::mrz_config_overrides_from("on", "control", "off");
+            synthpass_die::mrz_config_overrides_from("on", "control", "off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 
@@ -1973,7 +1973,7 @@ mod tests {
             Box::new(MockBackend),
         );
         pipeline.mrz_config_overrides =
-            synthpass_die::mrz_config_overrides_from("off", "off", "off");
+            synthpass_die::mrz_config_overrides_from("off", "off", "off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 

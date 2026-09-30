@@ -1358,7 +1358,7 @@ fn write_baseline_and_ledger(
 /// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
 /// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and every `SYNTHPASS_MRZ_*`
 /// arm is at its default (class sweep `off`, line-1 select `on`, repeated-line
-/// refusal `off`),
+/// refusal `off`, date digits `off`),
 /// `Some(message)` otherwise. A pure function of its arguments
 /// alone (no env reads, no I/O) so it is directly unit-testable without setting
 /// process environment variables — see `knowledge/benchmarks/README.md`'s
@@ -1367,25 +1367,29 @@ fn write_baseline_and_ledger(
 /// committing a baseline against one would make its own A/B look like a
 /// regression against itself the moment the env var is unset again.
 ///
-/// `class_sweep`, `line1_select` and `refuse_repeated_line` are the arm names
-/// `synthpass_die::class_sweep_arm`, `synthpass_die::line1_select_arm` and
-/// `synthpass_die::refuse_repeated_line_arm` return. Each changes what Tier 1
-/// reads, so a baseline written under any of them when it is not at its
-/// default would describe a configuration nobody runs by default (#574, #579).
-/// The line-1 selector's default is `on` since its promotion
+/// `class_sweep`, `line1_select`, `refuse_repeated_line` and `date_digits` are
+/// the arm names `synthpass_die::class_sweep_arm`,
+/// `synthpass_die::line1_select_arm`, `synthpass_die::refuse_repeated_line_arm`
+/// and `synthpass_die::date_digits_arm` return. Each changes what Tier 1 reads,
+/// so a baseline written under any of them when it is not at its default would
+/// describe a configuration nobody runs by default (#574, #579). The line-1
+/// selector's default is `on` since its promotion
 /// (`knowledge/benchmarks/line1-selection-ab-2026-09-29.md`), so `off` is the
-/// arm that is refused there. `control` is refused as well: it is a placebo, but
-/// a baseline is a claim about the default.
+/// arm that is refused there; the date-digits rule (#579) is `off` until it is
+/// promoted, so `on` is refused there. `control` is refused as well: it is a
+/// placebo, but a baseline is a claim about the default.
 fn refuse_non_default_baseline(
     arms: &synthpass_ocr::OcrArms,
     class_sweep: &str,
     line1_select: &str,
     refuse_repeated_line: &str,
+    date_digits: &str,
 ) -> Option<String> {
     if arms.is_default()
         && class_sweep == "off"
         && line1_select == "on"
         && refuse_repeated_line == "off"
+        && date_digits == "off"
     {
         return None;
     }
@@ -1393,11 +1397,11 @@ fn refuse_non_default_baseline(
         "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
          (texture=on, order=default, rotate=default, skew=default, chargrid=off) and \
          SYNTHPASS_MRZ_CLASS_SWEEP at off, SYNTHPASS_MRZ_LINE1_SELECT at on and \
-         SYNTHPASS_MRZ_REFUSE_REPEATED_LINE at off, their \
+         SYNTHPASS_MRZ_REFUSE_REPEATED_LINE and SYNTHPASS_MRZ_DATE_DIGITS at off, their \
          defaults — a baseline is only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
          This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}, \
          mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}, \
-         mrz_refuse_repeated_line={refuse_repeated_line}.",
+         mrz_refuse_repeated_line={refuse_repeated_line}, \n         mrz_date_digits={date_digits}.",
         arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
     ))
 }
@@ -1414,6 +1418,7 @@ fn run_baseline_step(
         synthpass_die::class_sweep_arm().0,
         synthpass_die::line1_select_arm().0,
         synthpass_die::refuse_repeated_line_arm().0,
+        synthpass_die::date_digits_arm().0,
     ) {
         eprintln!("{msg}");
         std::process::exit(1);
@@ -1720,6 +1725,7 @@ struct MrzArms {
     class_sweep: &'static str,
     line1_select: &'static str,
     refuse_repeated_line: &'static str,
+    date_digits: &'static str,
 }
 
 impl MrzArms {
@@ -1728,6 +1734,7 @@ impl MrzArms {
             class_sweep: synthpass_die::class_sweep_arm().0,
             line1_select: synthpass_die::line1_select_arm().0,
             refuse_repeated_line: synthpass_die::refuse_repeated_line_arm().0,
+            date_digits: synthpass_die::date_digits_arm().0,
         }
     }
 }
@@ -2680,6 +2687,7 @@ async fn main() {
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
         mrz_refuse_repeated_line_arm: synthpass_die::refuse_repeated_line_arm().0,
+        mrz_date_digits_arm: synthpass_die::date_digits_arm().0,
         model_paths: if replay_dir.is_some() {
             ModelPathsReport {
                 detection: NO_MODEL_LOADED.to_string(),
@@ -2708,6 +2716,10 @@ async fn main() {
     println!(
         "mrz repeated-line refusal arm measured: {}",
         synthpass_die::refuse_repeated_line_arm().0
+    );
+    println!(
+        "mrz date-digits arm measured: {}",
+        synthpass_die::date_digits_arm().0
     );
     println!("report written to {}", parsed.out);
     if let Some(dir) = replay_dir {
@@ -2758,7 +2770,13 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_allows_the_default_arms() {
         assert_eq!(
-            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "on", "off"),
+            refuse_non_default_baseline(
+                &synthpass_ocr::OcrArms::DEFAULT,
+                "off",
+                "on",
+                "off",
+                "off"
+            ),
             None
         );
     }
@@ -2767,12 +2785,13 @@ mod tests {
     fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.chargrid = "on";
-        let msg = refuse_non_default_baseline(&arms, "off", "on", "off").expect("must refuse");
+        let msg =
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off").expect("must refuse");
         assert!(msg.contains("chargrid=on"), "message: {msg}");
 
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.texture = "off";
-        assert!(refuse_non_default_baseline(&arms, "off", "on", "off").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "on", "off", "off").is_some());
     }
 
     /// #574: the class-sweep and line-1 `SYNTHPASS_MRZ_*` arms change what Tier
@@ -2783,16 +2802,17 @@ mod tests {
     fn refuse_non_default_baseline_rejects_either_mrz_arm() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
         for value in ["on", "control"] {
-            let msg = refuse_non_default_baseline(&arms, value, "on", "off").expect("class sweep");
+            let msg =
+                refuse_non_default_baseline(&arms, value, "on", "off", "off").expect("class sweep");
             assert!(msg.contains(&format!("mrz_class_sweep={value}")), "{msg}");
         }
         for value in ["off", "control"] {
-            let msg =
-                refuse_non_default_baseline(&arms, "off", value, "off").expect("line-1 select");
+            let msg = refuse_non_default_baseline(&arms, "off", value, "off", "off")
+                .expect("line-1 select");
             assert!(msg.contains(&format!("mrz_line1_select={value}")), "{msg}");
         }
         // Both moved at once is refused once, and the message names both.
-        let msg = refuse_non_default_baseline(&arms, "on", "off", "off").expect("both");
+        let msg = refuse_non_default_baseline(&arms, "on", "off", "off", "off").expect("both");
         assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=off"));
     }
 
@@ -2801,9 +2821,12 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_accepts_only_the_line1_default() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
-        assert_eq!(refuse_non_default_baseline(&arms, "off", "on", "off"), None);
-        assert!(refuse_non_default_baseline(&arms, "off", "off", "off").is_some());
-        assert!(refuse_non_default_baseline(&arms, "off", "control", "off").is_some());
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
+        assert!(refuse_non_default_baseline(&arms, "off", "off", "off", "off").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "control", "off", "off").is_some());
     }
 
     /// #579: the repeated-line refusal arm changes what Tier 1 reads, so a
@@ -2812,15 +2835,37 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_rejects_the_repeated_line_refusal() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
-        assert_eq!(refuse_non_default_baseline(&arms, "off", "on", "off"), None);
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
         for value in ["on", "control"] {
-            let msg = refuse_non_default_baseline(&arms, "off", "on", value).expect("refusal arm");
+            let msg =
+                refuse_non_default_baseline(&arms, "off", "on", value, "off").expect("refusal arm");
             assert!(
                 msg.contains(&format!("mrz_refuse_repeated_line={value}")),
                 "{msg}"
             );
             assert!(msg.contains("SYNTHPASS_MRZ_REFUSE_REPEATED_LINE"), "{msg}");
         }
+    }
+
+    /// #579: the date-digits arm changes what Tier 1 reads too, so a baseline
+    /// may not be written or asserted with it on or on `control`, and the message
+    /// names it.
+    #[test]
+    fn refuse_non_default_baseline_rejects_the_date_digits_arm() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        for value in ["on", "control"] {
+            let msg =
+                refuse_non_default_baseline(&arms, "off", "on", "off", value).expect("date digits");
+            assert!(msg.contains(&format!("mrz_date_digits={value}")), "{msg}");
+            assert!(msg.contains("SYNTHPASS_MRZ_DATE_DIGITS at off"), "{msg}");
+        }
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
     }
 
     #[test]
@@ -3040,6 +3085,7 @@ mod tests {
                 "class_sweep": synthpass_die::class_sweep_arm().0,
                 "line1_select": synthpass_die::line1_select_arm().0,
                 "refuse_repeated_line": synthpass_die::refuse_repeated_line_arm().0,
+                "date_digits": synthpass_die::date_digits_arm().0,
             })
         );
         assert_eq!(manifest["corpus_manifest"], "samples/corpus.jsonl");

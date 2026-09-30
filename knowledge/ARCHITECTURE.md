@@ -299,7 +299,10 @@ to `confidence` may not (see [`project_principles.md`](project_principles.md) P2
   returned only when there is none (#593). The opt-in `ParseOptions::refuse_repeated_line` (off by
   default, unmeasured as a default; `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE` in `synthpass-die`, #579)
   turns the repeated-line check into a refusal: the zone is dropped, and `MrzError::RepeatedLine`
-  is returned when not even a checksum-failed reading is left.
+  is returned when not even a checksum-failed reading is left. The opt-in
+  `ParseOptions::date_digits` (off by default, unmeasured as a default;
+  `SYNTHPASS_MRZ_DATE_DIGITS` in `synthpass-die`, #579) makes a date field holding a letter
+  fail `MrzData::valid()`, though its check digit still verifies.
 - A document-number field whose first cell is a filler is refused outright, whatever its check
   digits say. The arithmetic cannot see a `0`, `A`, `K` or `U` read as `<` (all share residue 0
   with the filler; see `mrz::Blindspot`), and Doc 9303 enters data from the left-hand position of
