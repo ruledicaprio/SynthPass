@@ -128,6 +128,7 @@ differs from CI's by float rounding.
 | `ci.yml` · `native-llm` | `cargo test -p synthpass-llm --test parity -- --ignored` | `workflow_dispatch` only | no |
 | `.github/workflows/real-specimen-gate.yml` | resolve the `samples-data` pin → identity audit → sync → `provider-bench --real-specimens --mrz-only --assert-baseline` (or `--write-baseline` with an explicit `data_ref`) → per-document field diff to the job log and step summary → upload the report and the text-free ledger projection (`if: always()`) | PR / push on a path filter (two hand-kept identical lists); dispatch | **no — advisory**; ~40 min ([`gate-cost-by-role-2026-09-17.md`](gate-cost-by-role-2026-09-17.md)); promotion is sequenced in [`ADR-0010`](../decisions/ADR-0010-benchmark-cost-split-by-role.md)'s amendment |
 | `.github/workflows/bench-data-collection.yml` | a matrix of five `measure` jobs (one per format, `contents: read`), each running `synthpass-bench --ocr-passes` twice with the shipped OCR defaults and budget: `--profile all --count 200` on a fresh seed window, and `--profile clean --count 100 --seed 0` (the synthetic-headline invocation, the same 100 documents every night); then one `publish` job (`contents: write`, `main` only, main's code, no third-party action) that runs `tools/bench_nightly_rows.py assemble` and appends `fresh.jsonl`, `fixed.jsonl` and `runs.jsonl` on `bench-data`, rebasing and retrying a rejected push. A dispatch from another ref runs a read-only `dry-run` job that uploads the would-be rows and never writes `bench-data` ([`ADR-0027`](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)) | nightly + dispatch | no; advisory reading of the rows is not built yet |
+| `.github/workflows/bench-ab.yml` | a dispatched before/after A/B of two refs on the five synthetic formats, both arms on one runner, one job with `contents: read`: validate the inputs, build `synthpass-bench` for each ref, measure each format before-arm-then-after-arm with the budget pinned, diff with `tools/bench_ab_diff.py`. Reports and the full diff go to a 3-day artifact; the log and step summary carry counts only ([§2.8](#28-ci-ab-bench-abyml), [`ADR-0027`](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)) | dispatch only | no; advisory |
 | `.github/workflows/bench-charts.yml` | `run-bench.ps1` for the real and synthetic tracks, `bench-chart --bars` | weekly + dispatch | no; opens a chart PR |
 | `.github/workflows/web-ocr.yml` | native arm under fixed `SYNTHPASS_OCR_*` env, then `run-corpus.mjs --native-report` | nightly + dispatch | no; "deliberately not a pull-request gate" |
 
@@ -163,6 +164,7 @@ differs from CI's by float rounding.
 | `scripts/measure-parity.sh` | the Tier-2 parity run with a provenance header |
 | `knowledge/benchmarks/ocr-order-ab/analyze.py` | positional per-document diff of two or three reports (the A/B attribution that the report does not do itself) |
 | `tools/bench_nightly_rows.py` | the nightly's row extractor and the one reader of `bench-data`'s schema-2 files: projects a `synthpass-bench` report to allowlisted rows (refusing any other key, and any allowed key whose value is not a number, a boolean or a short token), recomputes the derived flags and asserts they equal the report's counts, builds the run header, guards `fresh.jsonl` against a repeated `(document_type, seed, profile)`, picks each format's next fresh seed, and reads the frozen schema-1 file under its reading rule; stdlib only, run by the workflow and by `tools/test_bench_nightly_rows.py` |
+| `tools/bench_ab_args.py` | the trust boundary of `bench-ab.yml`: validates the dispatch inputs (refs, an allowlist of measurement knobs, formats, profile, bounded integers) into a normalized plan, runs one format in one arm with that arm's knobs and the pinned budget applied by `subprocess`, writes each arm's `arm.json` (with the nightly's runner-facts block) and the counts-only summary lines; stdlib only, tested by `tools/test_bench_ab_args.py` |
 | `tools/synth_ab_diff.py` | per-seed diff of two `synthpass-bench` reports, classifying every seed whose scored state moved |
 | `tools/bench_ab_diff.py` | per-document diff of two whole arms, meaning every synthetic format plus the real run. Covers accepted reads (#578), reads that changed without a state move, flag-only changes, `retry_stop` in each arm, real outcome, names and zone changes with fixture agreement, per-field exact / wrong / unread transitions from `report.json`'s `field_correctness` (#574) with the documents that lost an exact field, and whether the two runs are comparable. For a private or local arm it prints per-field counts and enumerated transitions only (ADR-0024 Decision 7), never a name, hash or reason text, and `--asset` and `--expect-identical` refuse it. `--expect-identical` is its neutrality mode: exit 0 if every document reads the same in both arms, 3 if not, printing counts and ids and never OCR text; `--check-pass-trace` adds the pass-trace invariants and `--check-report` compares each document's `report.json` row, which is how a `--replay-ocr-passes` run is checked against its capture. Each arm's identity block prints `replay_of` |
 | `tools/classify_mrz_mechanisms.py` | joins the real-specimen outcome ledger to an OCR dump and classifies each named miss by mechanism |
@@ -173,6 +175,41 @@ differs from CI's by float rounding.
 - **Dated findings, one home:** [`FINDINGS.md`](FINDINGS.md) — the log and the index of every dated file.
 - **One figure plus a link:** the repository `README.md` (both rates) and `knowledge/ROADMAP.md` (the scored rate) — enforced.
 - **Method:** [`SYNTHPASS.md`](../SYNTHPASS.md) (the synthetic runner), [`ADVERSARIAL.md`](../ADVERSARIAL.md) (the degradation profiles), [`README.md` § Benchmark maintenance contract](README.md#benchmark-maintenance-contract), [`ADR-0010`](../decisions/ADR-0010-benchmark-cost-split-by-role.md), [`ADR-0013`](../decisions/ADR-0013-names-are-scored-against-mrz-form-truth.md), [`tests/web/README.md`](../../tests/web/README.md), [`samples/README.md`](../../samples/README.md).
+
+### 2.8 CI A/B (`bench-ab.yml`)
+
+A dispatch measures two refs of this repository on the five synthetic formats, on one GitHub
+runner, and diffs them seed by seed. It exists so that an A/B needing no private specimen does not
+queue for hours on the local machine ([`ADR-0027`](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)).
+
+    gh workflow run bench-ab.yml --ref <branch> -f after_ref=<ref> -f after_env=SYNTHPASS_OCR_ORDER=band-first
+
+- **Inputs** (all strings but the last): `before_ref` (default `main`), `after_ref` (required),
+  `before_env` and `after_env` (space-separated `NAME=VALUE`, empty for the shipped defaults),
+  `formats` (default all five), `profile` (default `clean`), `count` (default 100, at most 500),
+  `seed` (default 0) and `expect_identical` (boolean, default false). `tools/bench_ab_args.py`
+  validates them before anything else runs; a refusal is one `::error::` line. A knob must be on its
+  allowlist, which lists only the measurement knobs
+  [`configuration.md`](../architecture/configuration.md) documents.
+- **Pinned.** Both arms run with `SYNTHPASS_OCR_MAX_SECONDS=600`, so machine speed cannot enter the
+  diff. It cannot be set by a dispatcher. That makes a CI arm a different configuration from the
+  shipped one, and it is never compared with a local arm (ADR-0027 decisions 3 and 4).
+- **Each arm** is built from its own checkout in the same run, with one shared target directory, and
+  its binary is copied out and hashed. `ab/<role>/arm.json` records the ref, the commit, the knobs,
+  the pin, the binary's SHA-256 and the runner's facts (the nightly's `context` block).
+- **Where the result is.** One artifact, `bench-ab`, kept **3 days**: each arm's reports,
+  `--dump-ocr` output (`<format>.stdout`), `arm.json`, the plan, and the full diff
+  (`diff.txt`, `diff.json`). They hold synthetic OCR zone text, which ADR-0027 decision 5 allows for
+  at most 3 days. The job log (90 days) and the step summary carry counts only: the arms' refs,
+  commits, knobs and hashes, the diff's per-format summary lines and the verdict.
+- **Synthetic only.** The public real-specimen arm is a follow-up, once its artifacts and log are
+  proven text-free. Nothing private, and no real-specimen OCR text, is ever in this workflow.
+- **Verifying it: an A/A dispatch.** The same ref in both arms with `expect_identical` true runs
+  `bench_ab_diff.py --expect-identical` and fails the job unless every read is identical
+  (`NEUTRAL`). Run one after any change to the workflow, and read a red A/A as a harness fault:
+  no A/B from it means anything until it is understood.
+- **Advisory.** It gates nothing and no timing from it is a result
+  (ADR-0027 decisions 6 and 7).
 
 ---
 
