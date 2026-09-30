@@ -401,33 +401,50 @@ pub(crate) fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
         Format::Td3 => (44, 72, 86),
         Format::MrvA | Format::MrvB => return Some(template),
     };
+    // After the width and count check above every index below is in range for
+    // the format's constants, so each `get` is `Some`. They are `get`, not
+    // indexing, so that an edit to those constants fails closed, to the
+    // ordinary layout, instead of panicking.
     let strip: String = lines.concat();
     let bytes = strip.as_bytes();
     let marker = number_start + 9;
-    let number = &strip[number_start..marker];
-    let optional = &strip[optional_start..optional_end];
-    if bytes[marker] != b'<' || number.trim_end_matches('<').is_empty() {
+    let (Some(number), Some(optional), Some(&marker_byte)) = (
+        strip.get(number_start..marker),
+        strip.get(optional_start..optional_end),
+        bytes.get(marker),
+    ) else {
+        return Some(template);
+    };
+    if marker_byte != b'<' || number.trim_end_matches('<').is_empty() {
         return Some(template);
     }
     let Some(end) = optional.find('<') else {
         return Some(template);
     };
-    if end < 2 || !optional.as_bytes()[end - 1].is_ascii_digit() {
+    if end < 2
+        || !optional
+            .as_bytes()
+            .get(end - 1)
+            .is_some_and(|b| b.is_ascii_digit())
+    {
         return Some(template);
     }
     let check_cell = optional_start + end - 1;
     let remainder_end = check_cell;
-    let spec_full = format!("{}{}", number, &strip[optional_start..remainder_end]);
-    let printed = bytes[check_cell] as char;
+    let (Some(remainder), Some(&printed_byte), Some(principal_digits)) = (
+        strip.get(optional_start..remainder_end),
+        bytes.get(check_cell),
+        number.get(0..8),
+    ) else {
+        return Some(template);
+    };
+    let spec_full = format!("{number}{remainder}");
+    let printed = printed_byte as char;
     let encoding = if verify(&spec_full, printed) {
         OverflowEncoding::Spec
     } else if number.ends_with('<')
         && verify(
-            &format!(
-                "{}{}",
-                number[0..8].trim_end_matches('<'),
-                &strip[optional_start..remainder_end]
-            ),
+            &format!("{}{remainder}", principal_digits.trim_end_matches('<')),
             printed,
         )
     {
