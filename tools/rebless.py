@@ -326,6 +326,9 @@ LEDGER_DIFFED_FIELDS = (
     "retry_variant_id",
     "retry_budget_hit",
     "retry_stop",
+    "check_states",
+    "retry_damaged_recovery",
+    "tier1_damaged_recovery",
 )
 LEDGER_DOC_LINE_CAP = 20
 
@@ -349,6 +352,9 @@ def _render_value(value: object) -> str:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, dict):
+        # `check_states`: compact JSON, keys sorted, as the Rust side prints it.
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
     return str(value)
 
 
@@ -446,7 +452,8 @@ def format_ledger_field_diff_lines(old_rows: list[dict], new_rows: list[dict]) -
 
     - **deterministic** -- `miss_reason` (kind only), `mrz_format`,
       `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
-      `retry_variant_id`, `retry_stop`: one totals line, then one line per
+      `retry_variant_id`, `retry_stop`, `check_states`,
+      `retry_damaged_recovery`, `tier1_damaged_recovery`: one totals line, then one line per
       document (at most 20, then `... and N more`);
     - **timing-sensitive** -- `ocr_ms` (one summary line) and every change on a
       budget-limited document (`retry_budget_hit`, `retry_stop == "budget"`,

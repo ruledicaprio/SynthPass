@@ -1062,6 +1062,7 @@ mod tests {
         for opts in [
             mrz::ParseOptions::default(),
             mrz::ParseOptions::default().with_class_sweep(true),
+            mrz::ParseOptions::default().with_refuse_repeated_line(true),
         ] {
             for text in &texts {
                 let read = read_tier1_with(text, &opts, Line1Arm::Off);
