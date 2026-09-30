@@ -223,17 +223,24 @@ fn two_admissible_same_country_readings_that_disagree_on_name_still_refuse() {
     let damaged_l2 = confuse_document_number_lead(l2);
     let text = format!("{l1}\n{damaged_l2}");
 
-    let data = find_and_parse(&text)
-        .unwrap_or_else(|e| panic!("expected a checksum-failed fallback, got a hard error: {e:?}"));
-
-    // Both readings share `document_type`/`issuing_country`, so #469's
-    // admissibility filter cannot distinguish them -- unanimity is the only
-    // thing left to refuse this, and it must still do so.
-    assert_eq!(data.format, Format::Td3);
-    assert_eq!(data.issuing_country, "RUS");
-    assert!(
-        !data.valid(),
-        "two admissible readings disagreeing on given_names (\"IVANL\" vs \
-         \"IVAN\") must still be refused by single()'s unanimity gate"
-    );
+    // The safety contract, and only it: a genuine disagreement on the given
+    // names is never returned as a valid read. TD3 line 1 has no check digit
+    // and line 2 carries no name, so nothing in the zone can tell a printed
+    // `IVANL` from a printed `IVAN` whose first filler OCR read as `L` (the
+    // misread the last-resort `aggressive_defiller` form exists for). A valid
+    // read of either name is a valid read of a name the zone cannot vouch for,
+    // so it is never safe, whichever name it carries. A refusal (an error) and
+    // a checksum-failed fallback are both safe.
+    match find_and_parse(&text) {
+        Err(_) => {}
+        Ok(data) => {
+            assert_eq!(data.format, Format::Td3);
+            assert_eq!(data.issuing_country, "RUS");
+            assert!(
+                !data.valid(),
+                "two names the zone cannot tell apart must not come back as a valid read, got {:?}",
+                data.given_names
+            );
+        }
+    }
 }

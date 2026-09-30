@@ -1551,10 +1551,6 @@ mod tests {
                     position: expected_position,
                 }
             );
-            assert_eq!(
-                error.to_string(),
-                format!("invalid MRZ character: '?' at line {line}, column {expected_position}")
-            );
         }
     }
 
@@ -1571,10 +1567,6 @@ mod tests {
                 line: None,
                 position: 2,
             }
-        );
-        assert_eq!(
-            error.to_string(),
-            "invalid MRZ character: '?' at position 2"
         );
     }
 

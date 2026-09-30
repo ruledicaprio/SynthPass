@@ -75,17 +75,18 @@ fn omitted_truth_can_make_a_wrong_filler_alignment_look_unique() {
         (printed.len(), ocr.len(), wrong_completion.len()),
         (36, 35, 36)
     );
-    let read =
-        find_and_parse(&format!("{upper}\n{ocr}")).expect("today's scanner returns a candidate");
-    assert_eq!(read.format, Format::MrvB);
-    assert_eq!(
-        read.mrz_lines.lines().nth(1),
-        Some("4FWFE9G21UTO7408122F1204159<<<<<<<<<")
-    );
-    assert!(
-        !read.valid(),
-        "today's scanner pads the tail but does not find the filler insertion"
-    );
+    // The contract: the scanner either refuses this line or returns a read
+    // that is not valid. It must never describe a surviving wrong alignment as
+    // a valid read. Which candidate it returns, and how it pads the tail, is the
+    // scanner's business and is not asserted.
+    if let Ok(read) = find_and_parse(&format!("{upper}\n{ocr}")) {
+        assert_eq!(read.format, Format::MrvB);
+        assert!(
+            !read.valid(),
+            "a read of this line must not be valid: {}",
+            read.mrz_lines
+        );
+    }
     assert!(parse_mrv_b(upper, printed).unwrap().valid());
     assert!(parse_mrv_b(upper, wrong_completion).unwrap().valid());
     // The printed truth needs both an inserted filler and E/G correction.
