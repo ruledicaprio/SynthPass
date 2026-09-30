@@ -865,6 +865,9 @@ const DIFFED_FIELDS: &[&str] = &[
     "retry_variant_id",
     "retry_budget_hit",
     "retry_stop",
+    "check_states",
+    "retry_damaged_recovery",
+    "tier1_damaged_recovery",
 ];
 
 /// One field that differs on one document, already rendered for printing.
@@ -885,6 +888,15 @@ fn render_optional(value: Option<&str>) -> String {
 
 fn render_optional_bool(value: Option<bool>) -> String {
     value.map_or_else(|| "null".to_string(), |b| b.to_string())
+}
+
+/// A `check_states` map as compact JSON (field names and booleans only), or
+/// `null`. The map is a `BTreeMap`, so the text is sorted and stable.
+fn render_check_states(value: Option<&BTreeMap<String, Option<bool>>>) -> String {
+    value.map_or_else(
+        || "null".to_string(),
+        |states| serde_json::to_string(states).unwrap_or_else(|_| "null".to_string()),
+    )
 }
 
 fn push_transition(changes: &mut Vec<FieldChange>, field: &'static str, old: String, new: String) {
@@ -963,6 +975,24 @@ fn field_changes(old: &OutcomeRow, new: &OutcomeRow) -> Vec<FieldChange> {
         render_optional(old.retry_stop.as_deref()),
         render_optional(new.retry_stop.as_deref()),
     );
+    push_transition(
+        &mut changes,
+        "check_states",
+        render_check_states(old.check_states.as_ref()),
+        render_check_states(new.check_states.as_ref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_damaged_recovery",
+        render_optional_bool(old.retry_damaged_recovery),
+        render_optional_bool(new.retry_damaged_recovery),
+    );
+    push_transition(
+        &mut changes,
+        "tier1_damaged_recovery",
+        render_optional_bool(old.tier1_damaged_recovery),
+        render_optional_bool(new.tier1_damaged_recovery),
+    );
     changes
 }
 
@@ -1028,7 +1058,8 @@ fn median(values: &mut [u128]) -> u128 {
 ///
 /// - **Deterministic** — `miss_reason` (the kind and "detail changed", never
 ///   the text), `mrz_format`, `mrz_found`, `mrz_checksums_valid`,
-///   `names_exact`, `name_error`, `retry_variant_id` and `retry_stop`. One
+///   `names_exact`, `name_error`, `retry_variant_id`, `retry_stop`,
+///   `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery`. One
 ///   totals line (documents per field, always complete), then one line per
 ///   document, at most [`DOC_LINE_CAP`].
 /// - **Timing-sensitive** — `ocr_ms` (one summary line: documents that differ,
@@ -3645,6 +3676,9 @@ mod tests {
             retry_variant_id: None,
             retry_budget_hit: false,
             retry_stop: None,
+            check_states: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
         }
     }
 
@@ -3665,6 +3699,40 @@ mod tests {
             keys,
             vec!["passports/a.png", "passports/b.png", "zzz-no-asset"],
             "asset_id sorts first; a row with no asset_id falls back to its name"
+        );
+    }
+
+    #[test]
+    fn build_outcome_rows_carries_check_states_and_both_damaged_recovery_flags() {
+        let mut with_mrz = detail("a", Some("a"), None);
+        with_mrz.check_states = Some(BTreeMap::from([
+            ("composite", Some(true)),
+            ("personal_number", None),
+        ]));
+        with_mrz.retry_damaged_recovery = Some(true);
+        with_mrz.tier1_damaged_recovery = Some(false);
+        let rows = build_outcome_rows(&mrz_report_with_details(vec![
+            with_mrz,
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+        ]));
+        assert_eq!(
+            rows[0].check_states,
+            Some(BTreeMap::from([
+                ("composite".to_string(), Some(true)),
+                ("personal_number".to_string(), None),
+            ]))
+        );
+        assert_eq!(rows[0].retry_damaged_recovery, Some(true));
+        assert_eq!(rows[0].tier1_damaged_recovery, Some(false));
+        assert_eq!(rows[1].check_states, None);
+        assert_eq!(rows[1].retry_damaged_recovery, None);
+        assert_eq!(rows[1].tier1_damaged_recovery, None);
+        let line = serde_json::to_string(&rows[1]).expect("serialize");
+        assert!(
+            line.ends_with(
+                r#""check_states":null,"retry_damaged_recovery":null,"tier1_damaged_recovery":null}"#
+            ),
+            "absent values serialize as null, never as omitted keys: {line}"
         );
     }
 
@@ -3816,6 +3884,99 @@ mod tests {
         // Only the existing outcome line remains for an unchanged ledger.
         assert_eq!(diff_ledger_fields(&rows, &rows), Vec::<String>::new());
         assert_eq!(diff_outcomes(&rows, &rows).len(), 1);
+    }
+
+    /// One `check_states` map: `document_number` verified, `composite` as given.
+    fn states(composite: bool) -> BTreeMap<String, Option<bool>> {
+        BTreeMap::from([
+            ("composite".to_string(), Some(composite)),
+            ("document_number".to_string(), Some(true)),
+            ("personal_number".to_string(), None),
+        ])
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_check_states_change_as_compact_json() {
+        let committed = vec![hit_row_with("a", |r| r.check_states = Some(states(true)))];
+        let actual = vec![hit_row_with("a", |r| r.check_states = Some(states(false)))];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 check_states 1"
+                    .to_string(),
+                "  a: check_states {\"composite\":true,\"document_number\":true,\"personal_number\":null} \
+                 -> {\"composite\":false,\"document_number\":true,\"personal_number\":null}"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_retry_damaged_recovery_change() {
+        let committed = vec![hit_row_with("a", |r| {
+            r.retry_damaged_recovery = Some(false)
+        })];
+        let actual = vec![hit_row_with("a", |r| r.retry_damaged_recovery = Some(true))];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 retry_damaged_recovery 1"
+                    .to_string(),
+                "  a: retry_damaged_recovery false -> true".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_tier1_damaged_recovery_change() {
+        let committed = vec![hit_row_with("a", |r| r.tier1_damaged_recovery = Some(true))];
+        let actual = vec![hit_row_with("a", |r| r.tier1_damaged_recovery = None)];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 tier1_damaged_recovery 1"
+                    .to_string(),
+                "  a: tier1_damaged_recovery true -> null".to_string(),
+            ]
+        );
+    }
+
+    /// A ledger committed before the three fields existed still parses: they
+    /// read as `None`, exactly as `null` does, so the diff against a run that
+    /// has them reports `null -> value` (until the ledger is re-blessed) and
+    /// the outcome line is untouched.
+    #[test]
+    fn a_ledger_without_the_recovery_and_check_state_fields_parses_and_diffs_from_null() {
+        let old_line = r#"{"asset_id":"a","name":"a","outcome":"hit","miss_reason":null,"mrz_format":"TD3","mrz_found":true,"mrz_checksums_valid":true,"names_exact":null,"name_error":null,"ocr_ms":1,"retry_variant_id":null,"retry_budget_hit":false,"retry_stop":null}"#;
+        let committed =
+            parse_ledger(format!("{old_line}\n").as_bytes()).expect("old ledger parses");
+        assert_eq!(committed[0].check_states, None);
+        assert_eq!(committed[0].retry_damaged_recovery, None);
+        assert_eq!(committed[0].tier1_damaged_recovery, None);
+
+        let actual = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("TD3".to_string());
+            r.check_states = Some(states(true));
+            r.retry_damaged_recovery = Some(false);
+            r.tier1_damaged_recovery = Some(false);
+        })];
+        assert_eq!(diff_outcomes(&committed, &actual).len(), 1);
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 1 document(s); check_states 1, \
+             retry_damaged_recovery 1, tier1_damaged_recovery 1"
+        );
+        assert!(
+            lines[1].starts_with("  a: check_states null -> {"),
+            "{lines:?}"
+        );
+        assert!(lines[1].ends_with(
+            "; retry_damaged_recovery null -> false; tier1_damaged_recovery null -> false"
+        ));
     }
 
     #[test]

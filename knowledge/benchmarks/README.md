@@ -549,7 +549,9 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 **The outcome ledger.** `real-specimen-outcomes.jsonl`, written alongside the baseline in the
 same directory, holds one JSON row per document (`asset_id`, `name`, `outcome`, the full
 `miss_reason`, `mrz_format`, `mrz_found`/`mrz_checksums_valid`, `names_exact`/`name_error`,
-`ocr_ms`, and the native-retry fields) — the per-document evidence the aggregate counts above
+`ocr_ms`, the native-retry fields, `check_states` (the state of each check digit, `true`,
+`false` or `null`, or `null` when no MRZ parsed) and the `retry_damaged_recovery` and
+`tier1_damaged_recovery` flags) — the per-document evidence the aggregate counts above
 are built from. It exists because the `real-specimen-gate-report` CI artifact is kept for 90
 days (`retention-days: 90`, since #416), so a dated finding derived from `--verbose` output or
 the JSONL report becomes unverifiable once that window passes; the ledger is committed, so it
@@ -558,14 +560,18 @@ does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
 an edited-by-hand or substituted ledger is caught the same way a hand-edited baseline count
 would be. When a committed ledger is present, an assert run also prints an informational
 (never gate-failing) per-document diff against the committed one, so a reviewer can see exactly
-which documents moved without downloading and diffing two CI artifacts by hand.
+which documents moved without downloading and diffing two CI artifacts by hand. A ledger
+committed before `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery` were
+added (#557) still parses: a missing key reads as `null`, so until the ledger is re-blessed the
+diff reports each of them as `null -> value` on every document that has one.
 
 **The per-document diff (#557).** It is the tool behind the **Inspect** clause of the
 maintenance contract above, and it has three parts, in this order. First the outcome summary line
 and the documents whose `outcome` changed (at most 20, then `... and N more`). Then a
 **deterministic** group: `miss_reason` (the miss kind and "detail changed", never the text),
 `mrz_format`, `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
-`retry_variant_id` and `retry_stop`, as one line of per-field totals (always complete) and one
+`retry_variant_id`, `retry_stop`, `check_states` (printed as compact JSON),
+`retry_damaged_recovery` and `tier1_damaged_recovery`, as one line of per-field totals (always complete) and one
 line per document (at most 20). Then a **timing-sensitive** group: one `ocr_ms` line (documents
 that differ, median |delta|, both totals) and a block for every *budget-limited* document, one
 that hit the retry-pass time budget on either side, which carries **all** of that document's
