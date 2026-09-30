@@ -622,8 +622,8 @@ impl NativeOcr {
             }
         }
 
-        let max_passes = max_passes();
-        let max_duration = max_duration();
+        let (max_passes, max_seconds) = effective_retry_budget();
+        let max_duration = Duration::from_secs(max_seconds);
         let mut retry_variant_id = None;
         // `MrzData::damaged_recovery` from whichever reading
         // `retry_variant_id` ends up naming. `Some`
@@ -1573,6 +1573,16 @@ fn max_passes() -> usize {
         .unwrap_or(DEFAULT_MAX_PASSES)
 }
 
+/// Returns the effective retry pass and wall-clock budgets.
+///
+/// Each value is the corresponding positive environment override, or the
+/// built-in default when its variable is unset, invalid, or zero. Consumers
+/// that record run metadata should use this accessor so their report matches
+/// the values the retry loop resolved.
+pub fn effective_retry_budget() -> (usize, u64) {
+    (max_passes(), max_duration().as_secs())
+}
+
 /// Which trailing texture-suppression pass, if any, to append after every
 /// other retry variant. See [`trailing_texture_mode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1984,7 +1994,8 @@ pub fn config_overrides_from(
 /// [`max_duration`]) instead of taking them as arguments — what a caller
 /// outside this crate (`synthpass-pipeline`'s `RustOcrEngine`) actually calls.
 pub fn config_overrides() -> std::collections::BTreeMap<String, String> {
-    config_overrides_from(OcrArms::from_env(), max_passes(), max_duration().as_secs())
+    let (max_passes, max_seconds) = effective_retry_budget();
+    config_overrides_from(OcrArms::from_env(), max_passes, max_seconds)
 }
 
 /// A recognized line's text, its bounding box (in the coordinate space of
@@ -3325,6 +3336,37 @@ mod tests {
         assert_eq!(max_passes(), DEFAULT_MAX_PASSES, "zero falls back");
 
         unsafe { std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES") };
+    }
+
+    /// Issue #615: callers that record a run must see the same effective pair
+    /// as the retry loop, including fallback semantics for both variables.
+    #[test]
+    fn effective_retry_budget_reports_defaults_and_overrides() {
+        let _env = crate::env_lock();
+        unsafe {
+            std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES");
+            std::env::remove_var("SYNTHPASS_OCR_MAX_SECONDS");
+        }
+        assert_eq!(
+            effective_retry_budget(),
+            (DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            "unset variables report the built-in defaults"
+        );
+
+        unsafe {
+            std::env::set_var("SYNTHPASS_OCR_MAX_PASSES", "3");
+            std::env::set_var("SYNTHPASS_OCR_MAX_SECONDS", "7");
+        }
+        assert_eq!(
+            effective_retry_budget(),
+            (3, 7),
+            "valid overrides are reported as effective"
+        );
+
+        unsafe {
+            std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES");
+            std::env::remove_var("SYNTHPASS_OCR_MAX_SECONDS");
+        }
     }
 
     /// The default pass budget must admit *every* retry variant, including
