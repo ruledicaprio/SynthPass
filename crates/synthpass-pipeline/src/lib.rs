@@ -121,8 +121,9 @@ pub struct Pipeline {
     /// through any other clone (e.g. `synthpass-serve`'s `AppState`).
     jobs: Arc<jobs::JobRegistry>,
     /// The non-default `SYNTHPASS_MRZ_*` arms (`SYNTHPASS_MRZ_CLASS_SWEEP`,
-    /// `SYNTHPASS_MRZ_LINE1_SELECT`) this pipeline was built under, read once
-    /// by [`synthpass_die::mrz_config_overrides`]. Both change what Tier 1
+    /// `SYNTHPASS_MRZ_LINE1_SELECT`, `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE`) this
+    /// pipeline was built under, read once by
+    /// [`synthpass_die::mrz_config_overrides`]. Each changes what Tier 1
     /// returns, so every record's [`ExtractionTrace::config_overrides`] carries
     /// them beside the OCR engine's own (principle 7). A snapshot rather than a
     /// per-document read, like the engine's own configuration: these are
@@ -1936,7 +1937,7 @@ mod tests {
             Box::new(MockBackend),
         );
         pipeline.mrz_config_overrides =
-            synthpass_die::mrz_config_overrides_from("on", "control", "off");
+            synthpass_die::mrz_config_overrides_from("on", "control", "off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 
@@ -1972,7 +1973,7 @@ mod tests {
             Box::new(MockBackend),
         );
         pipeline.mrz_config_overrides =
-            synthpass_die::mrz_config_overrides_from("off", "off", "off");
+            synthpass_die::mrz_config_overrides_from("off", "off", "off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 

@@ -857,9 +857,16 @@ def ledger_row(asset_id: str, **overrides) -> dict:
         "retry_variant_id": None,
         "retry_budget_hit": False,
         "retry_stop": None,
+        "check_states": None,
+        "retry_damaged_recovery": None,
+        "tier1_damaged_recovery": None,
     }
     row.update(overrides)
     return row
+
+
+def states(composite: bool) -> dict:
+    return {"composite": composite, "document_number": True, "personal_number": None}
 
 
 class LedgerDiffTests(unittest.TestCase):
@@ -896,6 +903,59 @@ class LedgerDiffTests(unittest.TestCase):
                 "mrz_checksums_valid 1",
                 "  a: mrz_format MRVA -> TD3; mrz_checksums_valid true -> false",
             ],
+        )
+
+    def test_a_check_states_change_prints_compact_json(self):
+        old = [ledger_row("a", check_states=states(True))]
+        new = [ledger_row("a", check_states=states(False))]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); check_states 1",
+                '  a: check_states {"composite":true,"document_number":true,"personal_number":null} '
+                '-> {"composite":false,"document_number":true,"personal_number":null}',
+            ],
+        )
+
+    def test_a_retry_damaged_recovery_change(self):
+        old = [ledger_row("a", retry_damaged_recovery=False)]
+        new = [ledger_row("a", retry_damaged_recovery=True)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); retry_damaged_recovery 1",
+                "  a: retry_damaged_recovery false -> true",
+            ],
+        )
+
+    def test_a_tier1_damaged_recovery_change(self):
+        old = [ledger_row("a", tier1_damaged_recovery=True)]
+        new = [ledger_row("a", tier1_damaged_recovery=None)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); tier1_damaged_recovery 1",
+                "  a: tier1_damaged_recovery true -> null",
+            ],
+        )
+
+    def test_an_old_ledger_row_without_the_three_fields_diffs_from_null(self):
+        # A ledger committed before the fields existed: the keys are absent, which
+        # reads as null, the same as the Rust side's `#[serde(default)]`.
+        old_row = ledger_row("a")
+        for field in ("check_states", "retry_damaged_recovery", "tier1_damaged_recovery"):
+            del old_row[field]
+        new = [ledger_row("a", check_states=states(True), retry_damaged_recovery=False, tier1_damaged_recovery=False)]
+        self.assertEqual(len(rb.format_outcome_diff_lines([old_row], new)), 1)
+        lines = rb.format_ledger_field_diff_lines([old_row], new)
+        self.assertEqual(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 1 document(s); check_states 1, "
+            "retry_damaged_recovery 1, tier1_damaged_recovery 1",
+        )
+        self.assertTrue(lines[1].startswith("  a: check_states null -> {"))
+        self.assertTrue(
+            lines[1].endswith("; retry_damaged_recovery null -> false; tier1_damaged_recovery null -> false")
         )
 
     def test_miss_reason_prints_the_kind_and_never_the_text(self):

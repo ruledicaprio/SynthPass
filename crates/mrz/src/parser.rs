@@ -1587,7 +1587,9 @@ fn repair_mrv_b_line2(l: &str) -> String {
 /// kept aside while the scan (and the damaged-capture pass below) looks for an
 /// unflagged valid one, which then wins; when there is none, the flagged zone
 /// is returned. The checks only re-rank between valid zones — they never
-/// refuse one. A zone is flagged when
+/// refuse one, unless [`ParseOptions::refuse_repeated_line`] is set (off by
+/// default), which drops a zone whose lines repeat one another and returns
+/// [`MrzError::RepeatedLine`] when nothing else is left. A zone is flagged when
 ///
 /// - line 1's issuing state (cells 2..5) is not in [`country_name`]'s table;
 /// - two of its lines are near-identical (similarity of at least 0.6 after
@@ -1720,8 +1722,18 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // one is returned only when none turns up (see its use after the damaged
     // pass). First wins, like `fallback`, for the same reason.
     let mut flagged_first: Option<MrzData> = None;
+    // With `opts.refuse_repeated_line`, the first checksum-valid zone that
+    // repeated one of its own lines, as the `MrzError` that names the pair. Such
+    // a zone is dropped instead of kept in `flagged_first`, and this is
+    // returned only when nothing else is (see the final precedence below). First
+    // wins, like `flagged_first`. Always `None` with the switch off.
+    let mut repeat_refused: Option<MrzError> = None;
     let mut consider = |data: MrzData| -> Option<MrzData> {
         if data.valid() {
+            if let Some(refusal) = repeat_refusal(&data, opts) {
+                repeat_refused.get_or_insert(refusal);
+                return None;
+            }
             if crate::rank::flagged(&data) {
                 flagged_first.get_or_insert(data);
                 return None;
@@ -2099,18 +2111,26 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
     // `consider` entirely), so without it a refused reading would fall
     // through to `IncompleteSequence` instead of getting a chance at repair.
     // A flagged valid zone opens this gate too: it may have an unflagged
-    // alternative that only the damaged pass can build.
-    if fallback.is_some() || refused.is_some() || flagged_first.is_some() {
+    // alternative that only the damaged pass can build. So does a zone the
+    // repeated-line refusal dropped, which is no longer in `flagged_first`.
+    if fallback.is_some()
+        || refused.is_some()
+        || flagged_first.is_some()
+        || repeat_refused.is_some()
+    {
         if let Some(mut data) = damaged_pass(&lines, opts, &intact_td1_starts) {
             // `damaged_pass` (and `class_sweep_pass`, which it tries first)
             // is the only path a reading can take here — see
             // `MrzData::damaged_recovery`'s doc comment for what this flags
             // and why a caller re-reading the source image might care.
             data.damaged_recovery = true;
-            if !crate::rank::flagged(&data) {
+            if let Some(refusal) = repeat_refusal(&data, opts) {
+                repeat_refused.get_or_insert(refusal);
+            } else if !crate::rank::flagged(&data) {
                 return Ok(data);
+            } else {
+                flagged_first.get_or_insert(data);
             }
-            flagged_first.get_or_insert(data);
         }
     }
 
@@ -2135,21 +2155,44 @@ pub fn find_and_parse_with(text: &str, opts: &ParseOptions) -> Result<MrzData, M
 
     // Precedence among what is left: a validating reading already returned
     // above; next best is a checksum-failed `fallback` (a caller can see how
-    // close the read came); next is the first structural refusal any
-    // candidate hit (still more informative than "not found" — it says
-    // *why* nothing here parsed); only then the shape-based
+    // close the read came, and it outranks a repeated-line refusal: the
+    // refusal only drops a zone, it never hides a reading that parsed); next
+    // is the first structural refusal any candidate hit (still more
+    // informative than "not found" — it says *why* nothing here parsed), a
+    // `LeadingFiller` before a `RepeatedLine`; only then the shape-based
     // `IncompleteSequence`/bare `NotFound`.
     match fallback {
         Some(data) => Ok(data),
-        None => Err(refused.unwrap_or_else(|| match shape_seen {
-            Some(format) => MrzError::IncompleteSequence {
-                format,
-                lines_found: 1,
-                lines_expected: expected_lines(format),
-            },
-            None => MrzError::NotFound,
-        })),
+        None => Err(refused
+            .or(repeat_refused)
+            .unwrap_or_else(|| match shape_seen {
+                Some(format) => MrzError::IncompleteSequence {
+                    format,
+                    lines_found: 1,
+                    lines_expected: expected_lines(format),
+                },
+                None => MrzError::NotFound,
+            })),
     }
+}
+
+/// The refusal `opts.refuse_repeated_line` makes of `data`, a checksum-valid
+/// zone: [`MrzError::RepeatedLine`] naming the first pair of near-identical
+/// lines, or `None` when the switch is off or no line repeats another.
+///
+/// Called on every valid zone the scan (and the damaged pass) reaches, so the
+/// switch costs the similarity check only when it is on; with it off,
+/// `crate::rank::flagged` runs the same check as before.
+fn repeat_refusal(data: &MrzData, opts: &ParseOptions) -> Option<MrzError> {
+    if !opts.refuse_repeated_line {
+        return None;
+    }
+    let (first_line, second_line) = crate::rank::repeated_lines(data)?;
+    Some(MrzError::RepeatedLine {
+        format: data.format,
+        first_line,
+        second_line,
+    })
 }
 
 /// How many MRZ lines `format` requires — the one place that count lives,

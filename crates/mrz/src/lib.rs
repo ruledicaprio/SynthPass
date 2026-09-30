@@ -207,6 +207,29 @@ pub struct ParseOptions {
     /// only after an ordinary read has already failed to validate.
     #[cfg_attr(feature = "serde", serde(default))]
     pub class_sweep: bool,
+    /// Refuse a checksum-valid zone in which one line repeats another, instead
+    /// of only ranking it below an alternative: [`find_and_parse_with`] drops
+    /// such a zone, from the ordinary scan or the damaged-capture pass, and
+    /// goes on looking.
+    ///
+    /// **Off by default, and unmeasured as a default** (#579). With it off,
+    /// [`find_and_parse_with`] returns such a zone when nothing better exists,
+    /// exactly as it always has. A zone "repeats a line" when two of its lines
+    /// are near-identical (similarity of at least 0.6 after dropping fillers
+    /// and folding lookalike characters; the most similar pair in a correctly
+    /// read zone scores at most 0.30). The check digits cannot see this: a
+    /// format's line 1 (and TD1's line 3) enters few or none of them, so a
+    /// second reading of another line can stand in for it and the zone still
+    /// validates.
+    ///
+    /// With it on, the precedence among what is left is: an unflagged valid
+    /// zone, then another flagged valid zone, then the best checksum-failed
+    /// reading (an [`Ok`] whose [`MrzData::valid`] is false), and only when
+    /// nothing else parsed, [`MrzError::RepeatedLine`]. Only the scan changes:
+    /// the `parse_*` functions, which are handed two or three lines and pick
+    /// nothing, are unaffected.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub refuse_repeated_line: bool,
     /// Require the date of birth and the date of expiry to hold digits (#579,
     /// the C6 rule): a read whose date field holds any character other than an
     /// ASCII digit or the filler `<` is not [`MrzData::valid`].
@@ -231,6 +254,7 @@ impl Default for ParseOptions {
         Self {
             pivot_yy: CURRENT_YY,
             class_sweep: false,
+            refuse_repeated_line: false,
             date_digits: false,
         }
     }
@@ -271,6 +295,40 @@ impl ParseOptions {
     #[must_use]
     pub const fn with_class_sweep(mut self, class_sweep: bool) -> Self {
         self.class_sweep = class_sweep;
+        self
+    }
+
+    /// Refuse a checksum-valid zone in which one line repeats another — see
+    /// [`ParseOptions::refuse_repeated_line`], which is off by default.
+    ///
+    /// ```
+    /// use mrz::{find_and_parse_with, Format, MrzError, ParseOptions};
+    ///
+    /// assert!(!ParseOptions::default().refuse_repeated_line);
+    /// let opts = ParseOptions::default().with_refuse_repeated_line(true);
+    /// assert!(opts.refuse_repeated_line);
+    ///
+    /// // A line 1 that is line 2 read a second time behind line 1's own
+    /// // document code and issuer still validates: no check digit covers it.
+    /// let text = "P<UTO02C36UTO7408122F1204159ZE184226B<<<<<10\n\
+    ///             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// let doc = find_and_parse_with(text, &ParseOptions::default()).unwrap();
+    /// assert!(doc.valid());
+    ///
+    /// // With the switch on, the zone is refused and the error says which
+    /// // two lines repeat.
+    /// assert_eq!(
+    ///     find_and_parse_with(text, &opts),
+    ///     Err(MrzError::RepeatedLine {
+    ///         format: Format::Td3,
+    ///         first_line: 0,
+    ///         second_line: 1,
+    ///     }),
+    /// );
+    /// ```
+    #[must_use]
+    pub const fn with_refuse_repeated_line(mut self, refuse_repeated_line: bool) -> Self {
+        self.refuse_repeated_line = refuse_repeated_line;
         self
     }
 
@@ -1286,6 +1344,24 @@ pub enum MrzError {
         /// Zero-based `char` column within the line.
         position: usize,
     },
+    /// [`find_and_parse_with`] only, and only with
+    /// [`ParseOptions::refuse_repeated_line`] on: every checksum-valid zone
+    /// found holds one line twice — the wrong physical line stood in for a
+    /// line no check digit covers — and no other reading, not even a
+    /// checksum-failed one, was left to return. A structural refusal like
+    /// [`Self::LeadingFiller`], not a [`Checks`] failure: the check digits
+    /// verified, and the zone is refused anyway.
+    ///
+    /// `first_line` and `second_line` are the zero-based lines of the first
+    /// near-identical pair in the refused zone, `first_line < second_line`.
+    RepeatedLine {
+        /// The zone's format.
+        format: Format,
+        /// Zero-based line of the earlier line of the pair.
+        first_line: usize,
+        /// Zero-based line of the later line of the pair.
+        second_line: usize,
+    },
 }
 
 impl core::fmt::Display for MrzError {
@@ -1336,6 +1412,14 @@ impl core::fmt::Display for MrzError {
             Self::OccludedCheckedCell { line, position } => write!(
                 f,
                 "occluded cell at line {line}, column {position} cannot be withheld safely"
+            ),
+            Self::RepeatedLine {
+                format,
+                first_line,
+                second_line,
+            } => write!(
+                f,
+                "{format:?} zone: line {second_line} repeats line {first_line}"
             ),
         }
     }

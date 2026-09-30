@@ -479,10 +479,15 @@ struct Report {
     /// `synthpass_die::read_tier1`, so the arm reaches every result here;
     /// per-document verdicts are not recorded on this report.
     mrz_line1_select_arm: &'static str,
+    /// The repeated-line refusal arm this run measured (#579), from
+    /// `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE` (default `off`), as
+    /// `mrz_class_sweep_arm` above. Always serialized; `provider-bench`
+    /// records it under the same name.
+    mrz_refuse_repeated_line_arm: &'static str,
     /// The date-digits arm this run measured (#579), from
     /// `SYNTHPASS_MRZ_DATE_DIGITS` (default `off`), as `mrz_class_sweep_arm`
     /// above. Always serialized; `provider-bench` records it under the same
-    /// name. It reaches every synthetic result through`synthpass_die::read_tier1`.
+    /// name. It reaches every synthetic result through `synthpass_die::read_tier1`.
     mrz_date_digits_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded (issue #541) — a run-level fact next to `ocr_arms`,
@@ -949,6 +954,7 @@ fn main() {
         max_seconds,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
+        mrz_refuse_repeated_line_arm: synthpass_die::refuse_repeated_line_arm().0,
         mrz_date_digits_arm: synthpass_die::date_digits_arm().0,
         model_paths: synthpass_bench::report::ModelPathsReport::resolve(
             &detection_path,
@@ -1304,6 +1310,7 @@ mod tests {
             max_seconds,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
+            mrz_refuse_repeated_line_arm: "off",
             mrz_date_digits_arm: "off",
             model_paths: synthpass_bench::report::ModelPathsReport::default(),
             hits,
@@ -1408,6 +1415,11 @@ mod tests {
         let json = serde_json::to_value(&report).expect("serialize synthetic report");
         assert_eq!(json["mrz_line1_select_arm"], "control");
         assert_eq!(json["mrz_date_digits_arm"], "on");
+
+        assert_eq!(json["mrz_refuse_repeated_line_arm"], "off");
+        report.mrz_refuse_repeated_line_arm = "on";
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["mrz_refuse_repeated_line_arm"], "on");
     }
 
     /// Issue #541: the resolved model paths are a run-level field, always
