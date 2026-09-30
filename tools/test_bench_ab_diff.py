@@ -239,20 +239,6 @@ class Arms(unittest.TestCase):
         self.assertIn("A / C", out)
         self.assertNotIn("RAW OCR TEXT", out)
 
-    def test_a_private_or_local_arm_is_refused_before_anything_is_printed(self):
-        public = [outcome_row("passports/X.jpg", "hit")]
-        before = write_arm(self.root, "before", outcomes=public, zones=[zone_row("passports/X.jpg", ["A"])],
-                           run=archive())
-        after = write_arm(self.root, "after", outcomes=public, zones=[zone_row("passports/X.jpg", ["B"])],
-                          run=archive(flags=("--real-specimens", "--include-private", "--dump-ocr")))
-        code, out, err = run(before, after)
-        self.assertEqual((code, out), (2, ""))
-        self.assertIn("--include-private", err)
-        local = write_arm(self.root, "local", outcomes=[outcome_row("local/Y.jpg", "hit")])
-        code, out, err = run(before, local)
-        self.assertEqual((code, out), (2, ""))
-        self.assertIn("local track", err)
-
     def test_a_different_corpus_or_image_is_not_an_ab_but_a_different_arm_is_a_note(self):
         asset = "passports/X.jpg"
         before = write_arm(self.root, "before", outcomes=[outcome_row(asset, "hit")],
@@ -380,6 +366,136 @@ def detail_row(asset, fields=None):
     if fields is not None:
         row["field_correctness"] = fields
     return row
+
+
+def private_row(asset, outcome, fmt="TD3", reason=None, retry_stop="exhausted", **extra):
+    row = outcome_row(asset, outcome, fmt, reason)
+    row.update(name=asset.rsplit("/", 1)[-1], mrz_found=outcome != "no_mrz_found",
+               mrz_checksums_valid=outcome == "hit", retry_stop=retry_stop, retry_budget_hit=False, ocr_ms=5)
+    row.update(extra)
+    return row
+
+
+class PrivateTrack(unittest.TestCase):
+    """ADR-0024 Decision 7: a diff that touches a private or local run prints counts and
+    enumerated transitions, never an asset name, a hash or reason text."""
+    PRIVATE_FLAGS = ("--real-specimens", "--include-private", "--dump-ocr")
+    IDS = ["private/Jane_Doe_Passport_Private_2020.jpg", "private/Ann_Roe_Visa_Private_2021.jpg",
+           "private/Max_Poe_ID_Private_2022.jpg"]
+    SECRET = "SECRET_REASON_TEXT"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def arms(self, flags=None, corpus_after="c" * 64):
+        passport, visa, card = self.IDS
+        before = [private_row(passport, "hit", "TD3", retry_stop="general_valid"),
+                  private_row(visa, "hit", "TD3", retry_stop="general_valid"),
+                  private_row(card, "checksum_failed", "TD1", reason=f"{self.SECRET} JANE DOE",
+                              retry_stop="exhausted")]
+        after = [private_row(passport, "hit", "TD3", retry_stop="general_valid"),
+                 private_row(visa, "hit", "MRVA", retry_stop="variant_valid"),
+                 private_row(card, "hit", "TD1", retry_stop="general_valid")]
+        zones = lambda rows: [zone_row(r["asset_id"], ["JANE<<DOE"], sha="f" * 64) for r in rows]
+        run_before = archive(flags=flags or self.PRIVATE_FLAGS)
+        run_after = archive(flags=flags or self.PRIVATE_FLAGS, corpus=corpus_after)
+        return (write_arm(self.root, "before", outcomes=before, zones=zones(before), run=run_before),
+                write_arm(self.root, "after", outcomes=after, zones=zones(after), run=run_after))
+
+    def assert_no_leak(self, *outputs):
+        for text in outputs:
+            for asset in self.IDS:
+                self.assertNotIn(asset, text)
+                self.assertNotIn(asset.rsplit("/", 1)[-1].rsplit(".", 1)[0], text)
+            for leak in (self.SECRET, "JANE", "Jane", "RAW OCR TEXT", "f" * 12, "c" * 12, "a" * 12, ARCHIVE):
+                self.assertNotIn(leak, text)
+
+    def test_a_private_arm_prints_counts_and_transitions_and_no_names_hashes_or_reasons(self):
+        code, out, err = run(*self.arms())
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("private or local track: counts and enumerated transitions only", out)
+        self.assertIn("before: was measured with --include-private", out)
+        self.assertIn("documents 3 -> 3, paired 3", out)
+        self.assertIn("outcome: checksum_failed 1 -> 0, hit 2 -> 3", out)
+        self.assertIn("mrz_format: MRVA 0 -> 1, TD1 1 -> 1, TD3 2 -> 1", out)
+        self.assertIn("outcome 1 \u00d7 checksum_failed to hit", out)
+        self.assertIn("mrz_format 1 \u00d7 TD3 to MRVA", out)
+        self.assertIn("retry_stop 1 \u00d7 exhausted to general_valid", out)
+        self.assertIn("retry_stop 1 \u00d7 general_valid to variant_valid", out)
+        self.assertIn("mrz_checksums_valid 1 \u00d7 false to true", out)
+        self.assert_no_leak(out)
+
+    def arms_again(self):
+        self.tmp2 = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp2.cleanup)
+        root, self.root = self.root, self.tmp2.name
+        try:
+            return self.arms(corpus_after="d" * 64)
+        finally:
+            self.root = root
+
+    def test_json_output_is_sanitised_too(self):
+        code, out, _ = run(*self.arms(), "--json")
+        self.assertEqual(code, 0)
+        real = json.loads(out)["real"]
+        self.assertTrue(real["private"])
+        self.assertEqual(real["fields"]["mrz_format"]["transitions"],
+                         [{"before": "TD3", "after": "MRVA", "documents": 1}])
+        self.assert_no_leak(out)
+
+    def test_a_corpus_mismatch_prints_no_hash(self):
+        code, out, _ = run(*self.arms_again())
+        self.assertEqual(code, 1)
+        self.assertIn("NOT AN A/B: real: corpus manifests differ\n", out)
+        self.assert_no_leak(out, "d" * 12)
+
+    def test_a_local_track_asset_marks_an_arm_with_no_archive(self):
+        rows = [private_row("local/Someone_Local_2020.jpg", "hit")]
+        before = write_arm(self.root, "before", outcomes=rows)
+        after = write_arm(self.root, "after", outcomes=[private_row("local/Someone_Local_2020.jpg", "no_mrz_found")])
+        code, out, _ = run(before, after)
+        self.assertEqual(code, 0)
+        self.assertIn("before: holds assets from the local track", out)
+        self.assertIn("outcome 1 \u00d7 hit to no_mrz_found", out)
+        self.assertNotIn("Someone_Local", out)
+
+    def test_a_value_that_is_not_a_kind_name_is_never_echoed(self):
+        rows = lambda outcome: [private_row("private/A.jpg", outcome, retry_stop=None)]
+        before = write_arm(self.root, "before", outcomes=rows("hit"), run=archive(flags=self.PRIVATE_FLAGS))
+        after = write_arm(self.root, "after", outcomes=rows("JANE DOE 900101 / L898902C3"),
+                          run=archive(flags=self.PRIVATE_FLAGS))
+        code, out, _ = run(before, after)
+        self.assertEqual(code, 0)
+        self.assertIn("outcome 1 \u00d7 hit to other", out)
+        self.assertNotIn("JANE", out)
+        self.assertNotIn("L898902C3", out)
+
+    def test_asset_and_the_neutrality_gate_still_refuse_a_private_arm(self):
+        before, after = self.arms()
+        code, out, err = run(before, after, "--asset", self.IDS[0])
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("prints no names", err)
+        self.assertNotIn(self.IDS[0], err)
+        code, out, err = run(before, after, "--expect-identical")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("--include-private", err)
+
+    def test_the_public_output_is_unchanged(self):
+        public = [private_row("passports/X.jpg", "hit"), private_row("misc/Y.jpg", "checksum_failed", "TD1",
+                                                                     reason="damaged zone")]
+        after_rows = [private_row("passports/X.jpg", "hit"), private_row("misc/Y.jpg", "hit", "TD1")]
+        before = write_arm(self.root, "before", outcomes=public, zones=[zone_row("misc/Y.jpg", ["A"])],
+                           run=archive())
+        after = write_arm(self.root, "after", outcomes=after_rows, zones=[zone_row("misc/Y.jpg", ["B"])],
+                          run=archive())
+        code, out, _ = run(before, after)
+        self.assertEqual(code, 0)
+        self.assertIn("misc/Y.jpg: checksum_failed/TD1 -> hit/TD1", out)
+        self.assertIn("before A", out)
+        self.assertIn("after  B", out)
+        self.assertNotIn("counts and enumerated transitions only", out)
 
 
 class FieldCorrectness(unittest.TestCase):
