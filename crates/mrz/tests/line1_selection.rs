@@ -155,14 +155,24 @@ fn with_names_of(data: &MrzData, incumbent: &MrzData) -> MrzData {
     probe
 }
 
+/// The ungrammatical incumbent, through the public API: a `<<<<` run inside the
+/// name field breaks the grammar, so with no other line in the text to propose
+/// the selector reports `NoCandidate`. In particular it does not say `Kept`,
+/// which is what a selector that accepted this name field would say.
 #[test]
-fn the_incumbent_fixture_is_valid_and_ungrammatical() {
+fn an_ungrammatical_incumbent_with_no_other_line_is_not_kept() {
     for format in FORMATS {
         let fx = Fixture::new(format);
-        let accepted = fx.parse(&fx.broken_line1());
-        assert!(accepted.valid(), "{format:?}");
-        assert_eq!(accepted.issuing_country, "UTO", "{format:?}");
-        assert_eq!(fx.broken_line1().len(), fx.width(), "{format:?}");
+        let broken = fx.broken_line1();
+        let accepted = fx.parse(&broken);
+        let selection = select(&fx.text(&[&broken]), &accepted);
+        assert_ne!(selection.verdict, Line1Verdict::Kept, "{format:?}");
+        assert_eq!(selection.verdict, Line1Verdict::NoCandidate, "{format:?}");
+        assert_eq!(
+            (selection.eligible, selection.distinct),
+            (0, 0),
+            "{format:?}"
+        );
     }
 }
 

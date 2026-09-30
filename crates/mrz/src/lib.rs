@@ -2201,17 +2201,20 @@ mod tests {
 
     #[test]
     fn default_options_match_the_plain_entry_points() {
-        let opts = ParseOptions::default();
-        assert_eq!(opts.pivot_yy, CURRENT_YY);
-        assert_eq!(
-            parse_td3(TD3_L1, TD3_L2).unwrap(),
-            parse_td3_with(TD3_L1, TD3_L2, &opts).unwrap()
-        );
+        assert_eq!(ParseOptions::default().pivot_yy, CURRENT_YY);
+
+        // The plain entry points read dates with the default pivot. Asserted
+        // against literals, not against `parse_td3_with(.., &default())`, which
+        // is the same call. A default pivot that drifted from today's would
+        // move the century of these dates.
+        let td3 = parse_td3(TD3_L1, TD3_L2).unwrap();
+        assert_eq!(td3.date_of_birth.to_string(), "1974-08-12");
+        assert_eq!(td3.date_of_expiry.to_string(), "2012-04-15");
+
         let text = format!("## VISA\n\n{MRV_A_L1}\n{MRV_A_L2}\n");
-        assert_eq!(
-            find_and_parse(&text).unwrap(),
-            find_and_parse_with(&text, &opts).unwrap()
-        );
+        let visa = find_and_parse(&text).unwrap();
+        assert_eq!(visa.date_of_birth.to_string(), "1985-02-21");
+        assert_eq!(visa.date_of_expiry.to_string(), "2027-03-14");
     }
 
     // ---- Checks diagnostics ----

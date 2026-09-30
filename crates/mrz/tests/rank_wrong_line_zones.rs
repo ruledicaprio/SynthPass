@@ -35,6 +35,13 @@ fn td3(issuing_country: &str, document_number: &str) -> (String, String) {
         personal_number: None,
     });
     let (l1, l2) = mrz.split_once('\n').expect("format_td3 emits two lines");
+    // The ranking tests below are about ranking, not about whether a zone
+    // parses: every constructed zone is a valid read on its own, an unregistered
+    // issuer included, and carries the issuer it was built with.
+    debug_assert!(
+        parse_td3(l1, l2).is_ok_and(|d| d.valid() && d.issuing_country == issuing_country),
+        "the constructed zone must be a valid read of its issuer: {l1} / {l2}"
+    );
     (l1.to_string(), l2.to_string())
 }
 
@@ -58,18 +65,6 @@ fn misread(l2: &str) -> String {
         other => panic!("fixture cell 2 is {other}, not a digit with a lookalike"),
     };
     cells.into_iter().collect()
-}
-
-/// The flagged zone parses as a valid TD3 read on its own, so the tests below
-/// are about ranking and not about whether it parses.
-#[test]
-fn the_flagged_fixture_is_a_valid_read_on_its_own() {
-    let (l1, l2) = flagged();
-    let data = parse_td3(&l1, &l2).expect("parses");
-    assert!(data.valid());
-    assert_eq!(data.issuing_country, "QQQ");
-    let (l1, l2) = unflagged();
-    assert!(parse_td3(&l1, &l2).expect("parses").valid());
 }
 
 /// (a) A flagged valid zone comes first, an unflagged valid zone after it: the
