@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1981-02-28",
+  "date_of_expiry": "2013-01-01",
+  "document_number": "S0002568",
+  "document_type": "ID",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "QUO",
+  "issuing_country": "CHE",
+  "mrz_checksums_valid": false,
+  "mrz_line": "IDCHES0002568<5<<<<<<<<<<<<<<<\n8102288M1301013CHE<<<<<<<<<<<5\nVADIS<<QUO<<<<<<<<<<<<<<<<<<<<",
+  "nationality": "CHE",
+  "personal_number": null,
+  "sex": "M",
+  "surname": "VADIS"
+}
