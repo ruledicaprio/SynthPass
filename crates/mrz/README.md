@@ -10,37 +10,28 @@ Zero-dependency (by default) [ICAO Doc 9303](https://www.icao.int/publications/p
 Machine Readable Zone parser, emitter and check-digit validator for Rust — passports, ID cards
 and visas.
 
-A check digit is **arithmetic, not a model score** — it agrees with the read or it does not.
-`mrz` verifies every printed digit under the standard 7-3-1 weighting and tells you exactly
-which one agreed and which one failed, field by field.
+A check digit is arithmetic, not a model score: it agrees with the read or it does not. `mrz`
+verifies every printed digit under the standard 7-3-1 weighting and reports which one agreed and
+which one failed, field by field. It is just as exact about what the arithmetic cannot see.
 
-It is equally exact about its own edges. A check digit is a strong *filter* and a weak
-*oracle*: what it passes is not a random remainder but precisely
-[what the arithmetic cannot see](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) — a closed-form set,
-measured against a real corpus, and a public API rather than a footnote.
+**Why use it**
 
-- **Evidence, field by field** — document number, date of birth, expiry, personal number, composite.
-- **Reads messy OCR** — finds the zone in free text, and repairs a misread only when a check
-  digit agrees with the repair.
-- **Writes conformant zones** — all five formats, with Latin and Cyrillic names transliterated
-  the way Doc 9303 prescribes.
-- **Honest about its limits** — the substitutions no check digit can catch are a public API.
-- **Small and safe** — no dependencies in the default build, no `unsafe`, no clock, no network. Builds for
-  `wasm32-unknown-unknown`, and is property-tested never to panic on arbitrary input.
+- **Evidence per field.** Document number, date of birth, expiry, personal number and composite each
+  report verified, refuted or not printed.
+- **Repairs only with proof.** `find_and_parse` fixes a misread only when a check digit agrees with the fix.
+- **Writes conformant zones.** All five formats, with Latin and Cyrillic names transliterated as Doc 9303 prescribes.
+- **States its limits.** The substitutions no check digit can catch are a public API.
+- **Small and safe.** No dependencies in the default build, no `unsafe`, no clock, no network. Builds for
+  `wasm32-unknown-unknown` and is property-tested never to panic on arbitrary input.
 
 **▶ [Try it in your browser](https://ruledicaprio.github.io/SynthPass/)** — live WASM MRZ validator.
 
----
-
 ## Contents
 
-- [Install](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#install) · [Supported formats](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#supported-formats) · [Quick start](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#quick-start)
-- [Reading OCR output](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#reading-ocr-output) · [Emitting](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#emitting) ·
-  [A checksum-consistent read is not a valid document](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#a-checksum-consistent-read-is-not-a-valid-document)
-- [What a check digit cannot prove](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) ·
-  [What a passing parse guarantees](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-passing-parse-guarantees) ·
-  [Conformance](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#conformance)
-- [Feature flags](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#feature-flags) · [Versioning and MSRV](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv) · [License](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
+- [Install](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#install) · [Formats](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#formats) · [Quick start](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#quick-start) · [Reading OCR output](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#reading-ocr-output) · [Emitting](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#emitting)
+- [Consistency versus validity](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#consistency-versus-validity) · [What a check digit cannot prove](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) · [What a passing parse guarantees](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-passing-parse-guarantees)
+- [Occluded cells](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#occluded-cells-apply_occlusion) · [Checking line 1](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#checking-line-1-select_line1) · [Conformance](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#conformance)
+- [Feature flags](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#feature-flags) · [Versioning and MSRV](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv) · [Changelog and roadmap](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#changelog-and-roadmap) · [License](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
 
 ## Install
 
@@ -56,15 +47,17 @@ says what to change, and the
 [changelog](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/CHANGELOG.md)
 says why each change was made.
 
-## Supported formats
+## Formats
 
-| Format | Document                        | Layout       | Parse | Emit |
-| ------ | ------------------------------- | ------------ | :---: | :--: |
-| TD3    | Passports                       | 2 lines × 44 | ✅ | ✅ |
-| TD2    | Official travel documents / IDs | 2 lines × 36 | ✅ | ✅ |
-| TD1    | ID cards                        | 3 lines × 30 | ✅ | ✅ |
-| MRV-A  | Visas (passport-book)           | 2 lines × 44 | ✅ | ✅ |
-| MRV-B  | Visas (smaller)                 | 2 lines × 36 | ✅ | ✅ |
+All five formats parse and emit.
+
+| Format | Document                        | Layout       |
+| ------ | ------------------------------- | ------------ |
+| TD3    | Passports                       | 2 lines × 44 |
+| TD2    | Official travel documents / IDs | 2 lines × 36 |
+| TD1    | ID cards                        | 3 lines × 30 |
+| MRV-A  | Visas (passport-book)           | 2 lines × 44 |
+| MRV-B  | Visas (smaller)                 | 2 lines × 36 |
 
 ## Quick start
 
@@ -85,19 +78,10 @@ assert_eq!(doc.checks.composite, Some(true));
 assert!(doc.valid()); // every check digit this format prints verified
 ```
 
-`parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other formats, each with a
+`parse_td1`, `parse_td2`, `parse_mrv_a` and `parse_mrv_b` cover the other formats. Each has a
 `*_with` variant taking `ParseOptions`.
 
 ## Reading OCR output
-
-[`find_and_parse`](https://docs.rs/mrz/latest/mrz/fn.find_and_parse.html) locates an MRZ inside
-noisy OCR text — HTML-escaped fillers, lines merged onto one physical line — and runs a
-check-digit-guided repair pass. A repaired reading is accepted only when its check digits agree
-with it. When nothing validates, you get the best-scoring partial read with its honest `Checks`, or
-`NotFound` if the text only looked like an MRZ. A zone that validates but shows a symptom of holding
-a wrong physical line (an issuing state that is in no registry, two near-identical lines, a digit in
-a two-line format's name field) is ranked below any unflagged valid zone in the same text, and is
-returned when there is none; the rank never refuses a valid read.
 
 ```rust
 let text = "## REPUBLIC OF UTOPIA\n\
@@ -110,38 +94,39 @@ assert_eq!(doc.given_names, "ANNA MARIA");
 assert!(doc.valid());
 ```
 
-Two cases that are easy to get wrong, both documented with runnable examples on docs.rs:
+[`find_and_parse`](https://docs.rs/mrz/latest/mrz/fn.find_and_parse.html) locates an MRZ in noisy
+OCR text and runs a check-digit-guided repair pass. It accepts a repaired reading only when its
+check digits agree with it. When nothing validates you get the best-scoring partial read with its
+honest `Checks`, or `NotFound` if the text only looked like an MRZ.
 
-- **Document numbers longer than the 9-character field** can overflow into optional data
-  under Parts 5/6 note j; TD3 uses that form by crate policy, while visas do not.
+Edge cases, each with a runnable example on docs.rs:
+
+- **Noisy text.** HTML-escaped fillers and lines merged onto one physical line are handled.
+- **A valid zone that may hold the wrong line.** An issuing state in no registry, two near-identical
+  lines, or a digit in a two-line format's name field ranks the zone below any unflagged valid zone in
+  the same text. It is still returned when there is no other; the rank never refuses a valid read.
+- **Long document numbers.** A number longer than the 9-character field can overflow into optional
+  data under Parts 5/6 note j. TD3 uses that form by crate policy; visas do not.
   [`full_document_number`](https://docs.rs/mrz/latest/mrz/struct.MrzData.html#method.full_document_number)
-  reassembles them.
-- **Unknown and partial birth dates** are conformant: Part 3 §4.8 lets an issuer fill
-  an unknown date of birth with `<`, and §4.9 gives a filler the value zero, so `<<<<<<` with check digit `0` is a
-  *valid* birth-date field. The parser also accepts fillers in expiry dates as a
-  tolerance policy; Part 3 §4.8 does not authorize them there. A parsed date is an
+  reassembles it.
+- **Unknown and partial birth dates.** Part 3 §4.8 lets an issuer fill an unknown date of birth with
+  `<`, and §4.9 gives a filler the value zero, so `<<<<<<` with check digit `0` is a *valid*
+  birth-date field. The parser also accepts fillers in expiry dates as a tolerance policy; §4.8 does
+  not authorize them there. A parsed date is an
   [`MrzDate`](https://docs.rs/mrz/latest/mrz/enum.MrzDate.html) (`Calendar`, `OutOfCalendar`,
-  `PartiallyUnknown`, `Unknown` or `Malformed`), so an issuer's unknown never looks like an
-  OCR failure. [`date_completeness`](https://docs.rs/mrz/latest/mrz/fn.date_completeness.html)
-  classifies a raw field the same way.
-- **A sex cell other than `M`, `F` or `<`** is kept as read, as
+  `PartiallyUnknown`, `Unknown` or `Malformed`), so an issuer's unknown never looks like an OCR
+  failure.
+  [`date_completeness`](https://docs.rs/mrz/latest/mrz/fn.date_completeness.html) classifies a raw
+  field the same way.
+- **A sex cell other than `M`, `F` or `<`.** It is kept as read, as
   [`Sex::NonConformant`](https://docs.rs/mrz/latest/mrz/enum.Sex.html), not rewritten to `X`. No
   check digit covers the cell, so a misread there is otherwise invisible.
-- **`select_line1`** is an opt-in look at the one field no check digit covers on a two-line format:
-  line 1's name field. Given the OCR text and the zone `find_and_parse_with` accepted, it reports
-  whether the accepted name field is well formed (`Kept`), whether exactly one other line of the
-  same width, document code and issuing state would replace an ill-formed one without changing
-  anything else (`Proposed`), or why it left the zone alone. It never applies a change, never
-  touches a field other than the names, and nothing in the crate calls it. **Off by default, and
-  unmeasured**, like `ParseOptions::class_sweep`: how many correct names it would break has not
-  been established, so it exists to be A/B'd against a control.
 
 ## Emitting
 
-All five formats emit from a `*Fields` struct with typed `MrzDate` and `Sex` values,
-plus MRZ-native text fields such as 3-letter codes. Dates print as `YYMMDD` in the zone.
-Every check digit is computed for you. With a document code accepted by the matching parser,
-the output parses back as `valid()`.
+All five formats emit from a `*Fields` struct with typed `MrzDate` and `Sex` values plus MRZ-native
+text fields such as 3-letter codes. Every check digit is computed for you, and dates print as
+`YYMMDD`. With a document code the matching parser accepts, the output parses back as `valid()`.
 
 ```rust
 use mrz::{format_td3, parse_td3, Td3Fields};
@@ -163,25 +148,25 @@ let (line1, line2) = zone.split_once('\n').unwrap();
 assert!(parse_td3(line1, line2).unwrap().valid());
 ```
 
-National characters are **transliterated, not dropped**:
+National characters are transliterated, not dropped:
 
-- **Latin**, Doc 9303 Part 3 §6 A — `MÜLLER` emits as `MUELLER`, not `MLLER`. Five characters
-  have more than one recommended form; see
+- **Latin**, Doc 9303 Part 3 §6 A: `MÜLLER` emits as `MUELLER`, not `MLLER`. Five characters have more
+  than one recommended form; see
   [`transliterate`](https://docs.rs/mrz/latest/mrz/fn.transliterate.html).
-- **Cyrillic**, §6 B — `ИВАНОВ` emits as `IVANOV`, not fillers. Twelve rows (plus five
-  word-initial rules) depend on the name's language — Serbian `Ж` is `Z`, Russian `Ж` is `ZH` —
-  so the emitters apply the base (≈ Russian) column. If you know the language, run
+- **Cyrillic**, §6 B: `ИВАНОВ` emits as `IVANOV`, not fillers. Twelve rows (plus five word-initial
+  rules) depend on the name's language: Serbian `Ж` is `Z`, Russian `Ж` is `ZH`. The emitters apply
+  the base (≈ Russian) column. If you know the language, run
   [`transliterate_cyrillic`](https://docs.rs/mrz/latest/mrz/fn.transliterate_cyrillic.html)
   with the right
   [`CyrillicLanguage`](https://docs.rs/mrz/latest/mrz/enum.CyrillicLanguage.html) first.
 
-Either way the crate can *produce* a conformant transliteration but cannot *validate* one: the
-standard admits several correct answers. §6 C (Arabic) is not implemented.
+The crate can *produce* a conformant transliteration but cannot *validate* one: the standard admits
+several correct answers. §6 C (Arabic) is not implemented.
 
-## A checksum-consistent read is not a valid document
+## Consistency versus validity
 
-A verified composite constrains the *read*. Whether the document is in date is a separate
-question, and the crate never reads the clock to answer it — you pass "today" in:
+A verified composite constrains the *read*. Whether the document is in date is a separate question,
+and the crate never reads the clock: you pass "today" in.
 
 ```rust
 use mrz::Date;
@@ -198,8 +183,8 @@ assert!(!doc.validity(Date::new(2026, 9, 14)).in_date); // ... and the specimen 
 ## What a check digit cannot prove
 
 A check digit is a 7-3-1 weighted sum taken **mod 10** (Part 3 §4.9), so it sees only each
-character's value mod 10. Two characters are indistinguishable to *every* check digit exactly
-when their values are congruent — and `blindspot` says so outright:
+character's value mod 10. Two characters are indistinguishable to *every* check digit exactly when
+their values are congruent. `blindspot` says so outright:
 
 ```rust
 use mrz::{blindspot, collisions, Blindspot};
@@ -225,120 +210,186 @@ assert_eq!(collisions('K'), vec!['0', 'A', 'U', '<']);
 | B ↔ L   | **blind**  | 11 vs 21                   |
 | A ↔ K   | **blind**  | 10 vs 20                   |
 
-**The table is per swap, not per character.** Across several positions the shift is
-`Σ Δᵢ·wᵢ (mod 10)`, so substitutions that are individually caught can cancel — two O↔0 at
-weights 7 and 3 give `24·(7+3) = 240 ≡ 0`. Measured over 76 real document-number mismatches,
-the undetectable ones were *dominated* by pairs this table calls caught. Read it as "which
-single swaps are safe", never as "which characters are safe".
+The table is per swap, not per character. Across several positions the shift is
+`Σ Δᵢ·wᵢ (mod 10)`, so swaps that are individually caught can cancel: two O↔0 at weights 7 and 3
+give `24·(7+3) = 240 ≡ 0`. Measured over 76 real document-number mismatches, the undetectable ones
+were *dominated* by pairs this table calls caught. Read it as "which single swaps are safe", never as
+"which characters are safe".
 
-That is why the crate layers structural checks on top of the arithmetic: country-code
-recognition and date plausibility in `find_and_parse`'s repair gates, plus one guard every
-direct `parse_*` call applies on its own. A document number whose first cell is the filler `<`
-(including an all-filler field) is refused outright as
+So the crate layers structural checks on top of the arithmetic: country-code recognition and date
+plausibility in `find_and_parse`'s repair gates, plus one guard every direct `parse_*` call applies.
+A document number whose first cell is the filler `<` (including an all-filler field) is refused
+outright as
 [`MrzError::LeadingFiller`](https://docs.rs/mrz/latest/mrz/enum.MrzError.html), never merely a
-failed check digit — Doc 9303 enters data from each field's left-hand position, so nothing was
-printed to the left of it. Beyond that one field, direct `parse_*` calls do not apply the
-country-registry or date-plausibility guards. The full derivation and the corpus numbers are on
+failed check digit: Doc 9303 enters data from each field's left-hand position, so nothing was printed
+to the left of it. The full derivation and the corpus numbers are on
 [`Blindspot`](https://docs.rs/mrz/latest/mrz/enum.Blindspot.html), and
 `cargo run -p mrz --example checksum_blindspots` demonstrates the law against the real parser.
 
 ## What a passing parse guarantees
 
-Every cell of the five formats' fixed grids falls into exactly one of three buckets, and a
-passing `parse_*` call means something different for each:
+Every cell of the five formats' fixed grids falls into one of three buckets. A passing `parse_*`
+call means something different for each.
 
-| | Guarantees | Does not guarantee |
-| --- | --- | --- |
-| **Check-digit-covered** — the document number, date of birth and date of expiry on every format, and TD3's personal number, each under its own digit; TD1 and TD2 optional data, under the composite alone; and the composite itself (TD1, TD2, TD3) | The printed digit agrees with the 7-3-1 weighted sum of the cells it covers (Part 3 §4.9) — internally consistent, field by field. The document number's own first cell also carries a content check beyond that arithmetic: a leading filler is refused outright (`MrzError::LeadingFiller`) rather than merely failing its check digit. | Byte-identity with what was issued. `1`↔`L` and `6`↔`G` are the *only* `CONFUSABLES` pairs sharing a residue class, so they are the only single-cell misreads no check digit anywhere can catch; every other listed confusable is caught individually, though two can still cancel in combination (see [above](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove)). Nor that a date names a real calendar day: `MrzDate::OutOfCalendar` is a valid, checksum-consistent outcome for a month of `13`, a `30`th of February, or the `000000` placeholder some specimens print. |
-| **Structural** — line 1's first cell, on every format | It matches its format's admissible document-code table: `P` (TD3), `V` (MRV-A/B), or one of `I`/`A`/`C` (TD1/TD2) — one of two content checks a direct `parse_*` call makes outside the check digits (the other is the document number's leading cell, in the row above). | Nothing about the document code's *second* cell, which is accepted exactly as printed with no check at all. |
-| **Unverifiable** — everything else: the document code's second cell, issuer, name, nationality, sex, and MRV-A/MRV-B optional data, since visas print no composite | Membership in the MRZ alphabet (`0`-`9`, `A`-`Z`, `<`) — anything else is `BadCharacter`. | That the issuing country or nationality is a real ICAO-registered code (no registry lookup here — that is a `find_and_parse` repair-time guard), or that the sex cell is `M`, `F` or `<` (anything else survives as `Sex::NonConformant`, never rejected). |
+**Check-digit-covered.** The document number, date of birth and date of expiry on every format,
+TD3's personal number, and the composite (TD1, TD2, TD3), each under its own digit; TD1 and TD2
+optional data sit under the composite alone.
 
-**No check digit covers the document code, issuer, name, nationality or sex on any of the five
-formats**, so there is no arithmetic anywhere to hold them to. On TD2, TD3 and both visas that is
-all of line 1; TD1's line 1 also carries the document number with its check digit, and optional
-data the composite covers. Direct `parse_*` calls never apply the country-registry or
-date-plausibility guards that `find_and_parse`'s repair gates do — the one content check they do
-make on their own, beyond the check digits, is refusing a document number whose first cell is the
-filler. A direct parse reports what the check digits establish, which is consistency, plus that one
-structural refusal, and leaves plausibility to those repair-time gates.
+- *Guarantees:* the printed digit agrees with the 7-3-1 weighted sum of the cells it covers (Part 3
+  §4.9), so the field is internally consistent. The document number's first cell also gets a content
+  check: a leading filler is refused (`MrzError::LeadingFiller`).
+- *Does not guarantee:* byte-identity with what was issued. `1`↔`L` and `6`↔`G` are the only
+  `CONFUSABLES` pairs sharing a residue class, so they are the only single-cell misreads no check
+  digit catches. Every other listed confusable is caught alone, though two can cancel in combination
+  ([above](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove)).
+  Nor does it guarantee a real calendar day: `MrzDate::OutOfCalendar` is a valid, checksum-consistent
+  outcome for a month of `13`, a `30`th of February, or the `000000` placeholder some specimens print.
 
-**`apply_occlusion`** takes this table one step further, for an image-derived
-[`CellMask`](https://docs.rs/mrz/latest/mrz/struct.CellMask.html) of cells an occluder covers on an
-already-parsed zone. A masked check-covered or structural cell refuses the whole call
-(`MrzError::OccludedCheckedCell`) rather than reporting a value the arithmetic cannot back up, and is
-never rebuilt from check-digit arithmetic even where it could be solved for uniquely. A masked
-unverifiable cell withholds its field — listed and blanked, never returned as a value. The name field
-follows ICAO's own grammar: a masked cell before a *visible* `<<` withholds the surname and the given
-names together, since a covered separator could either complete itself or continue a multi-part
-surname; a masked cell strictly after it, but before the given names' own visible end, withholds the
-given names alone; and a mask confined to trailing filler withholds nothing. An empty mask is always
-the identity. See [`apply_occlusion`](https://docs.rs/mrz/latest/mrz/fn.apply_occlusion.html)'s own
-documentation for the full semantics, including the overflow-layout case.
+**Structural.** Line 1's first cell, on every format.
+
+- *Guarantees:* it matches the format's admissible document-code table: `P` (TD3), `V` (MRV-A/B), or
+  one of `I`/`A`/`C` (TD1/TD2). Together with the document number's leading cell, this is one of two
+  content checks a direct `parse_*` call makes outside the check digits.
+- *Does not guarantee:* anything about the document code's second cell, which is accepted exactly as
+  printed.
+
+**Unverifiable.** Everything else: the document code's second cell, issuer, name, nationality, sex,
+and MRV-A/MRV-B optional data (visas print no composite).
+
+- *Guarantees:* membership in the MRZ alphabet (`0`-`9`, `A`-`Z`, `<`). Anything else is
+  `BadCharacter`.
+- *Does not guarantee:* that the issuing country or nationality is a real ICAO-registered code (a
+  direct parse does no registry lookup), or that the sex cell is `M`, `F` or `<` (anything else
+  survives as `Sex::NonConformant`, never rejected).
+
+No check digit covers the document code, issuer, name, nationality or sex on any of the five formats,
+so there is no arithmetic to hold them to. On TD2, TD3 and both visas that is all of line 1. TD1's
+line 1 also carries the document number with its check digit, and optional data the composite covers.
+
+**Direct parse versus `find_and_parse`.** A direct `parse_*` call reports what the check digits
+establish, which is consistency, plus the one structural refusal above. It never applies the
+country-registry or date-plausibility guards: those live in `find_and_parse`'s repair gates, and
+plausibility is left to them.
+
+## Occluded cells: `apply_occlusion`
+
+When an image shows an occluder over part of an already-parsed zone,
+[`apply_occlusion`](https://docs.rs/mrz/latest/mrz/fn.apply_occlusion.html) takes a
+[`CellMask`](https://docs.rs/mrz/latest/mrz/struct.CellMask.html) of the covered cells and
+withholds what the arithmetic cannot back up. Doctests on docs.rs show both outcomes.
+
+- **Check-covered or structural cell masked:** the whole call fails with
+  `MrzError::OccludedCheckedCell`. The cell is never rebuilt from check-digit arithmetic, even where
+  it could be solved for uniquely.
+- **Unverifiable cell masked:** its field is withheld, listed in `Occluded::fields` and blanked in
+  `Occluded::data`, never returned as a value.
+- **Name field:** a masked cell before a *visible* `<<` withholds the surname and the given names
+  together, since a covered separator could either complete itself or continue a multi-part surname.
+  A masked cell after it but before the given names' own visible end withholds the given names alone.
+  A mask confined to trailing filler withholds nothing.
+- **Empty mask:** always the identity.
+
+Three things to know before you use the result:
+
+- **`mrz_lines` keeps the covered cells.** `Occluded::data.mrz_lines` is the validated read, not a
+  redaction (ADR-0026 rejects rewriting covered cells). It must never stand in for a withheld
+  field.
+- **A blank can look like a printed value.** A withheld `sex` reads `Sex::Unspecified` and a
+  withheld optional-data slot reads `None`, exactly like a printed filler. Check `Occluded::fields`.
+- **Run `select_line1` first.** On an `Occluded::data` whose names were withheld it can `Propose`
+  them back from the OCR text.
+
+See the function's documentation for the full semantics, including the overflow-layout case.
+
+## Checking line 1: `select_line1`
+
+On a two-line format the one field no check digit covers is line 1's name field. `select_line1` is
+an opt-in look at it. Give it the OCR text and the zone `find_and_parse_with` accepted.
+
+```rust
+use mrz::{find_and_parse_with, select_line1, Line1Verdict, ParseOptions};
+
+let text = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<\n\
+            L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+let opts = ParseOptions::default();
+
+let accepted = find_and_parse_with(text, &opts).unwrap();
+let selection = select_line1(text, &accepted, &opts);
+assert_eq!(selection.verdict, Line1Verdict::Kept); // the accepted name field is well formed
+```
+
+It reports whether the accepted name field is well formed (`Kept`), whether exactly one other line
+of the same width, document code and issuing state would replace an ill-formed one without changing
+anything else (`Proposed`), or why it left the zone alone. It never applies a change, never touches
+a field other than the names, and nothing in `mrz` calls it.
+
+It has been measured. In SynthPass's
+[replayed A/B](https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/benchmarks/line1-selection-ab-2026-09-29.md)
+on the 261 public specimens, applying its proposals changed no outcome and took names exact among
+hits from 13 of 33 to 15 of 33. All five synthetic formats were identical. That is one corpus, so
+A/B it against a control on your own data before relying on it. `ParseOptions::class_sweep` remains
+unmeasured.
 
 ## Conformance
 
-`mrz` is verified against the ICAO Doc 9303 text, not against memory of it. Worked examples
-published in the standard — composite check digits, name encodings, transliterations, the
-published TD1/TD2/visa specimens and TD3 fields from Part 3 §3.2 — are
-pinned as test vectors. The older-edition `P<` TD3 line 1 differs from the
-current Part 4 `PP` specimen. Where the standard is
-**silent**, the crate says so rather than inventing conformance:
+`mrz` is verified against the ICAO Doc 9303 text, not against memory of it. Worked examples published
+in the standard are pinned as test vectors: composite check digits, name encodings, transliterations,
+the published TD1/TD2/visa specimens and TD3 fields from Part 3 §3.2. The older-edition `P<` TD3 line 1
+differs from the current Part 4 `PP` specimen. Where the standard is **silent**, the crate says so
+rather than inventing conformance:
 
 - Two-digit-year century inference has no rule anywhere in Doc 9303. The pivot is this crate's
   policy, documented as such, and configurable per call.
 - Name truncation is issuer-discretionary; Doc 9303 defines several strategies and states that
   truncation is not reliably detectable.
-- §6 A transliteration is deliberately multi-valued for five characters. §6 B is
-  language-dependent. Part 3 §6 B has no worked example, while Part 4 Appendix A
-  Figure A-2 illustrates one. Its 48 rows are pinned by table-integrity checks.
+- §6 A transliteration is deliberately multi-valued for five characters. §6 B is language-dependent.
+  Part 3 §6 B has no worked example, while Part 4 Appendix A Figure A-2 illustrates one. Its 48 rows
+  are pinned by table-integrity checks.
 
-The corroboration record — which passages are relied on, how each was verified, and which
-remain unverified — is kept alongside the source corpus in
+The corroboration record — which passages are relied on, how each was verified, and which remain
+unverified — is kept alongside the source corpus in
 [`CONFORMANCE_BASIS.md`](https://github.com/ruledicaprio/SynthPass/blob/main/knowledge/docs9303/CONFORMANCE_BASIS.md).
 
 ## Feature flags
 
-Both are off by default, keeping the base crate zero-dependency and wasm-clean:
+Both are off by default, keeping the base crate zero-dependency and wasm-clean.
 
-- **`serde`** — derives `Serialize` + `Deserialize` on the data types: `MrzData`, `Checks`,
-  `Format`, `Field`, `SequenceCompleteness`, `ParseOptions`, `Date`, `DateValidity`,
-  `DateCompleteness`, `DateRole`, `RawDateField`, `InvalidRawDateField`,
-  `ParseMrzDateError`, `ParseSexError`, and the five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`,
-  `MrvAFields`, `MrvBFields`). `MrzDate` and `Sex` implement both by hand as their text form:
-  a date serialises as `"1974-08-12"` (or its raw field, such as `"74<<12"`) and sex as its zone
-  character.
-- **`zeroize`** — derives `ZeroizeOnDrop` on `MrzData`, wiping its PII-bearing fields from memory
-  when the value is dropped. Best-effort: `format`, `document_number_legacy_encoding` and
-  `checks` are skipped, `MrzDate` keeps its variant after wiping its payload, `Sex` is fully
-  overwritten, and copies made before the drop are out of reach.
+- **`serde`** derives `Serialize` + `Deserialize` on the data types: `MrzData`, `Checks`, `Format`,
+  `Field`, `SequenceCompleteness`, `ParseOptions`, `Date`, `DateValidity`, `DateCompleteness`,
+  `ZoneField`, `Occluded`, and the five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`, `MrvBFields`). `MrzDate`
+  and `Sex` implement both by hand as their text form: a date serialises as `"1974-08-12"` (or its
+  raw field, such as `"74<<12"`) and sex as its zone character.
+- **`zeroize`** derives `ZeroizeOnDrop` on `MrzData`, wiping its PII-bearing fields from memory when
+  the value is dropped. Best-effort: `format`, `document_number_legacy_encoding` and `checks` are
+  skipped, `MrzDate` keeps its variant after wiping its payload, `Sex` is fully overwritten, and
+  copies made before the drop are out of reach.
 
 ## Versioning and MSRV
 
-`mrz` is pre-1.0, so **the minor version is the breaking slot**: `mrz = "0.9"` picks up every
-`0.9.x` fix and addition, and never a breaking `0.10.0`. CI diffs every change against the
-published API with `cargo-semver-checks`, so a break cannot ship as a patch.
+`mrz` is pre-1.0, so **the minor version is the breaking slot**: `mrz = "0.9"` picks up every `0.9.x`
+fix and addition, and never a breaking `0.10.0`. CI diffs every change against the published API with
+`cargo-semver-checks`, so a break cannot ship as a patch.
 
-**Types this crate returns, and its one options struct, are `#[non_exhaustive]`** — `MrzData`,
-`Checks`, `Date`, `DateValidity`, `ParseOptions` and every public enum — so they grow without
-breaking you. Build `ParseOptions` with `ParseOptions::default().with_pivot_yy(..)`; note that
-functional update syntax is *not* an escape hatch on a non-exhaustive struct, so
-`ParseOptions { pivot_yy: 30, ..Default::default() }` is rejected with `E0639` just as the bare
-literal is.
+**Returned types are `#[non_exhaustive]`**, and so is the one options struct: `MrzData`, `Checks`,
+`Date`, `DateValidity`, `ParseOptions` and every public enum. They grow without breaking you. Build
+`ParseOptions` with `ParseOptions::default().with_pivot_yy(..)`. Functional update syntax is *not* an
+escape hatch on a non-exhaustive struct: `ParseOptions { pivot_yy: 30, ..Default::default() }` is
+rejected with `E0639`, just as the bare literal is.
 
 The five emitter inputs (`Td3Fields`, `Td2Fields`, `Td1Fields`, `MrvAFields`, `MrvBFields`) are
 **deliberately exhaustive**: they mirror field layouts ICAO 9303 fixes, and you build them with
-struct expressions. Future tunables go in a separate non-exhaustive companion rather than as a
-new field on one of them.
+struct expressions. Future tunables go in a separate non-exhaustive companion rather than as a new
+field on one of them.
 
 The minimum supported Rust version is **1.82**, set by `std::iter::repeat_n` and
-`Option::is_none_or`, and enforced by CI for the zero-dependency default build. The `serde`
-feature follows its own upstream MSRV, which is comfortably below 1.82. The `zeroize` feature
-would not be — `zeroize` 1.9.0 and `zeroize_derive` 1.5.0 both moved to edition 2024 and
-rust-version 1.85, which cargo 1.82 cannot even parse — so `crates/mrz/Cargo.toml` caps both to
-their last edition-2021 releases (`zeroize` `>=1.8.1, <1.9`, `zeroize_derive` `>=1.4, <1.5`).
-CI's `msrv` job checks `--all-features` on 1.82 as well as the zero-dependency build, so this
-holds by construction rather than by promise. Raising the floor is a minor-version change; the
-zeroize cap can be lifted once that floor reaches 1.85.
+`Option::is_none_or`. CI's `msrv` job enforces it for the zero-dependency build and for
+`--all-features`. The `serde` feature follows its own upstream MSRV, comfortably below 1.82. The
+`zeroize` feature would not: `zeroize` 1.9.0 and `zeroize_derive` 1.5.0 both moved to edition 2024
+and rust-version 1.85, which cargo 1.82 cannot even parse. So `crates/mrz/Cargo.toml` caps both to
+their last edition-2021 releases (`zeroize` `>=1.8.1, <1.9`, `zeroize_derive` `>=1.4, <1.5`). Raising
+the floor is a minor-version change; the cap can be lifted once it reaches 1.85.
+
+## Changelog and roadmap
 
 - **[CHANGELOG](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/CHANGELOG.md)** —
   every published version, with the pull requests behind each entry.

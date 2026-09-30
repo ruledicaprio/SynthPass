@@ -41,12 +41,15 @@
 //!
 //! # Pass budget
 //!
-//! `SYNTHPASS_OCR_MAX_PASSES` (default [`DEFAULT_MAX_PASSES`]) and
-//! `SYNTHPASS_OCR_MAX_SECONDS` (default [`DEFAULT_MAX_SECONDS`]) bound the retry
-//! loop so a hopeless document (dense/photographic scan with no recoverable
-//! MRZ) aborts remaining variants instead of burning minutes — the general
-//! pass's text is always returned regardless of where the budget cuts the
-//! loop off.
+//! `SYNTHPASS_OCR_MAX_PASSES` (default [`DEFAULT_MAX_PASSES`]) limits how many
+//! passes may start. `SYNTHPASS_OCR_MAX_SECONDS` (default
+//! [`DEFAULT_MAX_SECONDS`]) stops the loop from starting another retry pass
+//! once that much wall-clock time has elapsed since the general pass started;
+//! a pass already in flight still finishes, and rotation and band detection
+//! run before the clock starts. Together they keep a
+//! hopeless document (dense/photographic scan with no recoverable MRZ) from
+//! starting every remaining variant — the general pass's text is always
+//! returned regardless of where the budget cuts the loop off.
 //!
 //! # Diagnostics
 //!
@@ -63,9 +66,11 @@
 //!
 //! `SYNTHPASS_OCR_CHARGRID` (`off`/`on`/`control`, default `off`) runs the
 //! [`chargrid`] module's fixed-grid MRZ name-line repair after a Tier-1 hit —
-//! see that module's doc for the mechanism (`ocrs` never emits an isolated
-//! `<`) and [`OcrPage::chargrid`] for what a run records. Unset, the OCR path
-//! is byte-identical to before this arm existed.
+//! see that module's doc for why name lines still lose fillers even though both
+//! engines emit isolated `<`
+//! (`knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`), and
+//! [`OcrPage::chargrid`] for what a run records. Unset, the OCR path is
+//! byte-identical to before this arm existed.
 //!
 //! # Pass trace (benchmark-only)
 //!
@@ -160,7 +165,8 @@ const MRZ_BEAM_WIDTH: u32 = 24;
 /// proves it against a real worst-case fixture and the loop's actual break
 /// condition, so a future variant — or another off-by-one — can't quietly
 /// outgrow this budget again. The `SYNTHPASS_OCR_MAX_SECONDS` wall-clock
-/// budget is what actually bounds a pathological document.
+/// budget limits which retry passes a pathological document may start; it is
+/// not an in-flight timeout.
 const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 
 /// Worst-case number of retry variants: `preprocess::mrz_variants`'s 7, plus
@@ -183,18 +189,25 @@ const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS + 1;
 /// variant count cannot drift apart silently — see that constant's doc comment.
 const MAX_RETRY_VARIANTS: usize = 13;
 
-/// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock ceiling on the whole
-/// `recognize` call when the env var is unset or invalid. Measured
-/// (`examples/mrz_corpus.rs`, post-Phase-1 variants, reference hardware): a
-/// full negative-control sweep (all retry variants run, none validate) costs
-/// ~15-27s, and `Slovenian_ID_Specimen_2022_back_mrz.jpg` — whose checksum-valid
-/// MRZ only assembles once enough variants have each contributed a line —
-/// needs close to 30s of its own. 45s keeps clearance above that measured
-/// worst case while still bounding the multi-minute-per-document blowup
-/// that motivated this budget in the first place (see the
-/// `Israel_Biometric_Passport.jpg` corpus entry, whose multi-minute cost was
-/// dominated by Tier 2's LLM generation on garbage OCR text, not the OCR
-/// passes themselves — this budget caps the OCR side of that problem).
+/// Default `SYNTHPASS_OCR_MAX_SECONDS` wall-clock threshold for starting
+/// another retry pass when the env var is unset or invalid. The loop checks
+/// elapsed time only before a pass starts; it does not interrupt a pass already
+/// in flight. This is therefore not a ceiling on the whole `recognize` call:
+/// the rotation probe and the geometry passes run before its clock starts, and
+/// a pass already in flight when the threshold passes still finishes. France
+/// ID 2020's back took 64.5 s against the 52 s default.
+///
+/// Measured (`examples/mrz_corpus.rs`, post-Phase-1 variants, reference
+/// hardware): a full negative-control sweep (all retry variants run, none
+/// validate) costs ~15-27s, and `Slovenian_ID_Specimen_2022_back_mrz.jpg` —
+/// whose checksum-valid MRZ only assembles once enough variants have each
+/// contributed a line — needs close to 30s of its own. 45s keeps clearance
+/// above that measured worst case while still stopping another retry pass
+/// after the threshold that replaced the earlier multi-minute-per-document
+/// blowup (see the `Israel_Biometric_Passport.jpg` corpus entry, whose
+/// multi-minute cost was dominated by Tier 2's LLM generation on garbage OCR
+/// text, not the OCR passes themselves — this budget limits the OCR side of
+/// that problem).
 ///
 /// **Raised 45 → 52 by ADR-0008 chunk 2** for the two quarter-turn variants
 /// ([`ROTATION_RETRY_TURNS`]) now trailing the chain, at the ~2–3s per pass the
@@ -204,8 +217,8 @@ const MAX_RETRY_VARIANTS: usize = 13;
 /// silent-truncation failure [`DEFAULT_MAX_PASSES`]'s own doc comment describes
 /// one budget over.
 ///
-/// Only documents that fail every upright variant ever reach the new ceiling —
-/// a document that validates earlier still finishes in the time it always did.
+/// Only documents that fail every upright variant ever reach the new threshold
+/// — a document that validates earlier still finishes in the time it always did.
 const DEFAULT_MAX_SECONDS: u64 = 52;
 
 pub struct NativeOcr {
@@ -1765,9 +1778,10 @@ fn skew_mode() -> preprocess::SkewMode {
 
 /// Which post-hit chargrid name-line repair, if any, to run after a Tier-1
 /// hit. See `crate::chargrid`'s module doc for the mechanism this wires in
-/// (`ocrs` never emits an isolated `<`, so the MRZ name line comes back
-/// missing fillers a fixed-pitch grid can recover) and [`chargrid_mode`] for
-/// the env var.
+/// (both engines emit isolated `<`, but name lines still come back missing
+/// fillers a fixed-pitch grid can recover; see
+/// `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`) and
+/// [`chargrid_mode`] for the env var.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChargridMode {
     /// No post-hit repair pass at all — behaviour byte-for-byte unchanged
@@ -2058,11 +2072,11 @@ const CHARGRID_MATCH_PREFIX_LEN: usize = 5;
 /// characters — the comparison key [`match_chargrid_line`] matches a
 /// recognized line against the parsed name line's own prefix.
 ///
-/// `ocrs` never emits `<` at all (see `crate::chargrid`'s module doc), so a
-/// recognized line's text is already filler-free; stripping `<` from the
-/// *parsed* line before comparing is what makes the two sides comparable —
-/// comparing raw prefixes would compare `"P<UTO"` against `"PUTOE"` and never
-/// match.
+/// Both engines emit isolated `<`, including on name lines; see
+/// `knowledge/benchmarks/ocr-filler-unknown-trace-2026-09-29.md`. Stripping
+/// fillers from both the parsed and recognized prefixes makes the comparison
+/// independent of which fillers survived — comparing raw prefixes could
+/// compare `"P<UTO"` against `"PUTOE"` and never match.
 fn chargrid_match_prefix(line: &str) -> String {
     line.chars()
         .filter(|&c| c != '<')

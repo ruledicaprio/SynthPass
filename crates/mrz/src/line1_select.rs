@@ -9,6 +9,8 @@
 //!
 //! The rule itself is documented on [`select_line1`], the one public item.
 
+use std::collections::BTreeSet;
+
 use crate::checksum::{is_mrz_charset, normalize_line};
 use crate::parser::{
     candidate_lines, parse_mrv_a_with, parse_mrv_b_with, parse_td2_with, parse_td3_with,
@@ -20,8 +22,8 @@ use crate::{Format, MrzData, MrzError, ParseOptions};
 /// document code and 2..5 the issuing state.
 const NAME_FIELD_START: usize = 5;
 
-/// What [`select_line1`] found. **Unmeasured, and off by default in every
-/// caller in this workspace.**
+/// What [`select_line1`] found. **Off by default in every caller in this
+/// workspace.**
 ///
 /// `#[non_exhaustive]`: an output type, obtained from [`select_line1`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +50,9 @@ pub struct Line1Selection {
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Line1Verdict {
-    /// The accepted read is not checksum-valid, or is TD1. Nothing was looked at.
+    /// The accepted read is not checksum-valid, is TD1, or its `mrz_lines` are
+    /// not two lines of the format's width (an [`MrzData`] edited after
+    /// parsing). Nothing was looked at.
     OutOfScope,
     /// The accepted name field already follows the name grammar.
     Kept,
@@ -98,10 +102,14 @@ fn unresolved_from(reason: FlagReason) -> Line1Unresolved {
 /// answer for the same arguments. Pass the same `opts` that produced
 /// `accepted`, since the eligibility check compares parses.
 ///
-/// **Off by default, and unmeasured.** Nothing in `mrz` calls this. It exists
-/// so a caller can A/B it against a control, as
-/// [`ParseOptions::class_sweep`] does; how many correct names it would break is
-/// exactly what has not been established.
+/// **Opt-in:** nothing in `mrz` calls this. SynthPass
+/// measured it in a replayed A/B over its 261 public real specimens
+/// (`knowledge/benchmarks/line1-selection-ab-2026-09-29.md` in the repository):
+/// applying its proposals changed no outcome and no correct field, and took
+/// names exact among hits from 13 of 33 to 15 of 33; all five synthetic formats
+/// were identical. That is one corpus, not a guarantee, so A/B it against a
+/// control on your own data before relying on it, as with
+/// [`ParseOptions::class_sweep`], which remains unmeasured.
 ///
 /// # The rule
 ///
@@ -109,7 +117,10 @@ fn unresolved_from(reason: FlagReason) -> Line1Unresolved {
 /// tune. In order, the first step that fires sets the verdict:
 ///
 /// 1. **Out of scope.** `accepted` is not checksum-valid, or is TD1 (whose
-///    names are on line 3, and whose line 1 carries check digits).
+///    names are on line 3, and whose line 1 carries check digits), or its
+///    `mrz_lines` are not exactly two lines of the format's width (only an
+///    [`MrzData`] edited after parsing can be), which is refused before any
+///    similarity work runs.
 /// 2. **Kept.** `accepted`'s name field (line 1 from cell 5) is already
 ///    grammatical: once trailing `<` is stripped it is non-empty and matches
 ///    `[A-Z]+(<[A-Z]+)*(<<[A-Z]+(<[A-Z]+)*)?`. A grammatical name field is
@@ -139,6 +150,12 @@ fn unresolved_from(reason: FlagReason) -> Line1Unresolved {
 /// It changes the name fields only: never the document code, the issuer, any
 /// other field or line 2. Order-independent: reordering the lines of `text`
 /// does not change the verdict.
+///
+/// Run it **before** [`apply_occlusion`](crate::apply_occlusion), not after:
+/// given an [`Occluded::data`](crate::Occluded::data) whose names were
+/// withheld, it can propose them back from the OCR text. With the `zeroize`
+/// feature, a [`Line1Verdict::Proposed`] read wipes itself on drop like any
+/// other [`MrzData`].
 ///
 /// ```
 /// use mrz::{
@@ -180,11 +197,19 @@ pub fn select_line1(text: &str, accepted: &MrzData, opts: &ParseOptions) -> Line
         Some(width) if accepted.valid() => width,
         _ => return done(Line1Verdict::OutOfScope),
     };
+    // `MrzData`'s fields are public, so `mrz_lines` may have been edited after
+    // parsing. Anything but exactly two lines of the format's width is out of
+    // scope, and is refused before `flag_reason` runs, whose similarity check
+    // would otherwise do edit-distance work on arbitrarily long lines.
     let mut zone_lines = accepted.mrz_lines.lines();
-    let (Some(incumbent_line1), Some(accepted_line2)) = (zone_lines.next(), zone_lines.next())
+    let (Some(incumbent_line1), Some(accepted_line2), None) =
+        (zone_lines.next(), zone_lines.next(), zone_lines.next())
     else {
         return done(Line1Verdict::OutOfScope);
     };
+    if incumbent_line1.len() != width || accepted_line2.len() != width {
+        return done(Line1Verdict::OutOfScope);
+    }
     let (Some(incumbent_prefix), Some(incumbent_field)) = (
         incumbent_line1.get(..NAME_FIELD_START),
         incumbent_line1.get(NAME_FIELD_START..),
@@ -209,7 +234,7 @@ pub fn select_line1(text: &str, accepted: &MrzData, opts: &ParseOptions) -> Line
         .map(|line| normalize_line(line))
         .collect();
     let mut eligible = 0;
-    let mut distinct_fields: Vec<&str> = Vec::new();
+    let mut distinct_fields: BTreeSet<&str> = BTreeSet::new();
     let mut proposals: Vec<MrzData> = Vec::new();
     for candidate in &candidates {
         let Some(proposal) = eligible_proposal(
@@ -225,8 +250,7 @@ pub fn select_line1(text: &str, accepted: &MrzData, opts: &ParseOptions) -> Line
         eligible += 1;
         // `eligible_proposal` returned, so the candidate has a name field.
         let field = candidate.get(NAME_FIELD_START..).unwrap_or("");
-        if !distinct_fields.contains(&field) {
-            distinct_fields.push(field);
+        if distinct_fields.insert(field) {
             proposals.push(proposal);
         }
     }

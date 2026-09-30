@@ -47,6 +47,7 @@
 //! | A number too long for its field | [`MrzData::full_document_number`] |
 //! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
 //! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
+//! | Cells an image shows as covered | [`apply_occlusion`] with a [`CellMask`]: it withholds fields no check digit covers, and refuses a covered check-digit cell |
 //!
 //! A valid composite check digit establishes checksum consistency, not
 //! byte-identity. It does not prove the document is in date — see
@@ -60,19 +61,20 @@
 //!
 //! - **`serde`** — derives `Serialize` and `Deserialize` on the data types:
 //!   [`MrzData`], [`Checks`], [`Format`], [`Field`], [`SequenceCompleteness`],
-//!   [`ParseOptions`], [`Date`], [`DateValidity`], [`DateCompleteness`], and the
-//!   five emitter inputs ([`Td3Fields`], [`Td2Fields`], [`Td1Fields`],
-//!   [`MrvAFields`], [`MrvBFields`]). [`MrzDate`] and [`Sex`] implement both by
-//!   hand as their text form (ADR-0020), so `MrzData`'s dates and sex serialise
-//!   as strings.
+//!   [`ParseOptions`], [`Date`], [`DateValidity`], [`DateCompleteness`],
+//!   [`ZoneField`], [`Occluded`], and the five emitter inputs ([`Td3Fields`],
+//!   [`Td2Fields`], [`Td1Fields`], [`MrvAFields`], [`MrvBFields`]). [`MrzDate`]
+//!   and [`Sex`] implement both by hand as their text form (ADR-0020), so
+//!   `MrzData`'s dates and sex serialise as strings.
 //! - **`zeroize`** — derives `ZeroizeOnDrop` on [`MrzData`], wiping its
 //!   PII-bearing fields from memory when the value is dropped. Best-effort: see
-//!   [`MrzData`] for what it does not reach.
+//!   [`MrzData`] for what it does not reach. An [`Occluded::data`] and a
+//!   [`Line1Verdict::Proposed`] read are `MrzData` values and wipe the same way.
 //!
 //! # Stability
 //!
-//! The crate is pre-1.0, so the **minor** version is the breaking slot: `^0.8`
-//! resolves any `0.8.x` but never `0.9.0`. Output types ([`MrzData`],
+//! The crate is pre-1.0, so the **minor** version is the breaking slot: `^0.9`
+//! resolves any `0.9.x` but never `0.10.0`. Output types ([`MrzData`],
 //! [`Checks`], [`Format`], [`Field`], [`MrzError`], [`SequenceCompleteness`] and
 //! the other enums) are `#[non_exhaustive]`, so they can grow in a patch
 //! release; the five `*Fields` emitter inputs are deliberately exhaustive, so
@@ -90,7 +92,9 @@
 //! re-exported at the crate root:
 //!
 //! - `parser` — the five fixed-layout parsers and the free-text scanner
-//! - `line1_select` — the shadow line-1 selector, [`select_line1`] (off by default, unmeasured)
+//! - `occlusion` — [`apply_occlusion`], [`CellMask`], [`Occluded`], [`ZoneField`]
+//!   (withholds covered, unverifiable fields from a parsed zone)
+//! - `line1_select` — the shadow line-1 selector, [`select_line1`] (opt-in; measured once, see its docs)
 //! - `emit` — the five emitters and Part 3 §4.6 name encoding
 //! - `checksum` — check-digit math and OCR line normalization
 //! - `repair` — check-digit-guided recovery of damaged or misread fields

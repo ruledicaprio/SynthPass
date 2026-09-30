@@ -387,7 +387,7 @@ const IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "gif", "bmp", 
 /// convention: `samples/private/`) and a filename carrying the corpus
 /// naming convention's `_Private_` token. These are real identity documents
 /// a user has placed under `samples/` for their own local benchmarking,
-/// gitignored (`.gitignore:63`: `samples/**/*Private*`) so they never reach
+/// gitignored (`.gitignore:92`: `samples/**/*Private*`) so they never reach
 /// the repo — but this walk has no other signal to tell them apart from the
 /// public specimen corpus, and the default real-specimen run must never
 /// silently grow to include them (it did, once: 238 → 251 documents, with
@@ -917,12 +917,7 @@ impl std::fmt::Display for MissReason {
                 }
                 Ok(())
             }
-            Self::DocumentNumberMismatch { got, expected } => {
-                write!(
-                    f,
-                    "document number mismatch: got {got:?}, expected {expected:?}"
-                )
-            }
+            Self::DocumentNumberMismatch { .. } => write!(f, "document number mismatch"),
             Self::Redacted => write!(f, "MRZ redacted in the specimen"),
             Self::NoMrzExpected => {
                 write!(f, "no MRZ on this document, and none was read (correct)")
@@ -2029,6 +2024,16 @@ mod tests {
             specimen_nonconforming: true,
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
+    }
+
+    #[test]
+    fn document_number_mismatch_reports_no_document_values() {
+        let reason = MissReason::DocumentNumberMismatch {
+            got: "SECRET-GOT".to_string(),
+            expected: "SECRET-EXPECTED".to_string(),
+        };
+        assert_eq!(miss_kind(&reason), "document_number_mismatch");
+        assert_eq!(reason.to_string(), "document number mismatch");
     }
 
     /// #536: `run_check` maps `mrz::MrzError::LeadingFiller` to its own miss

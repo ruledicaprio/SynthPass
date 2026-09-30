@@ -200,12 +200,12 @@ pub struct DocumentDetailReport {
     /// `DocumentDetail::tier1_damaged_recovery` passthrough. **Always
     /// serialized**, same reasoning as `retry_damaged_recovery` above.
     pub tier1_damaged_recovery: Option<bool>,
-    /// The shadow line-1 selector's verdict on this document (#574). **Absent**
-    /// when the `SYNTHPASS_MRZ_LINE1_SELECT` arm is `off` (every default run),
-    /// for a provider that makes no Tier-1 read, and when Tier 1 accepted
-    /// nothing to select on, so a default report is byte-identical to one
-    /// written before the selector existed. **Text-free**: kinds, counts and
-    /// pass ids only. Report-only; nothing gates on it.
+    /// The line-1 selector's verdict on this document (#574). The selector is
+    /// on by default, so this is **present on a default run** whenever Tier 1
+    /// accepted a zone in scope. It is **absent** only under
+    /// `SYNTHPASS_MRZ_LINE1_SELECT=off`, for a provider that makes no Tier-1
+    /// read, and when Tier 1 accepted nothing to select on. **Text-free**:
+    /// kinds, counts and pass ids only. Report-only; nothing gates on it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line1_selection: Option<Line1SelectionReport>,
 }
@@ -478,11 +478,11 @@ pub struct ProviderRow {
     /// parser (issue #443). **Report-only**: the document stays in its
     /// off-denominator bucket and no gate reads this count yet.
     pub checksum_valid_on_failed_specimen: usize,
-    /// How many documents got each shadow line-1 selector verdict (#574):
+    /// How many documents got each line-1 selector verdict (#574):
     /// `applied`, `proposed`, `unresolved`, `ambiguous` and `none`, every key
     /// present, over the documents whose `line1_selection` is recorded.
-    /// **Absent** when none is (the arm is `off`, or the provider makes no
-    /// Tier-1 read). Report-only.
+    /// **Absent** when none is (the arm is `off`, the provider makes no Tier-1
+    /// read, or nothing was accepted). Report-only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line1_selection_counts: Option<BTreeMap<&'static str, usize>>,
 }
@@ -628,12 +628,12 @@ pub struct Report {
     /// a clean null. Quote this field, never the variable you believe you
     /// set.
     pub mrz_class_sweep_arm: &'static str,
-    /// The shadow line-1 selector arm this run measured (#574), as the binary
-    /// resolved it -- `off`, `control` or `on`, from
+    /// The line-1 selector arm this run measured (#574), as the binary
+    /// resolved it -- `off`, `control` or `on` (the default), from
     /// `SYNTHPASS_MRZ_LINE1_SELECT`. **Always serialized**, beside
     /// `mrz_class_sweep_arm` and for the same reason: an unrecognised value
-    /// falls back to `off` silently, so quote this field, never the variable
-    /// you believe you set.
+    /// falls back to the default, `on`, silently, so quote this field, never
+    /// the variable you believe you set.
     pub mrz_line1_select_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded — one `NativeOcr` instance shared across every
@@ -1447,9 +1447,10 @@ mod tests {
         }
     }
 
-    /// The default (`off`) writes no `line1_selection` key on a document and no
-    /// `line1_selection_counts` key on the provider row, so a default report is
-    /// byte-identical to one written before the selector existed.
+    /// A document with no recorded verdict (the arm is `off`, or nothing was
+    /// accepted) writes no `line1_selection` key, and a provider row with none
+    /// writes no `line1_selection_counts` key. The selector is on by default
+    /// (#574), so a default run does record verdicts; this pins the absent case.
     #[test]
     fn off_writes_no_line1_selection_key() {
         let details = vec![detail("a", Some("a"), None)];

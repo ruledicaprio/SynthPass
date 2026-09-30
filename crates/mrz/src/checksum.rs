@@ -484,9 +484,9 @@ mod tests {
 
     #[test]
     fn line1_fit_pads_the_tail_when_the_only_run_starts_before_the_name_field() {
-        // A dropped document-code filler (`PCANMARTIN...` read for
-        // `P<CANMARTIN...`) leaves exactly one `<` run, at index 1 — before
-        // index 5, where the name field starts. `fit_length` inflates it,
+        // A short line 1 whose name-field padding was lost (`P<CANMARTIN`,
+        // with its document-code filler intact) has exactly one `<` run, at
+        // index 1 — before index 5, where the name field starts. `fit_length` inflates it,
         // shifting the issuing-state slot's own bytes into filler;
         // `fit_line1_length` must pad the tail instead.
         let n = "P<CANMARTIN";

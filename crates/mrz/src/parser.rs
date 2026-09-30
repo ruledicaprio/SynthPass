@@ -1052,7 +1052,10 @@ fn td3_line1_admissible(line1: &str) -> bool {
     if doc_code != "P<" && passport_type(doc_code).is_none() {
         return false;
     }
-    let issuer: String = line1[2..5].chars().map(letterize).collect();
+    let Some(issuer) = line1.get(2..5) else {
+        return false;
+    };
+    let issuer: String = issuer.chars().map(letterize).collect();
     country_resolves(&issuer)
 }
 
@@ -1425,7 +1428,9 @@ fn td1_line1_variants(raw: &str) -> Vec<String> {
 /// [`repair_td1_line1`] and once with [`repair_td1_line1_unshifted`], the
 /// pairing [`td1_line1_variants`] uses, so a line 1 that lost its position-1
 /// filler is also offered with the filler put back and the same one-cell (or
-/// one-field) repair applied to it.
+/// one-field) repair applied to it. The unshifted search runs only when the
+/// shifted one found something: an empty shifted search returns at once, so a
+/// line 1 whose only repair is the unshifted reading is not offered here.
 ///
 /// When at least one of the combined candidates is [`line1_admissible`], only
 /// the admissible ones are returned, in order and without repeats. When none
@@ -1616,10 +1621,14 @@ pub fn find_and_parse(text: &str) -> Result<MrzData, MrzError> {
 }
 
 /// Rejoin one OCR-inserted space only when two adjacent fragments recover an
-/// exact MRZ line width. A token that is already 30, 36 or 44 cells is a
-/// complete candidate and is never consumed into its neighbour. The caller
-/// still applies its existing long-token filter and physical-line fallback
-/// after this step.
+/// exact MRZ line width. Widths are UTF-8 bytes of the text as read, before
+/// normalization, so a fragment holding a non-ASCII character is measured
+/// wider than the cells it prints. A token that is already 30, 36 or 44 bytes
+/// is a complete candidate and is never consumed into its neighbour. The join
+/// *replaces* the two fragments: the pair is not kept as an extra candidate, so
+/// a pair that happens to add up to a line width is no longer read as two
+/// separate tokens. The caller still applies its existing long-token filter
+/// and physical-line fallback after this step.
 fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
     let is_line_width = |len| matches!(len, 30 | 36 | 44);
     let raw: Vec<&str> = line.split_whitespace().collect();
@@ -1648,7 +1657,10 @@ fn rejoin_exact_width_tokens(line: &str) -> Vec<String> {
 
 /// The candidate MRZ lines of an OCR text, in reading order: the one line walk
 /// [`find_and_parse_with`] scans and [`crate::select_line1`] draws its
-/// alternatives from, so the two can never disagree about what counts as a line.
+/// alternatives from, so the two agree about what counts as a line. The one
+/// exception is a merged zone with no whitespace between its lines, which
+/// [`find_and_parse_with`] splits on its own (below) and `select_line1` never
+/// sees.
 ///
 /// Markdown/HTML pipelines escape the filler character, so `&lt;` is undone
 /// first. OCR often emits several MRZ lines as ONE physical line,
