@@ -253,6 +253,8 @@ A benchmark change follows this lifecycle:
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
 
+A synthetic before/after A/B that needs no private specimen can run on one GitHub runner instead of the local machine: dispatch [`bench-ab.yml`](../../.github/workflows/bench-ab.yml) ([PIPELINE.md §2.8](PIPELINE.md#28-ci-ab-bench-abyml)). It pins the OCR time budget, keeps its reports in a 3-day artifact, is synthetic-only for now, and is never compared with a local arm.
+
 ## Replaying a captured run
 
 `provider-bench --real-specimens --mrz-only --replay-ocr-passes DIR` runs **no OCR**. It reads
