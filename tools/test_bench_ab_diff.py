@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import bench_ab_args as ab_args
 import bench_ab_diff as d
+import bench_nightly_rows as nightly
 
 
 def field(name, cer=0.0, expected=None, got=None):
@@ -790,6 +792,44 @@ def untraced(row):
     return {k: v for k, v in row.items() if k not in ("ocr_text", "ocr_passes")}
 
 
+class DateDigitsArm(unittest.TestCase):
+    """#579: the report's `mrz_date_digits_arm` is named in the identity block."""
+
+    A = "passports/A.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def real(self, before, after):
+        arms = []
+        for name, arm in (("before", before), ("after", after)):
+            real_report = provider_report(1.0, details=[])
+            if arm is not None:
+                real_report["mrz_date_digits_arm"] = arm
+            arms.append(write_arm(self.root, name, outcomes=[outcome_row(self.A, "hit")],
+                                  real_report=real_report))
+        return d.compare_arms(*arms, [])["real"]
+
+    def test_the_identity_block_names_each_arms_date_digits_arm(self):
+        r = self.real("off", "on")
+        self.assertEqual([i["mrz_date_digits_arm"] for i in r["identity"]], ["off", "on"])
+        self.assertIn("mrz_date_digits_arm differs: off -> on", r["notes"])
+        self.assertTrue(d.short_identity(r["identity"][0]).endswith("date digits off"))
+        self.assertTrue(d.short_identity(r["identity"][1]).endswith("date digits on"))
+
+    def test_reports_from_before_the_arm_read_as_they_did(self):
+        r = self.real(None, None)
+        self.assertEqual([i["mrz_date_digits_arm"] for i in r["identity"]], [None, None])
+        self.assertFalse([n for n in r["notes"] if "date_digits" in n])
+        self.assertNotIn("date digits", d.short_identity(r["identity"][0]))
+
+    def test_an_arm_recorded_in_one_report_only_is_noted(self):
+        r = self.real(None, "on")
+        self.assertIn("mrz_date_digits_arm is recorded in one arm only", r["notes"])
+
+
 class ExpectIdentical(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -1195,6 +1235,153 @@ class ExpectIdentical(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
             run(arm, arm, "--check-report")
         self.assertEqual(raised.exception.code, 2)
+
+
+class RunnerCheck(unittest.TestCase):
+    """ADR-0027 decision 4: both arms of an A/B were measured on one runner, in one workflow run.
+    The evidence is each CI arm's `arm.json`; an arm without one is a local arm."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+        self.binary = Path(self.root) / "synthpass-bench"
+        self.binary.write_bytes(b"binary")
+
+    def context(self, **over):
+        base = {"run_id": "123-1", "git_sha": "a" * 40, "event": "workflow_dispatch",
+                "cpu_model": "Test CPU 3.0GHz", "nproc": 4, "rustc": "rustc 1.90.0 (0000000 2025-09-01)",
+                "model_sha256": {"detection": "c" * 64, "recognition": "d" * 64}, "ocr_env": {}}
+        base.update(over)
+        return base
+
+    def record(self, role, after_env="", **context):
+        """A valid `arm.json` as `bench_ab_args.build_arm` writes it."""
+        plan = ab_args.validate({"AB_BEFORE_REF": "main", "AB_AFTER_REF": "branch", "AB_BEFORE_ENV": "",
+                                 "AB_AFTER_ENV": after_env, "AB_FORMATS": "td1", "AB_PROFILE": "clean",
+                                 "AB_COUNT": "10", "AB_SEED": "0", "AB_EXPECT_IDENTICAL": "false"})
+        return ab_args.build_arm(plan, role, "b" * 40, self.binary, self.context(**context))
+
+    def arm(self, name, record=None, docs=None, text=None):
+        """An arm directory with one synthetic report, and `arm.json` holding `record` (a dict,
+        or a string written verbatim) when it is given."""
+        arm = write_arm(self.root, name, reports={"td1.json": report(*(docs or [doc(0, True)]))})
+        if record is not None:
+            (arm / "arm.json").write_text(record if isinstance(record, str) else json.dumps(record),
+                                          encoding="utf-8")
+        return arm
+
+    def pair(self, tag, before=None, after=None, **after_context):
+        """Two arm directories whose records are a valid before/after pair unless overridden."""
+        before = self.record("before") if before is None else before
+        after = self.record("after", **after_context) if after is None else after
+        return self.arm(f"{tag}-b", before), self.arm(f"{tag}-a", after)
+
+    def test_matching_records_compare_in_both_modes(self):
+        before, after = self.pair("ok")
+        self.assertEqual(run(before, after)[::2], (0, ""))
+        code, out, err = run(before, after, "--expect-identical")
+        self.assertEqual((code, err), (0, ""))
+        self.assertTrue(out.endswith("NEUTRAL\n"))
+
+    def test_the_runner_keys_are_the_context_keys_but_ocr_env(self):
+        self.assertEqual(d.RUNNER_KEYS, tuple(k for k in nightly.CONTEXT_KEYS if k != "ocr_env"))
+        # A key added to the context block is compared by default; this list needs its new value below.
+        self.assertEqual(len(d.RUNNER_KEYS), 7)
+
+    def test_each_runner_key_that_differs_is_refused_and_named(self):
+        other = {"run_id": "222-1", "git_sha": "e" * 40, "event": "schedule", "cpu_model": "Other CPU",
+                 "nproc": 8, "rustc": "rustc 1.91.0 (1111111 2025-10-01)",
+                 "model_sha256": {"detection": "f" * 64, "recognition": "d" * 64}}
+        self.assertEqual(set(other), set(d.RUNNER_KEYS))
+        for key in d.RUNNER_KEYS:
+            with self.subTest(key=key):
+                before, after = self.pair(f"k-{key}", **{key: other[key]})
+                for mode in ((), ("--expect-identical",)):
+                    code, out, err = run(before, after, *mode)
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn(f"context.{key}", err)
+                    self.assertIn("not measured in one workflow run on one runner", err)
+                    self.assertEqual(len(err.strip().splitlines()), 1)
+
+    def test_every_differing_key_is_named_on_one_line(self):
+        before, after = self.pair("many", run_id="222-1", nproc=8,
+                                  model_sha256={"detection": "f" * 64, "recognition": "d" * 64})
+        code, out, err = run(before, after)
+        self.assertEqual((code, out), (2, ""))
+        self.assertEqual(len(err.strip().splitlines()), 1)
+        self.assertIn("context.run_id 123-1 vs 222-1", err)
+        self.assertIn("context.nproc 4 vs 8", err)
+        self.assertIn(f"context.model_sha256.detection {'c' * 12} vs {'f' * 12}", err)
+        self.assertNotIn("c" * 13, err)
+        self.assertNotIn("context.cpu_model", err)
+        self.assertNotIn("recognition", err)
+
+    def test_arms_that_differ_by_design_are_not_refused(self):
+        # The after arm's knobs (and so its ocr_env), ref, commit and binary differ in a real A/B.
+        before = self.record("before")
+        after = self.record("after", after_env="SYNTHPASS_MRZ_REFUSE_REPEATED_LINE=on")
+        self.assertEqual(after["context"]["ocr_env"], {"SYNTHPASS_MRZ_REFUSE_REPEATED_LINE": "on",
+                                                       "SYNTHPASS_OCR_MAX_SECONDS": "600"})
+        self.assertNotEqual(before["context"]["ocr_env"], after["context"]["ocr_env"])
+        after["ref"], after["git_sha"], after["binary_sha256"] = "another-branch", "c" * 40, "9" * 64
+        code, out, err = run(*self.pair("design", before, after))
+        self.assertEqual((code, err), (0, ""))
+
+    def test_a_ci_arm_is_never_compared_with_a_local_arm(self):
+        record = self.record("before")
+        for tag, before, after, side in (("only-b", self.arm("ob", record), self.arm("oa"), "before"),
+                                         ("only-a", self.arm("pb"), self.arm("pa", self.record("after")), "after")):
+            for mode in ((), ("--expect-identical",)):
+                with self.subTest(tag=tag, mode=mode):
+                    code, out, err = run(before, after, *mode)
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn(f"only the {side} arm has an arm.json", err)
+                    self.assertIn("local", err)
+
+    def test_two_local_arms_are_compared_as_before(self):
+        code, out, err = run(self.arm("l1"), self.arm("l2"))
+        self.assertEqual((code, err), (0, ""))
+        self.assertNotIn("arm.json", out + err)
+        code, out, err = run(self.arm("l3"), self.arm("l4"), "--expect-identical")
+        self.assertEqual((code, err), (0, ""))
+
+    def test_swapped_or_repeated_roles_are_refused(self):
+        before_rec, after_rec = self.record("before"), self.record("after")
+        for tag, first, second in (("swap", after_rec, before_rec), ("both-before", before_rec, before_rec),
+                                   ("both-after", after_rec, after_rec)):
+            with self.subTest(tag=tag):
+                code, out, err = run(*self.pair(tag, first, second))
+                self.assertEqual((code, out), (2, ""))
+                self.assertIn("role", err)
+
+    def test_a_malformed_record_is_refused_and_the_arm_is_named(self):
+        good = self.record("before")
+        missing = dict(good)
+        del missing["binary_sha256"]
+        for tag, bad in (("json", "not json {"), ("missing", missing), ("list", [1, 2])):
+            for side, pair in (("before", lambda: self.pair(f"{tag}-x", bad, self.record("after"))),
+                               ("after", lambda: self.pair(f"{tag}-y", good, bad))):
+                with self.subTest(tag=tag, side=side):
+                    code, out, err = run(*pair())
+                    self.assertEqual((code, out), (2, ""))
+                    self.assertIn(f"the {side} arm", err)
+                    self.assertIn("arm.json", err)
+                    self.assertNotIn("not json", err)
+
+    def test_a_mismatch_is_refused_not_reported_as_not_neutral(self):
+        before = self.arm("nn1", self.record("before"))
+        after = self.arm("nn2", self.record("after", nproc=8), docs=[doc(0, False, "checksum_failed")])
+        code, out, err = run(before, after, "--expect-identical")
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("context.nproc", err)
+
+    def test_a_refusal_prints_no_report_or_ocr_text(self):
+        secret = "SECRETZONETEXT"
+        before = self.arm("s1", self.record("before"), docs=[doc(0, True, note=secret)])
+        after = self.arm("s2", self.record("after", nproc=8), docs=[doc(0, True, note=secret)])
+        _, out, err = run(before, after)
+        self.assertNotIn(secret, out + err)
 
 
 if __name__ == "__main__":

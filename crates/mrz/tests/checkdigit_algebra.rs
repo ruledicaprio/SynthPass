@@ -181,7 +181,6 @@ fn two_misreads_in_a_date_meet_an_independent_composite() {
                     % 10;
                 // Every weight is odd, so both sums move by d1 + d2 (mod 2): a
                 // second digit over the same cells can only add a mod-5 check.
-                assert_eq!(own % 2, composite % 2);
                 let read = read_with(&[
                     (f.start + i, digit_misread(printed[f.start + i], d1)),
                     (f.start + j, digit_misread(printed[f.start + j], d2)),

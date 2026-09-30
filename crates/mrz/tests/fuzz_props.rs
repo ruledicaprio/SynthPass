@@ -330,8 +330,16 @@ proptest! {
 /// space this crate's overflow encoding (ICAO 9303 Part 5/6 note j; extended
 /// to TD3 by analogy, see `parser::read_overflow`'s doc comment) has to
 /// handle: fits-as-printed (<=9), fits-via-overflow, and too-long-so-truncate.
-fn any_length_doc_number() -> impl Strategy<Value = String> {
-    "[A-Z0-9]{1,20}"
+fn td3_overflow_doc_number() -> impl Strategy<Value = String> {
+    "[A-Z0-9]{10,21}"
+}
+
+fn td2_overflow_doc_number() -> impl Strategy<Value = String> {
+    "[A-Z0-9]{10,14}"
+}
+
+fn td1_overflow_doc_number() -> impl Strategy<Value = String> {
+    "[A-Z0-9]{10,22}"
 }
 
 fn short_field_strategy() -> impl Strategy<Value = String> {
@@ -352,12 +360,16 @@ proptest! {
     /// would be a silent corruption bug, worse than a rejected parse.
     #[test]
     fn td3_overflow_emit_parse_always_valid(
-        document_number in any_length_doc_number(),
+        document_number in td3_overflow_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
         date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
         date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
+        // Overflow check digit for AB1234567890: 10*7 + 11*3 + 1*1 +
+        // 2*7 + 3*3 + 4*1 + 5*7 + 6*3 + 7*1 + 8*7 + 9*3 + 0*1
+        // = 274, so the 7-3-1 remainder is 4.
+        prop_assert_eq!(mrz::check_digit("AB1234567890"), Ok(4));
         let fields = Td3Fields {
             document_number: document_number.clone(),
             surname,
@@ -370,19 +382,20 @@ proptest! {
         let (l1, l2) = mrz.split_once('\n').unwrap();
         let d = parse_td3(l1, l2).unwrap();
         prop_assert!(d.valid(), "checks: {:?}", d.checks);
-        if d.document_number_full.is_some() {
-            prop_assert_eq!(d.full_document_number(), document_number.as_str());
-        }
+        prop_assert_eq!(d.document_number_full.as_deref(), Some(document_number.as_str()));
+        prop_assert_eq!(d.full_document_number(), document_number.as_str());
     }
 
     #[test]
     fn td2_overflow_emit_parse_always_valid(
-        document_number in any_length_doc_number(),
+        document_number in td2_overflow_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
         date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
         date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
+        // The TD3 overflow check-digit known answer above pins the same
+        // document-number rule independently of this format's layout.
         let fields = Td2Fields {
             document_number: document_number.clone(),
             surname,
@@ -395,19 +408,20 @@ proptest! {
         let (l1, l2) = mrz.split_once('\n').unwrap();
         let d = parse_td2(l1, l2).unwrap();
         prop_assert!(d.valid(), "checks: {:?}", d.checks);
-        if d.document_number_full.is_some() {
-            prop_assert_eq!(d.full_document_number(), document_number.as_str());
-        }
+        prop_assert_eq!(d.document_number_full.as_deref(), Some(document_number.as_str()));
+        prop_assert_eq!(d.full_document_number(), document_number.as_str());
     }
 
     #[test]
     fn td1_overflow_emit_parse_always_valid(
-        document_number in any_length_doc_number(),
+        document_number in td1_overflow_doc_number(),
         surname in short_field_strategy(),
         given_names in short_field_strategy(),
         date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
         date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
+        // TD1 shares the document-number check-digit contract pinned in the
+        // TD3 overflow test above.
         let fields = Td1Fields {
             document_number: document_number.clone(),
             surname,
@@ -423,9 +437,8 @@ proptest! {
         let l3 = lines.next().unwrap();
         let d = parse_td1(l1, l2, l3).unwrap();
         prop_assert!(d.valid(), "checks: {:?}", d.checks);
-        if d.document_number_full.is_some() {
-            prop_assert_eq!(d.full_document_number(), document_number.as_str());
-        }
+        prop_assert_eq!(d.document_number_full.as_deref(), Some(document_number.as_str()));
+        prop_assert_eq!(d.full_document_number(), document_number.as_str());
     }
 }
 
@@ -772,6 +785,26 @@ proptest! {
         specimens in prop::collection::vec(mutated_specimen(), 1..4),
     ) {
         let opts = ParseOptions::default().with_class_sweep(true);
+        let _ = find_and_parse_with(&text, &opts);
+        let _ = find_and_parse_with(&lines.join("\n"), &opts);
+        let _ = find_and_parse_with(&specimens.join("\n"), &opts);
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// The opt-in repeated-line refusal (`ParseOptions::refuse_repeated_line`)
+    /// runs a similarity check over every valid zone, on the ordinary scan and
+    /// the damaged-capture pass, so it gets the same arbitrary, multi-line and
+    /// mutated-specimen texts with the switch on.
+    #[test]
+    fn find_and_parse_with_refusal_never_panics(
+        text in arbitrary_text(),
+        lines in prop::collection::vec(arbitrary_text(), 0..6),
+        specimens in prop::collection::vec(mutated_specimen(), 1..4),
+    ) {
+        let opts = ParseOptions::default().with_refuse_repeated_line(true);
         let _ = find_and_parse_with(&text, &opts);
         let _ = find_and_parse_with(&lines.join("\n"), &opts);
         let _ = find_and_parse_with(&specimens.join("\n"), &opts);

@@ -22,16 +22,16 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **139 / 151 = 92.1%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-24) |
-| Tier-1 hit rate, whole specimen corpus | 139 / 261 = 53.3% | same baseline; the gap is explained below |
-| Strict name hit rate, real specimens | **12 / 45 = 26.7%** of name-scorable scored documents (36.4% of name-scorable hits) | same baseline (CI, 2026-09-24); ADR-0013 |
-| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 110** | same baseline (CI, 2026-09-24) |
+| **Tier-1 hit rate, real specimens** | **137 / 149 = 91.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-30) |
+| Tier-1 hit rate, whole specimen corpus | 137 / 261 = 52.5% | same baseline; the gap is explained below |
+| Strict name hit rate, real specimens | **15 / 45 = 33.3%** of name-scorable scored documents (45.5% of name-scorable hits) | same baseline (CI, 2026-09-30); ADR-0013 |
+| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 112** | same baseline (CI, 2026-09-30) |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 389 / 500 = 77.8% (Derived) — TD3 74%, TD2 81%, TD1 57%, MRV-A 87%, MRV-B 90% (Observed, local; TD1 at `55c03a2`, #411 PR 2, the other four at `53fb184`, whose generated images and labels #411 PR 2 leaves byte-identical; not yet re-measured in CI at `55c03a2`). Of the 389 hits, 235 read both names exactly and **193 are wrong in at least one scored field** (report-only, #457); 196 / 500 are right on all twelve (Derived: TD1 measured, the other four carried over) | Observed locally, 2026-09-28: `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (release, Linux). TD1 at `55c03a2` (#566) against `d489fd3` (#559) — [`synthetic-headline-2026-09-29.md`](synthetic-headline-2026-09-29.md); TD3, TD2, MRV-A and MRV-B at `53fb184` ([`synthetic-headline-2026-09-28.md`](synthetic-headline-2026-09-28.md)). #566 draws TD1's three MRZ lines at Doc 9303's 4.23 mm pitch, 37 px (1.726 cap; was 55 px): TD1 holds 57 hits, but 20 seeds swap, correct reads go 22 → 30, wrong accepts 35 → 27 and strict 23 → 31, while checksum-valid wrong document numbers go 8 → 10 and accepted reads with a wrong document code or issuer 3 → 5 (#574). The move from 368 is all #411 PR 1, which draws every MRZ cell at the ISO pitch (22 px, 1.026 cap; was 23–25 px). The registered-provider path, `provider-bench --mrz-only --document-type <fmt>`, read identically per seed to this harness when the two were compared at `9c8f03d` ([comparison](m6-per-format-harness-comparison-2026-09-16.md)). Last confirmed in CI, on counts: 389 / 500 for PR 1's generator, `bench-charts.yml` rows on `bench-data`, 2026-09-28 at `e33b177` (before #566); 370 / 500 on 2026-09-25 at `f80877b` ([`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md)) |
 | Tier-2 per-field exact match, 118-fixture parity corpus | **335 / 585 = 57.3%** reviewed (65 documents, nine fields), **88 / 159 = 55.3%** derived (53 documents, check-digited fields only); 423 / 744 = 56.9% overall. Up from 297 / 585 = 50.8% (385 / 744 = 51.7%) under prompt v3 on the same fixtures: the #539 vocabulary (19 demonyms, 9 alternate country names) moved `nationality` 25 → 51 and `issuing_country` 41 → 53 of 65, exactly as `vocab_replay` projected, and no other field moved | Observed in CI: `ci.yml` `native-llm` job, run 36342651928, 2026-09-27, at `1988bbc` (PR #547), prompt v3, vocabulary `8feb315a58cdae3e`: [`normalize-country-demonyms-2026-09-27.md`](normalize-country-demonyms-2026-09-27.md). The v3 baseline run: [`parity-prompt-v3-2026-09-27.md`](parity-prompt-v3-2026-09-27.md). Harness: `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
 | Names, browser vs native, on documents both read validly | **28 / 31 vs 11 / 31** exact on both name fields (reviewed fixtures only) — 17 browser-right/native-wrong, 0 the other way | same run — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md) |
 
-**Why two rates.** 110 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
+**Why two rates.** 112 of the 261 specimens cannot produce a Tier-1 hit under any pipeline, so
 counting them as failures measures the corpus rather than the reader. They are scored out, and both
 numbers are published so neither can be accused of flattering by exclusion: the first says how often
 extraction succeeds when success is possible, the second what a pile of real documents yields. Only
@@ -46,13 +46,13 @@ non-conforming one).
 
 | Outcome | Count | In the denominator? | Meaning |
 | --- | --- | --- | --- |
-| **Tier-1 HIT** | **139** | numerator | Checksum-valid MRZ, document number matches ground truth |
+| **Tier-1 HIT** | **137** | numerator | Checksum-valid MRZ, document number matches ground truth |
 | `no_mrz_found` | 2 | yes | No MRZ located on a document that has one — behind `checksum_failed` since 2026-09-13; two real detection targets since the San Marino template (2026-09-17) and Moldova PA 2014 (2026-09-19) left the bucket, each reclassified as carrying no zone |
 | `checksum_failed` | **10** | yes | Conforming printed zone, read wrong — a genuine OCR error. The larger scored miss since 2026-09-13 |
 | `false_positive_mrz` | 0 | yes | A checksum-valid MRZ returned for a document carrying none. **Any non-zero value here fails the build** |
 | `no_mrz_expected` | 51 | no | Document carries no MRZ at all; none was read. A correct refusal |
 | `redacted_mrz` | 39 | no | Zone blacked out by whoever published the specimen |
-| `checksum_failed_specimen` | 20 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails. A checksum-**valid** read on one was built by the parser, not read off the page. `provider-bench` names each such read with a ⚠ summary line and counts them per provider as `checksum_valid_on_failed_specimen`. Report-only for now; [#443](https://github.com/ruledicaprio/SynthPass/issues/443) makes it a failure later, with a re-bless |
+| `checksum_failed_specimen` | 22 | no | Printed zone fails its own ICAO check digits — a byte-perfect read still fails. A checksum-**valid** read on one was built by the parser, not read off the page. `provider-bench` names each such read with a ⚠ summary line and counts them per provider as `checksum_valid_on_failed_specimen`. Report-only for now; [#443](https://github.com/ruledicaprio/SynthPass/issues/443) makes it a failure later, with a re-bless |
 
 `no_mrz_found` overtook `checksum_failed` when `mrz` 0.7.0 began rejecting structurally implausible
 readings, and stayed ahead through the denominator corrections and the 2026-09-10 specimen ingest
@@ -235,7 +235,7 @@ A benchmark change follows this lifecycle:
 
 `freeze → reconcile → measure → localize → change → regress → inspect → record`
 
-**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember. *(Amended 2026-09-29, #574: `SYNTHPASS_MRZ_CLASS_SWEEP` and `SYNTHPASS_MRZ_LINE1_SELECT` are refused the same way unless `off`; `control` is refused too, since a baseline is a claim about the default.)* *(Amended 2026-09-29, #574 promotion: the line-1 selector is now on by default, so `SYNTHPASS_MRZ_LINE1_SELECT` is refused unless `on`, its default; `SYNTHPASS_MRZ_CLASS_SWEEP` is still refused unless `off`.)*
+**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember. *(Amended 2026-09-29, #574: `SYNTHPASS_MRZ_CLASS_SWEEP` and `SYNTHPASS_MRZ_LINE1_SELECT` are refused the same way unless `off`; `control` is refused too, since a baseline is a claim about the default.)* *(Amended 2026-09-29, #574 promotion: the line-1 selector is now on by default, so `SYNTHPASS_MRZ_LINE1_SELECT` is refused unless `on`, its default; `SYNTHPASS_MRZ_CLASS_SWEEP` is still refused unless `off`.)* *(Amended 2026-09-30, #579: `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE`, `mrz`'s opt-in repeated-line refusal, is refused unless `off`, its default; `control` is refused too.)*
 
 **Reconcile.** Run the identity auditor before reading accuracy numbers. The candidate asset set must reconcile with the manifest: missing assets, unlisted assets, SHA mismatches, same-path byte conflicts, and duplicate encoded-byte groups are structural findings, not OCR results. Preserve whether each asset came from `samples-data`, MAIN/fixtures, or both. Keep these identities distinct:
 
@@ -249,9 +249,11 @@ A benchmark change follows this lifecycle:
 
 **Change and regress.** Keep corpus maintenance separate from accuracy optimization. Change one measurable hypothesis at a time, then rerun the same frozen population with the same provider configuration. Provider comparisons are meaningful only when both providers consume the same assets, labels, exclusions, and invocation scope.
 
-**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership.)*
+**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). The M4 synthetic gate prints the same kind of diff per seed against a CI-written ledger on every run, also report-only (see "The synthetic (M4) per-seed ledger" in the same section). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership. Amended 2026-09-30, #557 Phase 2: the M4 ledger diff.)*
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
+
+A synthetic before/after A/B that needs no private specimen can run on one GitHub runner instead of the local machine: dispatch [`bench-ab.yml`](../../.github/workflows/bench-ab.yml) ([PIPELINE.md §2.8](PIPELINE.md#28-ci-ab-bench-abyml)). It pins the OCR time budget, keeps its reports in a 3-day artifact, is synthetic-only for now, and is never compared with a local arm.
 
 ## Replaying a captured run
 
@@ -371,6 +373,12 @@ reading was stitched from two retry passes' name-line reads, not a correct
 parse ([#560](https://github.com/ruledicaprio/SynthPass/issues/560)). Italy
 CIE 2022 back and the Bosnia-Herzegovina ID card back are both labelled
 `TD1` in the current ledger, not `TD2`/`MRV-B`.
+
+*Updated 2026-09-30 (#630):* the Swiss card back now has reviewed ground truth.
+Its printed zone fails all four of its own check digits, so the ledger files it
+as `checksum_failed_specimen`, off the denominator. The reader still returns the
+stitched checksum-valid MRV-B read; see the 2026-09-30 entry in
+[`FINDINGS.md`](FINDINGS.md).
 
 **Synthetic tracks: `td1`, `td2`, `td3` (M6), `mrva`, `mrvb` (MRV-A/MRV-B
 visas, added alongside M6's own generation/extraction coverage).** A
@@ -549,7 +557,9 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 **The outcome ledger.** `real-specimen-outcomes.jsonl`, written alongside the baseline in the
 same directory, holds one JSON row per document (`asset_id`, `name`, `outcome`, the full
 `miss_reason`, `mrz_format`, `mrz_found`/`mrz_checksums_valid`, `names_exact`/`name_error`,
-`ocr_ms`, and the native-retry fields) — the per-document evidence the aggregate counts above
+`ocr_ms`, the native-retry fields, `check_states` (the state of each check digit, `true`,
+`false` or `null`, or `null` when no MRZ parsed) and the `retry_damaged_recovery` and
+`tier1_damaged_recovery` flags) — the per-document evidence the aggregate counts above
 are built from. It exists because the `real-specimen-gate-report` CI artifact is kept for 90
 days (`retention-days: 90`, since #416), so a dated finding derived from `--verbose` output or
 the JSONL report becomes unverifiable once that window passes; the ledger is committed, so it
@@ -558,14 +568,18 @@ does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
 an edited-by-hand or substituted ledger is caught the same way a hand-edited baseline count
 would be. When a committed ledger is present, an assert run also prints an informational
 (never gate-failing) per-document diff against the committed one, so a reviewer can see exactly
-which documents moved without downloading and diffing two CI artifacts by hand.
+which documents moved without downloading and diffing two CI artifacts by hand. A ledger
+committed before `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery` were
+added (#557) still parses: a missing key reads as `null`, so until the ledger is re-blessed the
+diff reports each of them as `null -> value` on every document that has one.
 
 **The per-document diff (#557).** It is the tool behind the **Inspect** clause of the
 maintenance contract above, and it has three parts, in this order. First the outcome summary line
 and the documents whose `outcome` changed (at most 20, then `... and N more`). Then a
 **deterministic** group: `miss_reason` (the miss kind and "detail changed", never the text),
 `mrz_format`, `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
-`retry_variant_id` and `retry_stop`, as one line of per-field totals (always complete) and one
+`retry_variant_id`, `retry_stop`, `check_states` (printed as compact JSON),
+`retry_damaged_recovery` and `tier1_damaged_recovery`, as one line of per-field totals (always complete) and one
 line per document (at most 20). Then a **timing-sensitive** group: one `ocr_ms` line (documents
 that differ, median |delta|, both totals) and a block for every *budget-limited* document, one
 that hit the retry-pass time budget on either side, which carries **all** of that document's
@@ -577,6 +591,45 @@ gate writes it to the job log and to `$GITHUB_STEP_SUMMARY`; the repository is p
 carries asset ids, field names, enumerated values and counts only, never OCR text or
 `miss_reason` text. `tools/rebless.py` prints the same diff between the old and the new
 ledger and puts it in the commit message and the FINDINGS entry.
+
+**The synthetic (M4) per-seed ledger (#557, Phase 2).** The `m4-hit-rate` job runs
+`synthpass-bench --ledger m4-ledger.jsonl --diff-ledger knowledge/benchmarks/m4-synthetic-ledger.jsonl`.
+`--ledger PATH` writes one JSONL row per seed, in seed order, every key always present (`null`
+when absent), in this order: `format`, `seed`, `profile`, `hit`, `miss_kind`, `wrong_accept`,
+`prefix_wrong_accept`, `wrong_fields` (field **names**, sorted), `check_states` (compact JSON,
+sorted keys), `names_exact`, `name_error`, `line1_flagged`, `retry_stop`, `retry_variant_id`,
+`retry_damaged_recovery`, `tier1_damaged_recovery` and `elapsed_ms`. No expected or read value and
+no OCR text: the rows are safe for a public step summary, and the flag works for any format and
+count, not only M4's 50 TD3 seeds. `--diff-ledger PATH` compares this run's rows with the
+committed ones by (`format`, `seed`) and prints, to the job log and to `$GITHUB_STEP_SUMMARY`:
+one line (seeds that changed a deterministic field, and per-field totals in schema order, never
+capped), up to 20 `seed N: field old -> new` lines and `... and N more`, one timing line
+(`elapsed_ms` differs on N of M seeds, median |delta|, both totals), the *budget-limited* seeds
+(`retry_stop` is `budget` on either side; every change on them is timing-sensitive, so they are
+not in the first line's count), and the seeds present on one side only, as counts. **The diff
+never changes the exit code**: `--min-hit-rate 0.30` and `--max-prefix-wrong-accepts 0` decide
+pass or fail from the numbers alone, exactly as before, and with no committed ledger at the path
+the diff prints one line and carries on (the bootstrap case). The one other way to exit non-zero
+is a `--ledger` file that cannot be written: the run exits 1 before the gates are evaluated, as it
+does for `--out`. The job uploads the ledger alone as the artifact `m4-bench` (`if: always()`,
+`retention-days: 90`; it is text-free) and `bench-report.json` as `m4-report` (`if: always()`,
+`retention-days: 3`). The report holds synthetic OCR zone text (`fields[].expected` and `got`, and
+the `mrz_lines` row), which [ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)
+decision 5 keeps for at most 3 days.
+
+The committed `m4-synthetic-ledger.jsonl` is written **by CI only**, never by hand and never from a
+local run: OCR inference floats can round differently on Windows or another CPU, so a ledger from
+another machine could diff against CI on noise, and ADR-0027 decision 4 says a CI arm is never
+compared with a local arm. **To install or re-bless it:** push the code, let
+the PR's own `m4-hit-rate` job finish, then `gh run download <run-id> -n m4-bench`, copy
+`m4-ledger.jsonl` over `knowledge/benchmarks/m4-synthetic-ledger.jsonl`, and commit it in the same
+PR with the message `m4: install the CI-written ledger from run <run-id> (#557)`. The next CI run
+then diffs CI against CI; a non-zero changed-seed count there is a finding, not a failure. **A PR
+that moves the ledger** (every generator change does, so each #411 PR will) re-installs it the
+same way from its own latest M4 artifact, in the same PR, and says in its body which seeds moved
+and why. A 5 x 100 headline ledger is not committed (#557 question 5): each generator PR would
+rewrite the whole file, so the weekly `bench-charts` artifacts are what to diff for now, with the
+caveat that until #557 Phase 2 item 4 their synthetic report holds only the last synthetic track.
 
 **What an assert run uploads.** Next to the report, the workflow uploads
 `real-specimen-outcomes-text-free.jsonl` with `if: always()`, so a failed gate keeps its

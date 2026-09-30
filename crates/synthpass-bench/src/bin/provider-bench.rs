@@ -865,6 +865,9 @@ const DIFFED_FIELDS: &[&str] = &[
     "retry_variant_id",
     "retry_budget_hit",
     "retry_stop",
+    "check_states",
+    "retry_damaged_recovery",
+    "tier1_damaged_recovery",
 ];
 
 /// One field that differs on one document, already rendered for printing.
@@ -885,6 +888,15 @@ fn render_optional(value: Option<&str>) -> String {
 
 fn render_optional_bool(value: Option<bool>) -> String {
     value.map_or_else(|| "null".to_string(), |b| b.to_string())
+}
+
+/// A `check_states` map as compact JSON (field names and booleans only), or
+/// `null`. The map is a `BTreeMap`, so the text is sorted and stable.
+fn render_check_states(value: Option<&BTreeMap<String, Option<bool>>>) -> String {
+    value.map_or_else(
+        || "null".to_string(),
+        |states| serde_json::to_string(states).unwrap_or_else(|_| "null".to_string()),
+    )
 }
 
 fn push_transition(changes: &mut Vec<FieldChange>, field: &'static str, old: String, new: String) {
@@ -963,6 +975,24 @@ fn field_changes(old: &OutcomeRow, new: &OutcomeRow) -> Vec<FieldChange> {
         render_optional(old.retry_stop.as_deref()),
         render_optional(new.retry_stop.as_deref()),
     );
+    push_transition(
+        &mut changes,
+        "check_states",
+        render_check_states(old.check_states.as_ref()),
+        render_check_states(new.check_states.as_ref()),
+    );
+    push_transition(
+        &mut changes,
+        "retry_damaged_recovery",
+        render_optional_bool(old.retry_damaged_recovery),
+        render_optional_bool(new.retry_damaged_recovery),
+    );
+    push_transition(
+        &mut changes,
+        "tier1_damaged_recovery",
+        render_optional_bool(old.tier1_damaged_recovery),
+        render_optional_bool(new.tier1_damaged_recovery),
+    );
     changes
 }
 
@@ -1028,7 +1058,8 @@ fn median(values: &mut [u128]) -> u128 {
 ///
 /// - **Deterministic** — `miss_reason` (the kind and "detail changed", never
 ///   the text), `mrz_format`, `mrz_found`, `mrz_checksums_valid`,
-///   `names_exact`, `name_error`, `retry_variant_id` and `retry_stop`. One
+///   `names_exact`, `name_error`, `retry_variant_id`, `retry_stop`,
+///   `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery`. One
 ///   totals line (documents per field, always complete), then one line per
 ///   document, at most [`DOC_LINE_CAP`].
 /// - **Timing-sensitive** — `ocr_ms` (one summary line: documents that differ,
@@ -1102,41 +1133,12 @@ fn diff_ledger_fields(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<St
     lines
 }
 
-/// Appends `lines` to the GitHub step summary at `path` as one fenced block,
-/// or does nothing when `path` is `None` (`GITHUB_STEP_SUMMARY` unset). The
-/// caller warns and carries on if this fails: the summary is evidence, never
-/// a gate condition.
-///
-/// The repository is public, so the summary is public too: `lines` must
-/// already be limited to asset ids, field names, enumerated values and counts
-/// — see [`FieldChange`].
-fn append_step_summary(path: Option<&Path>, lines: &[String]) -> std::io::Result<()> {
-    use std::io::Write as _;
-
-    let Some(path) = path else {
-        return Ok(());
-    };
-    let mut body =
-        String::from("### Real-specimen per-document ledger diff (report-only)\n\n```text\n");
-    for line in lines {
-        body.push_str(line);
-        body.push('\n');
-    }
-    body.push_str("```\n");
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    file.write_all(body.as_bytes())
-}
-
-/// The step summary file GitHub Actions names in `GITHUB_STEP_SUMMARY`; `None`
-/// outside Actions (unset or empty).
-fn step_summary_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("GITHUB_STEP_SUMMARY")
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-}
+/// The heading of this binary's step summary block. The writer itself is
+/// `synthpass_bench::step_summary`, shared with `synthpass-bench`'s M4 ledger
+/// diff; the lines it is given must already be limited to asset ids, field
+/// names, enumerated values and counts (see [`FieldChange`]), since the
+/// summary is public.
+const STEP_SUMMARY_TITLE: &str = "### Real-specimen per-document ledger diff (report-only)";
 
 /// The fixed name of the text-free projection of an assert run's ledger,
 /// written under the `--out` directory (see [`write_run_ledger_projection`]).
@@ -1157,8 +1159,8 @@ const RUN_LEDGER_PROJECTION_FILENAME: &str = "real-specimen-outcomes-text-free.j
 /// - `NoMrzFound`: the `Debug` of an `mrz::MrzError` — `BadCharacter` carries
 ///   the offending character and `BadDocumentCode` the first characters of
 ///   line 1, both OCR-read from the specimen. (`BadLength`, `BadChecksum`,
-///   `LeadingFiller`, `IncompleteSequence`, `NotFound` carry numbers and
-///   enums only.)
+///   `LeadingFiller`, `RepeatedLine`, `IncompleteSequence`, `NotFound` carry
+///   numbers and enums only.)
 /// - `OcrError`: the OCR engine's error string, unaudited for values, so
 ///   treated as carrying them.
 /// - `ChecksumFailed`: check-digit field names and a fixed suffix only;
@@ -1354,8 +1356,9 @@ fn write_baseline_and_ledger(
 }
 
 /// Why `--write-baseline`/`--assert-baseline` must refuse to run: `None`
-/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and both `SYNTHPASS_MRZ_*`
-/// arms are at their defaults (class sweep `off`, line-1 select `on`),
+/// when `arms` is [`synthpass_ocr::OcrArms::DEFAULT`] and every `SYNTHPASS_MRZ_*`
+/// arm is at its default (class sweep `off`, line-1 select `on`, repeated-line
+/// refusal `off`, date digits `off`),
 /// `Some(message)` otherwise. A pure function of its arguments
 /// alone (no env reads, no I/O) so it is directly unit-testable without setting
 /// process environment variables — see `knowledge/benchmarks/README.md`'s
@@ -1364,29 +1367,41 @@ fn write_baseline_and_ledger(
 /// committing a baseline against one would make its own A/B look like a
 /// regression against itself the moment the env var is unset again.
 ///
-/// `class_sweep` and `line1_select` are the arm names
-/// `synthpass_die::class_sweep_arm` and `synthpass_die::line1_select_arm`
-/// return. Both change what Tier 1 reads, so a baseline written under either
-/// when it is not at its default would describe a configuration nobody runs by
-/// default (#574). The line-1 selector's default is `on` since its promotion
+/// `class_sweep`, `line1_select`, `refuse_repeated_line` and `date_digits` are
+/// the arm names `synthpass_die::class_sweep_arm`,
+/// `synthpass_die::line1_select_arm`, `synthpass_die::refuse_repeated_line_arm`
+/// and `synthpass_die::date_digits_arm` return. Each changes what Tier 1 reads,
+/// so a baseline written under any of them when it is not at its default would
+/// describe a configuration nobody runs by default (#574, #579). The line-1
+/// selector's default is `on` since its promotion
 /// (`knowledge/benchmarks/line1-selection-ab-2026-09-29.md`), so `off` is the
-/// arm that is refused there. `control` is refused as well: it is a placebo, but
-/// a baseline is a claim about the default.
+/// arm that is refused there; the date-digits rule (#579) is `off` until it is
+/// promoted, so `on` is refused there. `control` is refused as well: it is a
+/// placebo, but a baseline is a claim about the default.
 fn refuse_non_default_baseline(
     arms: &synthpass_ocr::OcrArms,
     class_sweep: &str,
     line1_select: &str,
+    refuse_repeated_line: &str,
+    date_digits: &str,
 ) -> Option<String> {
-    if arms.is_default() && class_sweep == "off" && line1_select == "on" {
+    if arms.is_default()
+        && class_sweep == "off"
+        && line1_select == "on"
+        && refuse_repeated_line == "off"
+        && date_digits == "off"
+    {
         return None;
     }
     Some(format!(
         "❌ --write-baseline/--assert-baseline require every SYNTHPASS_OCR_* arm at its default \
          (texture=on, order=default, rotate=default, skew=default, chargrid=off) and \
-         SYNTHPASS_MRZ_CLASS_SWEEP at off and SYNTHPASS_MRZ_LINE1_SELECT at on, their \
+         SYNTHPASS_MRZ_CLASS_SWEEP at off, SYNTHPASS_MRZ_LINE1_SELECT at on and \
+         SYNTHPASS_MRZ_REFUSE_REPEATED_LINE and SYNTHPASS_MRZ_DATE_DIGITS at off, their \
          defaults — a baseline is only valid for the default provider configuration (see knowledge/benchmarks/README.md). \
          This run measured: texture={}, order={}, rotate={}, skew={}, chargrid={}, \
-         mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}.",
+         mrz_class_sweep={class_sweep}, mrz_line1_select={line1_select}, \
+         mrz_refuse_repeated_line={refuse_repeated_line}, \n         mrz_date_digits={date_digits}.",
         arms.texture, arms.order, arms.rotate, arms.skew, arms.chargrid,
     ))
 }
@@ -1402,6 +1417,8 @@ fn run_baseline_step(
         &synthpass_ocr::OcrArms::from_env(),
         synthpass_die::class_sweep_arm().0,
         synthpass_die::line1_select_arm().0,
+        synthpass_die::refuse_repeated_line_arm().0,
+        synthpass_die::date_digits_arm().0,
     ) {
         eprintln!("{msg}");
         std::process::exit(1);
@@ -1487,7 +1504,11 @@ fn run_baseline_step(
                 }
                 // The same lines go to the job's step summary. Report-only:
                 // a failed write warns and never changes the gate result.
-                if let Err(e) = append_step_summary(step_summary_path().as_deref(), &diff_lines) {
+                if let Err(e) = synthpass_bench::step_summary::append_step_summary(
+                    synthpass_bench::step_summary::step_summary_path().as_deref(),
+                    STEP_SUMMARY_TITLE,
+                    &diff_lines,
+                ) {
                     eprintln!("⚠ could not write the step summary: {e}");
                 }
             }
@@ -1703,6 +1724,8 @@ struct OcrDumpRunManifest<'a> {
 struct MrzArms {
     class_sweep: &'static str,
     line1_select: &'static str,
+    refuse_repeated_line: &'static str,
+    date_digits: &'static str,
 }
 
 impl MrzArms {
@@ -1710,6 +1733,8 @@ impl MrzArms {
         Self {
             class_sweep: synthpass_die::class_sweep_arm().0,
             line1_select: synthpass_die::line1_select_arm().0,
+            refuse_repeated_line: synthpass_die::refuse_repeated_line_arm().0,
+            date_digits: synthpass_die::date_digits_arm().0,
         }
     }
 }
@@ -2661,6 +2686,8 @@ async fn main() {
         seed_start,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
+        mrz_refuse_repeated_line_arm: synthpass_die::refuse_repeated_line_arm().0,
+        mrz_date_digits_arm: synthpass_die::date_digits_arm().0,
         model_paths: if replay_dir.is_some() {
             ModelPathsReport {
                 detection: NO_MODEL_LOADED.to_string(),
@@ -2685,6 +2712,14 @@ async fn main() {
     println!(
         "mrz line-1 select arm measured: {}",
         synthpass_die::line1_select_arm().0
+    );
+    println!(
+        "mrz repeated-line refusal arm measured: {}",
+        synthpass_die::refuse_repeated_line_arm().0
+    );
+    println!(
+        "mrz date-digits arm measured: {}",
+        synthpass_die::date_digits_arm().0
     );
     println!("report written to {}", parsed.out);
     if let Some(dir) = replay_dir {
@@ -2735,7 +2770,13 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_allows_the_default_arms() {
         assert_eq!(
-            refuse_non_default_baseline(&synthpass_ocr::OcrArms::DEFAULT, "off", "on"),
+            refuse_non_default_baseline(
+                &synthpass_ocr::OcrArms::DEFAULT,
+                "off",
+                "on",
+                "off",
+                "off"
+            ),
             None
         );
     }
@@ -2744,30 +2785,34 @@ mod tests {
     fn refuse_non_default_baseline_rejects_any_single_moved_knob() {
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.chargrid = "on";
-        let msg = refuse_non_default_baseline(&arms, "off", "on").expect("must refuse");
+        let msg =
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off").expect("must refuse");
         assert!(msg.contains("chargrid=on"), "message: {msg}");
 
         let mut arms = synthpass_ocr::OcrArms::DEFAULT;
         arms.texture = "off";
-        assert!(refuse_non_default_baseline(&arms, "off", "on").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "on", "off", "off").is_some());
     }
 
-    /// #574: both `SYNTHPASS_MRZ_*` arms change what Tier 1 reads, so a baseline
-    /// may not be written or asserted with either off its default: class sweep
-    /// `off`, line-1 select `on`. `control` is refused on both.
+    /// #574: the class-sweep and line-1 `SYNTHPASS_MRZ_*` arms change what Tier
+    /// 1 reads, so a baseline may not be written or asserted with either off
+    /// its default: class sweep `off`, line-1 select `on`. `control` is refused
+    /// on both (the refusal arm has its own test below).
     #[test]
     fn refuse_non_default_baseline_rejects_either_mrz_arm() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
         for value in ["on", "control"] {
-            let msg = refuse_non_default_baseline(&arms, value, "on").expect("class sweep");
+            let msg =
+                refuse_non_default_baseline(&arms, value, "on", "off", "off").expect("class sweep");
             assert!(msg.contains(&format!("mrz_class_sweep={value}")), "{msg}");
         }
         for value in ["off", "control"] {
-            let msg = refuse_non_default_baseline(&arms, "off", value).expect("line-1 select");
+            let msg = refuse_non_default_baseline(&arms, "off", value, "off", "off")
+                .expect("line-1 select");
             assert!(msg.contains(&format!("mrz_line1_select={value}")), "{msg}");
         }
         // Both moved at once is refused once, and the message names both.
-        let msg = refuse_non_default_baseline(&arms, "on", "off").expect("both");
+        let msg = refuse_non_default_baseline(&arms, "on", "off", "off", "off").expect("both");
         assert!(msg.contains("mrz_class_sweep=on") && msg.contains("mrz_line1_select=off"));
     }
 
@@ -2776,9 +2821,51 @@ mod tests {
     #[test]
     fn refuse_non_default_baseline_accepts_only_the_line1_default() {
         let arms = synthpass_ocr::OcrArms::DEFAULT;
-        assert_eq!(refuse_non_default_baseline(&arms, "off", "on"), None);
-        assert!(refuse_non_default_baseline(&arms, "off", "off").is_some());
-        assert!(refuse_non_default_baseline(&arms, "off", "control").is_some());
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
+        assert!(refuse_non_default_baseline(&arms, "off", "off", "off", "off").is_some());
+        assert!(refuse_non_default_baseline(&arms, "off", "control", "off", "off").is_some());
+    }
+
+    /// #579: the repeated-line refusal arm changes what Tier 1 reads, so a
+    /// baseline may not be written or asserted with it on; `control` is
+    /// refused too, and the message names it.
+    #[test]
+    fn refuse_non_default_baseline_rejects_the_repeated_line_refusal() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
+        for value in ["on", "control"] {
+            let msg =
+                refuse_non_default_baseline(&arms, "off", "on", value, "off").expect("refusal arm");
+            assert!(
+                msg.contains(&format!("mrz_refuse_repeated_line={value}")),
+                "{msg}"
+            );
+            assert!(msg.contains("SYNTHPASS_MRZ_REFUSE_REPEATED_LINE"), "{msg}");
+        }
+    }
+
+    /// #579: the date-digits arm changes what Tier 1 reads too, so a baseline
+    /// may not be written or asserted with it on or on `control`, and the message
+    /// names it.
+    #[test]
+    fn refuse_non_default_baseline_rejects_the_date_digits_arm() {
+        let arms = synthpass_ocr::OcrArms::DEFAULT;
+        for value in ["on", "control"] {
+            let msg =
+                refuse_non_default_baseline(&arms, "off", "on", "off", value).expect("date digits");
+            assert!(msg.contains(&format!("mrz_date_digits={value}")), "{msg}");
+            assert!(msg.contains("SYNTHPASS_MRZ_DATE_DIGITS at off"), "{msg}");
+        }
+        assert_eq!(
+            refuse_non_default_baseline(&arms, "off", "on", "off", "off"),
+            None
+        );
     }
 
     #[test]
@@ -2991,12 +3078,14 @@ mod tests {
             synthpass_die::mrz_parse_options().pivot_yy
         );
         assert_eq!(manifest["git_commit"], git_head());
-        // #574: both MRZ arms, as this process resolved them.
+        // #574, #579: every MRZ arm, as this process resolved them.
         assert_eq!(
             manifest["mrz_arms"],
             serde_json::json!({
                 "class_sweep": synthpass_die::class_sweep_arm().0,
                 "line1_select": synthpass_die::line1_select_arm().0,
+                "refuse_repeated_line": synthpass_die::refuse_repeated_line_arm().0,
+                "date_digits": synthpass_die::date_digits_arm().0,
             })
         );
         assert_eq!(manifest["corpus_manifest"], "samples/corpus.jsonl");
@@ -3645,6 +3734,9 @@ mod tests {
             retry_variant_id: None,
             retry_budget_hit: false,
             retry_stop: None,
+            check_states: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
         }
     }
 
@@ -3665,6 +3757,40 @@ mod tests {
             keys,
             vec!["passports/a.png", "passports/b.png", "zzz-no-asset"],
             "asset_id sorts first; a row with no asset_id falls back to its name"
+        );
+    }
+
+    #[test]
+    fn build_outcome_rows_carries_check_states_and_both_damaged_recovery_flags() {
+        let mut with_mrz = detail("a", Some("a"), None);
+        with_mrz.check_states = Some(BTreeMap::from([
+            ("composite", Some(true)),
+            ("personal_number", None),
+        ]));
+        with_mrz.retry_damaged_recovery = Some(true);
+        with_mrz.tier1_damaged_recovery = Some(false);
+        let rows = build_outcome_rows(&mrz_report_with_details(vec![
+            with_mrz,
+            detail("b", Some("b"), Some(MissReason::Redacted)),
+        ]));
+        assert_eq!(
+            rows[0].check_states,
+            Some(BTreeMap::from([
+                ("composite".to_string(), Some(true)),
+                ("personal_number".to_string(), None),
+            ]))
+        );
+        assert_eq!(rows[0].retry_damaged_recovery, Some(true));
+        assert_eq!(rows[0].tier1_damaged_recovery, Some(false));
+        assert_eq!(rows[1].check_states, None);
+        assert_eq!(rows[1].retry_damaged_recovery, None);
+        assert_eq!(rows[1].tier1_damaged_recovery, None);
+        let line = serde_json::to_string(&rows[1]).expect("serialize");
+        assert!(
+            line.ends_with(
+                r#""check_states":null,"retry_damaged_recovery":null,"tier1_damaged_recovery":null}"#
+            ),
+            "absent values serialize as null, never as omitted keys: {line}"
         );
     }
 
@@ -3816,6 +3942,99 @@ mod tests {
         // Only the existing outcome line remains for an unchanged ledger.
         assert_eq!(diff_ledger_fields(&rows, &rows), Vec::<String>::new());
         assert_eq!(diff_outcomes(&rows, &rows).len(), 1);
+    }
+
+    /// One `check_states` map: `document_number` verified, `composite` as given.
+    fn states(composite: bool) -> BTreeMap<String, Option<bool>> {
+        BTreeMap::from([
+            ("composite".to_string(), Some(composite)),
+            ("document_number".to_string(), Some(true)),
+            ("personal_number".to_string(), None),
+        ])
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_check_states_change_as_compact_json() {
+        let committed = vec![hit_row_with("a", |r| r.check_states = Some(states(true)))];
+        let actual = vec![hit_row_with("a", |r| r.check_states = Some(states(false)))];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 check_states 1"
+                    .to_string(),
+                "  a: check_states {\"composite\":true,\"document_number\":true,\"personal_number\":null} \
+                 -> {\"composite\":false,\"document_number\":true,\"personal_number\":null}"
+                    .to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_retry_damaged_recovery_change() {
+        let committed = vec![hit_row_with("a", |r| {
+            r.retry_damaged_recovery = Some(false)
+        })];
+        let actual = vec![hit_row_with("a", |r| r.retry_damaged_recovery = Some(true))];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 retry_damaged_recovery 1"
+                    .to_string(),
+                "  a: retry_damaged_recovery false -> true".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn diff_ledger_fields_reports_a_tier1_damaged_recovery_change() {
+        let committed = vec![hit_row_with("a", |r| r.tier1_damaged_recovery = Some(true))];
+        let actual = vec![hit_row_with("a", |r| r.tier1_damaged_recovery = None)];
+        assert_eq!(
+            diff_ledger_fields(&committed, &actual),
+            vec![
+                "deterministic field diff vs committed (report-only): 1 document(s); \
+                 tier1_damaged_recovery 1"
+                    .to_string(),
+                "  a: tier1_damaged_recovery true -> null".to_string(),
+            ]
+        );
+    }
+
+    /// A ledger committed before the three fields existed still parses: they
+    /// read as `None`, exactly as `null` does, so the diff against a run that
+    /// has them reports `null -> value` (until the ledger is re-blessed) and
+    /// the outcome line is untouched.
+    #[test]
+    fn a_ledger_without_the_recovery_and_check_state_fields_parses_and_diffs_from_null() {
+        let old_line = r#"{"asset_id":"a","name":"a","outcome":"hit","miss_reason":null,"mrz_format":"TD3","mrz_found":true,"mrz_checksums_valid":true,"names_exact":null,"name_error":null,"ocr_ms":1,"retry_variant_id":null,"retry_budget_hit":false,"retry_stop":null}"#;
+        let committed =
+            parse_ledger(format!("{old_line}\n").as_bytes()).expect("old ledger parses");
+        assert_eq!(committed[0].check_states, None);
+        assert_eq!(committed[0].retry_damaged_recovery, None);
+        assert_eq!(committed[0].tier1_damaged_recovery, None);
+
+        let actual = vec![hit_row_with("a", |r| {
+            r.mrz_format = Some("TD3".to_string());
+            r.check_states = Some(states(true));
+            r.retry_damaged_recovery = Some(false);
+            r.tier1_damaged_recovery = Some(false);
+        })];
+        assert_eq!(diff_outcomes(&committed, &actual).len(), 1);
+        let lines = diff_ledger_fields(&committed, &actual);
+        assert_eq!(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 1 document(s); check_states 1, \
+             retry_damaged_recovery 1, tier1_damaged_recovery 1"
+        );
+        assert!(
+            lines[1].starts_with("  a: check_states null -> {"),
+            "{lines:?}"
+        );
+        assert!(lines[1].ends_with(
+            "; retry_damaged_recovery null -> false; tier1_damaged_recovery null -> false"
+        ));
     }
 
     #[test]
@@ -4022,31 +4241,19 @@ mod tests {
         dir
     }
 
+    /// The step summary writer moved to `synthpass_bench::step_summary`, where
+    /// its test (`append_step_summary_writes_the_diff_lines_and_nothing_without_a_path`)
+    /// went with it. What stays here is this binary's own heading.
     #[test]
-    fn append_step_summary_writes_the_diff_lines_and_nothing_without_a_path() {
-        let dir = scratch_dir("step-summary");
-        let summary = dir.join("summary.md");
-        let lines = vec![
-            "outcome ledger diff vs committed: 0 document(s) changed outcome".to_string(),
-            "  a: mrz_format null -> TD3".to_string(),
-        ];
-
-        append_step_summary(None, &lines).expect("no path is a no-op");
-        assert!(!summary.exists(), "an unset variable must write nothing");
-
-        append_step_summary(Some(summary.as_path()), &lines).expect("write the summary");
-        let text = std::fs::read_to_string(&summary).expect("summary exists");
-        for line in &lines {
-            assert!(text.contains(&format!("{line}\n")), "{text}");
-        }
-        assert!(text.contains("```text\n") && text.ends_with("```\n"));
-
-        // GitHub steps append to one shared file; a second call must not truncate.
-        append_step_summary(Some(summary.as_path()), &lines).expect("append again");
-        let twice = std::fs::read_to_string(&summary).expect("summary exists");
-        assert_eq!(twice.matches("  a: mrz_format null -> TD3\n").count(), 2);
-
-        let _ = std::fs::remove_dir_all(&dir);
+    fn this_binarys_step_summary_heading_names_the_real_specimen_diff() {
+        assert!(
+            STEP_SUMMARY_TITLE.starts_with("### Real-specimen"),
+            "{STEP_SUMMARY_TITLE}"
+        );
+        assert!(
+            STEP_SUMMARY_TITLE.contains("report-only"),
+            "{STEP_SUMMARY_TITLE}"
+        );
     }
 
     #[test]

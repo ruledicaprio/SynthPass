@@ -207,35 +207,49 @@ proptest! {
     /// to make the TD formats panic while slicing for the composite.
     #[test]
     fn any_sex_cell_emits_a_well_formed_zone(c in any::<char>()) {
-        let sex = Sex::NonConformant(c);
         let written = if matches!(c, 'A'..='Z' | '0'..='9' | '<') { c } else { '<' };
-        let expected = Sex::from_zone(written);
+        let arbitrary_expected = match written {
+            'M' => Sex::Male,
+            'F' => Sex::Female,
+            '<' => Sex::Unspecified,
+            other => Sex::NonConformant(other),
+        };
+        let cases = [
+            ('M', Sex::Male),
+            ('F', Sex::Female),
+            ('<', Sex::Unspecified),
+            ('X', Sex::NonConformant('X')),
+            (written, arbitrary_expected),
+        ];
         // Non-empty and non-`<`-led: an empty document number formats to an
         // all-filler field, which the parsers now refuse outright (#536),
         // irrelevant to what this property tests (the sex cell).
-        let doc_number = "K12345670".to_string();
-        let zones = [
-            (format_td3(&Td3Fields { sex, document_number: doc_number.clone(), ..Td3Fields::default() }), 44),
-            (format_td2(&Td2Fields { sex, document_number: doc_number.clone(), ..Td2Fields::default() }), 36),
-            (format_td1(&Td1Fields { sex, document_number: doc_number.clone(), ..Td1Fields::default() }), 30),
-            (format_mrv_a(&MrvAFields { sex, document_number: doc_number.clone(), ..MrvAFields::default() }), 44),
-            (format_mrv_b(&MrvBFields { sex, document_number: doc_number, ..MrvBFields::default() }), 36),
-        ];
-        for (i, (zone, width)) in zones.iter().enumerate() {
-            for line in zone.split('\n') {
-                prop_assert_eq!(line.chars().count(), *width, "format {} line {:?}", i, line);
-                prop_assert_eq!(line.len(), *width, "format {} is not ASCII: {:?}", i, line);
+        for (cell, expected) in cases {
+            let sex = Sex::NonConformant(cell);
+            let doc_number = "K12345670".to_string();
+            let zones = [
+                (format_td3(&Td3Fields { sex, document_number: doc_number.clone(), ..Td3Fields::default() }), 44),
+                (format_td2(&Td2Fields { sex, document_number: doc_number.clone(), ..Td2Fields::default() }), 36),
+                (format_td1(&Td1Fields { sex, document_number: doc_number.clone(), ..Td1Fields::default() }), 30),
+                (format_mrv_a(&MrvAFields { sex, document_number: doc_number.clone(), ..MrvAFields::default() }), 44),
+                (format_mrv_b(&MrvBFields { sex, document_number: doc_number, ..MrvBFields::default() }), 36),
+            ];
+            for (i, (zone, width)) in zones.iter().enumerate() {
+                for line in zone.split('\n') {
+                    prop_assert_eq!(line.chars().count(), *width, "format {} line {:?}", i, line);
+                    prop_assert_eq!(line.len(), *width, "format {} is not ASCII: {:?}", i, line);
+                }
+                let lines: Vec<&str> = zone.split('\n').collect();
+                let parsed = match i {
+                    0 => parse_td3(lines[0], lines[1]),
+                    1 => parse_td2(lines[0], lines[1]),
+                    2 => parse_td1(lines[0], lines[1], lines[2]),
+                    3 => parse_mrv_a(lines[0], lines[1]),
+                    _ => parse_mrv_b(lines[0], lines[1]),
+                };
+                prop_assert!(parsed.is_ok(), "format {} did not parse: {:?}", i, parsed);
+                prop_assert_eq!(parsed.unwrap().sex, expected, "format {} cell {:?}", i, cell);
             }
-            let lines: Vec<&str> = zone.split('\n').collect();
-            let parsed = match i {
-                0 => parse_td3(lines[0], lines[1]),
-                1 => parse_td2(lines[0], lines[1]),
-                2 => parse_td1(lines[0], lines[1], lines[2]),
-                3 => parse_mrv_a(lines[0], lines[1]),
-                _ => parse_mrv_b(lines[0], lines[1]),
-            };
-            prop_assert!(parsed.is_ok(), "format {} did not parse: {:?}", i, parsed);
-            prop_assert_eq!(parsed.unwrap().sex, expected);
         }
     }
 }
@@ -1166,11 +1180,8 @@ fn td1_optional_data_slots_are_distinguishable_after_parsing() {
     assert_eq!(a.optional_data_2, None);
     assert_eq!(b.optional_data_1, None);
     assert_eq!(b.optional_data_2.as_deref(), Some(PAYLOAD));
-    assert_ne!(
-        (a.optional_data_1.clone(), a.optional_data_2.clone()),
-        (b.optional_data_1.clone(), b.optional_data_2.clone()),
-        "once the slots are named, these two zones must no longer collapse to the same value"
-    );
+    // (The four assertions above already say the two zones no longer collapse
+    // to the same value, so no separate inequality is asserted.)
     // And neither is a personal number: a TD1 does not print one.
     assert_eq!(a.personal_number(), None);
     assert_eq!(b.personal_number(), None);
