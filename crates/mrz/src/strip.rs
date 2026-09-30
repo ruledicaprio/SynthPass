@@ -783,19 +783,59 @@ mod tests {
             template.cells.len(),
             template.line_width * template.line_count
         );
-        let document_code = match format {
-            Format::Td3 => TD3_CODE,
-            Format::MrvA | Format::MrvB => VISA_CODE,
-            Format::Td1 | Format::Td2 => ID_CODE,
+        // Alphabets are judged one character at a time against literal lists
+        // (not against the constants that built the cells), and the document
+        // code cell also against the direct parser, which decides the same
+        // question by its own rule.
+        let admits = |cell: &CellSpec, c: char| -> bool {
+            let bit = match c {
+                '<' => FILLER,
+                '0'..='9' => 1u64 << (1 + (c as u8 - b'0')),
+                'A'..='Z' => glyph(c as u8),
+                _ => 0,
+            };
+            cell.allowed & bit != 0
         };
-        assert_eq!(template.cells[0].allowed, document_code);
+        let admitted_first_letters: &[u8] = match format {
+            Format::Td3 => b"P",
+            Format::MrvA | Format::MrvB => b"V",
+            Format::Td1 | Format::Td2 => b"IAC",
+        };
+        for letter in b'A'..=b'Z' {
+            let mut mutated = lines.concat().into_bytes();
+            mutated[0] = letter;
+            let parsed = parse(format, std::str::from_utf8(&mutated).unwrap());
+            let parser_admits = !matches!(parsed, Err(MrzError::BadDocumentCode(_)));
+            assert_eq!(
+                parser_admits,
+                admitted_first_letters.contains(&letter),
+                "{format:?}: the direct parser and first letter {:?}",
+                letter as char
+            );
+            assert_eq!(
+                admits(&template.cells[0], letter as char),
+                parser_admits,
+                "{format:?}: the cell alphabet and the direct parser on first letter {:?}",
+                letter as char
+            );
+        }
         for cell in &template.cells {
             assert_ne!(cell.allowed, 0, "every cell has an alphabet");
             if cell.field == Field::Sex {
-                assert_eq!(cell.allowed, SEX);
+                for c in ['M', 'F', '<'] {
+                    assert!(admits(cell, c), "{format:?}: sex admits {c:?}");
+                }
+                for c in ['0', '9', 'Z'] {
+                    assert!(!admits(cell, c), "{format:?}: sex refuses {c:?}");
+                }
             }
             if matches!(cell.field, Field::Name | Field::Nationality) {
-                assert_eq!(cell.allowed, LETTER | FILLER);
+                for c in ('A'..='Z').chain(['<']) {
+                    assert!(admits(cell, c), "{format:?}: names admit {c:?}");
+                }
+                for c in '0'..='9' {
+                    assert!(!admits(cell, c), "{format:?}: names refuse {c:?}");
+                }
             }
         }
         let original = lines.concat().into_bytes();
@@ -1081,10 +1121,13 @@ mod tests {
                 Format::MrvA => &MRV_A,
                 Format::MrvB => &MRV_B,
             };
-            let (mut structural, mut covered, mut unverifiable) = (0, 0, 0);
+            // Totality (every cell is classified exactly once) is the
+            // exhaustive `match` below; a sum of counters over it would only
+            // restate it.
+            let mut structural = 0;
             for (index, cell) in cells.iter().enumerate() {
                 match cell.class() {
-                    CellClass::CheckCovered => covered += 1,
+                    CellClass::CheckCovered | CellClass::Unverifiable => {}
                     CellClass::Structural => {
                         structural += 1;
                         assert_eq!(
@@ -1092,17 +1135,11 @@ mod tests {
                             "{format:?}: a structural cell can only be line 1's first position"
                         );
                     }
-                    CellClass::Unverifiable => unverifiable += 1,
                 }
             }
             assert_eq!(
                 structural, 1,
                 "{format:?}: exactly one structural cell — the document code"
-            );
-            assert_eq!(
-                structural + covered + unverifiable,
-                cells.len(),
-                "{format:?}: the map classifies every cell exactly once"
             );
 
             // #536: `parser::ensure_document_number_leads` is a second content

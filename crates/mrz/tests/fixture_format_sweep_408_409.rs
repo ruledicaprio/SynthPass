@@ -16,7 +16,7 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
     files.sort();
 
     let mut compared = 0;
-    let mut disagreements = 0;
+    let mut disagreeing: Vec<String> = Vec::new();
     for path in files {
         let raw = fs::read_to_string(&path).expect("read public OCR fixture");
         let fixture: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture JSON");
@@ -34,11 +34,11 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
         let detected = find_and_parse(zone).map(|data| data.format);
         compared += 1;
         if direct.as_ref().ok() != detected.as_ref().ok() {
-            disagreements += 1;
             let name = path
                 .file_name()
                 .expect("fixture file name")
                 .to_string_lossy();
+            disagreeing.push(name.to_string());
             let format_name = |format: &Result<Format, mrz::MrzError>| match format {
                 Ok(Format::Td1) => "TD1",
                 Ok(Format::Td2) => "TD2",
@@ -55,6 +55,10 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
             );
         }
     }
-    println!("compared={compared} disagreements={disagreements}");
+    println!("compared={compared} disagreements={}", disagreeing.len());
     assert_eq!(compared, 65, "fixture audit denominator changed");
+    assert!(
+        disagreeing.is_empty(),
+        "the scanner and the shape-named parser disagree on these fixtures: {disagreeing:?}"
+    );
 }

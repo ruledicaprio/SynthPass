@@ -302,16 +302,37 @@ fn damaged_recovery_is_false_for_a_reading_the_ordinary_scan_read_cleanly() {
 fn an_interior_filler_is_never_a_document_number() {
     let (_, l2) = td3_zone();
     let check = l2.as_bytes()[9] as char;
-    let field = format!("{}{}", UNKNOWN, &l2[1..9]);
 
-    if let Resolution::Ambiguous { candidates } =
-        solve_field(&field, check, FieldKind::DocumentNumber)
-    {
-        for c in candidates {
-            assert!(
-                !c.trim_end_matches('<').contains('<'),
-                "{c:?} has an interior filler"
-            );
+    // Column 0 is the original hole. Column 1 is a `0` in a document number
+    // that is `E` then zeros: `<` has the value 0, so it lies in that cell's
+    // residue class and the check digit cannot exclude it. Only the
+    // left-justification rule does, so this column is what makes the test able
+    // to fail.
+    for column in [0usize, 1] {
+        let field = format!("{}{}{}", &l2[..column], UNKNOWN, &l2[column + 1..9]);
+
+        // Every variant is handled, so a change of outcome cannot pass by
+        // falling through: whatever the solver returns, no value it offers may
+        // carry an interior filler.
+        match solve_field(&field, check, FieldKind::DocumentNumber) {
+            Resolution::Unique(value) => assert!(
+                !value.trim_end_matches('<').contains('<'),
+                "column {column}: {value:?} has an interior filler"
+            ),
+            Resolution::Ambiguous { candidates } => {
+                assert!(
+                    !candidates.is_empty(),
+                    "column {column}: an ambiguous answer names candidates"
+                );
+                for c in candidates {
+                    assert!(
+                        !c.trim_end_matches('<').contains('<'),
+                        "column {column}: {c:?} has an interior filler"
+                    );
+                }
+            }
+            Resolution::Unresolvable => {}
+            other => panic!("a new Resolution variant needs a decision here: {other:?}"),
         }
     }
 }
