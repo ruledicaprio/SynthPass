@@ -1428,15 +1428,16 @@ fn td1_line1_variants(raw: &str) -> Vec<String> {
 /// [`repair_td1_line1`] and once with [`repair_td1_line1_unshifted`], the
 /// pairing [`td1_line1_variants`] uses, so a line 1 that lost its position-1
 /// filler is also offered with the filler put back and the same one-cell (or
-/// one-field) repair applied to it. The unshifted search runs only when the
-/// shifted one found something: an empty shifted search returns at once, so a
-/// line 1 whose only repair is the unshifted reading is not offered here.
+/// one-field) repair applied to it. The unshifted search runs whether or not
+/// the shifted one found something, so a line 1 whose only repair is the
+/// unshifted reading is offered here too.
 ///
 /// When at least one of the combined candidates is [`line1_admissible`], only
 /// the admissible ones are returned, in order and without repeats. When none
-/// is, the result is exactly `search(repair_td1_line1)`, the list these sites
-/// produced before the unshifted reading was added: a document whose issuer is
-/// unknown gains no candidate here. Before this, a 30-cell line 1 with its
+/// is, the result is exactly `search(repair_td1_line1)` (which may be empty),
+/// the list these sites produced before the unshifted reading was added: a
+/// document whose issuer is unknown gains no candidate here. Before this, a
+/// 30-cell line 1 with its
 /// filler dropped and one further misread cell reached the search only as the
 /// shifted line, and a shifted reading that validates was recorded as the
 /// answer (`IFRAE0E0W2012...`, issuer `RAE`).
@@ -1446,9 +1447,6 @@ fn td1_line1_variants(raw: &str) -> Vec<String> {
 /// among them, and no shifted reading was found to win there.
 fn td1_line1_searched(search: impl Fn(fn(&str) -> String) -> Vec<String>) -> Vec<String> {
     let plain = search(repair_td1_line1);
-    if plain.is_empty() {
-        return plain;
-    }
     let unshifted = search(repair_td1_line1_unshifted);
     let mut seen = std::collections::HashSet::new();
     let admissible: Vec<String> = plain
