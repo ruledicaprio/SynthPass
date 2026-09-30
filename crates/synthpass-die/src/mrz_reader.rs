@@ -12,6 +12,11 @@
 //! `mrz::find_and_parse(&text).ok().filter(|m| m.valid())` plus a pair of
 //! private helpers. Nothing about the arithmetic changes here; it gains an
 //! identity, a declared capability, and somewhere to report evidence.
+//!
+//! The read goes through [`read_tier1`], which applies the line-1 selector
+//! (#574) by default; `SYNTHPASS_MRZ_LINE1_SELECT=off` restores the plain
+//! `mrz::find_and_parse_with`. The pipeline's v1 record reads Tier 1 the same
+//! way, so the v1 and v2 records agree under every arm.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -214,15 +219,19 @@ pub struct Tier1Read {
 }
 
 /// The Tier-1 read of an OCR text: [`mrz::find_and_parse_with`] under this
-/// process's arms, then the shadow line-1 selector under its own
-/// (`SYNTHPASS_MRZ_LINE1_SELECT`, see [`crate::line1_select_arm`]).
+/// process's arms, then the line-1 selector under its own
+/// (`SYNTHPASS_MRZ_LINE1_SELECT`, on by default, see [`crate::line1_select_arm`]).
 ///
 /// This is the one place a benchmark and the product read Tier 1, so every arm
-/// reads the same way. [`MrzReader`], the synthetic benchmark's Tier-1 read and
-/// the real-specimen benchmark's dump zone all call it. **Not routed through
-/// it, on purpose:** the OCR retry loop's own parse (so its stopping rule and
-/// "no extra OCR" hold), the pipeline's Tier-2 hint parse, the prep `mrz_found`
-/// parses and the printed-zone validity parse. Those keep their own calls.
+/// reads the same way. [`MrzReader`], the pipeline's v1 record
+/// (`PipelineResult.mrz`), the synthetic benchmark's Tier-1 read and the
+/// real-specimen benchmark's dump zone all call it. The pipeline's Tier-2 hint
+/// is built from that same read, but it carries check-digit fields only, which
+/// the selector never changes. **Not routed through it, on purpose:** the OCR
+/// retry loop's own parse (so its stopping rule and "no extra OCR" hold), the
+/// real-specimen benchmark's own hint parse (ADR-0024 step 0b routes it), the
+/// prep `mrz_found` parses and the printed-zone validity parse. Those keep
+/// their own calls.
 #[must_use]
 pub fn read_tier1(text: &str) -> Tier1Read {
     read_tier1_with(
@@ -241,7 +250,8 @@ pub fn read_tier1(text: &str) -> Tier1Read {
 ///   proposal is discarded, so `parsed` is what `Off` returns.
 /// - [`Line1Arm::On`]: as `Control`, and a proposal replaces `parsed`.
 ///
-/// **Unmeasured.** The selector changes name fields only.
+/// **Measured** in `knowledge/benchmarks/line1-selection-ab-2026-09-29.md`. The
+/// selector changes name fields only.
 #[must_use]
 pub fn read_tier1_with(text: &str, opts: &mrz::ParseOptions, arm: Line1Arm) -> Tier1Read {
     let mut parsed = mrz::find_and_parse_with(text, opts);
@@ -1175,7 +1185,7 @@ mod tests {
 
     #[test]
     fn the_reader_reports_the_selection_in_its_evidence_only_when_the_arm_is_on() {
-        // The process arm is `off` unless the environment says otherwise, and
+        // The process arm is `on` unless the environment says otherwise, and
         // this test makes no claim about the environment: it asserts only that
         // the evidence agrees with whatever arm the process is under.
         let arm = crate::line1_select_arm().1;
