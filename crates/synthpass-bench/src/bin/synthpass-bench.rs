@@ -1345,6 +1345,24 @@ mod tests {
         assert_eq!(json["results"][0]["retry_stop"], "general_valid");
     }
 
+    /// Issue #615: the retry budget is a run-level fact beside `ocr_arms`.
+    /// The default report records the binary's effective defaults, while an
+    /// override remains visible as the value the run actually used.
+    #[test]
+    fn report_carries_the_effective_ocr_retry_budget() {
+        let mut report = synthetic_rate_report(1, 1, 0);
+        let (default_max_passes, default_max_seconds) = synthpass_ocr::effective_retry_budget();
+        let json = serde_json::to_value(&report).expect("serialize synthetic report");
+        assert_eq!(json["max_passes"], default_max_passes);
+        assert_eq!(json["max_seconds"], default_max_seconds);
+
+        report.max_passes = 3;
+        report.max_seconds = 7;
+        let json = serde_json::to_value(&report).expect("serialize overridden report");
+        assert_eq!(json["max_passes"], 3);
+        assert_eq!(json["max_seconds"], 7);
+    }
+
     /// The nightly reads `render_sha256` from every `results[]` entry (the
     /// generator fingerprint), so it is always serialized, never omitted.
     #[test]

@@ -3327,6 +3327,37 @@ mod tests {
         unsafe { std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES") };
     }
 
+    /// Issue #615: callers that record a run must see the same effective pair
+    /// as the retry loop, including fallback semantics for both variables.
+    #[test]
+    fn effective_retry_budget_reports_defaults_and_overrides() {
+        let _env = crate::env_lock();
+        unsafe {
+            std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES");
+            std::env::remove_var("SYNTHPASS_OCR_MAX_SECONDS");
+        }
+        assert_eq!(
+            effective_retry_budget(),
+            (DEFAULT_MAX_PASSES, DEFAULT_MAX_SECONDS),
+            "unset variables report the built-in defaults"
+        );
+
+        unsafe {
+            std::env::set_var("SYNTHPASS_OCR_MAX_PASSES", "3");
+            std::env::set_var("SYNTHPASS_OCR_MAX_SECONDS", "7");
+        }
+        assert_eq!(
+            effective_retry_budget(),
+            (3, 7),
+            "valid overrides are reported as effective"
+        );
+
+        unsafe {
+            std::env::remove_var("SYNTHPASS_OCR_MAX_PASSES");
+            std::env::remove_var("SYNTHPASS_OCR_MAX_SECONDS");
+        }
+    }
+
     /// The default pass budget must admit *every* retry variant, including
     /// the last one. This is arithmetic, not behaviour, and it is a test
     /// rather than a comment because a comment is exactly what failed here:
