@@ -435,6 +435,80 @@ fn searched_sites_never_refuse_an_unknown_issuer() {
     assert!(data.damaged_recovery);
 }
 
+// --- #580: the unshifted search runs even when the shifted one finds nothing --
+
+/// A zone plus the text OCR would hand the parser when line 1 lost its
+/// position-1 filler (30 cells, padded) *and* every `0` of the document number
+/// was read as `O`, one glyph class read uniformly. The number is chosen so
+/// that the shifted reading cannot validate on its own: no blind spot, so the
+/// class sweep of the shifted alignment finds nothing and only the unshifted
+/// alignment can recover the line.
+fn shifted_class_misread(issuer: &str, number: &str) -> (Zone, String) {
+    let z = zone("I", issuer, number, "070707");
+    assert!(
+        parse_td1(&z.shifted, &z.l2, &z.l3).is_ok_and(|d| !d.valid()),
+        "sanity: the shifted reading must not validate: {}",
+        z.shifted
+    );
+    let misread = z.shifted.replace('0', "O");
+    assert!(
+        misread.matches('O').count() >= 2,
+        "sanity: a run of one class, {misread}"
+    );
+    let text = z.with_line_1(&misread);
+    (z, text)
+}
+
+/// `class_sweep_pass`: the shifted search finds nothing, and the unshifted
+/// reading, swept, is the only way to the truth. Before #580's fix the
+/// early return in `td1_line1_searched` skipped the unshifted search whenever
+/// the shifted one was empty, so the sweep offered nothing usable and the read
+/// stayed a checksum-failed one from the ordinary scan.
+#[test]
+fn class_sweep_offers_the_unshifted_line_when_the_shifted_search_is_empty() {
+    for number in ["401U0Z54N", "TK0NM0P4C"] {
+        let (z, text) = shifted_class_misread("FRA", number);
+
+        let off = find_and_parse_with(&text, &ParseOptions::default()).expect("must parse");
+        assert!(!off.valid(), "sanity: nothing validates with the sweep off");
+
+        let on = ParseOptions::default().with_class_sweep(true);
+        let data = find_and_parse_with(&text, &on).expect("the sweep recovers this reading");
+        assert_is_the_truth(&data, &z);
+        assert!(
+            data.damaged_recovery,
+            "recovered by the damaged-capture passes"
+        );
+    }
+}
+
+/// The guard on the same shape: when no combined candidate is admissible (the
+/// issuer does not resolve), the searched site returns exactly the shifted
+/// search's list, which here is empty. The read must be the one the sweep-off
+/// parse gives, so an unknown issuer gains no candidate from the unshifted
+/// search.
+#[test]
+fn class_sweep_gains_no_candidate_for_an_unknown_issuer() {
+    assert!(country_name("QQQ").is_none(), "sanity: QQQ is not a state");
+    for number in ["401U0Z54N", "TK0NM0P4C"] {
+        let (_, text) = shifted_class_misread("QQQ", number);
+
+        let summary = |data: Result<MrzData, mrz::MrzError>| {
+            data.ok()
+                .map(|d| (d.mrz_lines.clone(), d.valid(), d.damaged_recovery))
+        };
+        let off = summary(find_and_parse_with(&text, &ParseOptions::default()));
+        let on = ParseOptions::default().with_class_sweep(true);
+        let with_sweep = summary(find_and_parse_with(&text, &on));
+        assert_eq!(with_sweep, off, "the sweep must add nothing here");
+        assert!(
+            !off.as_ref()
+                .is_some_and(|(_, valid, recovered)| *valid || *recovered),
+            "sanity: the ordinary scan does not recover this line: {off:?}"
+        );
+    }
+}
+
 // --- Forms the filter must leave alone --------------------------------------
 
 /// A genuine two-letter TD1 document code with a resolving issuer.
