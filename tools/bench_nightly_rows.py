@@ -480,11 +480,6 @@ def validate_context(context: dict) -> dict:
     return context
 
 
-def _env_int(env: dict, name: str):
-    value = env.get(name)
-    return int(value) if value is not None and value.isdigit() else None
-
-
 def build_header(report: dict, rows: list[dict], context: dict, slice_name: str, counts: dict) -> dict:
     """One `runs.jsonl` line: the conditions this run measured under (ADR-0027 decision 2)."""
     arms = _need(report, "ocr_arms", "report")
@@ -504,6 +499,10 @@ def build_header(report: dict, rows: list[dict], context: dict, slice_name: str,
         mrz_arms[key] = value
     timestamp = _need(report, "timestamp_unix", "report")
     _check_int(timestamp, "timestamp_unix", "report")
+    max_passes = _need(report, "max_passes", "report")
+    max_seconds = _need(report, "max_seconds", "report")
+    _check_int(max_passes, "max_passes", "report", minimum=1)
+    _check_int(max_seconds, "max_seconds", "report", minimum=1)
     env = context["ocr_env"]
     return {
         "schema": SCHEMA,
@@ -524,10 +523,8 @@ def build_header(report: dict, rows: list[dict], context: dict, slice_name: str,
         "ocr_arms": arm_values,
         **mrz_arms,
         "ocr_env": dict(sorted(env.items())),
-        # The report does not carry the budget. These are the runner's own override, `None` when
-        # the variable was unset, meaning the binary's built-in default.
-        "max_passes": _env_int(env, "SYNTHPASS_OCR_MAX_PASSES"),
-        "max_seconds": _env_int(env, "SYNTHPASS_OCR_MAX_SECONDS"),
+        "max_passes": max_passes,
+        "max_seconds": max_seconds,
         "model_sha256": context["model_sha256"],
         "cpu_model": context["cpu_model"],
         "nproc": context["nproc"],
