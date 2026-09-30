@@ -1079,9 +1079,17 @@ class LedgerDiffBlockTests(unittest.TestCase):
 class MainLedgerGateTests(unittest.TestCase):
     """`main()` with every network, git and process call faked: the
     aggregates below never move (only CI provenance does), so the class is
-    `identical` and the ledger diff alone decides what happens next."""
+    `identical` and the ledger diff alone decides what happens next. Passing
+    `new_baseline_overrides` moves an off-denominator bucket instead, so the
+    class is `non-scored delta` (the doc-rewrite step is faked too)."""
 
-    def _run_main(self, old_rows: list[dict], new_rows: list[dict], confirm: bool) -> tuple[int, str, list[list[str]]]:
+    def _run_main(
+        self,
+        old_rows: list[dict],
+        new_rows: list[dict],
+        confirm: bool,
+        new_baseline_overrides: dict | None = None,
+    ) -> tuple[int, str, list[list[str]]]:
         import contextlib
         import io
 
@@ -1100,7 +1108,12 @@ class MainLedgerGateTests(unittest.TestCase):
             artifact = root / "artifact"
             artifact.mkdir()
             new_baseline = artifact / "real-specimen-mrz-baseline.json"
-            new_baseline.write_text(json.dumps(make_baseline(measured_on_ci_sha="ccccccc")), encoding="utf-8")
+            new_baseline.write_text(
+                json.dumps(make_baseline(measured_on_ci_sha="ccccccc", **(new_baseline_overrides or {}))), encoding="utf-8"
+            )
+            for rel in (rb.README_REL_PATH, rb.BENCH_README_REL_PATH, rb.FINDINGS_REL_PATH):
+                (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
+                (worktree / rel).write_text("placeholder\n", encoding="utf-8")
             new_ledger = artifact / "real-specimen-outcomes.jsonl"
             write_ledger(new_ledger, new_rows)
 
@@ -1115,7 +1128,11 @@ class MainLedgerGateTests(unittest.TestCase):
                 rb.ac, "run_bash_script", return_value=""
             ), mock.patch.object(
                 rb.ac, "run_cmd", side_effect=lambda cmd, **kw: commands.append(list(cmd)) or ""
-            ), mock.patch.object(rb.ac, "gh_pr_number_for_branch", return_value=None), contextlib.redirect_stdout(out):
+            ), mock.patch.object(rb.ac, "gh_pr_number_for_branch", return_value=None), mock.patch.object(
+                rb, "rewrite_readme_gap_and_corpus_rate", side_effect=lambda text, *a: text
+            ), mock.patch.object(
+                rb, "rewrite_benchmarks_readme_live_block", side_effect=lambda text, *a: text
+            ), mock.patch.object(rb.ixf, "write_index"), contextlib.redirect_stdout(out):
                 code = rb.main(argv)
             return code, out.getvalue(), commands
 
@@ -1128,6 +1145,26 @@ class MainLedgerGateTests(unittest.TestCase):
         self.assertIn("a: hit -> checksum_failed", out)
         self.assertIn("b: checksum_failed -> hit", out)
         self.assertFalse(any("commit" in c for c in commands), f"nothing may be committed: {commands}")
+
+    def test_non_scored_delta_and_an_outcome_change_stops_for_a_human(self):
+        old = [ledger_row("a"), ledger_row("b", outcome="checksum_failed")]
+        new = [ledger_row("a", outcome="checksum_failed"), ledger_row("b")]  # the two swapped buckets
+        code, out, commands = self._run_main(old, new, confirm=True, new_baseline_overrides={"documents": 266})
+        self.assertIn("baseline diff classification: non-scored delta", out)
+        self.assertEqual(code, rb.EXIT_OUTCOME_CHANGED)
+        self.assertIn("a: hit -> checksum_failed", out)
+        self.assertIn("b: checksum_failed -> hit", out)
+        self.assertFalse(any("commit" in c for c in commands), f"nothing may be committed: {commands}")
+
+    def test_non_scored_delta_without_an_outcome_change_still_proceeds(self):
+        # An ingest adds a document (only_new) but no document present on both
+        # sides changes outcome: not a stop, and the commit still goes ahead.
+        old = [ledger_row("a"), ledger_row("b")]
+        new = [ledger_row("a"), ledger_row("b"), ledger_row("c")]
+        code, out, commands = self._run_main(old, new, confirm=True, new_baseline_overrides={"documents": 266})
+        self.assertIn("baseline diff classification: non-scored delta", out)
+        self.assertEqual(code, 0)
+        self.assertEqual(len([c for c in commands if "commit" in c]), 1, commands)
 
     def test_identical_aggregates_and_a_non_outcome_change_proceeds_with_the_diff_in_the_commit_message(self):
         old = [ledger_row("a", retry_variant_id="pass-03", retry_stop="variant_valid"), ledger_row("b")]

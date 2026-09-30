@@ -54,12 +54,11 @@ hand, in order; this tool automates the mechanical parts and stops for a human
    that moved the numbers accuracy work is scored on -- that entry is
    `synthpass-analyst`'s to write, same discipline as
    `tools/apply_cohort.py`'s labelled DRAFT notes. It stops the same way, with
-   the distinct exit code 3, when the class is "identical" but the ledger diff
-   shows a document whose `outcome` changed: equal counts can hide two
-   documents swapping bucket, so that change is never committed mechanically.
-   Changes in every other ledger field are print-only, and so is an outcome
-   change under a "non-scored delta" (it is printed, and carried into the
-   commit message and the FINDINGS entry).
+   the distinct exit code 3, when the class is "identical" or "non-scored
+   delta" but the ledger diff shows a document present on both sides whose
+   `outcome` changed: equal scored counts (or off-denominator moves) can hide
+   two documents swapping bucket, so that change is never committed
+   mechanically. Changes in every other ledger field are print-only.
 6. Commit, push, dispatch the `mode=assert` run and wait for it, `gh pr
    ready`, and PATCH the PR body with a "Re-bless result" paragraph -- all
    gated behind `--confirm` (see "Two independent safety layers" below).
@@ -1096,8 +1095,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"installed at {baseline_path} for the analyst to work from; nothing else was written.")
         return EXIT_SCORED_DELTA
 
-    if cls == CLASS_IDENTICAL and outcome_moved:
-        print("\nbaseline classified 'identical', but a document's outcome changed -- stopping for a human.")
+    if cls in (CLASS_IDENTICAL, CLASS_NON_SCORED) and outcome_moved:
+        print(f"\nbaseline classified {cls!r}, but a document's outcome changed -- stopping for a human.")
         print(format_outcome_stop_message(outcome_moved))
         return EXIT_OUTCOME_CHANGED
 
