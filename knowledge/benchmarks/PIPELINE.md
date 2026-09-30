@@ -197,6 +197,8 @@ queue for hours on the local machine ([`ADR-0027`](../decisions/ADR-0027-ci-runn
 - **Each arm** is built from its own checkout in the same run, with one shared target directory, and
   its binary is copied out and hashed. `ab/<role>/arm.json` records the ref, the commit, the knobs,
   the pin, the binary's SHA-256 and the runner's facts (the nightly's `context` block).
+  `tools/bench_ab_diff.py` refuses a pair whose records differ in any runner fact or in role, and a
+  CI arm paired with a local one (exit 2).
 - **Where the result is.** One artifact, `bench-ab`, kept **3 days**: each arm's reports,
   `--dump-ocr` output (`<format>.stdout`), `arm.json`, the plan, and the full diff
   (`diff.txt`, `diff.json`). They hold synthetic OCR zone text, which ADR-0027 decision 5 allows for

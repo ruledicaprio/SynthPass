@@ -33,6 +33,8 @@ An arm is one directory, holding whatever the A/B measured:
     ARM/real/         one `provider-bench` run, e.g.
                       provider-bench --real-specimens --mrz-only --dump-ocr
                         --dump-ocr-hits --out ARM/real/report.json
+    ARM/arm.json      the arm's record, written by `bench-ab.yml` (`bench_ab_args.py arm-json`);
+                      a local arm has none
 
 - **Synthetic reports** are paired by file name. A pair must cover the same
   document type, profile and seeds; `synth_ab_diff.compare` checks that.
@@ -72,6 +74,8 @@ refused without it, and `--asset` is refused with it: that mode prints no zones.
   - two arms with nothing in common to compare;
   - an arm measured with a private or local track, under `--expect-identical`
     or with `--asset`;
+  - a CI arm (one with `arm.json`) paired with a local one, or two records whose
+    runner facts or roles differ (see below);
   - under `--expect-identical`, `--check-pass-trace` when neither arm has a
     pass trace, and `--check-report` when neither arm has a real `report.json`
     with `documents_detail` rows.
@@ -82,6 +86,25 @@ refused without it, and `--asset` is refused with it: that mode prints no zones.
 
 Codes 0, 1 and 2 mean the same in both modes. When several apply, 2 wins over 1
 and 1 wins over 3.
+
+## One runner
+
+ADR-0027 decision 4: both arms of an A/B run on one runner, from one workflow run,
+and a CI arm is never compared with a local one. Before anything is compared, in
+both modes, the arms' `arm.json` records are checked:
+
+- neither arm has one: a local A/B, compared as before;
+- only one has one: refused;
+- both have one: each must be a valid record (`bench_ab_args.check_arm`), the
+  before directory's must say `role: before` and the after directory's
+  `role: after`, and every `context` fact except `ocr_env` must be equal (run id
+  and attempt, commit, event, CPU model, core count, rustc, the two models'
+  hashes). `ocr_env` is each arm's own knobs plus the pin, which differ by
+  design; the refs, commits, knobs and binary hashes are not compared either. One
+  refusal line names every fact that differs.
+
+There is no override. The limit: a local arm records no machine, so two local arms
+measured on different machines are not detected.
 
 ## Neutrality mode
 
@@ -254,6 +277,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import bench_ab_args
+import bench_nightly_rows as nightly
 import synth_ab_diff as synth
 
 OUTCOMES = "provider-bench-ocr-outcomes.jsonl"
@@ -294,6 +319,11 @@ ENUM_VALUE = re.compile(r"[A-Za-z0-9_]{1,40}")
 PRIVATE_NOTE_VALUES = ("flags", "ocr_arms", "mrz_class_sweep_arm", "mrz_line1_select_arm")
 # Flags that change nothing about what a run measures.
 NEUTRAL_FLAGS = ("--progress", "--verbose")
+ARM_RECORD = "arm.json"
+# The runner facts both arms of a CI A/B must share: the nightly's context block, less `ocr_env`,
+# which is each arm's own knobs plus the pin and differs by design. A key added to the block is
+# compared here by default.
+RUNNER_KEYS = tuple(k for k in nightly.CONTEXT_KEYS if k != "ocr_env")
 
 
 class Refused(Exception):
@@ -817,7 +847,50 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str], allow_pri
     }
 
 
+def runner_value(key: str, value) -> str:
+    """A runner fact as printed: `model_sha256` as 12-hex prefixes, the rest as validated."""
+    return value[:12] if key.startswith("model_sha256.") else str(value)
+
+
+def check_runner(before: Path, after: Path) -> None:
+    """Refuse two arms that were not measured on one runner (ADR-0027 decision 4).
+
+    A CI arm carries `arm.json` (`bench_ab_args.py arm-json`). An arm without one is local: two local
+    arms are compared as always, a CI arm and a local one never are. Two records must name the roles
+    of the directories they sit in, and agree on every `RUNNER_KEYS` fact. Only key names and runner
+    facts, which `validate_context` limits to short plain values, are ever printed."""
+    paths = [before / ARM_RECORD, after / ARM_RECORD]
+    present = [p.exists() for p in paths]
+    if not any(present):
+        return
+    if not all(present):
+        side = "before" if present[0] else "after"
+        raise Refused(f"only the {side} arm has an {ARM_RECORD}: a CI arm is never compared with a local arm")
+    records = {}
+    for side, path in zip(("before", "after"), paths):
+        try:
+            records[side] = bench_ab_args.load_arm(path)
+        except bench_ab_args.Refused as error:
+            raise Refused(f"the {side} arm's record: {error}") from error
+        if records[side]["role"] != side:
+            raise Refused(f"the {side} arm's {ARM_RECORD} says role {records[side]['role']}: "
+                          "the arms were passed in the wrong order, or one record was copied")
+    context_b, context_a = records["before"]["context"], records["after"]["context"]
+    differing = []
+    for key in RUNNER_KEYS:
+        if key == "model_sha256":
+            pairs = [(f"{key}.{model}", context_b[key][model], context_a[key][model])
+                     for model in sorted(context_b[key])]
+        else:
+            pairs = [(key, context_b[key], context_a[key])]
+        differing += [f"context.{name} {runner_value(name, b)} vs {runner_value(name, a)}"
+                      for name, b, a in pairs if b != a]
+    if differing:
+        raise Refused("the arms were not measured in one workflow run on one runner: " + ", ".join(differing))
+
+
 def compare_arms(before: Path, after: Path, assets: list[str], allow_private: bool = False) -> dict:
+    check_runner(before, after)
     sb, sa = synthetic_reports(before), synthetic_reports(after)
     synthetic = {}
     for name in sorted(set(sb) & set(sa), key=report_order):
