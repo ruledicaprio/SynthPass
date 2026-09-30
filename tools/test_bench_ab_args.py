@@ -345,18 +345,27 @@ class RunAnArm(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.binary = self.root / "fake-bench"
-        self.binary.write_text(
-            f"#!{sys.executable}\n"
+        body = (
             "import json, os, sys\n"
             "print('--- seed 0 raw OCR lines ---')\n"
             "print('  [0] \"SYNTHETIC-ZONE-TEXT\"')\n"
             "out = sys.argv[sys.argv.index('--out') + 1]\n"
             "open(out, 'w').write(json.dumps({'argv': sys.argv[1:], 'cwd': os.getcwd(), "
             "'env': {k: v for k, v in os.environ.items() if k.startswith('SYNTHPASS_')}}))\n"
-            "sys.exit(int(os.environ.get('FAKE_EXIT', '0')))\n",
-            encoding="utf-8")
-        self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
+            "sys.exit(int(os.environ.get('FAKE_EXIT', '0')))\n")
+        if os.name == "nt":
+            # Windows starts no script by its #! line (WinError 193), so the stand-in is a .cmd
+            # shim that hands every argument to the interpreter and returns its exit status.
+            script = self.root / "fake-bench.py"
+            script.write_text(body, encoding="utf-8")
+            self.binary = self.root / "fake-bench.cmd"
+            # Text mode writes "\n" as "\r\n" on Windows, which cmd expects.
+            self.binary.write_text(f'@"{sys.executable}" "{script}" %*\n@exit /b %ERRORLEVEL%\n',
+                                   encoding="utf-8")
+        else:
+            self.binary = self.root / "fake-bench"
+            self.binary.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
+            self.binary.chmod(self.binary.stat().st_mode | stat.S_IXUSR)
         self.arm_dir = self.root / "arm-before"
         self.arm_dir.mkdir()
         self.plan = a.validate(inputs(

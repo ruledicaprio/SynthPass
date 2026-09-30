@@ -1133,41 +1133,12 @@ fn diff_ledger_fields(committed: &[OutcomeRow], actual: &[OutcomeRow]) -> Vec<St
     lines
 }
 
-/// Appends `lines` to the GitHub step summary at `path` as one fenced block,
-/// or does nothing when `path` is `None` (`GITHUB_STEP_SUMMARY` unset). The
-/// caller warns and carries on if this fails: the summary is evidence, never
-/// a gate condition.
-///
-/// The repository is public, so the summary is public too: `lines` must
-/// already be limited to asset ids, field names, enumerated values and counts
-/// — see [`FieldChange`].
-fn append_step_summary(path: Option<&Path>, lines: &[String]) -> std::io::Result<()> {
-    use std::io::Write as _;
-
-    let Some(path) = path else {
-        return Ok(());
-    };
-    let mut body =
-        String::from("### Real-specimen per-document ledger diff (report-only)\n\n```text\n");
-    for line in lines {
-        body.push_str(line);
-        body.push('\n');
-    }
-    body.push_str("```\n");
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    file.write_all(body.as_bytes())
-}
-
-/// The step summary file GitHub Actions names in `GITHUB_STEP_SUMMARY`; `None`
-/// outside Actions (unset or empty).
-fn step_summary_path() -> Option<std::path::PathBuf> {
-    std::env::var_os("GITHUB_STEP_SUMMARY")
-        .filter(|v| !v.is_empty())
-        .map(std::path::PathBuf::from)
-}
+/// The heading of this binary's step summary block. The writer itself is
+/// `synthpass_bench::step_summary`, shared with `synthpass-bench`'s M4 ledger
+/// diff; the lines it is given must already be limited to asset ids, field
+/// names, enumerated values and counts (see [`FieldChange`]), since the
+/// summary is public.
+const STEP_SUMMARY_TITLE: &str = "### Real-specimen per-document ledger diff (report-only)";
 
 /// The fixed name of the text-free projection of an assert run's ledger,
 /// written under the `--out` directory (see [`write_run_ledger_projection`]).
@@ -1533,7 +1504,11 @@ fn run_baseline_step(
                 }
                 // The same lines go to the job's step summary. Report-only:
                 // a failed write warns and never changes the gate result.
-                if let Err(e) = append_step_summary(step_summary_path().as_deref(), &diff_lines) {
+                if let Err(e) = synthpass_bench::step_summary::append_step_summary(
+                    synthpass_bench::step_summary::step_summary_path().as_deref(),
+                    STEP_SUMMARY_TITLE,
+                    &diff_lines,
+                ) {
                     eprintln!("⚠ could not write the step summary: {e}");
                 }
             }
@@ -4266,31 +4241,19 @@ mod tests {
         dir
     }
 
+    /// The step summary writer moved to `synthpass_bench::step_summary`, where
+    /// its test (`append_step_summary_writes_the_diff_lines_and_nothing_without_a_path`)
+    /// went with it. What stays here is this binary's own heading.
     #[test]
-    fn append_step_summary_writes_the_diff_lines_and_nothing_without_a_path() {
-        let dir = scratch_dir("step-summary");
-        let summary = dir.join("summary.md");
-        let lines = vec![
-            "outcome ledger diff vs committed: 0 document(s) changed outcome".to_string(),
-            "  a: mrz_format null -> TD3".to_string(),
-        ];
-
-        append_step_summary(None, &lines).expect("no path is a no-op");
-        assert!(!summary.exists(), "an unset variable must write nothing");
-
-        append_step_summary(Some(summary.as_path()), &lines).expect("write the summary");
-        let text = std::fs::read_to_string(&summary).expect("summary exists");
-        for line in &lines {
-            assert!(text.contains(&format!("{line}\n")), "{text}");
-        }
-        assert!(text.contains("```text\n") && text.ends_with("```\n"));
-
-        // GitHub steps append to one shared file; a second call must not truncate.
-        append_step_summary(Some(summary.as_path()), &lines).expect("append again");
-        let twice = std::fs::read_to_string(&summary).expect("summary exists");
-        assert_eq!(twice.matches("  a: mrz_format null -> TD3\n").count(), 2);
-
-        let _ = std::fs::remove_dir_all(&dir);
+    fn this_binarys_step_summary_heading_names_the_real_specimen_diff() {
+        assert!(
+            STEP_SUMMARY_TITLE.starts_with("### Real-specimen"),
+            "{STEP_SUMMARY_TITLE}"
+        );
+        assert!(
+            STEP_SUMMARY_TITLE.contains("report-only"),
+            "{STEP_SUMMARY_TITLE}"
+        );
     }
 
     #[test]

@@ -1,0 +1,12 @@
+- **`synthpass-bench` can write and diff a per-seed ledger of a synthetic run.** `--ledger PATH`
+  writes one JSONL row per seed (format, seed, profile, hit, miss kind, the wrong-accept flags, the
+  names of the wrong fields, the check states, `names_exact` and `name_error`, the line-1 flag, the
+  retry and damaged-recovery fields, and `elapsed_ms`) with no expected or read values and no OCR
+  text. `--diff-ledger PATH` prints how this run's rows differ from a committed ledger, per field
+  and per seed, and copies the lines to the GitHub step summary. The diff is report-only: it never
+  changes the exit code, and a missing committed ledger prints one line and carries on. The M4 CI
+  job now passes both flags and uploads the ledger as the `m4-bench` artifact (90 days, it is
+  text-free) and `bench-report.json` as `m4-report` (3 days, it holds synthetic OCR zone text,
+  ADR-0027 decision 5). The committed ledger `knowledge/benchmarks/m4-synthetic-ledger.jsonl` is
+  installed from the `m4-bench` artifact, never from a local run. The step-summary writer moved
+  from `provider-bench` into the library so both binaries share it (#557).
