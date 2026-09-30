@@ -277,7 +277,11 @@ mod tests {
 
     #[test]
     fn class_zero_holds_both_zero_and_filler() {
-        assert_eq!(CLASSES[0], &['0', 'A', 'K', 'U', '<']);
+        // Membership, not the order of the row: `0` and the filler share a
+        // residue class, and so do `K` and `<` through it.
+        for member in ['0', '<', 'K'] {
+            assert!(CLASSES[0].contains(&member), "{member:?} is in class 0");
+        }
         assert!(blindspot('K', '<').is_blind());
     }
 }

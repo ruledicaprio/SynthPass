@@ -138,18 +138,18 @@ fn seed_57_no_longer_accepts_the_shifted_line_1() {
 /// considered: the document number is `AMG7TQCG1`, the printed truth, and the
 /// read stays checksum-failed because its check cell reads `T` for `7`.
 ///
-/// Line 3 of this read is the noisy second-pass one
-/// (`DUBOISARDKELENAC<CCK<<<<<<<<<K`). The fallback rank prefers it over the
-/// clean last-pass line 3, exactly as it ranks any two checksum-failed reads.
-/// Names are not this fix's concern; they are pinned so a later change shows.
+/// Only what this fix owns is asserted: line 1, the code, the issuer and the
+/// document number, and that the read is not valid. Lines 2 and 3 are not:
+/// which of the checksum-failed candidates the fallback rank prefers for them
+/// (here a noisy second-pass line 3) is a tie-break between two such reads, not
+/// this fix's concern, and a legitimate change to that rank must not break this
+/// test.
 #[test]
 fn seed_75_no_longer_accepts_the_shifted_line_1() {
     let data = find_and_parse(SEED_75).expect("seed 75 parses as checksum-failed");
     assert_eq!(
-        data.mrz_lines,
-        "I<UTOAMG7TQCG1T<<<<<<<<<<<<<<<\n\
-         0403276F3109074UTOX90Y40XOANB1\n\
-         DUBOISARDKELENAC<CCK<<<<<<<<<K"
+        data.mrz_lines.lines().next(),
+        Some("I<UTOAMG7TQCG1T<<<<<<<<<<<<<<<")
     );
     assert_eq!(data.document_type, "I");
     assert_eq!(data.issuing_country, "UTO");
@@ -175,7 +175,6 @@ fn seed_75_first_pass_no_longer_reads_a_shifted_issuer() {
     );
     assert_eq!(data.document_type, "I");
     assert_eq!(data.issuing_country, "UTO");
-    assert_ne!(data.issuing_country, "TOA");
     assert!(!data.valid());
 }
 

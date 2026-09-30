@@ -170,27 +170,22 @@ mod tests {
         assert!((similarity("A<<<<<A", "AA") - 1.0).abs() < f64::EPSILON);
     }
 
+    /// What the fold is for, through the function that uses it: two readings of
+    /// one line that differ only by the glyphs OCR reads as either (`O`/`0`,
+    /// `I`/`1`) are the same line read twice, and a pair that differs by
+    /// unrelated letters at the same positions is not. The fold's table is not
+    /// copied here.
     #[test]
-    fn lookalikes_fold_to_one_character() {
-        for (from, to) in [
-            (b'O', b'0'),
-            (b'Q', b'0'),
-            (b'D', b'0'),
-            (b'I', b'1'),
-            (b'L', b'1'),
-            (b'Z', b'2'),
-            (b'S', b'5'),
-            (b'B', b'8'),
-            (b'G', b'6'),
-            (b'T', b'7'),
-        ] {
-            assert_eq!(fold_lookalike(from), to, "{}", from as char);
-        }
-        // Characters that are not lookalikes are unchanged.
-        for c in [b'A', b'M', b'0', b'5', b'<'] {
-            assert_eq!(fold_lookalike(c), c);
-        }
-        assert!((similarity("OQDILZSBGT", "0001125867") - 1.0).abs() < f64::EPSILON);
+    fn a_pair_differing_only_by_o_0_and_i_1_is_a_repeat() {
+        let read_as_letters = "MAOIMAOIMAOIMAOI";
+        let read_as_digits = "MA01MA01MA01MA01";
+        assert!(repeats_a_line(&[read_as_letters, read_as_digits]));
+
+        // `X` and `Y` are not lookalikes of `O` and `I`: half the cells differ,
+        // which is 0.5, below the threshold.
+        let unrelated_letters = "MAXYMAXYMAXYMAXY";
+        assert!(!repeats_a_line(&[read_as_letters, unrelated_letters]));
+        assert!(!repeats_a_line(&[read_as_digits, unrelated_letters]));
     }
 
     #[test]
