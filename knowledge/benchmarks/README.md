@@ -249,7 +249,7 @@ A benchmark change follows this lifecycle:
 
 **Change and regress.** Keep corpus maintenance separate from accuracy optimization. Change one measurable hypothesis at a time, then rerun the same frozen population with the same provider configuration. Provider comparisons are meaningful only when both providers consume the same assets, labels, exclusions, and invocation scope.
 
-**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership.)*
+**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). The M4 synthetic gate prints the same kind of diff per seed against a CI-written ledger on every run, also report-only (see "The synthetic (M4) per-seed ledger" in the same section). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership. Amended 2026-09-30, #557 Phase 2: the M4 ledger diff.)*
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
 
@@ -591,6 +591,38 @@ gate writes it to the job log and to `$GITHUB_STEP_SUMMARY`; the repository is p
 carries asset ids, field names, enumerated values and counts only, never OCR text or
 `miss_reason` text. `tools/rebless.py` prints the same diff between the old and the new
 ledger and puts it in the commit message and the FINDINGS entry.
+
+**The synthetic (M4) per-seed ledger (#557, Phase 2).** The `m4-hit-rate` job runs
+`synthpass-bench --ledger m4-ledger.jsonl --diff-ledger knowledge/benchmarks/m4-synthetic-ledger.jsonl`.
+`--ledger PATH` writes one JSONL row per seed, in seed order, every key always present (`null`
+when absent), in this order: `format`, `seed`, `profile`, `hit`, `miss_kind`, `wrong_accept`,
+`prefix_wrong_accept`, `wrong_fields` (field **names**, sorted), `check_states` (compact JSON,
+sorted keys), `names_exact`, `name_error`, `line1_flagged`, `retry_stop`, `retry_variant_id`,
+`retry_damaged_recovery`, `tier1_damaged_recovery` and `elapsed_ms`. No expected or read value and
+no OCR text: the rows are safe for a public step summary, and the flag works for any format and
+count, not only M4's 50 TD3 seeds. `--diff-ledger PATH` compares this run's rows with the
+committed ones by (`format`, `seed`) and prints, to the job log and to `$GITHUB_STEP_SUMMARY`:
+one line (seeds that changed a deterministic field, and per-field totals in schema order, never
+capped), up to 20 `seed N: field old -> new` lines and `... and N more`, one timing line
+(`elapsed_ms` differs on N of M seeds, median |delta|, both totals), the *budget-limited* seeds
+(`retry_stop` is `budget` on either side; every change on them is timing-sensitive, so they are
+not in the first line's count), and the seeds present on one side only, as counts. **The diff
+never changes the exit code**: `--min-hit-rate 0.30` and `--max-prefix-wrong-accepts 0` decide
+pass or fail exactly as before, and with no committed ledger at the path the diff prints one line
+and carries on (the bootstrap case). The job uploads `bench-report.json` and `m4-ledger.jsonl` as
+the artifact `m4-bench` with `if: always()` and `retention-days: 90`.
+
+The committed `m4-synthetic-ledger.jsonl` is written **by CI only**, never by hand and never from a
+local run: OCR inference floats round differently on Windows or another CPU, so a ledger from
+another machine would diff against CI on noise. **To install or re-bless it:** push the code, let
+the PR's own `m4-hit-rate` job finish, then `gh run download <run-id> -n m4-bench`, copy
+`m4-ledger.jsonl` over `knowledge/benchmarks/m4-synthetic-ledger.jsonl`, and commit it in the same
+PR with the message `m4: install the CI-written ledger from run <run-id> (#557)`. The next CI run
+then diffs CI against CI; a non-zero changed-seed count there is a finding, not a failure. **A PR
+that moves the ledger** (every generator change does, so each #411 PR will) re-installs it the
+same way from its own latest M4 artifact, in the same PR, and says in its body which seeds moved
+and why. A 5 x 100 headline ledger is not committed (#557 question 5): each generator PR would
+rewrite the whole file, so the weekly `bench-charts` artifacts are what to diff for now.
 
 **What an assert run uploads.** Next to the report, the workflow uploads
 `real-specimen-outcomes-text-free.jsonl` with `if: always()`, so a failed gate keeps its

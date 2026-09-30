@@ -307,11 +307,37 @@ jobs:
       # Pinned at the value CI measured on the PR that added it, PR #516 on
       # 7b4487a: 0 of 39 hits. A fix may only lower it. Raising it is a
       # reviewed edit to this line that names the seeds and the mechanism.
+      #
+      # --ledger / --diff-ledger (issue #557, Phase 2) are report-only: the
+      # run writes one row per seed to m4-ledger.jsonl and prints how those
+      # rows differ from the committed, CI-written
+      # knowledge/benchmarks/m4-synthetic-ledger.jsonl, to the log and to the
+      # step summary. The diff never changes the exit code; only the two gates
+      # above decide pass or fail. The committed ledger is installed from this
+      # job's own `m4-bench` artifact, never from a local run (see
+      # knowledge/benchmarks/README.md).
       - name: M4 Tier-1 hit-rate gate (synthpass-bench, clean profile)
         run: |
           cargo run -p synthpass-bench --release --bin synthpass-bench -- \
             --count 50 --seed 0 --profile clean --min-hit-rate 0.30 \
-            --max-prefix-wrong-accepts 0 --out bench-report.json
+            --max-prefix-wrong-accepts 0 --out bench-report.json \
+            --ledger m4-ledger.jsonl \
+            --diff-ledger knowledge/benchmarks/m4-synthetic-ledger.jsonl
+
+      # `if: always()`: a failed gate is exactly when the report and the
+      # ledger are wanted, and the runner is destroyed after the job. 90 days
+      # is long enough to install a ledger from the artifact of a PR that
+      # sat in review.
+      - name: Keep the M4 report and ledger
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: m4-bench
+          path: |
+            bench-report.json
+            m4-ledger.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
 
   # The changelog contract, enforced rather than trusted. Until now a PR could
   # merge with no fragment at all, a malformed one, or a version bump that did
