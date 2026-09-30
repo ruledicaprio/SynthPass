@@ -2716,21 +2716,10 @@ async fn run_prepped_with_dump_options(
             // checksum-partial read, the same as production. `mrz_hint`
             // itself is a no-op unless `SYNTHPASS_LLM_MRZ_HINT=1` is set, so
             // this harness measures exactly the same gate the pipeline does.
-            let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
-            let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
-            // The Tier-1 read the reader itself makes, under this process's
-            // arms (`SYNTHPASS_MRZ_CLASS_SWEEP`, `SYNTHPASS_MRZ_LINE1_SELECT`).
-            // `read_mrz` above stays this harness's hint parse, under the crate
-            // default options; since the #574 promotion production's hint derives
-            // from the routed read, which differs only in name fields, and the
-            // hint carries check-digit fields only, so the two hints agree
-            // (routing this parse is ADR-0024 step 0b). The dump zone below is
-            // the reader's read, so with an arm set it shows the zone the reader
-            // returned (#574, finding 3). With the class sweep and the line-1
-            // selector both `off` the two are one parse: `mrz_parse_options()`
-            // is then the crate default.
             let tier1 = synthpass_die::read_tier1(&bench_page.page.text);
-            let dump_zone: Option<&mrz::MrzData> = tier1.parsed.as_ref().ok();
+            let read_mrz = tier1.parsed.as_ref().ok();
+            let hint = synthpass_pipeline::mrz_hint(read_mrz);
+            let dump_zone: Option<&mrz::MrzData> = read_mrz;
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
