@@ -312,10 +312,12 @@ jobs:
       # run writes one row per seed to m4-ledger.jsonl and prints how those
       # rows differ from the committed, CI-written
       # knowledge/benchmarks/m4-synthetic-ledger.jsonl, to the log and to the
-      # step summary. The diff never changes the exit code; only the two gates
-      # above decide pass or fail. The committed ledger is installed from this
-      # job's own `m4-bench` artifact, never from a local run (see
-      # knowledge/benchmarks/README.md).
+      # step summary. The diff never changes the exit code, and the two gates
+      # above decide pass or fail from the numbers alone. The one other way this
+      # step exits non-zero is a --ledger file that cannot be written (exit 1,
+      # as for --out), which happens before the gates are evaluated. The
+      # committed ledger is installed from this job's own `m4-bench` artifact,
+      # never from a local run (see knowledge/benchmarks/README.md).
       - name: M4 Tier-1 hit-rate gate (synthpass-bench, clean profile)
         run: |
           cargo run -p synthpass-bench --release --bin synthpass-bench -- \
@@ -325,19 +327,30 @@ jobs:
             --diff-ledger knowledge/benchmarks/m4-synthetic-ledger.jsonl
 
       # `if: always()`: a failed gate is exactly when the report and the
-      # ledger are wanted, and the runner is destroyed after the job. 90 days
-      # is long enough to install a ledger from the artifact of a PR that
-      # sat in review.
-      - name: Keep the M4 report and ledger
+      # ledger are wanted, and the runner is destroyed after the job. The
+      # ledger is text-free (names, enumerated values, booleans and integers),
+      # and 90 days is long enough to install it from the artifact of a PR
+      # that sat in review. The name stays `m4-bench` so that
+      # `gh run download <run-id> -n m4-bench` is the whole install command.
+      - name: Keep the M4 ledger
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: m4-bench
-          path: |
-            bench-report.json
-            m4-ledger.jsonl
+          path: m4-ledger.jsonl
           if-no-files-found: ignore
           retention-days: 90
+
+      # bench-report.json holds synthetic OCR zone text (fields[].expected/got
+      # and the mrz_lines row): ADR-0027 decision 5 keeps it 3 days at most.
+      - name: Keep the M4 report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: m4-report
+          path: bench-report.json
+          if-no-files-found: ignore
+          retention-days: 3
 
   # The changelog contract, enforced rather than trusted. Until now a PR could
   # merge with no fragment at all, a malformed one, or a version bump that did

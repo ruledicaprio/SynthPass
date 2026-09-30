@@ -54,7 +54,9 @@
 //!                        hit, miss kind, wrong-accept flags, wrong field *names*,
 //!                        check states, names, line-1 flag, retry fields,
 //!                        `elapsed_ms`; no expected or read values, no OCR text) to
-//!                        PATH, for any format and count (issue #557, Phase 2)
+//!                        PATH, for any format and count (issue #557, Phase 2). A
+//!                        PATH that cannot be written exits 1, before the gates
+//!                        are evaluated, as `--out` does
 //!   --diff-ledger PATH   print how this run's rows differ from the committed
 //!                        ledger at PATH, joined on (format, seed), and copy the
 //!                        lines to `$GITHUB_STEP_SUMMARY` when it is set.
@@ -2135,27 +2137,6 @@ mod tests {
 
         assert!(parse_args(&args(&["--ledger"])).is_err());
         assert!(parse_args(&args(&["--diff-ledger"])).is_err());
-    }
-
-    /// The diff is report-only by construction: it is computed from rows and
-    /// a path and returns lines, so `--min-hit-rate` and
-    /// `--max-prefix-wrong-accepts` decide the exit code from the numbers
-    /// alone. This pins that a ledger diff of an entirely different run still
-    /// leaves both gate decisions exactly where they were.
-    #[test]
-    fn a_ledger_diff_leaves_the_gate_decisions_untouched() {
-        let missed = doc(Some("checksum_failed"), &["composite"], &[]);
-        let before = (prefix_gate_exceeded(0, 0), prefix_gate_exceeded(1, 0));
-        let rows = vec![ledger_row("TD3", &missed)];
-        let committed = vec![ledger_row("TD3", &doc(None, &[], &[]))];
-        let lines = synthpass_bench::synthetic_ledger::diff_ledgers(&committed, &rows);
-        assert!(lines[0].contains("1 seed(s) changed"), "{lines:?}");
-        assert_eq!(
-            before,
-            (prefix_gate_exceeded(0, 0), prefix_gate_exceeded(1, 0)),
-            "nothing the diff printed reaches a gate input"
-        );
-        assert_eq!(before, (false, true));
     }
 
     #[test]

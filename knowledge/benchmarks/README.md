@@ -608,13 +608,19 @@ capped), up to 20 `seed N: field old -> new` lines and `... and N more`, one tim
 (`retry_stop` is `budget` on either side; every change on them is timing-sensitive, so they are
 not in the first line's count), and the seeds present on one side only, as counts. **The diff
 never changes the exit code**: `--min-hit-rate 0.30` and `--max-prefix-wrong-accepts 0` decide
-pass or fail exactly as before, and with no committed ledger at the path the diff prints one line
-and carries on (the bootstrap case). The job uploads `bench-report.json` and `m4-ledger.jsonl` as
-the artifact `m4-bench` with `if: always()` and `retention-days: 90`.
+pass or fail from the numbers alone, exactly as before, and with no committed ledger at the path
+the diff prints one line and carries on (the bootstrap case). The one other way to exit non-zero
+is a `--ledger` file that cannot be written: the run exits 1 before the gates are evaluated, as it
+does for `--out`. The job uploads the ledger alone as the artifact `m4-bench` (`if: always()`,
+`retention-days: 90`; it is text-free) and `bench-report.json` as `m4-report` (`if: always()`,
+`retention-days: 3`). The report holds synthetic OCR zone text (`fields[].expected` and `got`, and
+the `mrz_lines` row), which [ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)
+decision 5 keeps for at most 3 days.
 
 The committed `m4-synthetic-ledger.jsonl` is written **by CI only**, never by hand and never from a
-local run: OCR inference floats round differently on Windows or another CPU, so a ledger from
-another machine would diff against CI on noise. **To install or re-bless it:** push the code, let
+local run: OCR inference floats can round differently on Windows or another CPU, so a ledger from
+another machine could diff against CI on noise, and ADR-0027 decision 4 says a CI arm is never
+compared with a local arm. **To install or re-bless it:** push the code, let
 the PR's own `m4-hit-rate` job finish, then `gh run download <run-id> -n m4-bench`, copy
 `m4-ledger.jsonl` over `knowledge/benchmarks/m4-synthetic-ledger.jsonl`, and commit it in the same
 PR with the message `m4: install the CI-written ledger from run <run-id> (#557)`. The next CI run
@@ -622,7 +628,8 @@ then diffs CI against CI; a non-zero changed-seed count there is a finding, not 
 that moves the ledger** (every generator change does, so each #411 PR will) re-installs it the
 same way from its own latest M4 artifact, in the same PR, and says in its body which seeds moved
 and why. A 5 x 100 headline ledger is not committed (#557 question 5): each generator PR would
-rewrite the whole file, so the weekly `bench-charts` artifacts are what to diff for now.
+rewrite the whole file, so the weekly `bench-charts` artifacts are what to diff for now, with the
+caveat that until #557 Phase 2 item 4 their synthetic report holds only the last synthetic track.
 
 **What an assert run uploads.** Next to the report, the workflow uploads
 `real-specimen-outcomes-text-free.jsonl` with `if: always()`, so a failed gate keeps its

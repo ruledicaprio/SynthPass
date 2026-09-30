@@ -16,8 +16,9 @@
 //! elsewhere and this module cannot change them.
 //!
 //! The committed ledger is written by CI only, never by hand and never from a
-//! local run: the OCR floats round differently across machines, so a ledger
-//! from another machine would diff against CI on noise. See
+//! local run: OCR floats can round differently across machines, so a ledger
+//! from another machine could diff against CI on noise, and ADR-0027 decision
+//! 4 says a CI arm is never compared with a local arm. See
 //! `knowledge/benchmarks/README.md`.
 
 use std::collections::BTreeMap;
@@ -31,7 +32,8 @@ use serde::{Deserialize, Serialize};
 /// never quotes them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LedgerRow {
-    /// The generated MRZ format label (`--document-type`), for example `td3`.
+    /// The generated MRZ format label (`--document-type`), as
+    /// `DocumentType::as_str` writes it: for example `TD3`.
     pub format: String,
     pub seed: u64,
     pub profile: String,
@@ -343,7 +345,7 @@ fn median(values: &mut [u128]) -> u128 {
 ///
 /// 1. One line: how many seeds changed a deterministic field, and per-field
 ///    totals in schema order (never capped).
-/// 2. Up to [`SEED_LINE_CAP`] `seed N: field old -> new; ...` lines, then
+/// 2. Up to 20 `seed N: field old -> new; ...` lines, then
 ///    `... and N more`.
 /// 3. One timing line: `elapsed_ms` differs on N of M seeds, the median
 ///    |delta| and both totals. Always printed.
@@ -622,6 +624,58 @@ mod tests {
             "  seed 5: wrong_fields [] -> [given_names,surname]; names_exact true -> false; \
              name_error null -> given_names_swapped"
         );
+    }
+
+    /// The field names exist twice, in `DIFFED_FIELDS` (the order the totals
+    /// print in) and as the literals in `field_changes`, and are only matched
+    /// as strings. One seed that differs on every diffed field pins that the
+    /// two lists agree: a name that drifts in either place drops out of the
+    /// totals line or comes out in the wrong place.
+    #[test]
+    fn a_seed_that_differs_on_every_field_is_totalled_under_every_name_in_schema_order() {
+        let committed = vec![row(0)];
+        let actual = vec![row_with(0, |r| {
+            r.profile = "mobile".to_string();
+            r.hit = false;
+            r.miss_kind = Some("checksum_failed".to_string());
+            r.wrong_accept = true;
+            r.prefix_wrong_accept = true;
+            r.wrong_fields = vec!["surname".to_string()];
+            r.check_states = Some(
+                [("composite".to_string(), Some(false))]
+                    .into_iter()
+                    .collect(),
+            );
+            r.names_exact = false;
+            r.name_error = Some("other".to_string());
+            r.line1_flagged = true;
+            r.retry_stop = Some("pass_cap".to_string());
+            r.retry_variant_id = Some("pass-01".to_string());
+            r.retry_damaged_recovery = Some(true);
+            r.tier1_damaged_recovery = Some(true);
+        })];
+        let lines = diff_ledgers(&committed, &actual);
+        assert_eq!(
+            lines[0],
+            "synthetic ledger diff vs committed (report-only): 1 seed(s) changed; \
+             profile 1, hit 1, miss_kind 1, wrong_accept 1, prefix_wrong_accept 1, \
+             wrong_fields 1, check_states 1, names_exact 1, name_error 1, line1_flagged 1, \
+             retry_stop 1, retry_variant_id 1, retry_damaged_recovery 1, \
+             tier1_damaged_recovery 1"
+        );
+        assert_eq!(DIFFED_FIELDS.len(), 14);
+        let seed_line = &lines[1];
+        assert_eq!(
+            seed_line.matches("; ").count() + 1,
+            14,
+            "one change per diffed field on the seed line: {seed_line}"
+        );
+        for field in DIFFED_FIELDS {
+            assert!(
+                seed_line.contains(&format!("{field} ")),
+                "{field} missing from {seed_line}"
+            );
+        }
     }
 
     #[test]
