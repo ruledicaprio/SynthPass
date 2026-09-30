@@ -129,6 +129,8 @@ def fresh_report():
         "seed_start": 100,
         "ocr_arms": {"texture": "on", "order": "default", "rotate": "default", "skew": "default",
                      "chargrid": "off"},
+        "max_passes": 14,
+        "max_seconds": 52,
         "mrz_class_sweep_arm": "off",
         "mrz_line1_select_arm": "off",
         "model_paths": {"detection": "/x/text-detection.rten", "recognition": "/x/text-recognition.rten"},
@@ -155,6 +157,8 @@ def fixed_report(document_type="TD3"):
         "seed_start": 0,
         "ocr_arms": {"texture": "on", "order": "default", "rotate": "default", "skew": "default",
                      "chargrid": "off"},
+        "max_passes": 14,
+        "max_seconds": 52,
         "mrz_class_sweep_arm": "off",
         "mrz_line1_select_arm": "off",
         "hits": 100,
@@ -545,13 +549,15 @@ class FixedSliceAndHeaderTests(unittest.TestCase):
         self.assertEqual((header["nproc"], header["cpu_model"]), (4, "Test CPU 3.0GHz"))
         self.assertEqual(header["model_sha256"]["detection"], "c" * 64)
         self.assertEqual(header["counts"]["wrong_accepts"], 2)
-        # No override set: the binary's own defaults, recorded as null.
-        self.assertEqual((header["max_passes"], header["max_seconds"], header["ocr_env"]), (None, None, {}))
+        # No override set: the binary's own effective defaults come from the report.
+        self.assertEqual((header["max_passes"], header["max_seconds"], header["ocr_env"]), (14, 52, {}))
 
     def test_an_overridden_budget_is_recorded(self):
+        report = fresh_report()
+        report.update(max_passes=3, max_seconds=7)
         ctx = context(ocr_env={"SYNTHPASS_OCR_MAX_SECONDS": "3600", "SYNTHPASS_OCR_MAX_PASSES": "14"})
-        _, header = n.extract_run(fresh_report(), "fresh", ctx)
-        self.assertEqual((header["max_passes"], header["max_seconds"]), (14, 3600))
+        _, header = n.extract_run(report, "fresh", ctx)
+        self.assertEqual((header["max_passes"], header["max_seconds"]), (3, 7))
 
     def test_a_context_with_an_extra_key_or_a_long_value_is_refused(self):
         with self.assertRaises(n.RowError):

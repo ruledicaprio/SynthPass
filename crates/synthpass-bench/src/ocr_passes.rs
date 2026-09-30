@@ -32,7 +32,7 @@
 //! in the same change.
 
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use synthpass_ocr::{ChargridFit, ChargridLineCapture, ChargridRecord, OcrPage, PassRecord};
 
 /// The file `provider-bench --dump-ocr-passes` writes next to `--out`.
@@ -463,19 +463,16 @@ pub fn read_rows(dir: &Path) -> Result<PassesFile, String> {
 ///
 /// `dir` is where [`OCR_PASSES_FILENAME`] will be written; it need not exist
 /// yet. A relative `dir` is taken from `cwd`. A `..` in the part of `dir` that
-/// does not exist yet is refused rather than guessed at.
+/// does not exist yet is refused rather than guessed at, on every operating
+/// system; a `..` through directories that do exist is resolved by the
+/// filesystem, as the write will be.
 pub fn check_passes_destination(
     root: &Path,
     cwd: &Path,
     dir: &Path,
     is_ignored: impl Fn(&Path) -> Result<bool, String>,
 ) -> Result<(), String> {
-    let absolute = if dir.is_absolute() {
-        dir.to_path_buf()
-    } else {
-        cwd.join(dir)
-    };
-    let destination = resolve_existing_prefix(&absolute)?.join(OCR_PASSES_FILENAME);
+    let destination = resolve_destination(cwd, dir)?.join(OCR_PASSES_FILENAME);
     let root = std::fs::canonicalize(root)
         .map_err(|e| format!("cannot resolve the working tree {}: {e}", root.display()))?;
     let Ok(relative) = destination.strip_prefix(&root) else {
@@ -493,28 +490,55 @@ pub fn check_passes_destination(
     }
 }
 
-/// Canonicalizes the deepest existing ancestor of `path` and re-appends the
-/// rest, so a not-yet-created output directory is judged by where it will be.
-fn resolve_existing_prefix(path: &Path) -> Result<PathBuf, String> {
-    let mut existing = path.to_path_buf();
-    let mut rest: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
-        // `file_name` is `None` for a path ending in `..`: where that leads
-        // depends on directories that do not exist yet, so it is refused.
-        let name = existing.file_name().ok_or_else(|| {
-            format!(
-                "{} has a parent-directory component past its last existing directory",
-                path.display()
-            )
-        })?;
-        rest.push(name.to_os_string());
-        if !existing.pop() {
-            return Err(format!("cannot resolve {}", path.display()));
+/// Resolves `dir`, taken from `cwd` when relative, to where the dump directory
+/// will be: the deepest existing directory on the way is canonicalized, and the
+/// rest, which does not exist yet, is appended as written.
+///
+/// The walk is component by component, so a `..` is classified before any path
+/// API can collapse it: through directories that exist it is resolved by the
+/// filesystem, as the write will be; past the last existing directory it is
+/// refused rather than guessed at. Joining `dir` to `cwd` first and popping
+/// components off the result until something exists was not portable: Windows
+/// collapses `..` lexically, in `Path::exists` for a plain path and in
+/// `PathBuf::push` for a canonical (`\\?\`) one, so `root/new/../../escape`
+/// resolved to a directory outside the tree there and was accepted, while
+/// Linux, unable to resolve `root/new/..` while `root/new` is missing, refused
+/// it (#619).
+fn resolve_destination(cwd: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let mut existing = if dir.is_absolute() {
+        PathBuf::new()
+    } else {
+        cwd.to_path_buf()
+    };
+    let mut missing = PathBuf::new();
+    for component in dir.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => existing.push(component),
+            Component::CurDir => {}
+            Component::Normal(_) if !missing.as_os_str().is_empty() => missing.push(component),
+            Component::Normal(_) => {
+                let candidate = existing.join(component);
+                if candidate.exists() {
+                    existing = candidate;
+                } else {
+                    missing.push(component);
+                }
+            }
+            Component::ParentDir => {
+                let candidate = existing.join(component);
+                if !missing.as_os_str().is_empty() || !candidate.exists() {
+                    return Err(format!(
+                        "{} has a parent-directory component past its last existing directory",
+                        dir.display()
+                    ));
+                }
+                existing = candidate;
+            }
         }
     }
     let mut resolved = std::fs::canonicalize(&existing)
         .map_err(|e| format!("cannot resolve {}: {e}", existing.display()))?;
-    resolved.extend(rest.into_iter().rev());
+    resolved.extend(missing.components());
     Ok(resolved)
 }
 
@@ -1195,6 +1219,33 @@ mod tests {
             check_passes_destination(&root, &root, Path::new("new/../../escape"), |_| Ok(true))
                 .expect_err("refused");
         assert!(err.contains("parent"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parent_traversal_that_would_stay_inside_is_refused_all_the_same() {
+        // `new/../inside` lands in `root` lexically, but `new` does not exist
+        // yet, and the rule is not to guess past the last existing directory.
+        let root = scratch("root-dotdot-inside");
+        let err = check_passes_destination(&root, &root, Path::new("new/../inside"), |_| Ok(true))
+            .expect_err("refused");
+        assert!(err.contains("parent"), "{err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn parent_traversal_through_existing_directories_is_resolved() {
+        let root = scratch("root-dotdot-existing");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let asked = std::cell::Cell::new(false);
+        let checked =
+            check_passes_destination(&root, &root, Path::new("sub/../artifacts"), |relative| {
+                assert_eq!(relative, Path::new("artifacts").join(OCR_PASSES_FILENAME));
+                asked.set(true);
+                Ok(true)
+            });
+        assert!(checked.is_ok(), "{checked:?}");
+        assert!(asked.get(), "git must be asked about the resolved path");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
