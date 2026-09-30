@@ -916,7 +916,7 @@ pub struct ExtractionTrace {
     /// vocabulary, `synthpass-core` holds none of it, and a future provider
     /// could fill it with its own knobs — though today the OCR engine
     /// does (`synthpass_pipeline::OcrEngine::config_overrides`,
-    /// issue #495), and the pipeline adds the two `SYNTHPASS_MRZ_*` arms
+    /// issue #495), and the pipeline adds the `SYNTHPASS_MRZ_*` arms
     /// (`synthpass_die::mrz_config_overrides`, #574). **Configuration
     /// only**: a per-run observation about *this* document — e.g. that a retry pass, not the first, produced the
     /// accepted read — never belongs here, only settings that hold for
