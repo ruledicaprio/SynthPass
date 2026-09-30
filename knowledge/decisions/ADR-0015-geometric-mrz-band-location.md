@@ -1,6 +1,6 @@
 # ADR-0015 — `mrz-locate`: find the MRZ band by geometry, before recognition
 
-**Status:** Proposed (amended 2026-09-24 and 2026-09-28)
+**Status:** Proposed (amended 2026-09-24, 2026-09-28 and 2026-10-01)
 **Date:** 2026-09-18
 
 ## Context
@@ -237,3 +237,37 @@ exist yet.
   - [#411](https://github.com/ruledicaprio/SynthPass/issues/411) logs the `ocrs` line-box height
     beside chargrid's reads, so that margin is measured on real documents.
   - A locator's filler test waits for that measurement.
+
+## Amendment (2026-10-01) — the locator reads a canvas whose scale SynthPass chose (ADR-0028)
+
+[ADR-0028](ADR-0028-scale-follows-the-measured-mrz-pitch.md) (Proposed) sets a scale policy:
+SynthPass chooses the scale of every image an engine reads, from the zone's measured pitch. This
+ADR consumes it. None of the points below changes the Decision, the arms or the go/no-go, and
+`mrz-locate` still does not exist.
+
+- **The probability map comes from ADR-0028's overview canvas.** That canvas is the whole page,
+  isotropic and antialiased, letterboxed to the detector's exact input size. So
+  `detect_text_pixels` neither pads nor resizes, and the map maps back to the decoded page by one
+  known isotropic factor. Without it, the map would come from `ocrs`'s per-axis fit, which changes
+  the band's aspect on any page that is not 4:3. The aspect ratio per format is one of this ADR's
+  own shape priors ("What an MRZ band looks like").
+- **Decision step 3's pitch fit becomes one of ADR-0028's pitch cues**, the glyph-centre cue. It is
+  accepted only when the other cues agree. Scoring "30 / 36 / 44 cells" becomes a set of
+  hypotheses, and the first checksum-valid parse fixes the count (ADR-0028, decisions 3 and 5).
+- **The 2026-09-28 spacing bands become the tolerance of ADR-0028's line-spacing cue.** TD1's band
+  is narrow, TD3's is wide, and TD2 is measured before a band is assumed, as that amendment says.
+- **The locator's constants are stated in pitches, or derived from them, not in pixels.** The only
+  pixel quantity is ADR-0028's overview floor, the glyph size below which Stage A tiles, and it is
+  swept.
+- **The band the locator returns is what ADR-0028's Stage C crops from the original decoded
+  image.** The Consequences' promise that "the crop … arrives with its pitch already measured" is
+  kept. The pitch is measured once on the overview and confirmed on the band.
+- **Two sources of candidates, one canvas.** ADR-0028's Stage A takes band candidates from `ocrs`'s
+  existing line detection on the overview. When built, `mrz-locate` is a second source on the same
+  canvas, judged by the same cues. Its arm (`SYNTHPASS_OCR_MRZ_LOCATE`) and ADR-0028's
+  (`SYNTHPASS_OCR_SCALE`) stay separate.
+- **France stays a go/no-go 1 case.** Context attributes France ID 2020 back to a preprocessing
+  gap. It is also the corpus's only scored multi-megapixel document. Whether scale alone closes it
+  is not measured.
+- **The first open question stands:** whether `detect_text_pixels` reuses `detect_words`'s forward
+  pass. On a fixed-size overview, each call's cost no longer depends on the photo's size.

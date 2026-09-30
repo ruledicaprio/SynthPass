@@ -154,7 +154,7 @@ The in-memory result is `PipelineResult`. It carries both the v1 `extracted` val
 
 | Route | Does |
 | --- | --- |
-| `GET /` | the embedded upload page |
+| `GET /` | the embedded upload page. It downscales an image to 2000 px on its long side and re-encodes it as JPEG (quality 0.85) before upload, unless the image is already within 2000 px and under 2 MB; [ADR-0028](../decisions/ADR-0028-scale-follows-the-measured-mrz-pitch.md) records this as known drift |
 | `POST /api/extract` | one multipart upload (20 MB limit), answered as an SSE stream: `delta` events while Tier 2 generates, then one `result` event |
 | `POST /api/extract/batch` | submits a batch job |
 | `GET /api/jobs/{id}` | a batch job's state |
