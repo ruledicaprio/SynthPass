@@ -635,6 +635,13 @@ pub struct Report {
     /// falls back to the default, `on`, silently, so quote this field, never
     /// the variable you believe you set.
     pub mrz_line1_select_arm: &'static str,
+    /// The repeated-line refusal arm this run measured (#579), as the binary
+    /// resolved it -- `off` (the default), `control` or `on`, from
+    /// `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE`. **Always serialized**, beside the
+    /// other two `mrz_*_arm` fields and for the same reason: an unrecognised
+    /// value falls back to `off` silently, so quote this field, never the
+    /// variable you believe you set.
+    pub mrz_refuse_repeated_line_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded — one `NativeOcr` instance shared across every
     /// provider row, so this is a single run-level fact, not per-provider.
@@ -1075,6 +1082,7 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
+            mrz_refuse_repeated_line_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1105,6 +1113,7 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
+            mrz_refuse_repeated_line_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1551,11 +1560,14 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "control",
+            mrz_refuse_repeated_line_arm: "control",
             model_paths: ModelPathsReport::default(),
             providers: Vec::new(),
         };
         let json = serde_json::to_value(&report).expect("serialize report");
         assert_eq!(json["mrz_line1_select_arm"], "control");
         assert_eq!(json["mrz_class_sweep_arm"], "off");
+        // #579: the refusal arm is always serialized too.
+        assert_eq!(json["mrz_refuse_repeated_line_arm"], "control");
     }
 }

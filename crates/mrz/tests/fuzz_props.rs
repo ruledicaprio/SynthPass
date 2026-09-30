@@ -778,6 +778,26 @@ proptest! {
     }
 }
 
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// The opt-in repeated-line refusal (`ParseOptions::refuse_repeated_line`)
+    /// runs a similarity check over every valid zone, on the ordinary scan and
+    /// the damaged-capture pass, so it gets the same arbitrary, multi-line and
+    /// mutated-specimen texts with the switch on.
+    #[test]
+    fn find_and_parse_with_refusal_never_panics(
+        text in arbitrary_text(),
+        lines in prop::collection::vec(arbitrary_text(), 0..6),
+        specimens in prop::collection::vec(mutated_specimen(), 1..4),
+    ) {
+        let opts = ParseOptions::default().with_refuse_repeated_line(true);
+        let _ = find_and_parse_with(&text, &opts);
+        let _ = find_and_parse_with(&lines.join("\n"), &opts);
+        let _ = find_and_parse_with(&specimens.join("\n"), &opts);
+    }
+}
+
 /// The formats `specimen` covers are exactly the five this crate parses.
 #[test]
 fn specimens_cover_every_format() {

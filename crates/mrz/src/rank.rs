@@ -10,7 +10,9 @@
 //! [`flagged`] reports whether a valid zone shows one of three such symptoms.
 //! `find_and_parse_with` keeps looking past a flagged zone and returns it only
 //! when no unflagged valid zone exists, so the checks can only *re-rank*: they
-//! never turn a valid parse into an invalid one and never refuse.
+//! never turn a valid parse into an invalid one and never refuse, unless
+//! `ParseOptions::refuse_repeated_line` is set, which makes the repeated-line
+//! check ([`repeated_lines`]) a refusal (#579). It is off by default.
 //!
 //! The three checks are deliberately narrow, and each is a symptom that a
 //! correctly read zone does not show on the corpora measured (see the constants
@@ -93,11 +95,29 @@ fn issuer_unresolved(line1: &str) -> bool {
 /// Two of the zone's lines are near-identical: their [`similarity`] is at least
 /// [`REPEATED_LINE_SIMILARITY`]. The lines of a real zone hold different fields.
 fn repeats_a_line(lines: &[&str]) -> bool {
-    lines.iter().enumerate().any(|(i, a)| {
+    repeated_pair(lines).is_some()
+}
+
+/// The first pair of `lines` (zero-based, earlier first) that are
+/// near-identical, as [`repeats_a_line`] defines it. Pairs are tried in order
+/// `(0, 1)`, `(0, 2)`, `(1, 2)`, so the pair reported is deterministic.
+fn repeated_pair(lines: &[&str]) -> Option<(usize, usize)> {
+    lines.iter().enumerate().find_map(|(i, a)| {
         lines[i + 1..]
             .iter()
-            .any(|b| similarity(a, b) >= REPEATED_LINE_SIMILARITY)
+            .position(|b| similarity(a, b) >= REPEATED_LINE_SIMILARITY)
+            .map(|offset| (i, i + 1 + offset))
     })
+}
+
+/// The pair of lines of `data`, a checksum-valid zone, that make it repeat a
+/// line, or `None` for a zone that repeats none. It is the repeated-line check
+/// of [`flag_reason`] with its evidence: `find_and_parse_with`, when
+/// `ParseOptions::refuse_repeated_line` is set, refuses the zone and names the
+/// pair.
+pub(crate) fn repeated_lines(data: &MrzData) -> Option<(usize, usize)> {
+    let lines: Vec<&str> = data.mrz_lines.lines().collect();
+    repeated_pair(&lines)
 }
 
 /// A two-line format's line 1 has an ASCII digit at cell 5 or later, where the
@@ -230,6 +250,18 @@ mod tests {
         assert!(!repeats_a_line(&twice[..2]));
         assert!(!repeats_a_line(&twice[..1]));
         assert!(!repeats_a_line(&[]));
+    }
+
+    /// The pair names the first repeat in `(0, 1)`, `(0, 2)`, `(1, 2)` order.
+    #[test]
+    fn the_repeated_pair_is_the_first_in_line_order() {
+        assert_eq!(repeated_pair(&["ABCDE", "ABCDE"]), Some((0, 1)));
+        assert_eq!(repeated_pair(&["ABCDE", "MMMMM", "ABCDE"]), Some((0, 2)));
+        assert_eq!(repeated_pair(&["MMMMM", "ABCDE", "ABCDE"]), Some((1, 2)));
+        // Both (0, 1) and (1, 2) repeat: the earlier pair is reported.
+        assert_eq!(repeated_pair(&["ABCDE", "ABCDE", "ABCDE"]), Some((0, 1)));
+        assert_eq!(repeated_pair(&["ABCDE", "MMMMM"]), None);
+        assert_eq!(repeated_pair(&[]), None);
     }
 
     #[test]

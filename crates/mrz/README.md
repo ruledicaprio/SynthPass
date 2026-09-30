@@ -104,7 +104,9 @@ Edge cases, each with a runnable example on docs.rs:
 - **Noisy text.** HTML-escaped fillers and lines merged onto one physical line are handled.
 - **A valid zone that may hold the wrong line.** An issuing state in no registry, two near-identical
   lines, or a digit in a two-line format's name field ranks the zone below any unflagged valid zone in
-  the same text. It is still returned when there is no other; the rank never refuses a valid read.
+  the same text. It is still returned when there is no other; the rank never refuses a valid read
+  unless you opt in to `ParseOptions::refuse_repeated_line` (off by default), which drops a zone whose
+  lines repeat one another and returns `MrzError::RepeatedLine` when nothing else is left.
 - **Long document numbers.** A number longer than the 9-character field can overflow into optional
   data under Parts 5/6 note j. TD3 uses that form by crate policy; visas do not.
   [`full_document_number`](https://docs.rs/mrz/latest/mrz/struct.MrzData.html#method.full_document_number)
