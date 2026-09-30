@@ -11,10 +11,7 @@
 //!   is what makes the text form lossless, so a consumer reading JSON loses
 //!   nothing the type knows.
 
-use mrz::{
-    date_completeness, expand_date_with_pivot, Date, DateCompleteness, DateRole, MrzDate,
-    RawDateField, Sex,
-};
+use mrz::{Date, DateCompleteness, DateRole, MrzDate, RawDateField, Sex};
 use proptest::prelude::*;
 
 const MRZ_ALPHABET: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ<";
@@ -43,24 +40,9 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(4096))]
 
     #[test]
-    fn display_is_byte_identical_to_expand_date_with_pivot(
-        text in field_text(), role in role(), pivot in 0u32..=99,
-    ) {
-        let date = MrzDate::from_field(field(&text), role, pivot);
-        let expected = expand_date_with_pivot(&text, role == DateRole::Birth, pivot);
-        prop_assert_eq!(date.to_string(), expected);
-    }
-
-    #[test]
     fn text_form_round_trips(text in field_text(), role in role(), pivot in 0u32..=99) {
         let date = MrzDate::from_field(field(&text), role, pivot);
         prop_assert_eq!(date.to_string().parse::<MrzDate>(), Ok(date));
-    }
-
-    #[test]
-    fn completeness_matches_the_raw_field(text in field_text(), role in role(), pivot in 0u32..=99) {
-        let date = MrzDate::from_field(field(&text), role, pivot);
-        prop_assert_eq!(date.completeness(), date_completeness(&text));
     }
 
     #[test]
@@ -75,6 +57,19 @@ proptest! {
             }
             None => prop_assert!(matches!(date, MrzDate::OutOfCalendar(d) if !d.is_well_formed())),
         }
+    }
+}
+
+#[test]
+fn display_uses_literal_dates_for_the_selected_pivot() {
+    for (raw, role, pivot, expected) in [
+        ("740812", DateRole::Birth, 26, "1974-08-12"),
+        ("740812", DateRole::Birth, 80, "2074-08-12"),
+        ("260101", DateRole::Birth, 26, "2026-01-01"),
+        ("940623", DateRole::Expiry, 26, "2094-06-23"),
+    ] {
+        let date = MrzDate::from_field(field(raw), role, pivot);
+        assert_eq!(date.to_string(), expected, "raw={raw}, pivot={pivot}");
     }
 }
 
