@@ -13,6 +13,7 @@
 //! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
 //!                 [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N]
 //!                 [--dump-ocr] [--ocr-passes] [--escalation-report]
+//!                 [--ledger PATH] [--diff-ledger PATH]
 //!   --count N            number of documents to check (default: 100)
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
@@ -49,6 +50,20 @@
 //!   --escalation-report  Tier-2 escalation rate under the default routing
 //!                        policy vs. Chunk 7's composite-only opt-in, and
 //!                        whether the newly-accepted documents are correct
+//!   --ledger PATH        also write one JSONL row per seed (format, seed, profile,
+//!                        hit, miss kind, wrong-accept flags, wrong field *names*,
+//!                        check states, names, line-1 flag, retry fields,
+//!                        `elapsed_ms`; no expected or read values, no OCR text) to
+//!                        PATH, for any format and count (issue #557, Phase 2). A
+//!                        PATH that cannot be written exits 1, before the gates
+//!                        are evaluated, as `--out` does
+//!   --diff-ledger PATH   print how this run's rows differ from the committed
+//!                        ledger at PATH, joined on (format, seed), and copy the
+//!                        lines to `$GITHUB_STEP_SUMMARY` when it is set.
+//!                        **Report-only: it never changes the exit code**; no file
+//!                        at PATH prints one line and carries on. The committed
+//!                        ledger is written by CI only
+//!                        (`knowledge/benchmarks/README.md`)
 //! ```
 //!
 //! An *accepted read* is one the router accepts because its check digits all
@@ -113,6 +128,13 @@ struct Args {
     /// arms come from the **same run of the same binary**, which is what
     /// `knowledge/benchmarks/README.md`'s same-binary A/B rule requires.
     escalation_report: bool,
+    /// `--ledger`: where to write this run's per-seed ledger
+    /// ([`synthpass_bench::synthetic_ledger`]). Written after the report and
+    /// before the gates are evaluated.
+    ledger: Option<String>,
+    /// `--diff-ledger`: the committed ledger to diff this run's rows against.
+    /// Report-only: the diff has no way to change the exit code.
+    diff_ledger: Option<String>,
 }
 
 impl Default for Args {
@@ -128,6 +150,8 @@ impl Default for Args {
             dump_ocr: false,
             ocr_passes: false,
             escalation_report: false,
+            ledger: None,
+            diff_ledger: None,
         }
     }
 }
@@ -136,7 +160,7 @@ fn usage() {
     eprintln!(
         "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
          [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N] [--dump-ocr] \
-         [--ocr-passes] [--escalation-report]"
+         [--ocr-passes] [--escalation-report] [--ledger PATH] [--diff-ledger PATH]"
     );
     eprintln!("  --count N            number of documents to check (default: 100)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -166,6 +190,13 @@ fn usage() {
         "  --escalation-report  print the Tier-2 escalation rate under the default routing \
          policy and under Chunk 7's accept_composite_only_failure opt-in, plus whether the \
          documents that opt-in would newly accept are correct"
+    );
+    eprintln!(
+        "  --ledger PATH        write one JSONL row per seed (no read values, no OCR text) to PATH"
+    );
+    eprintln!(
+        "  --diff-ledger PATH   print how this run's rows differ from the committed ledger at \
+         PATH; report-only, never changes the exit code"
     );
 }
 
@@ -246,6 +277,20 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
             "--escalation-report" => {
                 parsed.escalation_report = true;
                 i += 1;
+            }
+            "--ledger" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--ledger requires a value".to_string())?;
+                parsed.ledger = Some(v.clone());
+                i += 2;
+            }
+            "--diff-ledger" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--diff-ledger requires a value".to_string())?;
+                parsed.diff_ledger = Some(v.clone());
+                i += 2;
             }
             other => return Err(format!("unknown argument: {other}")),
         }
@@ -979,6 +1024,43 @@ fn main() {
     std::fs::write(&parsed.out, json).expect("write report");
     println!("report written to {}", parsed.out);
 
+    // The per-seed ledger and its diff (issue #557, Phase 2). Both are
+    // evidence: the diff prints and can change nothing, and the gates below
+    // are decided from the numbers above, not from anything here. Only a
+    // failure to write a `--ledger` that was asked for is an error, like
+    // `--out` above.
+    if parsed.ledger.is_some() || parsed.diff_ledger.is_some() {
+        let rows: Vec<synthpass_bench::synthetic_ledger::LedgerRow> = report
+            .results
+            .iter()
+            .map(|r| ledger_row(report.document_type, r))
+            .collect();
+        if let Some(path) = &parsed.ledger {
+            if let Err(e) = synthpass_bench::synthetic_ledger::write_ledger(Path::new(path), &rows)
+            {
+                eprintln!("❌ could not write the ledger to {path}: {e}");
+                std::process::exit(1);
+            }
+            println!("ledger written to {path}");
+        }
+        if let Some(committed) = &parsed.diff_ledger {
+            let lines =
+                synthpass_bench::synthetic_ledger::diff_against_file(Path::new(committed), &rows);
+            for line in &lines {
+                println!("{line}");
+            }
+            // The same lines go to the job's step summary; a failed write
+            // warns and carries on.
+            if let Err(e) = synthpass_bench::step_summary::append_step_summary(
+                synthpass_bench::step_summary::step_summary_path().as_deref(),
+                "### M4 synthetic per-seed ledger diff (report-only)",
+                &lines,
+            ) {
+                eprintln!("⚠ could not write the step summary: {e}");
+            }
+        }
+    }
+
     // Both gates are evaluated before exiting, so one failing run reports
     // every gate it fails rather than only the first.
     let mut failed = false;
@@ -1274,6 +1356,36 @@ fn print_escalation_report(results: &[SeedResult], document_type: &str) {
                 }
             }
         }
+    }
+}
+
+/// One [`SeedResult`] as a ledger row: the fields #557 names, copied as they
+/// are. `format` is the run's `--document-type` label; a run is a single
+/// format, so it is the same on every row.
+fn ledger_row(format: &str, r: &SeedResult) -> synthpass_bench::synthetic_ledger::LedgerRow {
+    synthpass_bench::synthetic_ledger::LedgerRow {
+        format: format.to_string(),
+        seed: r.seed,
+        profile: r.profile.to_string(),
+        hit: r.hit,
+        miss_kind: r.miss_kind.map(str::to_string),
+        wrong_accept: r.wrong_accept,
+        prefix_wrong_accept: r.prefix_wrong_accept,
+        wrong_fields: r.wrong_fields.iter().map(|f| f.to_string()).collect(),
+        check_states: r.check_states.as_ref().map(|states| {
+            states
+                .iter()
+                .map(|(field, state)| (field.to_string(), *state))
+                .collect()
+        }),
+        names_exact: r.names_exact,
+        name_error: r.name_error.map(str::to_string),
+        line1_flagged: r.line1_flagged,
+        retry_stop: r.retry_stop.clone(),
+        retry_variant_id: r.retry_variant_id.clone(),
+        retry_damaged_recovery: r.retry_damaged_recovery,
+        tier1_damaged_recovery: r.tier1_damaged_recovery,
+        elapsed_ms: r.elapsed_ms,
     }
 }
 
@@ -1990,6 +2102,73 @@ mod tests {
         assert_eq!(Args::default().max_prefix_wrong_accepts, None);
         assert!(parse_args(&args(&["--max-prefix-wrong-accepts", "-1"])).is_err());
         assert!(parse_args(&args(&["--max-prefix-wrong-accepts"])).is_err());
+    }
+
+    #[test]
+    fn ledger_flags_parse_are_off_by_default_and_need_a_value() {
+        let args = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let defaults = Args::default();
+        assert_eq!(defaults.ledger, None);
+        assert_eq!(defaults.diff_ledger, None);
+
+        let both = parse_args(&args(&[
+            "--ledger",
+            "m4-ledger.jsonl",
+            "--diff-ledger",
+            "knowledge/benchmarks/m4-synthetic-ledger.jsonl",
+        ]))
+        .expect("both flags parse");
+        assert_eq!(both.ledger.as_deref(), Some("m4-ledger.jsonl"));
+        assert_eq!(
+            both.diff_ledger.as_deref(),
+            Some("knowledge/benchmarks/m4-synthetic-ledger.jsonl")
+        );
+
+        // Each flag stands alone, and neither disturbs the gate flags.
+        let only_diff = parse_args(&args(&[
+            "--diff-ledger",
+            "a.jsonl",
+            "--min-hit-rate",
+            "0.3",
+        ]))
+        .expect("parses");
+        assert_eq!(only_diff.ledger, None);
+        assert_eq!(only_diff.min_hit_rate, Some(0.3));
+
+        assert!(parse_args(&args(&["--ledger"])).is_err());
+        assert!(parse_args(&args(&["--diff-ledger"])).is_err());
+    }
+
+    #[test]
+    fn a_seed_result_becomes_a_ledger_row_with_names_and_no_values() {
+        let mut r = doc(None, &[], &[]);
+        r.seed = 12;
+        r.wrong_fields = vec!["surname", "given_names"];
+        r.name_error = Some("given_names_swapped");
+        r.retry_stop = Some("general_valid".to_string());
+        r.elapsed_ms = 87;
+        let row = ledger_row("TD3", &r);
+        assert_eq!(row.format, "TD3");
+        assert_eq!(row.seed, 12);
+        assert_eq!(row.profile, "clean");
+        assert!(row.hit && row.miss_kind.is_none());
+        assert_eq!(row.wrong_fields, vec!["surname", "given_names"]);
+        assert_eq!(row.name_error.as_deref(), Some("given_names_swapped"));
+        assert_eq!(row.retry_stop.as_deref(), Some("general_valid"));
+        assert_eq!(row.elapsed_ms, 87);
+        let states = row.check_states.as_ref().expect("a hit has check states");
+        assert_eq!(states.len(), 5);
+        assert_eq!(states.get("composite"), Some(&Some(true)));
+        // The serialized row carries names and enumerated values only.
+        let text = synthpass_bench::synthetic_ledger::ledger_text(&[row]).expect("serializes");
+        assert!(
+            text.contains("\"wrong_fields\":[\"given_names\",\"surname\"]"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("expected") && !text.contains("got"),
+            "{text}"
+        );
     }
 
     fn field_line_cer(field: &'static str, mean_cer: f64, line: Option<usize>) -> FieldLineCer {
