@@ -2893,9 +2893,13 @@ mod tests {
 
     #[test]
     fn dot_dot_cannot_smuggle_an_in_tree_path_out_of_the_check() {
+        // The root goes through `absolutize` like the path under test, so the
+        // assertion reads the same on every OS: on Windows a rootless `/repo`
+        // is not absolute, and both come back prefixed with the current drive.
+        let root = absolutize(Path::new("/repo"));
         let cleaned = absolutize(Path::new("/tmp/../repo/results/./run"));
-        assert_eq!(cleaned, PathBuf::from("/repo/results/run"));
-        assert!(check_out_dir(&cleaned, Path::new("/repo"), |_| false).is_err());
+        assert_eq!(cleaned, root.join("results").join("run"));
+        assert!(check_out_dir(&cleaned, &root, |_| false).is_err());
     }
 
     #[test]
