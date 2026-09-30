@@ -472,14 +472,12 @@ pub fn check_passes_destination(
     dir: &Path,
     is_ignored: impl Fn(&Path) -> Result<bool, String>,
 ) -> Result<(), String> {
-    let destination = resolve_destination(cwd, dir)?.join(OCR_PASSES_FILENAME);
-    let root = std::fs::canonicalize(root)
-        .map_err(|e| format!("cannot resolve the working tree {}: {e}", root.display()))?;
-    let Ok(relative) = destination.strip_prefix(&root) else {
+    let Some(relative) = locate_in_tree(root, cwd, dir, Path::new(OCR_PASSES_FILENAME))?.relative
+    else {
         // Outside the working tree: nothing here for git to stage.
         return Ok(());
     };
-    if is_ignored(relative)? {
+    if is_ignored(&relative)? {
         Ok(())
     } else {
         Err(format!(
@@ -488,6 +486,38 @@ pub fn check_passes_destination(
             relative.display()
         ))
     }
+}
+
+/// Where a destination lands relative to the working tree.
+pub(crate) struct Located {
+    /// `dir` resolved as [`resolve_destination`] does: canonical up to the part that does not
+    /// exist yet.
+    pub(crate) resolved_dir: PathBuf,
+    /// The path of the file under `resolved_dir`, relative to the canonical tree root, or
+    /// `None` when it is outside the tree.
+    pub(crate) relative: Option<PathBuf>,
+}
+
+/// The shared core of every "is this destination a place git would stage" guard: this file's
+/// [`check_passes_destination`] and the benchmark archive's root check. `dir` is where `file`
+/// will be written; it need not exist yet. A relative `dir` is taken from `cwd`. Both sides are
+/// canonicalized before they are compared, because Windows returns `\\?\` paths for the
+/// canonical form of one and not the other.
+pub(crate) fn locate_in_tree(
+    root: &Path,
+    cwd: &Path,
+    dir: &Path,
+    file: &Path,
+) -> Result<Located, String> {
+    let resolved_dir = resolve_destination(cwd, dir)?;
+    let destination = resolved_dir.join(file);
+    let root = std::fs::canonicalize(root)
+        .map_err(|e| format!("cannot resolve the working tree {}: {e}", root.display()))?;
+    let relative = destination.strip_prefix(&root).ok().map(Path::to_path_buf);
+    Ok(Located {
+        resolved_dir,
+        relative,
+    })
 }
 
 /// Resolves `dir`, taken from `cwd` when relative, to where the dump directory
