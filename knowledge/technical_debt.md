@@ -219,6 +219,19 @@ weight-provisioning story costs in CI.
 
 ## Low
 
+### Name-separator repair still has two unrepresented edge cases
+
+Neither reviewed corpus contains the two cases that would settle the remaining
+name-repair ambiguity: a real name ending in double K or double L immediately
+before fillers that OCR reads as K/L, or an unmarked `KK` separator with no
+surviving `<<`. The benefit of choosing between those shapes is therefore
+unmeasured.
+
+Removing the empty-tail condition from the separator repair restores the
+measured name-line read, but leaves a real name ending in `KK` unprotected if
+its separator is also lost. Revisit this tradeoff with the first real specimen
+that exhibits either case.
+
 ### `#![forbid(unsafe_code)]` is declared in one crate of fourteen
 
 Only `crates/mrz/src/lib.rs` forbids `unsafe`. The other thirteen crates merely happen to contain

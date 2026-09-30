@@ -103,9 +103,9 @@ pub(crate) fn letterize(c: char) -> char {
     }
 }
 
-/// Replace runs of ≥ `min_run` consecutive `K`/`L` characters with fillers —
-/// OCR persistently misreads the `<` filler as K or L, and no transliterated
-/// ICAO name contains four K/L in a row.
+/// Repair filler runs, retaining a name's final two repeated letters when a
+/// third K/L touches visible filler. A run after a visible filler is padding,
+/// while a run with no visible filler in the middle of a name is ambiguous.
 pub(crate) fn defiller(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = String::with_capacity(s.len());
@@ -120,7 +120,17 @@ pub(crate) fn defiller(s: &str) -> String {
                 .iter()
                 .filter(|b| matches!(b, b'K' | b'L'))
                 .count();
-            if j - i >= 4 && kl >= 3 {
+            let after_filler = i > 0 && bytes[i - 1] == b'<';
+            let visible_filler = bytes[i..j].contains(&b'<');
+            if !after_filler
+                && visible_filler
+                && kl == 3
+                && bytes[i..i + 3].iter().all(|b| *b == bytes[i])
+            {
+                out.push_str(&s[i..i + 2]);
+                out.extend(std::iter::repeat_n('<', j - i - 2));
+            } else if j - i >= 4 && kl >= 3 && (after_filler || visible_filler || j == bytes.len())
+            {
                 out.extend(std::iter::repeat_n('<', j - i));
             } else {
                 out.push_str(&s[i..j]);
@@ -165,15 +175,20 @@ pub(crate) fn fix_doc_code(l: &str) -> String {
     }
 }
 
-/// MRZ name fields separate surname from given names with `<<`. When a name
-/// field has no `<<` at all but contains `KK`, that pair is a misread
-/// separator. Fields that already contain a real `<<` (e.g. MIKKO<<HEIKKI)
-/// are left untouched.
+/// Recover a lost `<<` only when the candidate `KK` follows six cells.
+/// In the pinned ambiguous names (JUKKA, PEKKA, MIKKO, HAKKINEN) the pair
+/// starts at cell 2; the existing VZOREC repair starts at cell 6. None of
+/// 65 reviewed fixture surnames or 25 generator surnames contains `KK`, so
+/// those corpora cannot establish a generally safe boundary. The six-cell
+/// guard preserves the observed short names; the remaining ambiguity is
+/// recorded in `knowledge/technical_debt.md`.
 pub(crate) fn fix_name_separator(s: &str) -> String {
     let trimmed = s.trim_end_matches('<');
     if !trimmed.contains("<<") {
         if let Some(pos) = trimmed.find("KK") {
-            return format!("{}<<{}", &s[..pos], &s[pos + 2..]);
+            if pos >= 6 {
+                return format!("{}<<{}", &s[..pos], &s[pos + 2..]);
+            }
         }
     }
     s.to_string()
@@ -406,6 +421,65 @@ mod tests {
         );
         // No separator at all + a KK pair → it was the separator.
         assert_eq!(fix_name_separator("VZORECKKJANA<<<"), "VZOREC<<JANA<<<");
+    }
+
+    #[test]
+    fn unmarked_double_k_is_not_evidence_of_a_separator() {
+        // The old VZOREC repair has the same shape as an ordinary double K
+        // in a name whose separator was dropped by OCR.
+        for name in ["JUKKAMARI", "PEKKAPETRI", "MIKKOMATTI", "HAKKINENHEIKKI"] {
+            assert_eq!(fix_name_separator(name), name);
+            assert_eq!(
+                fix_name_separator(&format!("{name}<<<<")),
+                format!("{name}<<<<")
+            );
+        }
+        // Still a wrong single-field read; there is no evidence that tells
+        // whether its K run is a separator or belongs to a name.
+        assert_eq!(fix_name_separator("KUKKKKMARI"), "KUKKKKMARI");
+        assert_eq!(fix_name_separator(&defiller("KUKKKKMARI")), "KUKKKKMARI");
+        assert_eq!(fix_name_separator(&defiller("KUKK<<MARI")), "KUKK<<MARI");
+        assert_eq!(fix_name_separator("TAMM<<MIKK"), "TAMM<<MIKK");
+        // The guard can also miss a real separator after a short surname.
+        assert_eq!(fix_name_separator("SMITHKKJOHN"), "SMITHKKJOHN");
+        assert_eq!(fix_name_separator("LIKKJOHN"), "LIKKJOHN");
+    }
+
+    #[test]
+    fn defiller_preserves_letters_next_to_noisy_name_padding() {
+        assert_eq!(defiller("KUKKKKMARI"), "KUKKKKMARI");
+        assert_eq!(defiller("KUKKK<<<"), "KUKK<<<<");
+        assert_eq!(fix_name_separator(&defiller("KUKKK<<<")), "KUKK<<<<");
+        assert_eq!(defiller("TAMM<<MIKKK<<"), "TAMM<<MIKK<<<");
+        assert_eq!(
+            fix_name_separator(&defiller("TAMM<<MIKKK<<")),
+            "TAMM<<MIKK<<<"
+        );
+        assert_eq!(defiller("JUKKA<<PEKKA<<<"), "JUKKA<<PEKKA<<<");
+        assert_eq!(defiller("PALLL<<<"), "PALL<<<<");
+    }
+
+    #[test]
+    fn defiller_repairs_padding_after_a_visible_filler() {
+        assert_eq!(
+            defiller("SPECIMEN<<SPECIMEN<KLLLL"),
+            "SPECIMEN<<SPECIMEN<<<<<<"
+        );
+        assert_eq!(defiller("MARIA<LLLL"), "MARIA<<<<<");
+    }
+
+    #[test]
+    fn defiller_still_repairs_filler_runs_without_name_boundary_ambiguity() {
+        // These old repairs have either a terminal long run or a visible
+        // filler before the noisy run. The latter includes the public Serbia
+        // 2012 specimen's given-name tail (a regression on the first draft).
+        assert_eq!(defiller("MARIAKKKKKKK"), "MARIA<<<<<<<");
+        assert_eq!(defiller("MARIA<<KKK<<L<<"), "MARIA<<<<<<<<<<");
+        assert_eq!(defiller("ANNA<MARIA<<KKLK<<<"), "ANNA<MARIA<<<<<<<<<");
+        assert_eq!(
+            defiller("MILICA<<<KK<K<<<<K<<<<<<<<<<"),
+            "MILICA<<<<<<<<<<<<<<<<<<<<<<"
+        );
     }
 
     #[test]
