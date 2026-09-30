@@ -190,7 +190,9 @@ queue for hours on the local machine ([`ADR-0027`](../decisions/ADR-0027-ci-runn
   `seed` (default 0) and `expect_identical` (boolean, default false). `tools/bench_ab_args.py`
   validates them before anything else runs; a refusal is one `::error::` line. A knob must be on its
   allowlist, which lists only the measurement knobs
-  [`configuration.md`](../architecture/configuration.md) documents.
+  [`configuration.md`](../architecture/configuration.md) documents, and its value must also be one
+  that file lists for it, in the canonical spelling: each knob falls back to its default silently on
+  an unrecognised value, so a typo would otherwise compare two identical arms.
 - **Pinned.** Both arms run with `SYNTHPASS_OCR_MAX_SECONDS=600`, so machine speed cannot enter the
   diff. It cannot be set by a dispatcher. That makes a CI arm a different configuration from the
   shipped one, and it is never compared with a local arm (ADR-0027 decisions 3 and 4).

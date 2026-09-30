@@ -23,6 +23,23 @@ CONFIGURATION = REPO / "knowledge" / "architecture" / "configuration.md"
 SHA = "a" * 40
 HASH = "b" * 64
 
+# Every knob's accepted values, written out here rather than read from the validator, so a test
+# that fails names the drift. Sources: `configuration.md` and the readers in `synthpass-die` and
+# `synthpass-ocr` (`ConfigurationPin` re-checks each row against the doc).
+WORD_KNOBS = {
+    "SYNTHPASS_MRZ_CLASS_SWEEP": ("off", "on", "control"),
+    "SYNTHPASS_MRZ_DATE_DIGITS": ("off", "on", "control"),
+    "SYNTHPASS_MRZ_LINE1_SELECT": ("off", "control", "on"),
+    "SYNTHPASS_MRZ_REFUSE_REPEATED_LINE": ("off", "control", "on"),
+    "SYNTHPASS_OCR_CHARGRID": ("off", "on", "control"),
+    "SYNTHPASS_OCR_ORDER": ("default", "band-first", "control"),
+    "SYNTHPASS_OCR_ROTATE": ("default", "legacy", "off"),
+    "SYNTHPASS_OCR_SKEW": ("default", "legacy"),
+    "SYNTHPASS_OCR_TEXTURE": ("off", "on", "control"),
+}
+MAX_PASSES = "SYNTHPASS_OCR_MAX_PASSES"
+MAX_PASSES_HIGH = 14
+
 
 def inputs(**over):
     """The raw dispatch inputs, as the workflow passes them, with any of them replaced."""
@@ -121,10 +138,17 @@ class Refs(Refusals):
 
 
 class EnvAssignments(Refusals):
-    def test_every_allowed_knob_is_accepted(self):
-        for name in a.ALLOWED_ENV:
-            with self.subTest(name=name):
-                self.assertEqual(a.validate(inputs(AB_AFTER_ENV=f"{name}=on"))["after_env"], {name: "on"})
+    def test_every_allowed_knob_is_accepted_with_each_of_its_values(self):
+        for name, values in WORD_KNOBS.items():
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    self.assertEqual(a.validate(inputs(AB_AFTER_ENV=f"{name}={value}"))["after_env"],
+                                     {name: value})
+                    self.assertEqual(a.validate(inputs(AB_BEFORE_ENV=f"{name}={value}"))["before_env"],
+                                     {name: value})
+
+    def test_the_table_covers_exactly_the_allowed_knobs(self):
+        self.assertEqual(set(WORD_KNOBS) | {MAX_PASSES}, set(a.ALLOWED_ENV))
 
     def test_several_assignments_on_any_whitespace_normalize_sorted(self):
         plan = a.validate(inputs(
@@ -186,22 +210,146 @@ class EnvAssignments(Refusals):
             with self.subTest(text=text[:40]):
                 self.refuses(AB_AFTER_ENV=text)
 
-    def test_a_value_of_the_maximum_length_is_accepted(self):
-        value = "x" * 32
-        self.assertEqual(a.validate(inputs(AB_AFTER_ENV=f"SYNTHPASS_OCR_ORDER={value}"))["after_env"],
-                         {"SYNTHPASS_OCR_ORDER": value})
+    def test_a_value_of_the_maximum_length_is_refused_as_not_one_the_knob_reads(self):
+        self.refuses("is not one of", AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=" + "x" * 32)
 
     def test_a_repeated_name_is_refused_even_with_the_same_value(self):
-        self.refuses("given twice", AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=on SYNTHPASS_OCR_ORDER=on")
+        self.refuses("given twice", AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=default SYNTHPASS_OCR_ORDER=default")
 
     def test_the_two_arms_are_checked_separately(self):
-        plan = a.validate(inputs(AB_BEFORE_ENV="SYNTHPASS_OCR_ORDER=on", AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=off"))
+        plan = a.validate(inputs(AB_BEFORE_ENV="SYNTHPASS_OCR_ORDER=default",
+                                 AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=band-first"))
         self.assertNotEqual(plan["before_env"], plan["after_env"])
         self.refuses("before_env", AB_BEFORE_ENV="PATH=x")
         self.refuses("after_env", AB_AFTER_ENV="PATH=x")
 
 
+class KnobValues(Refusals):
+    """#613: every knob falls back to its default silently on a value it does not recognise, so an
+    A/B on a typo compares two identical arms and reads as a clean null. The dispatch refuses it."""
+
+    def test_a_typo_is_refused_naming_the_knob_and_its_values(self):
+        message = self.refuses(AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=bandfirst")
+        self.assertIn("SYNTHPASS_OCR_ORDER: 'bandfirst' is not one of default, band-first, control", message)
+        self.assertIn("after_env", message)
+        for name, values in WORD_KNOBS.items():
+            with self.subTest(name=name):
+                message = self.refuses(AB_BEFORE_ENV=f"{name}=typo")
+                self.assertIn(f"{name}: 'typo' is not one of {', '.join(values)}", message)
+                self.assertIn("before_env", message)
+
+    def test_a_value_another_knob_takes_is_refused(self):
+        self.refuses("is not one of", AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=on")
+        self.refuses("is not one of", AB_AFTER_ENV="SYNTHPASS_OCR_SKEW=off")
+        self.refuses("is not one of", AB_AFTER_ENV="SYNTHPASS_OCR_ROTATE=control")
+        self.refuses("is not one of", AB_AFTER_ENV="SYNTHPASS_MRZ_CLASS_SWEEP=default")
+
+    def test_only_the_canonical_form_is_accepted(self):
+        # The Rust readers trim and lowercase, so `ON` works there. A dispatcher types the value
+        # once and `arm.json` should then hold the canonical one, so the validator is strict.
+        for name, values in WORD_KNOBS.items():
+            for value in (values[0].upper(), values[0].capitalize(), values[0] + "x", values[0][:-1]):
+                with self.subTest(name=name, value=value):
+                    self.refuses("is not one of", AB_AFTER_ENV=f"{name}={value}")
+
+    def test_whitespace_splits_an_assignment_so_a_padded_value_is_not_one(self):
+        # `NAME= value` is `NAME=` (an empty value) and a stray token, so it is refused as
+        # malformed; `NAME=value ` is a canonical value followed by a separator, and is accepted.
+        self.refuses(AB_AFTER_ENV="SYNTHPASS_OCR_ORDER= band-first")
+        self.assertEqual(a.validate(inputs(AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=band-first "))["after_env"],
+                         {"SYNTHPASS_OCR_ORDER": "band-first"})
+
+    def test_a_spelling_close_to_band_first_is_not_band_first(self):
+        for value in ("band_first", "bandfirst", "Band-First", "band-first-"):
+            with self.subTest(value=value):
+                self.refuses("is not one of", AB_AFTER_ENV=f"SYNTHPASS_OCR_ORDER={value}")
+
+    def test_max_passes_takes_an_integer_from_1_to_the_default_in_canonical_form(self):
+        for good in ("1", "2", "9", "10", "13", "14"):
+            with self.subTest(good=good):
+                self.assertEqual(a.validate(inputs(AB_AFTER_ENV=f"{MAX_PASSES}={good}"))["after_env"],
+                                 {MAX_PASSES: good})
+        for bad in ("0", "15", "100", "014", "01", "-1", "x", "1.0", "1e1", "0x1", "fourteen", "1_0",
+                    "99999999999999999999"):
+            with self.subTest(bad=bad):
+                message = self.refuses(AB_AFTER_ENV=f"{MAX_PASSES}={bad}")
+                self.assertIn(MAX_PASSES, message)
+                self.assertIn("1 to 14", message)
+        # `+1` and a non-ASCII digit are already outside the value grammar (the digit, outside the
+        # input's character set): refused, with that refusal's own message.
+        for bad in ("+1", "١"):
+            with self.subTest(bad=bad):
+                self.refuses(AB_AFTER_ENV=f"{MAX_PASSES}={bad}")
+
+    def test_the_value_of_another_knob_is_not_a_max_passes_value(self):
+        self.refuses("1 to 14", AB_AFTER_ENV=f"{MAX_PASSES}=on")
+
+    def test_the_refusal_is_one_error_line_with_exit_2(self):
+        code, stderr, stdout, written = Messages().run_validate(AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=bandfirst")
+        self.assertEqual(code, 2)
+        self.assertEqual((stdout, written), ("", ""))
+        self.assertEqual(len(stderr.splitlines()), 1)
+        self.assertTrue(stderr.startswith("::error::bench-ab: "))
+        self.assertIn("SYNTHPASS_OCR_ORDER: 'bandfirst' is not one of default, band-first, control", stderr)
+
+    def test_a_plan_file_holding_an_unknown_value_is_refused_on_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "plan.json"
+            plan = a.validate(inputs(AB_AFTER_ENV="SYNTHPASS_OCR_ORDER=band-first"))
+            for env in ({"SYNTHPASS_OCR_ORDER": "bandfirst"}, {"SYNTHPASS_OCR_ORDER": "ON"},
+                        {MAX_PASSES: "015"}, {MAX_PASSES: "15"}):
+                for key in ("after_env", "before_env"):
+                    with self.subTest(env=env, key=key):
+                        path.write_text(json.dumps(dict(plan, **{key: env})), encoding="utf-8")
+                        with self.assertRaises(a.Refused):
+                            a.load_plan(path)
+            for env in ({"SYNTHPASS_OCR_ORDER": "default"}, {MAX_PASSES: "14"}):
+                with self.subTest(env=env):
+                    path.write_text(json.dumps(dict(plan, after_env=env)), encoding="utf-8")
+                    self.assertEqual(a.load_plan(path)["after_env"], env)
+
+
 class ConfigurationPin(unittest.TestCase):
+    def row(self, text, name):
+        rows = [line for line in text.splitlines() if line.startswith(f"| `{name}`")]
+        self.assertEqual(len(rows), 1, f"configuration.md has {len(rows)} rows for {name}, expected 1")
+        return rows[0]
+
+    def test_every_allowed_knob_s_values_are_the_ones_configuration_md_lists(self):
+        # A row lists its values as one slash-separated run of backticked words (the default is a
+        # single backticked word in its own column), e.g. `off`/`on`/`control`.
+        run = re.compile(r"`[a-z][a-z-]*`(?:/`[a-z][a-z-]*`)+")
+        text = CONFIGURATION.read_text(encoding="utf-8")
+        for name, values in WORD_KNOBS.items():
+            with self.subTest(name=name):
+                listed = run.search(self.row(text, name))
+                self.assertIsNotNone(listed, f"{name}'s row lists no `a`/`b` values")
+                documented = tuple(word.strip("`") for word in listed.group(0).split("/"))
+                self.assertEqual(len(documented), len(set(documented)))
+                self.assertEqual(set(documented), set(values))
+                self.assertEqual(len(a.KNOB_VALUES[name]), len(documented))
+                self.assertEqual(set(a.KNOB_VALUES[name]), set(documented))
+
+    def test_the_validator_has_a_rule_for_every_allowed_name_and_no_other(self):
+        self.assertEqual(set(a.KNOB_VALUES) | set(a.KNOB_INTEGERS), set(a.ALLOWED_ENV))
+        self.assertFalse(set(a.KNOB_VALUES) & set(a.KNOB_INTEGERS))
+
+    def test_max_passes_ends_at_the_ocr_crate_s_default(self):
+        # `DEFAULT_MAX_PASSES` = `MAX_RETRY_VARIANTS + 1` in `synthpass-ocr`: the most passes any
+        # arm can start, so a larger value measures the same as it. Zero or a non-number falls back
+        # silently.
+        source = (REPO / "crates" / "synthpass-ocr" / "src" / "lib.rs").read_text(encoding="utf-8")
+        variants = re.search(r"^const MAX_RETRY_VARIANTS: usize = (\d+);", source, re.MULTILINE)
+        default = re.search(r"^const DEFAULT_MAX_PASSES: usize = MAX_RETRY_VARIANTS \+ 1;", source,
+                            re.MULTILINE)
+        self.assertIsNotNone(variants, "MAX_RETRY_VARIANTS is no longer a plain literal: update this pin")
+        self.assertIsNotNone(default, "DEFAULT_MAX_PASSES is no longer MAX_RETRY_VARIANTS + 1: update this pin")
+        self.assertEqual(a.KNOB_INTEGERS[MAX_PASSES], (1, int(variants.group(1)) + 1))
+        self.assertEqual(a.KNOB_INTEGERS[MAX_PASSES], (1, MAX_PASSES_HIGH))
+        # configuration.md states the same default on its row.
+        text = CONFIGURATION.read_text(encoding="utf-8")
+        self.assertIn(f"| `{MAX_PASSES}` / `SYNTHPASS_OCR_MAX_SECONDS` | `{MAX_PASSES_HIGH}` /", text)
+
     def test_every_allowed_name_is_documented_in_configuration_md(self):
         text = CONFIGURATION.read_text(encoding="utf-8")
         for name in a.ALLOWED_ENV:
@@ -472,6 +620,11 @@ class ArmRecord(unittest.TestCase):
                 a.check_arm(dict(arm, **{key: bad}))
         with self.assertRaises(a.Refused):
             a.check_arm(dict(arm, extra=1))
+        for bad in ({"SYNTHPASS_OCR_ORDER": "bandfirst"}, {"SYNTHPASS_OCR_ORDER": "BAND-FIRST"},
+                    {MAX_PASSES: "15"}, {MAX_PASSES: "014"}):
+            with self.subTest(env=bad), self.assertRaises(a.Refused):
+                a.check_arm(dict(arm, env=bad, context=dict(
+                    arm["context"], ocr_env=dict(sorted({**bad, **arm["pinned"]}.items())))))
         with self.assertRaises(a.Refused):
             a.check_arm(dict(arm, env={}))  # ocr_env no longer matches env plus the pin
 

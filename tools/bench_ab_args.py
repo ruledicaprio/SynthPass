@@ -43,8 +43,14 @@ because a workflow command (`::add-mask::`, `::set-env::`) is a line of text in 
   A full 40-character commit id is a ref too.
 - **Environment assignments** are whitespace-separated `NAME=VALUE`. NAME is one of `ALLOWED_ENV`,
   the knobs that change what an arm reads, each documented in
-  `knowledge/architecture/configuration.md`. VALUE matches `[A-Za-z0-9._-]{1,32}`. A NAME may not
-  repeat. `SYNTHPASS_OCR_MAX_SECONDS` is refused by name: the workflow pins it (below).
+  `knowledge/architecture/configuration.md`. VALUE matches `[A-Za-z0-9._-]{1,32}` and is, exactly
+  as spelled, one of the values that knob reads (`KNOB_VALUES`, and `KNOB_INTEGERS` for
+  `SYNTHPASS_OCR_MAX_PASSES`): every such knob falls back to its default **silently** on a value it
+  does not recognise, so an A/B on a typo such as `SYNTHPASS_OCR_ORDER=bandfirst` would compare two
+  identical arms and read as a clean null result (#613). Only the canonical form is accepted, so
+  `ON` and `014` are refused although the Rust readers take them: a dispatcher types the value once,
+  and `arm.json` then records the canonical one. A NAME may not repeat.
+  `SYNTHPASS_OCR_MAX_SECONDS` is refused by name: the workflow pins it (below).
   A name that says path, model, hash, verify, skip, download, licence, key, token, TLS, log or LLM
   is refused with a message that says so.
 - **Formats:** a non-empty, duplicate-free subset of `td1 td2 td3 mrva mrvb`, separated by spaces
@@ -85,27 +91,37 @@ SEED_MAX = 4294967295
 # The pinned budget: set by the workflow on both arms, never by a dispatcher.
 PINNED = {"SYNTHPASS_OCR_MAX_SECONDS": "600"}
 
-# Knobs that change what an arm reads. Each is documented in
-# `knowledge/architecture/configuration.md` (a test pins that) and read by the code in
-# `synthpass-ocr` or `synthpass-die`.
+# Knobs that change what an arm reads, with the values each one recognises. Each is documented in
+# `knowledge/architecture/configuration.md` (a test pins the names and every value list there) and
+# read by the code in `synthpass-ocr` or `synthpass-die`, which matches the value
+# case-insensitively and falls back to the default on anything else. Canonical lowercase only here.
+#
+# - MRZ arms: `synthpass-die`'s `class_sweep_arm`, `refuse_repeated_line_arm_from`,
+#   `date_digits_arm_from` and `Line1Arm::parse`.
+# - OCR arms: `synthpass-ocr`'s `trailing_texture_mode`, `ocr_order`, `rotate_mode`, `skew_mode` and
+#   `chargrid_mode`.
+KNOB_VALUES = {
+    "SYNTHPASS_MRZ_CLASS_SWEEP": ("off", "on", "control"),
+    "SYNTHPASS_MRZ_DATE_DIGITS": ("off", "on", "control"),
+    "SYNTHPASS_MRZ_LINE1_SELECT": ("off", "control", "on"),
+    "SYNTHPASS_MRZ_REFUSE_REPEATED_LINE": ("off", "control", "on"),
+    "SYNTHPASS_OCR_CHARGRID": ("off", "on", "control"),
+    "SYNTHPASS_OCR_ORDER": ("default", "band-first", "control"),
+    "SYNTHPASS_OCR_ROTATE": ("default", "legacy", "off"),
+    "SYNTHPASS_OCR_SKEW": ("default", "legacy"),
+    "SYNTHPASS_OCR_TEXTURE": ("off", "on", "control"),
+}
+# `SYNTHPASS_OCR_MAX_PASSES` (`synthpass-ocr`'s `max_passes()`): 1 to `DEFAULT_MAX_PASSES`, which
+# is `MAX_RETRY_VARIANTS + 1` = 14, the most passes any arm can start, so a larger value measures
+# the same as 14. Zero or a non-number falls back silently. A test pins the 14 to the crate.
+KNOB_INTEGERS = {"SYNTHPASS_OCR_MAX_PASSES": (1, 14)}
 #
 # Left out on purpose:
 # - `SYNTHPASS_OCR_STOP` and `SYNTHPASS_OCR_CONFIRM_PASSES` are gone (#473): the code only warns that
 #   they have no effect, so an A/B on them would compare two identical arms and read as a null result.
 # - `SYNTHPASS_OCR_THREADS`, `SYNTHPASS_OCR_VERBOSE` and `SYNTHPASS_OCR_DUMP_VARIANTS` change no read
 #   (concurrency, and diagnostics that write to the log or the disk).
-ALLOWED_ENV = (
-    "SYNTHPASS_MRZ_CLASS_SWEEP",
-    "SYNTHPASS_MRZ_DATE_DIGITS",
-    "SYNTHPASS_MRZ_LINE1_SELECT",
-    "SYNTHPASS_MRZ_REFUSE_REPEATED_LINE",
-    "SYNTHPASS_OCR_CHARGRID",
-    "SYNTHPASS_OCR_MAX_PASSES",
-    "SYNTHPASS_OCR_ORDER",
-    "SYNTHPASS_OCR_ROTATE",
-    "SYNTHPASS_OCR_SKEW",
-    "SYNTHPASS_OCR_TEXTURE",
-)
+ALLOWED_ENV = tuple(sorted({*KNOB_VALUES, *KNOB_INTEGERS}))
 # Words in a variable name that mean it is not a measurement knob, for a specific refusal message.
 # The allowlist decides; these only make the message say why.
 REFUSED_WORDS = (
@@ -180,6 +196,19 @@ def _env_name_refusal(name: str, label: str) -> str:
     return f"{label}: {show(name)} is not one of the allowed measurement knobs ({', '.join(ALLOWED_ENV)})"
 
 
+def knob_value_problem(name: str, value: str) -> str | None:
+    """Why `value` is not one the knob `name` reads, or `None` if it is. Canonical form only."""
+    if name in KNOB_INTEGERS:
+        low, high = KNOB_INTEGERS[name]
+        if INTEGER.fullmatch(value) and low <= int(value) <= high:
+            return None
+        return (f"{name}: {show(value)} is not an integer {low} to {high} in canonical form "
+                "(no sign, no leading zero)")
+    if value in KNOB_VALUES[name]:
+        return None
+    return f"{name}: {show(value)} is not one of {', '.join(KNOB_VALUES[name])}"
+
+
 def parse_env(text: str, label: str) -> dict[str, str]:
     if len(text) > ENV_TEXT_MAX or not ENV_TEXT.fullmatch(text):
         raise Refused(f"{label}: at most {ENV_TEXT_MAX} printable ASCII characters of NAME=VALUE pairs")
@@ -196,8 +225,20 @@ def parse_env(text: str, label: str) -> dict[str, str]:
             raise Refused(f"{label}: the value of {name} must match [A-Za-z0-9._-]{{1,32}}")
         if name in assignments:
             raise Refused(f"{label}: {name} is given twice")
+        problem = knob_value_problem(name, value)
+        if problem:
+            raise Refused(f"{label}: {problem}")
         assignments[name] = value
     return dict(sorted(assignments.items()))
+
+
+def all_assignments_ok(assignments: dict) -> bool:
+    """True if every name and value in a file's assignment map is one `parse_env` would accept."""
+    return all(
+        name in ALLOWED_ENV and isinstance(value, str) and ENV_VALUE.fullmatch(value) is not None
+        and knob_value_problem(name, value) is None
+        for name, value in assignments.items()
+    )
 
 
 def parse_formats(text: str) -> list[str]:
@@ -287,10 +328,7 @@ def check_plan(plan) -> dict:
         parse_ref(plan[key], key)
     for key in ("before_env", "after_env"):
         assignments = plan[key]
-        if not isinstance(assignments, dict) or any(
-            name not in ALLOWED_ENV or not isinstance(value, str) or not ENV_VALUE.fullmatch(value)
-            for name, value in assignments.items()
-        ):
+        if not isinstance(assignments, dict) or not all_assignments_ok(assignments):
             raise Refused(f"the plan's {key} holds an assignment that validate would refuse")
     formats = plan["formats"]
     if not isinstance(formats, list) or not formats or any(f not in FORMATS for f in formats) \
@@ -391,10 +429,7 @@ def check_arm(arm) -> dict:
     if not isinstance(arm["binary_sha256"], str) or not HEX64.fullmatch(arm["binary_sha256"]):
         raise Refused("arm.json: binary_sha256 must be 64 lowercase hex characters")
     env = arm["env"]
-    if not isinstance(env, dict) or any(
-        name not in ALLOWED_ENV or not isinstance(value, str) or not ENV_VALUE.fullmatch(value)
-        for name, value in env.items()
-    ):
+    if not isinstance(env, dict) or not all_assignments_ok(env):
         raise Refused("arm.json: env holds an assignment that validate would refuse")
     if arm["pinned"] != PINNED:
         raise Refused("arm.json: pinned must be exactly the workflow's pin")
