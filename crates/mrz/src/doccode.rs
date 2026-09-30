@@ -218,10 +218,15 @@ mod tests {
             ("PM", "Military passport"),
             ("PU", "Single-sheet travel document"),
         ];
-        let actual: Vec<(&str, &str)> = PassportType::ALL
+        // Compared as sorted collections: the iteration order of
+        // `PassportType::ALL` is not part of what §4.4 says.
+        let mut actual: Vec<(&str, &str)> = PassportType::ALL
             .into_iter()
             .map(|t| (t.code(), t.name()))
             .collect();
+        actual.sort_unstable();
+        let mut expected = expected.to_vec();
+        expected.sort_unstable();
         assert_eq!(actual, expected);
     }
 

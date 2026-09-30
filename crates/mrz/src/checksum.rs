@@ -440,7 +440,15 @@ mod tests {
         assert_eq!(fix_name_separator(&defiller("KUKKKKMARI")), "KUKKKKMARI");
         assert_eq!(fix_name_separator(&defiller("KUKK<<MARI")), "KUKK<<MARI");
         assert_eq!(fix_name_separator("TAMM<<MIKK"), "TAMM<<MIKK");
-        // The guard can also miss a real separator after a short surname.
+    }
+
+    /// A known limitation, recorded as one and not as a requirement: the guard
+    /// that spares ordinary double-K names also leaves a real separator alone
+    /// when the surname before it is short, so these two reads stay as read.
+    /// If the guard ever learns to tell them apart, this test is meant to be
+    /// changed with it; nothing else depends on it.
+    #[test]
+    fn known_limitation_a_real_kk_separator_after_a_short_surname_is_missed() {
         assert_eq!(fix_name_separator("SMITHKKJOHN"), "SMITHKKJOHN");
         assert_eq!(fix_name_separator("LIKKJOHN"), "LIKKJOHN");
     }
@@ -496,10 +504,12 @@ mod tests {
             2,
             "sanity: fit_length still offers the inflate candidate here"
         );
+        // The tail-padded line, as a literal: nine fillers appended, nothing in
+        // the document code or the issuing state moved.
         assert_eq!(
             fit_line1_length(n, 20),
-            vec![ordinary[1].clone()],
-            "only fit_length's tail-padded candidate must survive"
+            vec!["P<CANMARTIN<<<<<<<<<".to_string()],
+            "only the tail-padded candidate must survive"
         );
     }
 
@@ -533,10 +543,12 @@ mod tests {
             ordinary[0], ordinary[1],
             "sanity: the inflate and tail-padded candidates must differ"
         );
+        // The tail-padded line, as a literal: seven fillers appended, so the
+        // issuing-state slot `D<<` is untouched.
         assert_eq!(
             fit_line1_length(n, 44),
-            vec![ordinary[1].clone()],
-            "only fit_length's tail-padded candidate must survive"
+            vec!["P<D<<SCHWARZENEGGER<<REYNALDALEXANDER<<<<<<<".to_string()],
+            "only the tail-padded candidate must survive"
         );
     }
 
