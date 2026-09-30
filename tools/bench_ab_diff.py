@@ -553,6 +553,7 @@ def identity(archive: dict | None, report: dict | None) -> dict:
         "replay_of": archive.get("replay_of"),
         "mrz_class_sweep_arm": report.get("mrz_class_sweep_arm"),
         "mrz_line1_select_arm": report.get("mrz_line1_select_arm"),
+        "mrz_date_digits_arm": report.get("mrz_date_digits_arm"),
         "model_paths": report.get("model_paths"),
     }
 
@@ -938,7 +939,12 @@ def short_identity(ident: dict) -> str:
         # The capture's manifest file name and hash: no document text.
         text += f"; replay of {na(replay.get('run_manifest'))} (sha256 {str(replay.get('sha256'))[:12]})"
     # Last, so what precedes it reads as it did before the selector existed.
-    return text + f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
+    text += f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
+    # The date-digits arm (#579) only when the report recorded it, so an older
+    # report's line reads exactly as it did.
+    if ident.get("mrz_date_digits_arm") is not None:
+        text += f"; date digits {ident['mrz_date_digits_arm']}"
+    return text
 
 
 def render_synthetic(name: str, r: dict) -> list[str]:

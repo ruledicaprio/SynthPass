@@ -792,6 +792,44 @@ def untraced(row):
     return {k: v for k, v in row.items() if k not in ("ocr_text", "ocr_passes")}
 
 
+class DateDigitsArm(unittest.TestCase):
+    """#579: the report's `mrz_date_digits_arm` is named in the identity block."""
+
+    A = "passports/A.jpg"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def real(self, before, after):
+        arms = []
+        for name, arm in (("before", before), ("after", after)):
+            real_report = provider_report(1.0, details=[])
+            if arm is not None:
+                real_report["mrz_date_digits_arm"] = arm
+            arms.append(write_arm(self.root, name, outcomes=[outcome_row(self.A, "hit")],
+                                  real_report=real_report))
+        return d.compare_arms(*arms, [])["real"]
+
+    def test_the_identity_block_names_each_arms_date_digits_arm(self):
+        r = self.real("off", "on")
+        self.assertEqual([i["mrz_date_digits_arm"] for i in r["identity"]], ["off", "on"])
+        self.assertIn("mrz_date_digits_arm differs: off -> on", r["notes"])
+        self.assertTrue(d.short_identity(r["identity"][0]).endswith("date digits off"))
+        self.assertTrue(d.short_identity(r["identity"][1]).endswith("date digits on"))
+
+    def test_reports_from_before_the_arm_read_as_they_did(self):
+        r = self.real(None, None)
+        self.assertEqual([i["mrz_date_digits_arm"] for i in r["identity"]], [None, None])
+        self.assertFalse([n for n in r["notes"] if "date_digits" in n])
+        self.assertNotIn("date digits", d.short_identity(r["identity"][0]))
+
+    def test_an_arm_recorded_in_one_report_only_is_noted(self):
+        r = self.real(None, "on")
+        self.assertIn("mrz_date_digits_arm is recorded in one arm only", r["notes"])
+
+
 class ExpectIdentical(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
