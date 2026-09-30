@@ -2097,6 +2097,24 @@ fn prep_specimens(
         .collect()
 }
 
+/// The parse options for the printed-zone validity parse: the arm's options
+/// with the repeated-line refusal and the date-digits rule forced off (#579).
+///
+/// That parse decides whether the *document's* printed zone conforms, which
+/// selects the `checksum_failed_specimen` denominator rung. A refusal, or a
+/// letter-date rule, is a property of a run's reading, not of the document, so
+/// neither may move the denominator between arms.
+fn printed_zone_parse_options() -> mrz::ParseOptions {
+    printed_zone_parse_options_from(synthpass_die::mrz_parse_options())
+}
+
+/// [`printed_zone_parse_options`] over explicit options, testable without the
+/// process environment.
+fn printed_zone_parse_options_from(opts: mrz::ParseOptions) -> mrz::ParseOptions {
+    opts.with_refuse_repeated_line(false)
+        .with_date_digits(false)
+}
+
 /// One real specimen's [`BenchPage`], from its corpus document and the OCR page
 /// of its run.
 ///
@@ -2124,8 +2142,7 @@ fn specimen_bench_page(
     // `None` (unlabelled) is not evidence of non-conformance — see
     // `BenchPage::printed_zone_nonconforming`.
     let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
-        !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
-            .is_ok_and(|d| d.valid())
+        !mrz::find_and_parse_with(zone, &printed_zone_parse_options()).is_ok_and(|d| d.valid())
     });
     let found = mrz::find_and_parse(&page.text);
     let mrz_found = found.is_ok();
@@ -6681,7 +6698,7 @@ mod tests {
     fn control_read(text: &str) -> synthpass_die::Tier1Read {
         synthpass_die::read_tier1_with(
             text,
-            &synthpass_die::mrz_parse_options_for(false),
+            &synthpass_die::mrz_parse_options_for(false, false, false),
             synthpass_die::Line1Arm::Control,
         )
     }
@@ -6784,6 +6801,28 @@ mod tests {
         }
     }
 
+    /// #579: the printed-zone validity parse ignores the repeated-line refusal
+    /// and the date-digits arm, so the `checksum_failed_specimen` denominator is
+    /// the same in every arm; the other options are untouched.
+    #[test]
+    fn the_printed_zone_parse_ignores_the_refusal_and_date_digits_arms() {
+        let refusing = synthpass_die::mrz_parse_options_for(false, true, false);
+        assert!(refusing.refuse_repeated_line);
+        assert!(!printed_zone_parse_options_from(refusing).refuse_repeated_line);
+        let digits = synthpass_die::mrz_parse_options_for(false, false, true);
+        assert!(digits.date_digits);
+        assert!(!printed_zone_parse_options_from(digits).date_digits);
+        let swept = synthpass_die::mrz_parse_options_for(true, true, true);
+        let pinned = printed_zone_parse_options_from(swept);
+        assert!(pinned.class_sweep);
+        assert!(!pinned.refuse_repeated_line);
+        assert!(!pinned.date_digits);
+        assert_eq!(
+            printed_zone_parse_options_from(mrz::ParseOptions::default()),
+            mrz::ParseOptions::default()
+        );
+    }
+
     /// With every `SYNTHPASS_MRZ_*` arm `off` the dump zone comes from
     /// `read_tier1`, which is what `mrz::find_and_parse` returns: the dump is
     /// byte-identical to what it was before the arms reached it (#574, finding
@@ -6802,7 +6841,7 @@ mod tests {
         for text in &texts {
             let off = synthpass_die::read_tier1_with(
                 text,
-                &synthpass_die::mrz_parse_options_for(false),
+                &synthpass_die::mrz_parse_options_for(false, false, false),
                 synthpass_die::Line1Arm::Off,
             );
             assert_eq!(off.parsed, mrz::find_and_parse(text), "{text}");

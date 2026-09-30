@@ -635,6 +635,19 @@ pub struct Report {
     /// falls back to the default, `on`, silently, so quote this field, never
     /// the variable you believe you set.
     pub mrz_line1_select_arm: &'static str,
+    /// The repeated-line refusal arm this run measured (#579), as the binary
+    /// resolved it -- `off` (the default), `control` or `on`, from
+    /// `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE`. **Always serialized**, beside the
+    /// other two `mrz_*_arm` fields and for the same reason: an unrecognised
+    /// value falls back to `off` silently, so quote this field, never the
+    /// variable you believe you set.
+    pub mrz_refuse_repeated_line_arm: &'static str,
+    /// The date-digits arm this run measured (#579, the C6 rule), as the binary
+    /// resolved it -- `off` (the default), `control` or `on`, from
+    /// `SYNTHPASS_MRZ_DATE_DIGITS`. **Always serialized**, beside the other two
+    /// arms and for the same reason: an unrecognised value falls back to `off`,
+    /// silently, so quote this field, never the variable you believe you set.
+    pub mrz_date_digits_arm: &'static str,
     /// The `text-detection.rten`/`text-recognition.rten` paths this run
     /// actually loaded — one `NativeOcr` instance shared across every
     /// provider row, so this is a single run-level fact, not per-provider.
@@ -691,6 +704,26 @@ pub struct OutcomeRow {
     pub retry_variant_id: Option<String>,
     pub retry_budget_hit: bool,
     pub retry_stop: Option<String>,
+    /// [`DocumentDetail::check_states`]: the observed state of every check digit
+    /// on every parsed MRZ, keyed by `mrz::Field::as_str()`, each `true`
+    /// (verified), `false` (failed) or `null` (not printed by this layout).
+    /// `null` when no MRZ parsed. Same JSON shape as the report's
+    /// `check_states`, except that here an absent map is a `null`, not an
+    /// omitted key. Field names and booleans only, never a value.
+    ///
+    /// Added after the first ledger was committed: `#[serde(default)]` lets
+    /// `provider-bench`'s `parse_ledger` read a ledger that lacks it, as `None`. A missing
+    /// key and a `null` read the same, so the diff cannot tell them apart.
+    #[serde(default)]
+    pub check_states: Option<BTreeMap<String, Option<bool>>>,
+    /// [`DocumentDetail::retry_damaged_recovery`] passthrough. Absent from an
+    /// older ledger, which reads as `None` (see `check_states`).
+    #[serde(default)]
+    pub retry_damaged_recovery: Option<bool>,
+    /// [`DocumentDetail::tier1_damaged_recovery`] passthrough. Absent from an
+    /// older ledger, which reads as `None` (see `check_states`).
+    #[serde(default)]
+    pub tier1_damaged_recovery: Option<bool>,
 }
 
 impl OutcomeRow {
@@ -724,6 +757,14 @@ impl From<&DocumentDetail> for OutcomeRow {
             retry_variant_id: d.retry_variant_id.clone(),
             retry_budget_hit: d.retry_budget_hit,
             retry_stop: d.retry_stop.clone(),
+            check_states: d.check_states.as_ref().map(|states| {
+                states
+                    .iter()
+                    .map(|(field, state)| ((*field).to_string(), *state))
+                    .collect()
+            }),
+            retry_damaged_recovery: d.retry_damaged_recovery,
+            tier1_damaged_recovery: d.tier1_damaged_recovery,
         }
     }
 }
@@ -1047,6 +1088,8 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
+            mrz_refuse_repeated_line_arm: "off",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1077,6 +1120,8 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
+            mrz_refuse_repeated_line_arm: "off",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport {
                 detection: "/models/text-detection.rten".to_string(),
                 recognition: "/models/text-recognition.rten".to_string(),
@@ -1195,11 +1240,17 @@ mod tests {
             retry_variant_id: None,
             retry_budget_hit: false,
             retry_stop: None,
+            check_states: Some(BTreeMap::from([
+                ("composite".to_string(), Some(true)),
+                ("personal_number".to_string(), None),
+            ])),
+            retry_damaged_recovery: Some(false),
+            tier1_damaged_recovery: None,
         };
         let json = serde_json::to_string(&row).expect("serialize");
         assert_eq!(
             json,
-            r#"{"asset_id":"passports/foo.png","name":"foo","outcome":"hit","miss_reason":null,"mrz_format":"TD3","mrz_found":true,"mrz_checksums_valid":true,"names_exact":true,"name_error":null,"ocr_ms":42,"retry_variant_id":null,"retry_budget_hit":false,"retry_stop":null}"#
+            r#"{"asset_id":"passports/foo.png","name":"foo","outcome":"hit","miss_reason":null,"mrz_format":"TD3","mrz_found":true,"mrz_checksums_valid":true,"names_exact":true,"name_error":null,"ocr_ms":42,"retry_variant_id":null,"retry_budget_hit":false,"retry_stop":null,"check_states":{"composite":true,"personal_number":null},"retry_damaged_recovery":false,"tier1_damaged_recovery":null}"#
         );
     }
 
@@ -1517,11 +1568,39 @@ mod tests {
             seed_start: None,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "control",
+            mrz_refuse_repeated_line_arm: "control",
+            mrz_date_digits_arm: "off",
             model_paths: ModelPathsReport::default(),
             providers: Vec::new(),
         };
         let json = serde_json::to_value(&report).expect("serialize report");
         assert_eq!(json["mrz_line1_select_arm"], "control");
         assert_eq!(json["mrz_class_sweep_arm"], "off");
+        // #579: the refusal arm is always serialized too.
+        assert_eq!(json["mrz_refuse_repeated_line_arm"], "control");
+    }
+
+    /// #579: the date-digits arm is always serialized too, "off" included, so a
+    /// report names it whether or not it was set.
+    #[test]
+    fn the_report_always_carries_the_date_digits_arm() {
+        for arm in ["off", "control", "on"] {
+            let report = Report {
+                timestamp_unix: 0,
+                source: "real-specimens",
+                profile: None,
+                format: None,
+                count: 0,
+                seed_start: None,
+                mrz_class_sweep_arm: "off",
+                mrz_line1_select_arm: "on",
+                mrz_refuse_repeated_line_arm: "off",
+                mrz_date_digits_arm: arm,
+                model_paths: ModelPathsReport::default(),
+                providers: Vec::new(),
+            };
+            let json = serde_json::to_value(&report).expect("serialize report");
+            assert_eq!(json["mrz_date_digits_arm"], arm);
+        }
     }
 }
