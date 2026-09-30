@@ -100,21 +100,51 @@ pub fn class_sweep_arm() -> (&'static str, bool) {
     }
 }
 
-/// [`mrz::ParseOptions`] for the arm this process measures.
+/// The date-digits arm this process measures, from `SYNTHPASS_MRZ_DATE_DIGITS`
+/// (#579, the C6 rule).
+///
+/// The same three arms as [`class_sweep_arm`], read the same way: `on` makes
+/// `mrz` require the date of birth and the date of expiry to hold digits
+/// ([`mrz::ParseOptions::date_digits`]), `off` (the default) does not, and
+/// `control` is a **placebo**, behaviourally identical to `off`. **An
+/// unrecognised value falls back to `off` silently**, which is why the arm is
+/// returned by name: quote what the binary says it measured, never the
+/// variable you believe you set.
 #[must_use]
-pub fn mrz_parse_options() -> mrz::ParseOptions {
-    mrz_parse_options_for(class_sweep_arm().1)
+pub fn date_digits_arm() -> (&'static str, bool) {
+    date_digits_arm_from(&std::env::var("SYNTHPASS_MRZ_DATE_DIGITS").unwrap_or_default())
 }
 
-/// [`mrz_parse_options`] for an explicit class-sweep setting, so the mapping is
-/// tested without touching the process environment. With the sweep off it is
-/// exactly [`mrz::ParseOptions::default`], which is what makes
+/// [`date_digits_arm`] for an explicit value, so the mapping is tested without
+/// touching the process environment: `on` (case-insensitive, trimmed) is the
+/// arm that applies the rule; `control`, `off`, empty and anything else are
+/// `off`-behaviour, with `control` keeping its own name.
+#[must_use]
+pub fn date_digits_arm_from(value: &str) -> (&'static str, bool) {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "on" => ("on", true),
+        "control" => ("control", false),
+        _ => ("off", false),
+    }
+}
+
+/// [`mrz::ParseOptions`] for the arms this process measures.
+#[must_use]
+pub fn mrz_parse_options() -> mrz::ParseOptions {
+    mrz_parse_options_for(class_sweep_arm().1, date_digits_arm().1)
+}
+
+/// [`mrz_parse_options`] for explicit class-sweep and date-digits settings, so
+/// the mapping is tested without touching the process environment. With both
+/// off it is exactly [`mrz::ParseOptions::default`], which is what makes
 /// `mrz::find_and_parse` (default options) and [`read_tier1`] under the default
 /// arms the same parse: a benchmark's dump zone, which used to call the former,
 /// is unchanged by taking the latter.
 #[must_use]
-pub fn mrz_parse_options_for(class_sweep: bool) -> mrz::ParseOptions {
-    mrz::ParseOptions::default().with_class_sweep(class_sweep)
+pub fn mrz_parse_options_for(class_sweep: bool, date_digits: bool) -> mrz::ParseOptions {
+    mrz::ParseOptions::default()
+        .with_class_sweep(class_sweep)
+        .with_date_digits(date_digits)
 }
 
 /// The line-1 selector's arm, from `SYNTHPASS_MRZ_LINE1_SELECT` (#574).
@@ -192,15 +222,21 @@ pub fn line1_select_arm() -> (&'static str, Line1Arm) {
 /// The non-default `SYNTHPASS_MRZ_*` arms this process runs under, keyed by
 /// environment variable name, for `ExtractionTrace::config_overrides`.
 ///
-/// Both knobs change what Tier 1 returns, so a record produced under either
-/// must say so (principle 7): a knob appears here exactly when its arm is not
-/// its default, and an all-default process returns an empty map. The default of
-/// the class sweep is `off`, so it is listed when not `off`; the default of the
-/// line-1 selector is `on`, so it is listed when not `on`. `control` is listed
-/// although it is a placebo, because a run under it is not a default run.
+/// Each knob changes what Tier 1 returns, so a record produced under any of
+/// them must say so (principle 7): a knob appears here exactly when its arm is
+/// not its default, and an all-default process returns an empty map. The
+/// default of the class sweep is `off`, so it is listed when not `off`; the
+/// default of the line-1 selector is `on`, so it is listed when not `on`; the
+/// default of the date-digits rule (#579) is `off`, so it is listed when not
+/// `off`. `control` is listed although it is a placebo, because a run under it
+/// is not a default run.
 #[must_use]
 pub fn mrz_config_overrides() -> std::collections::BTreeMap<String, String> {
-    mrz_config_overrides_from(class_sweep_arm().0, line1_select_arm().0)
+    mrz_config_overrides_from(
+        class_sweep_arm().0,
+        line1_select_arm().0,
+        date_digits_arm().0,
+    )
 }
 
 /// [`mrz_config_overrides`] from explicit arm names, so the mapping is tested
@@ -209,11 +245,13 @@ pub fn mrz_config_overrides() -> std::collections::BTreeMap<String, String> {
 pub fn mrz_config_overrides_from(
     class_sweep: &str,
     line1_select: &str,
+    date_digits: &str,
 ) -> std::collections::BTreeMap<String, String> {
     let mut overrides = std::collections::BTreeMap::new();
     for (variable, arm, default) in [
         ("SYNTHPASS_MRZ_CLASS_SWEEP", class_sweep, "off"),
         ("SYNTHPASS_MRZ_LINE1_SELECT", line1_select, "on"),
+        ("SYNTHPASS_MRZ_DATE_DIGITS", date_digits, "off"),
     ] {
         if arm != default {
             overrides.insert(variable.to_string(), arm.to_string());
@@ -276,36 +314,106 @@ mod tests {
     /// latter).
     #[test]
     fn the_parse_options_with_the_class_sweep_off_are_the_default() {
-        assert_eq!(mrz_parse_options_for(false), mrz::ParseOptions::default());
-        assert!(mrz_parse_options_for(true).class_sweep);
+        assert_eq!(
+            mrz_parse_options_for(false, false),
+            mrz::ParseOptions::default()
+        );
+        assert!(mrz_parse_options_for(true, false).class_sweep);
+        assert!(!mrz_parse_options_for(true, false).date_digits);
     }
 
-    /// The defaults are class sweep `off` and line-1 select `on`.
+    /// #579: each arm sets its own option and neither disturbs the other.
+    #[test]
+    fn the_parse_options_apply_the_date_digits_arm() {
+        let date_digits = mrz_parse_options_for(false, true);
+        assert!(date_digits.date_digits);
+        assert!(!date_digits.class_sweep);
+        assert_eq!(
+            date_digits,
+            mrz::ParseOptions::default().with_date_digits(true)
+        );
+
+        let both = mrz_parse_options_for(true, true);
+        assert!(both.class_sweep && both.date_digits);
+    }
+
+    /// `SYNTHPASS_MRZ_DATE_DIGITS`: `on` applies the rule, `control`, `off`,
+    /// empty (unset) and anything unrecognised are `off` behaviour, and the
+    /// name reported is what the binary resolved, not what was typed.
+    #[test]
+    fn the_date_digits_arm_is_read_from_its_value() {
+        for (value, arm) in [
+            ("on", ("on", true)),
+            ("ON", ("on", true)),
+            ("  On\n", ("on", true)),
+            ("control", ("control", false)),
+            ("Control", ("control", false)),
+            ("off", ("off", false)),
+            // Unset reads as the empty string; anything unrecognised is `off`,
+            // silently.
+            ("", ("off", false)),
+            ("garbage", ("off", false)),
+            ("true", ("off", false)),
+            ("1", ("off", false)),
+            ("onn", ("off", false)),
+        ] {
+            assert_eq!(date_digits_arm_from(value), arm, "{value:?}");
+        }
+    }
+
+    /// The defaults are class sweep `off`, line-1 select `on` and date digits
+    /// `off`.
     #[test]
     fn no_override_is_reported_at_the_defaults() {
-        assert!(mrz_config_overrides_from("off", "on").is_empty());
+        assert!(mrz_config_overrides_from("off", "on", "off").is_empty());
+    }
+
+    /// #579: the date-digits arm is listed under its own variable when it is
+    /// not `off`, `control` included, and the other two knobs are unaffected.
+    #[test]
+    fn the_date_digits_arm_is_reported_by_its_own_variable_when_not_off() {
+        use std::collections::BTreeMap;
+        assert_eq!(
+            mrz_config_overrides_from("off", "on", "on"),
+            BTreeMap::from([("SYNTHPASS_MRZ_DATE_DIGITS".to_string(), "on".to_string())])
+        );
+        assert_eq!(
+            mrz_config_overrides_from("off", "on", "control"),
+            BTreeMap::from([(
+                "SYNTHPASS_MRZ_DATE_DIGITS".to_string(),
+                "control".to_string()
+            )])
+        );
+        assert_eq!(
+            mrz_config_overrides_from("on", "off", "on"),
+            BTreeMap::from([
+                ("SYNTHPASS_MRZ_CLASS_SWEEP".to_string(), "on".to_string()),
+                ("SYNTHPASS_MRZ_DATE_DIGITS".to_string(), "on".to_string()),
+                ("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "off".to_string()),
+            ])
+        );
     }
 
     #[test]
     fn each_mrz_knob_is_reported_by_its_own_variable_when_not_its_default() {
         use std::collections::BTreeMap;
         assert_eq!(
-            mrz_config_overrides_from("on", "on"),
+            mrz_config_overrides_from("on", "on", "off"),
             BTreeMap::from([("SYNTHPASS_MRZ_CLASS_SWEEP".to_string(), "on".to_string())])
         );
         assert_eq!(
-            mrz_config_overrides_from("off", "off"),
+            mrz_config_overrides_from("off", "off", "off"),
             BTreeMap::from([("SYNTHPASS_MRZ_LINE1_SELECT".to_string(), "off".to_string())])
         );
         assert_eq!(
-            mrz_config_overrides_from("off", "control"),
+            mrz_config_overrides_from("off", "control", "off"),
             BTreeMap::from([(
                 "SYNTHPASS_MRZ_LINE1_SELECT".to_string(),
                 "control".to_string()
             )])
         );
         assert_eq!(
-            mrz_config_overrides_from("control", "off"),
+            mrz_config_overrides_from("control", "off", "off"),
             BTreeMap::from([
                 (
                     "SYNTHPASS_MRZ_CLASS_SWEEP".to_string(),

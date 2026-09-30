@@ -207,6 +207,23 @@ pub struct ParseOptions {
     /// only after an ordinary read has already failed to validate.
     #[cfg_attr(feature = "serde", serde(default))]
     pub class_sweep: bool,
+    /// Require the date of birth and the date of expiry to hold digits (#579,
+    /// the C6 rule): a read whose date field holds any character other than an
+    /// ASCII digit or the filler `<` is not [`MrzData::valid`].
+    ///
+    /// A check digit is arithmetic, and letters have values too, so an emitted
+    /// or misread zone whose birth date is six letters passes every check digit
+    /// yet cannot be a date. The check digits themselves are unchanged (see
+    /// [`MrzData::checks`]); this is one more condition `valid` combines with
+    /// them. A partially unknown date (digits and `<` only, Doc 9303 Part 3
+    /// §4.8) stays valid, as does an all-filler one.
+    ///
+    /// **Off by default, until measured.** It is the validity rule the 0.10.0
+    /// refusals will carry; it ships as an option first, so an A/B can name it
+    /// before the default flips (the pattern [`ParseOptions::class_sweep`]
+    /// follows). Only these two fields are affected.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub date_digits: bool,
 }
 
 impl Default for ParseOptions {
@@ -214,6 +231,7 @@ impl Default for ParseOptions {
         Self {
             pivot_yy: CURRENT_YY,
             class_sweep: false,
+            date_digits: false,
         }
     }
 }
@@ -253,6 +271,21 @@ impl ParseOptions {
     #[must_use]
     pub const fn with_class_sweep(mut self, class_sweep: bool) -> Self {
         self.class_sweep = class_sweep;
+        self
+    }
+
+    /// Require the two date fields to hold digits — see
+    /// [`ParseOptions::date_digits`], which is off by default until measured.
+    ///
+    /// ```
+    /// use mrz::ParseOptions;
+    ///
+    /// assert!(!ParseOptions::default().date_digits);
+    /// assert!(ParseOptions::default().with_date_digits(true).date_digits);
+    /// ```
+    #[must_use]
+    pub const fn with_date_digits(mut self, date_digits: bool) -> Self {
+        self.date_digits = date_digits;
         self
     }
 }
@@ -700,6 +733,25 @@ pub struct MrzData {
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub damaged_recovery: bool,
+    /// `true` when this record was parsed with [`ParseOptions::date_digits`]
+    /// on, so [`valid`](Self::valid) also requires the date of birth and the
+    /// date of expiry to hold digits or fillers only (#579). Recorded on the
+    /// value because `valid` takes no options. `false` for every read made with
+    /// the default options.
+    ///
+    /// `#[serde(default, skip_serializing_if)]`: absent from the JSON unless
+    /// the option was on, so a record from the default options serializes
+    /// exactly as it did before this field existed, and JSON written before it
+    /// still deserializes.
+    #[cfg_attr(feature = "zeroize", zeroize(skip))]
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
+    pub date_digits_required: bool,
+}
+
+/// `skip_serializing_if` for a `bool` that is `false` by default.
+#[cfg(feature = "serde")]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl MrzData {
@@ -709,9 +761,9 @@ impl MrzData {
     /// preferred spelling: `valid` sits three letters from
     /// [`validity`](Self::validity) and means something entirely different,
     /// so the short name reads as a verdict on the *document* when it is a
-    /// verdict on the *arithmetic*. Both call
-    /// [`checks.all_valid()`](Checks::all_valid); neither is going away
-    /// inside 0.8.
+    /// verdict on the *arithmetic*. [`valid`](Self::valid) calls
+    /// [`checks.all_valid()`](Checks::all_valid) as well, and adds the opt-in
+    /// date-digits condition (#579); neither name is going away inside 0.8.
     ///
     /// **This is checksum consistency — not document validity, and not
     /// byte-identity with the printed zone.** Whether the document is in date
@@ -736,9 +788,18 @@ impl MrzData {
     }
 
     /// Shorthand for [`checks.all_valid()`](Checks::all_valid): every check
-    /// digit this format prints agrees with the candidate. Same answer as
+    /// digit this format prints agrees with the candidate. With the default
+    /// [`ParseOptions`] this is the same answer as
     /// [`checksum_consistent`](Self::checksum_consistent), which is the
     /// clearer name for it.
+    ///
+    /// **One more condition, when asked for.** A read made with
+    /// [`ParseOptions::date_digits`] on is also not valid if its date of birth
+    /// or date of expiry holds a character that is neither an ASCII digit nor
+    /// `<` (#579): letters have check-digit values too, so a date field of
+    /// letters can pass every digit. The check digits themselves are unchanged
+    /// ([`checks`](Self::checks) still says what the arithmetic found), and a
+    /// partially unknown date stays valid. Off by default.
     ///
     /// A failed check digit is a verdict on the read, not a parse error: the
     /// zone still parses, and this is where the verdict lives.
@@ -757,7 +818,17 @@ impl MrzData {
     /// assert!(!tampered.valid());
     /// ```
     pub fn valid(&self) -> bool {
-        self.checksum_consistent()
+        self.checksum_consistent() && !self.date_digits_violated()
+    }
+
+    /// The C6 condition: the read was made with [`ParseOptions::date_digits`]
+    /// on and a date field holds a character that is neither an ASCII digit nor
+    /// the filler. [`DateCompleteness::Malformed`] is exactly that.
+    fn date_digits_violated(&self) -> bool {
+        self.date_digits_required
+            && [self.date_of_birth, self.date_of_expiry]
+                .iter()
+                .any(|date| date.completeness() == DateCompleteness::Malformed)
     }
 
     /// The complete document number: the overflow reassembly when there is

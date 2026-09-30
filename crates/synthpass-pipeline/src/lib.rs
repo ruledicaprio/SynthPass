@@ -1935,7 +1935,8 @@ mod tests {
             Box::new(KnobReportingOcr(HRV_TD3_MARKDOWN)),
             Box::new(MockBackend),
         );
-        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("on", "control");
+        pipeline.mrz_config_overrides =
+            synthpass_die::mrz_config_overrides_from("on", "control", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 
@@ -1970,7 +1971,8 @@ mod tests {
             Box::new(KnobReportingOcr("just prose — no MRZ anywhere")),
             Box::new(MockBackend),
         );
-        pipeline.mrz_config_overrides = synthpass_die::mrz_config_overrides_from("off", "off");
+        pipeline.mrz_config_overrides =
+            synthpass_die::mrz_config_overrides_from("off", "off", "off");
 
         let result = pipeline.process_document(&input).await.expect("process");
 

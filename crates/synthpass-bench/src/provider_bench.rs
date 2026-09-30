@@ -6681,7 +6681,7 @@ mod tests {
     fn control_read(text: &str) -> synthpass_die::Tier1Read {
         synthpass_die::read_tier1_with(
             text,
-            &synthpass_die::mrz_parse_options_for(false),
+            &synthpass_die::mrz_parse_options_for(false, false),
             synthpass_die::Line1Arm::Control,
         )
     }
@@ -6802,7 +6802,7 @@ mod tests {
         for text in &texts {
             let off = synthpass_die::read_tier1_with(
                 text,
-                &synthpass_die::mrz_parse_options_for(false),
+                &synthpass_die::mrz_parse_options_for(false, false),
                 synthpass_die::Line1Arm::Off,
             );
             assert_eq!(off.parsed, mrz::find_and_parse(text), "{text}");
