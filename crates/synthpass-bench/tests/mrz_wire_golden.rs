@@ -96,8 +96,9 @@ fn render() -> (String, usize) {
 #[test]
 fn mrz_json_matches_the_golden_for_every_fixture() {
     let (rendered, count) = render();
-    // The denominator trap: a top-level-only walk sees 64.
-    assert_eq!(count, 118, "every fixture, derived/ included");
+    // The denominator trap: a top-level-only walk sees 66. 118 -> 120 on
+    // 2026-09-30 with the Russia 2013 and Switzerland 2003 fixtures (#579).
+    assert_eq!(count, 120, "every fixture, derived/ included");
 
     let golden = golden_path();
     if std::env::var_os("MRZ_WIRE_GOLDEN_BLESS").is_some() {

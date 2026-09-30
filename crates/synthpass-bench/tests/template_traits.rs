@@ -337,9 +337,12 @@ fn the_aggregate_is_pinned_so_a_silent_drop_cannot_pass() {
     // (td_format, optional_data_present) -> row count, measured 2026-09-22.
     // 2026-09-24: Td1 with optional data 5 -> 6, Bosnia 2013 card back's new
     // reviewed non-conforming fixture (#440).
+    // 2026-09-30: Td1 without optional data 4 -> 6, the Russian Federation ID
+    // 2013 and Switzerland ID 2003 card backs' new reviewed non-conforming
+    // fixtures (#579).
     // No Td2 row exists yet; a first one must appear here deliberately.
     const EXPECTED: &[(&str, bool, usize)] = &[
-        ("Td1", false, 4),
+        ("Td1", false, 6),
         ("Td1", true, 6),
         ("Td3", false, 20),
         ("Td3", true, 34),
