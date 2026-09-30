@@ -520,6 +520,54 @@ name-reconstruction check hit (see "Record the rejections" above), caught
 here instead of thrown away because the fix (compare against the
 pre-formatting representation) is cheap and doesn't weaken the check.
 
+## The nightly advisory
+
+`bench-data-collection.yml` ends every nightly with an advisory,
+`tools/bench_nightly_advisory.py`
+([ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md) decision 7). It reads
+`fresh.jsonl`, `fixed.jsonl` and `runs.jsonl` on `bench-data` after tonight's rows are appended, and
+says what tonight changed. `dataset.jsonl`, the frozen schema-1 history, is ignored. The thresholds
+below are provisional: a one-week A/A dispatch sets them, and each lives in one named constant in the
+tool.
+
+**What it checks, per format.**
+
+- **Fixed slice** (clean, seeds 0-99). Paired per seed against the most recent earlier night whose
+  fixed slice has the same `generator_fingerprint`, the hash over its rendered pixels, so any
+  re-render resets the reference. Every seed whose hit, correct-read, wrong-accept or prefix-wrong
+  status changed is named. With no earlier night that has the same fingerprint it says "no
+  reference": the state on the first night, and on the first night after any re-render.
+  A net loss of more than `NET_FLIP_WARN_ABOVE` (3) hits, lost minus gained, is a warning.
+- **Fresh slice** (all profiles, new seeds every night). The last 7 nights pooled against the prior
+  28 nights with the same fixed-slice fingerprint, by a two-proportion z-test. It flags a hit rate
+  or a correct-read rate (a hit with no wrong scored field) at z <= -3, and a wrong-accept rate at
+  z >= +3. With fewer than 7 recent nights or fewer than 7 baseline nights it says so and skips the
+  test: too little history is not a flag.
+
+**What turns the run red.** Only these, and only after the rows are pushed, so a red night never
+loses its data:
+
+- a severe fixed-slice flag: a fixed seed newly a wrong accept, or newly a prefix-wrong read,
+  against its same-fingerprint reference (the M4 ratchet for prefix-wrong reads is 0);
+- an invalid instrument: a `budget` retry stop in the fixed slice; missing or duplicate rows or
+  headers for tonight's run; a header whose fingerprint is not its rows'; or a fingerprint change
+  that no change to the render's inputs explains between the two runs' commits (`crates/synthpass-gen/`,
+  the `crates/mrz/` it assembles the zone with, or `Cargo.lock`). When the tool
+  cannot tell (no checkout of `main`, or the reference commit is not reachable) it warns instead.
+
+Everything else is a warning. It never opens an issue, never runs on `pull_request`, and is never a
+required check.
+
+**Where it reports.** The job summary (Markdown, from `$GITHUB_STEP_SUMMARY`), one `::warning::` or
+`::error::` line per finding, and one line per night appended to `advisory.jsonl` on `bench-data`,
+in the same commit as the night's rows. On a dispatch from another ref the dry-run job runs it on
+the would-be rows and puts `advisory.jsonl` in the `nightly-would-be-rows` artifact instead.
+
+**Aggregates only.** An `advisory.jsonl` line holds counts, rates, z values, finding codes, the run
+id, the fixed slice's fingerprint and the commit, and the seed numbers of flipped fixed seeds. It
+holds no field value, no OCR text and no `reason`; the tool writes only allowlisted keys, and only
+strings that are short tokens, and refuses to write the line otherwise.
+
 ## The per-PR real-specimen regression gate
 
 `.github/workflows/real-specimen-gate.yml` runs `provider-bench --real-specimens
