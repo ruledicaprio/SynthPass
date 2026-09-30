@@ -459,6 +459,13 @@ struct Report {
     /// recorded it before, so a retry-arm question about `td1`/`td2`/…
     /// history had no run-level record of which arm produced it (#510).
     ocr_arms: synthpass_bench::report::OcrArmsReport,
+    /// The effective OCR retry pass budget for this run: the positive
+    /// `SYNTHPASS_OCR_MAX_PASSES` override, or the binary's built-in default.
+    max_passes: usize,
+    /// The effective wall-clock threshold, in seconds, for starting another
+    /// OCR retry pass: the positive `SYNTHPASS_OCR_MAX_SECONDS` override, or
+    /// the binary's built-in default.
+    max_seconds: u64,
     /// The `mrz` class-sweep arm this run measured, as the binary resolved it
     /// (`off`, `control` or `on`, from `SYNTHPASS_MRZ_CLASS_SWEEP`). Quote
     /// this field, never the variable you believe you set: an unrecognised
@@ -922,6 +929,7 @@ fn main() {
         print_escalation_report(&results, parsed.document_type.as_str());
     }
 
+    let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
     let report = Report {
         timestamp_unix: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -932,6 +940,8 @@ fn main() {
         count: parsed.count,
         seed_start: parsed.seed,
         ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::from_env()),
+        max_passes,
+        max_seconds,
         mrz_class_sweep_arm: synthpass_die::class_sweep_arm().0,
         mrz_line1_select_arm: synthpass_die::line1_select_arm().0,
         model_paths: synthpass_bench::report::ModelPathsReport::resolve(
@@ -1276,6 +1286,7 @@ mod tests {
     fn synthetic_rate_report(hits: u64, strict_hits: u64, wrong_accepts: u64) -> Report {
         let (names_exact_among_hits, wrong_accept_rate) =
             rates_among_hits(strict_hits, wrong_accepts, hits);
+        let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
         Report {
             timestamp_unix: 0,
             profile: "clean",
@@ -1283,6 +1294,8 @@ mod tests {
             count: 1,
             seed_start: 0,
             ocr_arms: synthpass_bench::report::OcrArmsReport::from(synthpass_ocr::OcrArms::DEFAULT),
+            max_passes,
+            max_seconds,
             mrz_class_sweep_arm: "off",
             mrz_line1_select_arm: "off",
             model_paths: synthpass_bench::report::ModelPathsReport::default(),
