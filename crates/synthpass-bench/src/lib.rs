@@ -24,6 +24,8 @@ pub mod ground_truth;
 pub mod ocr_passes;
 pub mod provider_bench;
 pub mod report;
+pub mod step_summary;
+pub mod synthetic_ledger;
 
 /// Per-check-digit state for a parsed MRZ, keyed by the stable wire field
 /// names. `None` means the format does not print that digit; it is not a
