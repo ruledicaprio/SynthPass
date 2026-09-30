@@ -115,9 +115,10 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   which is no failure, as for the dump.
 - **`--check-report`** also compares the real arms' `report.json`: the `mrz`
   provider's `documents_detail` rows, per asset, after the same ignores (`ocr_ms`
-  is one). Those rows hold every per-document field the ledger and the dump do not
-  (`check_states`, `retry_damaged_recovery`, `tier1_damaged_recovery`, the
-  assertion counts, `field_correctness`), so this is the check that a replay
+  is one). Those rows hold per-document fields the ledger and the dump do not (the
+  assertion counts, `field_correctness`, `line1_selection`) and repeat
+  `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery`, which a
+  ledger written after #557 carries too, so this is the check that a replay
   reproduced them. It is opt-in because a change under test may legitimately move
   them. Without it `report.json` is not read in this mode. With the file in one
   arm only, the rows are not compared; in neither arm, the flag is refused.
