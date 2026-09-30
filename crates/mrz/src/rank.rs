@@ -174,16 +174,16 @@ mod tests {
     /// one line that differ only by the glyphs OCR reads as either (`O`/`0`,
     /// `I`/`1`) are the same line read twice, and a pair that differs by
     /// unrelated letters at the same positions is not. The fold's table is not
-    /// copied here.
+    /// copied here. Each fold carries half of the cells, so a fold that handles
+    /// only `O`/`0` or only `I`/`1` leaves the pair at 0.5, below the threshold.
     #[test]
     fn a_pair_differing_only_by_o_0_and_i_1_is_a_repeat() {
-        let read_as_letters = "MAOIMAOIMAOIMAOI";
-        let read_as_digits = "MA01MA01MA01MA01";
+        let read_as_letters = "OOOOIIII";
+        let read_as_digits = "00001111";
         assert!(repeats_a_line(&[read_as_letters, read_as_digits]));
 
-        // `X` and `Y` are not lookalikes of `O` and `I`: half the cells differ,
-        // which is 0.5, below the threshold.
-        let unrelated_letters = "MAXYMAXYMAXYMAXY";
+        // `X` and `Y` are not lookalikes of `O` and `I`: no cell agrees.
+        let unrelated_letters = "XXXXYYYY";
         assert!(!repeats_a_line(&[read_as_letters, unrelated_letters]));
         assert!(!repeats_a_line(&[read_as_digits, unrelated_letters]));
     }

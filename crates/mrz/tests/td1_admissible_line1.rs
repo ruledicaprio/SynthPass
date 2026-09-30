@@ -139,7 +139,8 @@ fn seed_57_no_longer_accepts_the_shifted_line_1() {
 /// read stays checksum-failed because its check cell reads `T` for `7`.
 ///
 /// Only what this fix owns is asserted: line 1, the code, the issuer and the
-/// document number, and that the read is not valid. Lines 2 and 3 are not:
+/// document number, that the read is not valid, and that it did not come from
+/// the damaged-capture pass. Lines 2 and 3 are not:
 /// which of the checksum-failed candidates the fallback rank prefers for them
 /// (here a noisy second-pass line 3) is a tie-break between two such reads, not
 /// this fix's concern, and a legitimate change to that rank must not break this

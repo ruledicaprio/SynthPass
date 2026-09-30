@@ -224,18 +224,21 @@ fn two_admissible_same_country_readings_that_disagree_on_name_still_refuse() {
     let text = format!("{l1}\n{damaged_l2}");
 
     // The safety contract, and only it: a genuine disagreement on the given
-    // names is never returned as a valid read of the wrong name. A refusal (an
-    // error) and a checksum-failed fallback are both safe; so is a valid read
-    // that carries the printed name. What is not acceptable is a valid read of
-    // the other candidate, `IVAN`.
+    // names is never returned as a valid read. TD3 line 1 has no check digit
+    // and line 2 carries no name, so nothing in the zone can tell a printed
+    // `IVANL` from a printed `IVAN` whose first filler OCR read as `L` (the
+    // misread the last-resort `aggressive_defiller` form exists for). A valid
+    // read of either name is a valid read of a name the zone cannot vouch for,
+    // so it is never safe, whichever name it carries. A refusal (an error) and
+    // a checksum-failed fallback are both safe.
     match find_and_parse(&text) {
         Err(_) => {}
         Ok(data) => {
             assert_eq!(data.format, Format::Td3);
             assert_eq!(data.issuing_country, "RUS");
             assert!(
-                !data.valid() || data.given_names == "IVANL",
-                "a valid read must carry the printed given names, got {:?}",
+                !data.valid(),
+                "two names the zone cannot tell apart must not come back as a valid read, got {:?}",
                 data.given_names
             );
         }
