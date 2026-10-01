@@ -2032,13 +2032,14 @@ mod tests {
 
     #[test]
     fn td3_long_document_number_round_trips() {
-        // The overflow line is an independent parser fixture. Its remainder
-        // check digit is 0: the full value's 7-3-1 sum is 360.
+        // The full document number's 7-3-1 sum is 360, so its check digit is 0.
         let pinned = parse_td3(
             "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
-            "L898902C3<UTO7408122F120415912340<<<<<<<<<<0",
+            "L898902C3<UTO7408122F120415912340<<<<<<<<<44",
         )
         .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
         assert_eq!(
             pinned.document_number_full.as_deref(),
             Some("L898902C31234")
@@ -2072,11 +2073,15 @@ mod tests {
 
     #[test]
     fn overflow_coexists_with_personal_number() {
+        // AB1234567890: 10·7 + 11·3 + 1·1 + 2·7 + 3·3 + 4·1 + 5·7 + 6·3 +
+        // 7·1 + 8·7 + 9·3 = 274, so the document-number digit is 4.
         let pinned = parse_td3(
             "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
             "AB1234567<UTO7408122F12041598904<ZE184<<<<37",
         )
         .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
         assert_eq!(pinned.document_number_full.as_deref(), Some("AB1234567890"));
         assert_eq!(pinned.personal_number(), Some("ZE184"));
 
@@ -2093,22 +2098,30 @@ mod tests {
 
     #[test]
     fn td2_and_td1_long_document_numbers_round_trip() {
+        // D23145890XY: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 33·7 + 34·3 = 540, so the document-number digit is 0.
         let pinned_td2 = parse_td2(
             "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
             "D23145890<UTO7408122F1204159XY0<<<<0",
         )
         .unwrap();
+        assert!(pinned_td2.valid(), "checks: {:?}", pinned_td2.checks);
+        assert_eq!(pinned_td2.checks.document_number, Some(true));
         assert_eq!(
             pinned_td2.document_number_full.as_deref(),
             Some("D23145890XY")
         );
 
+        // D23145890ABCDE: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 10·7 + 11·3 + 12·1 + 13·7 + 14·3 = 455, so its digit is 5.
         let pinned_td1 = parse_td1(
             "I<UTOD23145890<ABCDE5<<<<<<<<<",
             "7408122F1204159UTO<<<<<<<<<<<0",
             "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
         )
         .unwrap();
+        assert!(pinned_td1.valid(), "checks: {:?}", pinned_td1.checks);
+        assert_eq!(pinned_td1.checks.document_number, Some(true));
         assert_eq!(
             pinned_td1.document_number_full.as_deref(),
             Some("D23145890ABCDE")
@@ -2149,14 +2162,6 @@ mod tests {
         // TD2's optional field is 7 wide, so a remainder of 6 + check + filler
         // does not fit — the number is truncated to 9 as it always was, and the
         // ordinary (non-overflow) encoding still validates.
-        let pinned = parse_td2(
-            "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
-            "D231458907UTO7408122F1204159<<<<<<<6",
-        )
-        .unwrap();
-        assert_eq!(pinned.document_number_full, None);
-        assert_eq!(pinned.document_number, "D23145890");
-
         let td2 = Td2Fields {
             document_number: "D23145890ABCDEF".into(), // remainder 7 → needs 9
             date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),

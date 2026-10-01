@@ -326,10 +326,9 @@ proptest! {
     }
 }
 
-/// A document number of arbitrary MRZ-charset length 1..=20 — the whole
-/// space this crate's overflow encoding (ICAO 9303 Part 5/6 note j; extended
-/// to TD3 by analogy, see `parser::read_overflow`'s doc comment) has to
-/// handle: fits-as-printed (<=9), fits-via-overflow, and too-long-so-truncate.
+/// TD3 document numbers that fit its overflow layout (10..=21 characters).
+/// Lengths 1..=9 print directly; longer lengths cannot fit the layout and are
+/// covered with the format-specific length sweeps in `roundtrip.rs`.
 fn td3_overflow_doc_number() -> impl Strategy<Value = String> {
     "[A-Z0-9]{10,21}"
 }
@@ -350,14 +349,18 @@ fn yymmdd_strategy() -> impl Strategy<Value = String> {
     (0u32..100, 1u32..=12, 1u32..=28).prop_map(|(yy, mm, dd)| format!("{yy:02}{mm:02}{dd:02}"))
 }
 
+#[test]
+fn overflow_document_number_check_digit_known_answer() {
+    // 10·7 + 11·3 + 1·1 + 2·7 + 3·3 + 4·1 + 5·7 + 6·3 + 7·1 + 8·7 + 9·3 = 274 → 4.
+    assert_eq!(mrz::check_digit("AB1234567890"), Ok(4));
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(512))]
 
-    /// Unlike the panic-only properties above, this one asserts correctness:
-    /// whatever length the document number is, emit -> parse must validate,
-    /// and when overflow encoding kicks in `full_document_number()` must
-    /// recover the original input exactly. A "valid but wrong" reassembly
-    /// would be a silent corruption bug, worse than a rejected parse.
+    /// Checks emitted overflow numbers that fit the layout: emit -> parse must
+    /// validate and recover the original number. Lengths 1..=9 (and TD2's
+    /// 15..=20) are covered by `roundtrip.rs` properties and its length sweep.
     #[test]
     fn td3_overflow_emit_parse_always_valid(
         document_number in td3_overflow_doc_number(),
@@ -366,10 +369,6 @@ proptest! {
         date_of_birth in yymmdd_strategy().prop_map(|raw| support::birth(&raw)),
         date_of_expiry in yymmdd_strategy().prop_map(|raw| support::expiry(&raw)),
     ) {
-        // Overflow check digit for AB1234567890: 10*7 + 11*3 + 1*1 +
-        // 2*7 + 3*3 + 4*1 + 5*7 + 6*3 + 7*1 + 8*7 + 9*3 + 0*1
-        // = 274, so the 7-3-1 remainder is 4.
-        prop_assert_eq!(mrz::check_digit("AB1234567890"), Ok(4));
         let fields = Td3Fields {
             document_number: document_number.clone(),
             surname,
