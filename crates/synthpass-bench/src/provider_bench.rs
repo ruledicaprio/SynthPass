@@ -30,7 +30,10 @@
 //! same [`run_prepped_with_dump_options`]. Tier 1 is a pure function of the page text, so a replay
 //! measures everything downstream of `OcrPage::text` and nothing upstream.
 
-use crate::archive::{Archive, ArchiveTrack, DocRecord, OcrRecord, Tier1ReadRecord};
+use crate::archive::{
+    Archive, ArchiveTrack, DocRecord, OcrRecord, PrivateDocRecord, RetryStop, RetryVariant,
+    Sha256Hex, Tier1ReadRecord, ZoneClasses,
+};
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -884,13 +887,23 @@ fn truth_comparison(
     truth: Option<&str>,
     format: Option<&str>,
 ) -> Option<TruthComparison> {
+    truth_comparison_of_zone(recovered.map(|data| data.mrz_lines.as_str()), truth, format)
+}
+
+/// [`truth_comparison`] from the recovered zone's text, for a caller that holds the zone and not
+/// the parsed [`mrz::MrzData`] (the `synthpass-bench` archive).
+pub(crate) fn truth_comparison_of_zone(
+    recovered: Option<&str>,
+    truth: Option<&str>,
+    format: Option<&str>,
+) -> Option<TruthComparison> {
     let truth = truth?;
     Some(TruthComparison {
-        zone_mismatch: recovered.map(|data| mrz_zone_mismatch(&data.mrz_lines, truth)),
-        compared_cells: recovered.map(|data| compared_cells(&data.mrz_lines, truth)),
+        zone_mismatch: recovered.map(|zone| mrz_zone_mismatch(zone, truth)),
+        compared_cells: recovered.map(|zone| compared_cells(zone, truth)),
         field_mismatch: recovered
             .zip(format)
-            .and_then(|(data, format)| mrz_field_mismatch(format, &data.mrz_lines, truth)),
+            .and_then(|(zone, format)| mrz_field_mismatch(format, zone, truth)),
     })
 }
 
@@ -905,7 +918,7 @@ fn truth_comparison(
 #[allow(clippy::too_many_arguments)]
 fn archive_document(
     archive: &Archive,
-    provider: &str,
+    provider: &'static str,
     bench_page: &BenchPage,
     detail: &DocumentDetail,
     read_elapsed: Duration,
@@ -916,15 +929,25 @@ fn archive_document(
     let track = if bench_page.synthetic {
         ArchiveTrack::Synthetic
     } else {
-        bench_page
-            .asset_id
-            .as_deref()
-            // A real page with no asset ID cannot be placed in a track, so it is treated
-            // as the most restrictive one and dropped, never filed as public.
-            .map_or(ArchiveTrack::Private, |id| {
-                ArchiveTrack::from_corpus(crate::asset_track(id))
-            })
+        match bench_page.asset_id.as_deref() {
+            Some(id) => ArchiveTrack::from_corpus(crate::asset_track(id)),
+            // A real page with no asset ID cannot be placed in a track, so it is dropped:
+            // never filed as public, and never as a private record either.
+            None => return,
+        }
     };
+    if track == ArchiveTrack::Private {
+        archive_private_document(
+            archive,
+            provider,
+            bench_page,
+            detail,
+            read_elapsed,
+            tier1_zone,
+            truth,
+        );
+        return;
+    }
     let record = DocRecord {
         kind: "doc",
         run_id: archive.run_id(),
@@ -958,6 +981,55 @@ fn archive_document(
         truth,
     };
     archive.record(track, &record);
+}
+
+/// Writes one private-track document's text-free record (ADR-0024, Decision 7). It reads no
+/// `name`, no `asset_id`, no OCR text and no field value from its arguments, and it cannot be
+/// written without them being left out: [`PrivateDocRecord`] has nowhere to put them. The
+/// recovered zone is kept as character classes only. A page whose image hash is not a SHA-256
+/// has no key and writes nothing, as does an archive that is off.
+fn archive_private_document(
+    archive: &Archive,
+    provider: &'static str,
+    bench_page: &BenchPage,
+    detail: &DocumentDetail,
+    read_elapsed: Duration,
+    tier1_zone: Option<&mrz::MrzData>,
+    truth: Option<&TruthComparison>,
+) {
+    let (Some(run_id), Some(source_sha256)) = (
+        Sha256Hex::new(&archive.run_id()),
+        bench_page.source_sha256.as_deref().and_then(Sha256Hex::new),
+    ) else {
+        return;
+    };
+    let record = PrivateDocRecord {
+        kind: "private_doc",
+        run_id,
+        provider,
+        track: ArchiveTrack::Private.as_str(),
+        source_sha256,
+        outcome: detail.miss_reason.as_ref().map_or("hit", crate::miss_kind),
+        mrz_format: detail.mrz_format,
+        mrz_found: detail.mrz_found,
+        mrz_checksums_valid: detail.mrz_checksums_valid,
+        check_states: detail.check_states.clone(),
+        retry_variant_id: detail
+            .retry_variant_id
+            .as_deref()
+            .and_then(RetryVariant::parse),
+        retry_budget_hit: detail.retry_budget_hit,
+        retry_stop: detail.retry_stop.as_deref().and_then(RetryStop::parse),
+        retry_damaged_recovery: detail.retry_damaged_recovery,
+        tier1_damaged_recovery: detail.tier1_damaged_recovery,
+        read_us: read_elapsed.as_micros(),
+        ocr_ms: detail.ocr_elapsed.as_millis(),
+        mrz_band_score: bench_page.page.mrz_band_score,
+        rotation: bench_page.page.rotation,
+        truth,
+        zone_classes: tier1_zone.map(|data| ZoneClasses::of_zone(&data.mrz_lines)),
+    };
+    archive.record_private(&record);
 }
 
 /// One in-denominator real-specimen miss (`checksum_failed` or
@@ -6796,7 +6868,7 @@ mod tests {
             binary_sha256: None,
             git_commit: None,
             working_tree_dirty: None,
-            argv: Vec::new(),
+            argv: Some(Vec::new()),
             scope: Scope {
                 corpus: "real-specimens",
                 format: None,
@@ -7149,8 +7221,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A retry stop from the closed set, the budget flag and the damaged-recovery flags are
+    /// carried into the private record as they are; only an unknown stop is left out.
     #[tokio::test]
-    async fn a_private_asset_is_never_archived() {
+    async fn the_retry_facts_of_a_private_document_reach_its_record() {
+        let root = scratch_dir("archive-private-retry");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = private_sentinel_page();
+        page.page.retry_variant_id = Some("general".to_string());
+        page.page.retry_stop = Some("pass_cap".to_string());
+        page.page.retry_budget_hit = true;
+        page.page.retry_damaged_recovery = Some(true);
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        let (_, private) = only_file_in(&root, "private");
+        assert!(!private.contains(PRIVATE_SENTINEL));
+        let record: serde_json::Value =
+            serde_json::from_str(private.lines().nth(1).expect("a record")).expect("JSON");
+        assert_eq!(record["retry_variant_id"], "general");
+        assert_eq!(record["retry_stop"], "pass_cap");
+        assert_eq!(record["retry_budget_hit"], true);
+        assert_eq!(record["retry_damaged_recovery"], true);
+        assert_eq!(record["tier1_damaged_recovery"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_private_asset_is_archived_only_as_a_text_free_record() {
         let root = scratch_dir("archive-private-asset");
         let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
         let mut page = labelled_page_with_a_different_fixture_zone();
@@ -7167,10 +7274,331 @@ mod tests {
         )
         .await;
         archive.finish();
-        assert!(!root.join("private").exists());
+        // Never a document record, in `public/` or `local/`; one text-free record.
         assert!(!root.join("public").exists() && !root.join("local").exists());
+        let (_, private) = only_file_in(&root, "private");
+        assert_eq!(private.lines().count(), 2, "a header and one record");
+        for text in ["ERIKSSON", "labelled.png", "ANNA", "L898902C36"] {
+            assert!(!private.contains(text), "{text} is document text");
+        }
         assert!(archive.warnings().is_empty());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_private_page_without_an_image_hash_has_no_key_and_writes_nothing() {
+        let root = scratch_dir("archive-private-no-hash");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = Some("private/labelled.png".to_string());
+        page.source_sha256 = None;
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(std::fs::read_dir(&root).map_or(true, |mut dir| dir.next().is_none()));
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The one string every place text could hide carries in the private-record tests.
+    const PRIVATE_SENTINEL: &str = "SENTINELZQX";
+
+    /// A reader whose error text carries [`PRIVATE_SENTINEL`], so the miss reason of a private
+    /// document holds it in the ledger row (and, in a public record, would hold it too).
+    struct SentinelErroringReader {
+        capability: Capability,
+    }
+
+    #[async_trait::async_trait]
+    impl IntelligenceProvider for SentinelErroringReader {
+        fn id(&self) -> ProviderId {
+            ProviderId("sentinel-erroring-reader")
+        }
+        fn capability(&self) -> &Capability {
+            &self.capability
+        }
+        fn describe(&self) -> String {
+            "a failing test reader whose error names a document".into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FieldReader for SentinelErroringReader {
+        async fn read(&self, _ctx: &DocumentContext<'_>) -> Result<Reading, ProviderError> {
+            Err(ProviderError::Failed {
+                detail: format!("could not read {PRIVATE_SENTINEL}"),
+            })
+        }
+    }
+
+    fn sentinel_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .with_reader(std::sync::Arc::new(SentinelErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("two readers")
+    }
+
+    /// A fabricated private document with [`PRIVATE_SENTINEL`] in its file name, asset ID,
+    /// OCR text, recovered zone, fixture zone, field values and retry stop. Nothing about it is
+    /// a real specimen.
+    fn private_sentinel_page() -> BenchPage {
+        let pad = |mut line: String| {
+            while line.len() < 44 {
+                line.push('<');
+            }
+            line
+        };
+        let mut page = rate_test_page();
+        page.name = PRIVATE_SENTINEL.to_string();
+        page.asset_id = Some(format!("private/{PRIVATE_SENTINEL}.png"));
+        page.source_sha256 = Some("b".repeat(64));
+        let zone_line_1 = pad(format!("P<UTO{PRIVATE_SENTINEL}<<ANNA<MARIA"));
+        page.page = OcrPage {
+            text: format!("{PRIVATE_SENTINEL} header\n{zone_line_1}\n{REPLAY_LINE_2_VALID}"),
+            rotation: 90,
+            mrz_band_score: Some(0.75),
+            retry_variant_id: Some("pass-03".to_string()),
+            retry_stop: Some(format!("stopped at {PRIVATE_SENTINEL}")),
+            ..OcrPage::default()
+        };
+        page.mrz_found = true;
+        page.mrz_expected = true;
+        page.ground_truth_mrz = Some(format!(
+            "{}\n{REPLAY_LINE_2_VALID}",
+            pad(format!("P<UTO{PRIVATE_SENTINEL}<<WXYZ"))
+        ));
+        page.ground_truth = Some(HashMap::from([(
+            CoreField::Surname,
+            format!("{PRIVATE_SENTINEL}X"),
+        )]));
+        page.known_or_guessed_format = Some("TD3");
+        page
+    }
+
+    /// Runs the hook over the fabricated private document and a public one, with an `argv`
+    /// that names the private file, and returns the archive root.
+    async fn archive_private_run(tag: &str, with_private_page: bool) -> PathBuf {
+        let root = scratch_dir(tag);
+        let mut header = archive_test_header(1_000_000_000_000);
+        header.argv = Some(vec![
+            "--real-specimens".to_string(),
+            "--include-private".to_string(),
+            format!("{PRIVATE_SENTINEL}.png"),
+        ]);
+        header.tracks.private = true;
+        let header = header.with_run_id();
+        let archive = Archive::start(&root, &header);
+        let mut prepped = vec![Some(labelled_page_with_a_different_fixture_zone())];
+        if with_private_page {
+            prepped.insert(0, Some(private_sentinel_page()));
+        }
+        run_prepped_with_dump_options(
+            &sentinel_catalog(),
+            &prepped,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(archive.warnings().is_empty(), "{:?}", archive.warnings());
+        root
+    }
+
+    /// The one finished file in `root/track`, as text.
+    fn only_file_in(root: &Path, track: &str) -> (String, String) {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(root.join(track))
+            .unwrap_or_else(|e| panic!("{track}/ is missing: {e}"))
+            .flatten()
+            .map(|entry| entry.path())
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        let path = files.remove(0);
+        assert!(
+            path.extension().is_some_and(|ext| ext == "jsonl"),
+            "{path:?}"
+        );
+        (
+            path.file_name()
+                .expect("a name")
+                .to_string_lossy()
+                .into_owned(),
+            std::fs::read_to_string(&path).expect("read"),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_private_document_is_archived_text_free_through_the_hook() {
+        let root = archive_private_run("archive-private-hook", true).await;
+        let (private_name, private) = only_file_in(&root, "private");
+        let (public_name, public) = only_file_in(&root, "public");
+
+        // The whole private file, its header included, holds the sentinel nowhere.
+        assert!(
+            !private.contains(PRIVATE_SENTINEL),
+            "a private file carries no document text"
+        );
+        // Same stem as the run's other file.
+        assert_eq!(private_name, public_name);
+
+        let lines: Vec<serde_json::Value> = private
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a JSON line"))
+            .collect();
+        assert_eq!(lines.len(), 1 + 2, "a header, then one record per provider");
+        assert_eq!(lines[0]["kind"], "run");
+        assert!(
+            lines[0]["argv"].is_null(),
+            "no command line in a private file"
+        );
+        assert_eq!(lines[0]["tracks"]["private"], true);
+        let providers: Vec<&str> = lines[1..]
+            .iter()
+            .map(|d| d["provider"].as_str().expect("provider"))
+            .collect();
+        assert_eq!(providers, ["mrz", "sentinel-erroring-reader"]);
+
+        // Exactly the pinned keys, and none of the keys a document record carries.
+        let pinned = [
+            "kind",
+            "run_id",
+            "provider",
+            "track",
+            "source_sha256",
+            "outcome",
+            "mrz_format",
+            "mrz_found",
+            "mrz_checksums_valid",
+            "check_states",
+            "retry_variant_id",
+            "retry_budget_hit",
+            "retry_stop",
+            "retry_damaged_recovery",
+            "tier1_damaged_recovery",
+            "read_us",
+            "ocr_ms",
+            "mrz_band_score",
+            "rotation",
+            "truth",
+            "zone_classes",
+        ];
+        for record in &lines[1..] {
+            let mut keys: Vec<&str> = record
+                .as_object()
+                .expect("an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            let mut expected = pinned.to_vec();
+            expected.sort_unstable();
+            assert_eq!(keys, expected);
+            assert_eq!(record["kind"], "private_doc");
+            assert_eq!(record["track"], "private");
+            assert_eq!(record["run_id"], lines[0]["run_id"]);
+            assert_eq!(record["source_sha256"], "b".repeat(64));
+        }
+        // `truth` may name a field in `by_field` (`name`, say) as a count key; what must be
+        // absent are the document record's own top-level keys.
+        for never in [
+            "name",
+            "asset_id",
+            "ocr",
+            "text",
+            "fields",
+            "field_correctness",
+            "names_exact",
+            "miss_reason",
+            "name_error",
+            "ledger_row",
+            "tier1_read",
+            "lines",
+            "chargrid",
+            "ocr_passes",
+        ] {
+            for record in &lines[1..] {
+                assert!(
+                    record.get(never).is_none(),
+                    "a private record has no `{never}` key"
+                );
+            }
+        }
+
+        // What the record does say: facts and classes. The recovered zone is classes only.
+        let read = &lines[1];
+        assert_eq!(read["outcome"], "hit");
+        assert_eq!(read["mrz_format"], "TD3");
+        assert_eq!(read["rotation"], 90);
+        assert_eq!(read["mrz_band_score"], 0.75);
+        assert_eq!(read["retry_variant_id"], "pass-03");
+        assert!(
+            read["retry_stop"].is_null(),
+            "a retry stop outside the closed set is left out"
+        );
+        assert_eq!(
+            read["zone_classes"],
+            serde_json::json!([
+                // `P<UTO` + the 11-letter sentinel, `<<ANNA<MARIA`, filler to 44 cells.
+                format!("A<{}<<AAAA<AAAAA{}", "A".repeat(14), "<".repeat(16)),
+                "A999999A99AAA9999999A9999999AA999999A<<<<<99"
+            ])
+        );
+        assert!(read["truth"]["zone_mismatch"]
+            .as_u64()
+            .is_some_and(|n| n > 0));
+        let errored = &lines[2];
+        assert_eq!(errored["outcome"], "ocr_error");
+
+        // Positive controls: the text the private file lacks is really there to be written. The
+        // public record of the same error holds the error text in its ledger row, and the
+        // public header holds the command line that names the private file.
+        assert!(
+            public.contains(&format!("could not read {PRIVATE_SENTINEL}")),
+            "the error text reaches a public record"
+        );
+        assert!(
+            public.contains(&format!("{PRIVATE_SENTINEL}.png")),
+            "the public header keeps argv"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A public document in the same run writes its public record exactly as it does in a
+        // run that has no private document.
+        // Timings differ between two runs of the same input, so they are the one key left out.
+        let untimed = |text: &str| -> Vec<serde_json::Value> {
+            text.lines()
+                .map(|line| {
+                    let mut record: serde_json::Value =
+                        serde_json::from_str(line).expect("a JSON line");
+                    record.as_object_mut().expect("an object").remove("read_us");
+                    record
+                })
+                .collect()
+        };
+        let without = archive_private_run("archive-private-hook-without", false).await;
+        let (without_name, without_public) = only_file_in(&without, "public");
+        assert_eq!(
+            without_name, public_name,
+            "the same run, the same file name"
+        );
+        assert_eq!(untimed(&without_public), untimed(&public));
+        assert!(!without.join("private").exists());
+        let _ = std::fs::remove_dir_all(&without);
     }
 
     /// The property the whole feature rests on: for the same page, a replayed row
