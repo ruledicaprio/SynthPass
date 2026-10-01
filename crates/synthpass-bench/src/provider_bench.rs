@@ -6896,6 +6896,7 @@ mod tests {
             mrz_arms: BTreeMap::new(),
             pivot_yy: 26,
             model_paths: crate::report::ModelPathsReport::default(),
+            model_sha256: None,
             replay_of: None,
             env: BTreeMap::new(),
         }

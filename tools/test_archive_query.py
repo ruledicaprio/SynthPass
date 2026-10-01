@@ -374,6 +374,33 @@ class DiffTests(ArchiveCase):
             self.assertIn(expected, out)
         self.assertNotIn("ocr_arms.order", out, "an arm that did not change is not named")
 
+    def test_a_differing_model_hash_is_named_as_a_prefix_and_an_equal_one_is_not(self):
+        models = {"detection": "a" * 64, "recognition": "b" * 64}
+        head_a = header(RUN_A, model_sha256=models)
+        head_b = header(RUN_B, model_sha256={"detection": "c" * 64, "recognition": "b" * 64})
+        code, out, _ = self.two_runs([], [], head_a, head_b)
+        self.assertIn("  model_sha256.detection: aaaaaaaaaaaa -> cccccccccccc", out)
+        self.assertNotIn("model_sha256.recognition", out, "an equal hash is not named")
+        self.assertNotIn("a" * 13, out, "a prefix, never the whole hash")
+        self.assertNotIn(SENTINEL, out, "the model paths are still never printed")
+        self.setUp()
+        code, out, _ = self.two_runs([], [], head_a, header(RUN_B, model_sha256=dict(models)))
+        self.assertIn("header: identical", out)
+        self.assertNotIn("model_sha256", out)
+
+    def test_an_archive_written_before_the_hashes_still_reads(self):
+        # The default fixture has no `model_sha256` key, as a file written before it does not.
+        self.assertNotIn("model_sha256", header(RUN_A))
+        code, out, err = self.two_runs([doc(RUN_A, "passports/a.png", SHA_1)], [doc(RUN_B, "passports/a.png", SHA_1)])
+        self.assertEqual(code, 0, err)
+        self.assertIn("header: identical", out)
+        # One side with hashes and one without is a difference, shown as null against a prefix.
+        self.setUp()
+        head_b = header(RUN_B, model_sha256={"detection": "c" * 64, "recognition": None})
+        code, out, _ = self.two_runs([], [], header(RUN_A), head_b)
+        self.assertIn("  model_sha256.detection: null -> cccccccccccc", out)
+        self.assertNotIn("model_sha256.recognition", out, "null against null is no difference")
+
     def test_identical_headers_say_so(self):
         code, out, _ = self.two_runs([], [])
         self.assertIn("header: identical", out)
