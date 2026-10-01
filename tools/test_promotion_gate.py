@@ -220,6 +220,51 @@ class ComparabilityTests(GateCase):
         self.setUp()
         self.assertRefused(self.run_standard(cand_records=[extra, improved_docs(CAND_2)]), "only in candidate")
 
+    def test_a_changed_image_hash_refuses_naming_the_asset(self):
+        changed = [improved_docs(CAND_1), improved_docs(CAND_2)]
+        for run_id, records in zip((CAND_1, CAND_2), changed):
+            records[0] = doc(run_id, ASSETS[0], source_sha256="f" * 64)
+        result = self.run_standard(cand_records=changed)
+        self.assertRefused(result, "source_sha256 differs or is missing", ASSETS[0])
+        self.assertNotIn("f" * 64, result[1], "a hash is not printed")
+        self.assertNotIn(ASSETS[1], result[1].split("source_sha256")[1])
+
+    def test_a_missing_image_hash_refuses_naming_the_asset(self):
+        for side in ("candidate", "base", "every run"):
+            with self.subTest(side=side):
+                self.setUp()
+                if side == "every run":
+                    # Equal on both sides, so only the presence rule can refuse it.
+                    base = base_docs()
+                    base[1] = doc(BASE, ASSETS[1], source_sha256=None, names_exact=False,
+                                  fields={"surname": "wrong", "given_names": "exact"})
+                    cands = [improved_docs(CAND_1), improved_docs(CAND_2)]
+                    for run_id, records in zip((CAND_1, CAND_2), cands):
+                        records[1] = doc(run_id, ASSETS[1], source_sha256=None)
+                    result = self.run_standard(base_records=base, cand_records=cands)
+                elif side == "candidate":
+                    cands = [improved_docs(CAND_1), improved_docs(CAND_2)]
+                    cands[1][1] = doc(CAND_2, ASSETS[1], source_sha256=None)
+                    result = self.run_standard(cand_records=cands)
+                else:
+                    base = base_docs()
+                    base[2] = doc(BASE, ASSETS[2], source_sha256=None)
+                    result = self.run_standard(base_records=base)
+                self.assertRefused(result, "source_sha256 differs or is missing")
+                self.assertIn(ASSETS[2] if side == "base" else ASSETS[1], result[1])
+
+    def test_two_documents_of_one_image_join_on_the_asset_id_when_the_hashes_are_equal(self):
+        # Duplicate-byte images share a hash, so the join falls back to the asset id; the hashes
+        # are still equal, and that is comparable.
+        def with_shared_hash(records, run_id):
+            records[2] = doc(run_id, ASSETS[2], source_sha256=SHAS[ASSETS[0]])
+            return records
+
+        base = with_shared_hash(base_docs(), BASE)
+        cands = [with_shared_hash(improved_docs(r), r) for r in (CAND_1, CAND_2)]
+        code, out, err = self.run_standard(base_records=base, cand_records=cands)
+        self.assertEqual(code, 0, out + err)
+
     def test_an_undeclared_arm_that_differs_refuses(self):
         for field, value in (
             ("ocr_arms", {"texture": "off", "chargrid": "on"}),

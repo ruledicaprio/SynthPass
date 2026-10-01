@@ -13,8 +13,9 @@ or more `CANDIDATE` runs of the treatment arm. It answers three questions, in th
    (its SHA-256 recorded), models (compared by path until the header records hashes), scope, tracks,
    providers, `samples_data_sha`, corpus manifest and replay source; the same arms, environment,
    retry budget and pivot, except the declared treatment key, which must show the declared values;
-   every document joined one to one (`archive_query.join_records`); and no budget-limited document
-   unless the declaration makes the budget its subject. The candidate repeats are held to the same
+   every document joined one to one on the image's SHA-256 (`archive_query.join_records`, then
+   every pair must carry a `source_sha256` on both records and the two must be equal); and no
+   budget-limited document unless the declaration makes the budget its subject. The candidate repeats are held to the same
    facts. Any failure is an error (exit 2) that lists every failing fact and gives no result.
 2. **Safe?** Per joined document, base against each candidate run, any one vetoes: a Tier-1 hit
    lost; a new `false_positive_mrz`; a truth-backed field going from `exact` to anything else; an
@@ -410,6 +411,10 @@ def _capped(lines: list[str], total: int | None = None) -> list[str]:
     return shown
 
 
+def _is_sha(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
 def _join(left: Named, right: Named) -> tuple[list[aq.Pair], list[str]]:
     pairs, only_left, only_right = aq.join_records(left.run.records, right.run.records)
     failures = []
@@ -422,6 +427,17 @@ def _join(left: Named, right: Named) -> tuple[list[aq.Pair], list[str]]:
         ids = ", ".join(r["_display"] for r in only_right[:MOVER_LINE_CAP])
         failures.append(
             f"documents do not join one to one: {len(only_right)} only in {right.tag} against {left.tag}: {ids}"
+        )
+    # The join falls back to the asset id and the name, so a changed or unrecorded image still
+    # pairs. The image's SHA-256 is compared by value, never by how the pair was found.
+    unmatched = sorted(
+        {p.key for p in pairs if not _is_sha(p.a.get("source_sha256")) or p.a.get("source_sha256") != p.b.get("source_sha256")}
+    )
+    if unmatched:
+        ids = ", ".join(unmatched[:MOVER_LINE_CAP])
+        more = f" (and {len(unmatched) - MOVER_LINE_CAP} more)" if len(unmatched) > MOVER_LINE_CAP else ""
+        failures.append(
+            f"source_sha256 differs or is missing: {len(unmatched)} document(s) of {right.tag} against {left.tag}: {ids}{more}"
         )
     return pairs, failures
 
