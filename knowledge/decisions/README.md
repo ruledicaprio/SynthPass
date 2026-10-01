@@ -56,3 +56,4 @@ the record.
 | [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27; amended 2026-09-29) |
 | [0026](ADR-0026-covered-cells-are-occluded.md) | Covered MRZ cells are reported as `occluded`, never as text | Accepted (2026-09-28) |
 | [0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) | GitHub runners measure synthetic and public benchmark arms; nothing private, no text, no timings | Accepted (2026-09-29) |
+| [0029](ADR-0029-image-conditions-are-measured-flagged-and-bounded.md) | Image conditions are measured on the normalised band, reported as levels, and remedied only within bounds | Proposed |
