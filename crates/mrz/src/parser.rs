@@ -3215,4 +3215,59 @@ mod tests {
             Ordering::Equal
         );
     }
+
+    /// `position_class` and the line repairs describe one layout twice. Every
+    /// line repair turns a misread `O` into `0` in exactly the cells
+    /// `position_class` calls a digit class, and turns `0` into `O` only in the
+    /// cells it calls a letter class.
+    #[test]
+    fn line_repairs_coerce_exactly_the_digit_cells_of_position_class() {
+        use crate::{position_class, PositionClass};
+        type Repair = fn(&str) -> String;
+        let cases: [(Format, usize, usize, Repair); 11] = [
+            (Format::Td3, 0, 44, repair_td3_line1),
+            (Format::Td3, 1, 44, repair_td3_line2),
+            (Format::Td2, 0, 36, repair_td2_line1),
+            (Format::Td2, 1, 36, repair_td2_line2),
+            (Format::Td1, 0, 30, repair_td1_line1),
+            (Format::Td1, 1, 30, repair_td1_line2),
+            (Format::Td1, 2, 30, repair_td1_line3),
+            (Format::MrvA, 0, 44, repair_mrv_a_line1),
+            (Format::MrvA, 1, 44, repair_mrv_a_line2),
+            (Format::MrvB, 0, 36, repair_mrv_b_line1),
+            (Format::MrvB, 1, 36, repair_mrv_b_line2),
+        ];
+        for (format, line, width, repair) in cases {
+            let digit_cells: Vec<usize> = (0..width)
+                .filter(|&column| {
+                    matches!(
+                        position_class(format, line, column),
+                        Some(PositionClass::Digit | PositionClass::DigitOrFiller)
+                    )
+                })
+                .collect();
+            let all_o = repair(&"O".repeat(width));
+            let digitized: Vec<usize> = all_o
+                .char_indices()
+                .filter(|&(_, c)| c == '0')
+                .map(|(column, _)| column)
+                .collect();
+            assert_eq!(
+                digitized, digit_cells,
+                "{format:?} line {line}: the cells repair digitizes"
+            );
+            let all_zero = repair(&"0".repeat(width));
+            for (column, c) in all_zero.char_indices() {
+                if c == 'O' {
+                    assert!(
+                        matches!(
+                            position_class(format, line, column),
+                            Some(PositionClass::Letter | PositionClass::LetterOrFiller)
+                        ),
+                        "{format:?} line {line} column {column}: repair letterizes a non-letter cell"
+                    );
+                }
+            }
+        }
+    }
 }
