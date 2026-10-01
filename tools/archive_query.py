@@ -6,7 +6,7 @@ Reads the per-document benchmark archive (ADR-0024) that `provider-bench` and
 `synthpass-bench` write after every run, and answers questions from runs
 already made, without a new OCR pass. Read-only: it never writes to the
 archive, never reads a `*.partial` file (a run that was killed) and never
-touches a private track (there is none).
+reads `private/`, the private track's text-free records (ADR-0024 Decision 7).
 
     archive_query.py runs [--track public|local] [--root DIR]
     archive_query.py diff A B [--track ...] [--root DIR]
@@ -78,7 +78,7 @@ EXIT_ERROR = 2
 DOC_LINE_CAP = rebless.LEDGER_DOC_LINE_CAP
 # The record `track` values whose text `--chars` may print: an allowlist, so a missing or unknown
 # value refuses too. The `local` track holds `samples/local/` text and is not on it, and neither
-# is a private track, which has no archive.
+# is the private track, whose `private/` records this tool never reads.
 CHARS_TRACKS = frozenset({"public", "covers", "synthetic"})
 
 # Header fields `diff` compares, in print order. `argv` and `model_paths` are deliberately
