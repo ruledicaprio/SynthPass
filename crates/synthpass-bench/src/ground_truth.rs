@@ -28,7 +28,7 @@ const BATCH_A: [&str; 13] = [
     "id_cards/France_ID_Specimen_2020_back_mrz.png",
     "id_cards/Italy_ID_Specimen_2022_back_mrz.jpg",
     "passports/Moldova_Passport_Specimen_PA_MDA_2014_no_mrz.jpeg",
-    "passports/Afghanistan_Passport_Specimen_P0_AFG_2016_mrz.webp",
+    "passports/Afghanistan_Passport_Specimen_PO_AFG_2016_mrz.webp",
     "id_cards/Belgium_ID_Specimen_2021_back_mrz.png",
     "id_cards/Croatia_ID_Specimen_2021_back_mrz.jpg",
     "passports/Czechia_Passport_Specimen_P0_CZE_2005_mrz.jpg",
@@ -1173,7 +1173,7 @@ mod tests {
     #[test]
     fn reviewed_fixture_fields_are_available_for_batch_a_cards() {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/ocr_fixtures");
-        let fields = reviewed_fields(&fixtures, "Afghanistan_Passport_Specimen_P0_AFG_2016_mrz")
+        let fields = reviewed_fields(&fixtures, "Afghanistan_Passport_Specimen_PO_AFG_2016_mrz")
             .unwrap()
             .unwrap();
         assert!(fields["mrz_line"].is_some());

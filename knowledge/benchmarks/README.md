@@ -97,7 +97,7 @@ the PR that re-blesses the baseline. Mechanisms:
 Outcomes: [`real-specimen-outcomes.jsonl`](real-specimen-outcomes.jsonl).
 
 - `no_mrz_found`: France ID 2020 back, Italy ID 2022 back.
-- `checksum_failed`: Afghanistan `P0_AFG_2016`, Belgium ID 2021 back, Croatia ID 2021 back,
+- `checksum_failed`: Afghanistan `PO_AFG_2016`, Belgium ID 2021 back, Croatia ID 2021 back,
   Czechia `P0_CZE_2005`, Germany `P0_D00_2024`, Hong Kong `P0_HKG_2007` and `P0_HKG_2019`, Romania
   `PE_ROU_2024`, Russian Federation `P0_RUS_2019` (a segmentation failure, scored here), Sweden ID
   2022 back.
