@@ -1355,7 +1355,7 @@ mod tests {
         Some(MissReason::ChecksumFailed {
             check_states: BTreeMap::new(),
             specimen_nonconforming: true,
-            rejected_by: None,
+            rejected_by: Vec::new(),
         })
     }
 
@@ -1374,7 +1374,7 @@ mod tests {
             Some(MissReason::ChecksumFailed {
                 check_states: BTreeMap::new(),
                 specimen_nonconforming: false,
-                rejected_by: None,
+                rejected_by: Vec::new(),
             }),
         );
         ordinary.mrz_checksums_valid = true;

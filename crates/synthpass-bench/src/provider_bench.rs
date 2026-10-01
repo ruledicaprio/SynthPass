@@ -2617,20 +2617,22 @@ fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
 /// One document's Tier-1 miss classification for one reading: `None` for a
 /// hit.
 ///
-/// `read` is the reader's Tier-1 read under this process's arms
-/// (`synthpass_die::read_tier1`), `checksums_valid` the reading's
-/// `Evidence::mrz_checksums_valid`, and `document_number` the document number
-/// it extracted. Kept out of [`run_prepped_with_dump_options`] so the rungs
-/// are tested with explicit reads: the opt-in rules that reach the refusal
-/// rung (#579) never run in CI.
+/// `read` is the reader's Tier-1 read of `bench_page`'s text under `opts`,
+/// this process's parse options (`synthpass_die::read_tier1`);
+/// `checksums_valid` is the reading's `Evidence::mrz_checksums_valid`, and
+/// `document_number` the document number it extracted. Kept out of
+/// [`run_prepped_with_dump_options`] so the rungs are tested with explicit
+/// reads and options: the opt-in rules that reach the refusal rung (#579)
+/// never run in CI.
 fn tier1_miss_reason(
     bench_page: &BenchPage,
     read: Result<&mrz::MrzData, &mrz::MrzError>,
     checksums_valid: bool,
     document_number: Option<&str>,
+    opts: &mrz::ParseOptions,
 ) -> Option<MissReason> {
     let read_mrz = read.ok();
-    let rejected_by = crate::rejected_by(read);
+    let rejected_by = crate::rejected_by(&bench_page.page.text, opts, read);
     // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
     // found, then checksum validity, then — only when this document is
     // labelled — a document-number check against ground truth. A
@@ -2689,25 +2691,25 @@ fn tier1_miss_reason(
             specimen_nonconforming: true,
             rejected_by,
         })
-    } else if bench_page.document_number_leading_filler {
-        // A structural refusal (#536), not "nothing MRZ-shaped was
-        // found" — its own bucket rather than folding into the
-        // `NoMrzFound` rung below.
-        Some(MissReason::DocumentNumberLeadingFiller)
-    } else if let Some(rule) = rejected_by {
-        // An opt-in rule (#579) rejected a zone whose check digits verified:
-        // the date-digits rule leaves a read that is not `valid()`, the
-        // repeated-line rule no read at all. A miss in `checksum_failed`, as
-        // a checksum-invalid read is, with the rule named where a failed
-        // check digit would be. Above `mrz_found`, which a refusal clears:
-        // the zone was found, so this is not `no_mrz_found`.
+    } else if !rejected_by.is_empty() {
+        // An opt-in rule (#579) cost this document a valid read: with it off,
+        // the same text reads valid. The date-digits rule leaves a read that
+        // is not `valid()`, the repeated-line rule a checksum-failed reading
+        // or none. A miss in `checksum_failed`, as a checksum-invalid read
+        // is, with the rule named. Above the leading-filler and `mrz_found`
+        // rungs, whose refusal or missing zone the rule itself caused.
         Some(MissReason::ChecksumFailed {
             check_states: read_mrz
                 .map(|d| crate::check_states(&d.checks))
                 .unwrap_or_default(),
             specimen_nonconforming: false,
-            rejected_by: Some(rule),
+            rejected_by,
         })
+    } else if bench_page.document_number_leading_filler {
+        // A structural refusal (#536), not "nothing MRZ-shaped was
+        // found" — its own bucket rather than folding into the
+        // `NoMrzFound` rung below.
+        Some(MissReason::DocumentNumberLeadingFiller)
     } else if !bench_page.mrz_found {
         Some(MissReason::NoMrzFound(String::new()))
     } else if !checksums_valid {
@@ -2723,7 +2725,7 @@ fn tier1_miss_reason(
                 .map(|d| crate::check_states(&d.checks))
                 .unwrap_or_default(),
             specimen_nonconforming: false,
-            rejected_by: None,
+            rejected_by: Vec::new(),
         })
     } else {
         bench_page
@@ -2820,6 +2822,9 @@ async fn run_prepped_with_dump_options(
         .filter(|p| matches!(p, Some(bp) if !bp.mrz_found))
         .count();
 
+    // The parse options `synthpass_die::read_tier1` reads under, for the
+    // refusal rung's attribution (#579). Process-wide, so read once per run.
+    let parse_opts = synthpass_die::mrz_parse_options();
     let mut reports = Vec::with_capacity(catalog.readers().len());
     // Accumulated across every provider (each tagged in the row) and written
     // once after the loop — see `dump_ocr_dir` in this fn's doc.
@@ -3028,6 +3033,7 @@ async fn run_prepped_with_dump_options(
                 tier1.parsed.as_ref(),
                 reading.evidence.mrz_checksums_valid,
                 reading.extraction.fields.get(CoreField::DocumentNumber),
+                &parse_opts,
             );
 
             // One predicate each, shared with the rates they sit beside, so
@@ -3607,24 +3613,44 @@ mod tests {
         }
     }
 
-    /// A page that expects an MRZ, for [`tier1_miss_reason`]'s rungs.
-    fn ladder_page(mrz_found: bool) -> BenchPage {
+    /// A page that expects an MRZ, for [`tier1_miss_reason`]'s rungs, with
+    /// `text` as its OCR text.
+    fn ladder_page(mrz_found: bool, text: &str) -> BenchPage {
         let mut page = rate_test_page();
         page.mrz_expected = true;
         page.mrz_found = mrz_found;
+        page.page.text = text.to_string();
         page
     }
 
     const LADDER_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const LADDER_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// The ICAO zone with line 2 read again as line 1, behind line 1's
+    /// document code and issuer: valid, and refused by the repeated-line rule.
+    fn ladder_repeated_zone() -> String {
+        format!("{}{}\n{LADDER_L2}", &LADDER_L1[..5], &LADDER_L2[5..])
+    }
+
+    fn refusing() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_refuse_repeated_line(true)
+    }
 
     /// #579: with no rule in play the rungs are what they were: a
     /// checksum-invalid read names its failed digits, and no read at all is
     /// `no_mrz_found`.
     #[test]
     fn the_ladder_names_no_rule_for_a_default_read() {
-        let tampered = mrz::parse_td3(LADDER_L1, "L898902C36UTO7508122F1204159ZE184226B<<<<<10")
-            .expect("shape is still valid TD3");
-        let reason = tier1_miss_reason(&ladder_page(true), Ok(&tampered), false, None);
+        let defaults = mrz::ParseOptions::default();
+        let text = format!("{LADDER_L1}\n{}", LADDER_L2.replacen("740812", "750812", 1));
+        let tampered = mrz::find_and_parse(&text).expect("shape is still valid TD3");
+        let reason = tier1_miss_reason(
+            &ladder_page(true, &text),
+            Ok(&tampered),
+            false,
+            None,
+            &defaults,
+        );
         assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
         assert_eq!(
             reason.map(|r| r.to_string()).as_deref(),
@@ -3632,31 +3658,70 @@ mod tests {
         );
 
         let reason = tier1_miss_reason(
-            &ladder_page(false),
+            &ladder_page(false, "no zone here"),
             Err(&mrz::MrzError::NotFound),
             false,
             None,
+            &defaults,
         );
         assert_eq!(reason, Some(MissReason::NoMrzFound(String::new())));
     }
 
-    /// #579: a zone the repeated-line rule refused leaves no read and is not
-    /// found by the arm's prep parse. The refusal rung keeps it out of
-    /// `no_mrz_found`: a scored `checksum_failed` miss that names the rule.
+    /// #579: a zone the repeated-line rule refused is not found by the arm's
+    /// prep parse, and `mrz` may report it as `NotFound`. The refusal rung
+    /// keeps it out of `no_mrz_found`: a scored `checksum_failed` miss that
+    /// names the rule.
     #[test]
     fn a_refused_zone_is_a_checksum_failed_miss_that_names_the_rule() {
-        let refusal = mrz::MrzError::RepeatedLine {
-            format: mrz::Format::Td2,
-            first_line: 0,
-            second_line: 1,
+        let text = ladder_repeated_zone();
+        for error in [
+            mrz::find_and_parse_with(&text, &refusing()).expect_err("refused"),
+            mrz::MrzError::NotFound,
+        ] {
+            let reason = tier1_miss_reason(
+                &ladder_page(false, &text),
+                Err(&error),
+                false,
+                None,
+                &refusing(),
+            );
+            assert_eq!(
+                reason.as_ref().map(miss_kind),
+                Some("checksum_failed"),
+                "{error}"
+            );
+            assert!(in_scored_tier1_population(&reason));
+            assert_eq!(
+                reason.map(|r| r.to_string()).as_deref(),
+                Some("rejected by the repeated-line rule: the Td3 zone holds a line twice")
+            );
+        }
+    }
+
+    /// #579: when the rule caused the miss, it is named even where another
+    /// refusal is what the parse reported, as a leading filler can be.
+    #[test]
+    fn the_refusal_rung_outranks_the_leading_filler_it_caused() {
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
+        page.document_number_leading_filler = true;
+        let leading_filler = mrz::MrzError::LeadingFiller {
+            field: mrz::Field::DocumentNumber,
+            line: 1,
+            position: 0,
         };
-        let reason = tier1_miss_reason(&ladder_page(false), Err(&refusal), false, None);
+        let reason = tier1_miss_reason(&page, Err(&leading_filler), false, None, &refusing());
         assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
-        assert!(in_scored_tier1_population(&reason));
-        assert_eq!(
-            reason.map(|r| r.to_string()).as_deref(),
-            Some("rejected by the repeated-line rule: line 1 repeats line 0 of the Td2 zone")
+
+        // With no rule on, the leading filler is the reason, as before.
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&leading_filler),
+            false,
+            None,
+            &mrz::ParseOptions::default(),
         );
+        assert_eq!(reason, Some(MissReason::DocumentNumberLeadingFiller));
     }
 
     /// #579: on a specimen whose printed zone is non-conforming, a refusal
@@ -3664,14 +3729,16 @@ mod tests {
     /// rule rather than an empty list of failed digits.
     #[test]
     fn a_refused_zone_on_a_nonconforming_specimen_stays_off_the_denominator() {
-        let mut page = ladder_page(false);
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
         page.printed_zone_nonconforming = true;
-        let refusal = mrz::MrzError::RepeatedLine {
-            format: mrz::Format::MrvB,
-            first_line: 0,
-            second_line: 1,
-        };
-        let reason = tier1_miss_reason(&page, Err(&refusal), false, None);
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&mrz::MrzError::NotFound),
+            false,
+            None,
+            &refusing(),
+        );
         assert_eq!(
             reason.as_ref().map(miss_kind),
             Some("checksum_failed_specimen")
@@ -3680,7 +3747,7 @@ mod tests {
         assert_eq!(
             reason.map(|r| r.to_string()).as_deref(),
             Some(
-                "rejected by the repeated-line rule: line 1 repeats line 0 of the MrvB zone \
+                "rejected by the repeated-line rule: the Td3 zone holds a line twice \
                  (printed zone is non-conforming)"
             )
         );
@@ -3695,7 +3762,7 @@ mod tests {
         let text = format!("{LADDER_L1}\nL898902C36UTO74A8122F1204159ZE184226B<<<<<10");
         let opts = mrz::ParseOptions::default().with_date_digits(true);
         let read = mrz::find_and_parse_with(&text, &opts).expect("returned, not valid");
-        let reason = tier1_miss_reason(&ladder_page(true), Ok(&read), false, None);
+        let reason = tier1_miss_reason(&ladder_page(true, &text), Ok(&read), false, None, &opts);
         assert!(matches!(
             &reason,
             Some(MissReason::ChecksumFailed { check_states, .. })

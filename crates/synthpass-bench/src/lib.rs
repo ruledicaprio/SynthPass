@@ -838,15 +838,15 @@ pub enum MissReason {
     /// transcription — see the 2026-09-08 checksum_failed writeup. `miss_kind`
     /// reports the two as `checksum_failed_specimen` vs `checksum_failed`.
     ///
-    /// `rejected_by` is set when an opt-in parse rule (#579) rejected a zone
-    /// whose check digits all verified ([`rejected_by`]). No failed check
-    /// digit explains such a miss, so the miss reason names the rule instead.
-    /// Always `None` under the default parse options, which enable no such
-    /// rule.
+    /// `rejected_by` names the opt-in parse rules (#579) that cost the
+    /// document its read: with them switched off, the same text reads valid
+    /// ([`rejected_by`]). No failed check digit explains that part of the
+    /// miss, so the miss reason names the rule. Always empty under the default
+    /// parse options, which enable no such rule.
     ChecksumFailed {
         check_states: BTreeMap<&'static str, Option<bool>>,
         specimen_nonconforming: bool,
-        rejected_by: Option<RejectedBy>,
+        rejected_by: Vec<RejectedBy>,
     },
     /// A checksum-valid MRZ that disagrees with the ground truth. Rare and
     /// interesting: the check digits can validate over a misread that
@@ -911,27 +911,31 @@ impl std::fmt::Display for MissReason {
                 specimen_nonconforming,
                 rejected_by,
             } => {
-                if let Some(rule) = rejected_by {
-                    write!(f, "{rule}")?;
-                } else {
-                    let failed: Vec<_> = [
-                        "document_number",
-                        "date_of_birth",
-                        "date_of_expiry",
-                        "personal_number",
-                        "composite",
-                    ]
-                    .into_iter()
-                    .filter(|field| check_states.get(field) == Some(&Some(false)))
-                    .collect();
-                    write!(f, "checksum invalid: {}", failed.join(", "))?;
+                let failed: Vec<_> = [
+                    "document_number",
+                    "date_of_birth",
+                    "date_of_expiry",
+                    "personal_number",
+                    "composite",
+                ]
+                .into_iter()
+                .filter(|field| check_states.get(field) == Some(&Some(false)))
+                .collect();
+                // The failed check digits, then the rules that rejected a
+                // valid read; "checksum invalid: " alone only when neither
+                // has anything to name, as before the rules existed.
+                let mut parts = Vec::new();
+                if !failed.is_empty() || rejected_by.is_empty() {
+                    parts.push(format!("checksum invalid: {}", failed.join(", ")));
                 }
+                parts.extend(rejected_by.iter().map(ToString::to_string));
+                write!(f, "{}", parts.join("; "))?;
                 if *specimen_nonconforming {
                     // A rejected zone is not a faithful read of the printed one.
-                    let read = if rejected_by.is_some() {
-                        ""
-                    } else {
+                    let read = if rejected_by.is_empty() {
                         ", read faithfully"
+                    } else {
+                        ""
                     };
                     write!(f, " (printed zone is non-conforming{read})")?;
                 }
@@ -954,37 +958,31 @@ impl std::fmt::Display for MissReason {
     }
 }
 
-/// The opt-in parse rule (#579) that rejected a zone whose check digits all
-/// verified, as [`MissReason::ChecksumFailed`] records it.
+/// An opt-in parse rule (#579) that cost a document its read, as
+/// [`MissReason::ChecksumFailed`] records it ([`rejected_by`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RejectedBy {
     /// `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE` (`mrz::ParseOptions::refuse_repeated_line`):
-    /// every checksum-valid zone held one line twice and no other reading was
-    /// left, so the parse returned `mrz::MrzError::RepeatedLine`. The lines are
-    /// zero-based, as the error reports them.
-    RepeatedLine {
-        format: mrz::Format,
-        first_line: usize,
-        second_line: usize,
-    },
-    /// `SYNTHPASS_MRZ_DATE_DIGITS` (`mrz::ParseOptions::date_digits`): the read
-    /// is not `valid()` because these date fields (`"date_of_birth"`,
-    /// `"date_of_expiry"`) hold a character that is neither a digit nor the
-    /// filler, though every check digit verified.
+    /// with the rule off, the text reads as this format's zone, and one of its
+    /// lines repeats another.
+    RepeatedLine { format: mrz::Format },
+    /// `SYNTHPASS_MRZ_DATE_DIGITS` (`mrz::ParseOptions::date_digits`): with the
+    /// rule off, the text reads as a zone whose named date fields
+    /// (`"date_of_birth"`, `"date_of_expiry"`) hold a character that is neither
+    /// a digit nor the filler.
     DateDigits { fields: Vec<&'static str> },
 }
 
 impl std::fmt::Display for RejectedBy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::RepeatedLine {
-                format,
-                first_line,
-                second_line,
-            } => write!(
+            Self::RepeatedLine { format } => write!(
                 f,
-                "rejected by the repeated-line rule: line {second_line} repeats line {first_line} of the {format:?} zone"
+                "rejected by the repeated-line rule: the {format:?} zone holds a line twice"
             ),
+            Self::DateDigits { fields } if fields.is_empty() => {
+                write!(f, "rejected by the date-digits rule")
+            }
             Self::DateDigits { fields } => write!(
                 f,
                 "rejected by the date-digits rule: {} not digits",
@@ -994,45 +992,89 @@ impl std::fmt::Display for RejectedBy {
     }
 }
 
-/// Which opt-in parse rule (#579) rejected this Tier-1 read, when one did.
+/// The opt-in parse rules (#579) that cost `text` its read: `parsed`, the read
+/// under `opts`, is not valid, and the same text parses to a valid read with
+/// the rule switched off.
 ///
-/// `parsed` is the read under the process's parse options
-/// (`synthpass_die::read_tier1`). Only a zone whose check digits all verified
-/// can be rejected this way, so the answer is what a miss reason names in
-/// place of a failed check digit:
+/// Attributed by parsing again, not from `parsed`'s error, because `mrz` does
+/// not always say which rule declined a zone: the date-digits rule has no
+/// error of its own, and a repeated-line refusal can come back as `NotFound`
+/// when the checksum-failed reading left over looks like visual-zone text.
 ///
-/// - `Err(mrz::MrzError::RepeatedLine)`: the repeated-line rule refused the
-///   only checksum-valid zones there were.
-/// - An `Ok` read whose check digits verify but which is not `valid()`: the
-///   date-digits rule, the one other condition `valid()` adds. Named with the
-///   date fields `mrz::DateCompleteness::Malformed` describes, which is that
-///   rule's own definition; `None` if neither is.
+/// Each enabled rule is switched off on its own, and a rule whose removal
+/// restores a valid read is named, described from that read. When no single
+/// rule does it but removing all of them does, every enabled rule is named:
+/// they rejected the read together. The class sweep stays as `opts` sets it.
 ///
-/// `None` under the default options, which enable neither rule: every other
-/// error, and every read whose `valid()` is its checksum consistency.
-pub fn rejected_by(parsed: Result<&mrz::MrzData, &mrz::MrzError>) -> Option<RejectedBy> {
-    match parsed {
-        Err(mrz::MrzError::RepeatedLine {
-            format,
-            first_line,
-            second_line,
-        }) => Some(RejectedBy::RepeatedLine {
-            format: *format,
-            first_line: *first_line,
-            second_line: *second_line,
-        }),
-        Ok(read) if read.checksum_consistent() && !read.valid() => {
-            let fields: Vec<&'static str> = [
-                ("date_of_birth", read.date_of_birth),
-                ("date_of_expiry", read.date_of_expiry),
-            ]
-            .into_iter()
-            .filter(|(_, date)| date.completeness() == mrz::DateCompleteness::Malformed)
-            .map(|(field, _)| field)
-            .collect();
-            (!fields.is_empty()).then_some(RejectedBy::DateDigits { fields })
+/// Empty when `parsed` is valid or `opts` enables neither rule, so a run with
+/// the default options never parses twice and never names a rule.
+pub fn rejected_by(
+    text: &str,
+    opts: &mrz::ParseOptions,
+    parsed: Result<&mrz::MrzData, &mrz::MrzError>,
+) -> Vec<RejectedBy> {
+    let enabled: Vec<OptInRule> = [
+        (opts.refuse_repeated_line, OptInRule::RepeatedLine),
+        (opts.date_digits, OptInRule::DateDigits),
+    ]
+    .into_iter()
+    .filter_map(|(on, rule)| on.then_some(rule))
+    .collect();
+    if enabled.is_empty() || parsed.is_ok_and(mrz::MrzData::valid) {
+        return Vec::new();
+    }
+    // The read of `text` with `rules` switched off, when it is valid.
+    let valid_without = |rules: &[OptInRule]| {
+        let mut without = *opts;
+        for rule in rules {
+            without = match rule {
+                OptInRule::RepeatedLine => without.with_refuse_repeated_line(false),
+                OptInRule::DateDigits => without.with_date_digits(false),
+            };
         }
-        _ => None,
+        mrz::find_and_parse_with(text, &without)
+            .ok()
+            .filter(mrz::MrzData::valid)
+    };
+    let singles: Vec<RejectedBy> = enabled
+        .iter()
+        .filter_map(|&rule| valid_without(&[rule]).map(|read| rule.describe(&read)))
+        .collect();
+    if !singles.is_empty() {
+        return singles;
+    }
+    valid_without(&enabled).map_or_else(Vec::new, |read| {
+        enabled.iter().map(|rule| rule.describe(&read)).collect()
+    })
+}
+
+/// The opt-in rules [`rejected_by`] switches off one at a time.
+#[derive(Debug, Clone, Copy)]
+enum OptInRule {
+    RepeatedLine,
+    DateDigits,
+}
+
+impl OptInRule {
+    /// What this rule objected to in `read`, the valid read it declined.
+    fn describe(self, read: &mrz::MrzData) -> RejectedBy {
+        match self {
+            Self::RepeatedLine => RejectedBy::RepeatedLine {
+                format: read.format,
+            },
+            // The rule's own definition: a date field `Malformed` per
+            // `mrz::DateCompleteness`, a character neither a digit nor `<`.
+            Self::DateDigits => RejectedBy::DateDigits {
+                fields: [
+                    ("date_of_birth", read.date_of_birth),
+                    ("date_of_expiry", read.date_of_expiry),
+                ]
+                .into_iter()
+                .filter(|(_, date)| date.completeness() == mrz::DateCompleteness::Malformed)
+                .map(|(field, _)| field)
+                .collect(),
+            },
+        }
     }
 }
 
@@ -1499,52 +1541,30 @@ fn run_check(
     // `MrzReader` makes, so a `SYNTHPASS_MRZ_LINE1_SELECT` arm (#574) reaches this
     // benchmark too. With the arm `off` it is exactly `find_and_parse_with` under
     // `mrz_parse_options()`.
+    let opts = synthpass_die::mrz_parse_options();
     let decoded = match synthpass_die::read_tier1(&text).parsed {
         Ok(decoded) => decoded,
-        // #536: a structural refusal, not "nothing MRZ-shaped was found" —
-        // give it its own miss bucket rather than folding it into
-        // `NoMrzFound`.
-        Err(mrz::MrzError::LeadingFiller { .. }) => {
-            return (
-                Some(MissReason::DocumentNumberLeadingFiller),
-                total_loss(&truth),
-                None,
-                Some(text),
-                false,
-                None,
-                None,
-                retry_stop,
-                retry_variant_id,
-                retry_damaged_recovery,
-                None,
-            )
-        }
-        // #579: a zone the repeated-line rule refused was found, so it is not
-        // "nothing MRZ-shaped": a `checksum_failed` miss that names the rule,
-        // as `provider-bench` classifies it. Its check digits verified, so
-        // there is no failed one to list.
-        Err(refusal @ mrz::MrzError::RepeatedLine { .. }) => {
-            return (
-                Some(MissReason::ChecksumFailed {
+        Err(e) => {
+            // #579: a zone an opt-in rule declined was found, so it is not
+            // "nothing MRZ-shaped": whatever error the parse reports, a
+            // `checksum_failed` miss that names the rule, as `provider-bench`
+            // classifies it. Its check digits verified, so none is listed.
+            let rejected_by = rejected_by(&text, &opts, Err(&e));
+            let reason = if !rejected_by.is_empty() {
+                MissReason::ChecksumFailed {
                     check_states: BTreeMap::new(),
                     specimen_nonconforming: false,
-                    rejected_by: rejected_by(Err(&refusal)),
-                }),
-                total_loss(&truth),
-                None,
-                Some(text),
-                false,
-                None,
-                None,
-                retry_stop,
-                retry_variant_id,
-                retry_damaged_recovery,
-                None,
-            )
-        }
-        Err(e) => {
+                    rejected_by,
+                }
+            } else if matches!(e, mrz::MrzError::LeadingFiller { .. }) {
+                // #536: a structural refusal, not "nothing MRZ-shaped was
+                // found" — its own miss bucket rather than `NoMrzFound`.
+                MissReason::DocumentNumberLeadingFiller
+            } else {
+                MissReason::NoMrzFound(format!("{e:?}"))
+            };
             return (
-                Some(MissReason::NoMrzFound(format!("{e:?}"))),
+                Some(reason),
                 total_loss(&truth),
                 None,
                 Some(text),
@@ -1555,7 +1575,7 @@ fn run_check(
                 retry_variant_id,
                 retry_damaged_recovery,
                 None,
-            )
+            );
         }
     };
     let tier1_damaged_recovery = Some(decoded.damaged_recovery);
@@ -1583,7 +1603,7 @@ fn run_check(
                 // conformant zone, so a checksum failure here is always the
                 // OCR/parse pipeline, never a non-conforming source.
                 specimen_nonconforming: false,
-                rejected_by: rejected_by(Ok(&decoded)),
+                rejected_by: rejected_by(&text, &opts, Ok(&decoded)),
             }),
             fields,
             line1_integrity,
@@ -2135,13 +2155,10 @@ mod tests {
         assert_eq!(check_states["composite"], Some(false));
         assert_eq!(check_states["personal_number"], Some(true));
 
-        // A failed check digit is not a rule's rejection: there is one to name.
-        assert_eq!(rejected_by(Ok(&decoded)), None);
-
         let reason = MissReason::ChecksumFailed {
             check_states: check_states.clone(),
             specimen_nonconforming: false,
-            rejected_by: None,
+            rejected_by: Vec::new(),
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
         assert_eq!(
@@ -2152,7 +2169,7 @@ mod tests {
         let specimen = MissReason::ChecksumFailed {
             check_states,
             specimen_nonconforming: true,
-            rejected_by: None,
+            rejected_by: Vec::new(),
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
     }
@@ -2181,60 +2198,92 @@ mod tests {
         );
     }
 
-    /// The ICAO TD3 specimen with its date of birth's `0` read as `A`. Both
-    /// have value 0 modulo 10, so every check digit still verifies (#579, C6).
+    /// The ICAO TD3 specimen's lines (#579 fixtures).
     const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// Its date of birth's `0` read as `A`. Both have value 0 modulo 10, so
+    /// every check digit still verifies: what the date-digits rule is for.
     const TD3_L2_LETTER_DATE: &str = "L898902C36UTO74A8122F1204159ZE184226B<<<<<10";
 
-    /// #579: under the default options no rule rejects anything, so no miss
-    /// reason moves: a valid read, a read with a letter in a date, and every
-    /// error the default options return are `None`.
+    /// Its line 2 read a second time behind line 1's document code and
+    /// issuer: a wrong physical line that still validates, because line 1
+    /// enters no check digit. What the repeated-line rule is for.
+    fn td3_repeated_zone() -> String {
+        format!("{}{}\n{TD3_L2}", &TD3_L1[..5], &TD3_L2[5..])
+    }
+
+    fn date_digits() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_date_digits(true)
+    }
+
+    fn refusing() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_refuse_repeated_line(true)
+    }
+
+    /// #579: the default options enable neither rule, so nothing is
+    /// attributed and no miss reason moves, whatever the read: a valid read,
+    /// a checksum-invalid one, or an error.
     #[test]
-    fn rejected_by_is_none_under_the_default_options() {
-        let valid = mrz::parse_td3(TD3_L1, "L898902C36UTO7408122F1204159ZE184226B<<<<<10")
-            .expect("the ICAO specimen parses");
-        assert!(valid.valid());
-        assert_eq!(rejected_by(Ok(&valid)), None);
+    fn rejected_by_names_nothing_under_the_default_options() {
+        let defaults = mrz::ParseOptions::default();
+        let text = format!("{TD3_L1}\n{TD3_L2}");
+        let valid = mrz::find_and_parse(&text).expect("the ICAO specimen parses");
+        assert!(rejected_by(&text, &defaults, Ok(&valid)).is_empty());
 
-        let text = format!("{TD3_L1}\n{TD3_L2_LETTER_DATE}");
-        let letter_date = mrz::find_and_parse(&text).expect("the letter date parses");
-        assert!(letter_date.valid(), "letters have check-digit values");
-        assert_eq!(rejected_by(Ok(&letter_date)), None);
+        let tampered = TD3_L2.replacen("740812", "750812", 1);
+        let text = format!("{TD3_L1}\n{tampered}");
+        let invalid = mrz::find_and_parse(&text).expect("still parses");
+        assert!(!invalid.valid());
+        assert!(rejected_by(&text, &defaults, Ok(&invalid)).is_empty());
 
-        for error in [
-            mrz::MrzError::NotFound,
-            mrz::MrzError::LeadingFiller {
-                field: mrz::Field::DocumentNumber,
-                line: 1,
-                position: 0,
-            },
+        for text in [
+            td3_repeated_zone(),
+            format!("{TD3_L1}\n{TD3_L2_LETTER_DATE}"),
         ] {
-            assert_eq!(rejected_by(Err(&error)), None, "{error}");
+            assert!(
+                rejected_by(&text, &defaults, Err(&mrz::MrzError::NotFound)).is_empty(),
+                "no rule is on, so nothing is re-parsed"
+            );
         }
     }
 
-    /// #579: with the date-digits rule on, the letter-date read is returned
-    /// checksum-consistent but not `valid()`, and the miss reason names the
-    /// rule and the field instead of an empty list of failed check digits.
+    /// #579: a valid read was not rejected, and a miss the rule did not cause
+    /// (a checksum failure that stays one with the rule off) names no rule.
+    #[test]
+    fn rejected_by_names_no_rule_that_did_not_cost_the_read() {
+        let text = format!("{TD3_L1}\n{TD3_L2}");
+        let valid = mrz::find_and_parse_with(&text, &refusing()).expect("parses");
+        assert!(valid.valid());
+        assert!(rejected_by(&text, &refusing(), Ok(&valid)).is_empty());
+
+        let tampered = TD3_L2.replacen("740812", "750812", 1);
+        let text = format!("{TD3_L1}\n{tampered}");
+        let invalid = mrz::find_and_parse_with(&text, &date_digits()).expect("still parses");
+        assert!(!invalid.checksum_consistent());
+        assert!(rejected_by(&text, &date_digits(), Ok(&invalid)).is_empty());
+    }
+
+    /// #579: with the date-digits rule on, the letter-date zone is not
+    /// `valid()` though every check digit verifies. The rule is named with the
+    /// field, in place of an empty list of failed check digits.
     #[test]
     fn rejected_by_names_the_date_digits_rule_and_its_field() {
         let text = format!("{TD3_L1}\n{TD3_L2_LETTER_DATE}");
-        let opts = mrz::ParseOptions::default().with_date_digits(true);
-        let read = mrz::find_and_parse_with(&text, &opts).expect("returned, not valid");
+        let read = mrz::find_and_parse_with(&text, &date_digits()).expect("returned, not valid");
         assert!(read.checksum_consistent());
         assert!(!read.valid());
 
-        let rule = rejected_by(Ok(&read));
+        let rules = rejected_by(&text, &date_digits(), Ok(&read));
         assert_eq!(
-            rule,
-            Some(RejectedBy::DateDigits {
+            rules,
+            vec![RejectedBy::DateDigits {
                 fields: vec!["date_of_birth"]
-            })
+            }]
         );
         let reason = MissReason::ChecksumFailed {
             check_states: check_states(&read.checks),
             specimen_nonconforming: false,
-            rejected_by: rule,
+            rejected_by: rules,
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
         assert_eq!(
@@ -2243,47 +2292,87 @@ mod tests {
         );
     }
 
-    /// #579: a repeated-line refusal leaves no read; the miss reason names the
-    /// rule and the lines, and on a non-conforming specimen it does not claim
-    /// a faithful read. The bucket is unchanged.
+    /// #579: the repeated-line rule is named whatever error the parse
+    /// reported. `mrz` returns `RepeatedLine` for this zone alone, but can
+    /// return `NotFound` when a leftover reading looks like visual-zone text;
+    /// the attribution re-parses the text, so both name the rule. On a
+    /// non-conforming specimen the reason no longer claims a faithful read.
     #[test]
-    fn rejected_by_names_a_repeated_line_refusal() {
-        let refusal = mrz::MrzError::RepeatedLine {
-            format: mrz::Format::Td2,
-            first_line: 0,
-            second_line: 1,
-        };
-        let rule = rejected_by(Err(&refusal));
+    fn rejected_by_names_a_repeated_line_refusal_whatever_the_error() {
+        let text = td3_repeated_zone();
+        let refused = mrz::find_and_parse_with(&text, &refusing());
+        assert!(matches!(refused, Err(mrz::MrzError::RepeatedLine { .. })));
+        let expected = vec![RejectedBy::RepeatedLine {
+            format: mrz::Format::Td3,
+        }];
+        assert_eq!(rejected_by(&text, &refusing(), refused.as_ref()), expected);
         assert_eq!(
-            rule,
-            Some(RejectedBy::RepeatedLine {
-                format: mrz::Format::Td2,
-                first_line: 0,
-                second_line: 1,
-            })
+            rejected_by(&text, &refusing(), Err(&mrz::MrzError::NotFound)),
+            expected
         );
 
         let reason = MissReason::ChecksumFailed {
             check_states: BTreeMap::new(),
             specimen_nonconforming: false,
-            rejected_by: rule.clone(),
+            rejected_by: expected.clone(),
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
         assert_eq!(
             reason.to_string(),
-            "rejected by the repeated-line rule: line 1 repeats line 0 of the Td2 zone"
+            "rejected by the repeated-line rule: the Td3 zone holds a line twice"
         );
-
         let specimen = MissReason::ChecksumFailed {
             check_states: BTreeMap::new(),
             specimen_nonconforming: true,
-            rejected_by: rule,
+            rejected_by: expected,
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
         assert_eq!(
             specimen.to_string(),
-            "rejected by the repeated-line rule: line 1 repeats line 0 of the Td2 zone \
+            "rejected by the repeated-line rule: the Td3 zone holds a line twice \
              (printed zone is non-conforming)"
+        );
+    }
+
+    /// #579: a checksum-failed read left after a refusal keeps its failed
+    /// digits in the reason, followed by the rule that declined the valid zone.
+    #[test]
+    fn a_refusal_behind_a_checksum_failed_read_names_both() {
+        let reason = MissReason::ChecksumFailed {
+            check_states: BTreeMap::from([("document_number", Some(false))]),
+            specimen_nonconforming: false,
+            rejected_by: vec![RejectedBy::RepeatedLine {
+                format: mrz::Format::Td2,
+            }],
+        };
+        assert_eq!(
+            reason.to_string(),
+            "checksum invalid: document_number; \
+             rejected by the repeated-line rule: the Td2 zone holds a line twice"
+        );
+    }
+
+    /// #579: with both rules on, a zone each rule declines on its own is
+    /// restored only with both off, so both are named.
+    #[test]
+    fn rules_that_reject_a_read_together_are_both_named() {
+        // The repeated zone, with a letter in line 2's date of birth: the date
+        // rule declines it as well as the repeated-line rule.
+        let line2 = TD3_L2_LETTER_DATE;
+        let text = format!("{}{}\n{line2}", &TD3_L1[..5], &line2[5..]);
+        let both = refusing().with_date_digits(true);
+        let parsed = mrz::find_and_parse_with(&text, &both);
+        assert!(!parsed.as_ref().is_ok_and(mrz::MrzData::valid));
+        assert_eq!(
+            rejected_by(&text, &both, parsed.as_ref()),
+            vec![
+                RejectedBy::RepeatedLine {
+                    format: mrz::Format::Td3
+                },
+                RejectedBy::DateDigits {
+                    fields: vec!["date_of_birth"]
+                },
+            ]
         );
     }
 
