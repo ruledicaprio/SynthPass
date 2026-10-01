@@ -1,0 +1,1 @@
+- **Benchmark parse parity.** The real-specimen benchmark uses the effective `mrz` reader options for the Tier-2 hint, dump zone, check states on both `ChecksumFailed` rungs and `DocumentDetail`, and `tier1_damaged_recovery`. Under a non-default arm, all five follow the reader's Tier-1 read; with every arm at its default, both parses agree on all five.
