@@ -48,6 +48,7 @@
 //! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
 //! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
 //! | Cells an image shows as covered | [`apply_occlusion`] with a [`CellMask`]: it withholds fields no check digit covers, and refuses a covered check-digit cell |
+//! | A cell to read without its neighbours | [`position_class`]: which characters the layout allows there, a [`PositionClass`] |
 //!
 //! A valid composite check digit establishes checksum consistency, not
 //! byte-identity. It does not prove the document is in date — see
@@ -94,6 +95,8 @@
 //! - `parser` — the five fixed-layout parsers and the free-text scanner
 //! - `occlusion` — [`apply_occlusion`], [`CellMask`], [`Occluded`], [`ZoneField`]
 //!   (withholds covered, unverifiable fields from a parsed zone)
+//! - `position` — [`position_class`], [`PositionClass`] (which characters each
+//!   cell of a layout allows)
 //! - `line1_select` — the shadow line-1 selector, [`select_line1`] (opt-in; measured once, see its docs)
 //! - `emit` — the five emitters and Part 3 §4.6 name encoding
 //! - `checksum` — check-digit math and OCR line normalization
@@ -134,6 +137,7 @@ mod line1_select;
 mod mrz_date;
 mod occlusion;
 mod parser;
+mod position;
 mod rank;
 mod repair;
 mod sex;
@@ -160,6 +164,7 @@ pub use parser::{
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
     parse_td3_with,
 };
+pub use position::{position_class, PositionClass};
 pub use repair::{
     solve_class_sweep, solve_field, solve_substitution, substitution_candidates, width_candidates,
     FieldKind, Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
