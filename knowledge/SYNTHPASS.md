@@ -240,11 +240,14 @@ scheduled run, drew the same window, and added 200 duplicate rows. They were rem
 commit on `bench-data` (1810 to 1610 rows), which is why the row count drops once in that branch's
 history.
 
-This is data collection only: nothing consumes these files yet. Because `synthpass-gen`'s output is
+One reader consumes these files: the nightly advisory, `tools/bench_nightly_advisory.py`. It runs in the
+`publish` job after the rows are appended, judges the fixed slice seed by seed against the last night
+with the same generator fingerprint and the fresh slice in weekly pools, and appends one aggregate
+line per night to `advisory.jsonl` on the same branch (see
+[the nightly advisory](benchmarks/README.md#the-nightly-advisory)). Because `synthpass-gen`'s output is
 fully determined by `seed`, a row plus the commit is enough to regenerate the exact document and its
-degrade parameters later. The intent is a corpus of (parameters to outcome) examples ahead of any
-future auto-tuning or RL-style work on the generator's degrade settings, and, later, an advisory
-that reads the fixed slice seed by seed; neither exists yet.
+degrade parameters later. The wider intent is a corpus of (parameters to outcome) examples ahead of
+any future auto-tuning or RL-style work on the generator's degrade settings; that does not exist yet.
 
 **Retention.** The three files grow by about 1,500 rows a night with no expiry, and nothing prunes
 them. A consumer will want to decide on a window before that matters. Fetch the branch with

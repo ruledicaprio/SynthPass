@@ -1,4 +1,4 @@
-# Glyph atlas, per document code: the filler after `P`, `V` and `A` is misread at the clean render, after `I` and `C` it is read, and every lettered code reads 30 / 30
+# Glyph atlas, per document code: the filler after `P` and `V` is misread at the clean render; after `A`, it reads 22 / 30; after `I` and `C`, 30 / 30
 
 **Date:** 2026-10-01 · **MAIN:** `66e22e2` (the head of [#643](https://github.com/ruledicaprio/SynthPass/pull/643), `origin/main` `048695e` plus the `--format` and `--code` flags; every summary's header says `dirty: false`) · **DATA:** none (generated renders, seeds 0-29 of each format; the vendored font `crates/synthpass-gen/fonts/ocr-b.ttf`, sha256 `367d876cca94`) · **Evidence:** Observed on synthetic renders, vendored font, oracle crop (37 `glyph_atlas` runs, one per code per stage, counts from their `summary.json`) plus Derived (the contiguous-step readings below, computed over those rows) · **Status:** current
 
@@ -46,11 +46,10 @@ interval of 0.886-1.000.
   repeated stage 1's clean-render counts for `V<`, `A<`, `I<` and `C<` exactly.
 - **Where the filler is misread at the clean render, it is misread on every axis.** For `V<` and `A<` cell 1 is
   below 27 of 30 at the first step of all six axes, so no degradation level is reached (Observed).
-- **Where cell 1 is read, it ends before cell 0 does on resolution, rotation and blur.** For `I<` and `C<` cell 1
-  holds to 7 px per cell, rotation 0.5 degrees and blur sigma 2.0 (the last steps read in at least 27 of 30, going
-  down without a failing step); their cell 0 holds to 9 px, 1.5 degrees and sigma 3 to 4. `I<` cell 1 is also
-  the only cell that fails on JPEG (last good quality 10, fails at 5) and on noise (last good sigma 16, fails at
-  24) (Derived).
+- **Where the filler is read (`I<`, `C<`), it ends before cell 0 on rotation (0.5 against 1.5 degrees) and blur
+  (sigma 2.0 against 3 to 4); on resolution cell 0 ends first (9 px against 7).** These are the last steps read
+  in at least 27 of 30, going down without a failing step. `I<` cell 1 is the only cell read at the clean render
+  that fails on JPEG (last good quality 10, fails at 5) and noise (last good sigma 16, fails at 24) (Derived).
 - **JPEG, noise and contrast never ended a read of a cell that is read at the clean render**, except for `I<`
   cell 1 above (Derived).
 
