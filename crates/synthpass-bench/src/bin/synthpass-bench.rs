@@ -2041,10 +2041,12 @@ mod tests {
             Some(MissReason::ChecksumFailed {
                 check_states: Default::default(),
                 specimen_nonconforming: false,
+                rejected_by: None,
             }),
             Some(MissReason::ChecksumFailed {
                 check_states: Default::default(),
                 specimen_nonconforming: true,
+                rejected_by: None,
             }),
             Some(MissReason::DocumentNumberMismatch {
                 got: String::new(),
