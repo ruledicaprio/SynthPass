@@ -27,6 +27,10 @@ real capture device's exact noise transfer function, lens distortion, JPEG DCT q
 tables, or paper/ink physics. "Looks meaningfully different and reproducible" is the bar, not
 photorealism.
 
+## Covered MRZ cells (`--redact`)
+
+`synthpass generate --redact STYLE:LINE:FIRST-LAST` covers one inclusive, zero-based span of MRZ cells. The supported styles are `fill-black`, `fill-white`, `fill-grey`, `blur` and `graded-blur`. Cell `k` starts at the MRZ line rectangle's x coordinate plus `k × MRZ_CELL_WIDTH` (22 px); redaction changes pixels only in the selected cell boxes and is drawn before the synthetic watermark. This option accepts the `clean` profile only because capture transforms can move those boxes. A redacted sidecar adds an `occluded` entry with line, first, last and kind (`fill` or `blur`); the printed `mrz_lines` remain unchanged.
+
 ## Determinism
 
 `apply`/`apply_profile` seed a single `ChaCha8Rng` from the caller's `seed` argument and thread it

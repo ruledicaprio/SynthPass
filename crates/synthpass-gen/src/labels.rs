@@ -56,6 +56,33 @@ pub struct Labels {
     /// `"I"`/`"P"`) cannot: TD1 and TD2 both correctly emit `"I"`. See
     /// [`crate::model::DocumentType::document_code`].
     pub mrz_format: DocumentType,
+    /// MRZ cells covered in the rendered image; the printed `mrz_lines` stay unchanged.
+    pub occluded: Vec<OccludedSpan>,
+}
+
+/// An inclusive span of MRZ cells hidden by a deterministic redaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccludedKind {
+    Fill,
+    Blur,
+}
+
+impl OccludedKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fill => "fill",
+            Self::Blur => "blur",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OccludedSpan {
+    pub line: usize,
+    pub first: usize,
+    pub last: usize,
+    /// `fill` or `blur` (including graded blur).
+    pub kind: OccludedKind,
 }
 
 impl Labels {
@@ -109,6 +136,7 @@ pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
         mrz_lines: mrz_line_strings,
         mrz_rect,
         mrz_format: doc_type,
+        occluded: Vec::new(),
     }
 }
 
