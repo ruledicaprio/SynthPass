@@ -6,13 +6,12 @@
 //! points. The literals below include independent hand-computed values and an
 //! invalid-character rejection case.
 //!
-//! **Why this is a test and not an example.** It was adapted from a
-//! standalone audit tool proposed for `examples/`, which carried the same
-//! differential idea in a `#[cfg(test)]` module. That placement does not work:
-//! `cargo test --workspace`, which is what CI runs, does not execute test
-//! modules inside `examples/` — only an explicit `cargo test --example <name>`
-//! does, and nothing runs that. The oracle would have read as coverage while
-//! never executing.
+//! **Why these checks are integration tests.** Each fixed vector pins a
+//! hand-computed public result, while the invalid-character case pins the
+//! exact error payload. `cargo test --workspace` runs these contracts; examples
+//! are not part of the default workspace test suite.
+
+use mrz::MrzError;
 
 /// `(field, expected)` — known answers computed independently by hand.
 const VECTORS: &[(&str, u32)] = &[
@@ -36,5 +35,12 @@ fn the_crate_matches_the_hand_computed_vectors_and_rejects_invalid_characters() 
             "{field}: mrz::check_digit disagrees with the hand-computed answer"
         );
     }
-    assert!(mrz::check_digit("AB?C").is_err());
+    assert_eq!(
+        mrz::check_digit("AB?C"),
+        Err(MrzError::BadCharacter {
+            character: '?',
+            line: None,
+            position: 2
+        }),
+    );
 }
