@@ -225,13 +225,14 @@ pub struct Tier1Read {
 /// This is the one place a benchmark and the product read Tier 1, so every arm
 /// reads the same way. [`MrzReader`], the pipeline's v1 record
 /// (`PipelineResult.mrz`), the synthetic benchmark's Tier-1 read and the
-/// real-specimen benchmark's dump zone all call it. The pipeline's Tier-2 hint
-/// is built from that same read, but it carries check-digit fields only, which
-/// the selector never changes. **Not routed through it, on purpose:** the OCR
-/// retry loop's own parse (so its stopping rule and "no extra OCR" hold), the
-/// real-specimen benchmark's own hint parse (ADR-0024 step 0b routes it), the
-/// prep `mrz_found` parses and the printed-zone validity parse. Those keep
-/// their own calls.
+/// real-specimen benchmark's dump zone, check states and hint (ADR-0024 step
+/// 0b) all call it. The pipeline's Tier-2 hint is built from that same read,
+/// but it carries check-digit fields only, which the selector never changes.
+/// **Not routed through it, on purpose:** the OCR retry loop's own parse (so
+/// its stopping rule and "no extra OCR" hold), the benchmarks' prep
+/// `mrz_found` parses (the arms' parse options without the selector, which
+/// never turns a read into a refusal or back) and the printed-zone validity
+/// parse. Those keep their own calls.
 #[must_use]
 pub fn read_tier1(text: &str) -> Tier1Read {
     read_tier1_with(
