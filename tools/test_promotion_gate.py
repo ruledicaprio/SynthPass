@@ -44,6 +44,7 @@ def header(run_id, started_ms, chargrid="off", **over):
         "ocr_arms": {"texture": "on", "chargrid": chargrid},
         "retry_budget": {"max_passes": 14, "max_seconds": 520}, "mrz_arms": {"class_sweep": "off"},
         "pivot_yy": 26, "model_paths": {"detection": SENTINEL, "recognition": SENTINEL},
+        "model_sha256": {"detection": "1" * 64, "recognition": "2" * 64},
         "replay_of": None, "env": {"RTEN_NUM_THREADS": "4"},
     }
     head.update(over)
@@ -184,15 +185,85 @@ class ComparabilityTests(GateCase):
         result = self.run_standard(base_head=absent[0], cand_heads=absent[1:])
         self.assertRefused(result, "is not recorded")
 
-    def test_the_models_must_match_and_the_report_says_they_were_compared_by_path(self):
-        other = header(CAND_1, BASE_START_MS + 60_000, "on", model_paths={"detection": "x", "recognition": SENTINEL})
-        result = self.run_standard(cand_heads=[other, None])
-        self.assertRefused(result, "model_paths")
-        self.assertNotIn("detection", result[1], "a model path is never printed")
+    def test_a_changed_model_hash_refuses_naming_the_key_and_printing_no_hash(self):
+        for key in ("detection", "recognition"):
+            with self.subTest(key=key):
+                self.setUp()
+                hashes = {"detection": "1" * 64, "recognition": "2" * 64, key: "9" * 64}
+                other = header(CAND_1, BASE_START_MS + 60_000, "on", model_sha256=hashes)
+                result = self.run_standard(cand_heads=[other, None])
+                self.assertRefused(result, f"model_sha256 differs: {key}:")
+                self.assertNotIn("9" * 12, result[1], "a hash is never printed")
+                self.assertNotIn("1" * 12, result[1])
+                other_key = "recognition" if key == "detection" else "detection"
+                self.assertNotIn(f"differs: {other_key}", result[1], "only the key that differs is named")
+
+    def test_paths_that_differ_with_equal_hashes_are_comparable(self):
+        other = header(CAND_1, BASE_START_MS + 60_000, "on",
+                       model_paths={"detection": SENTINEL + "-elsewhere", "recognition": SENTINEL + "-elsewhere"})
+        code, out, err = self.run_standard(cand_heads=[other, None])
+        self.assertEqual(code, 0, out + err)
+        self.assertNotIn("model_paths", out)
+        self.assertNotIn(SENTINEL, out + err)
+
+    def test_a_live_run_without_the_hashes_refuses_as_not_recorded(self):
+        # Written before the key existed: no `model_sha256` at all, on every run so they are equal.
+        old = []
+        for run_id, started, chargrid in ((BASE, BASE_START_MS, "off"), (CAND_1, BASE_START_MS + 60_000, "on"),
+                                          (CAND_2, BASE_START_MS + 120_000, "on")):
+            head = header(run_id, started, chargrid)
+            del head["model_sha256"]
+            old.append(head)
+        result = self.run_standard(base_head=old[0], cand_heads=old[1:])
+        self.assertRefused(result, "model_sha256 not recorded on base", "model_sha256 not recorded on candidate 1")
+
+    def test_a_malformed_model_hash_refuses_as_not_recorded(self):
+        bad = {
+            "not 64 characters": {"detection": "1" * 63, "recognition": "2" * 64},
+            "uppercase": {"detection": "A" * 64, "recognition": "2" * 64},
+            "not hex": {"detection": "g" * 64, "recognition": "2" * 64},
+            "a key missing": {"detection": "1" * 64},
+            "a null key": {"detection": "1" * 64, "recognition": None},
+            "not a string": {"detection": 5, "recognition": "2" * 64},
+            "an empty object": {},
+            "a string": "1" * 64,
+            "null on a live run": None,
+        }
+        for label, value in bad.items():
+            with self.subTest(label=label):
+                self.setUp()
+                broken = [header(run_id, started, chargrid, model_sha256=value)
+                          for run_id, started, chargrid in ((BASE, BASE_START_MS, "off"),
+                                                            (CAND_1, BASE_START_MS + 60_000, "on"),
+                                                            (CAND_2, BASE_START_MS + 120_000, "on"))]
+                result = self.run_standard(base_head=broken[0], cand_heads=broken[1:])
+                self.assertRefused(result, "model_sha256 not recorded on")
+
+    def test_two_replays_of_one_capture_are_comparable_and_say_no_model_was_loaded(self):
+        capture = {"run_manifest": "provider-bench-ocr-run-aa.json", "sha256": "1" * 64}
+        self.write_declaration(declaration(treatment={"key": "mrz_arms.class_sweep", "base": "off", "candidate": "on"}))
+        heads = [header(run_id, started, "off", model_sha256=None, replay_of=capture, retry_budget=None,
+                        model_paths={"detection": "(replay: no OCR model loaded)", "recognition": "(replay: no OCR model loaded)"},
+                        mrz_arms={"class_sweep": sweep})
+                 for run_id, started, sweep in ((BASE, BASE_START_MS, "off"), (CAND_1, BASE_START_MS + 60_000, "on"),
+                                                (CAND_2, BASE_START_MS + 120_000, "on"))]
+        base, cands = self.standard(base_head=heads[0], cand_heads=heads[1:])
+        code, out, err = self.check(base, cands)
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("models: none loaded (replays of one capture)", out)
+        self.assertNotIn("compared by", out)
+
+    def test_a_replay_against_a_live_run_is_not_comparable(self):
+        capture = {"run_manifest": "provider-bench-ocr-run-aa.json", "sha256": "1" * 64}
+        replay = header(CAND_1, BASE_START_MS + 60_000, "on", model_sha256=None, replay_of=capture)
+        self.assertRefused(self.run_standard(cand_heads=[replay, None]), "replay_of", "model_sha256 differs")
+
+    def test_a_live_report_says_the_models_were_compared_by_sha256(self):
         code, out, _ = self.run_standard()
         self.assertEqual(code, 0)
-        self.assertIn("models: compared by path", out)
-        self.assertIn("no hashes", out)
+        self.assertIn("models: compared by SHA-256", out)
+        self.assertNotIn("by path", out)
+        self.assertNotIn("no hashes", out)
 
     def test_the_scope_must_match(self):
         scope = dict(header(BASE, 0)["scope"], count=2)
@@ -763,7 +834,8 @@ class DisclosureTests(GateCase):
         # refused: models, argv-bearing headers, a bad declaration, a missing run
         self.setUp()
         self.write_declaration()
-        other = header(CAND_1, BASE_START_MS + 60_000, "on", model_paths={"detection": SENTINEL + "-2"})
+        other = header(CAND_1, BASE_START_MS + 60_000, "on", model_paths={"detection": SENTINEL + "-2"},
+                       model_sha256={"detection": "9" * 64, "recognition": "2" * 64})
         base, cands = self.standard(cand_heads=[other, None])
         codes.add(self.assertQuiet(self.check(base, cands)))
         self.write_declaration(raw="[" + SENTINEL)

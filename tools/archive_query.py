@@ -18,8 +18,8 @@ reads `private/`, the private track's text-free records (ADR-0024 Decision 7).
   commit and dirty flag, scope, record count, providers; the `*.partial` files
   are counted on one line.
 * `diff A B`: the header arms that differ (`ocr_arms`, `mrz_arms`,
-  `retry_budget`, `pivot_yy`, `env`, the commit, the binary's SHA-256, and the
-  corpus scope), then the documents. A real specimen joins on `source_sha256`
+  `retry_budget`, `pivot_yy`, `env`, the commit, the binary's SHA-256, each OCR
+  model file's SHA-256 as `model_sha256.<key>` prefixes, and the corpus scope), then the documents. A real specimen joins on `source_sha256`
   when both records have it (a rename keeps the key), else on `asset_id`, else
   on `name`; a synthetic seed joins on (format, profile, seed). It prints the
   documents only in A and only in B, the outcome changes, the per-field changes
@@ -366,6 +366,11 @@ def _header_value(header: dict, field: str) -> object:
     return header.get(field)
 
 
+def _prefix(value: object) -> str:
+    """A hash as its first 12 characters, or `null` when it is not recorded."""
+    return str(value)[:12] if isinstance(value, str) else "null"
+
+
 def header_differences(a: dict, b: dict) -> list[str]:
     """One line per header arm or fact that differs. Dict-valued arms are compared key by key. Values
     are the enumerated settings the header records (arms, allowlisted environment settings),
@@ -401,6 +406,12 @@ def header_differences(a: dict, b: dict) -> list[str]:
     for field in ("corpus_manifest_sha256", "samples_data_sha"):
         if a.get(field) != b.get(field):
             lines.append(f"  {field}: {str(a.get(field))[:12]} -> {str(b.get(field))[:12]}")
+    # The OCR model files' SHA-256, key by key, as prefixes. A header written before the key
+    # existed, and a replay (which loads no model), both read as null.
+    old_models, new_models = (h.get("model_sha256") if isinstance(h.get("model_sha256"), dict) else {} for h in (a, b))
+    for key in sorted(set(old_models) | set(new_models)):
+        if old_models.get(key) != new_models.get(key):
+            lines.append(f"  model_sha256.{key}: {_prefix(old_models.get(key))} -> {_prefix(new_models.get(key))}")
     return lines
 
 
