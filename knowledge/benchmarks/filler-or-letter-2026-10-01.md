@@ -3,9 +3,10 @@
 **Date:** 2026-10-01 · **MAIN:** `048695e` (the base of all three OCR runs; the prototype was uncommitted at run time, see Evidence and limits) · **DATA:** `396b22f` · **Evidence:** Observed (three local release OCR runs of the 45 name-scorable real specimens, one per chargrid arm, with the prototype run on their pixels; one synthetic sweep and one tuning run, both on generated TD3 renders) plus Observed by eye (grid (a) on all 32 Tier-1 name lines with pixels) plus Derived (per-cell and per-document comparison with the reviewed fixtures, and the ceiling) · **Status:** current
 
 **2026-10-01.** This is the go/no-go note that
-[#575](https://github.com/ruledicaprio/SynthPass/issues/575) item C asks for. The prototype is
-the bench-only example
-[`filler_cells`](../../crates/synthpass-bench/examples/filler_cells.rs). It classes each name cell
+[#575](https://github.com/ruledicaprio/SynthPass/issues/575) item C asks for. The prototype was
+a bench-only example, `filler_cells`. After this no-go the owner chose not to keep it in the tree,
+so its source lives only in the history of
+[PR #650](https://github.com/ruledicaprio/SynthPass/pull/650) (commit `4c88d58`). It classes each name cell
 of a Tier-1 hit as `filler`, `letter`, `uncertain` or `occluded` from that cell's pixels, on two
 grids kept apart, and compares the class with the reviewed fixture's zone, never with OCR. It
 then applies the classes to the read and scores the names. Nothing is wired into the product, no
@@ -50,7 +51,7 @@ here.
 
 **Grid (a), the hand-verified grid.** It is fitted from the line's own ink: the format's cell
 count, the first and last inked columns, and the pitch and origin whose cell boundaries cross the
-least ink, each boundary charged the ink within 20% of a pitch of it (`ink_grid`). The fixture
+least ink, each boundary charged the ink within 20% of a pitch of it (the prototype's `ink_grid`). The fixture
 supplies nothing but the cell count, which the format already fixes. Each line was drawn with
 its grid and with the fixture's filler cells marked, in two halves at about 2x, and checked by
 eye. **On all 32 lines every boundary lies in the gap between two glyphs, and every marked filler
