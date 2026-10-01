@@ -81,7 +81,7 @@ counted over all 42 lines, in their own column. China 2012 is scored separately,
 
 | Trial | Component | What changed | Right-shifted fixed, of 8 | Good lines moved away, of 33 | Gate rejections |
 | --- | --- | --- | ---: | ---: | --- |
-| T0 | — | none: the production fit, replayed | 0 | 0 | none; replay equals the capture on all 43 lines, cells and grid |
+| T0 | — | none: the production fit, replayed | 0 | 0 | none; replay equals the capture on all 42 lines, cells and grid |
 | A1 | anchor | the final origin replaced by `grid_origin_from_ink` at the fitted pitch, over the line box ± one pitch; one `align` | 0 | 3 | 3 × `prefix_changed` |
 | A2 | anchor | each glyph's right edge minus the seed pitch, in place of its left edge | 4 | 31 | 2 × `prefix_changed` |
 | A3 | anchor | each glyph's centre minus half the seed pitch | 4 | 31 | 1 × `ink_mismatch`, 2 × `prefix_changed` |
