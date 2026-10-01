@@ -1,15 +1,9 @@
 //! The typed date and sex values of ADR-0019, and the text contract of
 //! ADR-0020: `Display`, `FromStr` (and serde, through them) and the zone agree.
 //!
-//! Two properties here carry the migration, not just the types:
-//!
-//! - `MrzDate::from_field(f).to_string()` equals `expand_date_with_pivot(f)`
-//!   for every six-character charset field, both roles and every pivot. That is
-//!   the proof that swapping `MrzData`'s `String` dates for `MrzDate` leaves
-//!   every date's text byte-identical.
-//! - `from_str(to_string(x)) == x` for every value the parser can produce. That
-//!   is what makes the text form lossless, so a consumer reading JSON loses
-//!   nothing the type knows.
+//! Literal Display answers pin every date variant and the year-pivot boundary.
+//! The property test round-trips each value `MrzDate::from_field` can produce;
+//! the FromStr and serde tests guard the public text contract.
 
 use mrz::{Date, DateCompleteness, DateRole, MrzDate, RawDateField, Sex};
 use proptest::prelude::*;
@@ -67,6 +61,11 @@ fn display_uses_literal_dates_for_the_selected_pivot() {
         ("740812", DateRole::Birth, 80, "2074-08-12"),
         ("260101", DateRole::Birth, 26, "2026-01-01"),
         ("940623", DateRole::Expiry, 26, "2094-06-23"),
+        ("000000", DateRole::Birth, 26, "2000-00-00"),
+        ("110229", DateRole::Birth, 26, "2011-02-29"),
+        ("74<<12", DateRole::Birth, 26, "74<<12"),
+        ("<<<<<<", DateRole::Birth, 26, "<<<<<<"),
+        ("R38473", DateRole::Birth, 26, "R38473"),
     ] {
         let date = MrzDate::from_field(field(raw), role, pivot);
         assert_eq!(date.to_string(), expected, "raw={raw}, pivot={pivot}");
