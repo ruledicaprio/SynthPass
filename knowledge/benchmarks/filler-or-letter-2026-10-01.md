@@ -266,7 +266,9 @@ where 7 and 6 px pass (Observed; the run does not say why).
 ## Evidence and limits
 
 - **The runs.** All three OCR runs ran from one binary built at `048695e` plus the uncommitted
-  example. The `real` subcommand was not edited after that build. The
+  example. The `real` subcommand was not edited after that build. The branch was then rebased
+  onto `b233bef`. The two commits in between change `provider-bench`'s own hint and dump parse
+  (#634) and a `tools/` script (#641). Neither touches OCR or `read_tier1`, which these runs use. The
   classifier and the analysis were revised after the OCR runs, which is possible because the runs
   keep the accepted pass's pixels, and every number here comes from the committed code. The sweep
   and the tuning set are deterministic, and a second sweep run reproduced `sweep.json`
