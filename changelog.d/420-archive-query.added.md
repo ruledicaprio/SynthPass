@@ -7,4 +7,5 @@
   differ with their cell positions, and the `truth` mismatch deltas, and `cell RUN --line L --col C`
   counts the classes at one cell of the recovered zone. It prints asset IDs, field names, counts,
   positions and classes, and never OCR text, a zone line, a field value or a `miss_reason` text;
-  `--chars` is the one opt-in and refuses the `local/` track (ADR-0024, #420).
+  `--chars` is the one opt-in and refuses any run that is not public: a file in `local/`, or any
+  record whose `track` is not `public`, `covers` or `synthetic` (ADR-0024, #420).

@@ -171,6 +171,16 @@ class RunsTests(ArchiveCase):
         self.assertNotIn(RUN_C[:12], out, "a .partial file is not listed")
         self.assertIn("2 run(s), 3 record(s); 1 .partial file(s) skipped", lines[2])
 
+    def test_runs_counts_only_the_doc_records(self):
+        path = self.write(header(RUN_A), [doc(RUN_A, "passports/a.png", SHA_1), {"kind": "note", "run_id": RUN_A}, doc(RUN_A, "passports/b.png", SHA_2)])
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("\n")
+        code, out, _ = self.cli("runs")
+        self.assertIn("records=2", out)
+        self.assertIn("1 run(s), 2 record(s)", out)
+        # `diff` and `cell` read the same two records.
+        self.assertEqual(len(aq.read_run(path).records), 2)
+
     def test_a_dirty_commit_is_flagged(self):
         self.write(header(RUN_A, working_tree_dirty=True), [])
         self.assertIn("0123456+dirty", self.cli("runs")[1])
@@ -368,6 +378,24 @@ class DiffTests(ArchiveCase):
         code, out, _ = self.two_runs([], [])
         self.assertIn("header: identical", out)
 
+    def test_the_source_and_the_machine_label_are_named_when_they_differ(self):
+        head_b = header(
+            RUN_B,
+            source="ci",
+            machine={"label": "linux-xeon-8272CL", "os": "linux", "arch": "x86_64", "cpus": 4},
+        )
+        code, out, _ = self.two_runs([], [], header(RUN_A), head_b)
+        self.assertIn("header: differs", out)
+        self.assertIn("  source: local -> ci", out)
+        self.assertIn("  machine.label: win11-i5-4570 -> linux-xeon-8272CL", out)
+        self.assertNotIn("machine.os", out, "only the label is named: it is the hardware, never a host")
+        # The same source and label on both sides: nothing to name.
+        self.write(header(RUN_C), [])
+        self.write(header("d" * 64), [])
+        code, out, _ = self.cli("diff", RUN_C[:8], "d" * 8)
+        self.assertIn("header: identical", out)
+        self.assertNotIn("source:", out)
+
     def test_a_replays_null_budget_is_a_difference(self):
         code, out, _ = self.two_runs([], [], header(RUN_A), header(RUN_B, retry_budget=None))
         self.assertIn("retry_budget:", out)
@@ -523,10 +551,55 @@ class CellTests(ArchiveCase):
         code, out, err = self.cli("cell", str(elsewhere), "--line", "1", "--col", "1", "--chars", "--track", "local")
         self.assertEqual(code, 2)
         self.assertEqual(out, "")
+        # The flag stands on its own too: a file whose records say `public`, outside `local/`,
+        # that the caller names with `--track local`.
+        named = self.write(header("e" * 64), [doc("e" * 64, "passports/e.png", SHA_2, lines=["P<UTO"])], track="named")
+        code, out, err = self.cli("cell", str(named), "--line", "1", "--col", "1", "--chars", "--track", "local")
+        self.assertEqual((code, out), (2, ""))
+        # The directory check stands on its own: records that say `public` in a file that sits in
+        # `local/` are still refused.
+        sitting = self.write(header(RUN_C), [doc(RUN_C, "passports/c.png", SHA_3, lines=["P<UTO"])], track="local")
+        code, out, err = self.cli("cell", str(sitting), "--line", "1", "--col", "1", "--chars")
+        self.assertEqual((code, out), (2, ""))
         # Without --chars the local track is readable: classes, no characters.
         code, out, _ = self.cli("cell", RUN_A[:8], "--line", "1", "--col", "1", "--track", "local")
         self.assertEqual(code, 0)
         self.assertIn("letter 1", out)
+
+    def test_chars_refuses_a_run_whose_records_are_not_all_on_an_allowed_track(self):
+        # A local run file copied out of `local/`: the directory says nothing, the records do.
+        copied = self.write(header(RUN_A), [doc(RUN_A, "local/a.png", SHA_1, lines=["P<UTO"], track="local")], track="copied")
+        code, out, err = self.cli("cell", str(copied), "--line", "1", "--col", "1", "--chars")
+        self.assertEqual(code, 2)
+        self.assertEqual(out, "")
+        self.assertIn("only allowed on the public track", err)
+        # Without --chars the same file is readable: classes only, no character.
+        code, out, _ = self.cli("cell", str(copied), "--line", "1", "--col", "1")
+        self.assertEqual(code, 0)
+        self.assertIn("letter 1", out)
+        self.assertNotIn("'P'", out)
+
+    def test_chars_is_an_allowlist_of_tracks(self):
+        for track in ("public", "covers", "synthetic"):
+            path = self.write(header(RUN_A), [doc(RUN_A, "passports/a.png", SHA_1, lines=["P<UTO"], track=track)], track=f"ok-{track}")
+            code, out, err = self.cli("cell", str(path), "--line", "1", "--col", "1", "--chars")
+            self.assertEqual(code, 0, f"{track}: {err}")
+            self.assertIn("'P' 1", out)
+        refused = ["local", "private", "", "Public", 7, None]
+        for n, track in enumerate(refused):
+            record = doc(RUN_A, "passports/a.png", SHA_1, lines=["P<UTO"], track=track)
+            path = self.write(header(RUN_A), [record], track=f"bad-{n}")
+            code, out, _ = self.cli("cell", str(path), "--line", "1", "--col", "1", "--chars")
+            self.assertEqual((code, out), (2, ""), f"track {track!r} must be refused")
+        # A missing `track` key is unknown too.
+        record = doc(RUN_A, "passports/a.png", SHA_1, lines=["P<UTO"])
+        del record["track"]
+        path = self.write(header(RUN_A), [record], track="bad-missing")
+        self.assertEqual(self.cli("cell", str(path), "--line", "1", "--col", "1", "--chars")[0], 2)
+        # One record outside the list is enough, whatever the others say.
+        mixed = [doc(RUN_A, "passports/a.png", SHA_1, lines=["P<UTO"]), doc(RUN_A, "local/b.png", SHA_2, lines=["P<UTO"], track="local")]
+        path = self.write(header(RUN_A), mixed, track="bad-mixed")
+        self.assertEqual(self.cli("cell", str(path), "--line", "1", "--col", "1", "--chars")[0], 2)
 
     def test_a_line_or_column_below_1_is_a_usage_error(self):
         self.run_with_zones([["P<UTO"]])

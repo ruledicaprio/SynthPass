@@ -31,13 +31,15 @@ touches a private track (there is none).
   absent) at one cell of the recovered zone across a run's records. Lines and
   columns count from 1, so `--line 1 --col 1` is the first character of the
   first MRZ line, the position ADR-0021 asked about. `--chars` reports the
-  characters' own counts instead and is refused on the `local/` track.
+  characters' own counts instead; it is refused unless the run is public: the
+  file must not sit in `local/`, and every record's own `track` must be `public`,
+  `covers` or `synthetic` (a missing or unknown `track` refuses).
 
 **Disclosure.** The output holds asset ids, field names, enumerated values,
 counts, cell positions and classes. It never prints OCR text, a zone line, a
 field value, `argv`, `model_paths` or a `miss_reason` text (only its kind).
-`--chars` is the one opt-in, and it prints characters only from the `public/`
-track. An error line names a file and a line number, never a line's content.
+`--chars` is the one opt-in, and it prints characters only from a public run
+(an allowlist of record tracks, so a local run copied out of `local/` still refuses). An error line names a file and a line number, never a line's content.
 
 **Root**, as the benchmark binaries resolve it: `--root DIR`, else
 `SYNTHPASS_BENCH_ARCHIVE` as a directory (`off` is an error for a reader),
@@ -74,6 +76,10 @@ ARCHIVE_DIR_NAME = "synthpass-bench-archive"
 EXIT_OK = 0
 EXIT_ERROR = 2
 DOC_LINE_CAP = rebless.LEDGER_DOC_LINE_CAP
+# The record `track` values whose text `--chars` may print: an allowlist, so a missing or unknown
+# value refuses too. The `local` track holds `samples/local/` text and is not on it, and neither
+# is a private track, which has no archive.
+CHARS_TRACKS = frozenset({"public", "covers", "synthetic"})
 
 # Header fields `diff` compares, in print order. `argv` and `model_paths` are deliberately
 # absent: they hold paths and are never printed.
@@ -313,6 +319,18 @@ def _cap(lines: list[str], total: int) -> list[str]:
 # ------------------------------------------------------------------ runs
 
 
+def _is_doc_line(line: str) -> bool:
+    """Whether a line is a `doc` record, as `read_run` counts it. A line that is not JSON is not
+    one: `runs` does not validate a file beyond its header, `diff` and `cell` do."""
+    if not line.strip():
+        return False
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return False
+    return isinstance(record, dict) and record.get("kind") == "doc"
+
+
 def cmd_runs(root: Path, track: str, out) -> int:
     finished, partial = run_files(root, track)
     errors = 0
@@ -328,7 +346,7 @@ def cmd_runs(root: Path, track: str, out) -> int:
             print(f"error: {exc}", file=sys.stderr)
             errors += 1
             continue
-        records = sum(1 for line in lines[1:] if line.strip())
+        records = sum(1 for line in lines[1:] if _is_doc_line(line))
         providers = header.get("providers") if isinstance(header.get("providers"), list) else []
         out.write(
             f"{path.name} {header['run_id'][:12]} {header.get('binary_name', '?')} {_start_utc(header)} "
@@ -363,6 +381,12 @@ def header_differences(a: dict, b: dict) -> list[str]:
                     lines.append(f"  {field}.{key}: {_render(old.get(key))} -> {_render(new.get(key))}")
         else:
             lines.append(f"  {field}: {_render(old)} -> {_render(new)}")
+    if a.get("source") != b.get("source"):
+        lines.append(f"  source: {_render(a.get('source'))} -> {_render(b.get('source'))}")
+    label_a = a["machine"].get("label") if isinstance(a.get("machine"), dict) else None
+    label_b = b["machine"].get("label") if isinstance(b.get("machine"), dict) else None
+    if label_a != label_b:
+        lines.append(f"  machine.label: {_render(label_a)} -> {_render(label_b)}")
     if (a.get("git_commit"), a.get("working_tree_dirty")) != (b.get("git_commit"), b.get("working_tree_dirty")):
         lines.append(f"  commit: {_commit(a)} -> {_commit(b)}")
     if a.get("binary_sha256") != b.get("binary_sha256"):
@@ -649,7 +673,7 @@ def cmd_diff(a: Run, b: Run, out) -> int:
         out.write("header: differs\n")
         out.writelines(line + "\n" for line in differences)
     else:
-        out.write("header: identical in the arms, retry budget, pivot, environment, commit, binary and scope\n")
+        out.write("header: identical in the arms, retry budget, pivot, environment, source, machine, commit, binary and scope\n")
     pairs, only_a, only_b = join_records(a.records, b.records)
     out.writelines(line + "\n" for line in document_diff_lines(pairs, only_a, only_b))
     return EXIT_OK
@@ -674,7 +698,12 @@ def classify_char(char: str) -> str:
 def cmd_cell(run: Run, line: int, col: int, fmt: str | None, chars: bool, track: str, out) -> int:
     if line < 1 or col < 1:
         raise ArchiveError("--line and --col count from 1")
-    if chars and (track != "public" or run.path.parent.name == "local"):
+    # Where the file sits says nothing once it is copied: the records' own `track` decide too.
+    if chars and (
+        track != "public"
+        or run.path.parent.name == "local"
+        or any(record.get("track") not in CHARS_TRACKS for record in run.records)
+    ):
         raise ArchiveError("--chars prints characters and is only allowed on the public track")
     records = [r for r in run.records if fmt is None or _record_format(r) == fmt]
     classes: Counter = Counter()
