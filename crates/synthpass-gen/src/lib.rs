@@ -48,7 +48,7 @@ pub mod model;
 mod mrz_line;
 pub mod render;
 
-pub use labels::{FieldLabel, Labels, OccludedSpan};
+pub use labels::{FieldLabel, Labels, OccludedKind, OccludedSpan};
 pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
 pub use render::{RedactSpan, RedactStyle, RenderOptions};
 
@@ -63,29 +63,31 @@ pub use render::{RedactSpan, RedactStyle, RenderOptions};
 /// Supports TD1, TD2, and TD3 document types based on `config.document_type`.
 pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::DynamicImage, Labels) {
     generate_with(passport, config, &RenderOptions::default())
+        .expect("default render options are valid")
 }
 
 pub fn generate_with(
     passport: &Passport,
     config: &GeneratorConfig,
     options: &RenderOptions,
-) -> (image::DynamicImage, Labels) {
+) -> Result<(image::DynamicImage, Labels), String> {
     let labels = labels::build_labels(passport, config.document_type);
     let mut labels = labels;
     if let Some(span) = options.redact {
         labels.occluded.push(OccludedSpan {
-            line: span.line,
-            first: span.first,
-            last: span.last,
-            kind: match span.style {
-                RedactStyle::FillBlack | RedactStyle::FillWhite | RedactStyle::FillGrey => "fill",
-                _ => "blur",
-            }
-            .to_string(),
+            line: span.line(),
+            first: span.first(),
+            last: span.last(),
+            kind: match span.style() {
+                RedactStyle::FillBlack | RedactStyle::FillWhite | RedactStyle::FillGrey => {
+                    labels::OccludedKind::Fill
+                }
+                _ => labels::OccludedKind::Blur,
+            },
         });
     }
-    let image = render::render_with(passport, &labels, config.document_type, options);
-    (image, labels)
+    let image = render::render_with(passport, &labels, config.document_type, options)?;
+    Ok((image, labels))
 }
 
 /// Convenience: generate a fictional document from `config.seed` and render

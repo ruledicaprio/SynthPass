@@ -40,10 +40,57 @@ pub enum RedactStyle {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RedactSpan {
-    pub line: usize,
-    pub first: usize,
-    pub last: usize,
-    pub style: RedactStyle,
+    line: usize,
+    first: usize,
+    last: usize,
+    style: RedactStyle,
+    doc_type: DocumentType,
+}
+
+impl RedactSpan {
+    pub fn new(
+        doc_type: DocumentType,
+        line: usize,
+        first: usize,
+        last: usize,
+        style: RedactStyle,
+    ) -> Result<Self, String> {
+        let page = layout::for_format(doc_type);
+        if line >= page.mrz_lines.len() {
+            return Err(format!(
+                "line {line} is out of range for {}",
+                doc_type.as_str()
+            ));
+        }
+        if first > last {
+            return Err(format!("first cell {first} exceeds last cell {last}"));
+        }
+        if last >= page.mrz_chars as usize {
+            return Err(format!(
+                "last cell {last} is out of range (line width {})",
+                page.mrz_chars
+            ));
+        }
+        Ok(Self {
+            line,
+            first,
+            last,
+            style,
+            doc_type,
+        })
+    }
+    pub fn line(self) -> usize {
+        self.line
+    }
+    pub fn first(self) -> usize {
+        self.first
+    }
+    pub fn last(self) -> usize {
+        self.last
+    }
+    pub fn style(self) -> RedactStyle {
+        self.style
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -415,6 +462,7 @@ fn draw_watermark(img: &mut RgbImage, rect: Rect) {
 /// `PageLayout` rather than sharing TD3's fixed 1200x840 canvas.
 pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> DynamicImage {
     render_with(passport, labels, doc_type, &RenderOptions::default())
+        .expect("default render options are valid")
 }
 
 pub fn render_with(
@@ -422,13 +470,20 @@ pub fn render_with(
     labels: &Labels,
     doc_type: DocumentType,
     options: &RenderOptions,
-) -> DynamicImage {
+) -> Result<DynamicImage, String> {
     // `labels` is the single source of drawn text (kept in sync with
     // `passport` by construction, see `labels::build_labels`); `passport` is
     // accepted for API symmetry with `crate::generate` and future per-field
     // render options (e.g. photo synthesis keyed off sex/nationality).
     let _ = passport;
     let page: PageLayout = layout::for_format(doc_type);
+    if let Some(span) = options.redact {
+        if span.doc_type != doc_type {
+            return Err("redaction document type does not match render document type".into());
+        }
+        // Revalidate here so no externally composed options can index outside the page.
+        RedactSpan::new(doc_type, span.line, span.first, span.last, span.style)?;
+    }
     let mut img = RgbImage::from_pixel(page.width, page.height, BACKGROUND);
 
     // Generic, non-country template: a plain frame only. Deliberately no
@@ -559,7 +614,7 @@ pub fn render_with(
     // on top of every other element — on every format's own watermark band.
     draw_watermark(&mut img, page.watermark);
 
-    DynamicImage::ImageRgb8(img)
+    Ok(DynamicImage::ImageRgb8(img))
 }
 
 fn blur_region(img: &mut RgbImage, rect: Rect, sigma: f32) {
@@ -571,6 +626,27 @@ fn blur_region(img: &mut RgbImage, rect: Rect, sigma: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_or_mismatched_redaction_spans_are_rejected_without_panicking() {
+        assert!(RedactSpan::new(DocumentType::TD1, 3, 0, 1, RedactStyle::Blur).is_err());
+        assert!(RedactSpan::new(DocumentType::TD3, 0, 2, 1, RedactStyle::Blur).is_err());
+        let config = crate::GeneratorConfig::with_document_type(9, DocumentType::TD1);
+        let passport = crate::data::generate_passport(&config);
+        let labels = crate::labels::build_labels(&passport, DocumentType::TD1);
+        let span = RedactSpan::new(DocumentType::TD3, 0, 0, 1, RedactStyle::Blur).unwrap();
+        assert!(render_with(
+            &passport,
+            &labels,
+            DocumentType::TD1,
+            &RenderOptions { redact: Some(span) }
+        )
+        .is_err());
+        assert!(
+            crate::generate_with(&passport, &config, &RenderOptions { redact: Some(span) })
+                .is_err()
+        );
+    }
 
     #[test]
     fn redaction_changes_only_the_requested_cells_and_keeps_watermark() {
@@ -585,18 +661,14 @@ mod tests {
             RedactStyle::Blur,
             RedactStyle::GradedBlur,
         ] {
-            let span = RedactSpan {
-                line: 0,
-                first: 5,
-                last: 7,
-                style,
-            };
+            let span = RedactSpan::new(DocumentType::TD3, 0, 5, 7, style).unwrap();
             let redacted = render_with(
                 &passport,
                 &labels,
                 DocumentType::TD3,
                 &RenderOptions { redact: Some(span) },
             )
+            .unwrap()
             .to_rgb8();
             let line = layout::for_format(DocumentType::TD3).mrz_lines[0];
             let x0 = line.x + 5 * layout::MRZ_CELL_WIDTH;
@@ -646,26 +718,100 @@ mod tests {
 
     #[test]
     fn mrz_cell_geometry_is_contiguous_for_td1_and_td3() {
+        use crate::data::generate_passport;
+        use crate::labels::build_labels;
+        use crate::model::GeneratorConfig;
         for doc_type in [DocumentType::TD1, DocumentType::TD3] {
             let page = layout::for_format(doc_type);
-            for line in &page.mrz_lines {
+            let passport = generate_passport(&GeneratorConfig::with_document_type(616, doc_type));
+            let labels = build_labels(&passport, doc_type);
+            let mut blank_labels = labels.clone();
+            blank_labels.mrz_lines = labels
+                .mrz_lines
+                .iter()
+                .map(|s| "<".repeat(s.chars().count()))
+                .collect();
+            let blank = render(&passport, &blank_labels, doc_type).to_rgb8();
+            for (line_idx, line) in page.mrz_lines.iter().enumerate() {
                 assert_eq!(line.width, page.mrz_chars * layout::MRZ_CELL_WIDTH);
+                let chars: Vec<char> = labels.mrz_lines[line_idx].chars().collect();
                 for cell in 0..page.mrz_chars {
-                    let x = line.x + cell * layout::MRZ_CELL_WIDTH;
-                    assert_eq!(
-                        x + layout::MRZ_CELL_WIDTH,
-                        line.x + (cell + 1) * layout::MRZ_CELL_WIDTH
-                    );
-                    assert!(Rect::new(x, line.y, layout::MRZ_CELL_WIDTH, line.height)
-                        .within_bounds(page.width, page.height));
+                    let rect = layout::mrz_char_rect_for_line(*line, page.mrz_chars, cell);
+                    assert!(rect.within_bounds(page.width, page.height));
+                    if chars[cell as usize] == '<' {
+                        continue;
+                    }
+                    let mut isolated = labels.clone();
+                    let mut line_chars = vec!['<'; page.mrz_chars as usize];
+                    line_chars[cell as usize] = chars[cell as usize];
+                    isolated.mrz_lines[line_idx] = line_chars.into_iter().collect();
+                    let isolated = render(&passport, &isolated, doc_type).to_rgb8();
+                    let mut ink = false;
+                    for y in 0..page.height {
+                        for x in 0..page.width {
+                            if isolated.get_pixel(x, y) != blank.get_pixel(x, y) {
+                                if x >= rect.x
+                                    && x < rect.x + rect.width
+                                    && y >= rect.y
+                                    && y < rect.y + rect.height
+                                {
+                                    ink = true;
+                                } else if x >= line.x
+                                    && x < line.x + line.width
+                                    && y >= line.y
+                                    && y < line.y + line.height
+                                {
+                                    panic!("{doc_type:?} line {line_idx} cell {cell} ink leaked to ({x},{y})");
+                                }
+                            }
+                        }
+                    }
+                    assert!(ink, "{doc_type:?} line {line_idx} cell {cell} has no ink");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn watermark_and_mrz_cells_are_disjoint_for_every_format() {
+        use crate::data::generate_passport;
+        use crate::labels::build_labels;
+        use crate::model::GeneratorConfig;
+        for doc_type in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
+            let config = GeneratorConfig::with_document_type(616, doc_type);
+            let passport = generate_passport(&config);
+            let labels = build_labels(&passport, doc_type);
+            let page = layout::for_format(doc_type);
+            let plain = render(&passport, &labels, doc_type).to_rgb8();
+            let span = RedactSpan::new(doc_type, 0, 0, 2, RedactStyle::FillGrey).unwrap();
+            let covered = render_with(
+                &passport,
+                &labels,
+                doc_type,
+                &RenderOptions { redact: Some(span) },
+            )
+            .unwrap()
+            .to_rgb8();
+            for y in page.watermark.y..page.watermark.y + page.watermark.height {
+                for x in page.watermark.x..page.watermark.x + page.watermark.width {
+                    assert_eq!(plain.get_pixel(x, y), covered.get_pixel(x, y));
                 }
             }
             for line in &page.mrz_lines {
-                let overlaps = line.x < page.watermark.x + page.watermark.width
-                    && page.watermark.x < line.x + line.width
-                    && line.y < page.watermark.y + page.watermark.height
-                    && page.watermark.y < line.y + line.height;
-                assert!(!overlaps, "{doc_type:?} MRZ overlaps watermark");
+                for cell in 0..page.mrz_chars {
+                    let r = layout::mrz_char_rect_for_line(*line, page.mrz_chars, cell);
+                    let overlaps = r.x < page.watermark.x + page.watermark.width
+                        && page.watermark.x < r.x + r.width
+                        && r.y < page.watermark.y + page.watermark.height
+                        && page.watermark.y < r.y + r.height;
+                    assert!(!overlaps, "{doc_type:?} cell {cell}");
+                }
             }
         }
     }

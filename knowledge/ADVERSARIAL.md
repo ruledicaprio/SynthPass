@@ -31,13 +31,13 @@ photorealism.
 
 `synthpass generate --redact STYLE:LINE:FIRST-LAST` covers one inclusive, zero-based span of MRZ cells. The supported styles are `fill-black`, `fill-white`, `fill-grey`, `blur` and `graded-blur`. Cell `k` starts at the MRZ line rectangle's x coordinate plus `k × MRZ_CELL_WIDTH` (22 px); redaction changes pixels only in the selected cell boxes and is drawn before the synthetic watermark. This option accepts the `clean` profile only because capture transforms can move those boxes. A redacted sidecar adds an `occluded` entry with line, first, last and kind (`fill` or `blur`); the printed `mrz_lines` remain unchanged.
 
+## Determinism
+
 `apply`/`apply_profile` seed a single `ChaCha8Rng` from the caller's `seed` argument and thread it
 through every step in order, so the same `(image, recipe, seed)` always produces byte-identical
 output pixels, and a different seed produces different noise/blur/rotation jitter within each
 step's declared parameters. See `crates/synthpass-gen/tests/degrade.rs` for the round-trip and
 determinism regression tests.
-
-## Determinism
 
 ## Status: measured, not (yet) merge-blocking
 

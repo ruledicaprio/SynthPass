@@ -61,13 +61,28 @@ pub struct Labels {
 }
 
 /// An inclusive span of MRZ cells hidden by a deterministic redaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OccludedKind {
+    Fill,
+    Blur,
+}
+
+impl OccludedKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Fill => "fill",
+            Self::Blur => "blur",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OccludedSpan {
     pub line: usize,
     pub first: usize,
     pub last: usize,
     /// `fill` or `blur` (including graded blur).
-    pub kind: String,
+    pub kind: OccludedKind,
 }
 
 impl Labels {
