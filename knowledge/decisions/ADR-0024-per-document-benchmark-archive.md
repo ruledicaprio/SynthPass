@@ -332,3 +332,38 @@ replay amendment 2's chargrid record from the same file.
   written before this amendment lacks the two new keys and cannot be replayed; recapture it.
 - `mrz_band_score` is an `f64` the replay writes back into the dump row, so `synthpass-bench` parses
   JSON with `serde_json`'s `float_roundtrip`, which reads it back as the identical value.
+
+## Amendment 4 (2026-10-01) — build step 3 as built (#645), and the size of a full run
+
+**Status of this amendment:** Proposed. It records what #645 built, on the owner's answers in that
+PR and its review; it changes no decision's intent.
+
+### What step 3 settled
+
+1. **One file per run and track.** Decision 3's "one JSON Lines file per run" means one file per
+   run *and track*, because Decision 6 separates tracks by directory. A run with `--include-local`
+   writes a `public/` file and a `local/` file that share one `run_id` and one header.
+2. **A run with `--include-private` writes no archive.** Until build step 7's text-free records
+   exist, such a run archives nothing, not even its public documents, and says so in one
+   `warning: archive:` line. Decision 1's "every run" holds for every other run.
+3. **The header, as built** (Decision 4):
+   - The machine label is the operating system and the processor designation, for example
+     `win11-i5-4570`, never the host name. It is restricted to `[A-Za-z0-9._-]`, and the
+     designation to 48 characters.
+   - `binary` is the file name; its SHA-256 identifies it. `argv` and `model_paths` keep their
+     paths, for Decision 8's publisher to refuse or redact.
+   - `env` holds the allowlisted variables, each looked up by its exact name; the environment is
+     never iterated. A value outside `[A-Za-z0-9._-]{1,32}` is recorded as `null`.
+   - In a replay, `retry_budget` is `null`: retry behaviour is the capture's (Amendment 3,
+     Decision 6).
+4. **No new tracing.** A record carries `ocr_passes` only when the run already traces them
+   (`--ocr-passes`).
+
+### The size of a full run
+
+Consequences promised this number once the first runner landed. One live
+`provider-bench --real-specimens --mrz-only` run of the public corpus, 261 documents, writes one
+file of **656,152 bytes in 262 lines**: a 1,515-byte header and 261 records, with a median record
+of 2,309 bytes and a largest of 12,537 (Observed, 2026-10-01, local, Linux, at #645's `e992e87`;
+its review fixes changed only a few header bytes). That is about 0.66 MB a run, or about 240 MB a
+year at one real run a day (Derived). Retention stays a manual prune.
