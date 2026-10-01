@@ -20,16 +20,17 @@
 //! a serious Tier-2 failure mode (the LLM inventing entire identities on
 //! MRZ-less fronts) was found by hand instead of by CI.
 //!
-//! Both entry points funnel into [`run_prepped`], the one place accuracy and
+//! Both entry points funnel into [`run_prepped_with_dump_options`], the one place accuracy and
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
 //!
 //! A third source is a **replay** ([`run_provider_bench_replay`], ADR-0024
 //! amendment 3): the public corpus's pages are rebuilt from a captured
 //! `provider-bench-ocr-passes.jsonl` instead of by OCR, and then run through the
-//! same [`run_prepped`]. Tier 1 is a pure function of the page text, so a replay
+//! same [`run_prepped_with_dump_options`]. Tier 1 is a pure function of the page text, so a replay
 //! measures everything downstream of `OcrPage::text` and nothing upstream.
 
+use crate::archive::{Archive, ArchiveTrack, DocRecord, OcrRecord, Tier1ReadRecord};
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -127,7 +128,7 @@ fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
 /// hand-analysis this instrumentation replaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CheckCoverage {
+pub(crate) enum CheckCoverage {
     /// A dedicated ICAO check digit protects this field on its own —
     /// document number, date of birth, date of expiry, or (TD3 only)
     /// personal number — or this field *is* that check digit's own
@@ -741,7 +742,7 @@ pub fn mrz_field_line(format: &str, field: &str) -> Option<usize> {
 /// or a position (`usize`); nothing on this type or [`mrz_field_mismatch`],
 /// which builds it, ever reads a character out of the zones it is given.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-struct FieldMismatch {
+pub(crate) struct FieldMismatch {
     /// Differing character count per field name, e.g. `{"optional_data_2":
     /// 7, "composite_cd": 1}`.
     by_field: BTreeMap<String, usize>,
@@ -859,6 +860,104 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
         }
     }
     Some(result)
+}
+
+/// How a labelled specimen's recovered zone compares with its hand-transcribed truth: counts
+/// and column positions, never a character of either zone. Computed once per labelled
+/// document ([`truth_comparison`]) and shared by the OCR miss dump and the archive
+/// (ADR-0024), so the two cannot disagree.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct TruthComparison {
+    /// Differing characters over the longer of the two zones ([`mrz_zone_mismatch`]).
+    pub(crate) zone_mismatch: Option<usize>,
+    /// Cells compared ([`compared_cells`]).
+    pub(crate) compared_cells: Option<usize>,
+    /// Where the differences are, by field ([`mrz_field_mismatch`]); needs a resolved format.
+    pub(crate) field_mismatch: Option<FieldMismatch>,
+}
+
+/// [`TruthComparison`] of `recovered` against `truth`: `None` for a document with no
+/// hand-transcribed zone, and otherwise a comparison whose parts are `None` where there is no
+/// recovered zone (or, for the field map, no resolved `format`).
+fn truth_comparison(
+    recovered: Option<&mrz::MrzData>,
+    truth: Option<&str>,
+    format: Option<&str>,
+) -> Option<TruthComparison> {
+    let truth = truth?;
+    Some(TruthComparison {
+        zone_mismatch: recovered.map(|data| mrz_zone_mismatch(&data.mrz_lines, truth)),
+        compared_cells: recovered.map(|data| compared_cells(&data.mrz_lines, truth)),
+        field_mismatch: recovered
+            .zip(format)
+            .and_then(|(data, format)| mrz_field_mismatch(format, &data.mrz_lines, truth)),
+    })
+}
+
+/// Writes one document's archive record for one provider (ADR-0024, Decision 5).
+///
+/// `detail` is the [`DocumentDetail`] just pushed, so the record's `ledger_row` is exactly
+/// what the outcome ledger writes for the document. `tier1_zone` is the Tier-1 parse of the
+/// provider's own input (`None` when nothing parsed), `fields` the provider's values (`None`
+/// when the reader errored). The record holds the provider-input OCR text verbatim and never
+/// the fixture's text: a labelled specimen contributes [`TruthComparison`]'s counts and
+/// positions only. Nothing here can fail the run: [`Archive::record`] returns `()`.
+#[allow(clippy::too_many_arguments)]
+fn archive_document(
+    archive: &Archive,
+    provider: &str,
+    bench_page: &BenchPage,
+    detail: &DocumentDetail,
+    read_elapsed: Duration,
+    tier1_zone: Option<&mrz::MrzData>,
+    fields: Option<BTreeMap<&'static str, Option<String>>>,
+    truth: Option<&TruthComparison>,
+) {
+    let track = if bench_page.synthetic {
+        ArchiveTrack::Synthetic
+    } else {
+        bench_page
+            .asset_id
+            .as_deref()
+            // A real page with no asset ID cannot be placed in a track, so it is treated
+            // as the most restrictive one and dropped, never filed as public.
+            .map_or(ArchiveTrack::Private, |id| {
+                ArchiveTrack::from_corpus(crate::asset_track(id))
+            })
+    };
+    let record = DocRecord {
+        kind: "doc",
+        run_id: archive.run_id(),
+        provider: provider.to_string(),
+        track: track.as_str(),
+        name: &bench_page.name,
+        asset_id: bench_page.asset_id.as_deref(),
+        source_sha256: bench_page.source_sha256.as_deref(),
+        ledger_row: crate::report::OutcomeRow::from(detail),
+        read_ok: detail.read_ok,
+        read_us: read_elapsed.as_micros(),
+        field_correctness: detail.field_correctness.as_ref().map(|fields| {
+            fields
+                .iter()
+                .map(|(field, correctness)| (*field, correctness.as_str()))
+                .collect()
+        }),
+        ocr: OcrRecord {
+            text: &bench_page.page.text,
+            rotation: bench_page.page.rotation,
+            mrz_band_score: bench_page.page.mrz_band_score,
+            chargrid: bench_page.page.chargrid.as_deref(),
+            ocr_passes: bench_page.pass_objects.as_deref(),
+        },
+        tier1_read: tier1_zone.map(|data| Tier1ReadRecord {
+            lines: data.mrz_lines.lines().map(str::to_string).collect(),
+            damaged_recovery: data.damaged_recovery,
+            valid: data.valid(),
+        }),
+        fields,
+        truth,
+    };
+    archive.record(track, &record);
 }
 
 /// One in-denominator real-specimen miss (`checksum_failed` or
@@ -1018,6 +1117,7 @@ pub struct ProviderReport {
 /// unsupported on a given specimen is enough to go and look; printing the
 /// fabricated surname itself would put document content into a terminal and a
 /// JSON report for no additional diagnostic power.
+#[derive(Debug)]
 pub struct DocumentDetail {
     /// Corpus-local identity: a synthetic document's seed, or a real
     /// specimen's file stem. Public-domain specimen filenames, not PII.
@@ -1323,6 +1423,7 @@ impl CapabilitySnapshot {
 /// the bench history and not quoted as accuracy. The two populations to quote
 /// are [`Self::accepted_reads`] (read quality) and [`Self::scored`]
 /// (end-to-end), each with its own document count.
+#[derive(Debug)]
 pub struct AccuracyStats {
     /// How many of `documents` contributed at least one ground-truth field.
     /// Always equal to `documents` for the synthetic corpus (every
@@ -1596,6 +1697,7 @@ fn compare_document(
 /// planned Qwen-vs-Moondream comparison. So this is computed only when
 /// `Capability::vision` is `false`; a vision-capable provider gets
 /// `NotApplicable` with the reason recorded, never a silently-wrong number.
+#[derive(Debug)]
 pub enum UnsupportedAssertion {
     /// Computed over the non-null answered fields of a `!capability.vision`
     /// provider, split by whether the document gave it an MRZ to anchor on.
@@ -1621,6 +1723,7 @@ pub enum UnsupportedAssertion {
 /// split are not the same size and a rate alone would hide that: "40% over
 /// 4 documents" and "40% over 120" are different claims, and the whole point
 /// of this split is that the smaller half is the one nobody had measured.
+#[derive(Debug)]
 pub struct AssertionBucket {
     /// `None` when the provider made **no assertions at all** over this
     /// subset — not the same fact as a measured rate of zero, and on this
@@ -1667,6 +1770,7 @@ const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-t
 /// exactly `0.0` regardless of how accurate the provider actually is. That's the
 /// same shape of bug [`AssertionBucket::rate`]'s `Option` and
 /// [`UnsupportedAssertion::NotApplicable`] both exist to prevent, one metric over.
+#[derive(Debug)]
 pub enum Tier1HitRate {
     /// Computed over a deterministic provider's nonempty scored population:
     /// the fraction with `miss_reason.is_none()`, excluding off-denominator classes.
@@ -1728,6 +1832,7 @@ const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — th
 /// `0.0` there would fabricate "every name wrong" out of "nothing was
 /// measured", the exact bug [`AccuracyStats`]'s `Option`s and
 /// [`AssertionBucket::rate`] both already exist to prevent.
+#[derive(Debug)]
 pub enum StrictNameHitRate {
     /// `strict_hits`, `name_scorable_documents` and `name_scorable_hits` are
     /// carried alongside both rates (rather than just the rates) so a caller
@@ -1768,6 +1873,7 @@ pub struct SpeedStats {
     pub p95: Duration,
 }
 
+#[derive(Debug)]
 pub struct JsonValidityStats {
     /// `synthpass_llm::repair::repair_fallbacks()` delta across this
     /// provider's whole loop — how many of its answers needed JSON repair
@@ -1945,11 +2051,12 @@ struct BenchPage {
     /// once in [`prep_specimens`]/[`prep_corpus`] and shared by every reader,
     /// the same way the OCR text is.
     ocr_elapsed: Duration,
-    /// The readings of every OCR pass, when a pass trace exists for this
-    /// document: a replay, or a live run with `--dump-ocr-passes`. Empty
-    /// otherwise. Used only to say which passes read a line-1 proposal
-    /// ([`line1_selection_detail`]); document text, never written out.
-    pass_readings: Vec<PassProvenance>,
+    /// Every OCR pass, when a pass trace exists for this document: a replay, or a live run
+    /// with `--dump-ocr-passes`; `None` otherwise (the benchmark adds no tracing of its own,
+    /// which would change timing under the retry loop's budget). Used to say which passes read
+    /// a line-1 proposal ([`line1_selection_detail`], through [`pass_provenance`]) and, under
+    /// ADR-0024, written to the archive's `ocr_passes`. **Document text.**
+    pass_objects: Option<Vec<crate::ocr_passes::PassObject>>,
 }
 
 /// Process-wide sequence keeps duplicate display names and concurrent runs distinct.
@@ -2046,7 +2153,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
                 ocr_elapsed,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             })
         })
         .collect()
@@ -2079,7 +2186,8 @@ fn prep_specimens(
             let (page, image_path, ocr_elapsed) =
                 ocr_and_keep_path(ocr, &doc.image, passes.is_some().then_some(&mut records))
                     .ok()?;
-            let pass_readings = pass_provenance(&crate::ocr_passes::pass_objects(&records));
+            let traced = passes.is_some();
+            let pass_objects = crate::ocr_passes::pass_objects(&records);
             if let Some(collector) = passes.as_deref_mut() {
                 collector.push(
                     &doc.name,
@@ -2090,7 +2198,7 @@ fn prep_specimens(
                 );
             }
             let mut bench_page = specimen_bench_page(doc, page, image_path, ocr_elapsed);
-            bench_page.pass_readings = pass_readings;
+            bench_page.pass_objects = traced.then_some(pass_objects);
             Some(bench_page)
         })
         .collect()
@@ -2182,7 +2290,7 @@ fn specimen_bench_page(
         synthetic: false,
         known_or_guessed_format,
         ocr_elapsed,
-        pass_readings: Vec::new(),
+        pass_objects: None,
     }
 }
 
@@ -2197,9 +2305,20 @@ pub async fn run_provider_bench(
     corpus: &[CorpusDoc],
     measure_memory: bool,
     progress: bool,
+    archive: Option<&Archive>,
 ) -> Vec<ProviderReport> {
     let prepped = prep_corpus(ocr, corpus, progress);
-    run_prepped(catalog, &prepped, measure_memory, None, progress).await
+    run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        None,
+        false,
+        None,
+        progress,
+        archive,
+    )
+    .await
 }
 
 /// Runs every reader in `catalog` against every real specimen in
@@ -2246,6 +2365,7 @@ pub async fn run_provider_bench_real_with_dump_options(
         dump_ocr_hits,
         run_manifest.as_deref(),
         progress,
+        None,
     )
     .await
 }
@@ -2276,6 +2396,9 @@ pub struct RealDumpOptions<'a> {
     /// ([`crate::ocr_passes::check_passes_destination`]) and refused the
     /// private track.
     pub ocr_passes_dir: Option<&'a Path>,
+    /// The per-document archive (ADR-0024), when this run writes one. A side output: it
+    /// changes nothing else, and no run reads it.
+    pub archive: Option<&'a Archive>,
 }
 
 /// [`run_provider_bench_real_with_dump_options`] with the full set of dumps.
@@ -2321,6 +2444,7 @@ pub async fn run_provider_bench_real_with_options(
         dumps.ocr_hits,
         run_manifest.as_deref(),
         progress,
+        dumps.archive,
     )
     .await)
 }
@@ -2475,7 +2599,7 @@ fn replay_pages(
                 temporary_image_path(),
                 Duration::ZERO,
             );
-            bench_page.pass_readings = pass_provenance(&row.ocr_passes);
+            bench_page.pass_objects = Some(row.ocr_passes.clone());
             Some(bench_page)
         })
         .collect())
@@ -2524,6 +2648,7 @@ pub async fn run_provider_bench_replay(
         dumps.ocr_hits,
         run_manifest.as_deref(),
         progress,
+        dumps.archive,
     )
     .await)
 }
@@ -2638,6 +2763,7 @@ fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
 /// an hour and was otherwise completely silent until the final report; stderr
 /// keeps it clear of the stdout summary and the `--out` JSON that
 /// `scripts/run-bench.ps1` consumes.
+#[cfg(test)]
 async fn run_prepped(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
@@ -2653,10 +2779,19 @@ async fn run_prepped(
         false,
         None,
         progress,
+        None,
     )
     .await
 }
 
+/// [`run_prepped`] with the OCR dump flags and the archive.
+///
+/// `archive`, when `Some`, receives one record per document per provider, written right
+/// after the document's [`DocumentDetail`] is pushed (the error arm and the success arm are
+/// its only two ends) and flushed at each provider's end. It is a side output: nothing this
+/// loop computes reads it or changes because of it, and it can only warn (ADR-0024,
+/// Decision 1).
+#[allow(clippy::too_many_arguments)]
 async fn run_prepped_with_dump_options(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
@@ -2665,6 +2800,7 @@ async fn run_prepped_with_dump_options(
     dump_ocr_hits: bool,
     run_manifest: Option<&str>,
     progress: bool,
+    archive: Option<&Archive>,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
     let labelled_documents = prepped
@@ -2806,6 +2942,25 @@ async fn run_prepped_with_dump_options(
                         // No reading, so no selection was recorded.
                         line1_selection: None,
                     });
+                    if let (Some(archive), Some(detail)) = (archive, documents_detail.last()) {
+                        // No read: the fields are null; the truth comparison still
+                        // describes the Tier-1 zone against the fixture.
+                        let truth_cmp = truth_comparison(
+                            dump_zone,
+                            bench_page.ground_truth_mrz.as_deref(),
+                            detail.mrz_format,
+                        );
+                        archive_document(
+                            archive,
+                            reader.id().as_str(),
+                            bench_page,
+                            detail,
+                            elapsed,
+                            dump_zone,
+                            None,
+                            truth_cmp.as_ref(),
+                        );
+                    }
                     // `OcrError` sits inside the scored population: a reader
                     // that errored read nothing, so end-to-end counts every
                     // field this document has truth for as absent. It is not
@@ -2994,6 +3149,13 @@ async fn run_prepped_with_dump_options(
                 scored.add_document(&comparison.tally);
             }
 
+            // The comparison against the hand-transcribed zone, once per labelled
+            // document: the dump below and the archive record both read it.
+            let truth_cmp = truth_comparison(
+                dump_zone,
+                bench_page.ground_truth_mrz.as_deref(),
+                mrz_format,
+            );
             let dump_miss_kind = match &miss_reason {
                 Some(
                     r @ (MissReason::ChecksumFailed { .. }
@@ -3062,24 +3224,13 @@ async fn run_prepped_with_dump_options(
                     }
                 };
 
-                let compared_cells = match (dump_zone, &bench_page.ground_truth_mrz) {
-                    (Some(data), Some(truth)) => Some(compared_cells(&data.mrz_lines, truth)),
-                    _ => None,
-                };
-                let zone_mismatch = match (dump_zone, &bench_page.ground_truth_mrz) {
-                    (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
-                    _ => None,
-                };
+                let compared_cells = truth_cmp.as_ref().and_then(|t| t.compared_cells);
+                let zone_mismatch = truth_cmp.as_ref().and_then(|t| t.zone_mismatch);
                 // Field-level attribution needs a resolved format (to know
                 // which table to look positions up against) on top of
                 // `zone_mismatch`'s own two preconditions — see
                 // `MissOcrDump::field_mismatch_counts`'s doc.
-                let field_mismatch = match (dump_zone, &bench_page.ground_truth_mrz, mrz_format) {
-                    (Some(data), Some(truth), Some(format)) => {
-                        mrz_field_mismatch(format, &data.mrz_lines, truth)
-                    }
-                    _ => None,
-                };
+                let field_mismatch = truth_cmp.as_ref().and_then(|t| t.field_mismatch.as_ref());
                 // Printed alongside the zone above so a run stopped before the
                 // final JSONL flush (the usual `llm`-pass kill) still carries the
                 // ground-truth comparison for every labelled specimen.
@@ -3099,7 +3250,7 @@ async fn run_prepped_with_dump_options(
                         ),
                         None => {}
                     }
-                    if let Some(fm) = &field_mismatch {
+                    if let Some(fm) = field_mismatch {
                         println!("  per-field mismatch: {:?}", fm.by_field);
                         println!("  per-field coverage: {:?}", fm.coverage);
                     }
@@ -3118,9 +3269,9 @@ async fn run_prepped_with_dump_options(
                     check_states,
                     ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
                     zone_mismatch,
-                    field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
-                    field_mismatch_positions: field_mismatch.as_ref().map(|f| f.by_line.clone()),
-                    field_mismatch_coverage: field_mismatch.as_ref().map(|f| f.coverage.clone()),
+                    field_mismatch_counts: field_mismatch.map(|f| f.by_field.clone()),
+                    field_mismatch_positions: field_mismatch.map(|f| f.by_line.clone()),
+                    field_mismatch_coverage: field_mismatch.map(|f| f.coverage.clone()),
                     compared_cells,
                 });
             }
@@ -3202,12 +3353,42 @@ async fn run_prepped_with_dump_options(
                     line1_selection_detail(
                         summary,
                         tier1.proposed_line1.as_deref(),
-                        &bench_page.pass_readings,
+                        &bench_page
+                            .pass_objects
+                            .as_deref()
+                            .map(pass_provenance)
+                            .unwrap_or_default(),
                     )
                 }),
             });
+            if let (Some(archive), Some(detail)) = (archive, documents_detail.last()) {
+                let fields = CoreField::ALL
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.as_str(),
+                            reading.extraction.fields.get(*field).map(str::to_string),
+                        )
+                    })
+                    .collect();
+                archive_document(
+                    archive,
+                    reader.id().as_str(),
+                    bench_page,
+                    detail,
+                    elapsed,
+                    dump_zone,
+                    Some(fields),
+                    truth_cmp.as_ref(),
+                );
+            }
         }
 
+        // The provider's records are on disk before the next provider starts, so a run
+        // killed in a later provider (the `llm` pass) still leaves this one's.
+        if let Some(archive) = archive {
+            archive.flush();
+        }
         let repair_after = synthpass_llm::repair::repair_fallbacks();
         let rss_after = measure_memory.then(sample_rss).flatten();
 
@@ -3556,7 +3737,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed: Duration::ZERO,
-            pass_readings: Vec::new(),
+            pass_objects: None,
         }
     }
 
@@ -3839,7 +4020,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -3860,7 +4041,7 @@ mod tests {
                 ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -4068,7 +4249,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4114,7 +4295,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4195,7 +4376,7 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: Some("passports/corrupted-td3-fixture.png".to_string()),
             source_sha256: Some("a".repeat(64)),
             name: "corrupted-td3-fixture".to_string(),
@@ -4232,6 +4413,7 @@ mod tests {
             false,
             Some("test-run.json"),
             false,
+            None,
         )
         .await;
 
@@ -4310,7 +4492,7 @@ mod tests {
         // OCR text with nothing MRZ-shaped in it: an MRZ is expected
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "no-mrz-found-fixture".to_string(),
@@ -4393,7 +4575,7 @@ mod tests {
         assert!(!recovered.valid());
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "labelled-nonconforming-specimen".to_string(),
@@ -4464,7 +4646,7 @@ mod tests {
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "labelled-ocr-misread".to_string(),
@@ -4560,7 +4742,7 @@ mod tests {
         let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4616,7 +4798,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4666,7 +4848,7 @@ mod tests {
 
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4731,7 +4913,7 @@ mod tests {
         // so it lands in `no_mrz_expected`.
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4798,7 +4980,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -4853,7 +5035,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -5563,7 +5745,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5613,7 +5795,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5669,7 +5851,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5737,7 +5919,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed,
-            pass_readings: Vec::new(),
+            pass_objects: None,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -5810,7 +5992,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
             // this document's true given names.
@@ -5830,7 +6012,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 3: no MRZ found, but still labelled with a name truth —
             // name-scorable, not a hit.
@@ -5850,7 +6032,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 4: a Tier-1 hit with no ground truth for either name field —
             // not name-scorable.
@@ -5870,7 +6052,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 5: carries a name truth, but is outside `tier1_hit_rate`'s own
             // scored population (`mrz_expected: false` and `mrz_found:
@@ -5893,7 +6075,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
         ];
         // `FixedReader` returns the same `hit_evidence` for every document
@@ -6376,6 +6558,406 @@ mod tests {
         ))
     }
 
+    // --- the per-document archive (ADR-0024) -------------------------------
+
+    /// A run header for a test: only the fields a record's shape or a file's name depends on.
+    fn archive_test_header(started_unix_ms: u64) -> crate::archive::RunHeader {
+        use crate::archive::{Machine, RetryBudget, RunHeader, Scope, TrackFlags, SCHEMA};
+        RunHeader {
+            kind: "run",
+            schema: SCHEMA,
+            run_id: String::new(),
+            binary_name: "provider-bench".to_string(),
+            started_unix_ms,
+            pid: 1,
+            source: "local",
+            machine: Machine {
+                label: "test".to_string(),
+                os: "testos",
+                arch: "testarch",
+                cpus: 1,
+            },
+            binary: "provider-bench".to_string(),
+            binary_sha256: None,
+            git_commit: None,
+            working_tree_dirty: None,
+            argv: Vec::new(),
+            scope: Scope {
+                corpus: "real-specimens",
+                format: None,
+                limit: None,
+                document_type: None,
+                profile: None,
+                seed_start: None,
+                count: 3,
+            },
+            tracks: TrackFlags {
+                private: false,
+                local: false,
+                covers: false,
+            },
+            samples_data_sha: None,
+            corpus_manifest_sha256: None,
+            documents_loaded: 3,
+            labelled_loaded: 1,
+            providers: Vec::new(),
+            ocr_arms: BTreeMap::new(),
+            retry_budget: Some(RetryBudget {
+                max_passes: 14,
+                max_seconds: 52,
+            }),
+            mrz_arms: BTreeMap::new(),
+            pivot_yy: 26,
+            model_paths: crate::report::ModelPathsReport::default(),
+            replay_of: None,
+            env: BTreeMap::new(),
+        }
+        .with_run_id()
+    }
+
+    /// Every line of every finished archive file under `root/track`, parsed.
+    fn archive_lines(root: &Path, track: &str) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(root.join(track)) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "jsonl") {
+                let body = std::fs::read_to_string(&path).expect("read the archive file");
+                out.extend(
+                    body.lines()
+                        .map(|line| serde_json::from_str(line).expect("a JSON line")),
+                );
+            }
+        }
+        out
+    }
+
+    fn two_provider_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .with_reader(std::sync::Arc::new(ErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("two readers")
+    }
+
+    #[tokio::test]
+    async fn the_archive_sees_one_record_per_document_per_provider() {
+        let root = scratch_dir("archive-per-provider");
+        let corpus = replay_corpus();
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        run_provider_bench_replay(
+            &two_provider_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions {
+                archive: Some(&archive),
+                ..RealDumpOptions::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        // Before `finish`, the per-provider flush alone has put every record on disk: a run
+        // killed now would still leave them in the `.partial`.
+        let partial = std::fs::read_dir(root.join("public"))
+            .expect("the public track directory")
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.extension().is_some_and(|ext| ext == "partial"))
+            .expect("the run is still partial");
+        let on_disk = std::fs::read_to_string(&partial).expect("readable while open");
+        assert_eq!(
+            on_disk.lines().count(),
+            1 + 3 * 2,
+            "every record is on disk before `finish`"
+        );
+        assert!(on_disk.ends_with('\n'), "no record is cut short");
+        archive.finish();
+
+        let lines = archive_lines(&root, "public");
+        assert_eq!(
+            lines.len(),
+            1 + 3 * 2,
+            "one header, three documents, two providers"
+        );
+        assert_eq!(lines[0]["kind"], "run");
+        let docs = &lines[1..];
+        assert!(docs
+            .iter()
+            .all(|d| d["kind"] == "doc" && d["track"] == "public"));
+        assert!(docs.iter().all(|d| d["run_id"] == lines[0]["run_id"]));
+        for provider in ["mrz", "erroring-test-reader"] {
+            let mut names: Vec<&str> = docs
+                .iter()
+                .filter(|d| d["provider"] == provider)
+                .map(|d| d["name"].as_str().expect("name"))
+                .collect();
+            names.sort_unstable();
+            assert_eq!(
+                names,
+                ["specimen-a", "specimen-b", "specimen-c"],
+                "{provider}"
+            );
+        }
+        // The error arm is a record too: no read, so no fields.
+        let errored = docs
+            .iter()
+            .find(|d| d["provider"] == "erroring-test-reader" && d["name"] == "specimen-a")
+            .expect("the erroring provider's record");
+        assert_eq!(errored["read_ok"], false);
+        assert!(errored["fields"].is_null());
+        assert_eq!(errored["ledger_row"]["outcome"], "ocr_error");
+        // A replay traces, so the record carries its (empty) pass list; the labelled document
+        // carries a comparison against its fixture, the others none.
+        let hit = docs
+            .iter()
+            .find(|d| d["provider"] == "mrz" && d["name"] == "specimen-a")
+            .expect("the mrz record of the labelled hit");
+        assert_eq!(hit["ledger_row"]["outcome"], "hit");
+        assert_eq!(hit["fields"]["surname"], "ERIKSSON");
+        assert_eq!(hit["ocr"]["ocr_passes"], serde_json::json!([]));
+        assert_eq!(hit["ocr"]["rotation"], 0);
+        assert_eq!(hit["tier1_read"]["valid"], true);
+        assert_eq!(hit["truth"]["zone_mismatch"], 0);
+        let unlabelled = docs
+            .iter()
+            .find(|d| d["provider"] == "mrz" && d["name"] == "specimen-b")
+            .expect("the mrz record of an unlabelled document");
+        assert!(unlabelled["truth"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What a run reports, with the timings that differ between two runs of the same input
+    /// left out (`speed`, `ocr_elapsed`, `measured_rss_delta_bytes`): each provider's whole
+    /// report as text, its `documents_detail` rows included, and the ledger rows as the ledger
+    /// writes them. A replay's OCR time is zero, so the per-document detail is deterministic.
+    fn run_outputs(reports: &[ProviderReport]) -> (Vec<String>, Vec<crate::report::OutcomeRow>) {
+        (
+            reports
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{} {} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                        r.provider_id,
+                        r.documents,
+                        r.accuracy,
+                        r.json_validity,
+                        r.unsupported_assertion,
+                        r.declared_resident_bytes,
+                        r.tier1_hit_rate,
+                        r.ocr_arms,
+                        (&r.strict_tier1_hit_rate, &r.documents_detail),
+                    )
+                })
+                .collect(),
+            reports
+                .iter()
+                .flat_map(|r| {
+                    r.documents_detail
+                        .iter()
+                        .map(crate::report::OutcomeRow::from)
+                })
+                .collect(),
+        )
+    }
+
+    /// One replay over the three-document corpus, with the OCR dump on so its bytes can be
+    /// compared, and `archive` (or none) attached.
+    async fn replay_with_dump(
+        dump_dir: &Path,
+        archive: Option<&Archive>,
+    ) -> (Vec<ProviderReport>, Vec<u8>) {
+        let corpus = replay_corpus();
+        let reports = run_provider_bench_replay(
+            &two_provider_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions {
+                ocr_dir: Some(dump_dir),
+                ocr_hits: true,
+                archive,
+                ..RealDumpOptions::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        let dump = std::fs::read(dump_dir.join("provider-bench-miss-ocr-dump.jsonl"))
+            .expect("the dump was written");
+        (reports, dump)
+    }
+
+    #[tokio::test]
+    async fn the_archive_changes_no_report_or_dump() {
+        let root = scratch_dir("archive-neutral-root");
+        let without_dir = scratch_dir("archive-neutral-without");
+        let with_dir = scratch_dir("archive-neutral-with");
+        let (without, dump_without) = replay_with_dump(&without_dir, None).await;
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let (with, dump_with) = replay_with_dump(&with_dir, Some(&archive)).await;
+        archive.finish();
+
+        assert!(
+            !archive_lines(&root, "public").is_empty(),
+            "the archive did write"
+        );
+        assert_eq!(run_outputs(&with), run_outputs(&without));
+        assert_eq!(
+            dump_with, dump_without,
+            "the miss dump is byte for byte the same"
+        );
+        for dir in [&root, &without_dir, &with_dir] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failing_archive_changes_no_report() {
+        let dir = scratch_dir("archive-failing");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let root_is_a_file = dir.join("not-a-directory");
+        std::fs::write(&root_is_a_file, b"x").expect("a file where the root should be");
+        let without_dir = dir.join("without");
+        let with_dir = dir.join("with");
+        let (without, dump_without) = replay_with_dump(&without_dir, None).await;
+        let archive = Archive::start(&root_is_a_file, &archive_test_header(1_000_000_000_000));
+        let (with, dump_with) = replay_with_dump(&with_dir, Some(&archive)).await;
+        archive.finish();
+
+        assert_eq!(archive.warnings().len(), 1, "one warning, then off");
+        assert_eq!(run_outputs(&with), run_outputs(&without));
+        assert_eq!(dump_with, dump_without);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A labelled specimen whose OCR text is one zone and whose fixture is another, so the
+    /// fixture's text can be told apart from the OCR text in the bytes of a record.
+    fn labelled_page_with_a_different_fixture_zone() -> BenchPage {
+        let mut page = rate_test_page();
+        page.name = "labelled".to_string();
+        page.asset_id = Some("passports/labelled.png".to_string());
+        page.source_sha256 = Some("0".repeat(64));
+        page.page = OcrPage {
+            text: format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"),
+            ..OcrPage::default()
+        };
+        page.mrz_found = true;
+        page.mrz_expected = true;
+        let mut fixture_line_1 = String::from("P<UTOSENTINELTRUTH<<ZQXJ");
+        while fixture_line_1.len() < 44 {
+            fixture_line_1.push('<');
+        }
+        page.ground_truth_mrz = Some(format!("{fixture_line_1}\n{REPLAY_LINE_2_VALID}"));
+        page.ground_truth = Some(HashMap::from([(
+            CoreField::Surname,
+            "ERIKSSON".to_string(),
+        )]));
+        page.known_or_guessed_format = Some("TD3");
+        page
+    }
+
+    #[tokio::test]
+    async fn a_doc_record_never_holds_the_fixture_zone() {
+        let root = scratch_dir("archive-no-fixture");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let prepped = vec![Some(labelled_page_with_a_different_fixture_zone())];
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &prepped,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+
+        let file = std::fs::read_dir(root.join("public"))
+            .expect("public/")
+            .flatten()
+            .next()
+            .expect("one file")
+            .path();
+        let bytes = std::fs::read_to_string(&file).expect("read");
+        assert!(bytes.contains("ERIKSSON"), "the OCR text is in the record");
+        for fixture_only in ["SENTINELTRUTH", "ZQXJ"] {
+            assert!(
+                !bytes.contains(fixture_only),
+                "{fixture_only} is fixture text"
+            );
+        }
+        // What the record does hold about the fixture: counts and positions.
+        let doc: serde_json::Value =
+            serde_json::from_str(bytes.lines().nth(1).expect("one record")).expect("JSON");
+        assert!(doc["truth"]["zone_mismatch"]
+            .as_u64()
+            .is_some_and(|n| n > 0));
+        assert!(doc["truth"]["compared_cells"].as_u64().is_some());
+        assert!(doc["truth"]["field_mismatch"]["by_field"].is_object());
+        assert!(
+            doc["ocr"]["ocr_passes"].is_null(),
+            "an untraced run adds no tracing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_real_page_without_an_asset_id_is_not_archived() {
+        // It cannot be placed in a track, so it is treated as the most restrictive one.
+        let root = scratch_dir("archive-no-asset-id");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = None;
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(!root.join("public").exists() && !root.join("local").exists());
+        assert!(!root.join("private").exists());
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_private_asset_is_never_archived() {
+        let root = scratch_dir("archive-private-asset");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = Some("private/labelled.png".to_string());
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(!root.join("private").exists());
+        assert!(!root.join("public").exists() && !root.join("local").exists());
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// The property the whole feature rests on: for the same page, a replayed row
     /// yields the same `DocumentDetail`, the same ledger row and the same dump
     /// row as the live path. Only `ocr_ms` differs, because no OCR ran.
@@ -6408,6 +6990,7 @@ mod tests {
             true,
             Some("run.json"),
             false,
+            None,
         )
         .await;
         let replay_reports = run_prepped_with_dump_options(
@@ -6418,6 +7001,7 @@ mod tests {
             true,
             Some("run.json"),
             false,
+            None,
         )
         .await;
 
