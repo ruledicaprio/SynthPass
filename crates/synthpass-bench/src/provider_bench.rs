@@ -884,13 +884,23 @@ fn truth_comparison(
     truth: Option<&str>,
     format: Option<&str>,
 ) -> Option<TruthComparison> {
+    truth_comparison_of_zone(recovered.map(|data| data.mrz_lines.as_str()), truth, format)
+}
+
+/// [`truth_comparison`] from the recovered zone's text, for a caller that holds the zone and not
+/// the parsed [`mrz::MrzData`] (the `synthpass-bench` archive).
+pub(crate) fn truth_comparison_of_zone(
+    recovered: Option<&str>,
+    truth: Option<&str>,
+    format: Option<&str>,
+) -> Option<TruthComparison> {
     let truth = truth?;
     Some(TruthComparison {
-        zone_mismatch: recovered.map(|data| mrz_zone_mismatch(&data.mrz_lines, truth)),
-        compared_cells: recovered.map(|data| compared_cells(&data.mrz_lines, truth)),
+        zone_mismatch: recovered.map(|zone| mrz_zone_mismatch(zone, truth)),
+        compared_cells: recovered.map(|zone| compared_cells(zone, truth)),
         field_mismatch: recovered
             .zip(format)
-            .and_then(|(data, format)| mrz_field_mismatch(format, &data.mrz_lines, truth)),
+            .and_then(|(zone, format)| mrz_field_mismatch(format, zone, truth)),
     })
 }
 

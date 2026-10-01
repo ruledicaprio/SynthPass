@@ -11,7 +11,8 @@
 //! `warning: archive: ...` line on stderr and turns the archive off for the rest of the run.
 //! It never changes an exit code, a report, a ledger, a dump or a manifest (Decision 1).
 //!
-//! **Files** (Decision 3): `<root>/{public,local}/<YYYYMMDDTHHMMSSZ>-provider-bench-<run>.jsonl`.
+//! **Files** (Decision 3): `<root>/{public,local}/<YYYYMMDDTHHMMSSZ>-<binary>-<run>.jsonl`, with
+//! `<binary>` the run header's `binary_name` (`provider-bench` or `synthpass-bench`).
 //! A file is created, as `<name>.jsonl.partial` with `create_new`, at its track's first record
 //! and renamed by [`Archive::finish`] only. A run that is killed leaves its `.partial`, which
 //! readers ignore; an existing file is never opened, appended to, renamed over or rewritten.
@@ -30,6 +31,7 @@ use sha2::{Digest, Sha256};
 use crate::ocr_passes::PassObject;
 use crate::provider_bench::TruthComparison;
 use crate::report::{ModelPathsReport, OutcomeRow};
+use crate::synthetic_ledger::LedgerRow;
 use crate::CorpusTrack;
 
 /// The record schema. A change to a key's name, order or meaning bumps it (schema 2 adds the
@@ -713,6 +715,196 @@ pub fn resolve_archive_root(
     }
 }
 
+// ---------------------------------------------------------------- plan and header
+
+/// What a run does about the archive (ADR-0024), decided before any model loads.
+#[derive(Debug, PartialEq)]
+pub enum ArchivePlan {
+    /// No archive, and nothing to say: `--no-archive` or `SYNTHPASS_BENCH_ARCHIVE=off`.
+    Off,
+    /// No archive, and one `warning: archive: ...` line to print.
+    Warn(String),
+    /// Write the archive under this root, which has passed the tree check.
+    Root(PathBuf),
+}
+
+/// The archive plan for a run, from the process's facts injected as arguments so every rule is
+/// testable without the environment or git: `variable` is `SYNTHPASS_BENCH_ARCHIVE`, `repo` the
+/// working tree, `cwd` the current directory.
+///
+/// A `--include-private` run is not refused, it writes no archive at all, with one warning: the
+/// private track may only be archived as text-free records (ADR-0024, Decision 7), which are a
+/// later step, and the archive may never change an exit code (Decision 1). Every other problem
+/// (a root git would stage, a git that cannot say where its directory is) is a warning too.
+/// `synthpass-bench` has no private track and passes `include_private` as `false`.
+pub fn plan(
+    no_archive: bool,
+    include_private: bool,
+    variable: Option<&str>,
+    repo: &Path,
+    cwd: &Path,
+    git_common_dir: impl FnOnce() -> Result<PathBuf, String>,
+    is_ignored: impl Fn(&Path) -> Result<bool, String>,
+) -> ArchivePlan {
+    // A run that turned the archive off says nothing more about it; only a run that asked for
+    // one (by default) is told why it will not get one.
+    if include_private && archive_requested(no_archive, variable) {
+        return ArchivePlan::Warn(
+            "warning: archive: --include-private writes no archive: the private track is only \
+             archived as text-free records, which are a later step (ADR-0024, Decision 7)"
+                .to_string(),
+        );
+    }
+    match resolve_archive_root(no_archive, variable, repo, cwd, git_common_dir, is_ignored) {
+        Ok(None) => ArchivePlan::Off,
+        Ok(Some(root)) => ArchivePlan::Root(root),
+        Err(e) => ArchivePlan::Warn(format!("warning: archive: {e}")),
+    }
+}
+
+/// [`plan`] for this process: `SYNTHPASS_BENCH_ARCHIVE`, the working directory, and git.
+pub fn plan_for_process(no_archive: bool, include_private: bool, repo: &Path) -> ArchivePlan {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let variable = match std::env::var_os(ARCHIVE_ENV).map(std::ffi::OsString::into_string) {
+        None => None,
+        Some(Ok(value)) => Some(value),
+        Some(Err(_)) => {
+            return ArchivePlan::Warn(format!(
+                "warning: archive: {ARCHIVE_ENV} is not valid Unicode, so no archive is written"
+            ));
+        }
+    };
+    plan(
+        no_archive,
+        include_private,
+        variable.as_deref(),
+        repo,
+        &cwd,
+        || git_common_dir(repo),
+        |relative| crate::ocr_passes::git_ignores(repo, relative),
+    )
+}
+
+/// The `SYNTHPASS_MRZ_*` arms as the run manifest and the archive header spell them: each name
+/// is what the binary resolved, never the variable's raw value (an unrecognised value falls
+/// back to `off`).
+#[derive(Serialize, Debug, PartialEq, Eq)]
+pub struct MrzArms {
+    pub class_sweep: &'static str,
+    pub line1_select: &'static str,
+    pub refuse_repeated_line: &'static str,
+    pub date_digits: &'static str,
+}
+
+impl MrzArms {
+    /// The arms this process resolved.
+    pub fn from_env() -> Self {
+        Self {
+            class_sweep: synthpass_die::class_sweep_arm().0,
+            line1_select: synthpass_die::line1_select_arm().0,
+            refuse_repeated_line: synthpass_die::refuse_repeated_line_arm().0,
+            date_digits: synthpass_die::date_digits_arm().0,
+        }
+    }
+}
+
+/// The `SYNTHPASS_MRZ_*` arms as a map, from [`MrzArms`] itself: the run manifest and the
+/// archive header both spell them, and neither keeps its own list of names.
+pub fn mrz_arms_map() -> BTreeMap<String, String> {
+    serde_json::to_value(MrzArms::from_env())
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default()
+}
+
+/// The five `SYNTHPASS_OCR_*` arms as the run manifest, the archive header and the replay's arm
+/// check spell them.
+pub fn ocr_arms_map(arms: &synthpass_ocr::OcrArms) -> BTreeMap<String, String> {
+    [
+        ("texture", arms.texture),
+        ("order", arms.order),
+        ("rotate", arms.rotate),
+        ("skew", arms.skew),
+        ("chargrid", arms.chargrid),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .collect()
+}
+
+/// What a binary tells the archive about its run, beyond the process's own facts.
+pub struct HeaderInputs<'a> {
+    /// `provider-bench` or `synthpass-bench`: the header's `binary_name` and the file name's.
+    pub binary_name: &'a str,
+    /// The working tree, for the git commit and dirty flag.
+    pub repo: &'a Path,
+    pub argv: &'a [String],
+    pub scope: Scope,
+    pub tracks: TrackFlags,
+    pub corpus_manifest_sha256: Option<String>,
+    pub documents_loaded: usize,
+    pub labelled_loaded: usize,
+    pub providers: Vec<String>,
+    pub ocr_arms: BTreeMap<String, String>,
+    pub model_paths: ModelPathsReport,
+    pub replay_of: Option<ReplayOfRecord>,
+}
+
+/// The header of a run's archive files (Decision 4): `inputs` plus this process's facts. The
+/// arms come from [`ocr_arms_map`] and [`mrz_arms_map`] (the run manifest's own code), the retry
+/// budget from `synthpass_ocr::effective_retry_budget` (the source the benchmarks' reports
+/// use), and `env` from [`allowlisted_env`].
+pub fn run_header(inputs: HeaderInputs<'_>) -> RunHeader {
+    let git = git_state(inputs.repo).ok();
+    let binary = std::env::current_exe().ok();
+    let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
+    RunHeader {
+        kind: "run",
+        schema: SCHEMA,
+        run_id: String::new(),
+        binary_name: inputs.binary_name.to_string(),
+        started_unix_ms: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64),
+        pid: std::process::id(),
+        source: source_from(std::env::var("GITHUB_ACTIONS").ok().as_deref()),
+        machine: Machine::detect(),
+        // The file name only: the path says whose machine this is, and the SHA-256 below
+        // identifies the binary. `argv` and `model_paths` keep their paths, which the Decision 8
+        // publisher is to refuse or redact.
+        binary: binary.as_ref().and_then(|b| b.file_name()).map_or_else(
+            || inputs.binary_name.to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
+        binary_sha256: binary
+            .as_ref()
+            .and_then(|b| std::fs::read(b).ok())
+            .map(|bytes| sha256_hex(&bytes)),
+        git_commit: git.as_ref().map(|g| g.commit.clone()),
+        working_tree_dirty: git.as_ref().map(|g| g.dirty),
+        argv: inputs.argv.to_vec(),
+        scope: inputs.scope,
+        tracks: inputs.tracks,
+        samples_data_sha: samples_data_sha_from(std::env::var("SAMPLES_DATA_SHA").ok().as_deref()),
+        corpus_manifest_sha256: inputs.corpus_manifest_sha256,
+        documents_loaded: inputs.documents_loaded,
+        labelled_loaded: inputs.labelled_loaded,
+        providers: inputs.providers,
+        ocr_arms: inputs.ocr_arms,
+        // A replay's OCR ran in the capture, whose manifest does not carry its budget.
+        retry_budget: inputs.replay_of.is_none().then_some(RetryBudget {
+            max_passes,
+            max_seconds,
+        }),
+        mrz_arms: mrz_arms_map(),
+        pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
+        model_paths: inputs.model_paths,
+        replay_of: inputs.replay_of,
+        env: process_env(),
+    }
+    .with_run_id()
+}
+
 // ---------------------------------------------------------------- the writer
 
 /// The civil date (year, month, day) of Unix seconds, in UTC: Howard Hinnant's
@@ -828,8 +1020,9 @@ impl Archive {
             }
         };
         let stem = format!(
-            "{}-provider-bench-{}",
+            "{}-{}-{}",
             utc_stamp(header.started_unix_ms / 1000),
+            header.binary_name,
             header.run_id.get(..12).unwrap_or(&header.run_id)
         );
         Self {
@@ -876,7 +1069,7 @@ impl Archive {
 
     /// Appends one record to its track's file, creating the file (and its header line) first
     /// when it is the track's first. A private-track record is dropped.
-    pub(crate) fn record(&self, track: ArchiveTrack, record: &DocRecord<'_>) {
+    pub(crate) fn record<T: Serialize>(&self, track: ArchiveTrack, record: &T) {
         let Some(dir) = track.dir() else { return };
         let Ok(mut inner) = self.inner.lock() else {
             return;
@@ -1012,6 +1205,106 @@ impl Archive {
             }
             eprintln!("archive: {} ({records} records)", plain_path(&path));
         }
+    }
+}
+
+// ---------------------------------------------------------------- the synthetic record
+
+/// One synthetic seed as `synthpass-bench` archives it (ADR-0024, Decision 5), where the
+/// synthetic path has the fact: a field it does not have is `null`, never invented. Key order is
+/// pinned by a test. The `ocr`, `tier1_read`, `fields` and `truth` keys are the ones
+/// [`DocRecord`] writes, under the same names.
+///
+/// The record holds the provider-input OCR text, so it is document content like a
+/// [`DocRecord`] (synthetic text, but the same file format and the same rule: nothing here
+/// reaches stdout, stderr, `--out`, a dump or the ledger). It never holds the generator's own
+/// zone: `truth` carries mismatch counts and positions only.
+#[derive(Debug, Serialize)]
+struct SyntheticDocRecord<'a> {
+    kind: &'static str,
+    run_id: String,
+    track: &'static str,
+    format: &'a str,
+    profile: &'a str,
+    seed: u64,
+    /// Exactly the row `--ledger` writes for this seed (it carries the check states).
+    ledger_row: &'a LedgerRow,
+    /// `null` when OCR itself failed.
+    ocr: Option<OcrRecord<'a>>,
+    /// `null` when nothing parsed.
+    tier1_read: Option<Tier1ReadRecord>,
+    /// The read's value for every scored field but the zone itself (that is `tier1_read`),
+    /// keyed by `CoreField::as_str`; an absent optional field is `null`. `null` when OCR failed.
+    fields: Option<BTreeMap<&'static str, Option<String>>>,
+    /// Mismatch counts and positions of the recovered zone against the generator's labels.
+    truth: Option<TruthComparison>,
+}
+
+impl Archive {
+    /// Records one synthetic seed: `ledger_row` is the row [`LedgerRow`] `--ledger` writes for
+    /// it, `hit` what `check_document` returned, `labels` the generator's labels, and `passes`
+    /// the OCR pass objects when the run already traces (`--ocr-passes`), else `None`: the
+    /// archive adds no tracing. Everything synthetic goes to `public/` (Decision 6).
+    pub fn record_synthetic(
+        &self,
+        ledger_row: &LedgerRow,
+        hit: &crate::HitResult,
+        labels: &synthpass_gen::Labels,
+        passes: Option<&[PassObject]>,
+    ) {
+        // The recovered zone is the `mrz_lines` row of the per-field comparison: present
+        // exactly when an MRZ parsed.
+        let zone = hit
+            .fields
+            .iter()
+            .find(|outcome| outcome.field == "mrz_lines")
+            .and_then(|outcome| outcome.got.as_deref());
+        let record = SyntheticDocRecord {
+            kind: "doc",
+            run_id: self.run_id(),
+            track: ArchiveTrack::Synthetic.as_str(),
+            format: &ledger_row.format,
+            profile: &ledger_row.profile,
+            seed: ledger_row.seed,
+            ledger_row,
+            ocr: hit
+                .raw_text
+                .as_deref()
+                .zip(hit.ocr.as_ref())
+                .map(|(text, facts)| OcrRecord {
+                    text,
+                    rotation: facts.rotation,
+                    mrz_band_score: facts.mrz_band_score,
+                    // The page-level chargrid verdict is not on the synthetic path; a traced
+                    // run's pass objects carry their own chargrid records.
+                    chargrid: None,
+                    ocr_passes: passes,
+                }),
+            tier1_read: zone.map(|zone| Tier1ReadRecord {
+                lines: zone.lines().map(str::to_string).collect(),
+                damaged_recovery: hit.tier1_damaged_recovery.unwrap_or(false),
+                // A parsed zone is valid unless its check digits failed.
+                valid: !matches!(hit.reason, Some(crate::MissReason::ChecksumFailed { .. })),
+            }),
+            fields: hit.ocr.as_ref().map(|_| {
+                hit.fields
+                    .iter()
+                    .filter(|outcome| outcome.field != "mrz_lines")
+                    .map(|outcome| {
+                        (
+                            outcome.field,
+                            outcome.got.clone().filter(|value| !value.is_empty()),
+                        )
+                    })
+                    .collect()
+            }),
+            truth: crate::provider_bench::truth_comparison_of_zone(
+                zone,
+                Some(&labels.mrz_lines.join("\n")),
+                Some(&ledger_row.format),
+            ),
+        };
+        self.record(ArchiveTrack::Synthetic, &record);
     }
 }
 
@@ -1909,6 +2202,124 @@ mod tests {
             inner.warnings,
             [r"warning: archive: cannot create D:\archive\public\x.partial: NotFound"]
         );
+    }
+
+    // ---- the synthetic record (build step 4) ----
+
+    #[test]
+    fn the_file_name_carries_the_binary_name() {
+        let root = scratch("binary-name");
+        let mut h = header(1_000_000_000_000);
+        h.binary_name = "synthpass-bench".to_string();
+        let h = h.with_run_id();
+        let archive = Archive::start(&root, &h);
+        archive.record(ArchiveTrack::Synthetic, &record(&h.run_id, "t", None));
+        archive.finish();
+        let names = files_under(&root.join("public"));
+        assert_eq!(names.len(), 1, "{names:?}");
+        assert!(
+            names[0].starts_with("20010909T014640Z-synthpass-bench-"),
+            "{names:?}"
+        );
+        assert!(names[0].ends_with(".jsonl"), "{names:?}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn synthetic_ledger_row() -> LedgerRow {
+        LedgerRow {
+            format: "TD3".to_string(),
+            seed: 0,
+            profile: "clean".to_string(),
+            hit: true,
+            miss_kind: None,
+            wrong_accept: false,
+            prefix_wrong_accept: false,
+            wrong_fields: Vec::new(),
+            check_states: None,
+            names_exact: true,
+            name_error: None,
+            line1_flagged: false,
+            retry_stop: None,
+            retry_variant_id: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
+            elapsed_ms: 0,
+        }
+    }
+
+    fn bare_hit(raw_text: Option<&str>, ocr: bool) -> crate::HitResult {
+        crate::HitResult {
+            hit: false,
+            reason: None,
+            check_states: None,
+            elapsed: std::time::Duration::ZERO,
+            fields: Vec::new(),
+            line1_integrity: None,
+            names_exact: false,
+            name_error: None,
+            raw_text: raw_text.map(str::to_string),
+            retry_stop: None,
+            retry_variant_id: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
+            ocr: ocr.then_some(crate::OcrFacts {
+                rotation: 90,
+                mrz_band_score: None,
+            }),
+        }
+    }
+
+    #[test]
+    fn a_synthetic_record_has_the_pinned_keys() {
+        let root = scratch("synthetic-keys");
+        let h = header(1_000_000_000_000);
+        let archive = Archive::start(&root, &h);
+        let labels =
+            synthpass_gen::generate_from_seed(&synthpass_gen::GeneratorConfig::with_document_type(
+                0,
+                synthpass_gen::DocumentType::TD3,
+            ))
+            .1;
+        archive.record_synthetic(
+            &synthetic_ledger_row(),
+            &bare_hit(Some("text"), true),
+            &labels,
+            None,
+        );
+        archive.finish();
+        let public = root.join("public");
+        let name = files_under(&public).remove(0);
+        let body = std::fs::read_to_string(public.join(name)).expect("the file");
+        let line = body.lines().nth(1).expect("the record");
+        assert_eq!(
+            ordered_keys(line),
+            [
+                "kind",
+                "run_id",
+                "track",
+                "format",
+                "profile",
+                "seed",
+                "ledger_row",
+                "ocr",
+                "tier1_read",
+                "fields",
+                "truth",
+            ]
+        );
+        // OCR succeeded but nothing parsed: no zone, so no read, and a truth comparison whose
+        // parts are all null; the fields exist (the read found none of them).
+        let value: serde_json::Value = serde_json::from_str(line).expect("JSON");
+        assert_eq!(value["ocr"]["rotation"], 90);
+        assert!(value["ocr"]["mrz_band_score"].is_null());
+        assert!(value["tier1_read"].is_null());
+        assert!(value["truth"]["zone_mismatch"].is_null());
+        assert!(value["truth"]["field_mismatch"].is_null());
+        // The generator's zone is never written: only counts and positions are.
+        for zone_line in &labels.mrz_lines {
+            assert!(!line.contains(zone_line.as_str()));
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A value that is not valid Unicode on this platform: a lone byte above 0x7f on Unix, an
