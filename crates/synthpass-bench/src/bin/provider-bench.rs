@@ -2006,10 +2006,10 @@ fn write_ocr_run_manifest(
 
 /// The archive plan for this process (ADR-0024): `SYNTHPASS_BENCH_ARCHIVE`, the working
 /// directory, and git. The rules live in [`archive::plan`], shared with `synthpass-bench`: a
-/// `--include-private` run writes no archive at all, with one warning, and every other problem
-/// is a warning too.
+/// `--include-private` run archives like any other (its private documents become text-free
+/// records in `private/`), and every problem is a warning.
 fn plan_archive(parsed: &Args, root: &Path) -> ArchivePlan {
-    archive::plan_for_process(parsed.no_archive, parsed.include_private, root)
+    archive::plan_for_process(parsed.no_archive, root)
 }
 
 /// What one run tells the archive about itself, beyond the process's own facts.
@@ -3247,7 +3247,6 @@ mod tests {
         let parsed = args_from(flags);
         archive::plan(
             parsed.no_archive,
-            parsed.include_private,
             variable,
             &repo,
             &repo,
@@ -3256,23 +3255,22 @@ mod tests {
         )
     }
 
+    /// `--include-private` no longer turns the archive off: the private track is archived as
+    /// text-free records (ADR-0024, Decision 7). The two ways to turn the archive off still do.
     #[test]
-    fn include_private_turns_the_archive_off_with_a_warning() {
-        let ArchivePlan::Warn(warning) = plan_for(&["--real-specimens", "--include-private"], None)
-        else {
-            panic!("a private run writes no archive, and says so");
-        };
-        assert!(warning.starts_with("warning: archive: "), "{warning}");
-        assert!(warning.contains("--include-private"), "{warning}");
-        assert!(warning.contains("Decision 7"), "{warning}");
-        // Even when a directory is named: the private track has no place in the archive.
+    fn include_private_leaves_the_archive_on() {
         let dir = std::env::temp_dir().join("named-archive-root");
         let named = dir.to_str().expect("utf-8 temp path");
-        assert!(matches!(
+        match plan_for(&["--real-specimens", "--include-private"], Some(named)) {
+            ArchivePlan::Root(root) => assert!(root.ends_with("named-archive-root"), "{root:?}"),
+            other => panic!("a private run is archived like any other: {other:?}"),
+        }
+        // The flag parses beside the others and is the only thing that differs.
+        assert_eq!(
             plan_for(&["--real-specimens", "--include-private"], Some(named)),
-            ArchivePlan::Warn(_)
-        ));
-        // A run that turned the archive off says nothing more about it.
+            plan_for(&["--real-specimens"], Some(named))
+        );
+        // A run that turned the archive off says nothing, private or not.
         assert_eq!(
             plan_for(
                 &["--real-specimens", "--include-private", "--no-archive"],

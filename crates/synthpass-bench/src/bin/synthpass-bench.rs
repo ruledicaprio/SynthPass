@@ -662,7 +662,7 @@ fn main() {
     let root = repo_root();
     // The archive is decided here, before any model loads: a root git would stage is not
     // written to, and the reason is one warning, never a refusal (ADR-0024, Decision 1).
-    let archive_plan = archive::plan_for_process(parsed.no_archive, false, &root);
+    let archive_plan = archive::plan_for_process(parsed.no_archive, &root);
     if let ArchivePlan::Warn(warning) = &archive_plan {
         eprintln!("{warning}");
     }
