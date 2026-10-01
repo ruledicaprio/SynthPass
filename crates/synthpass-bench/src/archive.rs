@@ -285,29 +285,223 @@ pub fn samples_data_sha_from(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// The machine label: `COMPUTERNAME`, else `/etc/hostname` (trimmed), else `unknown`. Both are
-/// injected so the order is testable.
-pub fn machine_label_from(computername: Option<&str>, etc_hostname: Option<&str>) -> String {
-    [computername, etc_hostname]
-        .into_iter()
-        .flatten()
+/// The machine label: the operating system and the processor's designation, such as
+/// `win11-i5-4570`, `win11-i7-1255U` or `linux-xeon-8272CL`. It names the hardware a number was
+/// measured on, never the host: a host name can be a person's. `windows_build` is the Windows
+/// build number (11 starts at 22000); `cpu_brand` is the processor's brand string. Both are
+/// injected so every rule is testable.
+pub fn machine_label_from(os: &str, windows_build: Option<u32>, cpu_brand: Option<&str>) -> String {
+    let os = match (os, windows_build) {
+        ("windows", Some(build)) if build >= 22_000 => "win11",
+        ("windows", Some(_)) => "win10",
+        (other, _) => other,
+    };
+    format!("{os}-{}", cpu_designation(cpu_brand))
+}
+
+/// The processor's designation from its brand string, in the form people write it:
+/// `Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz` is `i5-4570`; `12th Gen Intel(R) Core(TM)
+/// i7-1255U` is `i7-1255U`; a Xeon is `xeon-` and its model (`xeon-8272CL`, `xeon-E5-2673-v4`);
+/// `AMD EPYC 7763 64-Core Processor` is `epyc-7763`; `AMD Ryzen 7 5800X` is `ryzen7-5800X`;
+/// `Core(TM) Ultra 7 155H` is `ultra7-155H`. Any other brand string is lower-cased, its
+/// vendor words dropped and its runs of other characters turned into `-`. Nothing recognisable
+/// is `unknown`. The result is only `[A-Za-z0-9._-]`.
+pub fn cpu_designation(brand: Option<&str>) -> String {
+    let cleaned = brand
+        .unwrap_or("")
+        .replace("(R)", " ")
+        .replace("(TM)", " ")
+        .replace(['®', '™'], " ");
+    let tokens: Vec<&str> = cleaned.split_whitespace().collect();
+    let after = |word: &str| {
+        tokens
+            .iter()
+            .position(|t| t.eq_ignore_ascii_case(word))
+            .map(|i| &tokens[i + 1..])
+    };
+    let is_model = |t: &str| t.bytes().any(|b| b.is_ascii_digit()) && !t.ends_with("GHz");
+    let is_core_i = |t: &str| {
+        let bytes = t.as_bytes();
+        bytes.len() > 3
+            && bytes[0] == b'i'
+            && matches!(bytes[1], b'3' | b'5' | b'7' | b'9')
+            && bytes[2] == b'-'
+    };
+    let designation = if let Some(token) = tokens.iter().find(|t| is_core_i(t)) {
+        Some((*token).to_string())
+    } else if let Some(rest) = after("Ultra") {
+        match rest {
+            [tier, model, ..] if tier.parse::<u32>().is_ok() && is_model(model) => {
+                Some(format!("ultra{tier}-{model}"))
+            }
+            _ => None,
+        }
+    } else if let Some(rest) = after("Xeon") {
+        rest.iter().position(|t| is_model(t)).map(|i| {
+            let model = rest[i];
+            match rest.get(i + 1) {
+                Some(version)
+                    if version.len() > 1
+                        && version.starts_with('v')
+                        && version[1..].bytes().all(|b| b.is_ascii_digit()) =>
+                {
+                    format!("xeon-{model}-{version}")
+                }
+                _ => format!("xeon-{model}"),
+            }
+        })
+    } else if let Some(rest) = after("EPYC") {
+        rest.iter()
+            .find(|t| is_model(t))
+            .map(|model| format!("epyc-{model}"))
+    } else if let Some(rest) = after("Ryzen") {
+        match rest {
+            [tier, model, ..] if tier.parse::<u32>().is_ok() && is_model(model) => {
+                Some(format!("ryzen{tier}-{model}"))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let designation = designation.unwrap_or_else(|| {
+        let words: Vec<&str> = tokens
+            .iter()
+            .copied()
+            .filter(|t| {
+                let lower = t.to_ascii_lowercase();
+                !([
+                    "intel",
+                    "amd",
+                    "core",
+                    "cpu",
+                    "processor",
+                    "genuineintel",
+                    "@",
+                ]
+                .contains(&lower.as_str())
+                    || lower.ends_with("ghz")
+                    || lower.ends_with("mhz"))
+            })
+            .collect();
+        words.join(" ").to_ascii_lowercase()
+    });
+    let mut plain = String::new();
+    for ch in designation.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' {
+            plain.push(ch);
+        } else if !plain.ends_with('-') {
+            plain.push('-');
+        }
+    }
+    let plain = plain.trim_matches('-');
+    if plain.is_empty() {
+        "unknown".to_string()
+    } else {
+        plain.chars().take(48).collect()
+    }
+}
+
+/// The value of `name` in `reg query` output: the text after the type column (`REG_SZ`,
+/// `REG_DWORD`...) on the line that starts with `name`.
+fn reg_value(output: &str, name: &str) -> Option<String> {
+    output
+        .lines()
         .map(str::trim)
-        .find(|label| !label.is_empty())
-        .unwrap_or("unknown")
-        .to_string()
+        .find(|line| line.starts_with(name))
+        .and_then(|line| {
+            line[name.len()..]
+                .trim_start()
+                .split_once(char::is_whitespace)
+        })
+        .map(|(_type, value)| value.trim().to_string())
+}
+
+/// The first `model name` of `/proc/cpuinfo`.
+fn cpuinfo_model(text: &str) -> Option<String> {
+    text.lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(key, _)| key.trim() == "model name")
+        .map(|(_, value)| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// What `command` prints on stdout, or `None` when it cannot run or fails.
+fn command_stdout(command: &str, args: &[&str]) -> Option<String> {
+    let output = std::process::Command::new(command)
+        .args(args)
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// This machine's processor brand string and, on Windows, its build number.
+fn detect_cpu() -> (Option<String>, Option<u32>) {
+    match std::env::consts::OS {
+        "windows" => {
+            let cpu = command_stdout(
+                "reg",
+                &[
+                    "query",
+                    r"HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0",
+                    "/v",
+                    "ProcessorNameString",
+                ],
+            )
+            .and_then(|out| reg_value(&out, "ProcessorNameString"));
+            let build = command_stdout(
+                "reg",
+                &[
+                    "query",
+                    r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+                    "/v",
+                    "CurrentBuildNumber",
+                ],
+            )
+            .and_then(|out| reg_value(&out, "CurrentBuildNumber"))
+            .and_then(|value| value.parse().ok());
+            (cpu, build)
+        }
+        "macos" => (
+            command_stdout("sysctl", &["-n", "machdep.cpu.brand_string"])
+                .map(|out| out.trim().to_string()),
+            None,
+        ),
+        _ => (
+            std::fs::read_to_string("/proc/cpuinfo")
+                .ok()
+                .and_then(|text| cpuinfo_model(&text)),
+            None,
+        ),
+    }
 }
 
 impl Machine {
     /// This process's machine.
     pub fn detect() -> Self {
-        let computername = std::env::var("COMPUTERNAME").ok();
-        let hostname = std::fs::read_to_string("/etc/hostname").ok();
+        let (cpu_brand, windows_build) = detect_cpu();
         Self {
-            label: machine_label_from(computername.as_deref(), hostname.as_deref()),
+            label: machine_label_from(std::env::consts::OS, windows_build, cpu_brand.as_deref()),
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
             cpus: std::thread::available_parallelism().map_or(1, usize::from),
         }
+    }
+}
+
+/// A path as a person reads it: Windows' canonical form carries a `\\?\` (or `\\?\UNC\`)
+/// prefix that says nothing about where the file is.
+pub fn plain_path(path: &Path) -> String {
+    let text = path.display().to_string();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        text
     }
 }
 
@@ -537,7 +731,7 @@ impl Inner {
     fn fail(&mut self, what: &str, path: &Path, error: &std::io::Error) {
         let line = format!(
             "warning: archive: {what} {}: {:?}",
-            path.display(),
+            plain_path(path),
             error.kind()
         );
         eprintln!("{line}");
@@ -760,7 +954,7 @@ impl Archive {
                 inner.fail("cannot rename to", &path, &e);
                 return;
             }
-            eprintln!("archive: {} ({records} records)", path.display());
+            eprintln!("archive: {} ({records} records)", plain_path(&path));
         }
     }
 }
@@ -1510,12 +1704,154 @@ mod tests {
         ] {
             assert_eq!(samples_data_sha_from(bad), None, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_machine_label_is_the_os_and_the_processor_never_the_host() {
         assert_eq!(
-            machine_label_from(Some("DESKTOP-1"), Some("linuxbox")),
-            "DESKTOP-1"
+            machine_label_from(
+                "windows",
+                Some(26_200),
+                Some("Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz")
+            ),
+            "win11-i5-4570"
         );
-        assert_eq!(machine_label_from(None, Some("linuxbox\n")), "linuxbox");
-        assert_eq!(machine_label_from(Some("  "), Some("linuxbox")), "linuxbox");
-        assert_eq!(machine_label_from(None, None), "unknown");
+        assert_eq!(
+            machine_label_from(
+                "windows",
+                Some(22_631),
+                Some("12th Gen Intel(R) Core(TM) i7-1255U")
+            ),
+            "win11-i7-1255U"
+        );
+        // Windows 11 starts at build 22000; below it is Windows 10, unreadable is just `windows`.
+        assert_eq!(
+            machine_label_from(
+                "windows",
+                Some(21_999),
+                Some("Intel(R) Core(TM) i5-4570 CPU")
+            ),
+            "win10-i5-4570"
+        );
+        assert_eq!(
+            machine_label_from(
+                "windows",
+                Some(22_000),
+                Some("Intel(R) Core(TM) i5-4570 CPU")
+            ),
+            "win11-i5-4570"
+        );
+        assert_eq!(
+            machine_label_from("windows", None, Some("Intel(R) Core(TM) i5-4570 CPU")),
+            "windows-i5-4570"
+        );
+        assert_eq!(
+            machine_label_from(
+                "linux",
+                None,
+                Some("Intel(R) Xeon(R) Platinum 8272CL CPU @ 2.60GHz")
+            ),
+            "linux-xeon-8272CL"
+        );
+        assert_eq!(machine_label_from("linux", None, None), "linux-unknown");
+        assert_eq!(machine_label_from("macos", None, Some("")), "macos-unknown");
+    }
+
+    #[test]
+    fn cpu_designation_follows_the_vendor_forms() {
+        for (brand, expected) in [
+            ("Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz", "i5-4570"),
+            ("12th Gen Intel(R) Core(TM) i7-1255U", "i7-1255U"),
+            ("Intel(R) Core(TM) i9-14900K", "i9-14900K"),
+            ("Intel(R) Core(TM) Ultra 7 155H", "ultra7-155H"),
+            (
+                "Intel(R) Xeon(R) CPU E5-2673 v4 @ 2.30GHz",
+                "xeon-E5-2673-v4",
+            ),
+            (
+                "Intel(R) Xeon(R) Platinum 8272CL CPU @ 2.60GHz",
+                "xeon-8272CL",
+            ),
+            ("Intel(R) Xeon(R) W-2295 CPU @ 3.00GHz", "xeon-W-2295"),
+            ("AMD EPYC 7763 64-Core Processor", "epyc-7763"),
+            ("AMD Ryzen 7 5800X 8-Core Processor", "ryzen7-5800X"),
+            // Unrecognised: vendor words and the clock dropped, the rest made plain.
+            ("Apple M2 Pro", "apple-m2-pro"),
+            ("Intel(R) Pentium(R) CPU G4560 @ 3.50GHz", "pentium-g4560"),
+        ] {
+            assert_eq!(cpu_designation(Some(brand)), expected, "{brand}");
+        }
+        for nothing in [None, Some(""), Some("   "), Some("Intel(R) CPU")] {
+            assert_eq!(cpu_designation(nothing), "unknown", "{nothing:?}");
+        }
+        // Whatever the brand string holds, the label is plain: no path separator, space or `:`.
+        let odd = cpu_designation(Some("Weird/CPU: name\\with spaces 9000"));
+        assert!(
+            odd.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-')),
+            "{odd}"
+        );
+        assert!(odd.len() <= 48);
+        assert!(cpu_designation(Some(&"x".repeat(200))).len() <= 48);
+    }
+
+    #[test]
+    fn the_brand_string_is_read_from_registry_and_cpuinfo_output() {
+        let cpu = "\r\nHKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0\r\n    \
+                   ProcessorNameString    REG_SZ    Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz\r\n\r\n";
+        assert_eq!(
+            reg_value(cpu, "ProcessorNameString").as_deref(),
+            Some("Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz")
+        );
+        let build = "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\r\n    \
+                     CurrentBuildNumber    REG_SZ    26200\r\n";
+        assert_eq!(
+            reg_value(build, "CurrentBuildNumber").as_deref(),
+            Some("26200")
+        );
+        assert_eq!(
+            reg_value(
+                "ProcessorNameString    REG_SZ    \r\n",
+                "ProcessorNameString"
+            ),
+            None
+        );
+        assert_eq!(reg_value("nothing here", "ProcessorNameString"), None);
+
+        let info = "processor\t: 0\nvendor_id\t: GenuineIntel\nmodel name\t: Intel(R) Xeon(R) \
+                    Platinum 8272CL CPU @ 2.60GHz\nmodel name\t: second core\n";
+        assert_eq!(
+            cpuinfo_model(info).as_deref(),
+            Some("Intel(R) Xeon(R) Platinum 8272CL CPU @ 2.60GHz")
+        );
+        assert_eq!(cpuinfo_model("processor\t: 0\nHardware\t: BCM2835\n"), None);
+    }
+
+    #[test]
+    fn a_path_is_shown_without_the_extended_prefix() {
+        assert_eq!(plain_path(Path::new(r"\\?\D:\a\b.jsonl")), r"D:\a\b.jsonl");
+        assert_eq!(
+            plain_path(Path::new(r"\\?\UNC\host\share\b")),
+            r"\\host\share\b"
+        );
+        assert_eq!(plain_path(Path::new(r"D:\a\b")), r"D:\a\b");
+        assert_eq!(plain_path(Path::new("plain/a")), "plain/a");
+        // A prefix anywhere but the start is part of a name and stays.
+        assert_eq!(plain_path(Path::new(r"x\\?\y")), r"x\\?\y");
+
+        // The warning line uses it too.
+        let mut inner = Inner {
+            state: State::Off,
+            warnings: Vec::new(),
+        };
+        inner.fail(
+            "cannot create",
+            Path::new(r"\\?\D:\archive\public\x.partial"),
+            &std::io::Error::from(std::io::ErrorKind::NotFound),
+        );
+        assert_eq!(
+            inner.warnings,
+            [r"warning: archive: cannot create D:\archive\public\x.partial: NotFound"]
+        );
     }
 }
