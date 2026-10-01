@@ -1,0 +1,75 @@
+# Windows: the workspace tests and the tools/ Python tests on windows-latest, once a week and on
+# demand. Not a required check, and not run on every PR (Rusmir, 2026-10-01).
+#
+# Why: in one week the laptop found three Windows-only failures that Linux CI passed: a
+# path-traversal refusal written for Linux paths (#619, fixed in #620), the glyph atlas example's
+# path literal (fixed in #623) and `RunAnArm`'s stand-in bench, a `#!` script Windows cannot
+# execute (fixed in #640). Nothing in ci.yml runs on Windows, so the next one would again wait for
+# a lane to trip over it.
+#
+# It also runs on a pull request that edits this file, so a change to the job is tested before it
+# merges: `workflow_dispatch` only works once the file is on the default branch.
+name: Windows
+
+on:
+  schedule:
+    # Mondays 03:41 UTC: off the hour, and clear of the nightly bench-data collection.
+    - cron: "41 3 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Rust and tools (windows-latest)
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        # Git Bash: the same commands as the Linux jobs, and Git's bash ahead of System32 on PATH,
+        # which the tools/ suite needs on Windows (the laptop's 2026-09-30 runs).
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2.9.1
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # The same pinned models and checksums as ci.yml's `rust` job.
+      - name: Cache OCR .rten models
+        uses: actions/cache@v6
+        with:
+          path: |
+            text-detection.rten
+            text-recognition.rten
+          key: ocrs-rten-models-v1-${{ runner.os }}
+
+      - name: Download + checksum-verify the OCR .rten models
+        run: |
+          for f in text-detection.rten text-recognition.rten; do
+            if [ ! -f "$f" ]; then
+              curl -fL --retry 3 -o "$f" "https://ocrs-models.s3-accelerate.amazonaws.com/$f"
+            fi
+          done
+          echo "f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca  text-detection.rten" | sha256sum -c -
+          echo "e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e  text-recognition.rten" | sha256sum -c -
+
+      - name: Test (workspace)
+        run: cargo test --workspace --no-fail-fast
+
+      - name: tools/ unit tests (offline)
+        if: ${{ !cancelled() }}
+        run: python -m unittest discover -s tools -p "test_*.py"

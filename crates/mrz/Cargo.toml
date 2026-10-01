@@ -30,6 +30,9 @@ documentation = "https://docs.rs/mrz"
 readme = "README.md"
 keywords = ["mrz", "icao", "passport", "9303", "ocr"]
 categories = ["parser-implementations", "text-processing"]
+# Two integration tests read SynthPass's `samples/` corpus, which this package does not ship:
+# leave them out of the published crate, so its tests build from the crates.io source.
+exclude = ["tests/td1_not_reflowed_to_td2.rs", "tests/fixture_format_sweep_408_409.rs"]
 
 # Render the `serde` and `zeroize` feature surfaces on docs.rs.
 [package.metadata.docs.rs]

@@ -19,6 +19,7 @@ use synthpass_gen::degrade::{apply_profile, CaptureProfile};
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
+pub mod archive;
 pub mod bench_report;
 pub mod ground_truth;
 pub mod ocr_passes;
@@ -420,20 +421,15 @@ fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let name = path
+            let is_dir = path.is_dir();
+            let track = path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .map(str::to_ascii_lowercase);
-            if !tracks.private && name.as_deref().is_some_and(|n| n.contains("private")) {
+                .map_or(CorpusTrack::Public, |name| corpus_entry_track(name, is_dir));
+            if !corpus_track_allowed(track, tracks) {
                 continue;
             }
-            if path.is_dir() {
-                if !tracks.local && name.as_deref() == Some(LOCAL_TRACK_DIR) {
-                    continue;
-                }
-                if !tracks.covers && name.as_deref() == Some(COVERS_TRACK_DIR) {
-                    continue;
-                }
+            if is_dir {
                 walk(&path, tracks, out);
             } else if path
                 .extension()
@@ -448,6 +444,63 @@ fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
     walk(dir, tracks, &mut out);
     out.sort();
     out
+}
+
+/// The track a corpus entry belongs to, ordered from the least to the most restrictive
+/// (ADR-0024, Decision 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CorpusTrack {
+    /// The public corpus, which CI and the committed baseline measure.
+    Public,
+    /// `samples/covers/` ([`COVERS_TRACK_DIR`]).
+    Covers,
+    /// `samples/local/` ([`LOCAL_TRACK_DIR`]).
+    Local,
+    /// `samples/private/` and any name that contains `private`.
+    Private,
+}
+
+/// The track of one directory entry, from its name and whether it is a directory: the one
+/// rule the corpus walk (`find_image_files`) and the benchmark archive both apply, so the
+/// archive cannot file a document under a track the walk would not have put it in.
+///
+/// A name containing `private` (case-insensitive), file or directory, is the private track.
+/// A directory named exactly `local` or `covers` (case-insensitive) is that track; a file
+/// with such a name is not, and neither is a directory whose name merely contains one.
+pub fn corpus_entry_track(name: &str, is_dir: bool) -> CorpusTrack {
+    let name = name.to_ascii_lowercase();
+    if name.contains("private") {
+        CorpusTrack::Private
+    } else if is_dir && name == LOCAL_TRACK_DIR {
+        CorpusTrack::Local
+    } else if is_dir && name == COVERS_TRACK_DIR {
+        CorpusTrack::Covers
+    } else {
+        CorpusTrack::Public
+    }
+}
+
+/// Whether a walk with `tracks` opted in descends into (or lists) an entry of `track`.
+fn corpus_track_allowed(track: CorpusTrack, tracks: OptInTracks) -> bool {
+    match track {
+        CorpusTrack::Public => true,
+        CorpusTrack::Covers => tracks.covers,
+        CorpusTrack::Local => tracks.local,
+        CorpusTrack::Private => tracks.private,
+    }
+}
+
+/// The track of a specimen from its samples-relative asset ID (`/`-separated): [`corpus_entry_track`]
+/// of every component, the last being a file and the rest directories, and the most restrictive
+/// result. A document is in the private track if any component says so, however deep.
+pub fn asset_track(asset_id: &str) -> CorpusTrack {
+    let components: Vec<&str> = asset_id.split(['/', '\\']).collect();
+    components
+        .iter()
+        .enumerate()
+        .map(|(i, name)| corpus_entry_track(name, i + 1 < components.len()))
+        .max()
+        .unwrap_or(CorpusTrack::Public)
 }
 
 /// Reads `samples_root/ocr_fixtures/<stem>.json` and parses it as a v1
@@ -2987,6 +3040,112 @@ mod tests {
         );
         assert!(specimens.iter().any(|s| s.labels.is_some()));
         assert!(specimens.iter().any(|s| s.labels.is_none()));
+    }
+
+    /// ADR-0024, Decision 6: the archive files a document under the track the corpus walk puts
+    /// it in, by one predicate. For every combination of opt-in tracks, the walk lists exactly
+    /// the files whose asset track those tracks allow: a second rule in the archive would
+    /// disagree with the walk on one of these names.
+    #[test]
+    fn the_archive_track_is_the_corpus_walks_own() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-archive-track-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        // Files whose path has two non-public components: the walk needs both allowed.
+        const MULTI_TRACK: [&str; 2] = [
+            "deep/private/covers/x.png",
+            "LOCAL/covers/local-then-covers.png",
+        ];
+        // No two names differ only in case, so the tree is the same on a case-insensitive disk.
+        let files = [
+            "passports/plain.png",
+            "private/in-private-dir.png",
+            "passports/_Private_holder.png",
+            "LOCAL/in-local-dir.png",
+            "local.png",
+            "nested/CoVeRs/in-covers-dir.png",
+            "covers.png",
+            "locality/not-a-track.png",
+            "covers_extra/not-a-track.png",
+            "deep/private/covers/x.png",
+            "LOCAL/covers/local-then-covers.png",
+            "some_Private_track/y.png",
+        ];
+        for relative in files {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("create the tree");
+            std::fs::write(&path, b"").expect("create a file");
+        }
+
+        for bits in 0..8u8 {
+            let tracks = OptInTracks {
+                private: bits & 1 != 0,
+                local: bits & 2 != 0,
+                covers: bits & 4 != 0,
+            };
+            let mut walked: Vec<String> = find_image_files(&root, tracks)
+                .iter()
+                .map(|p| {
+                    p.strip_prefix(&root)
+                        .expect("under the root")
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/")
+                })
+                .collect();
+            walked.sort();
+            // What each opt-in flag means, stated here rather than taken from the walk's own
+            // function, so a walk that mis-reads a flag cannot agree with its own mistake.
+            let allowed = |track: CorpusTrack| match track {
+                CorpusTrack::Public => true,
+                CorpusTrack::Covers => tracks.covers,
+                CorpusTrack::Local => tracks.local,
+                CorpusTrack::Private => tracks.private,
+            };
+            let mut expected: Vec<String> = files
+                .iter()
+                .filter(|relative| allowed(asset_track(relative)))
+                .map(|relative| (*relative).to_string())
+                .collect();
+            expected.sort();
+            // A file with two non-public components is listed only when the walk may enter
+            // both, which is narrower than the archive's "most restrictive" track allows, so
+            // for those the walk's list is a subset; for every other file the two agree.
+            let (multi, single): (Vec<String>, Vec<String>) = expected
+                .into_iter()
+                .partition(|relative| MULTI_TRACK.contains(&relative.as_str()));
+            let walked_single: Vec<String> = walked
+                .iter()
+                .filter(|relative| !MULTI_TRACK.contains(&relative.as_str()))
+                .cloned()
+                .collect();
+            assert_eq!(walked_single, single, "{tracks:?}");
+            assert!(
+                walked
+                    .iter()
+                    .filter(|relative| MULTI_TRACK.contains(&relative.as_str()))
+                    .all(|relative| multi.contains(relative)),
+                "{tracks:?}: the walk lists a file the archive would call a track it may not enter"
+            );
+        }
+
+        // The tracks themselves, pinned: the most restrictive component wins.
+        for (asset_id, track) in [
+            ("passports/plain.png", CorpusTrack::Public),
+            ("private/in-private-dir.png", CorpusTrack::Private),
+            ("passports/_Private_holder.png", CorpusTrack::Private),
+            ("LOCAL/in-local-dir.png", CorpusTrack::Local),
+            ("local.png", CorpusTrack::Public),
+            ("nested/CoVeRs/in-covers-dir.png", CorpusTrack::Covers),
+            ("covers.png", CorpusTrack::Public),
+            ("locality/not-a-track.png", CorpusTrack::Public),
+            ("deep/private/covers/x.png", CorpusTrack::Private),
+            ("LOCAL/covers/local-then-covers.png", CorpusTrack::Local),
+        ] {
+            assert_eq!(asset_track(asset_id), track, "{asset_id}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn repo_root() -> std::path::PathBuf {
