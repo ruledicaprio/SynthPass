@@ -13,7 +13,7 @@
 //! synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE]
 //!                 [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N]
 //!                 [--dump-ocr] [--ocr-passes] [--escalation-report]
-//!                 [--ledger PATH] [--diff-ledger PATH]
+//!                 [--ledger PATH] [--diff-ledger PATH] [--no-archive]
 //!   --count N            number of documents to check (default: 100)
 //!   --seed N             base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME       clean|mobile|scanner|worn|border-kiosk|all (default: clean)
@@ -64,6 +64,16 @@
 //!                        at PATH prints one line and carries on. The committed
 //!                        ledger is written by CI only
 //!                        (`knowledge/benchmarks/README.md`)
+//!   --no-archive         do not write the per-document archive (ADR-0024). By default
+//!                        a run writes one JSON Lines file under
+//!                        `<git common dir>/synthpass-bench-archive/public/`, or under
+//!                        `SYNTHPASS_BENCH_ARCHIVE` when it names a directory
+//!                        (`SYNTHPASS_BENCH_ARCHIVE=off` also turns it off): a run
+//!                        header, then one record per seed. The records hold the OCR
+//!                        text, so the file is document content and is never printed
+//!                        or copied. The archive is a side output: no run reads it, and
+//!                        a problem with it is a one-line `warning: archive: ...` on
+//!                        stderr, never a changed exit code, report, ledger or dump
 //! ```
 //!
 //! An *accepted read* is one the router accepts because its check digits all
@@ -77,7 +87,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use synthpass_bench::{check_document, generate_corpus, miss_kind, ProfileChoice};
+use synthpass_bench::archive::{self, Archive, ArchivePlan};
+use synthpass_bench::{check_document, generate_corpus, miss_kind, HitResult, ProfileChoice};
 use synthpass_gen::DocumentType;
 use synthpass_ocr::NativeOcr;
 
@@ -135,6 +146,9 @@ struct Args {
     /// `--diff-ledger`: the committed ledger to diff this run's rows against.
     /// Report-only: the diff has no way to change the exit code.
     diff_ledger: Option<String>,
+    /// `--no-archive`: do not write the per-document archive (ADR-0024).
+    /// `SYNTHPASS_BENCH_ARCHIVE=off` does the same; the flag wins over the variable.
+    no_archive: bool,
 }
 
 impl Default for Args {
@@ -152,6 +166,7 @@ impl Default for Args {
             escalation_report: false,
             ledger: None,
             diff_ledger: None,
+            no_archive: false,
         }
     }
 }
@@ -160,7 +175,8 @@ fn usage() {
     eprintln!(
         "Usage: synthpass-bench [--count N] [--seed N] [--profile NAME] [--document-type TYPE] \
          [--out PATH] [--min-hit-rate F] [--max-prefix-wrong-accepts N] [--dump-ocr] \
-         [--ocr-passes] [--escalation-report] [--ledger PATH] [--diff-ledger PATH]"
+         [--ocr-passes] [--escalation-report] [--ledger PATH] [--diff-ledger PATH] \
+         [--no-archive]"
     );
     eprintln!("  --count N            number of documents to check (default: 100)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -197,6 +213,11 @@ fn usage() {
     eprintln!(
         "  --diff-ledger PATH   print how this run's rows differ from the committed ledger at \
          PATH; report-only, never changes the exit code"
+    );
+    eprintln!(
+        "  --no-archive         do not write the per-document archive (default: one JSON Lines \
+         file under <git common dir>/synthpass-bench-archive/public/, or \
+         SYNTHPASS_BENCH_ARCHIVE; SYNTHPASS_BENCH_ARCHIVE=off also disables it)"
     );
 }
 
@@ -284,6 +305,10 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                     .ok_or_else(|| "--ledger requires a value".to_string())?;
                 parsed.ledger = Some(v.clone());
                 i += 2;
+            }
+            "--no-archive" => {
+                parsed.no_archive = true;
+                i += 1;
             }
             "--diff-ledger" => {
                 let v = args
@@ -635,6 +660,12 @@ fn main() {
     };
 
     let root = repo_root();
+    // The archive is decided here, before any model loads: a root git would stage is not
+    // written to, and the reason is one warning, never a refusal (ADR-0024, Decision 1).
+    let archive_plan = archive::plan_for_process(parsed.no_archive, false, &root);
+    if let ArchivePlan::Warn(warning) = &archive_plan {
+        eprintln!("{warning}");
+    }
     // `SYNTHPASS_OCR_MODEL_DIR` if set, otherwise this binary's own
     // build-tree repo root (today's behaviour, unchanged) — issue #541.
     let model_dir = synthpass_bench::resolve_model_dir(&root, |k| std::env::var_os(k));
@@ -663,6 +694,14 @@ fn main() {
     // causing the retry budget to cut passes short — this was observed to
     // drop the measured hit rate by ~20 points versus running one at a time,
     // which is a resource-contention artifact, not a real accuracy signal.
+    let archive = start_archive(
+        &archive_plan,
+        &parsed,
+        &root,
+        &args,
+        &detection_path,
+        &recognition_path,
+    );
     let results: Vec<SeedResult> = corpus
         .into_iter()
         .map(|doc| {
@@ -673,74 +712,29 @@ fn main() {
                 (check_document(&ocr, &doc.image, &doc.labels), Vec::new())
             };
             if parsed.dump_ocr {
-                println!("--- seed {} raw OCR lines ---", doc.seed);
-                match &result.raw_text {
-                    Some(text) if !text.is_empty() => {
-                        for (i, line) in text.lines().enumerate() {
-                            println!("  [{i}] {line:?}");
-                        }
-                    }
-                    Some(_) => println!("  (OCR returned no text)"),
-                    None => println!("  (OCR failed: {:?})", result.reason),
+                for line in dump_ocr_lines(doc.seed, &result) {
+                    println!("{line}");
                 }
             }
-            let line1_flagged = matches!(
-                result.line1_integrity,
-                Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
-            );
-            let check_states = result.check_states.clone();
-            let names_exact = result.names_exact;
-            let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
-            let wrong_fields = wrong_scored_fields(&result.fields);
-            let wrong_accept = result.hit && !wrong_fields.is_empty();
-            let prefix_wrong_accept = wrong_accept && touches_line1_prefix(&wrong_fields);
-            let kind = result.reason.as_ref().map(miss_kind);
-            let prefix_wrong_accepted_read =
-                is_prefix_wrong_accepted_read(result.hit, kind, &wrong_fields);
-            // The traced fields exist only under `--ocr-passes`; `raw_text` is
-            // the text `mrz::find_and_parse` was handed, i.e. `OcrPage::text`.
-            let ocr_text = parsed.ocr_passes.then(|| result.raw_text.clone());
-            let ocr_passes = parsed
-                .ocr_passes
-                .then(|| synthpass_bench::ocr_passes::pass_objects(&pass_records));
-            SeedResult {
-                seed: doc.seed,
-                profile: doc.profile.as_str(),
-                render_sha256,
-                hit: result.hit,
-                miss_kind: kind,
-                check_states,
-                reason: result.reason.map(|r| r.to_string()),
-                elapsed_ms: result.elapsed.as_millis(),
-                retry_stop: result.retry_stop,
-                retry_variant_id: result.retry_variant_id,
-                retry_damaged_recovery: result.retry_damaged_recovery,
-                tier1_damaged_recovery: result.tier1_damaged_recovery,
-                line1_flagged,
-                names_exact,
-                name_error,
-                wrong_accept,
-                prefix_wrong_accept,
-                prefix_wrong_accepted_read,
-                wrong_fields,
-                ocr_text,
-                ocr_passes,
-                fields: result
-                    .fields
-                    .into_iter()
-                    .map(|f| {
-                        let imperfect = f.cer > 0.0;
-                        FieldReport {
-                            field: f.field,
-                            cer: f.cer,
-                            expected: imperfect.then_some(f.expected),
-                            got: if imperfect { f.got } else { None },
-                        }
-                    })
-                    .collect(),
-            }
+            finish_seed(
+                SeedInput {
+                    seed: doc.seed,
+                    profile: doc.profile.as_str(),
+                    format: parsed.document_type.as_str(),
+                    render_sha256,
+                    with_passes: parsed.ocr_passes,
+                    labels: &doc.labels,
+                },
+                result,
+                &pass_records,
+                &archive,
+            )
         })
         .collect();
+    // The seeds are done. The archive is closed now, before the report, the ledger and the
+    // gates, which may `exit` and skip any `Drop` (ADR-0024, Decision 3).
+    archive.flush();
+    archive.finish();
 
     let hits = results.iter().filter(|r| r.hit).count() as u64;
     let hit_rate = hits as f64 / parsed.count.max(1) as f64;
@@ -1094,6 +1088,160 @@ fn main() {
     if failed {
         std::process::exit(1);
     }
+}
+
+/// What one seed's check needs beyond the [`HitResult`] to become its report row and its archive
+/// record.
+struct SeedInput<'a> {
+    seed: u64,
+    profile: &'static str,
+    /// The run's `--document-type` label, as `DocumentType::as_str` writes it.
+    format: &'a str,
+    render_sha256: String,
+    /// `--ocr-passes`: the report row carries the OCR text and the pass objects.
+    with_passes: bool,
+    labels: &'a synthpass_gen::Labels,
+}
+
+/// The lines `--dump-ocr` prints for one seed, as printed.
+fn dump_ocr_lines(seed: u64, result: &HitResult) -> Vec<String> {
+    let mut lines = vec![format!("--- seed {seed} raw OCR lines ---")];
+    match &result.raw_text {
+        Some(text) if !text.is_empty() => {
+            for (i, line) in text.lines().enumerate() {
+                lines.push(format!("  [{i}] {line:?}"));
+            }
+        }
+        Some(_) => lines.push("  (OCR returned no text)".to_string()),
+        None => lines.push(format!("  (OCR failed: {:?})", result.reason)),
+    }
+    lines
+}
+
+/// One seed's report row, from its [`HitResult`]: the body `main` ran for each seed, moved out
+/// unchanged so that it can be tested without OCR.
+fn seed_report(
+    input: SeedInput<'_>,
+    result: HitResult,
+    pass_records: &[synthpass_ocr::PassRecord],
+) -> SeedResult {
+    let line1_flagged = matches!(
+        result.line1_integrity,
+        Some(synthpass_core::fusion::Verdict::NeedsReview { .. })
+    );
+    let check_states = result.check_states.clone();
+    let names_exact = result.names_exact;
+    let name_error = result.name_error.map(synthpass_bench::NameError::as_str);
+    let wrong_fields = wrong_scored_fields(&result.fields);
+    let wrong_accept = result.hit && !wrong_fields.is_empty();
+    let prefix_wrong_accept = wrong_accept && touches_line1_prefix(&wrong_fields);
+    let kind = result.reason.as_ref().map(miss_kind);
+    let prefix_wrong_accepted_read = is_prefix_wrong_accepted_read(result.hit, kind, &wrong_fields);
+    // The traced fields exist only under `--ocr-passes`; `raw_text` is
+    // the text `mrz::find_and_parse` was handed, i.e. `OcrPage::text`.
+    let ocr_text = input.with_passes.then(|| result.raw_text.clone());
+    let ocr_passes = input
+        .with_passes
+        .then(|| synthpass_bench::ocr_passes::pass_objects(pass_records));
+    SeedResult {
+        seed: input.seed,
+        profile: input.profile,
+        render_sha256: input.render_sha256,
+        hit: result.hit,
+        miss_kind: kind,
+        check_states,
+        reason: result.reason.map(|r| r.to_string()),
+        elapsed_ms: result.elapsed.as_millis(),
+        retry_stop: result.retry_stop,
+        retry_variant_id: result.retry_variant_id,
+        retry_damaged_recovery: result.retry_damaged_recovery,
+        tier1_damaged_recovery: result.tier1_damaged_recovery,
+        line1_flagged,
+        names_exact,
+        name_error,
+        wrong_accept,
+        prefix_wrong_accept,
+        prefix_wrong_accepted_read,
+        wrong_fields,
+        ocr_text,
+        ocr_passes,
+        fields: result
+            .fields
+            .into_iter()
+            .map(|f| {
+                let imperfect = f.cer > 0.0;
+                FieldReport {
+                    field: f.field,
+                    cer: f.cer,
+                    expected: imperfect.then_some(f.expected),
+                    got: if imperfect { f.got } else { None },
+                }
+            })
+            .collect(),
+    }
+}
+
+/// [`seed_report`], and the seed's archive record when `archive` is on. The archive reads a copy
+/// of the result and the finished row, and returns `()`: the row, and so the report, the ledger
+/// and the dump, are what they would be without it.
+fn finish_seed(
+    input: SeedInput<'_>,
+    result: HitResult,
+    pass_records: &[synthpass_ocr::PassRecord],
+    archive: &Archive,
+) -> SeedResult {
+    let for_archive = archive.is_on().then(|| result.clone());
+    let (format, labels) = (input.format, input.labels);
+    let row = seed_report(input, result, pass_records);
+    if let Some(hit) = for_archive {
+        // The row exactly as `--ledger` writes it, `wrong_fields` sorted included.
+        let ledger = ledger_row(format, &row).normalised();
+        archive.record_synthetic(&ledger, &hit, labels, row.ocr_passes.as_deref());
+    }
+    row
+}
+
+/// The archive for this run: on under the planned root, else off. Its header describes this
+/// run: `synthpass-bench` reads every seed through the Tier-1 reader (`mrz`), so that is its one
+/// provider.
+fn start_archive(
+    plan: &ArchivePlan,
+    parsed: &Args,
+    root: &Path,
+    argv: &[String],
+    detection: &Path,
+    recognition: &Path,
+) -> Archive {
+    let ArchivePlan::Root(dir) = plan else {
+        return Archive::disabled();
+    };
+    let header = archive::run_header(archive::HeaderInputs {
+        binary_name: "synthpass-bench",
+        repo: root,
+        argv,
+        scope: archive::Scope {
+            corpus: "synthetic-corpus",
+            format: None,
+            limit: None,
+            document_type: Some(parsed.document_type.as_str().to_string()),
+            profile: Some(parsed.profile.as_str().to_string()),
+            seed_start: Some(parsed.seed),
+            count: parsed.count,
+        },
+        tracks: archive::TrackFlags {
+            private: false,
+            local: false,
+            covers: false,
+        },
+        corpus_manifest_sha256: None,
+        documents_loaded: parsed.count as usize,
+        labelled_loaded: parsed.count as usize,
+        providers: vec!["mrz".to_string()],
+        ocr_arms: archive::ocr_arms_map(&synthpass_ocr::OcrArms::from_env()),
+        model_paths: synthpass_bench::report::ModelPathsReport::resolve(detection, recognition),
+        replay_of: None,
+    });
+    Archive::start(dir, &header)
 }
 
 /// The line-1 prefix: the two fields that open every ICAO 9303 MRZ and that
@@ -2236,5 +2384,368 @@ mod tests {
             synthpass_bench::provider_bench::mrz_field_line("TD1", "surname"),
             Some(3)
         );
+    }
+
+    // ---- the per-document archive (ADR-0024, build step 4) -----------------------------
+
+    use std::time::Duration;
+    use synthpass_bench::{FieldOutcome, NameError, OcrFacts};
+
+    /// A scratch directory unique to the process and the test, under the system temp directory:
+    /// never inside the working tree.
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "synthpass-bench-archive-test-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create the scratch directory");
+        dir
+    }
+
+    fn fixture_labels(seed: u64) -> synthpass_gen::Labels {
+        synthpass_gen::generate_from_seed(&synthpass_gen::GeneratorConfig::with_document_type(
+            seed,
+            DocumentType::TD3,
+        ))
+        .1
+    }
+
+    /// A hit-shaped result for `labels` without running OCR: one cell of line 2 misread, two
+    /// scored fields wrong (`surname` before `nationality`, so their sorted order is not their
+    /// scoring order), and the OCR facts a real run reports.
+    fn fake_hit(labels: &synthpass_gen::Labels, seed: u64) -> HitResult {
+        let mut read = labels.mrz_lines.clone();
+        read[1].replace_range(0..1, "X");
+        let read_zone = read.join("\n");
+        let field = |field: &'static str, expected: &str, got: &str, cer: f64| FieldOutcome {
+            field,
+            expected: expected.to_string(),
+            got: Some(got.to_string()),
+            cer,
+        };
+        HitResult {
+            hit: true,
+            reason: None,
+            check_states: Some(BTreeMap::from([
+                ("document_number", Some(true)),
+                ("composite", Some(true)),
+            ])),
+            elapsed: Duration::from_millis(10 + seed),
+            fields: vec![
+                field("document_number", "L898902C3", "L898902C3", 0.0),
+                field("surname", "ERIKSSON", "ERIKSSOM", 0.125),
+                field("nationality", "UTO", "UTX", 0.33),
+                field("optional_data_2", "", "", 0.0),
+                field("mrz_lines", &labels.mrz_lines.join("\n"), &read_zone, 0.01),
+            ],
+            line1_integrity: None,
+            names_exact: false,
+            name_error: Some(NameError::Other),
+            raw_text: Some(format!("{read_zone}\nA LINE THAT IS NOT THE ZONE")),
+            retry_stop: Some("general_valid".to_string()),
+            retry_variant_id: Some("general".to_string()),
+            retry_damaged_recovery: Some(false),
+            tier1_damaged_recovery: Some(false),
+            ocr: Some(OcrFacts {
+                rotation: 0,
+                mrz_band_score: Some(0.75),
+            }),
+        }
+    }
+
+    /// An archive for a test run, with a real header (its git and binary facts included).
+    fn test_archive(root: &Path) -> Archive {
+        let header = archive::run_header(archive::HeaderInputs {
+            binary_name: "synthpass-bench",
+            repo: Path::new("."),
+            argv: &[],
+            scope: archive::Scope {
+                corpus: "synthetic-corpus",
+                format: None,
+                limit: None,
+                document_type: Some("TD3".to_string()),
+                profile: Some("clean".to_string()),
+                seed_start: Some(0),
+                count: 3,
+            },
+            tracks: archive::TrackFlags {
+                private: false,
+                local: false,
+                covers: false,
+            },
+            corpus_manifest_sha256: None,
+            documents_loaded: 3,
+            labelled_loaded: 3,
+            providers: vec!["mrz".to_string()],
+            ocr_arms: BTreeMap::new(),
+            model_paths: synthpass_bench::report::ModelPathsReport::default(),
+            replay_of: None,
+        });
+        Archive::start(root, &header)
+    }
+
+    /// What a run produces for three seeds: the report rows, the ledger as `--ledger` writes
+    /// it, and the `--dump-ocr` text, with `archive` attached.
+    fn run_three_seeds(archive: &Archive, with_passes: bool) -> (String, String, Vec<String>) {
+        let mut rows = Vec::new();
+        let mut dump = Vec::new();
+        for seed in 0..3 {
+            let labels = fixture_labels(seed);
+            let hit = fake_hit(&labels, seed);
+            dump.extend(dump_ocr_lines(seed, &hit));
+            rows.push(finish_seed(
+                SeedInput {
+                    seed,
+                    profile: "clean",
+                    format: "TD3",
+                    render_sha256: "0".repeat(64),
+                    with_passes,
+                    labels: &labels,
+                },
+                hit,
+                &[],
+                archive,
+            ));
+        }
+        let ledger: Vec<_> = rows.iter().map(|r| ledger_row("TD3", r)).collect();
+        (
+            serde_json::to_string(&rows).expect("serialize the rows"),
+            synthpass_bench::synthetic_ledger::ledger_text(&ledger).expect("the ledger text"),
+            dump,
+        )
+    }
+
+    /// Every line of the one finished archive file under `root/public`, parsed.
+    fn archive_lines(root: &Path) -> Vec<serde_json::Value> {
+        let public = root.join("public");
+        let files: Vec<_> = std::fs::read_dir(&public)
+            .expect("the public track directory")
+            .flatten()
+            .map(|entry| entry.path())
+            .collect();
+        assert_eq!(files.len(), 1, "one file per run: {files:?}");
+        assert!(
+            files[0].extension().is_some_and(|ext| ext == "jsonl"),
+            "finished, not partial: {files:?}"
+        );
+        assert!(
+            files[0]
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.contains("-synthpass-bench-")),
+            "named for the binary: {files:?}"
+        );
+        std::fs::read_to_string(&files[0])
+            .expect("read the archive file")
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a JSON line"))
+            .collect()
+    }
+
+    #[test]
+    fn a_synthetic_run_writes_one_header_and_one_record_per_seed_into_public() {
+        let root = scratch("one-per-seed");
+        let archive = test_archive(&root);
+        run_three_seeds(&archive, false);
+        archive.finish();
+
+        let lines = archive_lines(&root);
+        assert_eq!(lines.len(), 1 + 3, "one header and three seeds");
+        assert_eq!(lines[0]["kind"], "run");
+        assert_eq!(lines[0]["binary_name"], "synthpass-bench");
+        assert_eq!(lines[0]["scope"]["corpus"], "synthetic-corpus");
+        assert_eq!(lines[0]["providers"], serde_json::json!(["mrz"]));
+        assert!(
+            !root.join("local").exists(),
+            "no local track for a synthetic run"
+        );
+        for (seed, record) in lines[1..].iter().enumerate() {
+            assert_eq!(record["kind"], "doc");
+            assert_eq!(record["track"], "synthetic");
+            assert_eq!(record["run_id"], lines[0]["run_id"]);
+            assert_eq!(record["seed"], seed);
+            assert_eq!(record["format"], "TD3");
+            assert_eq!(record["profile"], "clean");
+            // The OCR text is archived verbatim, with its band score and rotation.
+            assert!(record["ocr"]["text"]
+                .as_str()
+                .is_some_and(|text| text.ends_with("A LINE THAT IS NOT THE ZONE")));
+            assert_eq!(record["ocr"]["rotation"], 0);
+            assert_eq!(record["ocr"]["mrz_band_score"], 0.75);
+            // No tracing was asked for, so none is invented.
+            assert!(record["ocr"]["ocr_passes"].is_null());
+            assert!(record["ocr"]["chargrid"].is_null());
+            // The recovered zone, and a damaged-recovery flag from the read.
+            assert_eq!(record["tier1_read"]["valid"], true);
+            assert_eq!(record["tier1_read"]["damaged_recovery"], false);
+            assert_eq!(
+                record["tier1_read"]["lines"].as_array().map(Vec::len),
+                Some(2)
+            );
+            // The read's field values, never the zone (that is `tier1_read`); an absent
+            // optional field is null.
+            assert_eq!(record["fields"]["surname"], "ERIKSSOM");
+            assert!(record["fields"]["optional_data_2"].is_null());
+            assert!(record["fields"].get("mrz_lines").is_none());
+            // One misread cell: counts and positions, no characters.
+            assert_eq!(record["truth"]["zone_mismatch"], 1);
+            assert_eq!(
+                record["truth"]["field_mismatch"]["by_line"]["2"],
+                serde_json::json!([0])
+            );
+        }
+        let _ = std::fs::remove_dir_all(&root);
+
+        // Under `--ocr-passes` the pass objects the run already has are carried: here none ran.
+        let root = scratch("with-passes");
+        let archive = test_archive(&root);
+        run_three_seeds(&archive, true);
+        archive.finish();
+        let lines = archive_lines(&root);
+        assert!(lines[1..]
+            .iter()
+            .all(|record| record["ocr"]["ocr_passes"] == serde_json::json!([])));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_report_the_ledger_and_the_dump_are_the_same_with_and_without_the_archive() {
+        let root = scratch("neutral");
+        let archive = test_archive(&root);
+        let with = run_three_seeds(&archive, true);
+        archive.finish();
+        assert!(!archive_lines(&root).is_empty(), "the archive did write");
+        let without = run_three_seeds(&Archive::disabled(), true);
+        assert_eq!(with.0, without.0, "the report rows");
+        assert_eq!(with.1, without.1, "the ledger text");
+        assert_eq!(with.2, without.2, "the --dump-ocr lines");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_failing_archive_warns_once_and_changes_nothing_else() {
+        let dir = scratch("failing");
+        let root_is_a_file = dir.join("not-a-directory");
+        std::fs::write(&root_is_a_file, b"x").expect("a file where the root should be");
+        let archive = test_archive(&root_is_a_file);
+        let failing = run_three_seeds(&archive, true);
+        archive.flush();
+        archive.finish();
+        let warnings = archive.warnings();
+        assert_eq!(warnings.len(), 1, "one warning, then off: {warnings:?}");
+        assert!(
+            warnings[0].starts_with("warning: archive: "),
+            "{}",
+            warnings[0]
+        );
+        assert!(!archive.is_on());
+        assert_eq!(std::fs::read(&root_is_a_file).expect("untouched"), b"x");
+        assert_eq!(failing, run_three_seeds(&Archive::disabled(), true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_records_ledger_row_is_the_ledger_row_of_that_seed() {
+        let root = scratch("ledger-row");
+        let archive = test_archive(&root);
+        let (_, ledger_text, _) = run_three_seeds(&archive, false);
+        archive.finish();
+        // The file `--ledger` would write, parsed back.
+        let ledger = synthpass_bench::synthetic_ledger::parse_ledger(&ledger_text)
+            .expect("parse the ledger text");
+        assert_eq!(ledger.len(), 3);
+        let lines = archive_lines(&root);
+        for record in &lines[1..] {
+            let row: synthpass_bench::synthetic_ledger::LedgerRow =
+                serde_json::from_value(record["ledger_row"].clone()).expect("a ledger row");
+            let in_ledger = ledger
+                .iter()
+                .find(|r| r.seed == row.seed)
+                .expect("the ledger has the seed");
+            assert_eq!(&row, in_ledger, "seed {}", row.seed);
+            // Both name the scored fields that differ, in the ledger's sorted order.
+            assert_eq!(row.wrong_fields, ["nationality", "surname"]);
+        }
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_seed_whose_ocr_failed_archives_nulls_not_inventions() {
+        let root = scratch("ocr-failed");
+        let archive = test_archive(&root);
+        let labels = fixture_labels(0);
+        let failed = HitResult {
+            hit: false,
+            reason: Some(synthpass_bench::MissReason::OcrError("no text".to_string())),
+            check_states: None,
+            elapsed: Duration::from_millis(5),
+            fields: Vec::new(),
+            line1_integrity: None,
+            names_exact: false,
+            name_error: None,
+            raw_text: None,
+            retry_stop: None,
+            retry_variant_id: None,
+            retry_damaged_recovery: None,
+            tier1_damaged_recovery: None,
+            ocr: None,
+        };
+        finish_seed(
+            SeedInput {
+                seed: 0,
+                profile: "clean",
+                format: "TD3",
+                render_sha256: "0".repeat(64),
+                with_passes: false,
+                labels: &labels,
+            },
+            failed,
+            &[],
+            &archive,
+        );
+        archive.finish();
+        let lines = archive_lines(&root);
+        let record = &lines[1];
+        assert!(record["ocr"].is_null());
+        assert!(record["tier1_read"].is_null());
+        assert!(record["fields"].is_null());
+        assert_eq!(record["ledger_row"]["miss_kind"], "ocr_error");
+        assert!(record["truth"]["zone_mismatch"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_archive_parses_and_defaults_to_off_the_flag() {
+        assert!(!parse_args(&[]).expect("no arguments").no_archive);
+        let parsed = parse_args(&[
+            "--count".to_string(),
+            "3".to_string(),
+            "--no-archive".to_string(),
+        ])
+        .expect("--no-archive is a flag");
+        assert!(parsed.no_archive);
+        assert_eq!(parsed.count, 3);
+        assert!(parse_args(&["--no-archives".to_string()]).is_err());
+    }
+
+    #[test]
+    fn the_dump_lines_are_what_the_run_always_printed() {
+        let labels = fixture_labels(7);
+        let mut hit = fake_hit(&labels, 7);
+        hit.raw_text = Some("L1\nL2".to_string());
+        assert_eq!(
+            dump_ocr_lines(7, &hit),
+            [
+                "--- seed 7 raw OCR lines ---",
+                "  [0] \"L1\"",
+                "  [1] \"L2\"",
+            ]
+        );
+        hit.raw_text = Some(String::new());
+        assert_eq!(dump_ocr_lines(7, &hit)[1], "  (OCR returned no text)");
+        hit.raw_text = None;
+        hit.reason = Some(synthpass_bench::MissReason::OcrError("boom".to_string()));
+        assert!(dump_ocr_lines(7, &hit)[1].starts_with("  (OCR failed: Some(OcrError("));
     }
 }

@@ -1236,6 +1236,20 @@ pub struct HitResult {
     /// `mrz::find_and_parse_with` of the final OCR text. `None` when Tier 1
     /// found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,
+    /// What the OCR page reported besides its text, whenever OCR itself succeeded: kept for the
+    /// per-document archive (ADR-0024), which records it, and read by nothing else. `None` only
+    /// where `raw_text` is.
+    pub ocr: Option<OcrFacts>,
+}
+
+/// The parts of an `OcrPage` (`synthpass_imageprep`) the benchmark archive records beside its
+/// text. Copied from the page `check_document` already has: no OCR call is added.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrFacts {
+    /// `OcrPage::rotation`: degrees clockwise applied before the main pass.
+    pub rotation: u16,
+    /// `OcrPage::mrz_band_score`: the winning band's score, `None` when no band was found.
+    pub mrz_band_score: Option<f64>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -1276,6 +1290,7 @@ fn check_document_inner(
         fastrand_seed()
     ));
     let write_result = image.save(&path);
+    let mut ocr_facts = None;
     let (
         reason,
         fields,
@@ -1288,7 +1303,7 @@ fn check_document_inner(
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
-    ) = run_check(&path, write_result, ocr, expected, trace);
+    ) = run_check(&path, write_result, ocr, expected, trace, &mut ocr_facts);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -1305,6 +1320,7 @@ fn check_document_inner(
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
+        ocr: ocr_facts,
     }
 }
 
@@ -1366,6 +1382,7 @@ fn run_check(
     ocr: &NativeOcr,
     expected: &Labels,
     trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
+    ocr_facts: &mut Option<OcrFacts>,
 ) -> CheckOutcome {
     if let Err(e) = write_result {
         return (
@@ -1414,6 +1431,10 @@ fn run_check(
             )
         }
     };
+    *ocr_facts = Some(OcrFacts {
+        rotation: page.rotation,
+        mrz_band_score: page.mrz_band_score,
+    });
     let text = page.text;
     let retry_stop = page.retry_stop;
     let retry_variant_id = page.retry_variant_id;

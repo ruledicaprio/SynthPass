@@ -40,7 +40,7 @@ trend history is read.
   `samples_data_sha`, `measured_date`. Written only by CI; local `rten` inference differs by
   float rounding, so a local count is never a baseline.
 - **The per-document archive** `<git common dir>/synthpass-bench-archive/{public,local}/*.jsonl`
-  (ADR-0024): a run header, then one record per document per provider, with the provider-input
+  (ADR-0024, written by `provider-bench` and `synthpass-bench`): a run header, then one record per document per provider (one per seed for a `synthpass-bench` file, named `-synthpass-bench-`, with the same keys where the synthetic path has them), with the provider-input
   OCR text, the ledger row, the read's field values and mismatch positions against the fixture.
   Skip `*.partial` (a run that was killed). `local/` is `samples/local/`; there is no private
   track. It is document content: cite it by asset ID, counts and positions, never a line of text.
