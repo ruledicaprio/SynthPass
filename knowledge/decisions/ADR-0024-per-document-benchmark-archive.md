@@ -367,3 +367,63 @@ file of **656,152 bytes in 262 lines**: a 1,515-byte header and 261 records, wit
 of 2,309 bytes and a largest of 12,537 (Observed, 2026-10-01, local, Linux, at #645's `e992e87`;
 its review fixes changed only a few header bytes). That is about 0.66 MB a run, or about 240 MB a
 year at one real run a day (Derived). Retention stays a manual prune.
+
+## Amendment 5 (2026-10-01) — build step 7 as built (#665)
+
+**Status of this amendment:** Proposed. It records what
+[#665](https://github.com/ruledicaprio/SynthPass/pull/665) built for Decision 7 (the owner's choice
+of 2026-09-27) and what its review settled; it changes no decision's intent.
+
+### What step 7 settled
+
+1. **The private record is a type with no field that can hold free text.** `PrivateDocRecord` holds
+   only `&'static str` values from closed sets, checked SHA-256 hex digests and class symbols. Its
+   keys, in order: `kind` (`private_doc`), `run_id`, `provider`, `track` (`private`),
+   `source_sha256`, `outcome`, `mrz_format`, `mrz_found`, `mrz_checksums_valid`, `check_states`,
+   `retry_variant_id`, `retry_budget_hit`, `retry_stop`, `retry_damaged_recovery`,
+   `tier1_damaged_recovery`, `read_us`, `ocr_ms`, `mrz_band_score`, `rotation`, `truth`,
+   `zone_classes`. A test pins the key set and its order, and a new key, even a boolean, needs the
+   owner's yes and an amendment to this ADR.
+   - `source_sha256` is the SHA-256 of the image's bytes, the key Decision 7 names. A private page
+     with no image hash has no key and writes nothing.
+   - `truth` holds mismatch counts and cell positions against the fixture, never a character.
+   - `zone_classes` is the zone Tier 1 recovered after repair as one string per line, one symbol per
+     cell: `A` for an ASCII letter, `9` for a digit, `<` for the filler and `?` for anything else, the
+     partition `tools/archive_query.py` uses.
+   - `retry_variant_id` and `retry_stop` are free strings where the benchmark reads them, so a
+     replayed capture could carry any text there. Each passes through a closed parser: `general` or
+     `pass-` and two to four digits, and the five stops `synthpass-ocr` writes (`general_valid`,
+     `variant_valid`, `pass_cap`, `budget`, `exhausted`). Anything else is `null`.
+2. **One door into `private/`.** `Archive::record_private` is the only writer of `<root>/private/`,
+   and `Archive::record` still drops the private track. The private file has the run's stem and
+   `run_id`, stays `.partial` until the run finishes as the other tracks do (Decision 3), and a run
+   with no private document creates no `private/` directory.
+3. **The private header is the run's header with `argv` set to `null`,** because an argument can
+   name a private file. Every other key is unchanged; the review checked that none of them can
+   name a document.
+4. **`--include-private` no longer turns the archive off.** Amendment 4's item 2 described the
+   state before this step and is now history. Such a run writes its `public/` file, and its `local/`
+   file with `--include-local`, as any run does, plus the private records, and no longer warns that
+   it writes no archive. `--no-archive` and `SYNTHPASS_BENCH_ARCHIVE=off` still turn the archive off
+   (Decision 1).
+5. **Unchanged:** a real page that cannot be placed (no asset ID) is dropped, not filed as private;
+   the prohibition on OCR dumps of the private track stands (Decision 7); and a publisher, when one
+   exists, reads `public/` only (Decision 8). `tools/archive_query.py` reads `public/` and `local/`
+   and never `private/`.
+
+### The evidence
+
+Tests only, on fabricated documents: no real private specimen was read for this step. A sentinel
+string planted in the file name, the asset ID, the OCR text, the recovered zone, the fixture zone,
+a field value, a retry stop, an error text and an `argv` entry never reaches the private file, its
+header included, and the public file of the same run equals one written without the private
+document, timings aside. Each of 19 deliberate breaks of the private path turned a named test red
+before it was restored. The PR's real-specimen gate showed 0 documents changed outcome (Observed,
+2026-10-01, at #665's `576ad03`).
+
+### Where the build stands
+
+Every track is now archived (Decisions 6 and 7): the public and local tracks since build step 3
+(#645), synthetic runs since step 4 (#659) and the private track since this step. Step 5's reader
+is `tools/archive_query.py` (#662). Step 6, schema 2, waits on which OCR pass Tier 1 reads, the
+question [ADR-0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) leaves open.
