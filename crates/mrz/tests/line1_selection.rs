@@ -15,10 +15,10 @@
 mod support;
 
 use mrz::{
-    format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3, parse_mrv_a_with,
-    parse_mrv_b_with, parse_td1_with, parse_td2_with, parse_td3_with, select_line1, Format,
-    Line1Selection, Line1Unresolved, Line1Verdict, MrvAFields, MrvBFields, MrzData, ParseOptions,
-    Sex, Td1Fields, Td2Fields, Td3Fields,
+    find_and_parse_with, format_mrv_a, format_mrv_b, format_td1, format_td2, format_td3,
+    parse_mrv_a_with, parse_mrv_b_with, parse_td1_with, parse_td2_with, parse_td3_with,
+    select_line1, Format, Line1Selection, Line1Unresolved, Line1Verdict, MrvAFields, MrvBFields,
+    MrzData, ParseOptions, Sex, Td1Fields, Td2Fields, Td3Fields,
 };
 
 const FORMATS: [Format; 4] = [Format::Td3, Format::Td2, Format::MrvA, Format::MrvB];
@@ -155,14 +155,24 @@ fn with_names_of(data: &MrzData, incumbent: &MrzData) -> MrzData {
     probe
 }
 
+/// The ungrammatical incumbent, through the public API: a `<<<<` run inside the
+/// name field breaks the grammar, so with no other line in the text to propose
+/// the selector reports `NoCandidate`. In particular it does not say `Kept`,
+/// which is what a selector that accepted this name field would say.
 #[test]
-fn the_incumbent_fixture_is_valid_and_ungrammatical() {
+fn an_ungrammatical_incumbent_with_no_other_line_is_not_kept() {
     for format in FORMATS {
         let fx = Fixture::new(format);
-        let accepted = fx.parse(&fx.broken_line1());
-        assert!(accepted.valid(), "{format:?}");
-        assert_eq!(accepted.issuing_country, "UTO", "{format:?}");
-        assert_eq!(fx.broken_line1().len(), fx.width(), "{format:?}");
+        let broken = fx.broken_line1();
+        let accepted = fx.parse(&broken);
+        let selection = select(&fx.text(&[&broken]), &accepted);
+        assert_ne!(selection.verdict, Line1Verdict::Kept, "{format:?}");
+        assert_eq!(selection.verdict, Line1Verdict::NoCandidate, "{format:?}");
+        assert_eq!(
+            (selection.eligible, selection.distinct),
+            (0, 0),
+            "{format:?}"
+        );
     }
 }
 
@@ -449,6 +459,43 @@ fn a_repeated_line_is_unresolved() {
         selection.verdict,
         Line1Verdict::Unresolved(Line1Unresolved::RepeatedLine)
     );
+}
+
+/// With the opt-in refusal on, no returned zone is a repeated line, so the
+/// selector can no longer reach `Unresolved(RepeatedLine)` from a scan's read.
+#[test]
+fn under_refusal_no_returned_zone_is_a_repeated_line() {
+    let fx = Fixture::new(Format::Td3);
+    let repeated = format!("{}{}", &fx.good[..5], &fx.line2[5..]);
+    let refusing = ParseOptions::default().with_refuse_repeated_line(true);
+    let texts = [
+        fx.text(&[&repeated]),
+        fx.text(&[&repeated, &fx.good]),
+        fx.text(&[&repeated, &repeated]),
+    ];
+    for text in &texts {
+        // Off, the scan's read is the repeat and the selector reports it.
+        let off = find_and_parse_with(text, &ParseOptions::default()).expect("parses");
+        let verdict = select_line1(text, &off, &ParseOptions::default()).verdict;
+        let repeated_off = matches!(
+            verdict,
+            Line1Verdict::Unresolved(Line1Unresolved::RepeatedLine)
+        );
+        // On, whatever comes back never yields it.
+        if let Ok(on) = find_and_parse_with(text, &refusing) {
+            let verdict = select_line1(text, &on, &refusing).verdict;
+            assert!(
+                !matches!(
+                    verdict,
+                    Line1Verdict::Unresolved(Line1Unresolved::RepeatedLine)
+                ),
+                "{text}"
+            );
+            if repeated_off {
+                assert_ne!(on, off, "{text}");
+            }
+        }
+    }
 }
 
 /// Applying the proposal and asking again finds nothing to do.

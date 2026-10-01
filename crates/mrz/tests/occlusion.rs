@@ -167,38 +167,6 @@ fn layout(format: Format) -> Vec<(usize, usize, usize, Kind)> {
     }
 }
 
-/// The lowest `i >= from` with `chars[i..i + 2] == "<<"` and `i`/`i + 1`
-/// neither equal to `masked` -- a *visible* separator, written fresh (not
-/// calling `apply_occlusion`'s own `visible_double_filler`) so this table
-/// cannot share a bug with the code it is checking.
-fn visible_pair(chars: &[char], masked: usize, from: usize) -> Option<usize> {
-    if chars.len() < 2 {
-        return None;
-    }
-    (from..=chars.len() - 2)
-        .find(|&i| chars[i] == '<' && chars[i + 1] == '<' && i != masked && i + 1 != masked)
-}
-
-/// The independently-derived expected outcome of masking exactly
-/// `masked_index` (field-relative) inside the name field whose raw text is
-/// `field_text`. Mirrors the grammar documented on `apply_occlusion`, coded
-/// fresh against the raw characters rather than calling into it.
-fn expected_name_fields(field_text: &str, masked_index: usize) -> Vec<ZoneField> {
-    let chars: Vec<char> = field_text.chars().collect();
-    let separator = visible_pair(&chars, masked_index, 0);
-    match separator {
-        Some(sep) if masked_index > sep => {
-            let padding_start = visible_pair(&chars, masked_index, sep + 2).unwrap_or(chars.len());
-            if masked_index < padding_start {
-                vec![ZoneField::GivenNames]
-            } else {
-                Vec::new() // padding only: provably nothing to withhold
-            }
-        }
-        _ => vec![ZoneField::Surname, ZoneField::GivenNames],
-    }
-}
-
 fn field_value_is_blank(data: &MrzData, field: ZoneField) -> bool {
     match field {
         ZoneField::DocumentCode => data.document_type.is_empty(),
@@ -213,10 +181,123 @@ fn field_value_is_blank(data: &MrzData, field: ZoneField) -> bool {
     }
 }
 
+const NAME_BOTH: &[ZoneField] = &[ZoneField::Surname, ZoneField::GivenNames];
+const NAME_GIVEN: &[ZoneField] = &[ZoneField::GivenNames];
+const NAME_PADDING: &[ZoneField] = &[];
+
+// Per-column expected fields for the literal canonical name spans. The three
+// formats have the same `ERIKSSON<<ANNA<MARIA` prefix and different padding.
+const TD1_NAME_COLUMNS: [&[ZoneField]; 30] = [
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+];
+const SHORT_NAME_COLUMNS: [&[ZoneField]; 31] = [
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+];
+const LONG_NAME_COLUMNS: [&[ZoneField]; 39] = [
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_BOTH,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_GIVEN,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+    NAME_PADDING,
+];
+
 #[test]
 fn every_single_cell_mask_agrees_with_the_independently_built_coverage_table() {
     for format in ALL_FORMATS {
-        let (lines, parsed) = canonical_zone(format);
+        let (_, parsed) = canonical_zone(format);
         for &(line, start, end, kind) in &layout(format) {
             for column in start..end {
                 let mask = CellMask::EMPTY.with(line, column);
@@ -245,15 +326,20 @@ fn every_single_cell_mask_agrees_with_the_independently_built_coverage_table() {
                         );
                     }
                     Kind::Name => {
-                        let name_line = lines[line];
-                        let field_text = &name_line[start..end];
                         let masked_index = column - start;
-                        let expected = expected_name_fields(field_text, masked_index);
+                        // Direct per-column vectors from the documented spans,
+                        // independent of the helper that inferred this grammar.
+                        let expected = match format {
+                            Format::Td1 => TD1_NAME_COLUMNS[masked_index],
+                            Format::Td2 | Format::MrvB => SHORT_NAME_COLUMNS[masked_index],
+                            Format::Td3 | Format::MrvA => LONG_NAME_COLUMNS[masked_index],
+                            other => unreachable!("unexpected name format {other:?}"),
+                        };
 
                         let occluded = apply_occlusion(&parsed, mask)
                             .unwrap_or_else(|e| panic!("{ctx}: name cell must be Ok, got {e:?}"));
-                        assert_eq!(occluded.fields, expected, "{ctx}: field {field_text:?}");
-                        for field in &expected {
+                        assert_eq!(occluded.fields.as_slice(), expected, "{ctx}");
+                        for field in expected {
                             assert!(
                                 field_value_is_blank(&occluded.data, *field),
                                 "{ctx}: {field:?} must be blanked"

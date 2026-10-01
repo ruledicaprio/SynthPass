@@ -235,7 +235,7 @@ A benchmark change follows this lifecycle:
 
 `freeze → reconcile → measure → localize → change → regress → inspect → record`
 
-**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember. *(Amended 2026-09-29, #574: `SYNTHPASS_MRZ_CLASS_SWEEP` and `SYNTHPASS_MRZ_LINE1_SELECT` are refused the same way unless `off`; `control` is refused too, since a baseline is a claim about the default.)* *(Amended 2026-09-29, #574 promotion: the line-1 selector is now on by default, so `SYNTHPASS_MRZ_LINE1_SELECT` is refused unless `on`, its default; `SYNTHPASS_MRZ_CLASS_SWEEP` is still refused unless `off`.)*
+**Freeze.** Pin the exact MAIN revision, the exact `samples-data` revision, the provider and model configuration, the invocation, and the population selection before interpreting a result. A moving branch is not benchmark provenance. A baseline is current only for the population and provider configuration that produced it — as of PR-1.4, `provider-bench --write-baseline`/`--assert-baseline` enforce this mechanically: they refuse to run unless every `SYNTHPASS_OCR_*` measurement arm (`synthpass_ocr::OcrArms::is_default`) is at its default, rather than relying on whoever invokes them to remember. *(Amended 2026-09-29, #574: `SYNTHPASS_MRZ_CLASS_SWEEP` and `SYNTHPASS_MRZ_LINE1_SELECT` are refused the same way unless `off`; `control` is refused too, since a baseline is a claim about the default.)* *(Amended 2026-09-29, #574 promotion: the line-1 selector is now on by default, so `SYNTHPASS_MRZ_LINE1_SELECT` is refused unless `on`, its default; `SYNTHPASS_MRZ_CLASS_SWEEP` is still refused unless `off`.)* *(Amended 2026-09-30, #579: `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE`, `mrz`'s opt-in repeated-line refusal, is refused unless `off`, its default; `control` is refused too.)*
 
 **Reconcile.** Run the identity auditor before reading accuracy numbers. The candidate asset set must reconcile with the manifest: missing assets, unlisted assets, SHA mismatches, same-path byte conflicts, and duplicate encoded-byte groups are structural findings, not OCR results. Preserve whether each asset came from `samples-data`, MAIN/fixtures, or both. Keep these identities distinct:
 
@@ -249,9 +249,11 @@ A benchmark change follows this lifecycle:
 
 **Change and regress.** Keep corpus maintenance separate from accuracy optimization. Change one measurable hypothesis at a time, then rerun the same frozen population with the same provider configuration. Provider comparisons are meaningful only when both providers consume the same assets, labels, exclusions, and invocation scope.
 
-**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership.)*
+**Inspect.** Review both recovered cases and newly broken cases, including changes in outcome buckets and denominator membership, and every recorded per-document field, not only the outcome: a run can move a document's MRZ format, checksum validity, name-error class or retry path while every count and every outcome stays put, and a change nothing prints cannot be localized. Report the timing-sensitive fields separately from the deterministic ones: `ocr_ms`, and every field of a document that hit the retry-pass time budget, move with runner speed and are not a stability signal. A net hit-count improvement does not establish a safe change if it moves failures between stages or breaks previously passing specimens. The real-specimen gate prints this per-document diff on every run and `tools/rebless.py` prints it on every re-bless, both report-only (see "The per-PR real-specimen regression gate" below). The M4 synthetic gate prints the same kind of diff per seed against a CI-written ledger on every run, also report-only (see "The synthetic (M4) per-seed ledger" in the same section). *(Amended 2026-09-29, #557: the clause used to name only outcome buckets and denominator membership. Amended 2026-09-30, #557 Phase 2: the M4 ledger diff.)*
 
 **Record.** Re-bless a baseline deliberately from the validated CI artifact, in a separate reviewable change. The live block above must agree with that artifact; preserve prior baselines and historical reports rather than rewriting them. Label evidence as **Observed** (directly measured), **Derived** (calculated from an observed run), or **Hypothesized** (a prediction or proposed explanation). Every recorded result should include the MAIN SHA, `samples-data` SHA, workflow/run identifier, date, command, provider/model configuration, candidate and scored populations, hit count, outcome buckets, and any skips or preparation failures.
+
+A synthetic before/after A/B that needs no private specimen can run on one GitHub runner instead of the local machine: dispatch [`bench-ab.yml`](../../.github/workflows/bench-ab.yml) ([PIPELINE.md §2.8](PIPELINE.md#28-ci-ab-bench-abyml)). It pins the OCR time budget, keeps its reports in a 3-day artifact, is synthetic-only for now, and is never compared with a local arm.
 
 ## Replaying a captured run
 
@@ -603,7 +605,9 @@ gh workflow run real-specimen-gate.yml -f mode=write-baseline
 **The outcome ledger.** `real-specimen-outcomes.jsonl`, written alongside the baseline in the
 same directory, holds one JSON row per document (`asset_id`, `name`, `outcome`, the full
 `miss_reason`, `mrz_format`, `mrz_found`/`mrz_checksums_valid`, `names_exact`/`name_error`,
-`ocr_ms`, and the native-retry fields) — the per-document evidence the aggregate counts above
+`ocr_ms`, the native-retry fields, `check_states` (the state of each check digit, `true`,
+`false` or `null`, or `null` when no MRZ parsed) and the `retry_damaged_recovery` and
+`tier1_damaged_recovery` flags) — the per-document evidence the aggregate counts above
 are built from. It exists because the `real-specimen-gate-report` CI artifact is kept for 90
 days (`retention-days: 90`, since #416), so a dated finding derived from `--verbose` output or
 the JSONL report becomes unverifiable once that window passes; the ledger is committed, so it
@@ -612,14 +616,18 @@ does not expire. Its SHA-256 is pinned in the baseline's `outcomes_sha256`, and
 an edited-by-hand or substituted ledger is caught the same way a hand-edited baseline count
 would be. When a committed ledger is present, an assert run also prints an informational
 (never gate-failing) per-document diff against the committed one, so a reviewer can see exactly
-which documents moved without downloading and diffing two CI artifacts by hand.
+which documents moved without downloading and diffing two CI artifacts by hand. A ledger
+committed before `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery` were
+added (#557) still parses: a missing key reads as `null`, so until the ledger is re-blessed the
+diff reports each of them as `null -> value` on every document that has one.
 
 **The per-document diff (#557).** It is the tool behind the **Inspect** clause of the
 maintenance contract above, and it has three parts, in this order. First the outcome summary line
 and the documents whose `outcome` changed (at most 20, then `... and N more`). Then a
 **deterministic** group: `miss_reason` (the miss kind and "detail changed", never the text),
 `mrz_format`, `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
-`retry_variant_id` and `retry_stop`, as one line of per-field totals (always complete) and one
+`retry_variant_id`, `retry_stop`, `check_states` (printed as compact JSON),
+`retry_damaged_recovery` and `tier1_damaged_recovery`, as one line of per-field totals (always complete) and one
 line per document (at most 20). Then a **timing-sensitive** group: one `ocr_ms` line (documents
 that differ, median |delta|, both totals) and a block for every *budget-limited* document, one
 that hit the retry-pass time budget on either side, which carries **all** of that document's
@@ -631,6 +639,45 @@ gate writes it to the job log and to `$GITHUB_STEP_SUMMARY`; the repository is p
 carries asset ids, field names, enumerated values and counts only, never OCR text or
 `miss_reason` text. `tools/rebless.py` prints the same diff between the old and the new
 ledger and puts it in the commit message and the FINDINGS entry.
+
+**The synthetic (M4) per-seed ledger (#557, Phase 2).** The `m4-hit-rate` job runs
+`synthpass-bench --ledger m4-ledger.jsonl --diff-ledger knowledge/benchmarks/m4-synthetic-ledger.jsonl`.
+`--ledger PATH` writes one JSONL row per seed, in seed order, every key always present (`null`
+when absent), in this order: `format`, `seed`, `profile`, `hit`, `miss_kind`, `wrong_accept`,
+`prefix_wrong_accept`, `wrong_fields` (field **names**, sorted), `check_states` (compact JSON,
+sorted keys), `names_exact`, `name_error`, `line1_flagged`, `retry_stop`, `retry_variant_id`,
+`retry_damaged_recovery`, `tier1_damaged_recovery` and `elapsed_ms`. No expected or read value and
+no OCR text: the rows are safe for a public step summary, and the flag works for any format and
+count, not only M4's 50 TD3 seeds. `--diff-ledger PATH` compares this run's rows with the
+committed ones by (`format`, `seed`) and prints, to the job log and to `$GITHUB_STEP_SUMMARY`:
+one line (seeds that changed a deterministic field, and per-field totals in schema order, never
+capped), up to 20 `seed N: field old -> new` lines and `... and N more`, one timing line
+(`elapsed_ms` differs on N of M seeds, median |delta|, both totals), the *budget-limited* seeds
+(`retry_stop` is `budget` on either side; every change on them is timing-sensitive, so they are
+not in the first line's count), and the seeds present on one side only, as counts. **The diff
+never changes the exit code**: `--min-hit-rate 0.30` and `--max-prefix-wrong-accepts 0` decide
+pass or fail from the numbers alone, exactly as before, and with no committed ledger at the path
+the diff prints one line and carries on (the bootstrap case). The one other way to exit non-zero
+is a `--ledger` file that cannot be written: the run exits 1 before the gates are evaluated, as it
+does for `--out`. The job uploads the ledger alone as the artifact `m4-bench` (`if: always()`,
+`retention-days: 90`; it is text-free) and `bench-report.json` as `m4-report` (`if: always()`,
+`retention-days: 3`). The report holds synthetic OCR zone text (`fields[].expected` and `got`, and
+the `mrz_lines` row), which [ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md)
+decision 5 keeps for at most 3 days.
+
+The committed `m4-synthetic-ledger.jsonl` is written **by CI only**, never by hand and never from a
+local run: OCR inference floats can round differently on Windows or another CPU, so a ledger from
+another machine could diff against CI on noise, and ADR-0027 decision 4 says a CI arm is never
+compared with a local arm. **To install or re-bless it:** push the code, let
+the PR's own `m4-hit-rate` job finish, then `gh run download <run-id> -n m4-bench`, copy
+`m4-ledger.jsonl` over `knowledge/benchmarks/m4-synthetic-ledger.jsonl`, and commit it in the same
+PR with the message `m4: install the CI-written ledger from run <run-id> (#557)`. The next CI run
+then diffs CI against CI; a non-zero changed-seed count there is a finding, not a failure. **A PR
+that moves the ledger** (every generator change does, so each #411 PR will) re-installs it the
+same way from its own latest M4 artifact, in the same PR, and says in its body which seeds moved
+and why. A 5 x 100 headline ledger is not committed (#557 question 5): each generator PR would
+rewrite the whole file, so the weekly `bench-charts` artifacts are what to diff for now, with the
+caveat that until #557 Phase 2 item 4 their synthetic report holds only the last synthetic track.
 
 **What an assert run uploads.** Next to the report, the workflow uploads
 `real-specimen-outcomes-text-free.jsonl` with `if: always()`, so a failed gate keeps its

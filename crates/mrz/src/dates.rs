@@ -529,13 +529,26 @@ mod tests {
 
     #[test]
     fn century_pivot_boundary() {
-        // Birth: yy == CURRENT_YY (26) stays in the 2000s; yy == CURRENT_YY+1
-        // (27) rolls back to the 1900s; yy == 99 is always 1900s.
-        assert_eq!(expand_date("260101", true), "2026-01-01");
-        assert_eq!(expand_date("270101", true), "1927-01-01");
+        // Birth: yy == CURRENT_YY stays in the 2000s; yy == CURRENT_YY + 1
+        // rolls back to the 1900s; yy == 99 is always 1900s. The boundary is
+        // derived from the constant, so a yearly bump of CURRENT_YY is not a
+        // reason for this test to change.
+        let at = CURRENT_YY;
+        let above = CURRENT_YY + 1;
+        assert_eq!(
+            expand_date(&format!("{at:02}0101"), true),
+            format!("20{at:02}-01-01")
+        );
+        assert_eq!(
+            expand_date(&format!("{above:02}0101"), true),
+            format!("19{above:02}-01-01")
+        );
         assert_eq!(expand_date("990101", true), "1999-01-01");
         // Expiry is always 20xx, regardless of yy.
-        assert_eq!(expand_date("270101", false), "2027-01-01");
+        assert_eq!(
+            expand_date(&format!("{above:02}0101"), false),
+            format!("20{above:02}-01-01")
+        );
     }
 
     #[test]

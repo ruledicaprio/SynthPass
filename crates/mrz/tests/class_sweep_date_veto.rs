@@ -37,10 +37,7 @@
 
 mod support;
 
-use mrz::{
-    check_digit, find_and_parse_with, format_td1, parse_td1_with, solve_class_sweep, Date,
-    FieldKind, ParseOptions, Resolution, Td1Fields,
-};
+use mrz::{find_and_parse_with, format_td1, parse_td1_with, Date, ParseOptions, Td1Fields};
 
 /// Nine identical digits -- the shape that leaves exactly one residue class
 /// for the sweep to resolve to, and the one measured on the motivating card.
@@ -149,74 +146,33 @@ fn case_a_placeholder_dates_do_not_recover_even_with_sweep_on() {
     );
 }
 
-/// Pins the two `MrzData` flags a placeholder-date zone produces: `valid()`
-/// true, `dates_well_formed` false. Those are the two facts `accept_damaged`
-/// combines, so this records the raw material of the veto.
+/// The raw material of the veto, asserted on `validity()` itself: a zone whose
+/// printed dates are the placeholder `000000` is not calendar-well-formed,
+/// and the same zone with real dates is. `accept_damaged` combines this with
+/// checksum validity, so the veto in Case A above can only work if this holds.
 ///
-/// **This test is documentary, not evidential, and the distinction matters.**
-/// It survives deleting the date clause *and* neutralising the sweep, so it
-/// detects neither. Two reasons, both worth stating so nobody mistakes it for
-/// proof later:
-///
-/// - The sweep is an exact inverse of the corruption here, so the spliced line
-///   is byte-identical to the emitted one. `valid()` is therefore guaranteed by
-///   fixture construction, and re-asserts what Case A's own sanity check
-///   already covers. It cannot distinguish "the sweep found the right answer"
-///   from "the sweep found an answer that validates" -- in this fixture those
-///   are the same string.
-/// - `dates_well_formed` being false is a property of [`Date`] and `validity`,
-///   not of the sweep or of `accept_damaged`.
-///
-/// It also does not reproduce what `class_sweep_pass` computes. That pass
-/// sweeps over two bases, the first with the check-digit cell already
-/// digitized by `repair_td1_line1`; this reconstructs only the second.
+/// Unit-level on purpose. Whether the sweep recovers a reading is Case A and
+/// Case B's business; this test says nothing about the sweep, and re-asserts
+/// nothing that holds by fixture construction (no `valid()` on emitted lines).
 #[test]
-fn placeholder_dates_leave_the_reading_valid_but_not_well_formed() {
-    let zone = td1_zone("000000", "000000");
-    let broken = sweep_document_number_to_letters(&zone);
-    let lines: Vec<&str> = broken.lines().collect();
-    let (l1, l2, l3) = (lines[0], lines[1], lines[2]);
-
-    let cells: Vec<char> = l1.chars().collect();
-    let field: String = cells[5..14].iter().collect();
-    let field_check = cells[14];
-
-    let Resolution::Unique(fixed_field) =
-        solve_class_sweep(&field, field_check, FieldKind::DocumentNumber)
-    else {
-        panic!(
-            "expected a unique resolution for a uniform run of one confusable \
-             class -- this is `class_sweep_wiring.rs`'s own precondition"
-        );
+fn a_placeholder_date_is_not_well_formed_and_a_real_date_is() {
+    let reference = Date::new(2000, 1, 1);
+    let parse = |dob: &str, expiry: &str| {
+        let zone = td1_zone(dob, expiry);
+        let lines: Vec<&str> = zone.lines().collect();
+        parse_td1_with(lines[0], lines[1], lines[2], &ParseOptions::default())
+            .expect("an emitted zone parses")
     };
-    // Near-tautological -- nine of one confusable glyph have a single
-    // resolution -- but it fails loudly if `solve_class_sweep` ever returns a
-    // different residue class for this shape.
-    assert_eq!(fixed_field, DOCUMENT_NUMBER);
 
-    let fixed_check_digit =
-        check_digit(&fixed_field).expect("nine digits always yield a check digit");
-    let fixed_check_char =
-        char::from_digit(fixed_check_digit, 10).expect("a base-10 digit always converts");
-
-    let mut fixed_cells = cells;
-    for (i, c) in fixed_field.chars().enumerate() {
-        fixed_cells[5 + i] = c;
-    }
-    fixed_cells[14] = fixed_check_char;
-    let fixed_l1: String = fixed_cells.into_iter().collect();
-
-    let data = parse_td1_with(&fixed_l1, l2, l3, &ParseOptions::default())
-        .expect("the sweep-repaired zone must parse");
-
+    let placeholder = parse("000000", "000000");
     assert!(
-        data.valid(),
-        "every check digit validates -- guaranteed by construction here, since \
-         the spliced line is the emitted one"
+        !placeholder.validity(reference).dates_well_formed,
+        "000000 is not a calendar date"
     );
+
+    let real = parse("900101", "300101");
     assert!(
-        !data.validity(Date::new(2000, 1, 1)).dates_well_formed,
-        "while the placeholder dates are not calendar dates: the second half of \
-         the conjunction `accept_damaged` applies, recorded but not measured here"
+        real.validity(reference).dates_well_formed,
+        "1990-01-01 and 2030-01-01 are calendar dates"
     );
 }

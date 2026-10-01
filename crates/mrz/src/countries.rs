@@ -610,38 +610,50 @@ mod tests {
     }
 
     #[test]
-    fn every_code_is_equivalent_to_itself_and_to_its_aliases() {
-        // Reflexivity over the whole table, plus the symmetry/transitivity
-        // that the shared-name definition implies: any two codes naming the
-        // same entity must compare equal in both directions.
-        for &(code, name) in CODES {
-            assert!(codes_equivalent(code, code), "{code} vs itself");
-            for &(other, other_name) in CODES {
-                if name == other_name {
-                    assert!(
-                        codes_equivalent(code, other) && codes_equivalent(other, code),
-                        "{code} and {other} both name {name}"
-                    );
-                }
-            }
+    fn known_aliases_are_equivalent_both_ways_and_neighbours_are_not() {
+        // Literal pairs, each written from what the code means (the ICAO
+        // single-letter code for Germany, Kosovo's two codes), not derived
+        // from the table by a loop that shares the function's definition.
+        for (a, b) in [("D", "DEU"), ("XKX", "RKS"), ("FRA", "FRA")] {
+            assert!(codes_equivalent(a, b), "{a} vs {b}");
+            assert!(codes_equivalent(b, a), "{b} vs {a}");
+        }
+        // A British Overseas Territories Citizen is not a United Kingdom
+        // national, and Germany's `D` is not Denmark.
+        for (a, b) in [("GBD", "GBR"), ("D", "DNK"), ("XKX", "SRB")] {
+            assert!(!codes_equivalent(a, b), "{a} vs {b}");
+            assert!(!codes_equivalent(b, a), "{b} vs {a}");
         }
     }
 
     #[test]
-    fn every_table_entry_round_trips_through_both_directions() {
+    fn no_code_appears_twice_in_the_table() {
+        let mut seen = std::collections::HashSet::new();
         for &(code, name) in CODES {
-            assert_eq!(
-                country_name(code),
-                Some(name),
-                "country_name({code:?}) should return {name:?}"
-            );
-            // Not asserting code_for_name(name) == code here: several names
-            // have more than one valid code (see the alias test above), so
-            // this only checks the reverse lookup resolves to *some* valid
-            // code that maps back to the same name.
-            let reverse = code_for_name(name).expect("name should resolve back to a code");
-            assert_eq!(country_name(reverse), Some(name));
+            assert!(seen.insert(code), "{code} ({name}) is listed twice");
         }
+    }
+
+    #[test]
+    fn a_handful_of_codes_and_names_resolve_both_ways() {
+        // Independent literals; names with one code only, so the reverse
+        // direction is exact.
+        for (code, name) in [
+            ("FRA", "France"),
+            ("JPN", "Japan"),
+            ("BRA", "Brazil"),
+            ("CAN", "Canada"),
+            ("AUS", "Australia"),
+            ("USA", "United States of America"),
+        ] {
+            assert_eq!(country_name(code), Some(name), "{code}");
+            assert_eq!(code_for_name(name), Some(code), "{name}");
+        }
+        // Germany has two codes: the name resolves to the primary one, and
+        // both codes name Germany.
+        assert_eq!(country_name("DEU"), Some("Germany"));
+        assert_eq!(country_name("D"), Some("Germany"));
+        assert_eq!(code_for_name("Germany"), Some("DEU"));
     }
 
     // ── ALTERNATE_NAMES ──
@@ -686,8 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn alternate_names_accessor_matches_the_table() {
-        assert_eq!(alternate_names(), ALTERNATE_NAMES);
+    fn alternate_names_accessor_lists_a_known_alternate() {
         assert!(alternate_names().contains(&("Turkey", "TUR")));
     }
 }
