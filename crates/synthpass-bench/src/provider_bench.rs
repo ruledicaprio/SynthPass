@@ -1137,11 +1137,10 @@ pub struct DocumentDetail {
     /// exists and `SYNTHPASS_OCR_CHARGRID` was not `off`. See that field's
     /// doc for the possible values.
     pub chargrid: Option<String>,
-    /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
+    /// This document's Tier-1 read's `MrzData::damaged_recovery` —
     /// independent of `retry_damaged_recovery`, which describes the reading
-    /// the *native OCR retry loop* accepted, not this harness's own
-    /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
-    /// `None` when Tier 1 found no MRZ at all.
+    /// the *native OCR retry loop* accepted. `None` when Tier 1 found no MRZ
+    /// at all.
     pub tier1_damaged_recovery: Option<bool>,
     /// The line-1 selector's verdict on this document's Tier-1 read (#574),
     /// text-free. Present on a default run (the selector is on by default);
@@ -2726,28 +2725,13 @@ async fn run_prepped_with_dump_options(
         }
 
         for (doc_index, bench_page) in prepped.iter().flatten().enumerate() {
-            // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
-            // `mrz::find_and_parse(&markdown)` — a *read* of this provider's
-            // OCR text, not any ground-truth labels: the hint must reflect
-            // what this run's OCR pass actually recovered, including a
-            // checksum-partial read, the same as production. `mrz_hint`
-            // itself is a no-op unless `SYNTHPASS_LLM_MRZ_HINT=1` is set, so
-            // this harness measures exactly the same gate the pipeline does.
-            let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
-            let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
-            // The Tier-1 read the reader itself makes, under this process's
-            // arms (`SYNTHPASS_MRZ_CLASS_SWEEP`, `SYNTHPASS_MRZ_LINE1_SELECT`).
-            // `read_mrz` above stays this harness's hint parse, under the crate
-            // default options; since the #574 promotion production's hint derives
-            // from the routed read, which differs only in name fields, and the
-            // hint carries check-digit fields only, so the two hints agree
-            // (routing this parse is ADR-0024 step 0b). The dump zone below is
-            // the reader's read, so with an arm set it shows the zone the reader
-            // returned (#574, finding 3). With the class sweep and the line-1
-            // selector both `off` the two are one parse: `mrz_parse_options()`
-            // is then the crate default.
             let tier1 = synthpass_die::read_tier1(&bench_page.page.text);
-            let dump_zone: Option<&mrz::MrzData> = tier1.parsed.as_ref().ok();
+            let read_mrz = tier1.parsed.as_ref().ok();
+            // `read_mrz` is the reader's Tier-1 read under this process's
+            // arms, so the hint, the dump zone, the check states and
+            // `tier1_damaged_recovery` all describe one read (ADR-0024 step 0b).
+            let hint = synthpass_pipeline::mrz_hint(read_mrz);
+            let dump_zone: Option<&mrz::MrzData> = read_mrz;
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
@@ -2818,7 +2802,7 @@ async fn run_prepped_with_dump_options(
                         retry_budget_hit: bench_page.page.retry_budget_hit,
                         retry_stop: bench_page.page.retry_stop.clone(),
                         chargrid: bench_page.page.chargrid.clone(),
-                        tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                        tier1_damaged_recovery: read_mrz.map(|d| d.damaged_recovery),
                         // No reading, so no selection was recorded.
                         line1_selection: None,
                     });
@@ -2956,7 +2940,6 @@ async fn run_prepped_with_dump_options(
                 // run.
                 Some(MissReason::ChecksumFailed {
                     check_states: read_mrz
-                        .as_ref()
                         .map(|d| crate::check_states(&d.checks))
                         .unwrap_or_default(),
                     specimen_nonconforming: true,
@@ -2973,13 +2956,11 @@ async fn run_prepped_with_dump_options(
                 // rung above already took the specimens where it is not), so
                 // every failing check digit here is the pipeline's own.
                 //
-                // `read_mrz` (this harness's own independent parse of the OCR
-                // text, computed once per document above) is the same source
-                // `--dump-ocr` already uses a few lines below to print which
-                // check digit(s) failed — reused here for the same reason.
+                // `read_mrz` is the reader's Tier-1 read, the same source
+                // `--dump-ocr` prints below, so this check state describes
+                // that read.
                 Some(MissReason::ChecksumFailed {
                     check_states: read_mrz
-                        .as_ref()
                         .map(|d| crate::check_states(&d.checks))
                         .unwrap_or_default(),
                     specimen_nonconforming: false,
@@ -3190,9 +3171,7 @@ async fn run_prepped_with_dump_options(
                 }
                 None => (None, None),
             };
-            let check_states = read_mrz
-                .as_ref()
-                .map(|data| crate::check_states(&data.checks));
+            let check_states = read_mrz.map(|data| crate::check_states(&data.checks));
 
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
@@ -3215,7 +3194,7 @@ async fn run_prepped_with_dump_options(
                 retry_budget_hit: bench_page.page.retry_budget_hit,
                 retry_stop: bench_page.page.retry_stop.clone(),
                 chargrid: bench_page.page.chargrid.clone(),
-                tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                tier1_damaged_recovery: read_mrz.map(|d| d.damaged_recovery),
                 // From the reading's own evidence, so a provider that made no
                 // Tier-1 read records none; the proposal's line 1 is looked up
                 // in the pass trace, when there is one, and never stored.
