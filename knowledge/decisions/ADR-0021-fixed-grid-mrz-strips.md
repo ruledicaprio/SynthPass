@@ -1,6 +1,6 @@
 # ADR-0021 — Fixed-grid MRZ strips: align the read to its format's template, anchored by check digits, and refuse when the anchors cannot decide
 
-**Status:** Proposed (amended 2026-09-24 and 2026-10-01)
+**Status:** Proposed (amended 2026-09-24, 2026-10-01)
 **Date:** 2026-09-24
 
 > **What this ADR asks for first is a measurement, not code.** Its first stage (Phase 0 below) is
@@ -383,6 +383,18 @@ and here it is.
 | The merged-token fast paths' fixed split at 44, 36 or 30 | The line break is a position, so a merged token with a dropped cell realigns across the break |
 | #408's whitespace-split line 2 | Whitespace is not a cell |
 | #409's TD1 re-flowed into TD2 | Format is part of the alignment. Reading an intact 90-cell zone as 72 costs 18 deletions, and the ambiguity rule refuses rather than guesses if both verify. *Unmeasured* whether this is #409's mechanism; Phase 0 replays it. |
+
+**2026-10-01: TD1's unshift is also arbitrated by issuer admissibility (#580, #621).** The
+document-number digit and the composite, which the first row names for TD1, cannot tell the
+shifted reading from the unshifted one:
+
+- The shifted document number validates against a filler cell about one time in ten.
+- The composite then passes whenever the true check digit is `0` or `5`.
+
+So TD1's line-1 candidate lists keep only the candidates whose document code is `I`, `A` or `C` and
+whose issuing state resolves in the registry (`line1_admissible`), whenever at least one candidate
+does. The lists this covers are the ordinary variants, the merged-line scan and, since #621, the
+damaged-capture searches `substituted` and `class_swept`.
 
 Retirement conditions:
 
