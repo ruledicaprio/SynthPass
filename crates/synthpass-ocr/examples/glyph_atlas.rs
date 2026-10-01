@@ -1,5 +1,6 @@
-//! Glyph atlas (#433, PR 1) — what the OCR models do with the two `P<` cells
-//! of a TD3 MRZ line, measured under one controlled degradation at a time.
+//! Glyph atlas (#433, PR 1) — what the OCR models do with the two document-code
+//! cells of an MRZ line (`P<` of a TD3 line by default), measured under one
+//! controlled degradation at a time.
 //!
 //! **Evidence label for anything derived from this tool: "Observed on
 //! synthetic renders, vendored font, oracle crop".** It says nothing about the
@@ -11,11 +12,13 @@
 //!
 //! # What one run does
 //!
-//! For each seed, [`synthpass_gen`] renders a clean TD3 page (fictional
-//! identity, the vendored OFL OCR-B font). For each requested axis and each
+//! For each seed, [`synthpass_gen`] renders a clean page of the chosen
+//! `--format` (TD3 by default; fictional identity, the vendored OFL OCR-B
+//! font), with the chosen `--code` as its document code (the format's letter
+//! and the filler by default, `P<` for TD3). For each requested axis and each
 //! step of it, the clean page is degraded **on its own** (axes never
 //! compose), and for the chosen cells of the first MRZ line (default cells 0
-//! and 1, i.e. `P` and `<`) the tool records two things.
+//! and 1, i.e. the two code characters) the tool records two things.
 //!
 //! - **Detection.** `OcrEngine::detect_text_pixels` over the cell's box in
 //!   the degraded image: the mean and the max of the detection map, the
@@ -110,7 +113,18 @@
 //! cargo run -p synthpass-ocr --release --example glyph_atlas -- --seeds 2
 //! cargo run -p synthpass-ocr --release --example glyph_atlas -- \
 //!   --axes blur,noise --seeds 100 --seed-start 0 --cells 0,1
+//! cargo run -p synthpass-ocr --release --example glyph_atlas -- \
+//!   --format td1 --code ID --axes resolution --seeds 30 --cells 0,1
 //! ```
+//!
+//! `--format` is `td1`, `td2`, `td3`, `mrva` or `mrvb`, and sets the layout and
+//! the line-one length (the `--cells` limit). `--code` is two characters: the
+//! first fits the format (`P` for td3; `A`, `C` or `I` for td1 and td2; `V` for
+//! mrva and mrvb, Doc 9303 Parts 4-7), the second is `A`-`Z` or the filler
+//! `<`. A non-default code needs `--release`: the generator's debug assertion
+//! refuses a document code other than the format's own. Quote a code holding
+//! `<` in PowerShell. A default run (TD3, `P<`) is what the tool has always
+//! measured, to the byte.
 //!
 //! Set `RTEN_NUM_THREADS` and never run it beside an A/B arm or a gate. After
 //! 20 computed renders it prints the rate and a projected total.
@@ -137,7 +151,7 @@ use serde_json::{json, Value};
 
 use synthpass_gen::degrade::{self, Degradation};
 use synthpass_gen::layout::{self, Rect};
-use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig};
+use synthpass_gen::{DocumentType, GeneratorConfig};
 use synthpass_ocr::{verify, MRZ_CHARSET};
 
 // The label table, batch runner, pixel-to-timestep arithmetic and engine
@@ -156,7 +170,10 @@ use ctc_matrix::{
 // Constants
 // ---------------------------------------------------------------------
 
-const SCHEMA_VERSION: u32 = 1;
+/// 2 adds `code` to the header (and so to the summary's `run` block) and lets
+/// `format` take the five `--format` values; schema 1 was TD3 `P<` only, and
+/// its `format` was always `"TD3"`. Every other field keeps its meaning.
+const SCHEMA_VERSION: u32 = 2;
 const TOOL_NAME: &str = "glyph_atlas";
 const EVIDENCE_LABEL: &str = "Observed on synthetic renders, vendored font, oracle crop";
 
@@ -183,10 +200,200 @@ const FONT_NAME: &str = "OCR-B (Raisty), vendored";
 const FONT_PATH: &str = "crates/synthpass-gen/fonts/ocr-b.ttf";
 const FONT_LICENSE: &str = "OFL-1.1";
 
-/// The MRZ line this atlas reads: the first, whose first two cells are `P<`.
+/// The MRZ line this atlas reads: the first, whose first two cells are the
+/// document code.
 const LINE_INDEX: usize = 0;
-/// The first two characters of a TD3 line one, checked on seed 0.
-const EXPECTED_LINE_PREFIX: [char; 2] = ['P', '<'];
+
+// ---------------------------------------------------------------------
+// Format and document code
+// ---------------------------------------------------------------------
+
+/// The five MRZ formats the generator renders, as `--format` spells them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Td1,
+    Td2,
+    Td3,
+    MrvA,
+    MrvB,
+}
+
+/// The two characters that open MRZ line one: a document code.
+type Code = [char; 2];
+
+impl Format {
+    fn parse(text: &str) -> Option<Self> {
+        match text {
+            "td1" => Some(Self::Td1),
+            "td2" => Some(Self::Td2),
+            "td3" => Some(Self::Td3),
+            "mrva" => Some(Self::MrvA),
+            "mrvb" => Some(Self::MrvB),
+            _ => None,
+        }
+    }
+
+    /// How the header records the format.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Td1 => "TD1",
+            Self::Td2 => "TD2",
+            Self::Td3 => "TD3",
+            Self::MrvA => "MRV-A",
+            Self::MrvB => "MRV-B",
+        }
+    }
+
+    /// How a path spells the format: the flag's own spelling.
+    fn flag(self) -> &'static str {
+        match self {
+            Self::Td1 => "td1",
+            Self::Td2 => "td2",
+            Self::Td3 => "td3",
+            Self::MrvA => "mrva",
+            Self::MrvB => "mrvb",
+        }
+    }
+
+    fn document_type(self) -> DocumentType {
+        match self {
+            Self::Td1 => DocumentType::TD1,
+            Self::Td2 => DocumentType::TD2,
+            Self::Td3 => DocumentType::TD3,
+            Self::MrvA => DocumentType::MrvA,
+            Self::MrvB => DocumentType::MrvB,
+        }
+    }
+
+    /// The length of line one in cells, the `--cells` limit.
+    fn cells(self) -> usize {
+        (match self {
+            Self::Td1 => layout::TD1_MRZ_CHARS,
+            Self::Td2 => layout::TD2_MRZ_CHARS,
+            Self::Td3 => layout::TD3_MRZ_CHARS,
+            Self::MrvA => layout::MRVA_MRZ_CHARS,
+            Self::MrvB => layout::MRVB_MRZ_CHARS,
+        }) as usize
+    }
+
+    /// The first characters a document code of this format may start with:
+    /// Doc 9303 Part 4 (passports: `P`), Parts 5 and 6 (`A`, `C` or `I`, per
+    /// Note k) and Part 7 (visas: `V`).
+    fn code_letters(self) -> &'static [char] {
+        match self {
+            Self::Td1 | Self::Td2 => &['A', 'C', 'I'],
+            Self::Td3 => &['P'],
+            Self::MrvA | Self::MrvB => &['V'],
+        }
+    }
+
+    /// The code the generator writes for this format: its letter, then the
+    /// filler.
+    fn default_code(self) -> Code {
+        [
+            self.document_type()
+                .document_code()
+                .chars()
+                .next()
+                .unwrap_or('<'),
+            '<',
+        ]
+    }
+}
+
+/// `--code XY`: exactly two characters, the first one that fits `format`, the
+/// second `A`-`Z` or the filler `<`.
+fn parse_code(text: &str, format: Format) -> Result<Code, String> {
+    let chars: Vec<char> = text.chars().collect();
+    let [first, second] = chars[..] else {
+        return Err(format!(
+            "--code: {text:?} is not two characters (a letter, then a letter or <)"
+        ));
+    };
+    if !format.code_letters().contains(&first) {
+        let letters: Vec<String> = format.code_letters().iter().map(char::to_string).collect();
+        return Err(format!(
+            "--code: {text:?} does not start with {} as a {} code must",
+            letters.join(", "),
+            format.name()
+        ));
+    }
+    if !(second.is_ascii_uppercase() || second == '<') {
+        return Err(format!(
+            "--code: {text:?}: the second character must be A-Z or <"
+        ));
+    }
+    Ok([first, second])
+}
+
+fn code_text(code: Code) -> String {
+    code.iter().collect()
+}
+
+/// A code as a path spells it: the filler `<` is written `0`, as `samples/`
+/// does, because a Windows path cannot hold `<`.
+fn code_path_part(code: Code) -> String {
+    code.iter()
+        .map(|&c| if c == '<' { '0' } else { c })
+        .collect()
+}
+
+/// The default `--out` directory name. A run that is not the default format
+/// and code adds both, so two runs of one commit on one day do not collide;
+/// the default run keeps the name it always had.
+fn default_out_name(date: &str, short: &str, format: Format, code: Code) -> String {
+    if format == Format::Td3 && code == Format::Td3.default_code() {
+        format!("{date}-{short}")
+    } else {
+        format!("{date}-{short}-{}-{}", format.flag(), code_path_part(code))
+    }
+}
+
+/// What `Passport::document_type` holds for `code`: the emitter pads the field
+/// to two characters with the filler, so a trailing `<` is left off.
+fn passport_code_field(code: Code) -> String {
+    if code[1] == '<' {
+        code[0].to_string()
+    } else {
+        code_text(code)
+    }
+}
+
+/// One seed's clean page and ground-truth labels for `format`, with `code` as
+/// the document code. With the default code this is what
+/// `generate_from_seed` returns.
+fn render_clean(seed: u64, format: Format, code: Code) -> (DynamicImage, synthpass_gen::Labels) {
+    let config = GeneratorConfig::with_document_type(seed, format.document_type());
+    let mut passport = synthpass_gen::data::generate_passport(&config);
+    passport.document_type = passport_code_field(code);
+    synthpass_gen::generate(&passport, &config)
+}
+
+/// Line one must start with the code, or the generator did not write what the
+/// run says it measures.
+fn check_line_prefix(line: &[char], code: Code) -> Result<(), String> {
+    if line.iter().take(2).copied().eq(code.iter().copied()) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the generator's line one does not start with {}",
+            code_text(code)
+        ))
+    }
+}
+
+/// The generator's `debug_assert` refuses a document code that is not the
+/// format's own, so a non-default code needs a release build.
+fn check_build_for_code(format: Format, code: Code, debug_build: bool) -> Result<(), String> {
+    if debug_build && code != format.default_code() {
+        return Err(format!(
+            "--code {}: the generator's debug assertion refuses a document code other than the \
+             format's own; run with cargo's --release",
+            code_text(code)
+        ));
+    }
+    Ok(())
+}
 
 const NATIVE_PX_PER_CELL: f64 = layout::MRZ_CELL_WIDTH as f64;
 const DEFAULT_SEEDS: u64 = 100;
@@ -1391,6 +1598,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "sha256",
     "license",
     "format",
+    "code",
     "line",
     "cells",
     "cell",
@@ -1477,6 +1685,8 @@ struct HeaderInputs {
     recognition_sha256: String,
     font_sha256: String,
     detection_threshold: f32,
+    format: Format,
+    code: Code,
     cell_truths: Vec<(usize, char)>,
     axes: Vec<Axis>,
     seed_start: u64,
@@ -1528,7 +1738,8 @@ fn build_header(inputs: &HeaderInputs) -> Value {
             "sha256": inputs.font_sha256,
             "license": FONT_LICENSE,
         },
-        "format": "TD3",
+        "format": inputs.format.name(),
+        "code": code_text(inputs.code),
         "line": LINE_INDEX,
         "cells": cells,
         "crop": "oracle_line",
@@ -1618,6 +1829,8 @@ fn cell_line(seed: u64, axis: Axis, step_index: usize, cell: &CellOutcome) -> Va
 
 #[derive(Debug, PartialEq)]
 struct Args {
+    format: Format,
+    code: Code,
     axes: Vec<Axis>,
     seeds: u64,
     seed_start: u64,
@@ -1626,13 +1839,21 @@ struct Args {
 }
 
 const USAGE: &str = "glyph_atlas: per-cell detection and recognition measurements under one \
-degradation at a time (TD3 line one, synthetic renders, vendored font, oracle crop)
+degradation at a time (MRZ line one, synthetic renders, vendored font, oracle crop)
 
+  --format <f>        td1, td2, td3, mrva or mrvb (default td3); sets the layout and the
+                      line-one length, the --cells limit
+  --code <XY>         the two-character document code line one starts with (default: the
+                      format's letter and the filler, e.g. P<). The first character must fit
+                      the format: P for td3; A, C or I for td1 and td2; V for mrva and mrvb.
+                      The second is A-Z or <. Quote a code holding < in PowerShell. Needs a
+                      --release build when it is not the default.
   --axes <list>       comma list of resolution,jpeg,rotation,blur,noise,contrast (default: all)
   --seeds <n>         renders per step (default 100)
   --seed-start <n>    first seed (default 0)
   --cells <list>      cell indices of the first MRZ line (default 0,1)
-  --out <dir>         output directory (default artifacts/glyph-atlas/<date>-<shortsha>/;
+  --out <dir>         output directory (default artifacts/glyph-atlas/<date>-<shortsha>/, with
+                      -<format>-<code> added for a non-default format or code, < written 0;
                       an in-tree directory that git does not ignore is refused)
   --help              this text
 
@@ -1652,18 +1873,14 @@ fn parse_axes(list: &str) -> Result<Vec<Axis>, String> {
     Ok(axes)
 }
 
+/// The cell numbers in `list`, each listed once. The limit is the format's,
+/// and is checked by [`check_cells`] once every flag has been read.
 fn parse_cells(list: &str) -> Result<Vec<usize>, String> {
-    let limit = layout::TD3_MRZ_CHARS as usize;
     let mut cells: Vec<usize> = Vec::new();
     for item in list.split(',').map(str::trim) {
         let cell: usize = item
             .parse()
             .map_err(|e| format!("--cells: {item:?}: {e}"))?;
-        if cell >= limit {
-            return Err(format!(
-                "--cells: cell {cell} is outside the {limit}-cell TD3 line"
-            ));
-        }
         if cells.contains(&cell) {
             return Err(format!("--cells: cell {cell} listed twice"));
         }
@@ -1672,20 +1889,44 @@ fn parse_cells(list: &str) -> Result<Vec<usize>, String> {
     Ok(cells)
 }
 
+/// Every cell must lie inside line one of `format`.
+fn check_cells(cells: &[usize], format: Format) -> Result<(), String> {
+    let limit = format.cells();
+    match cells.iter().find(|&&cell| cell >= limit) {
+        Some(cell) => Err(format!(
+            "--cells: cell {cell} is outside the {limit}-cell {} line",
+            format.name()
+        )),
+        None => Ok(()),
+    }
+}
+
 fn parse_args(raw: &[String]) -> Result<Args, String> {
     let mut args = Args {
+        format: Format::Td3,
+        code: Format::Td3.default_code(),
         axes: Axis::ALL.to_vec(),
         seeds: DEFAULT_SEEDS,
         seed_start: 0,
         cells: DEFAULT_CELLS.to_vec(),
         out: None,
     };
+    // The code is checked against the format, so it waits until every flag
+    // has been read and the two may come in either order.
+    let mut code_arg: Option<&str> = None;
     let mut i = 0;
     while i < raw.len() {
         let flag = raw[i].as_str();
         let value = raw.get(i + 1).map(String::as_str);
         let need = || value.ok_or_else(|| format!("{flag} needs a value"));
         match flag {
+            "--format" => {
+                let text = need()?;
+                args.format = Format::parse(text).ok_or_else(|| {
+                    format!("--format: {text:?} is not one of td1, td2, td3, mrva, mrvb")
+                })?;
+            }
+            "--code" => code_arg = Some(need()?),
             "--axes" => args.axes = parse_axes(need()?)?,
             "--seeds" => {
                 args.seeds = need()?.parse().map_err(|e| format!("--seeds: {e}"))?;
@@ -1699,6 +1940,11 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
         }
         i += 2;
     }
+    args.code = match code_arg {
+        Some(text) => parse_code(text, args.format)?,
+        None => args.format.default_code(),
+    };
+    check_cells(&args.cells, args.format)?;
     if args.seeds == 0 {
         return Err("--seeds must be at least 1".to_string());
     }
@@ -1848,6 +2094,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     let args = parse_args(&raw)?;
+    check_build_for_code(args.format, args.code, cfg!(debug_assertions))?;
     let root = repo_root();
     let models = model_dir(&root);
 
@@ -1888,7 +2135,7 @@ fn run() -> Result<(), String> {
     let out_dir = absolutize(&args.out.clone().unwrap_or_else(|| {
         root.join("artifacts")
             .join("glyph-atlas")
-            .join(format!("{date}-{short}"))
+            .join(default_out_name(&date, &short, args.format, args.code))
     }));
     check_out_dir(&out_dir, &absolutize(&root), |p| git_ignores(&root, p))?;
     let records_path = out_dir.join("records.jsonl");
@@ -1907,26 +2154,23 @@ fn run() -> Result<(), String> {
     let greedy_engine = load_general_engine(&models)?;
     let alphabet = Alphabet::new();
 
-    let page = layout::for_format(DocumentType::TD3);
+    let page = layout::for_format(args.format.document_type());
     let line = *page
         .mrz_lines
         .get(LINE_INDEX)
-        .ok_or_else(|| "TD3 layout has no first MRZ line".to_string())?;
+        .ok_or_else(|| format!("the {} layout has no first MRZ line", args.format.name()))?;
     let mrz_chars = page.mrz_chars;
 
     // Seed 0's clean render: the expected truth for each cell and the input
     // of the alphabet self-check.
-    let (image0, labels0, _) =
-        generate_from_seed(&GeneratorConfig::with_document_type(0, DocumentType::TD3));
+    let (image0, labels0) = render_clean(0, args.format, args.code);
     let truth0: Vec<char> = labels0
         .mrz_lines
         .get(LINE_INDEX)
         .ok_or_else(|| "generator produced no first MRZ line".to_string())?
         .chars()
         .collect();
-    if truth0.iter().take(2).copied().collect::<Vec<char>>() != EXPECTED_LINE_PREFIX {
-        return Err("the generator's TD3 line one no longer starts with P<".to_string());
-    }
+    check_line_prefix(&truth0, args.code)?;
     let cell_truths: Vec<(usize, char)> = args
         .cells
         .iter()
@@ -1960,6 +2204,8 @@ fn run() -> Result<(), String> {
         recognition_sha256,
         font_sha256,
         detection_threshold: engine.detection_threshold(),
+        format: args.format,
+        code: args.code,
         cell_truths: cell_truths.clone(),
         axes: args.axes.clone(),
         seed_start: args.seed_start,
@@ -1986,10 +2232,7 @@ fn run() -> Result<(), String> {
     let started = Instant::now();
 
     for seed in args.seed_start..args.seed_start + args.seeds {
-        let (image, labels, _) = generate_from_seed(&GeneratorConfig::with_document_type(
-            seed,
-            DocumentType::TD3,
-        ));
+        let (image, labels) = render_clean(seed, args.format, args.code);
         let clean = image.into_rgb8();
         let truth_line: Vec<char> = labels
             .mrz_lines
@@ -2136,6 +2379,7 @@ fn print_table(cell_truths: &[(usize, char)], axes: &[Axis], aggs: &BTreeMap<Agg
 #[cfg(test)]
 mod tests {
     use super::*;
+    use synthpass_gen::generate_from_seed;
 
     // -- helpers --------------------------------------------------------
 
@@ -2229,6 +2473,8 @@ mod tests {
             recognition_sha256: "b".repeat(64),
             font_sha256: FONT_SHA256.into(),
             detection_threshold: 0.3,
+            format: Format::Td3,
+            code: ['P', '<'],
             cell_truths: vec![(0, 'P'), (1, '<')],
             axes: Axis::ALL.to_vec(),
             seed_start: 0,
@@ -2708,7 +2954,7 @@ mod tests {
         let (image, labels, _) =
             generate_from_seed(&GeneratorConfig::with_document_type(0, DocumentType::TD3));
         let first: Vec<char> = labels.mrz_lines[LINE_INDEX].chars().take(2).collect();
-        assert_eq!(first, EXPECTED_LINE_PREFIX);
+        assert_eq!(first, Format::Td3.default_code());
         let page = layout::for_format(DocumentType::TD3);
         let paper = paper_colour(&image.into_rgb8(), page.mrz_lines[LINE_INDEX]);
         assert!(paper.iter().all(|&c| c > 200), "{paper:?}");
@@ -2807,6 +3053,8 @@ mod tests {
         assert_eq!(header["schema"], SCHEMA_VERSION);
         assert_eq!(header["crop"], "oracle_line");
         assert_eq!(header["format"], "TD3");
+        assert_eq!(header["code"], "P<");
+        assert_eq!(header["schema"], 2);
         assert_eq!(header["ocrs"], "0.13.1");
         assert_eq!(header["axes"].as_array().expect("axes").len(), 6);
         assert_eq!(header["cells"][1]["truth"], "<");
@@ -2866,6 +3114,178 @@ mod tests {
         assert!(parse_args(&s(&["--seeds", "0"])).is_err());
         assert!(parse_args(&s(&["--seeds"])).is_err());
         assert!(parse_args(&s(&["--bogus", "1"])).is_err());
+    }
+
+    // -- --format and --code --------------------------------------------
+
+    fn parsed(list: &[&str]) -> Result<Args, String> {
+        parse_args(&list.iter().map(|x| x.to_string()).collect::<Vec<String>>())
+    }
+
+    #[test]
+    fn the_default_format_and_code_are_td3_and_p_filler() {
+        let args = parsed(&[]).expect("defaults parse");
+        assert_eq!((args.format, args.code), (Format::Td3, ['P', '<']));
+    }
+
+    #[test]
+    fn each_format_defaults_to_its_letter_and_the_filler() {
+        for (flag, letter) in [
+            ("td1", 'I'),
+            ("td2", 'I'),
+            ("td3", 'P'),
+            ("mrva", 'V'),
+            ("mrvb", 'V'),
+        ] {
+            let args = parsed(&["--format", flag]).expect(flag);
+            assert_eq!(args.code, [letter, '<'], "{flag}");
+        }
+    }
+
+    #[test]
+    fn a_code_that_fits_its_format_is_accepted() {
+        for (format, code) in [
+            ("td3", "PS"),
+            ("td3", "P<"),
+            ("td1", "ID"),
+            ("td1", "AR"),
+            ("td1", "C<"),
+            ("td2", "IO"),
+            ("td2", "A<"),
+            ("mrva", "V<"),
+            ("mrvb", "VC"),
+        ] {
+            let args = parsed(&["--format", format, "--code", code]).expect(code);
+            assert_eq!(args.code.iter().collect::<String>(), code);
+        }
+        // The flags may come in either order.
+        let args = parsed(&["--code", "ID", "--format", "td1"]).expect("code before format");
+        assert_eq!((args.format, args.code), (Format::Td1, ['I', 'D']));
+    }
+
+    #[test]
+    fn a_code_that_does_not_fit_its_format_is_refused_naming_the_flag() {
+        for (format, code) in [
+            ("td3", "IS"),
+            ("td3", "ID"),
+            ("td1", "P<"),
+            ("td1", "VC"),
+            ("td3", "VC"),
+            ("mrva", "P<"),
+            ("td3", "P0"),
+            ("td3", "P"),
+            ("td3", "PSS"),
+            ("td3", "ps"),
+            ("td3", "P-"),
+            ("td3", ""),
+        ] {
+            let error = parsed(&["--format", format, "--code", code])
+                .expect_err(&format!("{format} {code:?} must be refused"));
+            assert!(error.contains("--code"), "{error}");
+        }
+        // With no --format the format is td3.
+        assert!(parsed(&["--code", "ID"]).is_err());
+        assert!(parsed(&["--code"]).is_err());
+    }
+
+    #[test]
+    fn an_unknown_format_is_refused() {
+        for format in ["td4", "TD3", "mrv", "mrv-a", ""] {
+            let error = parsed(&["--format", format]).expect_err(format);
+            assert!(error.contains("--format"), "{error}");
+        }
+        assert!(parsed(&["--format"]).is_err());
+    }
+
+    #[test]
+    fn the_cell_limit_follows_the_format_whatever_the_flag_order() {
+        assert!(parsed(&["--cells", "43"]).is_ok());
+        assert!(parsed(&["--cells", "44"]).is_err());
+        assert!(parsed(&["--format", "td1", "--cells", "29"]).is_ok());
+        assert!(parsed(&["--format", "td1", "--cells", "30"]).is_err());
+        assert!(parsed(&["--cells", "30", "--format", "td1"]).is_err());
+        assert!(parsed(&["--cells", "36", "--format", "td2"]).is_err());
+        assert!(parsed(&["--cells", "35", "--format", "mrvb"]).is_ok());
+        assert!(parsed(&["--cells", "43", "--format", "mrva"]).is_ok());
+    }
+
+    #[test]
+    fn a_code_becomes_a_path_part_with_the_filler_written_as_zero() {
+        assert_eq!(code_path_part(['P', '<']), "P0");
+        assert_eq!(code_path_part(['P', 'S']), "PS");
+        assert_eq!(code_path_part(['C', '<']), "C0");
+    }
+
+    #[test]
+    fn the_default_output_name_moves_only_for_a_non_default_run() {
+        assert_eq!(
+            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<']),
+            "2026-10-01-abc1234"
+        );
+        assert_eq!(
+            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', 'S']),
+            "2026-10-01-abc1234-td3-PS"
+        );
+        assert_eq!(
+            default_out_name("2026-10-01", "abc1234", Format::Td1, ['I', '<']),
+            "2026-10-01-abc1234-td1-I0"
+        );
+    }
+
+    #[test]
+    fn line_one_must_start_with_the_code() {
+        let line: Vec<char> = "PSUTO".chars().collect();
+        assert!(check_line_prefix(&line, ['P', 'S']).is_ok());
+        let error = check_line_prefix(&line, ['P', '<']).expect_err("PS is not P<");
+        assert!(error.contains("P<"), "{error}");
+        assert!(check_line_prefix(&['P'], ['P', '<']).is_err());
+    }
+
+    // The generator's `debug_assert` refuses a document code that is not the
+    // format's own, so these two render tests run in a release build only.
+    // The tool itself refuses a non-default code in a debug build.
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "needs a release build")]
+    fn seed_zero_with_code_ps_starts_with_ps() {
+        let (_, labels) = render_clean(0, Format::Td3, ['P', 'S']);
+        let first: String = labels.mrz_lines[LINE_INDEX].chars().take(2).collect();
+        assert_eq!(first, "PS");
+        assert_eq!(labels.mrz_lines[LINE_INDEX].chars().count(), 44);
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "needs a release build")]
+    fn seed_zero_with_td1_and_code_id_starts_with_id_and_is_thirty_cells() {
+        let (_, labels) = render_clean(0, Format::Td1, ['I', 'D']);
+        let line = &labels.mrz_lines[LINE_INDEX];
+        assert!(line.starts_with("ID"), "{line}");
+        assert_eq!(line.chars().count(), 30);
+        assert_eq!(Format::Td1.cells(), 30);
+    }
+
+    #[test]
+    fn the_default_code_renders_exactly_what_the_generator_renders() {
+        // `--code` left at its default must leave today's runs untouched.
+        for format in [Format::Td3, Format::Td1, Format::MrvA] {
+            let (image, labels) = render_clean(7, format, format.default_code());
+            let (plain, plain_labels, _) = generate_from_seed(
+                &GeneratorConfig::with_document_type(7, format.document_type()),
+            );
+            assert_eq!(labels.mrz_lines, plain_labels.mrz_lines, "{format:?}");
+            assert_eq!(
+                image.into_rgb8().as_raw(),
+                plain.into_rgb8().as_raw(),
+                "{format:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_default_code_is_refused_in_a_debug_build_and_a_default_one_is_not() {
+        assert!(check_build_for_code(Format::Td3, ['P', '<'], true).is_ok());
+        assert!(check_build_for_code(Format::Td3, ['P', 'S'], false).is_ok());
+        let error = check_build_for_code(Format::Td3, ['P', 'S'], true).expect_err("debug");
+        assert!(error.contains("--release"), "{error}");
     }
 
     #[test]
