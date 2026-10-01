@@ -224,7 +224,8 @@ its own ceiling is a result, not a loss: it tells the next attempt where the res
 ## Open questions
 
 - Where the OCR-B font lives once two crates need it.
-- Whether `position_class` belongs in `mrz` (proposed) or in `synthpass-ocr`.
+- ~~Whether `position_class` belongs in `mrz` (proposed) or in `synthpass-ocr`.~~ Answered
+  2026-10-01: `mrz`, by the owner's choice. See the amendment below.
 - Whether TD1's synthetic watermark line can be excluded by geometry alone before classification.
 
 ## Sequencing
@@ -233,3 +234,27 @@ After the `chargrid` A/B has a number (so "+10 pp over the best arm" has a value
 Definition of Done is evaluated against its frozen list — this is a recognition change, and
 [ADR-0011](ADR-0011-split-m6-packaging-into-m8.md)'s amendment keeps M6 scored on the frozen
 snapshot.
+
+## Amendment 2026-10-01: `position_class` as built
+
+The owner placed `position_class` in `mrz` and asked for it ahead of the bake-off, as staging for
+the elimination work in
+[`../research/mrz-geometric-elimination.md`](../research/mrz-geometric-elimination.md). The rest
+of this ADR stays Proposed.
+
+- **Signature.** `mrz::position_class(format, line, column) -> Option<PositionClass>`, zero-based,
+  `None` outside the grid. `PositionClass` is `#[non_exhaustive]`: `Digit`, `DigitOrFiller`,
+  `Letter`, `LetterOrFiller`, `Any`, with `allows(char)`.
+- **One source.** The classes are read from the cell alphabets that `crates/mrz/src/strip.rs`
+  already held for the five layouts, not from a new table. The class widens an exact alphabet (the
+  sex cell's `M`, `F`, `<` is `LetterOrFiller`), so it never excludes a character the layout
+  admits.
+- **One correction.** TD3's personal-number check digit was digits only in that model. Doc 9303
+  Part 4, position 43, lets an issuer print `<` there when the personal number is unused, and
+  `verify` already accepted it. The cell is now `DigitOrFiller`. The alphabets are test metadata
+  today, so no reading changes.
+- **No drift.** A test feeds every line repair a line of `O` and a line of `0`: the cells it
+  turns into digits are exactly the digit-class cells, and it turns `0` into `O` only in
+  letter-class cells.
+- **Not modelled.** It reads no text, so a long document number's filler in place of its check
+  digit is invisible to it.
