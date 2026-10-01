@@ -9,7 +9,10 @@
 
 use serde::Serialize;
 use std::path::Path;
-use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
+use synthpass_gen::{
+    data, generate_with, DocumentType, GeneratorConfig, Labels, RedactSpan, RedactStyle,
+    RenderOptions,
+};
 
 /// Parsed `synthpass generate` arguments.
 #[derive(Debug)]
@@ -19,6 +22,7 @@ struct GenerateArgs {
     profile: String,
     out_dir: String,
     document_type: DocumentType,
+    redact: Option<RedactSpan>,
 }
 
 impl Default for GenerateArgs {
@@ -29,6 +33,7 @@ impl Default for GenerateArgs {
             profile: "clean".to_string(),
             out_dir: ".".to_string(),
             document_type: DocumentType::TD3,
+            redact: None,
         }
     }
 }
@@ -52,7 +57,7 @@ const LABELS_SUFFIX: &str = "labels.json";
 
 fn usage() {
     eprintln!(
-        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]"
+        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--redact STYLE:LINE:FIRST-LAST] [--out-dir DIR]"
     );
     eprintln!("  --count N            number of documents to generate (default: 1)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -64,6 +69,7 @@ fn usage() {
         "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to generate (default: td3)"
     );
     eprintln!("  --out-dir DIR        output directory (default: .)");
+    eprintln!("  --redact SPAN        fill-black|fill-white|fill-grey|blur|graded-blur:LINE:FIRST-LAST (clean profile only)");
 }
 
 /// Hand-rolled flag parser, consistent with the rest of this CLI's style
@@ -131,9 +137,44 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
                 parsed.out_dir = v.clone();
                 i += 2;
             }
+            "--redact" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--redact requires STYLE:LINE:FIRST-LAST".to_string())?;
+                parsed.redact = Some(parse_redact(v)?);
+                i += 2;
+            }
             other => {
                 return Err(format!("unknown argument: {other}"));
             }
+        }
+    }
+
+    if parsed.redact.is_some() && parsed.profile != "clean" {
+        return Err(
+            "--redact requires --profile clean because capture profiles move MRZ cells".into(),
+        );
+    }
+    if let Some(span) = parsed.redact {
+        let layout = synthpass_gen::layout::for_format(parsed.document_type);
+        if span.line >= layout.mrz_lines.len() {
+            return Err(format!(
+                "--redact line {} is out of range for {}",
+                span.line,
+                parsed.document_type.as_str()
+            ));
+        }
+        if span.first > span.last {
+            return Err(format!(
+                "--redact first cell {} exceeds last cell {}",
+                span.first, span.last
+            ));
+        }
+        if span.last >= layout.mrz_chars as usize {
+            return Err(format!(
+                "--redact last cell {} is out of range (line width {})",
+                span.last, layout.mrz_chars
+            ));
         }
     }
 
@@ -152,6 +193,37 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
     }
 
     Ok(parsed)
+}
+
+fn parse_redact(value: &str) -> Result<RedactSpan, String> {
+    let parts: Vec<_> = value.split(':').collect();
+    if parts.len() != 3 {
+        return Err("--redact span must be STYLE:LINE:FIRST-LAST".into());
+    }
+    let style = match parts[0] {
+        "fill-black" => RedactStyle::FillBlack,
+        "fill-white" => RedactStyle::FillWhite,
+        "fill-grey" => RedactStyle::FillGrey,
+        "blur" => RedactStyle::Blur,
+        "graded-blur" => RedactStyle::GradedBlur,
+        other => return Err(format!("--redact style '{other}' is unknown")),
+    };
+    let line = parts[1]
+        .parse()
+        .map_err(|_| format!("--redact line '{}' is not a number", parts[1]))?;
+    let (first, last) = parts[2]
+        .split_once('-')
+        .ok_or_else(|| "--redact cells must be FIRST-LAST".to_string())?;
+    Ok(RedactSpan {
+        line,
+        first: first
+            .parse()
+            .map_err(|_| format!("--redact first cell '{first}' is not a number"))?,
+        last: last
+            .parse()
+            .map_err(|_| format!("--redact last cell '{last}' is not a number"))?,
+        style,
+    })
 }
 
 /// Maps this CLI's `--profile` string to `synthpass_gen::degrade`'s
@@ -241,6 +313,16 @@ struct LabelsJson {
     profile: String,
     image_width: u32,
     image_height: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    occluded: Vec<OccludedJson>,
+}
+
+#[derive(Serialize)]
+struct OccludedJson {
+    line: usize,
+    first: usize,
+    last: usize,
+    kind: String,
 }
 
 #[derive(Serialize)]
@@ -286,6 +368,16 @@ fn labels_to_json(
         profile: profile.to_string(),
         image_width: width,
         image_height: height,
+        occluded: labels
+            .occluded
+            .iter()
+            .map(|s| OccludedJson {
+                line: s.line,
+                first: s.first,
+                last: s.last,
+                kind: s.kind.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -315,7 +407,14 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
     for i in 0..parsed.count {
         let seed = parsed.seed + i;
         let config = GeneratorConfig::with_document_type(seed, parsed.document_type);
-        let (image, labels, passport) = generate_from_seed(&config);
+        let passport = data::generate_passport(&config);
+        let (image, labels) = generate_with(
+            &passport,
+            &config,
+            &RenderOptions {
+                redact: parsed.redact,
+            },
+        );
         let image = degrade_placeholder(image, &parsed.profile, seed);
         let (width, height) = (image.width(), image.height());
 
@@ -578,5 +677,27 @@ mod tests {
         let args = vec!["--nope".to_string()];
         let err = parse_args(&args).unwrap_err();
         assert!(err.contains("unknown argument"));
+    }
+
+    #[test]
+    fn redact_span_validates_style_geometry_and_profile() {
+        for (arg, expected) in [
+            ("nope:0:0-1", "style"),
+            ("blur:9:0-1", "line"),
+            ("blur:0:2-1", "first cell"),
+            ("blur:0:0-44", "last cell"),
+        ] {
+            let args = vec!["--redact".to_string(), arg.to_string()];
+            assert!(parse_args(&args).unwrap_err().contains(expected));
+        }
+        let args = vec![
+            "--redact".into(),
+            "blur:0:0-1".into(),
+            "--profile".into(),
+            "mobile".into(),
+        ];
+        assert!(parse_args(&args)
+            .unwrap_err()
+            .contains("requires --profile clean"));
     }
 }

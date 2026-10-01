@@ -48,8 +48,9 @@ pub mod model;
 mod mrz_line;
 pub mod render;
 
-pub use labels::{FieldLabel, Labels};
+pub use labels::{FieldLabel, Labels, OccludedSpan};
 pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
+pub use render::{RedactSpan, RedactStyle, RenderOptions};
 
 /// Generate a synthetic document data page: a fictional identity drawn
 /// from `config.seed`, rendered into an image, alongside its ground-truth
@@ -61,8 +62,29 @@ pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
 ///
 /// Supports TD1, TD2, and TD3 document types based on `config.document_type`.
 pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::DynamicImage, Labels) {
+    generate_with(passport, config, &RenderOptions::default())
+}
+
+pub fn generate_with(
+    passport: &Passport,
+    config: &GeneratorConfig,
+    options: &RenderOptions,
+) -> (image::DynamicImage, Labels) {
     let labels = labels::build_labels(passport, config.document_type);
-    let image = render::render(passport, &labels, config.document_type);
+    let mut labels = labels;
+    if let Some(span) = options.redact {
+        labels.occluded.push(OccludedSpan {
+            line: span.line,
+            first: span.first,
+            last: span.last,
+            kind: match span.style {
+                RedactStyle::FillBlack | RedactStyle::FillWhite | RedactStyle::FillGrey => "fill",
+                _ => "blur",
+            }
+            .to_string(),
+        });
+    }
+    let image = render::render_with(passport, &labels, config.document_type, options);
     (image, labels)
 }
 

@@ -22,6 +22,35 @@ use crate::labels::Labels;
 use crate::layout::{self, PageLayout, Rect};
 use crate::model::{DocumentType, Passport};
 
+/// Blur sigma for the uniform MRZ redaction, in cell widths. A sweep seed for #565 PR 6, not a measured value.
+pub const REDACT_BLUR_SIGMA_CELLS: f32 = 0.5;
+/// First-cell graded blur sigma in cell widths. A sweep seed for #565 PR 6, not a measured value.
+pub const REDACT_GRADED_BLUR_MIN_CELLS: f32 = 0.1;
+/// Last-cell graded blur sigma in cell widths. A sweep seed for #565 PR 6, not a measured value.
+pub const REDACT_GRADED_BLUR_MAX_CELLS: f32 = 0.5;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedactStyle {
+    FillBlack,
+    FillWhite,
+    FillGrey,
+    Blur,
+    GradedBlur,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RedactSpan {
+    pub line: usize,
+    pub first: usize,
+    pub last: usize,
+    pub style: RedactStyle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RenderOptions {
+    pub redact: Option<RedactSpan>,
+}
+
 const BACKGROUND: Rgb<u8> = Rgb([244, 243, 236]);
 const FRAME: Rgb<u8> = Rgb([70, 72, 90]);
 const PORTRAIT_FILL: Rgb<u8> = Rgb([205, 205, 210]);
@@ -385,6 +414,15 @@ fn draw_watermark(img: &mut RgbImage, rect: Rect) {
 /// own card canvas ([`layout::for_format`]) — TD1/TD2/TD3 each get their own
 /// `PageLayout` rather than sharing TD3's fixed 1200x840 canvas.
 pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> DynamicImage {
+    render_with(passport, labels, doc_type, &RenderOptions::default())
+}
+
+pub fn render_with(
+    passport: &Passport,
+    labels: &Labels,
+    doc_type: DocumentType,
+    options: &RenderOptions,
+) -> DynamicImage {
     // `labels` is the single source of drawn text (kept in sync with
     // `passport` by construction, see `labels::build_labels`); `passport` is
     // accepted for API symmetry with `crate::generate` and future per-field
@@ -473,6 +511,50 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
         }
     }
 
+    if let Some(span) = options.redact {
+        let line = page.mrz_lines[span.line];
+        let x = line.x + span.first as u32 * layout::MRZ_CELL_WIDTH;
+        let width = (span.last - span.first + 1) as u32 * layout::MRZ_CELL_WIDTH;
+        let region = Rect::new(x, line.y, width, line.height);
+        match span.style {
+            RedactStyle::FillBlack | RedactStyle::FillWhite | RedactStyle::FillGrey => {
+                let tone = match span.style {
+                    RedactStyle::FillBlack => Rgb([0, 0, 0]),
+                    RedactStyle::FillWhite => Rgb([255, 255, 255]),
+                    _ => Rgb([128, 128, 128]),
+                };
+                fill_rect(&mut img, region, tone);
+            }
+            RedactStyle::Blur => blur_region(
+                &mut img,
+                region,
+                REDACT_BLUR_SIGMA_CELLS * layout::MRZ_CELL_WIDTH as f32,
+            ),
+            RedactStyle::GradedBlur => {
+                let count = span.last - span.first + 1;
+                for offset in 0..count {
+                    let t = if count <= 1 {
+                        0.0
+                    } else {
+                        offset as f32 / (count - 1) as f32
+                    };
+                    let sigma = REDACT_GRADED_BLUR_MIN_CELLS
+                        + t * (REDACT_GRADED_BLUR_MAX_CELLS - REDACT_GRADED_BLUR_MIN_CELLS);
+                    blur_region(
+                        &mut img,
+                        Rect::new(
+                            x + offset as u32 * layout::MRZ_CELL_WIDTH,
+                            line.y,
+                            layout::MRZ_CELL_WIDTH,
+                            line.height,
+                        ),
+                        sigma * layout::MRZ_CELL_WIDTH as f32,
+                    );
+                }
+            }
+        }
+    }
+
     // Guardrail #1: unconditional synthetic watermark, drawn last so it stays
     // on top of every other element — on every format's own watermark band.
     draw_watermark(&mut img, page.watermark);
@@ -480,9 +562,113 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
     DynamicImage::ImageRgb8(img)
 }
 
+fn blur_region(img: &mut RgbImage, rect: Rect, sigma: f32) {
+    let crop = image::imageops::crop_imm(img, rect.x, rect.y, rect.width, rect.height).to_image();
+    let blurred = image::imageops::blur(&crop, sigma);
+    image::imageops::replace(img, &blurred, i64::from(rect.x), i64::from(rect.y));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redaction_changes_only_the_requested_cells_and_keeps_watermark() {
+        let config = crate::GeneratorConfig::with_document_type(17, DocumentType::TD3);
+        let passport = crate::data::generate_passport(&config);
+        let labels = crate::labels::build_labels(&passport, DocumentType::TD3);
+        let plain = render(&passport, &labels, DocumentType::TD3).to_rgb8();
+        for style in [
+            RedactStyle::FillBlack,
+            RedactStyle::FillWhite,
+            RedactStyle::FillGrey,
+            RedactStyle::Blur,
+            RedactStyle::GradedBlur,
+        ] {
+            let span = RedactSpan {
+                line: 0,
+                first: 5,
+                last: 7,
+                style,
+            };
+            let redacted = render_with(
+                &passport,
+                &labels,
+                DocumentType::TD3,
+                &RenderOptions { redact: Some(span) },
+            )
+            .to_rgb8();
+            let line = layout::for_format(DocumentType::TD3).mrz_lines[0];
+            let x0 = line.x + 5 * layout::MRZ_CELL_WIDTH;
+            let x1 = line.x + 8 * layout::MRZ_CELL_WIDTH;
+            for y in 0..plain.height() {
+                for x in 0..plain.width() {
+                    let inside = x >= x0 && x < x1 && y >= line.y && y < line.y + line.height;
+                    if !inside {
+                        assert_eq!(
+                            plain.get_pixel(x, y),
+                            redacted.get_pixel(x, y),
+                            "outside span ({x},{y}) {style:?}"
+                        );
+                    }
+                }
+            }
+            if let RedactStyle::FillBlack | RedactStyle::FillWhite | RedactStyle::FillGrey = style {
+                let expected = match style {
+                    RedactStyle::FillBlack => Rgb([0, 0, 0]),
+                    RedactStyle::FillWhite => Rgb([255, 255, 255]),
+                    _ => Rgb([128, 128, 128]),
+                };
+                for y in line.y..line.y + line.height {
+                    for x in x0..x1 {
+                        assert_eq!(*redacted.get_pixel(x, y), expected);
+                    }
+                }
+            } else {
+                for cell in 5..=7 {
+                    let left = line.x + cell * layout::MRZ_CELL_WIDTH;
+                    assert!(
+                        (line.y..line.y + line.height)
+                            .any(|y| (left..left + layout::MRZ_CELL_WIDTH)
+                                .any(|x| plain.get_pixel(x, y) != redacted.get_pixel(x, y))),
+                        "cell {cell} unchanged"
+                    );
+                }
+            }
+            let page = layout::for_format(DocumentType::TD3);
+            for y in page.watermark.y..page.watermark.y + page.watermark.height {
+                for x in page.watermark.x..page.watermark.x + page.watermark.width {
+                    assert_eq!(plain.get_pixel(x, y), redacted.get_pixel(x, y));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mrz_cell_geometry_is_contiguous_for_td1_and_td3() {
+        for doc_type in [DocumentType::TD1, DocumentType::TD3] {
+            let page = layout::for_format(doc_type);
+            for line in &page.mrz_lines {
+                assert_eq!(line.width, page.mrz_chars * layout::MRZ_CELL_WIDTH);
+                for cell in 0..page.mrz_chars {
+                    let x = line.x + cell * layout::MRZ_CELL_WIDTH;
+                    assert_eq!(
+                        x + layout::MRZ_CELL_WIDTH,
+                        line.x + (cell + 1) * layout::MRZ_CELL_WIDTH
+                    );
+                    assert!(Rect::new(x, line.y, layout::MRZ_CELL_WIDTH, line.height)
+                        .within_bounds(page.width, page.height));
+                }
+            }
+            for line in &page.mrz_lines {
+                let overlaps = line.x < page.watermark.x + page.watermark.width
+                    && page.watermark.x < line.x + line.width
+                    && line.y < page.watermark.y + page.watermark.height
+                    && page.watermark.y < line.y + line.height;
+                assert!(!overlaps, "{doc_type:?} MRZ overlaps watermark");
+            }
+        }
+    }
 
     #[test]
     fn watermark_renders_without_embedded_fonts() {
