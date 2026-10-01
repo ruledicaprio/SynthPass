@@ -52,8 +52,10 @@ the record.
 | [0019](ADR-0019-typed-values-on-mrzdata.md) | Typed dates and sex on `MrzData` | Accepted (2026-09-23, Option D) |
 | [0020](ADR-0020-mrz-value-wire-contract.md) | The wire form of `MrzDate` and `Sex`: `Display`, serde and the zone agree | Accepted |
 | [0021](ADR-0021-fixed-grid-mrz-strips.md) | Fixed-grid MRZ strips: check-anchor alignment with an explicit ambiguity outcome | Proposed (amended 2026-09-24, 2026-10-01) |
+| [0022](ADR-0022-declarative-layout-plugins.md) | Declarative layout plugins: a closed, geometry-only schema, checked at load time | Proposed |
 | [0023](ADR-0023-cli-output-contract.md) | The CLI's output contract: `--json`, and stdout/stderr for everything else | Accepted (2026-09-26) |
 | [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27; amended 2026-09-29) |
+| [0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) | Tier 1 reads a single OCR pass only when two passes agree | Proposed (not adopted by #550; 2026-10-01 note) |
 | [0026](ADR-0026-covered-cells-are-occluded.md) | Covered MRZ cells are reported as `occluded`, never as text | Accepted (2026-09-28) |
 | [0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) | GitHub runners measure synthetic and public benchmark arms; nothing private, no text, no timings | Accepted (2026-09-29) |
 | [0028](ADR-0028-scale-follows-the-measured-mrz-pitch.md) | SynthPass owns every resample; scale follows the measured MRZ pitch | Proposed |

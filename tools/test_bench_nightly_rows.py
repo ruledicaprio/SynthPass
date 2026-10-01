@@ -8,7 +8,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+import bench_ab_args as ab
 import bench_nightly_rows as n
 
 # Text the report carries and no row may.
@@ -568,6 +570,46 @@ class FixedSliceAndHeaderTests(unittest.TestCase):
             n.validate_context(context(ocr_env={"PATH": "/usr/bin"}))
         with self.assertRaises(n.RowError):
             n.validate_context(context(git_sha="main"))
+
+
+class RecordedEnvTests(unittest.TestCase):
+    """A run header records only the named measurement knobs and the pinned budget. Any other
+    `SYNTHPASS_*` variable stays out, so a credential that shares the prefix never reaches the
+    public `bench-data` rows."""
+
+    def test_the_recorded_names_are_the_dispatch_allowlist_plus_the_pinned_budget(self):
+        self.assertEqual(set(n.RECORDED_ENV), set(ab.ALLOWED_ENV) | set(ab.PINNED))
+
+    def test_collect_context_records_only_the_named_knobs(self):
+        env = {
+            "GITHUB_RUN_ID": "123456789",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_SHA": SHA,
+            "GITHUB_EVENT_NAME": "schedule",
+            "SYNTHPASS_OCR_CHARGRID": "on",
+            "SYNTHPASS_OCR_MAX_SECONDS": "600",
+            "SYNTHPASS_API_TOKEN": "abc123",
+            "SYNTHPASS_OCR_THREADS": "4",
+        }
+        rustc = mock.Mock(stdout="rustc 1.90.0 (0000000 2025-09-01)\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("text-detection.rten", "text-recognition.rten"):
+                (Path(tmp) / name).write_bytes(b"model")
+            with mock.patch.dict(n.os.environ, env, clear=True), \
+                    mock.patch.object(n.subprocess, "run", return_value=rustc):
+                ctx = n.collect_context(Path(tmp))
+        self.assertEqual(ctx["ocr_env"], {"SYNTHPASS_OCR_CHARGRID": "on", "SYNTHPASS_OCR_MAX_SECONDS": "600"})
+        self.assertIs(n.validate_context(ctx), ctx)
+
+    def test_a_context_naming_another_synthpass_variable_is_refused(self):
+        for name in ("SYNTHPASS_API_TOKEN", "SYNTHPASS_OCR_THREADS", "SYNTHPASS_LICENSE_KEY"):
+            with self.subTest(name=name), self.assertRaises(n.RowError):
+                n.validate_context(context(ocr_env={name: "abc123"}))
+
+    def test_every_recorded_knob_is_accepted(self):
+        for name in n.RECORDED_ENV:
+            with self.subTest(name=name):
+                self.assertEqual(n.validate_context(context(ocr_env={name: "1"}))["ocr_env"], {name: "1"})
 
 
 class AssembleAndSeedTests(unittest.TestCase):
