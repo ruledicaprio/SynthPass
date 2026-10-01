@@ -285,7 +285,7 @@ Two further observations shape how the ruler is read:
 - a change to any gate, baseline, tolerance or denominator;
 - a new dependency, a new model or a fork of `ocrs`;
 - a sixth `mrz::Format`;
-- resampling pages inside the identity window before open question 3 is decided;
+- resampling pages inside the identity window (open question 3);
 - step 6 without its gate evidence.
 
 **What would reverse it.** Either of these:
@@ -310,27 +310,20 @@ Each step is its own PR. Nothing changes default behaviour before step 6.
 | 7 | Browser: `mrz-wasm` exposes the normaliser, and `web/scan.js` drops its 1600 px cap | browser only | `web-ocr.yml` |
 | 8 | Later arms: line rectangles from the grid alone; scale-aware post-processing on `detect_text_pixels` | none by default | same-binary A/B |
 
-## Open questions
+## Open questions, decided
 
-These are the owner's to decide. Each carries the design analysis's recommendation, which is not
-a decision.
+The owner decided all three on 2026-10-01, each as the design analysis recommended.
 
-1. **The one-line driving-licence MRZ.** ISO/IEC 18013-3 Amd 1 §8.3.2.5 defines a one-line zone.
-   It lies outside Doc 9303, and ROADMAP places licences under "Beyond ICAO 9303".
-   - (a) Leave it there, while Stage C's crop geometry keeps room for a one-line shape.
-   - (b) Add a sixth `mrz::Format` now, which needs its own ADR because it widens scope beyond
-     Doc 9303.
-
-   *Recommended: (a).*
-2. **The serve page's 2000 px downscale and JPEG re-encode.**
-   - (a) Remove the client-side downscale once the server normalises (after step 6), and document
-     it until then.
-   - (b) Keep it, and document it.
-
-   *Recommended: (a).*
-3. **An identity window, or normalise every page.** Decision 9 already limits the promotion to
-   pages outside a window. This question decides whether pages inside it are ever resampled.
-   *Recommended: the window,* so that today's population of small images is untouched.
+1. **The one-line driving-licence MRZ: (a), it stays beyond Doc 9303.** ISO/IEC 18013-3 Amd 1
+   §8.3.2.5 defines a one-line zone. It lies outside Doc 9303, and ROADMAP places licences under
+   "Beyond ICAO 9303". Stage C's crop geometry keeps room for a one-line shape. A sixth
+   `mrz::Format` would need an ADR of its own, because it widens scope beyond Doc 9303.
+2. **The serve page's 2000 px downscale and JPEG re-encode: (a), removed once the server
+   normalises.** Step 0 records them as drift until then. The removal is a PR of its own after
+   step 6.
+3. **An identity window: yes.** Pages inside the window are never resampled, so today's population
+   of small images is untouched. Decision 9 already limits the promotion to pages outside it. The
+   window's bounds are swept (decision 7).
 
 ## References
 
