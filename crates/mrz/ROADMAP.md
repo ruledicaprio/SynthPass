@@ -99,7 +99,7 @@ Additive work and fixes that break nothing. None of it is ordered or scheduled.
   since 1.81, below this crate's MSRV, so the switch may be possible without a break. What it
   needs is an audit of the `std::` paths and of the `serde` feature's `alloc` configuration.
 
-## The breaking window — 0.8.0 (closed; reopened once for 0.9.0)
+## The breaking window — 0.8.0 (closed; reopened for 0.9.0, and to reopen for 0.10.0)
 
 Pre-1.0 is the cheap time to break, and the plan is to break **once**: collect every change
 below into a single release rather than spreading them across several minors. Each is a
@@ -150,17 +150,36 @@ proposal to be decided on its merits, in an issue or an ADR of its own. None is 
 - 0.9.0 reopened the breaking window once, for a correctness refusal: a document number whose
   first cell is the filler is no longer accepted (#536). So the clock restarts there. Nothing
   breaks after 0.9.0, and the 0.9 line exists to prove that: real downstream use runs on it for
-  at least one full release cycle without needing a breaking fix.
+  at least one full release cycle without needing a breaking fix. (Superseded on 2026-10-01: the
+  window reopens once more for 0.10.0, below.)
 - The `serde` representation — field names, enum tagging — is documented as API and pinned by
   a round-trip test per type. From 1.0, renaming a JSON field is a major change.
 - The 1.x MSRV and semver policy is written into this file.
+
+## 0.10.0 — the window reopened a second time (decided 2026-10-01)
+
+0.10.0 reopens the breaking window once more, for correctness refusals only. It ships in
+December and holds:
+
+- **The repeated-line refusal, as a default** (#579). `ParseOptions::refuse_repeated_line` refuses
+  a zone in which one line repeats another. No check digit covers such a line, so a second reading
+  of another line can stand in for it, as in #542's TD2 case. #542 is closed, because its seeds no
+  longer misread.
+- **The date-field rule, as a default** (#579). With `ParseOptions::date_digits`, a read whose date
+  of birth or date of expiry holds anything but digits or the filler is not `valid()`.
+- **The refusal #560 needs.** A TD1 card was accepted as an MRV-B stitched from two retry passes'
+  reads. The form of the refusal is decided in #560.
+
+Each ships first in 0.9.x as an opt-in `ParseOptions` switch, and becomes a default only after it
+is measured. The 1.0 clock restarts at 0.10.0: the 0.10 line has to ship for a full release cycle
+with no further break.
 
 ## 1.0.0 — when, not a date
 
 1.0 ships when all of these hold:
 
-- [ ] The breaking window, reopened for 0.9.0, has closed, and the 0.9.x line shipped with no
-      further break.
+- [ ] The breaking window, reopened for 0.10.0, has closed, and the 0.10.x line shipped for a
+      full release cycle with no further break.
 - [x] Every public item is documented, and every item docs.rs counts carries a runnable example.
 - [x] Every Doc 9303 worked example the crate relies on is pinned as a test vector
       ([`CONFORMANCE_BASIS.md`](../../knowledge/docs9303/CONFORMANCE_BASIS.md)).

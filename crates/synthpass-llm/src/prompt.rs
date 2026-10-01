@@ -286,7 +286,7 @@ fn is_latin_or_punctuation(c: char) -> bool {
 /// than ICAO 9303's longest defined MRZ line (TD3, 44 characters) glued to an
 /// adjacent character with no separating whitespace. OCR corruption can push
 /// that further still: the same corpus's
-/// `Afghanistan_Passport_Specimen_P0_AFG_2016_mrz.md` reads its second MRZ
+/// `Afghanistan_Passport_Specimen_PO_AFG_2016_mrz.md` reads its second MRZ
 /// line as a 48-character run behind a garbled two-character prefix.
 ///
 /// [`LONG_RUN_NOISE_THRESHOLD`] sits at 64 — comfortably above both, with

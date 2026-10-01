@@ -153,7 +153,24 @@ _TOKEN = re.compile(r"^[A-Za-z0-9_.:-]{1,40}$")
 # `<GITHUB_RUN_ID>-<GITHUB_RUN_ATTEMPT>`
 _RUN_ID = re.compile(r"^[0-9]{1,20}-[0-9]{1,4}$")
 _PRINTABLE = re.compile(r"^[ -~]{1,120}$")
-_ENV_NAME = re.compile(r"^SYNTHPASS_[A-Z0-9_]{1,60}$")
+# The environment a run header records (`ocr_env`): the measurement knobs `bench-ab.yml` may set
+# (`ALLOWED_ENV` in `tools/bench_ab_args.py`) and the wall-clock budget it pins. Any other
+# `SYNTHPASS_*` variable on the runner is left out, so a credential that shares the prefix never
+# reaches the public `bench-data` rows. Written out here because `bench_ab_args` imports this
+# module; a test pins the two lists together.
+RECORDED_ENV = (
+    "SYNTHPASS_MRZ_CLASS_SWEEP",
+    "SYNTHPASS_MRZ_DATE_DIGITS",
+    "SYNTHPASS_MRZ_LINE1_SELECT",
+    "SYNTHPASS_MRZ_REFUSE_REPEATED_LINE",
+    "SYNTHPASS_OCR_CHARGRID",
+    "SYNTHPASS_OCR_MAX_PASSES",
+    "SYNTHPASS_OCR_MAX_SECONDS",
+    "SYNTHPASS_OCR_ORDER",
+    "SYNTHPASS_OCR_ROTATE",
+    "SYNTHPASS_OCR_SKEW",
+    "SYNTHPASS_OCR_TEXTURE",
+)
 
 
 class RowError(ValueError):
@@ -475,8 +492,8 @@ def validate_context(context: dict) -> dict:
     if not isinstance(env, dict):
         raise RowError("context: ocr_env must be an object")
     for name, value in env.items():
-        if not _ENV_NAME.match(name) or not isinstance(value, str) or not re.match(r"^[A-Za-z0-9_.-]{0,40}$", value):
-            raise RowError("context: ocr_env holds only SYNTHPASS_* names with short plain values")
+        if name not in RECORDED_ENV or not isinstance(value, str) or not re.match(r"^[A-Za-z0-9_.-]{0,40}$", value):
+            raise RowError("context: ocr_env holds only the recorded measurement knobs, with short plain values")
     return context
 
 
@@ -741,7 +758,7 @@ def collect_context(model_dir: Path) -> dict:
             "detection": _sha256_of(Path(model_dir) / "text-detection.rten"),
             "recognition": _sha256_of(Path(model_dir) / "text-recognition.rten"),
         },
-        "ocr_env": {k: v for k, v in sorted(env.items()) if k.startswith("SYNTHPASS_")},
+        "ocr_env": {name: env[name] for name in RECORDED_ENV if name in env},
     }
 
 
