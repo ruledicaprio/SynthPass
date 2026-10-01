@@ -978,7 +978,9 @@ fn archive_document(
 /// iteration. This is a diagnostic artifact, not a hot path.
 ///
 /// For a `no_mrz_found` row `recovered_mrz_lines` is empty, `check_states` is
-/// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
+/// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. So for a
+/// `checksum_failed` row whose zone the opt-in repeated-line rule refused
+/// (#579), which leaves no read. What
 /// matters there is `mrz_band_score` (was a band even found?) and
 /// `raw_ocr_text` (what did the recognizer see?) — the localization-vs-
 /// recognition question `ADR-0008` chunk 1C cell (b) asks.
@@ -1134,8 +1136,9 @@ pub struct DocumentDetail {
     pub name: String,
     /// Exact samples-relative asset identity for real-specimen joins.
     pub asset_id: Option<String>,
-    /// Whether `mrz::find_and_parse` recovered an MRZ from this document's
-    /// OCR text — which bucket this document counted toward.
+    /// Whether `mrz::find_and_parse_with`, under this process's parse options,
+    /// recovered an MRZ from this document's OCR text — which bucket this
+    /// document counted toward.
     pub mrz_found: bool,
     /// The document's ICAO 9303 MRZ format, resolved per corpus source —
     /// the M6 plan's "report Tier-1 hit rate keyed by mrz::Format" applied to
@@ -1994,8 +1997,10 @@ struct BenchPage {
     /// this `None`. Used solely to sub-classify a `checksum_failed` miss.
     ground_truth_mrz: Option<String>,
     image_path: PathBuf,
-    /// Whether `mrz::find_and_parse` recovered *any* MRZ from this document's
-    /// OCR text — parsed, not necessarily checksum-valid.
+    /// Whether `mrz::find_and_parse_with`, under this process's parse options
+    /// (`synthpass_die::mrz_parse_options`), recovered *any* MRZ from this
+    /// document's OCR text — parsed, not necessarily checksum-valid. A zone an
+    /// opt-in rule refuses (#579) is not recovered.
     ///
     /// This is the "zero anchor vs some anchor" split, and it is deliberately
     /// the found/not-found line rather than the checksum-valid/invalid one.
@@ -2261,7 +2266,12 @@ fn specimen_bench_page(
     let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
         !mrz::find_and_parse_with(zone, &printed_zone_parse_options()).is_ok_and(|d| d.valid())
     });
-    let found = mrz::find_and_parse(&page.text);
+    // Under this process's arms, as `prep_corpus` parses, so `mrz_found` and
+    // the leading-filler flag describe the run's read: a zone an opt-in rule
+    // refuses (#579) is not found here, and `tier1_miss_reason`'s refusal rung
+    // keeps it out of `no_mrz_found`. With every arm at its default this is
+    // `mrz::find_and_parse`.
+    let found = mrz::find_and_parse_with(&page.text, &synthpass_die::mrz_parse_options());
     let mrz_found = found.is_ok();
     let document_number_leading_filler = matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
     // Derived from the filename, the same way the corpus manifest
@@ -2739,6 +2749,134 @@ fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
     )
 }
 
+/// One document's Tier-1 miss classification for one reading: `None` for a
+/// hit.
+///
+/// `read` is the reader's Tier-1 read of `bench_page`'s text under `opts`,
+/// this process's parse options (`synthpass_die::read_tier1`);
+/// `checksums_valid` is the reading's `Evidence::mrz_checksums_valid`, and
+/// `document_number` the document number it extracted. Kept out of
+/// [`run_prepped_with_dump_options`] so the rungs are tested with explicit
+/// reads and options: the opt-in rules that reach the refusal rung (#579)
+/// never run in CI.
+fn tier1_miss_reason(
+    bench_page: &BenchPage,
+    read: Result<&mrz::MrzData, &mrz::MrzError>,
+    checksums_valid: bool,
+    document_number: Option<&str>,
+    opts: &mrz::ParseOptions,
+) -> Option<MissReason> {
+    let read_mrz = read.ok();
+    let rejected_by = crate::rejected_by(&bench_page.page.text, opts, read);
+    // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
+    // found, then checksum validity, then — only when this document is
+    // labelled — a document-number check against ground truth. A
+    // specimen with no label that clears those gets no further check;
+    // that is a hit, not an unknown.
+    //
+    // The rungs are ordered by **what the document makes possible**,
+    // before anything about what the run achieved. Three populations
+    // cannot produce a Tier-1 hit no matter how good the pipeline gets,
+    // and each is scored off the denominator rather than counted as a
+    // failure to do the impossible:
+    //
+    //   * `no_mrz_expected` — the document carries no zone at all.
+    //   * `redacted_mrz`    — the zone is physically blacked out.
+    //   * `checksum_failed_specimen` — the *printed* zone fails its own
+    //     ICAO check digits, so even a byte-perfect read fails.
+    //
+    // Getting that order wrong is what this whole classification was
+    // rebuilt for. Every one of the three used to be decided by what OCR
+    // happened to return:
+    //
+    //   * An MRZ-less front has no `ocr_fixtures/` label to contradict,
+    //     so a hallucinated checksum-valid zone reached the final `else`,
+    //     found no ground truth, and was counted as a Tier-1 **hit** —
+    //     while the 42 correct refusals were counted as `no_mrz_found`.
+    //   * `Redacted` sat *after* the `mrz_found` gate, so 9 of the 36
+    //     redacted specimens were scored out and 27 were scored in as
+    //     detection failures, split by nothing but whether the blackout
+    //     bar happened to OCR into parseable noise. The cleaner the
+    //     redaction, the worse the document scored.
+    //   * A non-conforming printed zone was only recognised when OCR
+    //     recovered it *exactly*, which caught 1 of the 16 the
+    //     2026-09-08 writeup identified.
+    if !bench_page.mrz_expected {
+        if bench_page.mrz_found && checksums_valid {
+            Some(MissReason::FalsePositiveMrz)
+        } else {
+            // Includes the parseable-but-checksum-failing case: the
+            // check digits rejected it, which is the system working.
+            Some(MissReason::NoMrzExpected)
+        }
+    } else if bench_page.redacted {
+        // Before the `mrz_found` gate, not after. Whether a blackout bar
+        // resolves into something parseable is a property of the bar's
+        // texture, not of the pipeline, and it is not stable run to run.
+        Some(MissReason::Redacted)
+    } else if bench_page.printed_zone_nonconforming {
+        // The printed zone fails its own check digits, so this document
+        // has no reachable hit. Reported whatever OCR returned, for the
+        // same reason as `redacted`: the document decides this, not the
+        // run.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: true,
+            rejected_by,
+        })
+    } else if !rejected_by.is_empty() {
+        // An opt-in rule (#579) cost this document a valid read: with it off,
+        // the same text reads valid. The date-digits rule leaves a read that
+        // is not `valid()`, the repeated-line rule a checksum-failed reading
+        // or none. A miss in `checksum_failed`, as a checksum-invalid read
+        // is, with the rule named. Above the leading-filler and `mrz_found`
+        // rungs, whose refusal or missing zone the rule itself caused.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: false,
+            rejected_by,
+        })
+    } else if bench_page.document_number_leading_filler {
+        // A structural refusal (#536), not "nothing MRZ-shaped was
+        // found" — its own bucket rather than folding into the
+        // `NoMrzFound` rung below.
+        Some(MissReason::DocumentNumberLeadingFiller)
+    } else if !bench_page.mrz_found {
+        Some(MissReason::NoMrzFound(String::new()))
+    } else if !checksums_valid {
+        // A genuine OCR misread: the printed zone is conforming (the
+        // rung above already took the specimens where it is not), so
+        // every failing check digit here is the pipeline's own.
+        //
+        // `read_mrz` is the reader's Tier-1 read, the same source
+        // `--dump-ocr` prints, so this check state describes that
+        // read.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: false,
+            rejected_by: Vec::new(),
+        })
+    } else {
+        bench_page
+            .ground_truth
+            .as_ref()
+            .and_then(|gt| gt.get(&CoreField::DocumentNumber))
+            .and_then(|expected| {
+                let got = document_number.unwrap_or("");
+                (got != expected).then(|| MissReason::DocumentNumberMismatch {
+                    got: got.to_string(),
+                    expected: expected.clone(),
+                })
+            })
+    }
+}
+
 /// The shared reader loop both [`run_provider_bench`] and
 /// [`run_provider_bench_real`] funnel into — the one place accuracy and
 /// unsupported-assertion are computed, so the two corpus sources cannot
@@ -2830,6 +2968,9 @@ async fn run_prepped_with_dump_options(
         .filter(|p| matches!(p, Some(bp) if !bp.mrz_found))
         .count();
 
+    // The parse options `synthpass_die::read_tier1` reads under, for the
+    // refusal rung's attribution (#579). Process-wide, so read once per run.
+    let parse_opts = synthpass_die::mrz_parse_options();
     let mut reports = Vec::with_capacity(catalog.readers().len());
     // Accumulated across every provider (each tagged in the row) and written
     // once after the loop — see `dump_ocr_dir` in this fn's doc.
@@ -3052,101 +3193,13 @@ async fn run_prepped_with_dump_options(
                 }
             }
 
-            // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
-            // found, then checksum validity, then — only when this document is
-            // labelled — a document-number check against ground truth. A
-            // specimen with no label that clears those gets no further check;
-            // that is a hit, not an unknown.
-            //
-            // The rungs are ordered by **what the document makes possible**,
-            // before anything about what the run achieved. Three populations
-            // cannot produce a Tier-1 hit no matter how good the pipeline gets,
-            // and each is scored off the denominator rather than counted as a
-            // failure to do the impossible:
-            //
-            //   * `no_mrz_expected` — the document carries no zone at all.
-            //   * `redacted_mrz`    — the zone is physically blacked out.
-            //   * `checksum_failed_specimen` — the *printed* zone fails its own
-            //     ICAO check digits, so even a byte-perfect read fails.
-            //
-            // Getting that order wrong is what this whole classification was
-            // rebuilt for. Every one of the three used to be decided by what OCR
-            // happened to return:
-            //
-            //   * An MRZ-less front has no `ocr_fixtures/` label to contradict,
-            //     so a hallucinated checksum-valid zone reached the final `else`,
-            //     found no ground truth, and was counted as a Tier-1 **hit** —
-            //     while the 42 correct refusals were counted as `no_mrz_found`.
-            //   * `Redacted` sat *after* the `mrz_found` gate, so 9 of the 36
-            //     redacted specimens were scored out and 27 were scored in as
-            //     detection failures, split by nothing but whether the blackout
-            //     bar happened to OCR into parseable noise. The cleaner the
-            //     redaction, the worse the document scored.
-            //   * A non-conforming printed zone was only recognised when OCR
-            //     recovered it *exactly*, which caught 1 of the 16 the
-            //     2026-09-08 writeup identified.
-            let miss_reason = if !bench_page.mrz_expected {
-                if bench_page.mrz_found && reading.evidence.mrz_checksums_valid {
-                    Some(MissReason::FalsePositiveMrz)
-                } else {
-                    // Includes the parseable-but-checksum-failing case: the
-                    // check digits rejected it, which is the system working.
-                    Some(MissReason::NoMrzExpected)
-                }
-            } else if bench_page.redacted {
-                // Before the `mrz_found` gate, not after. Whether a blackout bar
-                // resolves into something parseable is a property of the bar's
-                // texture, not of the pipeline, and it is not stable run to run.
-                Some(MissReason::Redacted)
-            } else if bench_page.printed_zone_nonconforming {
-                // The printed zone fails its own check digits, so this document
-                // has no reachable hit. Reported whatever OCR returned, for the
-                // same reason as `redacted`: the document decides this, not the
-                // run.
-                Some(MissReason::ChecksumFailed {
-                    check_states: read_mrz
-                        .map(|d| crate::check_states(&d.checks))
-                        .unwrap_or_default(),
-                    specimen_nonconforming: true,
-                })
-            } else if bench_page.document_number_leading_filler {
-                // A structural refusal (#536), not "nothing MRZ-shaped was
-                // found" — its own bucket rather than folding into the
-                // `NoMrzFound` rung below.
-                Some(MissReason::DocumentNumberLeadingFiller)
-            } else if !bench_page.mrz_found {
-                Some(MissReason::NoMrzFound(String::new()))
-            } else if !reading.evidence.mrz_checksums_valid {
-                // A genuine OCR misread: the printed zone is conforming (the
-                // rung above already took the specimens where it is not), so
-                // every failing check digit here is the pipeline's own.
-                //
-                // `read_mrz` is the reader's Tier-1 read, the same source
-                // `--dump-ocr` prints below, so this check state describes
-                // that read.
-                Some(MissReason::ChecksumFailed {
-                    check_states: read_mrz
-                        .map(|d| crate::check_states(&d.checks))
-                        .unwrap_or_default(),
-                    specimen_nonconforming: false,
-                })
-            } else {
-                bench_page
-                    .ground_truth
-                    .as_ref()
-                    .and_then(|gt| gt.get(&CoreField::DocumentNumber))
-                    .and_then(|expected| {
-                        let got = reading
-                            .extraction
-                            .fields
-                            .get(CoreField::DocumentNumber)
-                            .unwrap_or("");
-                        (got != expected).then(|| MissReason::DocumentNumberMismatch {
-                            got: got.to_string(),
-                            expected: expected.clone(),
-                        })
-                    })
-            };
+            let miss_reason = tier1_miss_reason(
+                bench_page,
+                tier1.parsed.as_ref(),
+                reading.evidence.mrz_checksums_valid,
+                reading.extraction.fields.get(CoreField::DocumentNumber),
+                &parse_opts,
+            );
 
             // One predicate each, shared with the rates they sit beside, so
             // "accepted" and "scored" cannot drift from `accepted_reads` and
@@ -3225,9 +3278,9 @@ async fn run_prepped_with_dump_options(
                     }
                     // `no_mrz_found`: nothing MRZ-shaped parsed, so there is
                     // no zone to show — the band score and raw text above are
-                    // the whole story. (Also the "shouldn't happen" case where
-                    // `mrz_found` is true but `find_and_parse` recovered
-                    // nothing — same output, and just as informative.)
+                    // the whole story. Also a `checksum_failed` zone the
+                    // repeated-line rule refused (#579): the reader returned
+                    // no read, and the ledger's miss reason names the rule.
                     None => {
                         println!("  (nothing MRZ-shaped parsed)");
                         (Vec::new(), None)
@@ -3749,6 +3802,168 @@ mod tests {
             ocr_elapsed: Duration::ZERO,
             pass_objects: None,
         }
+    }
+
+    /// A page that expects an MRZ, for [`tier1_miss_reason`]'s rungs, with
+    /// `text` as its OCR text.
+    fn ladder_page(mrz_found: bool, text: &str) -> BenchPage {
+        let mut page = rate_test_page();
+        page.mrz_expected = true;
+        page.mrz_found = mrz_found;
+        page.page.text = text.to_string();
+        page
+    }
+
+    const LADDER_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const LADDER_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// The ICAO zone with line 2 read again as line 1, behind line 1's
+    /// document code and issuer: valid, and refused by the repeated-line rule.
+    fn ladder_repeated_zone() -> String {
+        format!("{}{}\n{LADDER_L2}", &LADDER_L1[..5], &LADDER_L2[5..])
+    }
+
+    fn refusing() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_refuse_repeated_line(true)
+    }
+
+    /// #579: with no rule in play the rungs are what they were: a
+    /// checksum-invalid read names its failed digits, and no read at all is
+    /// `no_mrz_found`.
+    #[test]
+    fn the_ladder_names_no_rule_for_a_default_read() {
+        let defaults = mrz::ParseOptions::default();
+        let text = format!("{LADDER_L1}\n{}", LADDER_L2.replacen("740812", "750812", 1));
+        let tampered = mrz::find_and_parse(&text).expect("shape is still valid TD3");
+        let reason = tier1_miss_reason(
+            &ladder_page(true, &text),
+            Ok(&tampered),
+            false,
+            None,
+            &defaults,
+        );
+        assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some("checksum invalid: date_of_birth, composite")
+        );
+
+        let reason = tier1_miss_reason(
+            &ladder_page(false, "no zone here"),
+            Err(&mrz::MrzError::NotFound),
+            false,
+            None,
+            &defaults,
+        );
+        assert_eq!(reason, Some(MissReason::NoMrzFound(String::new())));
+    }
+
+    /// #579: a zone the repeated-line rule refused is not found by the arm's
+    /// prep parse, and `mrz` may report it as `NotFound`. The refusal rung
+    /// keeps it out of `no_mrz_found`: a scored `checksum_failed` miss that
+    /// names the rule.
+    #[test]
+    fn a_refused_zone_is_a_checksum_failed_miss_that_names_the_rule() {
+        let text = ladder_repeated_zone();
+        for error in [
+            mrz::find_and_parse_with(&text, &refusing()).expect_err("refused"),
+            mrz::MrzError::NotFound,
+        ] {
+            let reason = tier1_miss_reason(
+                &ladder_page(false, &text),
+                Err(&error),
+                false,
+                None,
+                &refusing(),
+            );
+            assert_eq!(
+                reason.as_ref().map(miss_kind),
+                Some("checksum_failed"),
+                "{error}"
+            );
+            assert!(in_scored_tier1_population(&reason));
+            assert_eq!(
+                reason.map(|r| r.to_string()).as_deref(),
+                Some("rejected by the repeated-line rule: the Td3 zone holds a line twice")
+            );
+        }
+    }
+
+    /// #579: when the rule caused the miss, it is named even where another
+    /// refusal is what the parse reported, as a leading filler can be.
+    #[test]
+    fn the_refusal_rung_outranks_the_leading_filler_it_caused() {
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
+        page.document_number_leading_filler = true;
+        let leading_filler = mrz::MrzError::LeadingFiller {
+            field: mrz::Field::DocumentNumber,
+            line: 1,
+            position: 0,
+        };
+        let reason = tier1_miss_reason(&page, Err(&leading_filler), false, None, &refusing());
+        assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
+
+        // With no rule on, the leading filler is the reason, as before.
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&leading_filler),
+            false,
+            None,
+            &mrz::ParseOptions::default(),
+        );
+        assert_eq!(reason, Some(MissReason::DocumentNumberLeadingFiller));
+    }
+
+    /// #579: on a specimen whose printed zone is non-conforming, a refusal
+    /// stays `checksum_failed_specimen`, off the denominator, and names the
+    /// rule rather than an empty list of failed digits.
+    #[test]
+    fn a_refused_zone_on_a_nonconforming_specimen_stays_off_the_denominator() {
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
+        page.printed_zone_nonconforming = true;
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&mrz::MrzError::NotFound),
+            false,
+            None,
+            &refusing(),
+        );
+        assert_eq!(
+            reason.as_ref().map(miss_kind),
+            Some("checksum_failed_specimen")
+        );
+        assert!(!in_scored_tier1_population(&reason));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some(
+                "rejected by the repeated-line rule: the Td3 zone holds a line twice \
+                 (printed zone is non-conforming)"
+            )
+        );
+    }
+
+    /// #579: the date-digits rule leaves a read whose check digits all
+    /// verify. The miss names the rule and the field, and keeps that read's
+    /// check states.
+    #[test]
+    fn a_date_digits_rejection_names_the_field_and_keeps_the_check_states() {
+        // The date of birth's `0` read as `A`: the same value modulo 10.
+        let text = format!("{LADDER_L1}\nL898902C36UTO74A8122F1204159ZE184226B<<<<<10");
+        let opts = mrz::ParseOptions::default().with_date_digits(true);
+        let read = mrz::find_and_parse_with(&text, &opts).expect("returned, not valid");
+        let reason = tier1_miss_reason(&ladder_page(true, &text), Ok(&read), false, None, &opts);
+        assert!(matches!(
+            &reason,
+            Some(MissReason::ChecksumFailed { check_states, .. })
+                if !check_states.is_empty()
+                    && check_states.values().all(|state| *state != Some(false))
+        ));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some("rejected by the date-digits rule: date_of_birth not digits")
+        );
     }
 
     #[tokio::test]
