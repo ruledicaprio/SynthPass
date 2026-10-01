@@ -145,7 +145,9 @@ pub struct RunHeader {
     pub providers: Vec<String>,
     /// The run manifest's `ocr_arms`, from the same code.
     pub ocr_arms: BTreeMap<String, String>,
-    pub retry_budget: RetryBudget,
+    /// This process's budget, `null` for a replay: its OCR ran in the capture, whose
+    /// manifest does not carry the budget it ran under (ADR-0024, amendment 3, Decision 6).
+    pub retry_budget: Option<RetryBudget>,
     /// The run manifest's `mrz_arms`, from the same code.
     pub mrz_arms: BTreeMap<String, String>,
     pub pivot_yy: u32,
@@ -159,7 +161,9 @@ pub struct RunHeader {
 impl RunHeader {
     /// Sets `run_id` from the header's own bytes: the hex SHA-256 of the header serialized
     /// with `run_id` empty. Two runs that differ in any recorded fact (the start time and the
-    /// process id included) get different ids.
+    /// process id included) get different ids. A header that cannot be serialized (it holds
+    /// no floats or maps with non-string keys, so it is not expected) gets the id of no
+    /// bytes, and [`Archive::start`] then refuses it with a warning, so no file carries it.
     #[must_use]
     pub fn with_run_id(mut self) -> Self {
         self.run_id = String::new();
@@ -299,6 +303,11 @@ pub fn machine_label_from(os: &str, windows_build: Option<u32>, cpu_brand: Optio
     format!("{os}-{}", cpu_designation(cpu_brand))
 }
 
+/// The longest processor designation recorded. The longest real one is about twenty
+/// characters (`xeon-E5-2673-v4`, `ultra7-155H`); the cap only keeps a garbled brand string
+/// from becoming a very long label in every record's header.
+const DESIGNATION_MAX: usize = 48;
+
 /// The processor's designation from its brand string, in the form people write it:
 /// `Intel(R) Core(TM) i5-4570 CPU @ 3.20GHz` is `i5-4570`; `12th Gen Intel(R) Core(TM)
 /// i7-1255U` is `i7-1255U`; a Xeon is `xeon-` and its model (`xeon-8272CL`, `xeon-E5-2673-v4`);
@@ -398,7 +407,7 @@ pub fn cpu_designation(brand: Option<&str>) -> String {
     if plain.is_empty() {
         "unknown".to_string()
     } else {
-        plain.chars().take(48).collect()
+        plain.chars().take(DESIGNATION_MAX).collect()
     }
 }
 
@@ -505,6 +514,24 @@ pub fn plain_path(path: &Path) -> String {
     }
 }
 
+/// The allowlisted variables this process has, looked up **by name**.
+///
+/// Never `std::env::vars()`: it panics while it iterates if any variable's name or value
+/// is not valid Unicode, and that would turn a side output into an exit code 101. A
+/// non-Unicode value of an allowlisted name becomes `""`, which [`allowlisted_env`]'s value
+/// gate records as `null`. On Windows the lookup is case-insensitive, as every reader's is.
+pub fn process_env() -> BTreeMap<String, Option<String>> {
+    env_from(|name| std::env::var_os(name))
+}
+
+/// [`process_env`] with the lookup injected, so a non-Unicode value is testable without
+/// touching the process's environment.
+fn env_from(get: impl Fn(&str) -> Option<std::ffi::OsString>) -> BTreeMap<String, Option<String>> {
+    allowlisted_env(ARCHIVE_ENV_ALLOWLIST.iter().filter_map(|name| {
+        get(name).map(|value| ((*name).to_string(), value.into_string().unwrap_or_default()))
+    }))
+}
+
 /// The variables in [`ARCHIVE_ENV_ALLOWLIST`] that appear in `vars`, with their values.
 ///
 /// A pure function over injected pairs, and an exact-name match: a prefix rule would record
@@ -575,11 +602,22 @@ pub fn git_common_dir(root: &Path) -> Result<PathBuf, String> {
     }
     let text = String::from_utf8(output.stdout)
         .map_err(|_| "git rev-parse --git-common-dir was not UTF-8".to_string())?;
-    let dir = text.trim();
-    if dir.is_empty() {
-        return Err("git rev-parse --git-common-dir printed nothing".to_string());
+    parse_git_common_dir(&text)
+}
+
+/// The one absolute path `git rev-parse --path-format=absolute --git-common-dir` prints.
+/// Git before 2.31 does not know the option: it echoes it back as an extra line and then
+/// prints a relative directory, which must never be taken for the root.
+fn parse_git_common_dir(text: &str) -> Result<PathBuf, String> {
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let (Some(dir), None) = (lines.next(), lines.next()) else {
+        return Err("git rev-parse --git-common-dir did not print exactly one path".to_string());
+    };
+    let dir = PathBuf::from(dir);
+    if !dir.is_absolute() {
+        return Err("git rev-parse --git-common-dir did not print an absolute path".to_string());
     }
-    Ok(PathBuf::from(dir))
+    Ok(dir)
 }
 
 // ---------------------------------------------------------------- root
@@ -677,12 +715,12 @@ pub fn resolve_archive_root(
 
 // ---------------------------------------------------------------- the writer
 
-/// `YYYYMMDDTHHMMSSZ` (UTC) from Unix seconds: sortable, and free of `:`, which Windows refuses
-/// in a file name. A civil-from-days conversion (Howard Hinnant's algorithm), as `provider-bench`
-/// uses for its report date: one file name does not justify a `chrono` dependency.
-pub fn utc_stamp(unix_secs: u64) -> String {
+/// The civil date (year, month, day) of Unix seconds, in UTC: Howard Hinnant's
+/// civil-from-days algorithm, one copy for every date this crate writes (the archive's file
+/// names and `provider-bench`'s report date). One date does not justify a `chrono`
+/// dependency.
+pub fn civil_date(unix_secs: u64) -> (i64, i64, i64) {
     let days = (unix_secs / 86_400) as i64;
-    let secs = unix_secs % 86_400;
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -692,6 +730,14 @@ pub fn utc_stamp(unix_secs: u64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d)
+}
+
+/// `YYYYMMDDTHHMMSSZ` (UTC) from Unix seconds: sortable, and free of `:`, which Windows refuses
+/// in a file name.
+pub fn utc_stamp(unix_secs: u64) -> String {
+    let secs = unix_secs % 86_400;
+    let (y, m, d) = civil_date(unix_secs);
     format!(
         "{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z",
         secs / 3600,
@@ -768,8 +814,18 @@ impl Archive {
     /// An archive under `root` for the run `header` describes. Nothing touches the disk until
     /// a track's first record: no record means no file.
     pub fn start(root: &Path, header: &RunHeader) -> Self {
-        let Ok(line) = serde_json::to_string(header) else {
-            return Self::disabled();
+        let line = match serde_json::to_string(header) {
+            Ok(line) => line,
+            Err(e) => {
+                let warning = format!("warning: archive: cannot serialize the run header: {e}");
+                eprintln!("{warning}");
+                return Self {
+                    inner: Mutex::new(Inner {
+                        state: State::Off,
+                        warnings: vec![warning],
+                    }),
+                };
+            }
         };
         let stem = format!(
             "{}-provider-bench-{}",
@@ -1013,10 +1069,10 @@ mod tests {
             labelled_loaded: 5,
             providers: vec!["mrz".to_string()],
             ocr_arms: BTreeMap::from([("texture".to_string(), "on".to_string())]),
-            retry_budget: RetryBudget {
+            retry_budget: Some(RetryBudget {
                 max_passes: 14,
                 max_seconds: 52,
-            },
+            }),
             mrz_arms: BTreeMap::from([("class_sweep".to_string(), "off".to_string())]),
             pivot_yy: 26,
             model_paths: ModelPathsReport::default(),
@@ -1481,7 +1537,7 @@ mod tests {
     }
 
     #[test]
-    fn a_write_failure_is_a_warning_and_keeps_the_exit_code() {
+    fn a_write_failure_is_one_warning_and_turns_the_archive_off() {
         let dir = scratch("write-failure");
         let root_is_a_file = dir.join("not-a-directory");
         std::fs::write(&root_is_a_file, b"x").expect("a file where the root should be");
@@ -1853,5 +1909,73 @@ mod tests {
             inner.warnings,
             [r"warning: archive: cannot create D:\archive\public\x.partial: NotFound"]
         );
+    }
+
+    /// A value that is not valid Unicode on this platform: a lone byte above 0x7f on Unix, an
+    /// unpaired surrogate on Windows.
+    fn non_unicode_os_string() -> std::ffi::OsString {
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(vec![0x66, 0xff, 0xfe])
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&[0x66, 0xD800])
+        }
+    }
+
+    #[test]
+    fn the_environment_is_looked_up_by_name_and_a_non_unicode_value_is_null() {
+        let env = env_from(|name| match name {
+            "SYNTHPASS_OCR_TEXTURE" => Some(std::ffi::OsString::from("off")),
+            "SYNTHPASS_OCR_ORDER" => Some(non_unicode_os_string()),
+            other => {
+                // Only allowlisted names are ever asked for, so a credential's name is never
+                // looked up and its value never read.
+                assert!(
+                    ARCHIVE_ENV_ALLOWLIST.contains(&other),
+                    "{other} was asked for"
+                );
+                None
+            }
+        });
+        assert_eq!(env["SYNTHPASS_OCR_TEXTURE"].as_deref(), Some("off"));
+        assert_eq!(env["SYNTHPASS_OCR_ORDER"], None);
+        assert_eq!(env.len(), 2, "{env:?}");
+        // This process's own environment goes through the same function and cannot panic,
+        // whatever it holds.
+        assert!(process_env()
+            .keys()
+            .all(|name| ARCHIVE_ENV_ALLOWLIST.contains(&name.as_str())));
+    }
+
+    #[test]
+    fn git_must_print_exactly_one_absolute_path() {
+        let absolute = if cfg!(windows) {
+            "D:/repo/.git"
+        } else {
+            "/repo/.git"
+        };
+        assert_eq!(
+            parse_git_common_dir(&format!("{absolute}\n")),
+            Ok(PathBuf::from(absolute))
+        );
+        // Git before 2.31 does not know the option: it echoes it, then prints a relative path.
+        assert!(parse_git_common_dir("--path-format=absolute\n.git\n").is_err());
+        assert!(parse_git_common_dir(".git\n").is_err());
+        assert!(parse_git_common_dir("").is_err());
+        assert!(parse_git_common_dir(&format!("{absolute}\n{absolute}\n")).is_err());
+    }
+
+    #[test]
+    fn the_civil_date_is_the_utc_date_of_the_seconds() {
+        assert_eq!(civil_date(0), (1970, 1, 1));
+        assert_eq!(civil_date(86_399), (1970, 1, 1));
+        assert_eq!(civil_date(86_400), (1970, 1, 2));
+        assert_eq!(civil_date(951_782_400), (2000, 2, 29));
+        assert_eq!(civil_date(1_709_164_800), (2024, 2, 29));
+        assert_eq!(civil_date(4_102_444_800), (2100, 1, 1));
     }
 }

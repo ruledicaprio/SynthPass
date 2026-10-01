@@ -919,7 +919,9 @@ fn archive_document(
         bench_page
             .asset_id
             .as_deref()
-            .map_or(ArchiveTrack::Public, |id| {
+            // A real page with no asset ID cannot be placed in a track, so it is treated
+            // as the most restrictive one and dropped, never filed as public.
+            .map_or(ArchiveTrack::Private, |id| {
                 ArchiveTrack::from_corpus(crate::asset_track(id))
             })
     };
@@ -1115,6 +1117,7 @@ pub struct ProviderReport {
 /// unsupported on a given specimen is enough to go and look; printing the
 /// fabricated surname itself would put document content into a terminal and a
 /// JSON report for no additional diagnostic power.
+#[derive(Debug)]
 pub struct DocumentDetail {
     /// Corpus-local identity: a synthetic document's seed, or a real
     /// specimen's file stem. Public-domain specimen filenames, not PII.
@@ -1420,6 +1423,7 @@ impl CapabilitySnapshot {
 /// the bench history and not quoted as accuracy. The two populations to quote
 /// are [`Self::accepted_reads`] (read quality) and [`Self::scored`]
 /// (end-to-end), each with its own document count.
+#[derive(Debug)]
 pub struct AccuracyStats {
     /// How many of `documents` contributed at least one ground-truth field.
     /// Always equal to `documents` for the synthetic corpus (every
@@ -1693,6 +1697,7 @@ fn compare_document(
 /// planned Qwen-vs-Moondream comparison. So this is computed only when
 /// `Capability::vision` is `false`; a vision-capable provider gets
 /// `NotApplicable` with the reason recorded, never a silently-wrong number.
+#[derive(Debug)]
 pub enum UnsupportedAssertion {
     /// Computed over the non-null answered fields of a `!capability.vision`
     /// provider, split by whether the document gave it an MRZ to anchor on.
@@ -1718,6 +1723,7 @@ pub enum UnsupportedAssertion {
 /// split are not the same size and a rate alone would hide that: "40% over
 /// 4 documents" and "40% over 120" are different claims, and the whole point
 /// of this split is that the smaller half is the one nobody had measured.
+#[derive(Debug)]
 pub struct AssertionBucket {
     /// `None` when the provider made **no assertions at all** over this
     /// subset — not the same fact as a measured rate of zero, and on this
@@ -1764,6 +1770,7 @@ const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-t
 /// exactly `0.0` regardless of how accurate the provider actually is. That's the
 /// same shape of bug [`AssertionBucket::rate`]'s `Option` and
 /// [`UnsupportedAssertion::NotApplicable`] both exist to prevent, one metric over.
+#[derive(Debug)]
 pub enum Tier1HitRate {
     /// Computed over a deterministic provider's nonempty scored population:
     /// the fraction with `miss_reason.is_none()`, excluding off-denominator classes.
@@ -1825,6 +1832,7 @@ const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — th
 /// `0.0` there would fabricate "every name wrong" out of "nothing was
 /// measured", the exact bug [`AccuracyStats`]'s `Option`s and
 /// [`AssertionBucket::rate`] both already exist to prevent.
+#[derive(Debug)]
 pub enum StrictNameHitRate {
     /// `strict_hits`, `name_scorable_documents` and `name_scorable_hits` are
     /// carried alongside both rates (rather than just the rates) so a caller
@@ -1865,6 +1873,7 @@ pub struct SpeedStats {
     pub p95: Duration,
 }
 
+#[derive(Debug)]
 pub struct JsonValidityStats {
     /// `synthpass_llm::repair::repair_fallbacks()` delta across this
     /// provider's whole loop — how many of its answers needed JSON repair
@@ -6593,10 +6602,10 @@ mod tests {
             labelled_loaded: 1,
             providers: Vec::new(),
             ocr_arms: BTreeMap::new(),
-            retry_budget: RetryBudget {
+            retry_budget: Some(RetryBudget {
                 max_passes: 14,
                 max_seconds: 52,
-            },
+            }),
             mrz_arms: BTreeMap::new(),
             pivot_yy: 26,
             model_paths: crate::report::ModelPathsReport::default(),
@@ -6653,6 +6662,21 @@ mod tests {
         )
         .await
         .unwrap_or_else(|e| panic!("covered: {e}"));
+        // Before `finish`, the per-provider flush alone has put every record on disk: a run
+        // killed now would still leave them in the `.partial`.
+        let partial = std::fs::read_dir(root.join("public"))
+            .expect("the public track directory")
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.extension().is_some_and(|ext| ext == "partial"))
+            .expect("the run is still partial");
+        let on_disk = std::fs::read_to_string(&partial).expect("readable while open");
+        assert_eq!(
+            on_disk.lines().count(),
+            1 + 3 * 2,
+            "every record is on disk before `finish`"
+        );
+        assert!(on_disk.ends_with('\n'), "no record is cut short");
         archive.finish();
 
         let lines = archive_lines(&root, "public");
@@ -6709,9 +6733,28 @@ mod tests {
     }
 
     /// What a run reports, with the timings that differ between two runs of the same input
-    /// left out: every ledger row, and each provider's Tier-1 hit rate.
-    fn run_outputs(reports: &[ProviderReport]) -> (Vec<crate::report::OutcomeRow>, Vec<String>) {
+    /// left out (`speed`, `ocr_elapsed`, `measured_rss_delta_bytes`): each provider's whole
+    /// report as text, its `documents_detail` rows included, and the ledger rows as the ledger
+    /// writes them. A replay's OCR time is zero, so the per-document detail is deterministic.
+    fn run_outputs(reports: &[ProviderReport]) -> (Vec<String>, Vec<crate::report::OutcomeRow>) {
         (
+            reports
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{} {} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                        r.provider_id,
+                        r.documents,
+                        r.accuracy,
+                        r.json_validity,
+                        r.unsupported_assertion,
+                        r.declared_resident_bytes,
+                        r.tier1_hit_rate,
+                        r.ocr_arms,
+                        (&r.strict_tier1_hit_rate, &r.documents_detail),
+                    )
+                })
+                .collect(),
             reports
                 .iter()
                 .flat_map(|r| {
@@ -6719,10 +6762,6 @@ mod tests {
                         .iter()
                         .map(crate::report::OutcomeRow::from)
                 })
-                .collect(),
-            reports
-                .iter()
-                .map(|r| r.tier1_hit_rate.to_string())
                 .collect(),
         )
     }
@@ -6867,6 +6906,31 @@ mod tests {
             doc["ocr"]["ocr_passes"].is_null(),
             "an untraced run adds no tracing"
         );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_real_page_without_an_asset_id_is_not_archived() {
+        // It cannot be placed in a track, so it is treated as the most restrictive one.
+        let root = scratch_dir("archive-no-asset-id");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = None;
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(!root.join("public").exists() && !root.join("local").exists());
+        assert!(!root.join("private").exists());
+        assert!(archive.warnings().is_empty());
         let _ = std::fs::remove_dir_all(&root);
     }
 

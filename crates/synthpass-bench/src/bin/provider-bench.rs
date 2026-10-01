@@ -151,9 +151,7 @@
 //! never what a bare invocation was meant to start (issue #510).
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -773,15 +771,7 @@ fn ledger_bytes(rows: &[OutcomeRow]) -> Vec<u8> {
 /// Lowercase hex SHA-256, byte-by-byte the same way `synthpass-export`'s
 /// `writer.rs` and `synthpass-ocr`'s `build.rs` already do: sha2 0.11's
 /// `finalize()` returns a `hybrid_array::Array` with no `LowerHex` impl.
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let mut out = String::new();
-    for b in hasher.finalize() {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
+use synthpass_bench::archive::sha256_hex;
 
 /// Where `--write-baseline PATH` / `--assert-baseline PATH` read or write the
 /// outcome ledger: [`OUTCOMES_LEDGER_FILENAME`] in the same directory as the
@@ -2113,7 +2103,17 @@ fn archive_plan(
 /// The plan for this process: `SYNTHPASS_BENCH_ARCHIVE`, the working directory, and git.
 fn plan_archive(parsed: &Args, root: &Path) -> ArchivePlan {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let variable = std::env::var(archive::ARCHIVE_ENV).ok();
+    let variable = match std::env::var_os(archive::ARCHIVE_ENV).map(std::ffi::OsString::into_string)
+    {
+        None => None,
+        Some(Ok(value)) => Some(value),
+        Some(Err(_)) => {
+            return ArchivePlan::Warn(format!(
+                "warning: archive: {} is not valid Unicode, so no archive is written",
+                archive::ARCHIVE_ENV
+            ));
+        }
+    };
     archive_plan(
         parsed,
         variable.as_deref(),
@@ -2153,9 +2153,13 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
         pid: std::process::id(),
         source: archive::source_from(std::env::var("GITHUB_ACTIONS").ok().as_deref()),
         machine: archive::Machine::detect(),
-        binary: binary
-            .as_ref()
-            .map_or_else(|| "provider-bench".to_string(), |b| b.display().to_string()),
+        // The file name only: the path says whose machine this is, and the SHA-256
+        // below identifies the binary. `argv` and `model_paths` keep their paths, which
+        // the Decision 8 publisher is to refuse or redact.
+        binary: binary.as_ref().and_then(|b| b.file_name()).map_or_else(
+            || "provider-bench".to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        ),
         binary_sha256: binary
             .as_ref()
             .and_then(|b| std::fs::read(b).ok())
@@ -2171,8 +2175,13 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
             },
             format: parsed.format.map(|f| f.as_str().to_string()),
             limit: parsed.limit,
-            document_type: (!real)
-                .then(|| format!("{:?}", parsed.document_type.unwrap_or(DocumentType::TD3))),
+            document_type: (!real).then(|| {
+                parsed
+                    .document_type
+                    .unwrap_or(DocumentType::TD3)
+                    .as_str()
+                    .to_string()
+            }),
             profile: (!real).then(|| parsed.profile.as_str().to_string()),
             seed_start: (!real).then_some(parsed.seed),
             count: run.documents_loaded as u64,
@@ -2190,10 +2199,10 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
         labelled_loaded: run.labelled_loaded,
         providers: run.providers.clone(),
         ocr_arms: manifest_ocr_arms(run.replay),
-        retry_budget: archive::RetryBudget {
+        retry_budget: run.replay.is_none().then_some(archive::RetryBudget {
             max_passes,
             max_seconds,
-        },
+        }),
         mrz_arms: mrz_arms_map(),
         pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
         model_paths: run.model_paths.clone(),
@@ -2201,7 +2210,7 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
             run_manifest: source.run_manifest.clone(),
             sha256: source.run_manifest_sha256.clone(),
         }),
-        env: archive::allowlisted_env(std::env::vars()),
+        env: archive::process_env(),
     }
     .with_run_id()
 }
@@ -2227,16 +2236,7 @@ fn start_archive(plan: &ArchivePlan, parsed: &Args, root: &Path, run: &ArchiveRu
 /// (Howard Hinnant's algorithm). One date string in a report does not justify a
 /// `chrono`/`time` dependency.
 fn iso_date(unix_secs: u64) -> String {
-    let days = (unix_secs / 86_400) as i64;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
+    let (y, m, d) = archive::civil_date(unix_secs);
     format!("{y:04}-{m:02}-{d:02}")
 }
 
@@ -3525,6 +3525,20 @@ mod tests {
                 source.is_none(),
                 "only a replay names its capture"
             );
+            // A replay's OCR ran in the capture, so it records no budget of its own.
+            assert_eq!(
+                header["retry_budget"].is_null(),
+                source.is_some(),
+                "only a live run records its retry budget"
+            );
+            // The binary is a file name, never the path of the machine's user.
+            assert!(
+                header["binary"]
+                    .as_str()
+                    .is_some_and(|b| !b.contains('\\') && !b.contains('/')),
+                "{}",
+                header["binary"]
+            );
             if let Some(source) = source {
                 assert_eq!(header["ocr_arms"], serde_json::json!(source.ocr_arms));
                 assert_eq!(manifest["replay_of"], header["replay_of"]);
@@ -3545,11 +3559,12 @@ mod tests {
             },
         );
         let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
+        let budget = header
+            .retry_budget
+            .as_ref()
+            .expect("a live run records its retry budget");
         assert_eq!(
-            (
-                header.retry_budget.max_passes,
-                header.retry_budget.max_seconds
-            ),
+            (budget.max_passes, budget.max_seconds),
             (max_passes, max_seconds)
         );
         let _ = std::fs::remove_dir_all(&dir);
