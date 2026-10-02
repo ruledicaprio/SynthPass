@@ -262,7 +262,8 @@ pub struct ReplayOfRecord {
 /// One document as one provider read it (Decision 5). Key set and order are pinned by tests.
 ///
 /// It holds the provider-input OCR text verbatim, so it is document content. It never holds
-/// the fixture's text: a labelled specimen carries mismatch counts and cell positions only.
+/// the fixture's text: a labelled specimen carries mismatch counts, cell positions and the
+/// classes of the printed document code's two cells only.
 #[derive(Debug, Serialize)]
 pub(crate) struct DocRecord<'a> {
     pub kind: &'static str,
@@ -432,6 +433,20 @@ impl ZoneClasses {
     }
 }
 
+/// The classes of a zone's document code, the first two cells of its first line, as the symbols
+/// [`CellClass::symbol`] writes (`P<` is `A<`, `PS` is `AA`): at most two symbols, fewer for a
+/// shorter line, none for an empty zone. The characters are mapped and dropped, so the result
+/// can go on every track (Decision 7 already admits [`ZoneClasses`]).
+pub(crate) fn document_code_classes(zone: &str) -> String {
+    zone.lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(2)
+        .map(|c| CellClass::of(c).symbol())
+        .collect()
+}
+
 impl Serialize for ZoneClasses {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(
@@ -475,8 +490,8 @@ pub(crate) struct PrivateDocRecord<'a> {
     pub ocr_ms: u128,
     pub mrz_band_score: Option<f64>,
     pub rotation: u16,
-    /// Counts and cell positions against the fixture, never a character; `null` for an
-    /// unlabelled document.
+    /// Counts and cell positions against the fixture, and the classes of its document code's
+    /// two cells (`code_cells`), never a character; `null` for an unlabelled document.
     pub truth: Option<&'a TruthComparison>,
     /// The Tier-1 zone after repair; `null` when nothing parsed.
     pub zone_classes: Option<ZoneClasses>,
@@ -1488,7 +1503,7 @@ impl Archive {
 /// The record holds the provider-input OCR text, so it is document content like a
 /// [`DocRecord`] (synthetic text, but the same file format and the same rule: nothing here
 /// reaches stdout, stderr, `--out`, a dump or the ledger). It never holds the generator's own
-/// zone: `truth` carries mismatch counts and positions only.
+/// zone: `truth` carries mismatch counts, positions and the document code's two classes only.
 #[derive(Debug, Serialize)]
 struct SyntheticDocRecord<'a> {
     kind: &'static str,
@@ -2143,6 +2158,47 @@ mod tests {
         );
         assert_eq!(value["zone_classes"], serde_json::json!(["AA9<", "A9"]));
         assert!(value["truth"].is_null());
+    }
+
+    #[test]
+    fn a_private_records_truth_carries_the_code_as_classes_only() {
+        let h = header(1_000_000_000_000);
+        let truth = TruthComparison {
+            zone_mismatch: Some(2),
+            compared_cells: Some(88),
+            field_mismatch: None,
+            code_cells: Some(document_code_classes(
+                "PSUTOSECRETSURNAME<<GIVEN\nL898902C36",
+            )),
+        };
+        let json = serde_json::to_string(&private_record(&h.run_id, Some(&truth))).expect("JSON");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("JSON");
+        assert_eq!(
+            value["truth"],
+            serde_json::json!({
+                "zone_mismatch": 2,
+                "compared_cells": 88,
+                "field_mismatch": null,
+                "code_cells": "AA"
+            })
+        );
+        assert!(!json.contains("PS") && !json.contains("SECRET"), "{json}");
+    }
+
+    #[test]
+    fn a_document_code_is_written_as_at_most_two_class_symbols() {
+        for (zone, expected) in [
+            ("P<UTOX\nY", "A<"),
+            ("PSUTOX", "AA"),
+            ("I<UTO", "A<"),
+            ("1<", "9<"),
+            ("\u{00e9}Z", "?A"),
+            ("P", "A"),
+            ("", ""),
+            ("\nPS", ""),
+        ] {
+            assert_eq!(document_code_classes(zone), expected, "{zone:?}");
+        }
     }
 
     #[test]
