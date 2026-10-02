@@ -1,6 +1,6 @@
-//! Glyph atlas (#433, PR 1) — what the OCR models do with the two document-code
-//! cells of an MRZ line (`P<` of a TD3 line by default), measured under one
-//! controlled degradation at a time.
+//! Glyph atlas (#433) — what the OCR models do with the cells of an MRZ line
+//! (the two document-code cells of line 1, `P<` of a TD3 line, by default),
+//! measured under one controlled degradation at a time.
 //!
 //! **Evidence label for anything derived from this tool: "Observed on
 //! synthetic renders, vendored font, oracle crop".** It says nothing about the
@@ -17,8 +17,9 @@
 //! font), with the chosen `--code` as its document code (the format's letter
 //! and the filler by default, `P<` for TD3). For each requested axis and each
 //! step of it, the clean page is degraded **on its own** (axes never
-//! compose), and for the chosen cells of the first MRZ line (default cells 0
-//! and 1, i.e. the two code characters) the tool records two things.
+//! compose), and for the chosen cells of the chosen MRZ line (`--line`, default
+//! the first; default cells 0 and 1, i.e. the two code characters) the tool
+//! records two things.
 //!
 //! - **Detection.** `OcrEngine::detect_text_pixels` over the cell's box in
 //!   the degraded image: the mean and the max of the detection map, the
@@ -51,6 +52,32 @@
 //! equals the clean render (resolution 22, rotation 0, blur 0, noise 0,
 //! contrast 1) is evaluated once per seed and its result reused, flagged
 //! `reused_identity` on the render line.
+//!
+//! # Line and truth (schema 3)
+//!
+//! `--line N` (from 1; TD1 has three lines, the other formats two) reads that
+//! MRZ line: the clean render's truth line, the oracle line rectangle, the
+//! paper colour and the degradation's geometry all follow it, and `--cells` is
+//! limited by the line's length. The alphabet self-check and the check that the
+//! generator wrote the `--code` always use line 1.
+//!
+//! Line 1's two code cells have one truth for every seed. Line 2's date,
+//! check-digit and nationality cells do not: their truth glyph changes with the
+//! seed. The aggregates are keyed by `(cell, truth glyph, axis, step)`, so a
+//! cell with a fixed truth gives exactly the rows it always gave, and a cell
+//! whose truth varies gives one summary row per glyph seen (rows ordered by cell
+//! in request order, then truth glyph, then axis, then step). The header lists,
+//! per requested cell, `truths`: the glyphs the cell takes across the run's
+//! seeds, sorted, computed from the generator's labels before the first
+//! degraded render.
+//!
+//! **What changed from schema 2:** the header's `schema` is 3; its `line` is the
+//! 1-based line number (schema 2 wrote the 0-based index, always 0); each
+//! header `cells` entry has `truths` (a sorted list) in place of `truth`; and a
+//! run no longer aborts when a cell's truth differs between seeds. Every render,
+//! cell and summary row keeps its keys and meaning, and a default run (line 1,
+//! `--cells 0,1`, TD3 `P<`, or any cells of line 1) writes them byte for byte as
+//! schema 2 did, the header and the timings apart.
 //!
 //! # Conventions (recorded in the header as well)
 //!
@@ -115,10 +142,11 @@
 //!   --axes blur,noise --seeds 100 --seed-start 0 --cells 0,1
 //! cargo run -p synthpass-ocr --release --example glyph_atlas -- \
 //!   --format td1 --code ID --axes resolution --seeds 30 --cells 0,1
+//! cargo run -p synthpass-ocr --release --example glyph_atlas -- //!   --line 2 --cells 9,10,11 --axes blur --seeds 100
 //! ```
 //!
 //! `--format` is `td1`, `td2`, `td3`, `mrva` or `mrvb`, and sets the layout and
-//! the line-one length (the `--cells` limit). `--code` is two characters: the
+//! the line length (the `--cells` limit). `--code` is two characters: the
 //! first fits the format (`P` for td3; `A`, `C` or `I` for td1 and td2; `V` for
 //! mrva and mrvb, Doc 9303 Parts 4-7), the second is `A`-`Z` or the filler
 //! `<`. A non-default code needs `--release`: the generator's debug assertion
@@ -170,10 +198,14 @@ use ctc_matrix::{
 // Constants
 // ---------------------------------------------------------------------
 
-/// 2 adds `code` to the header (and so to the summary's `run` block) and lets
+/// 2 added `code` to the header (and so to the summary's `run` block) and let
 /// `format` take the five `--format` values; schema 1 was TD3 `P<` only, and
-/// its `format` was always `"TD3"`. Every other field keeps its meaning.
-const SCHEMA_VERSION: u32 = 2;
+/// its `format` was always `"TD3"`. 3 adds `--line`: the header's `line` is now
+/// the 1-based line number the run read (schema 2 wrote the 0-based index, always
+/// 0), and each header `cells` entry lists `truths`, the sorted glyphs the
+/// cell's truth takes across the seeds, in place of schema 2's single `truth`.
+/// Every render, cell and summary row keeps its keys and meaning.
+const SCHEMA_VERSION: u32 = 3;
 const TOOL_NAME: &str = "glyph_atlas";
 const EVIDENCE_LABEL: &str = "Observed on synthetic renders, vendored font, oracle crop";
 
@@ -200,9 +232,9 @@ const FONT_NAME: &str = "OCR-B (Raisty), vendored";
 const FONT_PATH: &str = "crates/synthpass-gen/fonts/ocr-b.ttf";
 const FONT_LICENSE: &str = "OFL-1.1";
 
-/// The MRZ line this atlas reads: the first, whose first two cells are the
-/// document code.
-const LINE_INDEX: usize = 0;
+/// The MRZ line a run reads unless `--line` says otherwise: the first, whose
+/// first two cells are the document code. Lines are numbered from 1.
+const DEFAULT_LINE: usize = 1;
 
 // ---------------------------------------------------------------------
 // Format and document code
@@ -265,15 +297,14 @@ impl Format {
         }
     }
 
-    /// The length of line one in cells, the `--cells` limit.
-    fn cells(self) -> usize {
-        (match self {
-            Self::Td1 => layout::TD1_MRZ_CHARS,
-            Self::Td2 => layout::TD2_MRZ_CHARS,
-            Self::Td3 => layout::TD3_MRZ_CHARS,
-            Self::MrvA => layout::MRVA_MRZ_CHARS,
-            Self::MrvB => layout::MRVB_MRZ_CHARS,
-        }) as usize
+    /// The length in cells of MRZ line `line` (numbered from 1), the `--cells`
+    /// limit; `None` when the format has no such line (TD1 has three, the
+    /// others two).
+    fn line_cells(self, line: usize) -> Option<usize> {
+        let page = layout::for_format(self.document_type());
+        (1..=page.mrz_lines.len())
+            .contains(&line)
+            .then_some(page.mrz_chars as usize)
     }
 
     /// The first characters a document code of this format may start with:
@@ -339,14 +370,22 @@ fn code_path_part(code: Code) -> String {
 }
 
 /// The default `--out` directory name. A run that is not the default format
-/// and code adds both, so two runs of one commit on one day do not collide;
-/// the default run keeps the name it always had.
-fn default_out_name(date: &str, short: &str, format: Format, code: Code) -> String {
-    if format == Format::Td3 && code == Format::Td3.default_code() {
+/// and code adds both, and a line other than the first adds `-line<N>`, so two
+/// runs of one commit on one day do not collide; the default run keeps the name
+/// it always had.
+fn default_out_name(date: &str, short: &str, format: Format, code: Code, line: usize) -> String {
+    let mut name = if format == Format::Td3 && code == Format::Td3.default_code() {
         format!("{date}-{short}")
     } else {
         format!("{date}-{short}-{}-{}", format.flag(), code_path_part(code))
+    };
+    if line != DEFAULT_LINE {
+        if format == Format::Td3 && code == Format::Td3.default_code() {
+            name.push_str(&format!("-{}-{}", format.flag(), code_path_part(code)));
+        }
+        name.push_str(&format!("-line{line}"));
     }
+    name
 }
 
 /// What `Passport::document_type` holds for `code`: the emitter pads the field
@@ -1431,8 +1470,48 @@ fn self_check(
 // Aggregation and the publishable summary
 // ---------------------------------------------------------------------
 
-/// `(cell, axis, step index)`.
-type AggKey = (usize, Axis, usize);
+/// `(cell, truth glyph, axis, step index)`. Line 1's document-code cells have one
+/// truth, so each gives the one aggregate it always gave; a date, check-digit or
+/// nationality cell of line 2 takes a different truth with the seed and gets one
+/// aggregate per glyph, never a mixture.
+type AggKey = (usize, char, Axis, usize);
+
+/// Adds one cell's outcome to the aggregate of its own truth glyph.
+fn record_cell(
+    aggs: &mut BTreeMap<AggKey, CellAgg>,
+    axis: Axis,
+    step_index: usize,
+    outcome: &CellOutcome,
+) {
+    aggs.entry((outcome.cell, outcome.truth, axis, step_index))
+        .or_default()
+        .add(outcome);
+}
+
+/// For each requested cell, in request order, the truth glyphs it takes across
+/// the seeds' lines, sorted and listed once. Refuses a cell past the end of any
+/// line, and an empty seed range.
+fn cell_truth_sets(
+    cells: &[usize],
+    lines: &[Vec<char>],
+) -> Result<Vec<(usize, Vec<char>)>, String> {
+    if lines.is_empty() {
+        return Err("no seeds, so no truth line to read".to_string());
+    }
+    cells
+        .iter()
+        .map(|&cell| {
+            let mut glyphs = std::collections::BTreeSet::new();
+            for line in lines {
+                let glyph = line
+                    .get(cell)
+                    .ok_or_else(|| format!("cell {cell} is past the end of the truth line"))?;
+                glyphs.insert(*glyph);
+            }
+            Ok((cell, glyphs.into_iter().collect()))
+        })
+        .collect()
+}
 
 #[derive(Default)]
 struct CellAgg {
@@ -1503,26 +1582,28 @@ fn wilson_95(k: u64, n: u64) -> Option<(f64, f64)> {
 
 fn build_summary(
     run: &Value,
-    cell_truths: &[(usize, char)],
+    cell_truths: &[(usize, Vec<char>)],
     axes: &[Axis],
     aggs: &BTreeMap<AggKey, CellAgg>,
 ) -> Value {
     let mut results: Vec<Value> = Vec::new();
-    for &(cell, truth) in cell_truths {
-        for &axis in axes {
-            for (step_index, &param) in axis.steps().iter().enumerate() {
-                let Some(agg) = aggs.get(&(cell, axis, step_index)) else {
-                    continue;
-                };
-                let n_rec = agg.n - agg.rec_missing;
-                let wilson = wilson_95(agg.correct, n_rec);
-                let mut wrong: Vec<(&String, &u64)> = agg.wrong_winners.iter().collect();
-                wrong.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
-                let winner_when_wrong: Vec<Value> = wrong
-                    .into_iter()
-                    .map(|(ch, count)| json!({"char": ch, "count": count}))
-                    .collect();
-                results.push(json!({
+    for (cell, truths) in cell_truths {
+        let cell = *cell;
+        for &truth in truths {
+            for &axis in axes {
+                for (step_index, &param) in axis.steps().iter().enumerate() {
+                    let Some(agg) = aggs.get(&(cell, truth, axis, step_index)) else {
+                        continue;
+                    };
+                    let n_rec = agg.n - agg.rec_missing;
+                    let wilson = wilson_95(agg.correct, n_rec);
+                    let mut wrong: Vec<(&String, &u64)> = agg.wrong_winners.iter().collect();
+                    wrong.sort_by(|a, b| b.1.cmp(a.1).then_with(|| a.0.cmp(b.0)));
+                    let winner_when_wrong: Vec<Value> = wrong
+                        .into_iter()
+                        .map(|(ch, count)| json!({"char": ch, "count": count}))
+                        .collect();
+                    results.push(json!({
                     "cell": cell,
                     "truth": truth.to_string(),
                     "axis": axis.name(),
@@ -1552,6 +1633,7 @@ fn build_summary(
                         None
                     },
                 }));
+                }
             }
         }
     }
@@ -1603,6 +1685,7 @@ const ALLOWED_KEYS: &[&str] = &[
     "cells",
     "cell",
     "truth",
+    "truths",
     "crop",
     "axes",
     "axis",
@@ -1687,7 +1770,9 @@ struct HeaderInputs {
     detection_threshold: f32,
     format: Format,
     code: Code,
-    cell_truths: Vec<(usize, char)>,
+    /// The 1-based MRZ line read.
+    line: usize,
+    cell_truths: Vec<(usize, Vec<char>)>,
     axes: Vec<Axis>,
     seed_start: u64,
     seeds: u64,
@@ -1711,7 +1796,10 @@ fn build_header(inputs: &HeaderInputs) -> Value {
     let cells: Vec<Value> = inputs
         .cell_truths
         .iter()
-        .map(|&(cell, truth)| json!({"cell": cell, "truth": truth.to_string()}))
+        .map(|(cell, truths)| {
+            let glyphs: Vec<String> = truths.iter().map(char::to_string).collect();
+            json!({"cell": cell, "truths": glyphs})
+        })
         .collect();
     json!({
         "type": "header",
@@ -1740,7 +1828,7 @@ fn build_header(inputs: &HeaderInputs) -> Value {
         },
         "format": inputs.format.name(),
         "code": code_text(inputs.code),
-        "line": LINE_INDEX,
+        "line": inputs.line,
         "cells": cells,
         "crop": "oracle_line",
         "axes": axes,
@@ -1834,15 +1922,20 @@ struct Args {
     axes: Vec<Axis>,
     seeds: u64,
     seed_start: u64,
+    /// The MRZ line to read, numbered from 1.
+    line: usize,
     cells: Vec<usize>,
     out: Option<PathBuf>,
 }
 
 const USAGE: &str = "glyph_atlas: per-cell detection and recognition measurements under one \
-degradation at a time (MRZ line one, synthetic renders, vendored font, oracle crop)
+degradation at a time (one MRZ line, synthetic renders, vendored font, oracle crop)
 
   --format <f>        td1, td2, td3, mrva or mrvb (default td3); sets the layout and the
-                      line-one length, the --cells limit
+                      line length, the --cells limit
+  --line <n>          the MRZ line to read, from 1 (default 1; td1 has 3 lines, the others 2).
+                      A cell whose truth differs between seeds (line 2's dates, check digits
+                      and nationality) gets one summary row per truth glyph.
   --code <XY>         the two-character document code line one starts with (default: the
                       format's letter and the filler, e.g. P<). The first character must fit
                       the format: P for td3; A, C or I for td1 and td2; V for mrva and mrvb.
@@ -1851,7 +1944,7 @@ degradation at a time (MRZ line one, synthetic renders, vendored font, oracle cr
   --axes <list>       comma list of resolution,jpeg,rotation,blur,noise,contrast (default: all)
   --seeds <n>         renders per step (default 100)
   --seed-start <n>    first seed (default 0)
-  --cells <list>      cell indices of the first MRZ line (default 0,1)
+  --cells <list>      cell indices of the chosen line (default 0,1)
   --out <dir>         output directory (default artifacts/glyph-atlas/<date>-<shortsha>/, with
                       -<format>-<code> added for a non-default format or code, < written 0;
                       an in-tree directory that git does not ignore is refused)
@@ -1889,12 +1982,20 @@ fn parse_cells(list: &str) -> Result<Vec<usize>, String> {
     Ok(cells)
 }
 
-/// Every cell must lie inside line one of `format`.
-fn check_cells(cells: &[usize], format: Format) -> Result<(), String> {
-    let limit = format.cells();
+/// `--line` must name a line `format` has, and every cell must lie inside it.
+fn check_line_and_cells(cells: &[usize], format: Format, line: usize) -> Result<(), String> {
+    let limit = format.line_cells(line).ok_or_else(|| {
+        format!(
+            "--line: {format} has no line {line} (it has {lines})",
+            format = format.name(),
+            lines = (1..)
+                .take_while(|&l| format.line_cells(l).is_some())
+                .count()
+        )
+    })?;
     match cells.iter().find(|&&cell| cell >= limit) {
         Some(cell) => Err(format!(
-            "--cells: cell {cell} is outside the {limit}-cell {} line",
+            "--cells: cell {cell} is outside the {limit}-cell {} line {line}",
             format.name()
         )),
         None => Ok(()),
@@ -1908,6 +2009,7 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
         axes: Axis::ALL.to_vec(),
         seeds: DEFAULT_SEEDS,
         seed_start: 0,
+        line: DEFAULT_LINE,
         cells: DEFAULT_CELLS.to_vec(),
         out: None,
     };
@@ -1934,6 +2036,13 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
             "--seed-start" => {
                 args.seed_start = need()?.parse().map_err(|e| format!("--seed-start: {e}"))?;
             }
+            "--line" => {
+                let text = need()?;
+                args.line = match text.parse::<usize>() {
+                    Ok(line) if line >= 1 => line,
+                    _ => return Err(format!("--line: {text:?} is not a line number from 1")),
+                };
+            }
             "--cells" => args.cells = parse_cells(need()?)?,
             "--out" => args.out = Some(PathBuf::from(need()?)),
             other => return Err(format!("unknown argument {other:?}; try --help")),
@@ -1944,7 +2053,7 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
         Some(text) => parse_code(text, args.format)?,
         None => args.format.default_code(),
     };
-    check_cells(&args.cells, args.format)?;
+    check_line_and_cells(&args.cells, args.format, args.line)?;
     if args.seeds == 0 {
         return Err("--seeds must be at least 1".to_string());
     }
@@ -2135,7 +2244,13 @@ fn run() -> Result<(), String> {
     let out_dir = absolutize(&args.out.clone().unwrap_or_else(|| {
         root.join("artifacts")
             .join("glyph-atlas")
-            .join(default_out_name(&date, &short, args.format, args.code))
+            .join(default_out_name(
+                &date,
+                &short,
+                args.format,
+                args.code,
+                args.line,
+            ))
     }));
     check_out_dir(&out_dir, &absolutize(&root), |p| git_ignores(&root, p))?;
     let records_path = out_dir.join("records.jsonl");
@@ -2154,35 +2269,51 @@ fn run() -> Result<(), String> {
     let greedy_engine = load_general_engine(&models)?;
     let alphabet = Alphabet::new();
 
+    let line_index = args.line - 1;
     let page = layout::for_format(args.format.document_type());
-    let line = *page
-        .mrz_lines
-        .get(LINE_INDEX)
-        .ok_or_else(|| format!("the {} layout has no first MRZ line", args.format.name()))?;
+    let line = *page.mrz_lines.get(line_index).ok_or_else(|| {
+        format!(
+            "the {} layout has no MRZ line {}",
+            args.format.name(),
+            args.line
+        )
+    })?;
     let mrz_chars = page.mrz_chars;
 
-    // Seed 0's clean render: the expected truth for each cell and the input
-    // of the alphabet self-check.
+    // Seed 0's clean render: the input of the alphabet self-check, which reads
+    // line one whatever line the run measures, and (for line one) the check
+    // that the generator wrote the document code the run says it measures.
     let (image0, labels0) = render_clean(0, args.format, args.code);
-    let truth0: Vec<char> = labels0
+    let first_line0: Vec<char> = labels0
         .mrz_lines
-        .get(LINE_INDEX)
-        .ok_or_else(|| "generator produced no first MRZ line".to_string())?
+        .first()
+        .ok_or_else(|| "generator produced no MRZ line".to_string())?
         .chars()
         .collect();
-    check_line_prefix(&truth0, args.code)?;
-    let cell_truths: Vec<(usize, char)> = args
-        .cells
-        .iter()
-        .map(|&cell| {
-            truth0
-                .get(cell)
-                .copied()
-                .map(|ch| (cell, ch))
-                .ok_or_else(|| format!("cell {cell} is past the end of the truth line"))
+    check_line_prefix(&first_line0, args.code)?;
+    // Every seed's truth line, from the generator's labels, before the first
+    // degraded render: a cell's truth glyphs are whatever the seeds draw.
+    let truth_lines: Vec<Vec<char>> = (args.seed_start..args.seed_start + args.seeds)
+        .map(|seed| {
+            render_clean(seed, args.format, args.code)
+                .1
+                .mrz_lines
+                .get(line_index)
+                .map(|text| text.chars().collect())
+                .ok_or_else(|| format!("seed {seed}: no MRZ line {}", args.line))
         })
         .collect::<Result<_, _>>()?;
-    self_check(&greedy_engine, &raw_model, &image0.into_rgb8(), line)?;
+    let cell_truths = cell_truth_sets(&args.cells, &truth_lines)?;
+    let self_check_line = *page
+        .mrz_lines
+        .first()
+        .ok_or_else(|| "the layout has no first MRZ line".to_string())?;
+    self_check(
+        &greedy_engine,
+        &raw_model,
+        &image0.into_rgb8(),
+        self_check_line,
+    )?;
     drop(greedy_engine);
     eprintln!("glyph_atlas: alphabet self-check passed");
 
@@ -2206,6 +2337,7 @@ fn run() -> Result<(), String> {
         detection_threshold: engine.detection_threshold(),
         format: args.format,
         code: args.code,
+        line: args.line,
         cell_truths: cell_truths.clone(),
         axes: args.axes.clone(),
         seed_start: args.seed_start,
@@ -2236,18 +2368,10 @@ fn run() -> Result<(), String> {
         let clean = image.into_rgb8();
         let truth_line: Vec<char> = labels
             .mrz_lines
-            .get(LINE_INDEX)
-            .ok_or_else(|| format!("seed {seed}: no first MRZ line"))?
+            .get(line_index)
+            .ok_or_else(|| format!("seed {seed}: no MRZ line {}", args.line))?
             .chars()
             .collect();
-        for &(cell, expected) in &cell_truths {
-            if truth_line.get(cell) != Some(&expected) {
-                return Err(format!(
-                    "seed {seed}: the truth glyph at cell {cell} differs from seed 0's; the \
-                     atlas keys its results by cell and needs a fixed truth per cell"
-                ));
-            }
-        }
         let dctx = DegradeCtx {
             clean: &clean,
             paper: paper_colour(&clean, line),
@@ -2300,9 +2424,7 @@ fn run() -> Result<(), String> {
                 )?;
                 for cell in &outcome.cells {
                     write_line(&mut records, &cell_line(seed, axis, step_index, cell))?;
-                    aggs.entry((cell.cell, axis, step_index))
-                        .or_default()
-                        .add(cell);
+                    record_cell(&mut aggs, axis, step_index, cell);
                 }
 
                 if !reused && computed == PROGRESS_AFTER {
@@ -2345,20 +2467,26 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn print_table(cell_truths: &[(usize, char)], axes: &[Axis], aggs: &BTreeMap<AggKey, CellAgg>) {
+fn print_table(
+    cell_truths: &[(usize, Vec<char>)],
+    axes: &[Axis],
+    aggs: &BTreeMap<AggKey, CellAgg>,
+) {
     println!(
         "cell truth axis        step param    n   correct   p_true_peak(median)  margin(median)"
     );
-    for &(cell, truth) in cell_truths {
-        for &axis in axes {
-            for (step_index, &param) in axis.steps().iter().enumerate() {
-                let Some(agg) = aggs.get(&(cell, axis, step_index)) else {
-                    continue;
-                };
-                let n_rec = agg.n - agg.rec_missing;
-                let show =
-                    |v: Option<f64>| v.map_or_else(|| "-".to_string(), |x| format!("{x:.3}"));
-                println!(
+    for (cell, truths) in cell_truths {
+        let cell = *cell;
+        for &truth in truths {
+            for &axis in axes {
+                for (step_index, &param) in axis.steps().iter().enumerate() {
+                    let Some(agg) = aggs.get(&(cell, truth, axis, step_index)) else {
+                        continue;
+                    };
+                    let n_rec = agg.n - agg.rec_missing;
+                    let show =
+                        |v: Option<f64>| v.map_or_else(|| "-".to_string(), |x| format!("{x:.3}"));
+                    println!(
                     "{cell:>4} {truth:>5} {:<11} {step_index:>4} {param:>5} {:>4} {:>4}/{:<4} {:>10} {:>18}",
                     axis.name(),
                     agg.n,
@@ -2367,6 +2495,7 @@ fn print_table(cell_truths: &[(usize, char)], axes: &[Axis], aggs: &BTreeMap<Agg
                     show(percentile(&agg.p_true_peak, 0.5)),
                     show(percentile(&agg.margins, 0.5)),
                 );
+                }
             }
         }
     }
@@ -2475,7 +2604,8 @@ mod tests {
             detection_threshold: 0.3,
             format: Format::Td3,
             code: ['P', '<'],
-            cell_truths: vec![(0, 'P'), (1, '<')],
+            line: 1,
+            cell_truths: vec![(0, vec!['P']), (1, vec!['<'])],
             axes: Axis::ALL.to_vec(),
             seed_start: 0,
             seeds: 2,
@@ -2953,10 +3083,10 @@ mod tests {
     fn the_generators_first_td3_line_starts_with_p_filler_and_paper_is_light() {
         let (image, labels, _) =
             generate_from_seed(&GeneratorConfig::with_document_type(0, DocumentType::TD3));
-        let first: Vec<char> = labels.mrz_lines[LINE_INDEX].chars().take(2).collect();
+        let first: Vec<char> = labels.mrz_lines[0].chars().take(2).collect();
         assert_eq!(first, Format::Td3.default_code());
         let page = layout::for_format(DocumentType::TD3);
-        let paper = paper_colour(&image.into_rgb8(), page.mrz_lines[LINE_INDEX]);
+        let paper = paper_colour(&image.into_rgb8(), page.mrz_lines[0]);
         assert!(paper.iter().all(|&c| c > 200), "{paper:?}");
     }
 
@@ -2973,6 +3103,112 @@ mod tests {
     }
 
     // -- output shape ---------------------------------------------------
+
+    // The exact text the tool wrote for these three line types before `--line`
+    // existed (captured from the code at `a0df033`): a default run must not move.
+    const GOLDEN_SUMMARY_ROW: &str = r#"{"accuracy":{"correct":3,"n":3,"rate":1.0,"wilson95_hi":1.0,"wilson95_lo":0.4385029682449546},"axis":"blur","cell":0,"median_det_frac_above_threshold":0.75,"median_margin":0.3,"n":3,"p_true_peak":{"median":0.5,"p10":0.5,"p90":0.5},"param":0.5,"rec_missing":0,"step":1,"truth":"P","unit":"gaussian_sigma_native_px","winner_when_wrong":[],"word_covers_center_rate":1.0}"#;
+    const GOLDEN_RENDER: &str = r#"{"axis":"blur","beam_prefix_ok":true,"beam_prefix_ok_ignoring_filler":false,"image_h":40,"image_w":100,"ms":1.5,"param":0.5,"px_per_cell":22.0,"reused_identity":false,"seed":5,"step":1,"type":"render"}"#;
+    const GOLDEN_CELL: &str = r#"{"axis":"blur","cell":0,"det":{"frac_above_threshold":0.75,"p_max":0.9,"p_mean":0.5,"word_covers_center":true},"rec":{"blank_mean":0.3,"margin":0.3,"p_true_mean":0.5,"p_true_peak":0.5,"runner_up":"B","runner_up_mrz":"B","runner_up_mrz_p":0.2,"runner_up_p":0.2,"timesteps":[0,1],"winner":"P","winner_p":0.5},"seed":5,"step":1,"truth":"P","type":"cell"}"#;
+
+    fn golden_cell() -> CellOutcome {
+        let rec = stats(
+            &[row(&[
+                (label_of('P'), 0.5),
+                (label_of('B'), 0.2),
+                (CTC_BLANK_LABEL, 0.3),
+            ])],
+            'P',
+        );
+        sample_cell(Some(rec))
+    }
+
+    #[test]
+    fn a_fixed_truth_cell_writes_the_rows_it_always_wrote() {
+        let cell = golden_cell();
+        let outcome = RenderOutcome {
+            image_w: 100,
+            image_h: 40,
+            beam_prefix_ok: true,
+            beam_prefix_ok_ignoring_filler: false,
+            cells: vec![cell.clone()],
+        };
+        let mut aggs: BTreeMap<AggKey, CellAgg> = BTreeMap::new();
+        for _ in 0..3 {
+            record_cell(&mut aggs, Axis::Blur, 1, &cell);
+        }
+        let summary = build_summary(&json!({"k": 1}), &[(0, vec!['P'])], &[Axis::Blur], &aggs);
+        assert_eq!(summary["results"].as_array().expect("rows").len(), 1);
+        assert_eq!(
+            serde_json::to_string(&summary["results"][0]).expect("serialize"),
+            GOLDEN_SUMMARY_ROW
+        );
+        assert_eq!(
+            serde_json::to_string(&render_line(
+                5,
+                Axis::Blur,
+                1,
+                0.5,
+                22.0,
+                &outcome,
+                1.5,
+                false
+            ))
+            .expect("serialize"),
+            GOLDEN_RENDER
+        );
+        assert_eq!(
+            serde_json::to_string(&cell_line(5, Axis::Blur, 1, &cell)).expect("serialize"),
+            GOLDEN_CELL
+        );
+    }
+
+    #[test]
+    fn a_cell_whose_truth_varies_gets_one_summary_row_per_truth_glyph() {
+        let right = golden_cell(); // truth P, winner P
+        let wrong_rec = stats(&[row(&[(label_of('P'), 0.6), (label_of('Q'), 0.1)])], 'Q');
+        let wrong = CellOutcome {
+            truth: 'Q',
+            ..sample_cell(Some(wrong_rec))
+        };
+        let mut aggs: BTreeMap<AggKey, CellAgg> = BTreeMap::new();
+        for outcome in [&right, &wrong, &right] {
+            record_cell(&mut aggs, Axis::Blur, 1, outcome);
+        }
+        // The two truths never share an aggregate.
+        assert_eq!(aggs.len(), 2);
+        let summary = build_summary(&json!({}), &[(0, vec!['P', 'Q'])], &[Axis::Blur], &aggs);
+        let rows = summary["results"].as_array().expect("rows");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            (rows[0]["truth"].as_str(), rows[0]["n"].as_u64()),
+            (Some("P"), Some(2))
+        );
+        assert_eq!(rows[0]["accuracy"]["correct"], 2);
+        assert_eq!(
+            (rows[1]["truth"].as_str(), rows[1]["n"].as_u64()),
+            (Some("Q"), Some(1))
+        );
+        assert_eq!(rows[1]["accuracy"]["correct"], 0);
+        assert_eq!(rows[1]["winner_when_wrong"][0]["char"], "P");
+        // A truth glyph with no data (a seed range that never drew it) writes no row.
+        let summary = build_summary(&json!({}), &[(0, vec!['P', 'Z'])], &[Axis::Blur], &aggs);
+        assert_eq!(summary["results"].as_array().expect("rows").len(), 1);
+    }
+
+    #[test]
+    fn the_truth_glyphs_of_a_cell_are_every_one_the_seeds_draw_sorted() {
+        let line = |s: &str| -> Vec<char> { s.chars().collect() };
+        let lines = vec![line("P<ZB"), line("P<AB"), line("P<ZB"), line("P<MB")];
+        let sets = cell_truth_sets(&[2, 0, 3], &lines).expect("sets");
+        assert_eq!(
+            sets,
+            vec![(2, vec!['A', 'M', 'Z']), (0, vec!['P']), (3, vec!['B'])],
+            "request order is kept; each cell's glyphs are sorted and listed once"
+        );
+        let error = cell_truth_sets(&[4], &lines).expect_err("past the end");
+        assert!(error.contains("cell 4"), "{error}");
+        assert!(cell_truth_sets(&[0], &[]).is_err(), "no seeds, no truth");
+    }
 
     #[test]
     fn every_serialized_key_is_on_the_allowlist() {
@@ -2999,12 +3235,10 @@ mod tests {
             false,
         ));
         let mut aggs = BTreeMap::new();
-        aggs.entry((0usize, Axis::Blur, 1usize))
-            .or_insert_with(CellAgg::default)
-            .add(&outcome.cells[0]);
+        record_cell(&mut aggs, Axis::Blur, 1, &outcome.cells[0]);
         values.push(build_summary(
             &build_header(&sample_inputs()),
-            &[(0, 'P')],
+            &[(0, vec!['P'])],
             &[Axis::Blur],
             &aggs,
         ));
@@ -3027,16 +3261,16 @@ mod tests {
         let cell = sample_cell(Some(rec));
         let mut aggs: BTreeMap<AggKey, CellAgg> = BTreeMap::new();
         for _ in 0..3 {
-            aggs.entry((0, Axis::Blur, 0)).or_default().add(&cell);
+            record_cell(&mut aggs, Axis::Blur, 0, &cell);
         }
         let mut run = build_header(&sample_inputs());
         if let Some(object) = run.as_object_mut() {
             object.remove("type");
             object.remove("args");
         }
-        let summary = build_summary(&run, &[(0, 'P')], &[Axis::Blur], &aggs);
+        let summary = build_summary(&run, &[(0, vec!['P'])], &[Axis::Blur], &aggs);
         let results = summary["results"].as_array().expect("results is an array");
-        // One row per (cell, axis, step) with data, however many seeds fed it.
+        // One row per (cell, truth, axis, step) with data, however many seeds fed it.
         assert_eq!(results.len(), 1);
         assert_eq!(results[0]["n"], 3);
         let mut keys = Vec::new();
@@ -3054,12 +3288,32 @@ mod tests {
         assert_eq!(header["crop"], "oracle_line");
         assert_eq!(header["format"], "TD3");
         assert_eq!(header["code"], "P<");
-        assert_eq!(header["schema"], 2);
+        assert_eq!(header["schema"], 3);
+        assert_eq!(
+            header["line"], 1,
+            "the line is the 1-based number --line takes"
+        );
         assert_eq!(header["ocrs"], "0.13.1");
         assert_eq!(header["axes"].as_array().expect("axes").len(), 6);
-        assert_eq!(header["cells"][1]["truth"], "<");
+        assert_eq!(header["cells"][1]["truths"], json!(["<"]));
         assert_eq!(header["font"]["license"], "OFL-1.1");
         assert_eq!(header["font"]["sha256"], FONT_SHA256);
+    }
+
+    #[test]
+    fn the_header_lists_each_cells_truth_glyphs_sorted_and_the_chosen_line() {
+        let mut inputs = sample_inputs();
+        inputs.line = 2;
+        inputs.cell_truths = vec![(11, vec!['0', '3', '9']), (19, vec!['F', 'M'])];
+        let header = build_header(&inputs);
+        assert_eq!(header["line"], 2);
+        assert_eq!(header["cells"][0]["cell"], 11);
+        assert_eq!(header["cells"][0]["truths"], json!(["0", "3", "9"]));
+        assert_eq!(header["cells"][1]["truths"], json!(["F", "M"]));
+        assert!(
+            header["cells"][0].get("truth").is_none(),
+            "schema 2's single `truth` is replaced by `truths`"
+        );
     }
 
     #[test]
@@ -3085,6 +3339,7 @@ mod tests {
         assert_eq!(args.seeds, 100);
         assert_eq!(args.seed_start, 0);
         assert_eq!(args.cells, vec![0, 1]);
+        assert_eq!(args.line, 1);
         assert_eq!(args.out, None);
     }
 
@@ -3209,6 +3464,55 @@ mod tests {
         assert!(parsed(&["--cells", "43", "--format", "mrva"]).is_ok());
     }
 
+    // -- --line -----------------------------------------------------------
+
+    #[test]
+    fn the_line_flag_is_one_based_and_defaults_to_the_first() {
+        assert_eq!(parsed(&[]).expect("defaults").line, 1);
+        assert_eq!(parsed(&["--line", "1"]).expect("line 1").line, 1);
+        assert_eq!(parsed(&["--line", "2"]).expect("line 2").line, 2);
+        for bad in ["0", "-1", "x", "1.5", ""] {
+            let error = parsed(&["--line", bad]).expect_err(bad);
+            assert!(
+                error.contains("is not a line number from 1"),
+                "the parser refuses {bad:?} itself: {error}"
+            );
+        }
+        assert!(parsed(&["--line"]).is_err(), "a flag with no value");
+    }
+
+    #[test]
+    fn a_line_the_format_does_not_have_is_refused_whatever_the_flag_order() {
+        // TD1 has three lines; every other format has two.
+        assert!(parsed(&["--format", "td1", "--line", "3"]).is_ok());
+        assert!(parsed(&["--line", "3", "--format", "td1"]).is_ok());
+        assert!(parsed(&["--format", "td1", "--line", "4"]).is_err());
+        for format in ["td2", "td3", "mrva", "mrvb"] {
+            assert!(
+                parsed(&["--format", format, "--line", "2"]).is_ok(),
+                "{format}"
+            );
+            let error = parsed(&["--line", "3", "--format", format]).expect_err(format);
+            assert!(error.contains("--line"), "{error}");
+        }
+    }
+
+    #[test]
+    fn the_cell_limit_comes_from_the_chosen_line() {
+        assert_eq!(Format::Td3.line_cells(1), Some(44));
+        assert_eq!(Format::Td3.line_cells(2), Some(44));
+        assert_eq!(Format::Td3.line_cells(3), None);
+        assert_eq!(Format::Td1.line_cells(3), Some(30));
+        assert_eq!(Format::Td1.line_cells(0), None);
+        assert_eq!(Format::MrvB.line_cells(2), Some(36));
+        assert!(parsed(&["--line", "2", "--cells", "9,27,43"]).is_ok());
+        assert!(parsed(&["--line", "2", "--cells", "44"]).is_err());
+        assert!(parsed(&["--cells", "44", "--line", "2"]).is_err());
+        assert!(parsed(&["--format", "td1", "--line", "3", "--cells", "29"]).is_ok());
+        let error = parsed(&["--format", "td1", "--line", "3", "--cells", "30"]).expect_err("past");
+        assert!(error.contains("line 3"), "{error}");
+    }
+
     #[test]
     fn a_code_becomes_a_path_part_with_the_filler_written_as_zero() {
         assert_eq!(code_path_part(['P', '<']), "P0");
@@ -3219,16 +3523,21 @@ mod tests {
     #[test]
     fn the_default_output_name_moves_only_for_a_non_default_run() {
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<']),
+            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<'], 1),
             "2026-10-01-abc1234"
         );
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', 'S']),
+            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', 'S'], 1),
             "2026-10-01-abc1234-td3-PS"
         );
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td1, ['I', '<']),
+            default_out_name("2026-10-01", "abc1234", Format::Td1, ['I', '<'], 1),
             "2026-10-01-abc1234-td1-I0"
+        );
+        // A later line has its own directory, so two runs of one commit do not collide.
+        assert_eq!(
+            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<'], 2),
+            "2026-10-01-abc1234-td3-P0-line2"
         );
     }
 
@@ -3248,19 +3557,19 @@ mod tests {
     #[cfg_attr(debug_assertions, ignore = "needs a release build")]
     fn seed_zero_with_code_ps_starts_with_ps() {
         let (_, labels) = render_clean(0, Format::Td3, ['P', 'S']);
-        let first: String = labels.mrz_lines[LINE_INDEX].chars().take(2).collect();
+        let first: String = labels.mrz_lines[0].chars().take(2).collect();
         assert_eq!(first, "PS");
-        assert_eq!(labels.mrz_lines[LINE_INDEX].chars().count(), 44);
+        assert_eq!(labels.mrz_lines[0].chars().count(), 44);
     }
 
     #[test]
     #[cfg_attr(debug_assertions, ignore = "needs a release build")]
     fn seed_zero_with_td1_and_code_id_starts_with_id_and_is_thirty_cells() {
         let (_, labels) = render_clean(0, Format::Td1, ['I', 'D']);
-        let line = &labels.mrz_lines[LINE_INDEX];
+        let line = &labels.mrz_lines[0];
         assert!(line.starts_with("ID"), "{line}");
         assert_eq!(line.chars().count(), 30);
-        assert_eq!(Format::Td1.cells(), 30);
+        assert_eq!(Format::Td1.line_cells(1), Some(30));
     }
 
     #[test]
