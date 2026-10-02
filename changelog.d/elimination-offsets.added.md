@@ -1,0 +1,1 @@
+- Add a standard-library measurement reader that scores grid-offset recovery from the elimination probe's `cells.jsonl`; it changes nothing in the shipped pipeline.

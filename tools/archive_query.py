@@ -11,6 +11,7 @@ reads `private/`, the private track's text-free records (ADR-0024 Decision 7).
     archive_query.py runs [--track public|local] [--root DIR]
     archive_query.py diff A B [--track ...] [--root DIR]
     archive_query.py cell RUN --line L --col C [--format F | --document-type T] [--chars]
+    archive_query.py codes RUN [RUN2] [--track ...] [--root DIR]
 
 `A`, `B` and `RUN` name a run by a `run_id` prefix or by a file path.
 
@@ -34,6 +35,22 @@ reads `private/`, the private track's text-free records (ADR-0024 Decision 7).
   characters' own counts instead; it is refused unless the run is public: the
   file must not sit in `local/`, and every record's own `track` must be `public`,
   `covers` or `synthetic` (a missing or unknown `track` refuses).
+* `codes RUN [RUN2]`: the document-code witness matrix (#664). For each record that carries the
+  printed code's classes (`truth.code_cells`, `A<` for `P<`, `AA` for `PS`), the observed class (the
+  first two cells of `tier1_read.lines[0]`, or `zone_classes[0]` on a private record; `unread`
+  when nothing was read), counted per provider and format (the format the read resolved; a document
+  with no read is under `unknown`). Per printed class it prints the observed counts, the code's
+  `document_type` entry of `field_correctness` (exact, wrong, unread, or `no entry`), and for the
+  documents whose observed class differs from the printed one the `retry_variant_id` and
+  `retry_stop` counts and the asset ids. A record with no `code_cells` is skipped and counted. With
+  `RUN2`, the two matrices side by side and the documents whose observed class changed; two runs
+  that are not comparable (`comparability_failures`: the same binary, models, scope, tracks, providers,
+  data, corpus manifest and replay source, and every document joined one to one on `source_sha256`;
+  the arms may differ, they are what is compared) are refused with the facts that differ, exit 2.
+  The asset ids it lists are those of the `public`, `covers` and `synthetic` records only; a `local`
+  or private record is counted and never named. `codes` is the one command that also reads a
+  private run's `private_doc` records, from a file named by its path: they hold class symbols, a
+  provider, a format and a SHA-256, never text (Decision 7).
 
 **Disclosure.** The output holds asset ids, field names, enumerated values,
 counts, cell positions and classes. It never prints OCR text, a zone line, a
@@ -59,6 +76,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -191,9 +209,10 @@ def read_header(path: Path) -> dict:
     return _parse_header(lines[0], path)
 
 
-def read_run(path: Path) -> Run:
-    """A whole run: the header, then every `doc` record. A record of another run is refused;
-    a record of an unknown kind is ignored, as unknown keys are."""
+def read_run(path: Path, kinds: tuple[str, ...] = ("doc",)) -> Run:
+    """A whole run: the header, then every record of the given `kinds` (`doc` unless a command asks
+    for more). A record of another run is refused; a record of any other kind is ignored, as
+    unknown keys are."""
     lines = _read_lines(path)
     if not lines:
         raise ArchiveError(f"{path.name}: the file is empty")
@@ -208,7 +227,7 @@ def read_run(path: Path) -> Run:
             raise ArchiveError(f"{path.name}: line {number} is not JSON") from None
         if not isinstance(record, dict):
             raise ArchiveError(f"{path.name}: line {number} is not a record")
-        if record.get("kind") != "doc":
+        if record.get("kind") not in kinds:
             continue
         if record.get("run_id") != header["run_id"]:
             raise ArchiveError(f"{path.name}: line {number} is a record of another run")
@@ -216,13 +235,13 @@ def read_run(path: Path) -> Run:
     return Run(path=path, header=header, records=records)
 
 
-def find_run(spec: str, root: Path, track: str) -> Run:
+def find_run(spec: str, root: Path, track: str, kinds: tuple[str, ...] = ("doc",)) -> Run:
     """A run named by a file path, or by a `run_id` prefix among the finished files of `track`."""
     candidate = Path(spec)
     if candidate.is_file():
         if candidate.name.endswith(".partial"):
             raise ArchiveError(f"{candidate.name}: a .partial file is a run that never finished and is not read")
-        return read_run(candidate)
+        return read_run(candidate, kinds)
     finished, _partial = run_files(root, track)
     matches = []
     for path in finished:
@@ -233,7 +252,7 @@ def find_run(spec: str, root: Path, track: str) -> Run:
         raise ArchiveError(f"no finished run in {track}/ matches {spec!r} as a run_id prefix or a file")
     if len(matches) > 1:
         raise ArchiveError(f"{spec!r} matches {len(matches)} runs in {track}/; use a longer prefix")
-    return read_run(matches[0])
+    return read_run(matches[0], kinds)
 
 
 # ------------------------------------------------------------------ small helpers
@@ -744,6 +763,285 @@ def cmd_cell(run: Run, line: int, col: int, fmt: str | None, chars: bool, track:
     return EXIT_OK
 
 
+# ------------------------------------------------------------------ codes
+
+UNREAD = "unread"
+NO_FORMAT = "unknown"
+NO_ENTRY = "no entry"
+CODE_FIELD = "document_type"
+CLASS_SYMBOLS = {"letter": "A", "digit": "9", "filler": "<", "other": "?"}
+CLASS_SYMBOL_SET = frozenset(CLASS_SYMBOLS.values())
+FIELD_VERDICTS = ("exact", "wrong", "unread")
+# The retry facts are written as text by a replay too, so only the closed sets are printed.
+RETRY_STOPS = frozenset({"general_valid", "variant_valid", "pass_cap", "budget", "exhausted"})
+RETRY_VARIANT = re.compile(r"general|pass-\d{2,4}")
+# The record tracks whose asset ids `codes` may print, the allowlist `--chars` uses.
+LISTED_TRACKS = CHARS_TRACKS
+PRIVATE_KIND = "private_doc"
+CODE_KINDS = ("doc", PRIVATE_KIND)
+# Header facts that must be equal for two runs to be compared, `promotion_gate.EQUAL_FACTS` (a test
+# keeps the two the same). The arms are not here: they are what two runs differ in.
+COMPARABLE_FACTS = ("scope", "tracks", "providers", "samples_data_sha", "corpus_manifest_sha256", "replay_of")
+
+
+@dataclass
+class CodeRow:
+    """One document's code classes, and what `codes` may say about it: no text, only classes,
+    enumerated facts and, for a record on a listed track, its asset id."""
+
+    section: tuple[str, str]  # (provider, format)
+    printed: str
+    observed: str
+    listed: bool
+    shown: str  # the asset id; read only when `listed`
+    variant: str
+    stop: str
+    verdict: str  # the `document_type` entry of `field_correctness`, or NO_ENTRY
+
+    @property
+    def differs(self) -> bool:
+        return self.printed != self.observed
+
+
+def _symbols(value: object, what: str) -> str:
+    """`value` as a string of at most two class symbols, else an error that names no content."""
+    if not isinstance(value, str) or len(value) > 2 or not set(value) <= CLASS_SYMBOL_SET:
+        raise ArchiveError(f"a record's {what} is not at most two class symbols (A, 9, < or ?)")
+    return value
+
+
+def printed_class(record: dict) -> str | None:
+    """The printed code's classes, `truth.code_cells`; `None` when the record does not carry them."""
+    truth = record.get("truth")
+    value = truth.get("code_cells") if isinstance(truth, dict) else None
+    return None if value is None else _symbols(value, "truth.code_cells")
+
+
+def observed_class(record: dict) -> str:
+    """The first two cells of the recovered zone's first line as class symbols; `unread` when
+    nothing was read. A private record has the classes already, in `zone_classes`."""
+    if record.get("kind") == PRIVATE_KIND:
+        zone = record.get("zone_classes")
+        first = zone[0] if isinstance(zone, list) and zone else None
+        symbols = "" if first is None else _symbols(first[:2] if isinstance(first, str) else first, "zone_classes")
+    else:
+        lines = _zone_lines(record)
+        symbols = "".join(CLASS_SYMBOLS[classify_char(char)] for char in lines[0][:2]) if lines else ""
+    return symbols or UNREAD
+
+
+def _retry_facts(record: dict) -> dict:
+    return record if record.get("kind") == PRIVATE_KIND else _ledger_row(record)
+
+
+def _variant_text(value: object) -> str:
+    if value is None:
+        return "none"
+    return value if isinstance(value, str) and RETRY_VARIANT.fullmatch(value) else "other"
+
+
+def _stop_text(value: object) -> str:
+    if value is None:
+        return "none"
+    return value if isinstance(value, str) and value in RETRY_STOPS else "other"
+
+
+def _code_format(record: dict) -> str:
+    value = record.get("mrz_format") if record.get("kind") == PRIVATE_KIND else _record_format(record)
+    return str(value).upper() if isinstance(value, str) and value else NO_FORMAT
+
+
+def _code_verdict(record: dict) -> str:
+    correctness = record.get("field_correctness")
+    verdict = correctness.get(CODE_FIELD) if isinstance(correctness, dict) else None
+    return verdict if verdict in FIELD_VERDICTS else NO_ENTRY
+
+
+def code_row(record: dict) -> CodeRow | None:
+    """The row for one record, or `None` when it carries no printed code class."""
+    printed = printed_class(record)
+    if printed is None:
+        return None
+    facts = _retry_facts(record)
+    listed = record.get("kind") == "doc" and record.get("track") in LISTED_TRACKS
+    return CodeRow(
+        section=(str(record.get("provider") or "?"), _code_format(record)),
+        printed=printed,
+        observed=observed_class(record),
+        listed=listed,
+        shown=_display_key(record) if listed else "",
+        variant=_variant_text(facts.get("retry_variant_id")),
+        stop=_stop_text(facts.get("retry_stop")),
+        verdict=_code_verdict(record),
+    )
+
+
+def code_rows(run: Run) -> tuple[list[CodeRow], int]:
+    """`(rows, skipped)`: a row per record with a printed code class, and how many records had none."""
+    rows = []
+    skipped = 0
+    for record in run.records:
+        row = code_row(record)
+        if row is None:
+            skipped += 1
+        else:
+            rows.append(row)
+    return rows, skipped
+
+
+def _class_order(name: str) -> tuple[bool, str]:
+    return (name == UNREAD, name)
+
+
+def _counts(counter: Counter) -> str:
+    return ", ".join(f"{name} {counter[name]}" for name in sorted(counter)) or "none"
+
+
+def _class_counts(counter: Counter) -> str:
+    """Observed classes as `name n`, `unread` last."""
+    return ", ".join(f"{name} {counter[name]}" for name in sorted(counter, key=_class_order)) or "none"
+
+
+def _sections(*row_sets: list[CodeRow]) -> list[tuple[str, str]]:
+    return sorted({row.section for rows in row_sets for row in rows})
+
+
+def _document_lines(rows: list[CodeRow]) -> list[str]:
+    """The documents whose observed class differs from the printed one: named when their record's
+    track allows it, else counted."""
+    differing = [row for row in rows if row.differs]
+    named = [f"  {row.shown}: printed {row.printed}, observed {row.observed}" for row in differing if row.listed]
+    unnamed = sum(1 for row in differing if not row.listed)
+    lines = _cap(sorted(named)[:DOC_LINE_CAP], len(named))
+    if unnamed:
+        lines.append(f"  {unnamed} more on the local or private track, not named")
+    return lines
+
+
+def _differs_line(rows: list[CodeRow]) -> str:
+    differing = [row for row in rows if row.differs]
+    return (
+        f"  observed class differs from printed: {len(differing)} document(s); "
+        f"retry_variant_id {_counts(Counter(row.variant for row in differing))}; "
+        f"retry_stop {_counts(Counter(row.stop for row in differing))}"
+    )
+
+
+def _section_lines(section: tuple[str, str], rows: list[CodeRow]) -> list[str]:
+    provider, fmt = section
+    lines = [f"provider {provider}, format {fmt}: {len(rows)} document(s)"]
+    for printed in sorted({row.printed for row in rows}, key=_class_order):
+        lines.append(f"  printed {printed} -> observed " + _class_counts(Counter(row.observed for row in rows if row.printed == printed)))
+    lines.append(_differs_line(rows))
+    lines.extend(_document_lines(rows))
+    return lines
+
+
+def _all_lines(rows: list[CodeRow]) -> list[str]:
+    """Every format together: the code's `document_type` entry per printed class, and the totals."""
+    lines = [f"all formats: {len(rows)} document(s)"]
+    for printed in sorted({row.printed for row in rows}, key=_class_order):
+        verdicts = Counter(row.verdict for row in rows if row.printed == printed)
+        lines.append(
+            f"  printed {printed}, {CODE_FIELD} field: "
+            + ", ".join(f"{name} {verdicts[name]}" for name in (*FIELD_VERDICTS, NO_ENTRY))
+        )
+    lines.append(_differs_line(rows))
+    return lines
+
+
+def codes_report(run: Run) -> list[str]:
+    rows, skipped = code_rows(run)
+    lines = [
+        f"document-code classes: {run.path.name} (run {run.run_id[:12]}): {len(run.records)} record(s), "
+        f"{len(rows)} with a printed code class, {skipped} skipped for none"
+    ]
+    for section in _sections(rows):
+        lines.extend(_section_lines(section, [row for row in rows if row.section == section]))
+    lines.extend(_all_lines(rows))
+    return lines
+
+
+def _hex64(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in "0123456789abcdef" for char in value)
+
+
+def comparability_failures(a: Run, b: Run) -> list[str]:
+    """Every reason two runs cannot be compared document by document; names facts, never values.
+    The arms may differ. The facts are those of `promotion_gate.py`'s comparability check."""
+    failures: list[str] = []
+    for name, run in (("A", a), ("B", b)):
+        if not isinstance(run.header.get("binary_sha256"), str) or not run.header["binary_sha256"]:
+            failures.append(f"binary_sha256 is not recorded on run {name}")
+        models = run.header.get("model_sha256")
+        if run.header.get("replay_of") is None and not (
+            isinstance(models, dict) and all(_hex64(models.get(key)) for key in ("detection", "recognition"))
+        ):
+            failures.append(f"model_sha256 is not recorded on run {name}")
+    if a.header.get("binary_sha256") != b.header.get("binary_sha256"):
+        failures.append("binary_sha256 differs")
+    if a.header.get("model_sha256") != b.header.get("model_sha256"):
+        failures.append("model_sha256 differs")
+    for fact in COMPARABLE_FACTS:
+        if a.header.get(fact) != b.header.get(fact):
+            failures.append(f"{fact} differs")
+    pairs, only_a, only_b = join_records(a.records, b.records)
+    if only_a or only_b:
+        failures.append(f"the document sets differ: {len(only_a)} only in A, {len(only_b)} only in B")
+    loose = sum(1 for pair in pairs if pair.by != "source_sha256")
+    if loose:
+        failures.append(f"{loose} document(s) do not join one to one on source_sha256")
+    return failures
+
+
+def codes_diff_lines(a: Run, b: Run) -> list[str]:
+    """Two comparable runs side by side, then the documents whose observed class changed."""
+    failures = comparability_failures(a, b)
+    if failures:
+        raise ArchiveError("the runs are not comparable: " + "; ".join(failures))
+    rows_a, skipped_a = code_rows(a)
+    rows_b, skipped_b = code_rows(b)
+    lines = [
+        f"document-code classes: A {a.path.name} (run {a.run_id[:12]}) vs B {b.path.name} (run {b.run_id[:12]}): "
+        f"{len(rows_a)} and {len(rows_b)} with a printed code class, {skipped_a} and {skipped_b} skipped for none"
+    ]
+    differences = header_differences(a.header, b.header)
+    lines.append("header: differs" if differences else "header: identical in the arms, retry budget, pivot, environment, source, machine, commit, binary and scope")
+    lines.extend(differences)
+    for section in _sections(rows_a, rows_b):
+        mine_a = [row for row in rows_a if row.section == section]
+        mine_b = [row for row in rows_b if row.section == section]
+        lines.append(f"provider {section[0]}, format {section[1]}: {len(mine_a)} document(s) in A, {len(mine_b)} in B")
+        for printed in sorted({row.printed for row in (*mine_a, *mine_b)}, key=_class_order):
+            observed_a = Counter(row.observed for row in mine_a if row.printed == printed)
+            observed_b = Counter(row.observed for row in mine_b if row.printed == printed)
+            lines.append(f"  printed {printed} -> observed A: {_class_counts(observed_a)} | B: {_class_counts(observed_b)}")
+    pairs, _only_a, _only_b = join_records(a.records, b.records)
+    changed: list[tuple[str, str, str]] = []
+    unnamed = compared = 0
+    for pair in pairs:
+        row_a, row_b = code_row(pair.a), code_row(pair.b)
+        if row_a is None or row_b is None:
+            continue
+        compared += 1
+        if row_a.observed != row_b.observed:
+            if row_a.listed and row_b.listed:
+                changed.append((row_a.shown, row_a.observed, row_b.observed))
+            else:
+                unnamed += 1
+    lines.append(f"observed class changed between the runs: {len(changed) + unnamed} of {compared} compared document(s)")
+    lines.extend(_cap([f"  {name}: {old} -> {new}" for name, old, new in sorted(changed)[:DOC_LINE_CAP]], len(changed)))
+    if unnamed:
+        lines.append(f"  {unnamed} more on the local or private track, not named")
+    return lines
+
+
+def cmd_codes(a: Run, b: Run | None, out) -> int:
+    lines = codes_report(a) if b is None else codes_diff_lines(a, b)
+    out.writelines(line + "\n" for line in lines)
+    return EXIT_OK
+
+
 # ------------------------------------------------------------------ main
 
 
@@ -764,6 +1062,9 @@ def build_parser() -> argparse.ArgumentParser:
     cell.add_argument("--format", dest="fmt", help="only records of this format (TD1, TD2, TD3, MRVA, MRVB)")
     cell.add_argument("--document-type", dest="document_type", help="the same filter, for a synthetic run")
     cell.add_argument("--chars", action="store_true", help="report the characters' counts (public track only)")
+    codes = sub.add_parser("codes", parents=[common], help="the printed document code's classes against the observed ones")
+    codes.add_argument("run", metavar="RUN", help="a run_id prefix or a file path")
+    codes.add_argument("run2", metavar="RUN2", nargs="?", help="a second, comparable run: both matrices and what changed")
     return parser
 
 
@@ -776,6 +1077,9 @@ def main(argv: list[str] | None = None, out=None) -> int:
             return cmd_runs(root, args.track, out)
         if args.command == "diff":
             return cmd_diff(find_run(args.a, root, args.track), find_run(args.b, root, args.track), out)
+        if args.command == "codes":
+            second = find_run(args.run2, root, args.track, CODE_KINDS) if args.run2 else None
+            return cmd_codes(find_run(args.run, root, args.track, CODE_KINDS), second, out)
         fmt = args.fmt or args.document_type
         if args.fmt and args.document_type and args.fmt.upper() != args.document_type.upper():
             raise ArchiveError("--format and --document-type name different formats")
