@@ -427,3 +427,45 @@ Every track is now archived (Decisions 6 and 7): the public and local tracks sin
 (#645), synthetic runs since step 4 (#659) and the private track since this step. Step 5's reader
 is `tools/archive_query.py` (#662). Step 6, schema 2, waits on which OCR pass Tier 1 reads, the
 question [ADR-0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) leaves open.
+
+## Amendment 6 (2026-10-01) — the OCR models' SHA-256 in the run header (#670)
+
+**Status of this amendment:** Proposed. It records what
+[#670](https://github.com/ruledicaprio/SynthPass/pull/670) added to the run header for
+[#664](https://github.com/ruledicaprio/SynthPass/issues/664)'s promotion gate and what its review
+settled; it changes no decision's intent.
+
+### Why
+
+The promotion gate (`tools/promotion_gate.py`, #667) compares two runs only when they used the same
+OCR models. The header named the models by path alone (`model_paths`, Amendment 4 item 3), so a
+model file replaced under the same path passed as the same model.
+
+### What #670 settled
+
+1. **`model_sha256`, directly after `model_paths`:** `{"detection", "recognition"}`, the SHA-256 of
+   the bytes of the two `.rten` files the run loaded, in the shape the nightly's run header already
+   records (`tools/bench_nightly_rows.py`). Both binaries hash the two paths they pass to
+   `NativeOcr::load`, once, before the first document.
+2. **Never an error.** A file that cannot be read is `null` for its key, the rule `binary_sha256`
+   follows, and the run goes on.
+3. **A replay records `null`.** It loads no model: its OCR is the capture's, which `replay_of` names
+   (Amendment 3). The key is always written.
+4. **The schema stays 1.** Readers ignore unknown keys, and a file written before #670 has no key.
+   The test that pins the header's keys and their order includes it. The private header carries the
+   same hashes (Amendment 5 item 3: only `argv` differs), and `run_id`, the SHA-256 of the header
+   with `run_id` blank, now covers them.
+5. **The readers.** `tools/archive_query.py diff` names a differing model as `model_sha256.<key>`
+   with 12-character prefixes of the two hashes. `tools/promotion_gate.py` compares the models by
+   `model_sha256` instead of `model_paths`: a live run whose header lacks either hash as 64
+   lowercase hexadecimal characters is refused as not comparable (`model_sha256 not recorded`),
+   replays of one capture are comparable with each other, and the report says whether the models
+   were compared by SHA-256 or none were loaded.
+
+### The evidence
+
+The review read a live run's header: both hashes equal the pair the workflows pin when they
+download the models (`f15cfb56bd02…` for detection, `e484866d4cce…` for recognition). Five
+deliberate breaks of the two readers each turned a test red before they were restored, and both
+tool suites passed at the PR's head. The PR's real-specimen gate showed 0 documents changed
+outcome (Observed, 2026-10-01, at #670's `81d5cba`).
