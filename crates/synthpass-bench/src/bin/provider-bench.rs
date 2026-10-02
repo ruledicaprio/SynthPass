@@ -1938,6 +1938,16 @@ fn manifest_ocr_arms(replay: Option<&ReplaySource>) -> BTreeMap<String, String> 
     }
 }
 
+/// The model files a run loaded, for the archive header's `model_sha256`: the same two paths
+/// `model_paths_report` names, or none for a replay, which loads no model.
+fn loaded_model_files<'a>(
+    replay: bool,
+    detection: &'a Path,
+    recognition: &'a Path,
+) -> Option<(&'a Path, &'a Path)> {
+    (!replay).then_some((detection, recognition))
+}
+
 /// The `model_paths` the report records: the paths the OCR models were loaded from, or a note
 /// that a replay loaded none. The archive header records the same value.
 fn model_paths_report(replay: bool, detection: &Path, recognition: &Path) -> ModelPathsReport {
@@ -2020,6 +2030,9 @@ struct ArchiveRun<'a> {
     providers: Vec<String>,
     replay: Option<&'a ReplaySource>,
     model_paths: ModelPathsReport,
+    /// The two model files this run loaded, to hash once for the header; `None` for a replay,
+    /// which loads no model.
+    model_files: Option<(&'a Path, &'a Path)>,
 }
 
 /// The header of this run's archive files (ADR-0024, Decision 4). The arms come from the run
@@ -2061,6 +2074,9 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
         providers: run.providers.clone(),
         ocr_arms: manifest_ocr_arms(run.replay),
         model_paths: run.model_paths.clone(),
+        model_sha256: run
+            .model_files
+            .map(|(detection, recognition)| archive::ModelSha256::of_files(detection, recognition)),
         replay_of: run.replay.map(|source| archive::ReplayOfRecord {
             run_manifest: source.run_manifest.clone(),
             sha256: source.run_manifest_sha256.clone(),
@@ -2285,6 +2301,11 @@ async fn main() {
                     &detection_path,
                     &recognition_path,
                 ),
+                model_files: loaded_model_files(
+                    replay.is_some(),
+                    &detection_path,
+                    &recognition_path,
+                ),
             },
         );
         let dumps = RealDumpOptions {
@@ -2362,6 +2383,7 @@ async fn main() {
                 providers: catalog_provider_ids(catalog),
                 replay: None,
                 model_paths: model_paths_report(false, &detection_path, &recognition_path),
+                model_files: loaded_model_files(false, &detection_path, &recognition_path),
             },
         );
         let reports = run_provider_bench(
@@ -3344,6 +3366,7 @@ mod tests {
                     providers: vec!["mrz".to_string()],
                     replay: source,
                     model_paths: ModelPathsReport::default(),
+                    model_files: None,
                 },
             ))
             .expect("serialize the header");
@@ -3409,6 +3432,7 @@ mod tests {
                 providers: Vec::new(),
                 replay: None,
                 model_paths: ModelPathsReport::default(),
+                model_files: None,
             },
         );
         let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
@@ -3419,6 +3443,63 @@ mod tests {
         assert_eq!(
             (budget.max_passes, budget.max_seconds),
             (max_passes, max_seconds)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A live run records the SHA-256 of the two files it loaded; a replay loads none, so it
+    /// records `null`, and the report's `model_paths` note and the header agree on that.
+    #[test]
+    fn the_header_hashes_the_loaded_models_and_a_replay_records_null() {
+        let dir =
+            std::env::temp_dir().join(format!("provider-bench-model-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (detection, recognition) = (
+            dir.join("text-detection.rten"),
+            dir.join("text-recognition.rten"),
+        );
+        std::fs::write(&detection, b"abc").expect("write");
+        std::fs::write(&recognition, b"abd").expect("write");
+        let parsed = args_from(&["--real-specimens", "--mrz-only"]);
+        let flags = vec!["--real-specimens".to_string(), "--mrz-only".to_string()];
+        let replay = ReplaySource {
+            run_manifest: "provider-bench-ocr-run-aa.json".to_string(),
+            run_manifest_sha256: "b".repeat(64),
+            ocr_arms: BTreeMap::new(),
+        };
+        let header_of = |replay: Option<&ReplaySource>| {
+            serde_json::to_value(archive_header(
+                &parsed,
+                &repo_root(),
+                &ArchiveRun {
+                    argv: &flags,
+                    documents_loaded: 1,
+                    labelled_loaded: 1,
+                    providers: vec!["mrz".to_string()],
+                    replay,
+                    model_paths: model_paths_report(replay.is_some(), &detection, &recognition),
+                    model_files: loaded_model_files(replay.is_some(), &detection, &recognition),
+                },
+            ))
+            .expect("serialize")
+        };
+        let live = header_of(None);
+        assert_eq!(
+            live["model_sha256"]["detection"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let other = live["model_sha256"]["recognition"]
+            .as_str()
+            .expect("a hash");
+        assert_eq!(other.len(), 64);
+        assert_ne!(
+            live["model_sha256"]["detection"],
+            live["model_sha256"]["recognition"]
+        );
+        let replayed = header_of(Some(&replay));
+        assert!(
+            replayed["model_sha256"].is_null(),
+            "a replay loads no model"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

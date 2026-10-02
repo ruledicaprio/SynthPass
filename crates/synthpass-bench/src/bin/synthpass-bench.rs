@@ -1215,7 +1215,22 @@ fn start_archive(
     let ArchivePlan::Root(dir) = plan else {
         return Archive::disabled();
     };
-    let header = archive::run_header(archive::HeaderInputs {
+    Archive::start(
+        dir,
+        &archive_header(parsed, root, argv, detection, recognition),
+    )
+}
+
+/// The header of this run's archive files: the run's scope, arms and the two model files it
+/// loaded, by path and by SHA-256 (hashed once, before the first seed).
+fn archive_header(
+    parsed: &Args,
+    root: &Path,
+    argv: &[String],
+    detection: &Path,
+    recognition: &Path,
+) -> archive::RunHeader {
+    archive::run_header(archive::HeaderInputs {
         binary_name: "synthpass-bench",
         repo: root,
         argv,
@@ -1239,9 +1254,10 @@ fn start_archive(
         providers: vec!["mrz".to_string()],
         ocr_arms: archive::ocr_arms_map(&synthpass_ocr::OcrArms::from_env()),
         model_paths: synthpass_bench::report::ModelPathsReport::resolve(detection, recognition),
+        // The files the engine was loaded from, hashed once before the first seed.
+        model_sha256: Some(archive::ModelSha256::of_files(detection, recognition)),
         replay_of: None,
-    });
-    Archive::start(dir, &header)
+    })
 }
 
 /// The line-1 prefix: the two fields that open every ICAO 9303 MRZ and that
@@ -2456,6 +2472,36 @@ mod tests {
         }
     }
 
+    /// The header records the SHA-256 of the two model files the run loaded, beside their paths.
+    #[test]
+    fn the_header_records_the_model_hashes() {
+        let dir =
+            std::env::temp_dir().join(format!("synthpass-bench-model-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (detection, recognition) = (
+            dir.join("text-detection.rten"),
+            dir.join("text-recognition.rten"),
+        );
+        std::fs::write(&detection, b"abc").expect("write");
+        let header = serde_json::to_value(archive_header(
+            &Args::default(),
+            Path::new("."),
+            &[],
+            &detection,
+            &recognition,
+        ))
+        .expect("serialize");
+        assert_eq!(
+            header["model_sha256"]["detection"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(
+            header["model_sha256"]["recognition"].is_null(),
+            "an unreadable file is a null for its key"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// An archive for a test run, with a real header (its git and binary facts included).
     fn test_archive(root: &Path) -> Archive {
         let header = archive::run_header(archive::HeaderInputs {
@@ -2482,6 +2528,7 @@ mod tests {
             providers: vec!["mrz".to_string()],
             ocr_arms: BTreeMap::new(),
             model_paths: synthpass_bench::report::ModelPathsReport::default(),
+            model_sha256: None,
             replay_of: None,
         });
         Archive::start(root, &header)

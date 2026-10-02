@@ -10,7 +10,8 @@ or more `CANDIDATE` runs of the treatment arm. It answers three questions, in th
                             [--track public|local] [--root DIR]
 
 1. **Comparable?** The runs must be the same experiment but for one declared arm: the same binary
-   (its SHA-256 recorded), models (compared by path until the header records hashes), scope, tracks,
+   (its SHA-256 recorded), models (the SHA-256 of each OCR model file; a live run must record both,
+   a replay loads none and is comparable only with replays of the same capture), scope, tracks,
    providers, `samples_data_sha`, corpus manifest and replay source; the same arms, environment,
    retry budget and pivot, except the declared treatment key, which must show the declared values;
    every document joined one to one on the image's SHA-256 (`archive_query.join_records`, then
@@ -277,6 +278,17 @@ def _differing_keys(a: object, b: object, prefix: str) -> list[str]:
     return [prefix]
 
 
+def _recorded_model_hashes(value: object) -> bool:
+    """Both OCR model hashes present, each 64 lowercase hex characters."""
+    return (
+        isinstance(value, dict)
+        and all(
+            isinstance(value.get(key), str) and len(value[key]) == 64 and all(c in "0123456789abcdef" for c in value[key])
+            for key in ("detection", "recognition")
+        )
+    )
+
+
 def header_failures(base: Named, other: Named, decl: Declaration) -> list[str]:
     """Every header fact on which `other` differs from `base`, or fails the declaration. Names the
     field and the run; never a value (a model path or a hash is not printed)."""
@@ -288,8 +300,17 @@ def header_failures(base: Named, other: Named, decl: Declaration) -> list[str]:
             failures.append(f"binary_sha256 is not recorded on {named.tag}")
     if a.get("binary_sha256") != b.get("binary_sha256"):
         failures.append(f"binary_sha256 differs: {other.tag} against {base.tag}")
-    if a.get("model_paths") != b.get("model_paths"):
-        failures.append(f"model_paths differ: {other.tag} against {base.tag}")
+    # The models are identified by the SHA-256 of their files, never by path: a path only says
+    # which machine ran them. A live run must record both hashes; a replay loads no model.
+    for named in (base, other):
+        if named.run.header.get("replay_of") is None and not _recorded_model_hashes(named.run.header.get("model_sha256")):
+            failures.append(f"model_sha256 not recorded on {named.tag}")
+    if a.get("model_sha256") != b.get("model_sha256"):
+        old, new = a.get("model_sha256"), b.get("model_sha256")
+        keys = [k for k in sorted(set(old) | set(new), key=str) if old.get(k) != new.get(k)] if isinstance(old, dict) and isinstance(new, dict) else [None]
+        for key in keys:
+            named_key = f" {key}:" if key else ""
+            failures.append(f"model_sha256 differs:{named_key} {other.tag} against {base.tag}")
     for field in EQUAL_FACTS:
         if a.get(field) != b.get(field):
             for key in _differing_keys(a.get(field), b.get(field), field):
@@ -501,7 +522,10 @@ def run_check(base_spec: str, candidate_specs: list[str], declare: Path, root_ar
         emit(f"REFUSED ({len(failures)} comparability failure(s))")
         return EXIT_REFUSED
     emit("comparable: yes")
-    emit("models: compared by path; the header records no hashes yet, so a replaced file under one path is not detected")
+    if isinstance(base.run.header.get("model_sha256"), dict):
+        emit("models: compared by SHA-256")
+    else:
+        emit("models: none loaded (replays of one capture)")
 
     # ---- safety vetoes
     vetoes: list[Veto] = []

@@ -31,8 +31,8 @@
 //! measures everything downstream of `OcrPage::text` and nothing upstream.
 
 use crate::archive::{
-    Archive, ArchiveTrack, DocRecord, OcrRecord, PrivateDocRecord, RetryStop, RetryVariant,
-    Sha256Hex, Tier1ReadRecord, ZoneClasses,
+    document_code_classes, Archive, ArchiveTrack, DocRecord, OcrRecord, PrivateDocRecord,
+    RetryStop, RetryVariant, Sha256Hex, Tier1ReadRecord, ZoneClasses,
 };
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
@@ -877,6 +877,11 @@ pub(crate) struct TruthComparison {
     pub(crate) compared_cells: Option<usize>,
     /// Where the differences are, by field ([`mrz_field_mismatch`]); needs a resolved format.
     pub(crate) field_mismatch: Option<FieldMismatch>,
+    /// The classes of the fixture's document code, the first two cells of line 1, in the
+    /// archive's symbols (`A<` for `P<`, `AA` for `PS`): [`document_code_classes`]. A class
+    /// string, never the code itself, and independent of what was recovered. Added after the
+    /// first three keys; the schema stays 1 because readers ignore keys they do not know.
+    pub(crate) code_cells: Option<String>,
 }
 
 /// [`TruthComparison`] of `recovered` against `truth`: `None` for a document with no
@@ -904,6 +909,7 @@ pub(crate) fn truth_comparison_of_zone(
         field_mismatch: recovered
             .zip(format)
             .and_then(|(zone, format)| mrz_field_mismatch(format, zone, truth)),
+        code_cells: Some(document_code_classes(truth)),
     })
 }
 
@@ -913,8 +919,8 @@ pub(crate) fn truth_comparison_of_zone(
 /// what the outcome ledger writes for the document. `tier1_zone` is the Tier-1 parse of the
 /// provider's own input (`None` when nothing parsed), `fields` the provider's values (`None`
 /// when the reader errored). The record holds the provider-input OCR text verbatim and never
-/// the fixture's text: a labelled specimen contributes [`TruthComparison`]'s counts and
-/// positions only. Nothing here can fail the run: [`Archive::record`] returns `()`.
+/// the fixture's text: a labelled specimen contributes [`TruthComparison`]'s counts, positions
+/// and the code's two cell classes only. Nothing here can fail the run: [`Archive::record`] returns `()`.
 #[allow(clippy::too_many_arguments)]
 fn archive_document(
     archive: &Archive,
@@ -5368,6 +5374,72 @@ mod tests {
         assert_eq!(mrz_zone_mismatch("ABC", "ABC\nDEF"), 3);
     }
 
+    /// The printed document code as classes (#664): the fixture's first two line-1 cells, as the
+    /// archive's class symbols, whatever was recovered.
+    #[test]
+    fn code_cells_are_the_classes_of_the_printed_codes_two_cells() {
+        let code_cells = |truth: Option<&str>, recovered: Option<&str>| {
+            truth_comparison_of_zone(recovered, truth, None).map(|t| t.code_cells)
+        };
+        for (truth, expected) in [
+            ("P<UTOERIKSSON<<ANNA<MARIA\nL898902C36UTO", "A<"),
+            ("I<UTOD231458907<<<<<<<<<<<<<<<\n7408122F", "A<"),
+            ("V<UTOERIKSSON<<ANNA<MARIA\nL8988901C4XXX", "A<"),
+            ("PSUTOERIKSSON<<ANNA<MARIA\nL898902C36UTO", "AA"),
+            ("POCHNLI<<NA<<<<<<<<<<<<<<<<<\nE12345678", "AA"),
+            ("IDFRABERTHIER\nL898902C36UTO", "AA"),
+            ("12UTO\nX", "99"),
+            ("\u{00e9}<UTO", "?<"),
+        ] {
+            assert_eq!(
+                code_cells(Some(truth), Some(truth)),
+                Some(Some(expected.to_string())),
+                "{expected}"
+            );
+            // The printed code does not depend on what was recovered.
+            assert_eq!(
+                code_cells(Some(truth), None),
+                Some(Some(expected.to_string())),
+                "{expected}, nothing recovered"
+            );
+            assert_eq!(
+                code_cells(Some(truth), Some("XX\nYY")),
+                Some(Some(expected.to_string())),
+                "{expected}, a different read"
+            );
+        }
+        // A one-character first line gives one symbol, an empty zone an empty string.
+        assert_eq!(code_cells(Some("P"), None), Some(Some("A".to_string())));
+        assert_eq!(code_cells(Some("<\nPS"), None), Some(Some("<".to_string())));
+        assert_eq!(code_cells(Some(""), None), Some(Some(String::new())));
+        // No hand-transcribed zone, no comparison at all.
+        assert_eq!(code_cells(None, Some("PS")), None);
+    }
+
+    /// The new key goes after the existing three, and the comparison still holds no zone text.
+    #[test]
+    fn a_truth_comparison_writes_code_cells_last_and_no_zone_text() {
+        let truth = "PSUTOERIKSSON<<ANNA<MARIA\nL898902C36UTO6908061F9406236ZE184226B<<<<<10";
+        let comparison =
+            truth_comparison_of_zone(Some(truth), Some(truth), Some("TD3")).expect("a comparison");
+        let json = serde_json::to_string(&comparison).expect("serialize");
+        let positions: Vec<usize> = [
+            "zone_mismatch",
+            "compared_cells",
+            "field_mismatch",
+            "code_cells",
+        ]
+        .iter()
+        .map(|key| json.find(&format!("\"{key}\"")).expect("key present"))
+        .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{json}");
+        assert!(json.ends_with(r#""code_cells":"AA"}"#), "{json}");
+        assert!(
+            !json.contains("ERIKSSON") && !json.contains("PSUTO"),
+            "{json}"
+        );
+    }
+
     /// A different character than `c`, with a different ICAO check-digit
     /// numeric value, staying inside the MRZ charset. `<` and `0` collide
     /// (both have check-digit value `0`), so a naive "next letter/digit"
@@ -6896,6 +6968,7 @@ mod tests {
             mrz_arms: BTreeMap::new(),
             pivot_yy: 26,
             model_paths: crate::report::ModelPathsReport::default(),
+            model_sha256: None,
             replay_of: None,
             env: BTreeMap::new(),
         }
@@ -7011,6 +7084,7 @@ mod tests {
         assert_eq!(hit["ocr"]["rotation"], 0);
         assert_eq!(hit["tier1_read"]["valid"], true);
         assert_eq!(hit["truth"]["zone_mismatch"], 0);
+        assert_eq!(hit["truth"]["code_cells"], "A<");
         let unlabelled = docs
             .iter()
             .find(|d| d["provider"] == "mrz" && d["name"] == "specimen-b")

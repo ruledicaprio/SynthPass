@@ -163,6 +163,10 @@ pub struct RunHeader {
     pub mrz_arms: BTreeMap<String, String>,
     pub pivot_yy: u32,
     pub model_paths: ModelPathsReport,
+    /// The SHA-256 of each OCR model file's bytes, from the same two paths `model_paths` names:
+    /// a model replaced under one path changes it. `null` for a replay, which loads no model
+    /// (its OCR came from the capture `replay_of` names). Always serialized.
+    pub model_sha256: Option<ModelSha256>,
     /// A replay's capture: its run-manifest file name and that file's SHA-256.
     pub replay_of: Option<ReplayOfRecord>,
     /// [`allowlisted_env`]: the allowlisted variables that are set, and only those.
@@ -229,6 +233,26 @@ pub struct RetryBudget {
     pub max_seconds: u64,
 }
 
+/// The SHA-256 of the two OCR model files a run loaded, in the shape the nightly's run header
+/// records (`bench_nightly_rows.py`'s `model_sha256`). A file that cannot be read is `null` for
+/// its key, never an error that stops the run (the rule `binary_sha256` follows).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModelSha256 {
+    pub detection: Option<String>,
+    pub recognition: Option<String>,
+}
+
+impl ModelSha256 {
+    /// The hashes of the files at the two paths the engine was loaded from.
+    pub fn of_files(detection: &Path, recognition: &Path) -> Self {
+        let hash = |path: &Path| std::fs::read(path).ok().map(|bytes| sha256_hex(&bytes));
+        Self {
+            detection: hash(detection),
+            recognition: hash(recognition),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ReplayOfRecord {
     pub run_manifest: String,
@@ -238,7 +262,8 @@ pub struct ReplayOfRecord {
 /// One document as one provider read it (Decision 5). Key set and order are pinned by tests.
 ///
 /// It holds the provider-input OCR text verbatim, so it is document content. It never holds
-/// the fixture's text: a labelled specimen carries mismatch counts and cell positions only.
+/// the fixture's text: a labelled specimen carries mismatch counts, cell positions and the
+/// classes of the printed document code's two cells only.
 #[derive(Debug, Serialize)]
 pub(crate) struct DocRecord<'a> {
     pub kind: &'static str,
@@ -408,6 +433,20 @@ impl ZoneClasses {
     }
 }
 
+/// The classes of a zone's document code, the first two cells of its first line, as the symbols
+/// [`CellClass::symbol`] writes (`P<` is `A<`, `PS` is `AA`): at most two symbols, fewer for a
+/// shorter line, none for an empty zone. The characters are mapped and dropped, so the result
+/// can go on every track (Decision 7 already admits [`ZoneClasses`]).
+pub(crate) fn document_code_classes(zone: &str) -> String {
+    zone.lines()
+        .next()
+        .unwrap_or_default()
+        .chars()
+        .take(2)
+        .map(|c| CellClass::of(c).symbol())
+        .collect()
+}
+
 impl Serialize for ZoneClasses {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_seq(
@@ -451,8 +490,8 @@ pub(crate) struct PrivateDocRecord<'a> {
     pub ocr_ms: u128,
     pub mrz_band_score: Option<f64>,
     pub rotation: u16,
-    /// Counts and cell positions against the fixture, never a character; `null` for an
-    /// unlabelled document.
+    /// Counts and cell positions against the fixture, and the classes of its document code's
+    /// two cells (`code_cells`), never a character; `null` for an unlabelled document.
     pub truth: Option<&'a TruthComparison>,
     /// The Tier-1 zone after repair; `null` when nothing parsed.
     pub zone_classes: Option<ZoneClasses>,
@@ -1031,6 +1070,8 @@ pub struct HeaderInputs<'a> {
     pub providers: Vec<String>,
     pub ocr_arms: BTreeMap<String, String>,
     pub model_paths: ModelPathsReport,
+    /// `None` for a replay.
+    pub model_sha256: Option<ModelSha256>,
     pub replay_of: Option<ReplayOfRecord>,
 }
 
@@ -1083,6 +1124,7 @@ pub fn run_header(inputs: HeaderInputs<'_>) -> RunHeader {
         mrz_arms: mrz_arms_map(),
         pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
         model_paths: inputs.model_paths,
+        model_sha256: inputs.model_sha256,
         replay_of: inputs.replay_of,
         env: process_env(),
     }
@@ -1461,7 +1503,7 @@ impl Archive {
 /// The record holds the provider-input OCR text, so it is document content like a
 /// [`DocRecord`] (synthetic text, but the same file format and the same rule: nothing here
 /// reaches stdout, stderr, `--out`, a dump or the ledger). It never holds the generator's own
-/// zone: `truth` carries mismatch counts and positions only.
+/// zone: `truth` carries mismatch counts, positions and the document code's two classes only.
 #[derive(Debug, Serialize)]
 struct SyntheticDocRecord<'a> {
     kind: &'static str,
@@ -1612,6 +1654,10 @@ mod tests {
             mrz_arms: BTreeMap::from([("class_sweep".to_string(), "off".to_string())]),
             pivot_yy: 26,
             model_paths: ModelPathsReport::default(),
+            model_sha256: Some(ModelSha256 {
+                detection: Some("a".repeat(64)),
+                recognition: Some("b".repeat(64)),
+            }),
             replay_of: None,
             env: BTreeMap::new(),
         }
@@ -2115,6 +2161,47 @@ mod tests {
     }
 
     #[test]
+    fn a_private_records_truth_carries_the_code_as_classes_only() {
+        let h = header(1_000_000_000_000);
+        let truth = TruthComparison {
+            zone_mismatch: Some(2),
+            compared_cells: Some(88),
+            field_mismatch: None,
+            code_cells: Some(document_code_classes(
+                "PSUTOSECRETSURNAME<<GIVEN\nL898902C36",
+            )),
+        };
+        let json = serde_json::to_string(&private_record(&h.run_id, Some(&truth))).expect("JSON");
+        let value: serde_json::Value = serde_json::from_str(&json).expect("JSON");
+        assert_eq!(
+            value["truth"],
+            serde_json::json!({
+                "zone_mismatch": 2,
+                "compared_cells": 88,
+                "field_mismatch": null,
+                "code_cells": "AA"
+            })
+        );
+        assert!(!json.contains("PS") && !json.contains("SECRET"), "{json}");
+    }
+
+    #[test]
+    fn a_document_code_is_written_as_at_most_two_class_symbols() {
+        for (zone, expected) in [
+            ("P<UTOX\nY", "A<"),
+            ("PSUTOX", "AA"),
+            ("I<UTO", "A<"),
+            ("1<", "9<"),
+            ("\u{00e9}Z", "?A"),
+            ("P", "A"),
+            ("", ""),
+            ("\nPS", ""),
+        ] {
+            assert_eq!(document_code_classes(zone), expected, "{zone:?}");
+        }
+    }
+
+    #[test]
     fn a_zone_is_written_as_classes_and_never_as_characters() {
         // Letter, digit, filler, a lowercase letter (still a letter), a non-ASCII letter and a
         // symbol (both "other"), and a last line shorter than the first.
@@ -2236,6 +2323,8 @@ mod tests {
         assert!(private_json["argv"].is_null(), "{private}");
         // The same run: the same id, and every other key equal, in the same order.
         assert_eq!(private_json["run_id"], public_json["run_id"]);
+        assert_eq!(private_json["model_sha256"], public_json["model_sha256"]);
+        assert!(private_json["model_sha256"]["detection"].is_string());
         assert_eq!(ordered_keys(&private), ordered_keys(&public));
         let mut without_argv = public_json.clone();
         without_argv["argv"] = serde_json::Value::Null;
@@ -2396,6 +2485,7 @@ mod tests {
                 "mrz_arms",
                 "pivot_yy",
                 "model_paths",
+                "model_sha256",
                 "replay_of",
                 "env",
             ]
@@ -2410,6 +2500,67 @@ mod tests {
         );
         // A different start is a different run.
         assert_ne!(h.run_id, header(1_000_000_000_001).run_id);
+    }
+
+    /// The SHA-256 of `abc`, a published test vector.
+    const SHA256_OF_ABC: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+    #[test]
+    fn model_hashes_are_the_sha256_of_each_files_bytes() {
+        let dir = scratch("model-hashes");
+        let (detection, recognition) = (dir.join("det.rten"), dir.join("rec.rten"));
+        std::fs::write(&detection, b"abc").expect("write");
+        std::fs::write(&recognition, b"").expect("write");
+        let hashes = ModelSha256::of_files(&detection, &recognition);
+        assert_eq!(hashes.detection.as_deref(), Some(SHA256_OF_ABC));
+        // The SHA-256 of no bytes.
+        assert_eq!(
+            hashes.recognition.as_deref(),
+            Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_unreadable_model_file_is_a_null_for_its_key_and_never_an_error() {
+        let dir = scratch("model-hashes-missing");
+        let present = dir.join("det.rten");
+        std::fs::write(&present, b"abc").expect("write");
+        let missing = dir.join("nothing.rten");
+        let hashes = ModelSha256::of_files(&present, &missing);
+        assert_eq!(hashes.detection.as_deref(), Some(SHA256_OF_ABC));
+        assert_eq!(hashes.recognition, None);
+        let json = serde_json::to_value(&hashes).expect("serialize");
+        assert!(json["recognition"].is_null(), "the key is present and null");
+        // A directory where a file should be is unreadable too.
+        assert_eq!(ModelSha256::of_files(&dir, &dir).detection, None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_header_carries_the_hashes_and_a_replay_carries_null() {
+        let live = serde_json::to_value(header(1_000_000_000_000)).expect("serialize");
+        assert_eq!(live["model_sha256"]["detection"], "a".repeat(64));
+        assert_eq!(live["model_sha256"]["recognition"], "b".repeat(64));
+        let mut replay = header(1_000_000_000_000);
+        replay.model_sha256 = None;
+        let json = serde_json::to_string(&replay.with_run_id()).expect("serialize");
+        assert!(
+            json.contains(r#""model_sha256":null"#),
+            "always serialized: {json}"
+        );
+    }
+
+    #[test]
+    fn two_headers_that_differ_only_in_one_model_hash_have_different_run_ids() {
+        let a = header(1_000_000_000_000);
+        let mut b = header(1_000_000_000_000);
+        assert_eq!(a.run_id, b.run_id, "the fixture is deterministic");
+        b.model_sha256 = Some(ModelSha256 {
+            detection: Some("c".repeat(64)),
+            recognition: Some("b".repeat(64)),
+        });
+        assert_ne!(a.run_id, b.with_run_id().run_id);
     }
 
     #[test]
