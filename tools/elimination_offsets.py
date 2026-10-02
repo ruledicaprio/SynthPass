@@ -41,17 +41,21 @@ def _integer(value: Any) -> bool:
 
 
 def _pearson(a: list[float], b: tuple[int, ...]) -> float | None:
-    if len(a) != len(b) or not a:
+    if len(a) != len(b) or not a or max(a) == min(a) or max(b) == min(b):
         return None
-    ma = sum(a) / len(a)
-    mb = sum(b) / len(b)
+    ma = math.fsum(a) / len(a)
+    mb = math.fsum(b) / len(b)
     da = [x - ma for x in a]
     db = [x - mb for x in b]
-    va = sum(x * x for x in da)
-    vb = sum(x * x for x in db)
+    va = math.fsum(x * x for x in da)
+    vb = math.fsum(x * x for x in db)
     if va == 0.0 or vb == 0.0:
         return None
-    return sum(x * y for x, y in zip(da, db)) / math.sqrt(va * vb)
+    return math.fsum(x * y for x, y in zip(da, db)) / math.sqrt(va * vb)
+
+
+def _step_is_expected(step: float | None, pitch_px: float) -> bool:
+    return step is None or step < pitch_px
 
 
 def _correlations(rises: list[float], template: tuple[int, ...]) -> list[float | None]:
@@ -108,17 +112,20 @@ def read_cells(path: str | Path) -> tuple[dict[str, Any], dict[tuple[str, int, f
         header = head_obj["header"]
         if header.get("tool") != "elimination_probe":
             raise InputError(1, "expected elimination_probe header")
-        for key in ("fractions", "steps_px_per_cell"):
+        for key in ("fractions", "steps_px_per_cell", "bins"):
             if key not in header:
                 raise InputError(1, f"header missing {key}")
         fractions = header["fractions"]
         steps = header["steps_px_per_cell"]
+        bin_count = header["bins"]
         if not isinstance(fractions, list) or not fractions or not all(_number(x) for x in fractions):
             raise InputError(1, "header fractions must be a non-empty array of finite numbers")
         if not isinstance(steps, list) or not all(_number(x) and x > 0 for x in steps):
             raise InputError(1, "header steps_px_per_cell must be an array of positive finite numbers")
         if len(set(steps)) != len(steps):
             raise InputError(1, "header steps_px_per_cell contains duplicates")
+        if not _integer(bin_count) or bin_count <= 0:
+            raise InputError(1, "header bins must be a positive integer")
         for key in ("main", "located", "documents"):
             if key not in header:
                 raise InputError(1, f"header missing {key}")
@@ -180,8 +187,8 @@ def read_cells(path: str | Path) -> tuple[dict[str, Any], dict[tuple[str, int, f
             if not isinstance(rise, list) or len(rise) != len(fractions) or not all(_number(x) for x in rise):
                 raise InputError(number, "rise must have one finite number per fraction")
             bins = row["bins"]
-            if not isinstance(bins, list) or len(bins) != 8 or not all(_number(x) for x in bins):
-                raise InputError(number, "bins must have eight finite numbers")
+            if not isinstance(bins, list) or len(bins) != bin_count or not all(_number(x) for x in bins):
+                raise InputError(number, f"bins must have {bin_count} finite numbers")
             if not _number(row["left_quarter"]):
                 raise InputError(number, "left_quarter must be a finite number")
 
@@ -233,7 +240,7 @@ def analyze(header: dict[str, Any], groups: dict[tuple[str, int, float | None], 
         template = TEMPLATE_B if shape == "3x30" else TEMPLATE_A
         true_offset = 0 if shape == "3x30" else 10
         classes = [info["classes"][i] for i in range(width)]
-        expected_steps: list[float | None] = [None] + [s for s in steps if s < info["pitch_px"]]
+        expected_steps: list[float | None] = [None] + [s for s in steps if _step_is_expected(s, info["pitch_px"])]
         expected_by_line[(doc, line)] = expected_steps
         for fi, fraction in enumerate(fraction_values):
             by_step: list[tuple[float, bool]] = []
@@ -292,7 +299,7 @@ def markdown_report(header: dict[str, Any], summary: dict[str, Any], lines: list
                     "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"])
         any_step = False
         for step in step_values:
-            eligible = [key for key in source_lines if step is None or step < details["line_info"][key]["pitch_px"]]
+            eligible = [key for key in source_lines if _step_is_expected(step, details["line_info"][key]["pitch_px"])]
             if not eligible:
                 continue
             any_step = True
@@ -315,7 +322,8 @@ def markdown_report(header: dict[str, Any], summary: dict[str, Any], lines: list
                     "| --- | --- | ---: | ---: | ---: | ---: |"])
         misses = [v for v in lines if v["fraction"] == fraction and v["step_px_per_cell"] is None and not v["hit"]]
         for v in misses:
-            out.append(f"| {v['document']} | {v['shape']} | {_fmt(v['rank'])} | {_fmt(v['margin'])} | {_fmt(v['adjacent_margin'])} | {v['disagreeing']} |")
+            rank = "-" if v["rank"] is None else str(v["rank"])
+            out.append(f"| {v['document']} | {v['shape']} | {rank} | {_fmt(v['margin'])} | {_fmt(v['adjacent_margin'])} | {v['disagreeing']} |")
         if not misses:
             out.append("| - | - | - | - | - | - |")
         out.append("")

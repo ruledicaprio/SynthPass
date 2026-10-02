@@ -129,16 +129,18 @@ class EliminationOffsetTests(unittest.TestCase):
         self.assertEqual(len(lines), 5 * 2)
 
     def test_nonexpected_steps_are_ignored_and_missing_step_breaks_floor(self):
-        short = HEADER | {"steps_px_per_cell": [20.0, 16.0, 13.0, 12.0]}
         rows = motif("2x44", 10, pitch=12.0)
+        rows += motif("2x44", 10, step=11.0, pitch=12.0)
         with tempfile.TemporaryDirectory() as td:
-            _, lines, floors, details = read_analyze(Path(td) / "short.jsonl", rows, short)
+            _, lines, floors, details = read_analyze(Path(td) / "standard.jsonl", rows)
             summary = {"line2_by_shape": {"2x44": 1, "2x36": 0, "3x30": 0}, "skipped_lines": 0}
-            report = eo.markdown_report(short, summary, lines, floors, details)
-        self.assertEqual(len(lines), 2)  # only native is expected
-        self.assertEqual(floors[0]["floor"], 12.0)
-        self.assertEqual(details["expected_by_line"][("doc-A", 2)], [None])
-        self.assertNotIn("| 12.000 |", report)
+            report = eo.markdown_report(HEADER, summary, lines, floors, details)
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(floors[0]["floor"], 11.0)
+        self.assertEqual(details["expected_by_line"][("doc-A", 2)], [None, 11.0])
+        self.assertIn("| 11.000 |", report)
+        for step in (20, 16, 13):
+            self.assertNotIn(f"| {step}.000 |", report)
 
         rows = motif("2x44", 10, step=None) + motif("2x44", 10, step=20.0)
         rows += motif("2x44", 10, step=13.0) + motif("2x44", 10, step=11.0)
@@ -147,15 +149,20 @@ class EliminationOffsetTests(unittest.TestCase):
         self.assertEqual(floors[0]["floor"], 20.0)
 
     def test_native_miss_has_no_floor_and_disagreeing_and_skipped_lines(self):
-        rows = motif("2x44", 11, line=2) + motif("2x44", 10, line=1) + motif("2x44", 10, line=3)
-        rows = motif("3x30", 1, line=2, disagree=True, class_offset=0)
-        rows += motif("3x30", 0, line=1) + motif("3x30", 0, line=3)
+        rows = motif("2x44", 11, doc="doc-A", line=2)
+        rows += motif("2x44", 10, doc="doc-A", line=1)
+        rows += motif("3x30", 1, doc="doc-B", line=2, disagree=True, class_offset=0)
+        rows += motif("3x30", 0, doc="doc-B", line=1) + motif("3x30", 0, doc="doc-B", line=3)
         with tempfile.TemporaryDirectory() as td:
-            summary, lines, floors, _ = read_analyze(Path(td) / "cells.jsonl", rows)
+            summary, lines, floors, details = read_analyze(Path(td) / "cells.jsonl", rows)
+            report = eo.markdown_report(HEADER, summary, lines, floors, details)
         self.assertEqual(floors, [])
-        self.assertEqual(summary["skipped_lines"], 2)
-        native = next(x for x in lines if x["line"] == 2)
+        self.assertEqual(summary["skipped_lines"], 3)
+        native = next(x for x in lines if x["document"] == "doc-B" and x["line"] == 2)
         self.assertEqual(native["disagreeing"], 2)
+        for miss in (x for x in lines if x["step_px_per_cell"] is None):
+            self.assertIn(f"| {miss['document']} | {miss['shape']} | {miss['rank']} |", report)
+            self.assertNotIn(f"| {miss['document']} | {miss['shape']} | {miss['rank']}.000 |", report)
 
     def test_report_json_and_even_median(self):
         rows = motif("2x44", 10, doc="doc-B") + motif("3x30", 0, doc="doc-A")
@@ -179,53 +186,84 @@ class EliminationOffsetTests(unittest.TestCase):
         self.assertEqual(parsed["input"]["line2_by_shape"]["2x44"], 1)
         self.assertEqual([x["document"] for x in parsed["lines"][:2]], ["doc-A", "doc-A"])
 
+    def test_bins_follow_positive_header_count(self):
+        header = HEADER | {"bins": 3}
+        rows = motif("2x44", 10)
+        for row in rows:
+            row["bins"] = [0.25, 0.5, 0.25]
+        with tempfile.TemporaryDirectory() as td:
+            path = write_input(Path(td) / "three-bins.jsonl", rows, header)
+            eo.read_cells(path)
+            rows[0]["bins"].append(0.0)
+            write_input(path, rows, header)
+            with self.assertRaises(eo.InputError) as raised:
+                eo.read_cells(path)
+        self.assertEqual(raised.exception.problem, "bins must have 3 finite numbers")
+
     def test_validation_errors_exit_two_once_without_traceback(self):
         base = motif("2x44", 10)
-        cases: list[tuple[str, str, list[str] | None, dict | None]] = []
-        cases.append(("empty", "", None, None))
-        cases.append(("wrong-header", json.dumps({"header": {"tool": "other"}}) + "\n", None, None))
-        cases.append(("header-array", json.dumps({"header": {"tool": "elimination_probe", "steps_px_per_cell": []}}) + "\n", None, None))
-        cases.append(("header-steps", json.dumps({"header": {"tool": "elimination_probe", "fractions": [0.02]}}) + "\n", None, None))
-        cases.append(("bad-json", json.dumps({"header": HEADER}) + "\n{bad\n", None, None))
-        cases.append(("invalid-utf8", "\xff", None, None))
+        cases: list[tuple[str, str, list[str] | None, dict | None, str]] = []
+        cases.append(("empty", "", None, None, "empty file"))
+        cases.append(("wrong-header", json.dumps({"header": {"tool": "other"}}) + "\n", None, None,
+                      "expected elimination_probe header"))
+        cases.append(("header-array", json.dumps({"header": {"tool": "elimination_probe", "steps_px_per_cell": []}}) + "\n", None, None,
+                      "header missing fractions"))
+        cases.append(("header-steps", json.dumps({"header": {"tool": "elimination_probe", "fractions": [0.02]}}) + "\n", None, None,
+                      "header missing steps_px_per_cell"))
+        missing_bins = dict(HEADER)
+        del missing_bins["bins"]
+        cases.append(("header-missing-bins", json.dumps({"header": missing_bins}) + "\n", None, None,
+                      "header missing bins"))
+        cases.append(("header-bins", json.dumps({"header": HEADER | {"bins": 0}}) + "\n", None, None,
+                      "header bins must be a positive integer"))
+        cases.append(("bad-json", json.dumps({"header": HEADER}) + "\n{bad\n", None, None, "invalid JSON row"))
+        cases.append(("invalid-utf8", "\xff", None, None, "file is not valid UTF-8"))
         missing = [dict(r) for r in base]
         del missing[0]["class"]
-        cases.append(("missing-key", "", missing, None))
+        cases.append(("missing-key", "", missing, None, "row missing class"))
         wrong_type = [dict(r) for r in base]
         wrong_type[0]["pitch_px"] = "22"
-        cases.append(("wrong-type", "", wrong_type, None))
-        for field, bad_value in (("document", 7), ("line", "2"), ("column", False),
-                                 ("step_px_per_cell", True), ("top", "0.1"),
-                                 ("bottom", None), ("rise", 0.1), ("bins", "bins"),
-                                 ("left_quarter", "0.25")):
+        cases.append(("wrong-type", "", wrong_type, None, "pitch_px must be a positive finite number"))
+        for field, bad_value, problem in (
+                ("document", 7, "document must be a non-empty string"),
+                ("line", "2", "line is outside the shape"),
+                ("column", False, "column is outside the shape"),
+                ("step_px_per_cell", True, "step_px_per_cell is not in the header"),
+                ("top", "0.1", "top must have one finite number per fraction"),
+                ("bottom", None, "bottom must have one finite number per fraction"),
+                ("rise", 0.1, "rise must have one finite number per fraction"),
+                ("bins", "bins", "bins must have 8 finite numbers"),
+                ("left_quarter", "0.25", "left_quarter must be a finite number")):
             malformed = [dict(r) for r in base]
             malformed[0][field] = bad_value
-            cases.append((f"type-{field}", "", malformed, None))
+            cases.append((f"type-{field}", "", malformed, None, problem))
         bad_rise = [dict(r) for r in base]
         bad_rise[0]["rise"] = [0.0]
-        cases.append(("rise-length", "", bad_rise, None))
+        cases.append(("rise-length", "", bad_rise, None, "rise must have one finite number per fraction"))
         bad_shape = [dict(r) for r in base]
         bad_shape[0]["shape"] = []
-        cases.append(("shape", "", bad_shape, None))
+        cases.append(("shape", "", bad_shape, None, "unknown shape"))
         bad_class = [dict(r) for r in base]
         bad_class[0]["class"] = "punctuation"
-        cases.append(("class", "", bad_class, None))
+        cases.append(("class", "", bad_class, None, "unknown class"))
         bad_step = [dict(r) for r in base]
         bad_step[0]["step_px_per_cell"] = 7.0
-        cases.append(("unknown-step", "", bad_step, None))
+        cases.append(("unknown-step", "", bad_step, None, "step_px_per_cell is not in the header"))
         high_step = [dict(r) for r in motif("2x44", 10, step=20.0, pitch=20.0)]
-        cases.append(("step-at-pitch", "", high_step, None))
+        cases.append(("step-at-pitch", "", high_step, None, "step_px_per_cell must be below pitch_px"))
         bad_col = [dict(r) for r in base]
         bad_col[0]["column"] = 44
-        cases.append(("column", "", bad_col, None))
-        cases.append(("duplicate", "", base + [dict(base[0])], None))
-        cases.append(("missing-column", "", base[:-1], None))
-        cases.append(("two-shapes", "", base + motif("3x30", 0), None))
+        cases.append(("column", "", bad_col, None, "column is outside the shape"))
+        cases.append(("duplicate", "", base + [dict(base[0])], None,
+                      "duplicate (document, line, step, column)"))
+        cases.append(("missing-column", "", base[:-1], None,
+                      "(document, line, step) is missing columns for doc-A line 2"))
+        cases.append(("two-shapes", "", base + motif("3x30", 0), None, "document has two shapes"))
         two_pitch = base + motif("2x44", 10, step=20.0, pitch=21.0)
         two_pitch[-1]["pitch_px"] = 23.0
-        cases.append(("two-pitches", "", two_pitch, None))
+        cases.append(("two-pitches", "", two_pitch, None, "line has two pitch_px values"))
         with tempfile.TemporaryDirectory() as td:
-            for label, raw, rows, header in cases:
+            for label, raw, rows, header, expected_problem in cases:
                 with self.subTest(label=label):
                     path = Path(td) / f"{label}.jsonl"
                     if raw == "\xff":
@@ -241,6 +279,10 @@ class EliminationOffsetTests(unittest.TestCase):
                     self.assertEqual(len(proc.stderr.splitlines()), 1, proc.stderr)
                     self.assertIn(str(path), proc.stderr)
                     self.assertNotIn("Traceback", proc.stderr)
+                    location, separator, problem = proc.stderr.rstrip().removeprefix(f"{path}:").partition(": ")
+                    self.assertTrue(separator, proc.stderr)
+                    self.assertTrue(location.isdigit(), proc.stderr)
+                    self.assertEqual(problem, expected_problem)
 
     def test_cli_usage_and_file_errors_are_single_line(self):
         for argv in ([], ["a", "b"], ["--bad", "a"]):
