@@ -469,3 +469,61 @@ download the models (`f15cfb56bd02…` for detection, `e484866d4cce…` for reco
 deliberate breaks of the two readers each turned a test red before they were restored, and both
 tool suites passed at the PR's head. The PR's real-specimen gate showed 0 documents changed
 outcome (Observed, 2026-10-01, at #670's `81d5cba`).
+
+## Amendment 7 (2026-10-02) — the printed document code as classes in `truth` (#677)
+
+**Status of this amendment:** Proposed. It records what
+[#677](https://github.com/ruledicaprio/SynthPass/pull/677) added to a labelled document's truth
+comparison for [#664](https://github.com/ruledicaprio/SynthPass/issues/664)'s witness matrix, and
+what its review settled; it changes no decision's intent.
+
+### Why
+
+#664 asks, before any `P<` repair is proposed, what the document code was *printed* as against what
+was *read*. The archive could answer only the second half: `TruthComparison` carried mismatch counts
+and cell positions (Decision 5), never anything about the fixture's own code, so the printed side had
+to come from outside the archive — and the obvious fix, storing the two characters, is exactly what
+Decision 5 forbids.
+
+### What #677 settled
+
+1. **`code_cells`, directly after `field_mismatch`:** the class symbols of the first two cells of
+   the hand-transcribed zone's first line, as [`CellClass::symbol`](../../crates/synthpass-bench/src/archive.rs) already writes them (`A` letter,
+   `9` digit, `<` filler, `?` other). `P<`, `I<` and `V<` give `A<`; `PS`, `PO` and `ID` give `AA`.
+   At most two symbols, fewer for a shorter first line, an empty string for an empty zone.
+2. **It is a class string, never the code**, so it rides every track. The characters are mapped and
+   dropped inside `document_code_classes`, so no character of the fixture survives the call —
+   Decision 7 already admits class symbols on the private track for `ZoneClasses`, and the same
+   argument carries here. `TruthComparison` reaches the public `DocRecord`, the private
+   `PrivateDocRecord` and the synthetic record, and all three doc comments were widened from
+   "mismatch counts and cell positions only" rather than left to contradict the new key.
+3. **The printed class, not the read.** It is computed from the fixture alone and does not depend on
+   what was recovered, which is the property the matrix rests on: the same value whether the read
+   matched, nothing parsed, or a different zone was read. A document with no hand-transcribed zone
+   has no `TruthComparison` at all, so there is nothing to write.
+4. **The schema stays 1**, on Amendment 6's precedent: readers ignore keys they do not know, a file
+   written before #677 has no key, and the test that pins the comparison's key set and order
+   includes it.
+5. **The reader:** `tools/archive_query.py codes RUN [RUN2]`, read-only and standard library only.
+   It prints, per provider and format, the printed class against the observed class (the first two
+   cells of the Tier-1 read after repair, `unread` when nothing parsed), the `document_type` entry of
+   `field_correctness` per printed class, and for the documents whose observed class differs the
+   `retry_variant_id` and `retry_stop` counts. It names the asset ids of `public`, `covers` and
+   `synthetic` records only: a `local` or private record is counted and never named. `codes` is the
+   first reader that also reads a private run's `private_doc` records, which hold class symbols, a
+   provider, a format and a SHA-256 and never text (Amendment 5, Decision 7). With `RUN2` it prints
+   both matrices and the documents whose observed class changed, refusing two runs that are not
+   comparable on the same facts `tools/promotion_gate.py` requires, exit 2.
+
+### The evidence
+
+Twenty-two tool tests and four Rust tests were added, among them the key-order pin, a sentinel that
+no character of a zone or a fixture is printed by any `codes` output, one that a retry fact outside
+its closed set is not printed, one that a local record is counted and never named, and one that the
+other commands still ignore `private_doc` records after `read_run` was widened to read them. The
+review derived the disclosure path independently: `codes` reads an asset id only for a record whose
+`kind` is `doc` and whose track is allowed, so the id never enters the row for a private or local
+record. All 16 checks passed at the PR's head, including the real-specimen gate with 0 documents
+changed outcome (Observed, 2026-10-02, at #677's `ca01153`). The first real-specimen matrix it
+produced is the dated finding
+[#678](https://github.com/ruledicaprio/SynthPass/pull/678); the numbers live there, not here.
