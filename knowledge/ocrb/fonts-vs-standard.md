@@ -75,6 +75,10 @@ assumes a cap of 2.46 mm.
   - The glyph shapes are close enough on digits, letters and stroke.
   - The two corrections the standard supports are:
     - raise `<` by about 0.025-0.03 cap, about 22-27 units on the vendored font's 885-unit cap;
+      *Tried 2026-09-29 as a render-time offset
+      ([#604](https://github.com/ruledicaprio/SynthPass/pull/604)) and closed unmerged 2026-10-01; the
+      vendored position stays. See the
+      [2026-10-02 `FINDINGS.md` entry](../benchmarks/FINDINGS.md#2026-10-02--604-the-filler--drawn-0025-cap-higher-at-render-time-the-move-is-054-px-synthetic-filler-reads-fall-and-the-pr-is-closed-unmerged).*
     - fix the **cell width**, which was a layout bug, not a font bug. *Corrected 2026-09-28
       ([#411](https://github.com/ruledicaprio/SynthPass/issues/411)):* the generator's old
       1.119 cap cell (8% wider than ISO's pitch of 1.033, 9% wider than real print's 1.024) is
