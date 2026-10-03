@@ -1472,7 +1472,7 @@ fn evaluate_render(
     let prefix_len = ctx.cells.iter().copied().max().map_or(0, |c| c + 1);
     let lines = ctx
         .engine
-        .recognize_text(&input, &[vec![rect.clone()]])
+        .recognize_text(&input, &[vec![rect]])
         .map_err(|e| format!("beam recognition failed: {e}"))?;
     let beam_text = lines
         .into_iter()
@@ -1511,7 +1511,7 @@ fn self_check(
     let matrix = oracle_matrix(greedy_engine, &input, raw_model, &rect)?;
     let mine = greedy_text(&matrix);
     let lines = greedy_engine
-        .recognize_text(&input, &[vec![rect.clone()]])
+        .recognize_text(&input, &[vec![rect]])
         .map_err(|e| format!("self-check: ocrs greedy read failed: {e}"))?;
     let theirs = lines
         .into_iter()
@@ -1725,6 +1725,7 @@ fn build_summary(
 /// `summary.json`. A test checks the emitted keys against it, so a new field
 /// has to be added here on purpose, and nothing that looks like text, a
 /// path, or a per-seed row in the summary can slip in unnoticed.
+#[cfg(test)]
 const ALLOWED_KEYS: &[&str] = &[
     // header
     "type",

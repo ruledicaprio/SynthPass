@@ -94,25 +94,6 @@ pub fn ctc_char(label: usize) -> Option<char> {
     }
 }
 
-#[cfg(test)]
-mod ctc_alphabet_tests {
-    use super::*;
-
-    /// Pins the three labels the probes' items 2/3 depend on against an
-    /// accidental edit of this copy — if this ever fails, every downstream
-    /// number reads the wrong class index. It compares the copy with itself,
-    /// so it does not detect an upstream `ocrs` alphabet change; see
-    /// [`CTC_ALPHABET`]'s doc comment for what does.
-    #[test]
-    fn labels_match_the_verified_ocrs_alphabet() {
-        assert_eq!(CTC_ALPHABET.chars().count(), 96, "97 classes = 96 + blank");
-        assert_eq!(ctc_char(CTC_LABEL_FILLER), Some('<'));
-        assert_eq!(ctc_char(CTC_LABEL_EUR_E), Some('E'));
-        assert_eq!(ctc_char(CTC_LABEL_LETTER_E), Some('E'));
-        assert_eq!(ctc_char(CTC_BLANK_LABEL), None);
-    }
-}
-
 // ---------------------------------------------------------------------
 // Engine loading
 // ---------------------------------------------------------------------
@@ -266,4 +247,23 @@ pub fn timestep_range(
         t1 = t0 + 1;
     }
     (t0, t1)
+}
+
+#[cfg(test)]
+mod ctc_alphabet_tests {
+    use super::*;
+
+    /// Pins the three labels the probes' items 2/3 depend on against an
+    /// accidental edit of this copy — if this ever fails, every downstream
+    /// number reads the wrong class index. It compares the copy with itself,
+    /// so it does not detect an upstream `ocrs` alphabet change; see
+    /// [`CTC_ALPHABET`]'s doc comment for what does.
+    #[test]
+    fn labels_match_the_verified_ocrs_alphabet() {
+        assert_eq!(CTC_ALPHABET.chars().count(), 96, "97 classes = 96 + blank");
+        assert_eq!(ctc_char(CTC_LABEL_FILLER), Some('<'));
+        assert_eq!(ctc_char(CTC_LABEL_EUR_E), Some('E'));
+        assert_eq!(ctc_char(CTC_LABEL_LETTER_E), Some('E'));
+        assert_eq!(ctc_char(CTC_BLANK_LABEL), None);
+    }
 }

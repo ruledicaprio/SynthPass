@@ -603,6 +603,7 @@ fn unentitled_requests_text(batch: u64, metrics: u64) -> String {
     out
 }
 
+#[allow(clippy::result_large_err)] // ApiError is the whole HTTP response, built once per failed request
 async fn extract(
     State(state): State<Arc<AppState>>,
     Query(params): Query<HashMap<String, String>>,
@@ -748,6 +749,7 @@ async fn cleanup(state: &AppState, paths: &[&PathBuf]) {
 /// once per process. Reuses `queue_full_error`/`api_error` so the refusals
 /// that remain (queue-full, expired license) are shaped identically to
 /// every other endpoint's.
+#[allow(clippy::result_large_err)] // ApiError is the whole HTTP response, built once per failed request
 async fn extract_batch(
     State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
@@ -863,6 +865,7 @@ async fn extract_batch(
 /// submit a batch has no legitimate use for its results", but that gate
 /// existed only to back the submit endpoint's 403, which no longer refuses
 /// anything.
+#[allow(clippy::result_large_err)] // ApiError is the whole HTTP response, built once per failed request
 async fn get_job(
     State(state): State<Arc<AppState>>,
     AxumPath(raw_id): AxumPath<String>,
