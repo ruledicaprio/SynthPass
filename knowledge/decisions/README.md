@@ -44,7 +44,7 @@ the record.
 | [0011](ADR-0011-split-m6-packaging-into-m8.md) | Split M6: the deterministic core keeps the number, packaging becomes M8 | Accepted (amended 2026-09-16, 2026-09-17, 2026-09-27) |
 | [0012](ADR-0012-cover-only-specimens-are-a-labelled-class.md) | Cover-only specimens are a labelled class, not a drop | Accepted (amended 2026-09-15) |
 | [0013](ADR-0013-names-are-scored-against-mrz-form-truth.md) | Name accuracy is a separate axis, scored only against MRZ-form truth | Accepted |
-| [0014](ADR-0014-per-cell-ocrb-classification.md) | `mrz-cell`: per-cell OCR-B classification for the MRZ band, as a benchmark-first prototype | Proposed |
+| [0014](ADR-0014-per-cell-ocrb-classification.md) | `mrz-cell`: per-cell OCR-B classification for the MRZ band, as a benchmark-first prototype | Proposed (amended 2026-10-01) |
 | [0015](ADR-0015-geometric-mrz-band-location.md) | `mrz-locate`: find the MRZ band by geometry, before recognition | Proposed (amended 2026-09-24, 2026-09-28, 2026-10-01) |
 | [0016](ADR-0016-card-backs-declare-recoverable-fields.md) | Which fields a document side may be scored on | Accepted |
 | [0017](ADR-0017-checks-distinguish-absent-from-verified.md) | `Checks` must distinguish "absent" from "verified" | Accepted (amended 2026-09-22) |
@@ -54,7 +54,7 @@ the record.
 | [0021](ADR-0021-fixed-grid-mrz-strips.md) | Fixed-grid MRZ strips: check-anchor alignment with an explicit ambiguity outcome | Proposed (amended 2026-09-24, 2026-10-01) |
 | [0022](ADR-0022-declarative-layout-plugins.md) | Declarative layout plugins: a closed, geometry-only schema, checked at load time | Proposed |
 | [0023](ADR-0023-cli-output-contract.md) | The CLI's output contract: `--json`, and stdout/stderr for everything else | Accepted (2026-09-26) |
-| [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27; amended 2026-09-29) |
+| [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27; amended 2026-09-29, 2026-10-01) |
 | [0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) | Tier 1 reads a single OCR pass only when two passes agree | Proposed (not adopted by #550; 2026-10-01 note) |
 | [0026](ADR-0026-covered-cells-are-occluded.md) | Covered MRZ cells are reported as `occluded`, never as text | Accepted (2026-09-28) |
 | [0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) | GitHub runners measure synthetic and public benchmark arms; nothing private, no text, no timings | Accepted (2026-09-29) |

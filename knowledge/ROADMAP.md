@@ -142,7 +142,7 @@ more specific belongs there, because restating numbers in a second document is p
 
 **Tier-1 on real specimens: 137 / 149 = 91.9%** over the documents that can yield a hit — from
 the CI-written baseline
-([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-09-30)
+([`real-specimen-mrz-baseline.json`](benchmarks/real-specimen-mrz-baseline.json), 2026-10-01)
 that [`real-specimen-gate.yml`](../.github/workflows/real-specimen-gate.yml) enforces on every
 PR. The rest of the corpus carries no MRZ, has it blacked out, or prints a zone whose own check
 digits fail; [the denominator correction](benchmarks/denominator-correction-2026-09-09.md)

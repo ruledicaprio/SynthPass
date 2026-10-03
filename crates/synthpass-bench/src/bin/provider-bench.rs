@@ -153,9 +153,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-use synthpass_bench::archive::{self, Archive, RunHeader};
+use synthpass_bench::archive::{self, ocr_arms_map, Archive, ArchivePlan, MrzArms, RunHeader};
 use synthpass_bench::provider_bench::{
     run_provider_bench, run_provider_bench_real_with_options, run_provider_bench_replay,
     AssertionBucket, PopulationAccuracy, ProviderReport, RealDumpOptions, StrictNameHitRate,
@@ -1731,28 +1731,6 @@ struct OcrDumpRunManifest<'a> {
     replay_of: Option<ReplayOf<'a>>,
 }
 
-/// The `SYNTHPASS_MRZ_*` arms as the run manifest spells them: each name is
-/// what the binary resolved, never the variable's raw value (an unrecognised
-/// value falls back to `off`).
-#[derive(Serialize, Debug, PartialEq, Eq)]
-struct MrzArms {
-    class_sweep: &'static str,
-    line1_select: &'static str,
-    refuse_repeated_line: &'static str,
-    date_digits: &'static str,
-}
-
-impl MrzArms {
-    fn from_env() -> Self {
-        Self {
-            class_sweep: synthpass_die::class_sweep_arm().0,
-            line1_select: synthpass_die::line1_select_arm().0,
-            refuse_repeated_line: synthpass_die::refuse_repeated_line_arm().0,
-            date_digits: synthpass_die::date_digits_arm().0,
-        }
-    }
-}
-
 /// What a replay's manifest says about the capture it replayed (ADR-0024,
 /// amendment 3, Decision 3): the capture's run-manifest file name and the
 /// SHA-256 of that file's bytes. Neither holds document text.
@@ -1760,30 +1738,6 @@ impl MrzArms {
 struct ReplayOf<'a> {
     run_manifest: &'a str,
     sha256: &'a str,
-}
-
-/// The `SYNTHPASS_MRZ_*` arms as a map, from [`MrzArms`] itself: the run manifest and the
-/// archive header both spell them, and neither keeps its own list of names.
-fn mrz_arms_map() -> BTreeMap<String, String> {
-    serde_json::to_value(MrzArms::from_env())
-        .ok()
-        .and_then(|value| serde_json::from_value(value).ok())
-        .unwrap_or_default()
-}
-
-/// The five `SYNTHPASS_OCR_*` arms as the run manifest and the replay's arm
-/// check spell them.
-fn ocr_arms_map(arms: &synthpass_ocr::OcrArms) -> BTreeMap<String, String> {
-    [
-        ("texture", arms.texture),
-        ("order", arms.order),
-        ("rotate", arms.rotate),
-        ("skew", arms.skew),
-        ("chargrid", arms.chargrid),
-    ]
-    .into_iter()
-    .map(|(key, value)| (key.to_string(), value.to_string()))
-    .collect()
 }
 
 /// SHA-256 of `samples/corpus.jsonl`, `None` when it cannot be read.
@@ -1984,6 +1938,16 @@ fn manifest_ocr_arms(replay: Option<&ReplaySource>) -> BTreeMap<String, String> 
     }
 }
 
+/// The model files a run loaded, for the archive header's `model_sha256`: the same two paths
+/// `model_paths_report` names, or none for a replay, which loads no model.
+fn loaded_model_files<'a>(
+    replay: bool,
+    detection: &'a Path,
+    recognition: &'a Path,
+) -> Option<(&'a Path, &'a Path)> {
+    (!replay).then_some((detection, recognition))
+}
+
 /// The `model_paths` the report records: the paths the OCR models were loaded from, or a note
 /// that a replay loaded none. The archive header records the same value.
 fn model_paths_report(replay: bool, detection: &Path, recognition: &Path) -> ModelPathsReport {
@@ -2050,78 +2014,12 @@ fn write_ocr_run_manifest(
     Ok(name)
 }
 
-/// What a run does about the per-document archive (ADR-0024), decided before any model loads.
-#[derive(Debug, PartialEq)]
-enum ArchivePlan {
-    /// No archive, and nothing to say: `--no-archive` or `SYNTHPASS_BENCH_ARCHIVE=off`.
-    Off,
-    /// No archive, and one `warning: archive: ...` line to print.
-    Warn(String),
-    /// Write the archive under this root, which has passed the tree check.
-    Root(PathBuf),
-}
-
-/// The archive plan for `parsed`, from the process's facts injected as arguments so every rule
-/// is testable without the environment or git: `variable` is `SYNTHPASS_BENCH_ARCHIVE`, `repo`
-/// the working tree, `cwd` the current directory.
-///
-/// A `--include-private` run is not refused, it writes no archive at all, with one warning: the
-/// private track may only be archived as text-free records (ADR-0024, Decision 7), which are a
-/// later step, and the archive may never change an exit code (Decision 1). Every other problem
-/// (a root git would stage, a git that cannot say where its directory is) is a warning too.
-fn archive_plan(
-    parsed: &Args,
-    variable: Option<&str>,
-    repo: &Path,
-    cwd: &Path,
-    git_common_dir: impl FnOnce() -> Result<PathBuf, String>,
-    is_ignored: impl Fn(&Path) -> Result<bool, String>,
-) -> ArchivePlan {
-    // A run that turned the archive off says nothing more about it; only a run that asked for
-    // one (by default) is told why it will not get one.
-    if parsed.include_private && archive::archive_requested(parsed.no_archive, variable) {
-        return ArchivePlan::Warn(
-            "warning: archive: --include-private writes no archive: the private track is only \
-             archived as text-free records, which are a later step (ADR-0024, Decision 7)"
-                .to_string(),
-        );
-    }
-    match archive::resolve_archive_root(
-        parsed.no_archive,
-        variable,
-        repo,
-        cwd,
-        git_common_dir,
-        is_ignored,
-    ) {
-        Ok(None) => ArchivePlan::Off,
-        Ok(Some(root)) => ArchivePlan::Root(root),
-        Err(e) => ArchivePlan::Warn(format!("warning: archive: {e}")),
-    }
-}
-
-/// The plan for this process: `SYNTHPASS_BENCH_ARCHIVE`, the working directory, and git.
+/// The archive plan for this process (ADR-0024): `SYNTHPASS_BENCH_ARCHIVE`, the working
+/// directory, and git. The rules live in [`archive::plan`], shared with `synthpass-bench`: a
+/// `--include-private` run archives like any other (its private documents become text-free
+/// records in `private/`), and every problem is a warning.
 fn plan_archive(parsed: &Args, root: &Path) -> ArchivePlan {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let variable = match std::env::var_os(archive::ARCHIVE_ENV).map(std::ffi::OsString::into_string)
-    {
-        None => None,
-        Some(Ok(value)) => Some(value),
-        Some(Err(_)) => {
-            return ArchivePlan::Warn(format!(
-                "warning: archive: {} is not valid Unicode, so no archive is written",
-                archive::ARCHIVE_ENV
-            ));
-        }
-    };
-    archive_plan(
-        parsed,
-        variable.as_deref(),
-        root,
-        &cwd,
-        || archive::git_common_dir(root),
-        |relative| synthpass_bench::ocr_passes::git_ignores(root, relative),
-    )
+    archive::plan_for_process(parsed.no_archive, root)
 }
 
 /// What one run tells the archive about itself, beyond the process's own facts.
@@ -2132,41 +2030,20 @@ struct ArchiveRun<'a> {
     providers: Vec<String>,
     replay: Option<&'a ReplaySource>,
     model_paths: ModelPathsReport,
+    /// The two model files this run loaded, to hash once for the header; `None` for a replay,
+    /// which loads no model.
+    model_files: Option<(&'a Path, &'a Path)>,
 }
 
 /// The header of this run's archive files (ADR-0024, Decision 4). The arms come from the run
-/// manifest's own code ([`manifest_ocr_arms`], [`mrz_arms_map`]), so the two cannot disagree,
+/// manifest's own code ([`manifest_ocr_arms`], [`archive::mrz_arms_map`]), so the two cannot disagree,
 /// and the retry budget is recorded here rather than left to the manifest.
 fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader {
-    let git = archive::git_state(root).ok();
-    let binary = std::env::current_exe().ok();
-    let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
     let real = parsed.real_specimens;
-    RunHeader {
-        kind: "run",
-        schema: archive::SCHEMA,
-        run_id: String::new(),
-        binary_name: "provider-bench".to_string(),
-        started_unix_ms: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64),
-        pid: std::process::id(),
-        source: archive::source_from(std::env::var("GITHUB_ACTIONS").ok().as_deref()),
-        machine: archive::Machine::detect(),
-        // The file name only: the path says whose machine this is, and the SHA-256
-        // below identifies the binary. `argv` and `model_paths` keep their paths, which
-        // the Decision 8 publisher is to refuse or redact.
-        binary: binary.as_ref().and_then(|b| b.file_name()).map_or_else(
-            || "provider-bench".to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        ),
-        binary_sha256: binary
-            .as_ref()
-            .and_then(|b| std::fs::read(b).ok())
-            .map(|bytes| archive::sha256_hex(&bytes)),
-        git_commit: git.as_ref().map(|g| g.commit.clone()),
-        working_tree_dirty: git.as_ref().map(|g| g.dirty),
-        argv: run.argv.to_vec(),
+    archive::run_header(archive::HeaderInputs {
+        binary_name: "provider-bench",
+        repo: root,
+        argv: run.argv,
         scope: archive::Scope {
             corpus: if real {
                 "real-specimens"
@@ -2191,28 +2068,20 @@ fn archive_header(parsed: &Args, root: &Path, run: &ArchiveRun<'_>) -> RunHeader
             local: parsed.include_local,
             covers: parsed.include_covers,
         },
-        samples_data_sha: archive::samples_data_sha_from(
-            std::env::var("SAMPLES_DATA_SHA").ok().as_deref(),
-        ),
         corpus_manifest_sha256: real.then(|| corpus_manifest_sha256(root)).flatten(),
         documents_loaded: run.documents_loaded,
         labelled_loaded: run.labelled_loaded,
         providers: run.providers.clone(),
         ocr_arms: manifest_ocr_arms(run.replay),
-        retry_budget: run.replay.is_none().then_some(archive::RetryBudget {
-            max_passes,
-            max_seconds,
-        }),
-        mrz_arms: mrz_arms_map(),
-        pivot_yy: synthpass_die::mrz_parse_options().pivot_yy,
         model_paths: run.model_paths.clone(),
+        model_sha256: run
+            .model_files
+            .map(|(detection, recognition)| archive::ModelSha256::of_files(detection, recognition)),
         replay_of: run.replay.map(|source| archive::ReplayOfRecord {
             run_manifest: source.run_manifest.clone(),
             sha256: source.run_manifest_sha256.clone(),
         }),
-        env: archive::process_env(),
-    }
-    .with_run_id()
+    })
 }
 
 /// The ids of the providers in `catalog`, in registration order.
@@ -2432,6 +2301,11 @@ async fn main() {
                     &detection_path,
                     &recognition_path,
                 ),
+                model_files: loaded_model_files(
+                    replay.is_some(),
+                    &detection_path,
+                    &recognition_path,
+                ),
             },
         );
         let dumps = RealDumpOptions {
@@ -2509,6 +2383,7 @@ async fn main() {
                 providers: catalog_provider_ids(catalog),
                 replay: None,
                 model_paths: model_paths_report(false, &detection_path, &recognition_path),
+                model_files: loaded_model_files(false, &detection_path, &recognition_path),
             },
         );
         let reports = run_provider_bench(
@@ -3391,8 +3266,9 @@ mod tests {
         let repo =
             std::env::temp_dir().join(format!("provider-bench-plan-repo-{}", std::process::id()));
         std::fs::create_dir_all(&repo).expect("create the fake working tree");
-        archive_plan(
-            &args_from(flags),
+        let parsed = args_from(flags);
+        archive::plan(
+            parsed.no_archive,
             variable,
             &repo,
             &repo,
@@ -3401,23 +3277,22 @@ mod tests {
         )
     }
 
+    /// `--include-private` no longer turns the archive off: the private track is archived as
+    /// text-free records (ADR-0024, Decision 7). The two ways to turn the archive off still do.
     #[test]
-    fn include_private_turns_the_archive_off_with_a_warning() {
-        let ArchivePlan::Warn(warning) = plan_for(&["--real-specimens", "--include-private"], None)
-        else {
-            panic!("a private run writes no archive, and says so");
-        };
-        assert!(warning.starts_with("warning: archive: "), "{warning}");
-        assert!(warning.contains("--include-private"), "{warning}");
-        assert!(warning.contains("Decision 7"), "{warning}");
-        // Even when a directory is named: the private track has no place in the archive.
+    fn include_private_leaves_the_archive_on() {
         let dir = std::env::temp_dir().join("named-archive-root");
         let named = dir.to_str().expect("utf-8 temp path");
-        assert!(matches!(
+        match plan_for(&["--real-specimens", "--include-private"], Some(named)) {
+            ArchivePlan::Root(root) => assert!(root.ends_with("named-archive-root"), "{root:?}"),
+            other => panic!("a private run is archived like any other: {other:?}"),
+        }
+        // The flag parses beside the others and is the only thing that differs.
+        assert_eq!(
             plan_for(&["--real-specimens", "--include-private"], Some(named)),
-            ArchivePlan::Warn(_)
-        ));
-        // A run that turned the archive off says nothing more about it.
+            plan_for(&["--real-specimens"], Some(named))
+        );
+        // A run that turned the archive off says nothing, private or not.
         assert_eq!(
             plan_for(
                 &["--real-specimens", "--include-private", "--no-archive"],
@@ -3491,6 +3366,7 @@ mod tests {
                     providers: vec!["mrz".to_string()],
                     replay: source,
                     model_paths: ModelPathsReport::default(),
+                    model_files: None,
                 },
             ))
             .expect("serialize the header");
@@ -3556,6 +3432,7 @@ mod tests {
                 providers: Vec::new(),
                 replay: None,
                 model_paths: ModelPathsReport::default(),
+                model_files: None,
             },
         );
         let (max_passes, max_seconds) = synthpass_ocr::effective_retry_budget();
@@ -3566,6 +3443,63 @@ mod tests {
         assert_eq!(
             (budget.max_passes, budget.max_seconds),
             (max_passes, max_seconds)
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A live run records the SHA-256 of the two files it loaded; a replay loads none, so it
+    /// records `null`, and the report's `model_paths` note and the header agree on that.
+    #[test]
+    fn the_header_hashes_the_loaded_models_and_a_replay_records_null() {
+        let dir =
+            std::env::temp_dir().join(format!("provider-bench-model-hash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let (detection, recognition) = (
+            dir.join("text-detection.rten"),
+            dir.join("text-recognition.rten"),
+        );
+        std::fs::write(&detection, b"abc").expect("write");
+        std::fs::write(&recognition, b"abd").expect("write");
+        let parsed = args_from(&["--real-specimens", "--mrz-only"]);
+        let flags = vec!["--real-specimens".to_string(), "--mrz-only".to_string()];
+        let replay = ReplaySource {
+            run_manifest: "provider-bench-ocr-run-aa.json".to_string(),
+            run_manifest_sha256: "b".repeat(64),
+            ocr_arms: BTreeMap::new(),
+        };
+        let header_of = |replay: Option<&ReplaySource>| {
+            serde_json::to_value(archive_header(
+                &parsed,
+                &repo_root(),
+                &ArchiveRun {
+                    argv: &flags,
+                    documents_loaded: 1,
+                    labelled_loaded: 1,
+                    providers: vec!["mrz".to_string()],
+                    replay,
+                    model_paths: model_paths_report(replay.is_some(), &detection, &recognition),
+                    model_files: loaded_model_files(replay.is_some(), &detection, &recognition),
+                },
+            ))
+            .expect("serialize")
+        };
+        let live = header_of(None);
+        assert_eq!(
+            live["model_sha256"]["detection"],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let other = live["model_sha256"]["recognition"]
+            .as_str()
+            .expect("a hash");
+        assert_eq!(other.len(), 64);
+        assert_ne!(
+            live["model_sha256"]["detection"],
+            live["model_sha256"]["recognition"]
+        );
+        let replayed = header_of(Some(&replay));
+        assert!(
+            replayed["model_sha256"].is_null(),
+            "a replay loads no model"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

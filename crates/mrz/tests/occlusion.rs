@@ -327,8 +327,7 @@ fn every_single_cell_mask_agrees_with_the_independently_built_coverage_table() {
                     }
                     Kind::Name => {
                         let masked_index = column - start;
-                        // Direct per-column vectors from the documented spans,
-                        // independent of the helper that inferred this grammar.
+                        // Literal per-column vectors from the documented spans.
                         let expected = match format {
                             Format::Td1 => TD1_NAME_COLUMNS[masked_index],
                             Format::Td2 | Format::MrvB => SHORT_NAME_COLUMNS[masked_index],

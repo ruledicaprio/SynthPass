@@ -219,7 +219,7 @@ proptest! {
             ('F', Sex::Female),
             ('<', Sex::Unspecified),
             ('X', Sex::NonConformant('X')),
-            (written, arbitrary_expected),
+            (c, arbitrary_expected),
         ];
         // Non-empty and non-`<`-led: an empty document number formats to an
         // all-filler field, which the parsers now refuse outright (#536),

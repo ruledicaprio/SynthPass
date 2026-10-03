@@ -22,10 +22,10 @@ on every PR by [`real-specimen-gate.yml`](../../.github/workflows/real-specimen-
 
 | Metric | Value | Source |
 | --- | --- | --- |
-| **Tier-1 hit rate, real specimens** | **137 / 149 = 91.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-09-30) |
+| **Tier-1 hit rate, real specimens** | **137 / 149 = 91.9%** on documents that can yield a hit | `real-specimen-mrz-baseline.json` (CI, 2026-10-01) |
 | Tier-1 hit rate, whole specimen corpus | 137 / 261 = 52.5% | same baseline; the gap is explained below |
-| Strict name hit rate, real specimens | **15 / 45 = 33.3%** of name-scorable scored documents (45.5% of name-scorable hits) | same baseline (CI, 2026-09-30); ADR-0013 |
-| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 112** | same baseline (CI, 2026-09-30) |
+| Strict name hit rate, real specimens | **15 / 45 = 33.3%** of name-scorable scored documents (45.5% of name-scorable hits) | same baseline (CI, 2026-10-01); ADR-0013 |
+| False accepts (a checksum-valid MRZ returned for a document that carries none) | **0 / 112** | same baseline (CI, 2026-10-01) |
 | Tier-1 hit rate, synthetic clean (100 docs per format, seed 0) | 391 / 500 = 78.2% (Observed) — TD3 74%, TD2 81%, TD1 59%, MRV-A 87%, MRV-B 90% (Observed, local; all five at `196dbca`, one build, and the same 500 documents read identically in CI at `04a6479`). Of the 391 hits, 238 read both names exactly and **193 are wrong in at least one scored field** (report-only, #457); 198 / 500 are right on all twelve (Observed) | Observed locally, 2026-10-01: `synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0` (release, Linux), all five formats at `196dbca` (#647) — [`synthetic-headline-2026-10-01.md`](synthetic-headline-2026-10-01.md). TD1's 57 → 59 since `55c03a2` is two seeds: #580 (TD1 line 1 prefers the reading whose issuer resolves) turns seed 39 into a correct read, and #593 (a zone holding a wrong physical line ranks below an alternative) turns seed 57 into a hit that is still wrong in both names. Three seeds in other formats change fields and no hit: TD3 95 becomes correct (#593), and MRV-A 76's given names become exact while MRV-A 83's names run together (both #602). Checksum-valid wrong document numbers go 23 → 20, and TD1's accepted reads with a wrong document code or issuer 5 → 1 (#574). The registered-provider path, `provider-bench --mrz-only --document-type <fmt>`, read identically per seed to this harness when the two were compared at `9c8f03d` ([comparison](m6-per-format-harness-comparison-2026-09-16.md)). Confirmed in CI document by document: `bench-data-collection.yml`'s fixed slice, scheduled run 36697344380 on 2026-09-30 at `04a6479`, matches all 500 documents on the render hash, the hit and all twelve field CERs. Earlier CI confirmations were on counts: 389 / 500, `bench-charts.yml` rows for `e33b177` on 2026-09-28 ([`synthetic-headline-2026-09-29.md`](synthetic-headline-2026-09-29.md)); 370 / 500 on 2026-09-25 at `f80877b` ([`synthetic-headline-2026-09-25.md`](synthetic-headline-2026-09-25.md)) |
 | Tier-2 per-field exact match, 118-fixture parity corpus | **335 / 585 = 57.3%** reviewed (65 documents, nine fields), **88 / 159 = 55.3%** derived (53 documents, check-digited fields only); 423 / 744 = 56.9% overall. Up from 297 / 585 = 50.8% (385 / 744 = 51.7%) under prompt v3 on the same fixtures: the #539 vocabulary (19 demonyms, 9 alternate country names) moved `nationality` 25 → 51 and `issuing_country` 41 → 53 of 65, exactly as `vocab_replay` projected, and no other field moved | Observed in CI: `ci.yml` `native-llm` job, run 36342651928, 2026-09-27, at `1988bbc` (PR #547), prompt v3, vocabulary `8feb315a58cdae3e`: [`normalize-country-demonyms-2026-09-27.md`](normalize-country-demonyms-2026-09-27.md). The v3 baseline run: [`parity-prompt-v3-2026-09-27.md`](parity-prompt-v3-2026-09-27.md). Harness: `crates/synthpass-llm/tests/parity.rs` |
 | Browser OCR (tesseract.js) vs native (`ocrs`/`rten`) | **140 vs 140** over the 154 scored documents — a tie on count, 8 documents each way, 6 missed by both. On the browser report's own MRZ-bearing axis (212, which includes 58 documents no pipeline can hit) 144 vs 142 checksum-valid. The browser's 140 is checksum-validity, native's is a Tier-1 hit | Observed in CI: `web-ocr.yml` run 35169813105, 2026-09-17, tag `v1.5.0`, MAIN `b2a0afd`, DATA `469a4ee` — [`phase-d-native-vs-browser-2026-09-18.md`](phase-d-native-vs-browser-2026-09-18.md); supersedes the 2026-09-09 cut ([`ocr-stack-gap-2026-09-09.md`](ocr-stack-gap-2026-09-09.md)) |
@@ -97,7 +97,7 @@ the PR that re-blesses the baseline. Mechanisms:
 Outcomes: [`real-specimen-outcomes.jsonl`](real-specimen-outcomes.jsonl).
 
 - `no_mrz_found`: France ID 2020 back, Italy ID 2022 back.
-- `checksum_failed`: Afghanistan `P0_AFG_2016`, Belgium ID 2021 back, Croatia ID 2021 back,
+- `checksum_failed`: Afghanistan `PO_AFG_2016`, Belgium ID 2021 back, Croatia ID 2021 back,
   Czechia `P0_CZE_2005`, Germany `P0_D00_2024`, Hong Kong `P0_HKG_2007` and `P0_HKG_2019`, Romania
   `PE_ROU_2024`, Russian Federation `P0_RUS_2019` (a segmentation failure, scored here), Sweden ID
   2022 back.
@@ -521,6 +521,54 @@ category of false positive `synthpass-core/src/fusion.rs`'s retired
 name-reconstruction check hit (see "Record the rejections" above), caught
 here instead of thrown away because the fix (compare against the
 pre-formatting representation) is cheap and doesn't weaken the check.
+
+## The nightly advisory
+
+`bench-data-collection.yml` ends every nightly with an advisory,
+`tools/bench_nightly_advisory.py`
+([ADR-0027](../decisions/ADR-0027-ci-runners-measure-public-benchmark-arms.md) decision 7). It reads
+`fresh.jsonl`, `fixed.jsonl` and `runs.jsonl` on `bench-data` after tonight's rows are appended, and
+says what tonight changed. `dataset.jsonl`, the frozen schema-1 history, is ignored. The thresholds
+below are provisional: a one-week A/A dispatch sets them, and each lives in one named constant in the
+tool.
+
+**What it checks, per format.**
+
+- **Fixed slice** (clean, seeds 0-99). Paired per seed against the most recent earlier night whose
+  fixed slice has the same `generator_fingerprint`, the hash over its rendered pixels, so any
+  re-render resets the reference. Every seed whose hit, correct-read, wrong-accept or prefix-wrong
+  status changed is named. With no earlier night that has the same fingerprint it says "no
+  reference": the state on the first night, and on the first night after any re-render.
+  A net loss of more than `NET_FLIP_WARN_ABOVE` (3) hits, lost minus gained, is a warning.
+- **Fresh slice** (all profiles, new seeds every night). The last 7 nights pooled against the prior
+  28 nights with the same fixed-slice fingerprint, by a two-proportion z-test. It flags a hit rate
+  or a correct-read rate (a hit with no wrong scored field) at z <= -3, and a wrong-accept rate at
+  z >= +3. With fewer than 7 recent nights or fewer than 7 baseline nights it says so and skips the
+  test: too little history is not a flag.
+
+**What turns the run red.** Only these, and only after the rows are pushed, so a red night never
+loses its data:
+
+- a severe fixed-slice flag: a fixed seed newly a wrong accept, or newly a prefix-wrong read,
+  against its same-fingerprint reference (the M4 ratchet for prefix-wrong reads is 0);
+- an invalid instrument: a `budget` retry stop in the fixed slice; missing or duplicate rows or
+  headers for tonight's run; a header whose fingerprint is not its rows'; or a fingerprint change
+  that no change to the render's inputs explains between the two runs' commits (`crates/synthpass-gen/`,
+  the `crates/mrz/` it assembles the zone with, or `Cargo.lock`). When the tool
+  cannot tell (no checkout of `main`, or the reference commit is not reachable) it warns instead.
+
+Everything else is a warning. It never opens an issue, never runs on `pull_request`, and is never a
+required check.
+
+**Where it reports.** The job summary (Markdown, from `$GITHUB_STEP_SUMMARY`), one `::warning::` or
+`::error::` line per finding, and one line per night appended to `advisory.jsonl` on `bench-data`,
+in the same commit as the night's rows. On a dispatch from another ref the dry-run job runs it on
+the would-be rows and puts `advisory.jsonl` in the `nightly-would-be-rows` artifact instead.
+
+**Aggregates only.** An `advisory.jsonl` line holds counts, rates, z values, finding codes, the run
+id, the fixed slice's fingerprint and the commit, and the seed numbers of flipped fixed seeds. It
+holds no field value, no OCR text and no `reason`; the tool writes only allowlisted keys, and only
+strings that are short tokens, and refuses to write the line otherwise.
 
 ## The per-PR real-specimen regression gate
 
