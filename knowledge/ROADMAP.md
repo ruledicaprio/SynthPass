@@ -107,6 +107,9 @@ _The append-only execution log that used to live here (M1 → v1.4.0) is archive
 [`archive/roadmap-execution-log.md`](archive/roadmap-execution-log.md). Every measured
 number's source of truth is [`benchmarks/README.md`](benchmarks/README.md)._
 
+The order of work for October to December 2026 is in [`PLAN_2026_Q4.md`](PLAN_2026_Q4.md). It is
+planning text: where it and this section disagree, this section wins.
+
 **M1–M7: complete.** The synthetic MRZ core, the document factory, the
 degradation/capture profiles + CLI, the regression/benchmark harness, the extraction
 platform (Atlas), and the Document Intelligence Engine provider contract have all shipped.
