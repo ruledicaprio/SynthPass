@@ -76,7 +76,8 @@ pitches (p):
 | Quantity | mm | p | Source |
 | --- | --- | --- | --- |
 | Character pitch | 2.54 | 1 | Doc 9303 Part 3 §4.4; ISO 1073-2 §3.8; ECMA-11 §3.8 |
-| Digit height, size I | 2.66 | 1.05 | ISO 1073-2 §4.1 (Table 1) |
+| Digit height, size I (digit cells) | 2.66 | 1.05 | ISO 1073-2 §4.1 (Table 1) |
+| Capital height, size I (letter cells) | 2.46 | 0.97 | ISO 1073-2 §4.1 (Table 1); ECMA-11 §4.1 |
 | Nominal stroke width | 0.35 | 0.138 | ISO 1073-2 §11.4.1 |
 | Minimum character spacing | 2.30 | 0.906 | ISO 1831 §6.7.2 |
 | Nominal line pitch, TD3 and MRV | 6.35 | 2.50 | Doc 9303 Part 4 §3; Part 7 |
