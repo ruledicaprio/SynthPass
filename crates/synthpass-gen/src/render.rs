@@ -161,9 +161,10 @@ fn draw_placeholder_bar(img: &mut RgbImage, rect: Rect) {
 }
 
 /// Placeholder rendering of one MRZ line: each of the line's `mrz_chars`
-/// character cells (30, 36 or 44, by format) is filled when the printed character is not the `<` filler, and left blank
-/// otherwise — this keeps the per-character bounding boxes meaningful (filler
-/// runs stay visually empty) without needing real glyphs.
+/// character cells (30, 36 or 44, by format) is filled when the printed
+/// character is not the `<` filler, and left blank otherwise — this keeps the
+/// per-character bounding boxes meaningful (filler runs stay visually empty)
+/// without needing real glyphs.
 fn draw_mrz_placeholder(img: &mut RgbImage, line_rect: Rect, text: &str, mrz_chars: u32) {
     for (i, c) in text.chars().enumerate() {
         if c == '<' {
@@ -595,10 +596,69 @@ pub fn render_with(
     )
 }
 
+/// Whether every label rectangle is the one `page` places: the nine always
+/// present visual-zone fields, the personal number when it is labelled, and the
+/// MRZ band spanning `page.mrz_lines`.
+fn check_labels_match_layout(labels: &Labels, page: &PageLayout) -> Result<(), String> {
+    let mut pairs = vec![
+        (
+            "document_type",
+            labels.document_type.rect,
+            page.document_type,
+        ),
+        (
+            "issuing_country",
+            labels.issuing_country.rect,
+            page.issuing_country,
+        ),
+        ("surname", labels.surname.rect, page.surname),
+        ("given_names", labels.given_names.rect, page.given_names),
+        (
+            "document_number",
+            labels.document_number.rect,
+            page.document_number,
+        ),
+        ("nationality", labels.nationality.rect, page.nationality),
+        (
+            "date_of_birth",
+            labels.date_of_birth.rect,
+            page.date_of_birth,
+        ),
+        ("sex", labels.sex.rect, page.sex),
+        (
+            "date_of_expiry",
+            labels.date_of_expiry.rect,
+            page.date_of_expiry,
+        ),
+    ];
+    if let Some(label) = &labels.personal_number {
+        pairs.push(("personal_number", label.rect, page.personal_number));
+    }
+    if let Some((name, _, _)) = pairs.iter().find(|(_, label, placed)| label != placed) {
+        return Err(format!(
+            "labels do not match the layout: {name} rectangle differs"
+        ));
+    }
+    if let (Some(first), Some(last)) = (page.mrz_lines.first(), page.mrz_lines.last()) {
+        let band = Rect::new(
+            first.x,
+            first.y,
+            first.width,
+            (last.y + last.height) - first.y,
+        );
+        if labels.mrz_rect != band {
+            return Err("labels do not match the layout: MRZ rectangle differs".into());
+        }
+    }
+    Ok(())
+}
+
 /// [`render_with`] on an explicit [`ValidatedLayout`]: the layout's format
 /// picks the canvas, watermark band and MRZ, and its rectangles place the
 /// portrait and the visual-zone fields. `labels` must have been built from the
-/// same layout ([`crate::labels::build_labels_with_layout`]).
+/// same layout ([`crate::labels::build_labels_with_layout`]); a label rectangle
+/// that differs from the layout's, in the ten visual-zone fields or the MRZ
+/// band, is an error, so labels and pixels cannot silently disagree.
 pub fn render_with_layout(
     passport: &Passport,
     labels: &Labels,
@@ -612,6 +672,7 @@ pub fn render_with_layout(
     let _ = passport;
     let doc_type = layout.format();
     let page: &PageLayout = layout.page();
+    check_labels_match_layout(labels, page)?;
     if let Some(span) = options.redact {
         if span.doc_type != doc_type {
             return Err("redaction document type does not match render document type".into());
@@ -766,6 +827,33 @@ fn blur_region(img: &mut RgbImage, rect: Rect, sigma: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_that_disagree_with_the_layout_are_an_error() {
+        let td3 = ValidatedLayout::builtin(DocumentType::TD3);
+        let config = crate::GeneratorConfig::with_document_type(9, DocumentType::TD3);
+        let passport = crate::data::generate_passport(&config);
+        let labels = crate::labels::build_labels_with_layout(&passport, td3);
+        let options = RenderOptions::default();
+        assert!(render_with_layout(&passport, &labels, td3, &options).is_ok());
+
+        let mut moved = labels.clone();
+        moved.surname.rect.x += 1;
+        let e = render_with_layout(&passport, &moved, td3, &options).unwrap_err();
+        assert!(e.contains("surname"), "{e}");
+
+        let mut moved = labels.clone();
+        moved.mrz_rect.y += 1;
+        let e = render_with_layout(&passport, &moved, td3, &options).unwrap_err();
+        assert!(e.contains("MRZ"), "{e}");
+
+        // Labels built for another format's layout.
+        let td1 = ValidatedLayout::builtin(DocumentType::TD1);
+        let td1_config = crate::GeneratorConfig::with_document_type(9, DocumentType::TD1);
+        let td1_passport = crate::data::generate_passport(&td1_config);
+        let other = crate::labels::build_labels_with_layout(&td1_passport, td1);
+        assert!(render_with_layout(&passport, &other, td3, &options).is_err());
+    }
 
     #[test]
     fn invalid_or_mismatched_redaction_spans_are_rejected_without_panicking() {
