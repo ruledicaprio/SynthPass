@@ -428,6 +428,12 @@ Every track is now archived (Decisions 6 and 7): the public and local tracks sin
 is `tools/archive_query.py` (#662). Step 6, schema 2, waits on which OCR pass Tier 1 reads, the
 question [ADR-0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) leaves open.
 
+**2026-10-03:** the owner accepted ADR-0025, so step 6 no longer waits. On `main`, Tier 1 parses
+the full concatenation of every pass, which each document record already holds verbatim (Decision
+5). Decision 5 adds a pass's lines under schema 2 only when Tier 1's input is narrowed to that
+pass, and no retry stop on `main` narrows it (ADR-0025, 2026-10-03). Until one does, schema 2 has
+nothing to record.
+
 ## Amendment 6 (2026-10-01) — the OCR models' SHA-256 in the run header (#670)
 
 **Status of this amendment:** Proposed. It records what
