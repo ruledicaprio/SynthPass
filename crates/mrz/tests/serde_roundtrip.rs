@@ -87,3 +87,58 @@ fn old_parseoptions_json_defaults_class_sweep_off() {
     assert_eq!(options.pivot_yy, 30);
     assert!(!options.class_sweep);
 }
+
+#[test]
+fn old_parseoptions_json_defaults_date_digits_off() {
+    let options: mrz::ParseOptions =
+        serde_json::from_str(r#"{"pivot_yy":30,"class_sweep":true}"#).expect("0.9 shape");
+    assert!(options.class_sweep);
+    assert!(!options.date_digits);
+}
+
+/// #579: the flag `valid()` needs is recorded on the value, and stays out of the
+/// JSON unless the option was on, so a default read serializes exactly as it did
+/// before the flag existed.
+#[test]
+fn date_digits_required_is_absent_by_default_and_round_trips_when_on() {
+    let default = parse_td3(TD3_L1, TD3_L2).unwrap();
+    let json = serde_json::to_value(&default).expect("serialize");
+    assert!(
+        json.as_object()
+            .expect("an object")
+            .get("date_digits_required")
+            .is_none(),
+        "a default read must not gain a key: {json}"
+    );
+
+    let opts = mrz::ParseOptions::default().with_date_digits(true);
+    let on = mrz::parse_td3_with(TD3_L1, TD3_L2, &opts).unwrap();
+    let json_on = serde_json::to_value(&on).expect("serialize");
+    assert_eq!(json_on["date_digits_required"], true);
+    let restored: MrzData = serde_json::from_value(json_on).expect("deserialize");
+    assert_eq!(restored, on);
+}
+
+/// The verdict of a read made under the option survives a JSON round trip.
+#[test]
+fn a_letters_date_read_under_the_option_stays_not_valid_through_json() {
+    let letters = mrz::MrzDate::from_field(
+        mrz::RawDateField::try_from("ABCDEF").expect("six MRZ characters"),
+        mrz::DateRole::Birth,
+        mrz::CURRENT_YY,
+    );
+    let zone = mrz::format_td3(&mrz::Td3Fields {
+        document_number: "K12345670".to_string(),
+        date_of_birth: letters,
+        ..Default::default()
+    });
+    let (l1, l2) = zone.split_once('\n').unwrap();
+    let opts = mrz::ParseOptions::default().with_date_digits(true);
+    let read = mrz::parse_td3_with(l1, l2, &opts).unwrap();
+    assert!(!read.valid());
+
+    let restored: MrzData =
+        serde_json::from_str(&serde_json::to_string(&read).unwrap()).expect("deserialize");
+    assert!(!restored.valid());
+    assert_eq!(restored, read);
+}

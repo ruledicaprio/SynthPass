@@ -82,7 +82,7 @@
 //! cargo run -p synthpass-ocr --release --example probe_matrix -- \
 //!   --out artifacts/probe --mode all
 //! cargo run -p synthpass-ocr --release --example probe_matrix -- \
-//!   --image samples/passports/Afghanistan_Passport_Specimen_P0_AFG_2016_mrz.jpg
+//!   --image samples/passports/Afghanistan_Passport_Specimen_PO_AFG_2016_mrz.jpg
 //! cargo run -p synthpass-ocr --release --example probe_matrix -- \
 //!   --synthetic-origin 50
 //! ```

@@ -1,11 +1,12 @@
 //! Public JSON fixture audit for #409. Reports only fixture names and format
-//! classes, never document field values.
+//! classes, never document field values. It reads only `samples/ocr_fixtures`
+//! and takes a fraction of a second, so it runs with the ordinary suite: a
+//! scanner change that mis-detects the format of a public fixture fails here.
 
 use mrz::{find_and_parse, parse_td1, parse_td3, Format};
 use std::{fs, path::Path};
 
 #[test]
-#[ignore = "run explicitly for the #409 fixture-format audit"]
 fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../samples/ocr_fixtures");
     let mut files: Vec<_> = fs::read_dir(directory)
@@ -16,7 +17,7 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
     files.sort();
 
     let mut compared = 0;
-    let mut disagreements = 0;
+    let mut disagreeing: Vec<String> = Vec::new();
     for path in files {
         let raw = fs::read_to_string(&path).expect("read public OCR fixture");
         let fixture: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture JSON");
@@ -34,11 +35,11 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
         let detected = find_and_parse(zone).map(|data| data.format);
         compared += 1;
         if direct.as_ref().ok() != detected.as_ref().ok() {
-            disagreements += 1;
             let name = path
                 .file_name()
                 .expect("fixture file name")
                 .to_string_lossy();
+            disagreeing.push(name.to_string());
             let format_name = |format: &Result<Format, mrz::MrzError>| match format {
                 Ok(Format::Td1) => "TD1",
                 Ok(Format::Td2) => "TD2",
@@ -55,6 +56,16 @@ fn compare_every_public_ocr_fixture_with_its_shape_named_parser() {
             );
         }
     }
-    println!("compared={compared} disagreements={disagreements}");
-    assert_eq!(compared, 65, "fixture audit denominator changed");
+    println!("compared={compared} disagreements={}", disagreeing.len());
+    // A floor, not the exact count: a fixture added later must not fail this
+    // test, but a directory that stops being read (or a filter that drops
+    // files) must.
+    assert!(
+        compared >= 65,
+        "fixture audit compared {compared} fixtures, fewer than the 65 it started with"
+    );
+    assert!(
+        disagreeing.is_empty(),
+        "the scanner and the shape-named parser disagree on these fixtures: {disagreeing:?}"
+    );
 }

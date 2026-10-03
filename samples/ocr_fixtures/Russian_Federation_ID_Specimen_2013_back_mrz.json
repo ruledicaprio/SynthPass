@@ -1,0 +1,15 @@
+{
+  "date_of_birth": "1987-03-02",
+  "date_of_expiry": "2022-08-13",
+  "document_number": "241456789",
+  "document_type": "IP",
+  "extraction_method": "mrz-deterministic",
+  "given_names": "ALEKSANDRA",
+  "issuing_country": "RUS",
+  "mrz_checksums_valid": false,
+  "mrz_line": "IPRUS2414567891<<<<<<<<<<<<<<<\n8703021F2208138RUS<<<<<<<<<<<5\nALEKSANDROVA<<ALEKSANDRA<<<<<<",
+  "nationality": "RUS",
+  "personal_number": null,
+  "sex": "F",
+  "surname": "ALEKSANDROVA"
+}

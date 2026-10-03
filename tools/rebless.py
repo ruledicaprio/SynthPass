@@ -54,12 +54,11 @@ hand, in order; this tool automates the mechanical parts and stops for a human
    that moved the numbers accuracy work is scored on -- that entry is
    `synthpass-analyst`'s to write, same discipline as
    `tools/apply_cohort.py`'s labelled DRAFT notes. It stops the same way, with
-   the distinct exit code 3, when the class is "identical" but the ledger diff
-   shows a document whose `outcome` changed: equal counts can hide two
-   documents swapping bucket, so that change is never committed mechanically.
-   Changes in every other ledger field are print-only, and so is an outcome
-   change under a "non-scored delta" (it is printed, and carried into the
-   commit message and the FINDINGS entry).
+   the distinct exit code 3, when the class is "identical" or "non-scored
+   delta" but the ledger diff shows a document present on both sides whose
+   `outcome` changed: equal scored counts (or off-denominator moves) can hide
+   two documents swapping bucket, so that change is never committed
+   mechanically. Changes in every other ledger field are print-only.
 6. Commit, push, dispatch the `mode=assert` run and wait for it, `gh pr
    ready`, and PATCH the PR body with a "Re-bless result" paragraph -- all
    gated behind `--confirm` (see "Two independent safety layers" below).
@@ -327,6 +326,9 @@ LEDGER_DIFFED_FIELDS = (
     "retry_variant_id",
     "retry_budget_hit",
     "retry_stop",
+    "check_states",
+    "retry_damaged_recovery",
+    "tier1_damaged_recovery",
 )
 LEDGER_DOC_LINE_CAP = 20
 
@@ -350,6 +352,9 @@ def _render_value(value: object) -> str:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, dict):
+        # `check_states`: compact JSON, keys sorted, as the Rust side prints it.
+        return json.dumps(value, separators=(",", ":"), sort_keys=True)
     return str(value)
 
 
@@ -447,7 +452,8 @@ def format_ledger_field_diff_lines(old_rows: list[dict], new_rows: list[dict]) -
 
     - **deterministic** -- `miss_reason` (kind only), `mrz_format`,
       `mrz_found`, `mrz_checksums_valid`, `names_exact`, `name_error`,
-      `retry_variant_id`, `retry_stop`: one totals line, then one line per
+      `retry_variant_id`, `retry_stop`, `check_states`,
+      `retry_damaged_recovery`, `tier1_damaged_recovery`: one totals line, then one line per
       document (at most 20, then `... and N more`);
     - **timing-sensitive** -- `ocr_ms` (one summary line) and every change on a
       budget-limited document (`retry_budget_hit`, `retry_stop == "budget"`,
@@ -1089,8 +1095,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"installed at {baseline_path} for the analyst to work from; nothing else was written.")
         return EXIT_SCORED_DELTA
 
-    if cls == CLASS_IDENTICAL and outcome_moved:
-        print("\nbaseline classified 'identical', but a document's outcome changed -- stopping for a human.")
+    if cls in (CLASS_IDENTICAL, CLASS_NON_SCORED) and outcome_moved:
+        print(f"\nbaseline classified {cls!r}, but a document's outcome changed -- stopping for a human.")
         print(format_outcome_stop_message(outcome_moved))
         return EXIT_OUTCOME_CHANGED
 

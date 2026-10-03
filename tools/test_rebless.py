@@ -857,9 +857,16 @@ def ledger_row(asset_id: str, **overrides) -> dict:
         "retry_variant_id": None,
         "retry_budget_hit": False,
         "retry_stop": None,
+        "check_states": None,
+        "retry_damaged_recovery": None,
+        "tier1_damaged_recovery": None,
     }
     row.update(overrides)
     return row
+
+
+def states(composite: bool) -> dict:
+    return {"composite": composite, "document_number": True, "personal_number": None}
 
 
 class LedgerDiffTests(unittest.TestCase):
@@ -896,6 +903,59 @@ class LedgerDiffTests(unittest.TestCase):
                 "mrz_checksums_valid 1",
                 "  a: mrz_format MRVA -> TD3; mrz_checksums_valid true -> false",
             ],
+        )
+
+    def test_a_check_states_change_prints_compact_json(self):
+        old = [ledger_row("a", check_states=states(True))]
+        new = [ledger_row("a", check_states=states(False))]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); check_states 1",
+                '  a: check_states {"composite":true,"document_number":true,"personal_number":null} '
+                '-> {"composite":false,"document_number":true,"personal_number":null}',
+            ],
+        )
+
+    def test_a_retry_damaged_recovery_change(self):
+        old = [ledger_row("a", retry_damaged_recovery=False)]
+        new = [ledger_row("a", retry_damaged_recovery=True)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); retry_damaged_recovery 1",
+                "  a: retry_damaged_recovery false -> true",
+            ],
+        )
+
+    def test_a_tier1_damaged_recovery_change(self):
+        old = [ledger_row("a", tier1_damaged_recovery=True)]
+        new = [ledger_row("a", tier1_damaged_recovery=None)]
+        self.assertEqual(
+            rb.format_ledger_field_diff_lines(old, new),
+            [
+                "deterministic field diff vs committed (report-only): 1 document(s); tier1_damaged_recovery 1",
+                "  a: tier1_damaged_recovery true -> null",
+            ],
+        )
+
+    def test_an_old_ledger_row_without_the_three_fields_diffs_from_null(self):
+        # A ledger committed before the fields existed: the keys are absent, which
+        # reads as null, the same as the Rust side's `#[serde(default)]`.
+        old_row = ledger_row("a")
+        for field in ("check_states", "retry_damaged_recovery", "tier1_damaged_recovery"):
+            del old_row[field]
+        new = [ledger_row("a", check_states=states(True), retry_damaged_recovery=False, tier1_damaged_recovery=False)]
+        self.assertEqual(len(rb.format_outcome_diff_lines([old_row], new)), 1)
+        lines = rb.format_ledger_field_diff_lines([old_row], new)
+        self.assertEqual(
+            lines[0],
+            "deterministic field diff vs committed (report-only): 1 document(s); check_states 1, "
+            "retry_damaged_recovery 1, tier1_damaged_recovery 1",
+        )
+        self.assertTrue(lines[1].startswith("  a: check_states null -> {"))
+        self.assertTrue(
+            lines[1].endswith("; retry_damaged_recovery null -> false; tier1_damaged_recovery null -> false")
         )
 
     def test_miss_reason_prints_the_kind_and_never_the_text(self):
@@ -1019,9 +1079,17 @@ class LedgerDiffBlockTests(unittest.TestCase):
 class MainLedgerGateTests(unittest.TestCase):
     """`main()` with every network, git and process call faked: the
     aggregates below never move (only CI provenance does), so the class is
-    `identical` and the ledger diff alone decides what happens next."""
+    `identical` and the ledger diff alone decides what happens next. Passing
+    `new_baseline_overrides` moves an off-denominator bucket instead, so the
+    class is `non-scored delta` (the doc-rewrite step is faked too)."""
 
-    def _run_main(self, old_rows: list[dict], new_rows: list[dict], confirm: bool) -> tuple[int, str, list[list[str]]]:
+    def _run_main(
+        self,
+        old_rows: list[dict],
+        new_rows: list[dict],
+        confirm: bool,
+        new_baseline_overrides: dict | None = None,
+    ) -> tuple[int, str, list[list[str]]]:
         import contextlib
         import io
 
@@ -1040,7 +1108,12 @@ class MainLedgerGateTests(unittest.TestCase):
             artifact = root / "artifact"
             artifact.mkdir()
             new_baseline = artifact / "real-specimen-mrz-baseline.json"
-            new_baseline.write_text(json.dumps(make_baseline(measured_on_ci_sha="ccccccc")), encoding="utf-8")
+            new_baseline.write_text(
+                json.dumps(make_baseline(measured_on_ci_sha="ccccccc", **(new_baseline_overrides or {}))), encoding="utf-8"
+            )
+            for rel in (rb.README_REL_PATH, rb.BENCH_README_REL_PATH, rb.FINDINGS_REL_PATH):
+                (worktree / rel).parent.mkdir(parents=True, exist_ok=True)
+                (worktree / rel).write_text("placeholder\n", encoding="utf-8")
             new_ledger = artifact / "real-specimen-outcomes.jsonl"
             write_ledger(new_ledger, new_rows)
 
@@ -1055,7 +1128,11 @@ class MainLedgerGateTests(unittest.TestCase):
                 rb.ac, "run_bash_script", return_value=""
             ), mock.patch.object(
                 rb.ac, "run_cmd", side_effect=lambda cmd, **kw: commands.append(list(cmd)) or ""
-            ), mock.patch.object(rb.ac, "gh_pr_number_for_branch", return_value=None), contextlib.redirect_stdout(out):
+            ), mock.patch.object(rb.ac, "gh_pr_number_for_branch", return_value=None), mock.patch.object(
+                rb, "rewrite_readme_gap_and_corpus_rate", side_effect=lambda text, *a: text
+            ), mock.patch.object(
+                rb, "rewrite_benchmarks_readme_live_block", side_effect=lambda text, *a: text
+            ), mock.patch.object(rb.ixf, "write_index"), contextlib.redirect_stdout(out):
                 code = rb.main(argv)
             return code, out.getvalue(), commands
 
@@ -1068,6 +1145,26 @@ class MainLedgerGateTests(unittest.TestCase):
         self.assertIn("a: hit -> checksum_failed", out)
         self.assertIn("b: checksum_failed -> hit", out)
         self.assertFalse(any("commit" in c for c in commands), f"nothing may be committed: {commands}")
+
+    def test_non_scored_delta_and_an_outcome_change_stops_for_a_human(self):
+        old = [ledger_row("a"), ledger_row("b", outcome="checksum_failed")]
+        new = [ledger_row("a", outcome="checksum_failed"), ledger_row("b")]  # the two swapped buckets
+        code, out, commands = self._run_main(old, new, confirm=True, new_baseline_overrides={"documents": 266})
+        self.assertIn("baseline diff classification: non-scored delta", out)
+        self.assertEqual(code, rb.EXIT_OUTCOME_CHANGED)
+        self.assertIn("a: hit -> checksum_failed", out)
+        self.assertIn("b: checksum_failed -> hit", out)
+        self.assertFalse(any("commit" in c for c in commands), f"nothing may be committed: {commands}")
+
+    def test_non_scored_delta_without_an_outcome_change_still_proceeds(self):
+        # An ingest adds a document (only_new) but no document present on both
+        # sides changes outcome: not a stop, and the commit still goes ahead.
+        old = [ledger_row("a"), ledger_row("b")]
+        new = [ledger_row("a"), ledger_row("b"), ledger_row("c")]
+        code, out, commands = self._run_main(old, new, confirm=True, new_baseline_overrides={"documents": 266})
+        self.assertIn("baseline diff classification: non-scored delta", out)
+        self.assertEqual(code, 0)
+        self.assertEqual(len([c for c in commands if "commit" in c]), 1, commands)
 
     def test_identical_aggregates_and_a_non_outcome_change_proceeds_with_the_diff_in_the_commit_message(self):
         old = [ledger_row("a", retry_variant_id="pass-03", retry_stop="variant_valid"), ledger_row("b")]

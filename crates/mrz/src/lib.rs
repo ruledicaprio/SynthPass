@@ -48,6 +48,7 @@
 //! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
 //! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
 //! | Cells an image shows as covered | [`apply_occlusion`] with a [`CellMask`]: it withholds fields no check digit covers, and refuses a covered check-digit cell |
+//! | A cell to read without its neighbours | [`position_class`]: which characters the layout allows there, a [`PositionClass`] |
 //!
 //! A valid composite check digit establishes checksum consistency, not
 //! byte-identity. It does not prove the document is in date — see
@@ -94,6 +95,8 @@
 //! - `parser` — the five fixed-layout parsers and the free-text scanner
 //! - `occlusion` — [`apply_occlusion`], [`CellMask`], [`Occluded`], [`ZoneField`]
 //!   (withholds covered, unverifiable fields from a parsed zone)
+//! - `position` — [`position_class`], [`PositionClass`] (which characters each
+//!   cell of a layout allows)
 //! - `line1_select` — the shadow line-1 selector, [`select_line1`] (opt-in; measured once, see its docs)
 //! - `emit` — the five emitters and Part 3 §4.6 name encoding
 //! - `checksum` — check-digit math and OCR line normalization
@@ -134,6 +137,7 @@ mod line1_select;
 mod mrz_date;
 mod occlusion;
 mod parser;
+mod position;
 mod rank;
 mod repair;
 mod sex;
@@ -160,6 +164,7 @@ pub use parser::{
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
     parse_td3_with,
 };
+pub use position::{position_class, PositionClass};
 pub use repair::{
     solve_class_sweep, solve_field, solve_substitution, substitution_candidates, width_candidates,
     FieldKind, Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
@@ -207,6 +212,46 @@ pub struct ParseOptions {
     /// only after an ordinary read has already failed to validate.
     #[cfg_attr(feature = "serde", serde(default))]
     pub class_sweep: bool,
+    /// Refuse a checksum-valid zone in which one line repeats another, instead
+    /// of only ranking it below an alternative: [`find_and_parse_with`] drops
+    /// such a zone, from the ordinary scan or the damaged-capture pass, and
+    /// goes on looking.
+    ///
+    /// **Off by default, and unmeasured as a default** (#579). With it off,
+    /// [`find_and_parse_with`] returns such a zone when nothing better exists,
+    /// exactly as it always has. A zone "repeats a line" when two of its lines
+    /// are near-identical (similarity of at least 0.6 after dropping fillers
+    /// and folding lookalike characters; the most similar pair in a correctly
+    /// read zone scores at most 0.30). The check digits cannot see this: a
+    /// format's line 1 (and TD1's line 3) enters few or none of them, so a
+    /// second reading of another line can stand in for it and the zone still
+    /// validates.
+    ///
+    /// With it on, the precedence among what is left is: an unflagged valid
+    /// zone, then another flagged valid zone, then the best checksum-failed
+    /// reading (an [`Ok`] whose [`MrzData::valid`] is false), and only when
+    /// nothing else parsed, [`MrzError::RepeatedLine`]. Only the scan changes:
+    /// the `parse_*` functions, which are handed two or three lines and pick
+    /// nothing, are unaffected.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub refuse_repeated_line: bool,
+    /// Require the date of birth and the date of expiry to hold digits (#579,
+    /// the C6 rule): a read whose date field holds any character other than an
+    /// ASCII digit or the filler `<` is not [`MrzData::valid`].
+    ///
+    /// A check digit is arithmetic, and letters have values too, so an emitted
+    /// or misread zone whose birth date is six letters passes every check digit
+    /// yet cannot be a date. The check digits themselves are unchanged (see
+    /// [`MrzData::checks`]); this is one more condition `valid` combines with
+    /// them. A partially unknown date (digits and `<` only, Doc 9303 Part 3
+    /// §4.8) stays valid, as does an all-filler one.
+    ///
+    /// **Off by default, until measured.** It is the validity rule the 0.10.0
+    /// refusals will carry; it ships as an option first, so an A/B can name it
+    /// before the default flips (the pattern [`ParseOptions::class_sweep`]
+    /// follows). Only these two fields are affected.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub date_digits: bool,
 }
 
 impl Default for ParseOptions {
@@ -214,6 +259,8 @@ impl Default for ParseOptions {
         Self {
             pivot_yy: CURRENT_YY,
             class_sweep: false,
+            refuse_repeated_line: false,
+            date_digits: false,
         }
     }
 }
@@ -253,6 +300,55 @@ impl ParseOptions {
     #[must_use]
     pub const fn with_class_sweep(mut self, class_sweep: bool) -> Self {
         self.class_sweep = class_sweep;
+        self
+    }
+
+    /// Refuse a checksum-valid zone in which one line repeats another — see
+    /// [`ParseOptions::refuse_repeated_line`], which is off by default.
+    ///
+    /// ```
+    /// use mrz::{find_and_parse_with, Format, MrzError, ParseOptions};
+    ///
+    /// assert!(!ParseOptions::default().refuse_repeated_line);
+    /// let opts = ParseOptions::default().with_refuse_repeated_line(true);
+    /// assert!(opts.refuse_repeated_line);
+    ///
+    /// // A line 1 that is line 2 read a second time behind line 1's own
+    /// // document code and issuer still validates: no check digit covers it.
+    /// let text = "P<UTO02C36UTO7408122F1204159ZE184226B<<<<<10\n\
+    ///             L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// let doc = find_and_parse_with(text, &ParseOptions::default()).unwrap();
+    /// assert!(doc.valid());
+    ///
+    /// // With the switch on, the zone is refused and the error says which
+    /// // two lines repeat.
+    /// assert_eq!(
+    ///     find_and_parse_with(text, &opts),
+    ///     Err(MrzError::RepeatedLine {
+    ///         format: Format::Td3,
+    ///         first_line: 0,
+    ///         second_line: 1,
+    ///     }),
+    /// );
+    /// ```
+    #[must_use]
+    pub const fn with_refuse_repeated_line(mut self, refuse_repeated_line: bool) -> Self {
+        self.refuse_repeated_line = refuse_repeated_line;
+        self
+    }
+
+    /// Require the two date fields to hold digits — see
+    /// [`ParseOptions::date_digits`], which is off by default until measured.
+    ///
+    /// ```
+    /// use mrz::ParseOptions;
+    ///
+    /// assert!(!ParseOptions::default().date_digits);
+    /// assert!(ParseOptions::default().with_date_digits(true).date_digits);
+    /// ```
+    #[must_use]
+    pub const fn with_date_digits(mut self, date_digits: bool) -> Self {
+        self.date_digits = date_digits;
         self
     }
 }
@@ -700,6 +796,25 @@ pub struct MrzData {
     #[cfg_attr(feature = "zeroize", zeroize(skip))]
     #[cfg_attr(feature = "serde", serde(default))]
     pub damaged_recovery: bool,
+    /// `true` when this record was parsed with [`ParseOptions::date_digits`]
+    /// on, so [`valid`](Self::valid) also requires the date of birth and the
+    /// date of expiry to hold digits or fillers only (#579). Recorded on the
+    /// value because `valid` takes no options. `false` for every read made with
+    /// the default options.
+    ///
+    /// `#[serde(default, skip_serializing_if)]`: absent from the JSON unless
+    /// the option was on, so a record from the default options serializes
+    /// exactly as it did before this field existed, and JSON written before it
+    /// still deserializes.
+    #[cfg_attr(feature = "zeroize", zeroize(skip))]
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "is_false"))]
+    pub date_digits_required: bool,
+}
+
+/// `skip_serializing_if` for a `bool` that is `false` by default.
+#[cfg(feature = "serde")]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl MrzData {
@@ -709,9 +824,9 @@ impl MrzData {
     /// preferred spelling: `valid` sits three letters from
     /// [`validity`](Self::validity) and means something entirely different,
     /// so the short name reads as a verdict on the *document* when it is a
-    /// verdict on the *arithmetic*. Both call
-    /// [`checks.all_valid()`](Checks::all_valid); neither is going away
-    /// inside 0.8.
+    /// verdict on the *arithmetic*. [`valid`](Self::valid) calls
+    /// [`checks.all_valid()`](Checks::all_valid) as well, and adds the opt-in
+    /// date-digits condition (#579); neither name is going away inside 0.8.
     ///
     /// **This is checksum consistency — not document validity, and not
     /// byte-identity with the printed zone.** Whether the document is in date
@@ -736,9 +851,18 @@ impl MrzData {
     }
 
     /// Shorthand for [`checks.all_valid()`](Checks::all_valid): every check
-    /// digit this format prints agrees with the candidate. Same answer as
+    /// digit this format prints agrees with the candidate. With the default
+    /// [`ParseOptions`] this is the same answer as
     /// [`checksum_consistent`](Self::checksum_consistent), which is the
     /// clearer name for it.
+    ///
+    /// **One more condition, when asked for.** A read made with
+    /// [`ParseOptions::date_digits`] on is also not valid if its date of birth
+    /// or date of expiry holds a character that is neither an ASCII digit nor
+    /// `<` (#579): letters have check-digit values too, so a date field of
+    /// letters can pass every digit. The check digits themselves are unchanged
+    /// ([`checks`](Self::checks) still says what the arithmetic found), and a
+    /// partially unknown date stays valid. Off by default.
     ///
     /// A failed check digit is a verdict on the read, not a parse error: the
     /// zone still parses, and this is where the verdict lives.
@@ -757,7 +881,17 @@ impl MrzData {
     /// assert!(!tampered.valid());
     /// ```
     pub fn valid(&self) -> bool {
-        self.checksum_consistent()
+        self.checksum_consistent() && !self.date_digits_violated()
+    }
+
+    /// The C6 condition: the read was made with [`ParseOptions::date_digits`]
+    /// on and a date field holds a character that is neither an ASCII digit nor
+    /// the filler. [`DateCompleteness::Malformed`] is exactly that.
+    fn date_digits_violated(&self) -> bool {
+        self.date_digits_required
+            && [self.date_of_birth, self.date_of_expiry]
+                .iter()
+                .any(|date| date.completeness() == DateCompleteness::Malformed)
     }
 
     /// The complete document number: the overflow reassembly when there is
@@ -1215,6 +1349,24 @@ pub enum MrzError {
         /// Zero-based `char` column within the line.
         position: usize,
     },
+    /// [`find_and_parse_with`] only, and only with
+    /// [`ParseOptions::refuse_repeated_line`] on: every checksum-valid zone
+    /// found holds one line twice — the wrong physical line stood in for a
+    /// line no check digit covers — and no other reading, not even a
+    /// checksum-failed one, was left to return. A structural refusal like
+    /// [`Self::LeadingFiller`], not a [`Checks`] failure: the check digits
+    /// verified, and the zone is refused anyway.
+    ///
+    /// `first_line` and `second_line` are the zero-based lines of the first
+    /// near-identical pair in the refused zone, `first_line < second_line`.
+    RepeatedLine {
+        /// The zone's format.
+        format: Format,
+        /// Zero-based line of the earlier line of the pair.
+        first_line: usize,
+        /// Zero-based line of the later line of the pair.
+        second_line: usize,
+    },
 }
 
 impl core::fmt::Display for MrzError {
@@ -1265,6 +1417,14 @@ impl core::fmt::Display for MrzError {
             Self::OccludedCheckedCell { line, position } => write!(
                 f,
                 "occluded cell at line {line}, column {position} cannot be withheld safely"
+            ),
+            Self::RepeatedLine {
+                format,
+                first_line,
+                second_line,
+            } => write!(
+                f,
+                "{format:?} zone: line {second_line} repeats line {first_line}"
             ),
         }
     }
@@ -1396,10 +1556,6 @@ mod tests {
                     position: expected_position,
                 }
             );
-            assert_eq!(
-                error.to_string(),
-                format!("invalid MRZ character: '?' at line {line}, column {expected_position}")
-            );
         }
     }
 
@@ -1416,10 +1572,6 @@ mod tests {
                 line: None,
                 position: 2,
             }
-        );
-        assert_eq!(
-            error.to_string(),
-            "invalid MRZ character: '?' at position 2"
         );
     }
 
@@ -1885,6 +2037,19 @@ mod tests {
 
     #[test]
     fn td3_long_document_number_round_trips() {
+        // The full document number's 7-3-1 sum is 360, so its check digit is 0.
+        let pinned = parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "L898902C3<UTO7408122F120415912340<<<<<<<<<44",
+        )
+        .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
+        assert_eq!(
+            pinned.document_number_full.as_deref(),
+            Some("L898902C31234")
+        );
+
         let fields = Td3Fields {
             document_code: "P".into(),
             issuing_country: "UTO".into(),
@@ -1913,6 +2078,18 @@ mod tests {
 
     #[test]
     fn overflow_coexists_with_personal_number() {
+        // AB1234567890: 10·7 + 11·3 + 1·1 + 2·7 + 3·3 + 4·1 + 5·7 + 6·3 +
+        // 7·1 + 8·7 + 9·3 = 274, so the document-number digit is 4.
+        let pinned = parse_td3(
+            "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
+            "AB1234567<UTO7408122F12041598904<ZE184<<<<37",
+        )
+        .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
+        assert_eq!(pinned.document_number_full.as_deref(), Some("AB1234567890"));
+        assert_eq!(pinned.personal_number(), Some("ZE184"));
+
         let fields = Td3Fields {
             document_number: "AB1234567890".into(), // 12 chars
             personal_number: Some("ZE184".into()),
@@ -1926,6 +2103,35 @@ mod tests {
 
     #[test]
     fn td2_and_td1_long_document_numbers_round_trip() {
+        // D23145890XY: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 33·7 + 34·3 = 540, so the document-number digit is 0.
+        let pinned_td2 = parse_td2(
+            "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
+            "D23145890<UTO7408122F1204159XY0<<<<0",
+        )
+        .unwrap();
+        assert!(pinned_td2.valid(), "checks: {:?}", pinned_td2.checks);
+        assert_eq!(pinned_td2.checks.document_number, Some(true));
+        assert_eq!(
+            pinned_td2.document_number_full.as_deref(),
+            Some("D23145890XY")
+        );
+
+        // D23145890ABCDE: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 10·7 + 11·3 + 12·1 + 13·7 + 14·3 = 455, so its digit is 5.
+        let pinned_td1 = parse_td1(
+            "I<UTOD23145890<ABCDE5<<<<<<<<<",
+            "7408122F1204159UTO<<<<<<<<<<<0",
+            "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
+        )
+        .unwrap();
+        assert!(pinned_td1.valid(), "checks: {:?}", pinned_td1.checks);
+        assert_eq!(pinned_td1.checks.document_number, Some(true));
+        assert_eq!(
+            pinned_td1.document_number_full.as_deref(),
+            Some("D23145890ABCDE")
+        );
+
         let td2 = Td2Fields {
             document_number: "D23145890XY".into(), // 11 chars; remainder fits 7
             date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),
@@ -2054,17 +2260,20 @@ mod tests {
 
     #[test]
     fn default_options_match_the_plain_entry_points() {
-        let opts = ParseOptions::default();
-        assert_eq!(opts.pivot_yy, CURRENT_YY);
-        assert_eq!(
-            parse_td3(TD3_L1, TD3_L2).unwrap(),
-            parse_td3_with(TD3_L1, TD3_L2, &opts).unwrap()
-        );
+        assert_eq!(ParseOptions::default().pivot_yy, CURRENT_YY);
+
+        // The plain entry points read dates with the default pivot. Asserted
+        // against literals, not against `parse_td3_with(.., &default())`, which
+        // is the same call. A default pivot that drifted from today's would
+        // move the century of these dates.
+        let td3 = parse_td3(TD3_L1, TD3_L2).unwrap();
+        assert_eq!(td3.date_of_birth.to_string(), "1974-08-12");
+        assert_eq!(td3.date_of_expiry.to_string(), "2012-04-15");
+
         let text = format!("## VISA\n\n{MRV_A_L1}\n{MRV_A_L2}\n");
-        assert_eq!(
-            find_and_parse(&text).unwrap(),
-            find_and_parse_with(&text, &opts).unwrap()
-        );
+        let visa = find_and_parse(&text).unwrap();
+        assert_eq!(visa.date_of_birth.to_string(), "1985-02-21");
+        assert_eq!(visa.date_of_expiry.to_string(), "2027-03-14");
     }
 
     // ---- Checks diagnostics ----

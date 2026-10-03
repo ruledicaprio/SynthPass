@@ -227,15 +227,23 @@ const SECTION_4_2_3_1_NAME_EXAMPLES: &[(&str, &str)] = &[
     ),
 ];
 
+/// Each §4.2.3.1 example is fed to the real TD3 parser as line 1, beside the
+/// Part 4 specimen's line 2. A line that is not 44 characters (the transcription
+/// damage this table guards against) is refused by the parser, and so is a name
+/// field that is not TD3 line 1 at all; the length is asserted by the parser,
+/// not by counting the test's own literals.
 #[test]
-fn section_4_2_3_1_examples_are_44_characters() {
+fn section_4_2_3_1_examples_are_accepted_as_td3_line_1() {
+    const SPECIMEN_LINE_2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
     for &(source, mrz_line) in SECTION_4_2_3_1_NAME_EXAMPLES {
-        assert_eq!(
-            mrz_line.len(),
-            44,
-            "9303 pt4 §4.2.3.1 {source}: {mrz_line:?} is not 44 characters — likely \
-             corpus transcription damage, not an implementation bug"
-        );
+        let data = parse_td3(mrz_line, SPECIMEN_LINE_2).unwrap_or_else(|err| {
+            panic!(
+                "9303 pt4 §4.2.3.1 {source}: {mrz_line:?} is refused as TD3 line 1 ({err:?}) — \
+                 likely corpus transcription damage, not an implementation bug"
+            )
+        });
+        assert_eq!(data.mrz_lines.lines().next(), Some(mrz_line), "{source}");
+        assert_eq!(data.issuing_country, "UTO", "{source}");
     }
 }
 
@@ -870,9 +878,10 @@ fn truncation_respects_icao_invariants() {
 /// the transliteration into the MRZ: `CANXXON<<TERESA`".
 ///
 /// This is the `XxSuffix` style (`Ñ`→`NXX`), not the `Expanded` style the
-/// emit path wires in by default (`Ñ`→`N`), so it is built here directly
-/// from [`mrz::transliterate`] plus the same `<<`-join/pad-to-width §4.6
-/// applies, rather than through `format_td3` (which is Expanded-only).
+/// emit path wires in by default (`Ñ`→`N`), so it is asserted directly on
+/// [`mrz::transliterate`] rather than through `format_td3` (which is
+/// Expanded-only). Only the two transliterations are the vector; the
+/// `<<`-join and the padding to width are not asserted here.
 #[test]
 fn xxsuffix_golden_vector_teresa_canon() {
     use mrz::{transliterate, TransliterationStyle};
@@ -881,17 +890,6 @@ fn xxsuffix_golden_vector_teresa_canon() {
     let given_names = transliterate("Térèsa", TransliterationStyle::XxSuffix);
     assert_eq!(surname, "CANXXON");
     assert_eq!(given_names, "TERESA");
-
-    let combined = format!("{surname}<<{given_names}");
-    assert_eq!(combined, "CANXXON<<TERESA");
-
-    let mut padded = combined.clone();
-    while padded.len() < 39 {
-        padded.push('<');
-    }
-    assert_eq!(padded.len(), 39);
-    assert!(padded.starts_with(&combined));
-    assert!(padded[combined.len()..].chars().all(|c| c == '<'));
 }
 
 /// Emit-path regression: `clean_name_half` now transliterates Table A

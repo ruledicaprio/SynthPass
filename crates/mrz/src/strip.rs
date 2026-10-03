@@ -206,8 +206,12 @@ const fn profile(field: Field) -> (u64, EditPolicy) {
         Field::BirthCheck
         | Field::ExpiryCheck
         | Field::DocumentNumberCheck
-        | Field::PersonalCheck
         | Field::CompositeCheck => (DIGIT, EditPolicy::Comparison),
+        // Part 4, position 43: when the personal number field is unused and
+        // filled with `<`, its check digit may be zero or the filler, at the
+        // issuer's option. `verify` already accepts the filler wherever the
+        // expected digit is zero.
+        Field::PersonalCheck => (DIGIT | FILLER, EditPolicy::Comparison),
         Field::Sex => (SEX, EditPolicy::UncheckedData),
         Field::DocumentNumberMarker => (FILLER, EditPolicy::Comparison),
         Field::Name | Field::Nationality => (LETTER | FILLER, EditPolicy::UncheckedData),
@@ -365,6 +369,51 @@ const TD3: [CellSpec; 88] = two_line::<88>(44, true, false);
 const MRV_A: [CellSpec; 88] = two_line::<88>(44, false, true);
 const MRV_B: [CellSpec; 72] = two_line::<72>(36, false, true);
 
+/// Each format's line width, line count and ordinary-layout cells.
+fn ordinary(format: Format) -> (usize, usize, &'static [CellSpec]) {
+    match format {
+        Format::Td1 => (30, 3, &TD1),
+        Format::Td2 => (36, 2, &TD2),
+        Format::Td3 => (44, 2, &TD3),
+        Format::MrvA => (44, 2, &MRV_A),
+        Format::MrvB => (36, 2, &MRV_B),
+    }
+}
+
+/// The ordinary layout's cell at zero-based `line` and `column`, or `None`
+/// outside the format's grid. Read by [`crate::position_class`], the public
+/// view of the cells' alphabets. A long document number's conditional layout
+/// is resolved by [`for_lines`] from a zone's text and is not consulted here.
+pub(crate) fn ordinary_cell(format: Format, line: usize, column: usize) -> Option<CellSpec> {
+    let (width, count, cells) = ordinary(format);
+    if line >= count || column >= width {
+        return None;
+    }
+    cells.get(line * width + column).copied()
+}
+
+impl CellSpec {
+    /// This cell's alphabet as a [`crate::PositionClass`]. The two narrower
+    /// alphabets (the sex cell's `M`, `F`, `<` and the first document-code
+    /// cell's own letters) widen to their class. A cell whose
+    /// alphabet fits no class, which the ordinary layout does not contain,
+    /// widens to [`crate::PositionClass::Any`], so the class never excludes a
+    /// character the cell admits.
+    pub(crate) fn position_class(self) -> crate::PositionClass {
+        use crate::PositionClass;
+        let digits = self.allowed & DIGIT != 0;
+        let letters = self.allowed & LETTER != 0;
+        let filler = self.allowed & FILLER != 0;
+        match (digits, letters, filler) {
+            (true, false, false) => PositionClass::Digit,
+            (true, false, true) => PositionClass::DigitOrFiller,
+            (false, true, false) => PositionClass::Letter,
+            (false, true, true) => PositionClass::LetterOrFiller,
+            _ => PositionClass::Any,
+        }
+    }
+}
+
 /// Resolve the parser's conditional layout. TD3's overflow is a crate extension
 /// by analogy with Parts 5/6; Part 4 defines no such encoding. Visas never
 /// select overflow. Legacy mode reflects this crate's pre-0.6 emission only.
@@ -372,15 +421,11 @@ const MRV_B: [CellSpec; 72] = two_line::<72>(36, false, true);
 /// Crate-private: `occlusion.rs`'s `apply_occlusion` (#565) is this
 /// function's first production caller, re-deriving the template from a zone
 /// that has already parsed, where cell *k* is line position *k* by
-/// construction. A public API for this map needs its own ADR (#551, #421).
+/// construction. A public API for this map needs its own ADR (#551, #421);
+/// [`crate::position_class`] (ADR-0014, amended 2026-10-01) exposes only each
+/// ordinary cell's alphabet class, through [`ordinary_cell`].
 pub(crate) fn for_lines(format: Format, lines: &[&str]) -> Option<Template> {
-    let (width, count, base): (usize, usize, &[CellSpec]) = match format {
-        Format::Td1 => (30, 3, &TD1),
-        Format::Td2 => (36, 2, &TD2),
-        Format::Td3 => (44, 2, &TD3),
-        Format::MrvA => (44, 2, &MRV_A),
-        Format::MrvB => (36, 2, &MRV_B),
-    };
+    let (width, count, base) = ordinary(format);
     if lines.len() != count
         || lines
             .iter()
@@ -783,19 +828,59 @@ mod tests {
             template.cells.len(),
             template.line_width * template.line_count
         );
-        let document_code = match format {
-            Format::Td3 => TD3_CODE,
-            Format::MrvA | Format::MrvB => VISA_CODE,
-            Format::Td1 | Format::Td2 => ID_CODE,
+        // Alphabets are judged one character at a time against literal lists
+        // (not against the constants that built the cells), and the document
+        // code cell also against the direct parser, which decides the same
+        // question by its own rule.
+        let admits = |cell: &CellSpec, c: char| -> bool {
+            let bit = match c {
+                '<' => FILLER,
+                '0'..='9' => 1u64 << (1 + (c as u8 - b'0')),
+                'A'..='Z' => glyph(c as u8),
+                _ => 0,
+            };
+            cell.allowed & bit != 0
         };
-        assert_eq!(template.cells[0].allowed, document_code);
+        let admitted_first_letters: &[u8] = match format {
+            Format::Td3 => b"P",
+            Format::MrvA | Format::MrvB => b"V",
+            Format::Td1 | Format::Td2 => b"IAC",
+        };
+        for letter in b'A'..=b'Z' {
+            let mut mutated = lines.concat().into_bytes();
+            mutated[0] = letter;
+            let parsed = parse(format, std::str::from_utf8(&mutated).unwrap());
+            let parser_admits = !matches!(parsed, Err(MrzError::BadDocumentCode(_)));
+            assert_eq!(
+                parser_admits,
+                admitted_first_letters.contains(&letter),
+                "{format:?}: the direct parser and first letter {:?}",
+                letter as char
+            );
+            assert_eq!(
+                admits(&template.cells[0], letter as char),
+                parser_admits,
+                "{format:?}: the cell alphabet and the direct parser on first letter {:?}",
+                letter as char
+            );
+        }
         for cell in &template.cells {
             assert_ne!(cell.allowed, 0, "every cell has an alphabet");
             if cell.field == Field::Sex {
-                assert_eq!(cell.allowed, SEX);
+                for c in ['M', 'F', '<'] {
+                    assert!(admits(cell, c), "{format:?}: sex admits {c:?}");
+                }
+                for c in ['0', '9', 'Z'] {
+                    assert!(!admits(cell, c), "{format:?}: sex refuses {c:?}");
+                }
             }
             if matches!(cell.field, Field::Name | Field::Nationality) {
-                assert_eq!(cell.allowed, LETTER | FILLER);
+                for c in ('A'..='Z').chain(['<']) {
+                    assert!(admits(cell, c), "{format:?}: names admit {c:?}");
+                }
+                for c in '0'..='9' {
+                    assert!(!admits(cell, c), "{format:?}: names refuse {c:?}");
+                }
             }
         }
         let original = lines.concat().into_bytes();
@@ -1081,10 +1166,13 @@ mod tests {
                 Format::MrvA => &MRV_A,
                 Format::MrvB => &MRV_B,
             };
-            let (mut structural, mut covered, mut unverifiable) = (0, 0, 0);
+            // Totality (every cell is classified exactly once) is the
+            // exhaustive `match` below; a sum of counters over it would only
+            // restate it.
+            let mut structural = 0;
             for (index, cell) in cells.iter().enumerate() {
                 match cell.class() {
-                    CellClass::CheckCovered => covered += 1,
+                    CellClass::CheckCovered | CellClass::Unverifiable => {}
                     CellClass::Structural => {
                         structural += 1;
                         assert_eq!(
@@ -1092,17 +1180,11 @@ mod tests {
                             "{format:?}: a structural cell can only be line 1's first position"
                         );
                     }
-                    CellClass::Unverifiable => unverifiable += 1,
                 }
             }
             assert_eq!(
                 structural, 1,
                 "{format:?}: exactly one structural cell — the document code"
-            );
-            assert_eq!(
-                structural + covered + unverifiable,
-                cells.len(),
-                "{format:?}: the map classifies every cell exactly once"
             );
 
             // #536: `parser::ensure_document_number_leads` is a second content
@@ -1348,5 +1430,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A cell's public class is never narrower than its alphabet: every
+    /// character a cell's mask admits is in its `position_class`. And the one
+    /// alphabet the class view corrected, TD3's personal-number check digit,
+    /// admits the filler (Part 4, position 43).
+    #[test]
+    fn position_class_never_excludes_a_character_the_cell_admits() {
+        let bit = |c: char| -> u64 {
+            match c {
+                '<' => FILLER,
+                '0'..='9' => 1u64 << (1 + (c as u8 - b'0')),
+                'A'..='Z' => glyph(c as u8),
+                _ => 0,
+            }
+        };
+        for format in ALL_FORMATS {
+            let (width, count, cells) = ordinary(format);
+            assert_eq!(cells.len(), width * count, "{format:?}");
+            for (index, cell) in cells.iter().enumerate() {
+                let (line, column) = (index / width, index % width);
+                let viewed = ordinary_cell(format, line, column).expect("inside the grid");
+                assert_eq!(viewed, *cell, "{format:?} line {line} column {column}");
+                let class = cell.position_class();
+                for c in ('0'..='9').chain('A'..='Z').chain(['<']) {
+                    if cell.allowed & bit(c) != 0 {
+                        assert!(
+                            class.allows(c),
+                            "{format:?} line {line} column {column}: {class:?} excludes {c:?}"
+                        );
+                    }
+                }
+            }
+        }
+        let personal_check = ordinary_cell(Format::Td3, 1, 42).expect("TD3 line 2 column 42");
+        assert_eq!(personal_check.field, Field::PersonalCheck);
+        assert_ne!(personal_check.allowed & FILLER, 0);
+        assert_eq!(personal_check.allowed & LETTER, 0);
     }
 }

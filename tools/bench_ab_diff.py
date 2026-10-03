@@ -33,6 +33,8 @@ An arm is one directory, holding whatever the A/B measured:
     ARM/real/         one `provider-bench` run, e.g.
                       provider-bench --real-specimens --mrz-only --dump-ocr
                         --dump-ocr-hits --out ARM/real/report.json
+    ARM/arm.json      the arm's record, written by `bench-ab.yml` (`bench_ab_args.py arm-json`);
+                      a local arm has none
 
 - **Synthetic reports** are paired by file name. A pair must cover the same
   document type, profile and seeds; `synth_ab_diff.compare` checks that.
@@ -70,7 +72,10 @@ refused without it, and `--asset` is refused with it: that mode prints no zones.
 - **2** on:
   - unreadable input;
   - two arms with nothing in common to compare;
-  - an arm measured with a private or local track;
+  - an arm measured with a private or local track, under `--expect-identical`
+    or with `--asset`;
+  - a CI arm (one with `arm.json`) paired with a local one, or two records whose
+    runner facts or roles differ (see below);
   - under `--expect-identical`, `--check-pass-trace` when neither arm has a
     pass trace, and `--check-report` when neither arm has a real `report.json`
     with `documents_detail` rows.
@@ -81,6 +86,25 @@ refused without it, and `--asset` is refused with it: that mode prints no zones.
 
 Codes 0, 1 and 2 mean the same in both modes. When several apply, 2 wins over 1
 and 1 wins over 3.
+
+## One runner
+
+ADR-0027 decision 4: both arms of an A/B run on one runner, from one workflow run,
+and a CI arm is never compared with a local one. Before anything is compared, in
+both modes, the arms' `arm.json` records are checked:
+
+- neither arm has one: a local A/B, compared as before;
+- only one has one: refused;
+- both have one: each must be a valid record (`bench_ab_args.check_arm`), the
+  before directory's must say `role: before` and the after directory's
+  `role: after`, and every `context` fact except `ocr_env` must be equal (run id
+  and attempt, commit, event, CPU model, core count, rustc, the two models'
+  hashes). `ocr_env` is each arm's own knobs plus the pin, which differ by
+  design; the refs, commits, knobs and binary hashes are not compared either. One
+  refusal line names every fact that differs.
+
+There is no override. The limit: a local arm records no machine, so two local arms
+measured on different machines are not detected.
 
 ## Neutrality mode
 
@@ -114,9 +138,10 @@ It first runs the default mode's checks, which decide exit 1 and 2. Then:
   which is no failure, as for the dump.
 - **`--check-report`** also compares the real arms' `report.json`: the `mrz`
   provider's `documents_detail` rows, per asset, after the same ignores (`ocr_ms`
-  is one). Those rows hold every per-document field the ledger and the dump do not
-  (`check_states`, `retry_damaged_recovery`, `tier1_damaged_recovery`, the
-  assertion counts, `field_correctness`), so this is the check that a replay
+  is one). Those rows hold per-document fields the ledger and the dump do not (the
+  assertion counts, `field_correctness`, `line1_selection`) and repeat
+  `check_states`, `retry_damaged_recovery` and `tier1_damaged_recovery`, which a
+  ledger written after #557 carries too, so this is the check that a replay
   reproduced them. It is opt-in because a change under test may legitimately move
   them. Without it `report.json` is not read in this mode. With the file in one
   arm only, the rows are not compared; in neither arm, the flag is refused.
@@ -217,10 +242,25 @@ A report written before a key existed is compared on what both arms have:
 
 Synthetic truth is generated and carries no real person.
 
-The real comparison covers the public corpus only. An arm is refused, with exit
-status 2 and before anything is printed, when:
+An arm is on a private or local track when:
 - its run archive shows `--include-private` or `--include-local`; or
 - an asset sits on a `private` or `local` track.
+(`report.json` carries no track marker of its own.)
+
+Then the real comparison is the private diff of ADR-0024 Decision 7, and the
+default mode prints only counts and enumerated transitions from the outcome
+ledger's enumerated columns (outcome kind, format, retry stop, booleans):
+
+    outcome: checksum_failed 1 -> 0, hit 2 -> 3
+    mrz_format 1 × TD3 to MRVA
+
+with no asset name, no image or corpus hash, no `miss_reason` text and no zone.
+It reads neither the zone dump nor the raw OCR text, and writes no file. `--json`
+carries the same sanitised result. `--asset` names a document, so it is refused
+for such an arm, and so is `--expect-identical`, which is the public gate.
+Synthetic reports in the same arms print as usual.
+
+Otherwise the comparison covers the public corpus.
 
 The public corpus's MRZ lines are already quoted in the dated notes in
 `knowledge/benchmarks/`. The default mode prints recovered zones, fixture
@@ -237,6 +277,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import bench_ab_args
+import bench_nightly_rows as nightly
 import synth_ab_diff as synth
 
 OUTCOMES = "provider-bench-ocr-outcomes.jsonl"
@@ -265,8 +307,23 @@ FLAG_KEYS = ("check_states", "line1_flagged", "tier1_damaged_recovery",
              "retry_damaged_recovery", "retry_stop", "retry_variant_id")
 PRIVATE_FLAGS = ("--include-private", "--include-local")
 PRIVATE_TRACKS = ("private", "local")
+# The ledger columns a private or local run's diff may print, all enumerated: an
+# outcome kind, a format, a retry stop, booleans. `name` and `miss_reason` are
+# free text and are not in this list, nor is any column holding a path or hash.
+PRIVATE_FIELDS = ("outcome", "mrz_format", "mrz_found", "mrz_checksums_valid", "names_exact", "name_error",
+                  "retry_stop", "retry_budget_hit")
+# What a printed private value may look like: a kind name or a boolean, never text.
+ENUM_VALUE = re.compile(r"[A-Za-z0-9_]{1,40}")
+# Identity keys whose values carry no document name and no hash, so a private
+# diff may print them; every other key that differs is named without its value.
+PRIVATE_NOTE_VALUES = ("flags", "ocr_arms", "mrz_class_sweep_arm", "mrz_line1_select_arm")
 # Flags that change nothing about what a run measures.
 NEUTRAL_FLAGS = ("--progress", "--verbose")
+ARM_RECORD = "arm.json"
+# The runner facts both arms of a CI A/B must share: the nightly's context block, less `ocr_env`,
+# which is each arm's own knobs plus the pin and differs by design. A key added to the block is
+# compared here by default.
+RUNNER_KEYS = tuple(k for k in nightly.CONTEXT_KEYS if k != "ocr_env")
 
 
 class Refused(Exception):
@@ -496,6 +553,7 @@ def identity(archive: dict | None, report: dict | None) -> dict:
         "replay_of": archive.get("replay_of"),
         "mrz_class_sweep_arm": report.get("mrz_class_sweep_arm"),
         "mrz_line1_select_arm": report.get("mrz_line1_select_arm"),
+        "mrz_date_digits_arm": report.get("mrz_date_digits_arm"),
         "model_paths": report.get("model_paths"),
     }
 
@@ -633,15 +691,99 @@ def real_state(row: dict | None) -> dict | None:
     return {k: row.get(k) for k in ("outcome", "mrz_format", "miss_reason", "names_exact", "name_error")}
 
 
-def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
+def compare_identities(ids: list[dict], problems: list[str], notes: list[str], private: bool = False) -> None:
+    """Append what differs between two arms' identity blocks to `problems` and
+    `notes`. With `private`, no hash and no value outside `PRIVATE_NOTE_VALUES`
+    is printed."""
+    for key in ids[0]:
+        b, a = ids[0][key], ids[1][key]
+        if key == "git_commit" or b == a:
+            continue
+        if b is None or a is None:
+            notes.append(f"{key} is recorded in one arm only")
+        elif key == "corpus_manifest_sha256":
+            problems.append("corpus manifests differ" if private
+                            else f"corpus manifests differ: {b[:12]} -> {a[:12]}")
+        elif private and key not in PRIVATE_NOTE_VALUES:
+            notes.append(f"{key} differs")
+        else:
+            notes.append(f"{key} differs: {b} -> {a}")
+
+
+def enum_value(value) -> str:
+    """A ledger value as a printable kind: booleans and `none` by name, a string
+    only when it is a bare kind name, and `other` for anything else."""
+    if value is None:
+        return "none"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str) and ENUM_VALUE.fullmatch(value):
+        return value
+    return "other"
+
+
+def private_fields(ob: dict[str, dict], oa: dict[str, dict]) -> dict:
+    """Per enumerated ledger column: the count of each value in each arm, and the
+    transitions on the documents both arms have, as `n x before to after`. A
+    column is compared only when both arms' rows carry it. No asset id, name or
+    reason text is kept."""
+    common = sorted(set(ob) & set(oa))
+    out = {}
+    for name in PRIVATE_FIELDS:
+        if not any(name in r for r in ob.values()) or not any(name in r for r in oa.values()):
+            continue
+        counts = [Counter(enum_value(r.get(name)) for r in rows.values()) for rows in (ob, oa)]
+        moves = Counter((enum_value(ob[k].get(name)), enum_value(oa[k].get(name))) for k in common)
+        out[name] = {
+            "counts": {v: [counts[0][v], counts[1][v]] for v in sorted(set(counts[0]) | set(counts[1]))},
+            "transitions": [{"before": b, "after": a, "documents": n}
+                            for (b, a), n in sorted(moves.items()) if b != a],
+        }
+    return out
+
+
+def compare_private(ob: dict, oa: dict, ids: list[dict], reasons: list[str | None],
+                    reports: list[dict | None]) -> dict:
+    """The diff of two runs of which one is on a private or local track (ADR-0024
+    Decision 7): counts and enumerated transitions, no asset name, no image hash,
+    no `miss_reason` text. The zone dump is not read at all."""
+    problems, notes = [], []
+    if set(ob) != set(oa):
+        problems.append(f"asset sets differ: {len(set(ob) - set(oa))} only before, "
+                        f"{len(set(oa) - set(ob))} only after")
+    compare_identities(ids, problems, notes, private=True)
+    summaries = [real_summary(ob, reports[0]), real_summary(oa, reports[1])]
+    fc = compare_field_correctness(field_correctness_maps(reports[0]), field_correctness_maps(reports[1]))
+    fc["regressions"] = None if fc["regressions"] is None else len(fc["regressions"])
+    return {
+        "private": True,
+        "reasons": reasons,
+        "problems": problems,
+        "notes": notes,
+        "documents": [len(ob), len(oa)],
+        "paired": len(set(ob) & set(oa)),
+        "fields": private_fields(ob, oa),
+        "alarms": [{"false_positive_mrz": s["false_positive_mrz"],
+                    "checksum_valid_on_failed_specimen": s["checksum_valid_on_failed_specimen"]}
+                   for s in summaries],
+        "field_correctness": fc,
+    }
+
+
+def compare_real(before_dir: Path, after_dir: Path, assets: list[str], allow_private: bool = False) -> dict:
     ob, oa = load_jsonl(before_dir / OUTCOMES), load_jsonl(after_dir / OUTCOMES)
     archive_b, archive_a = run_archive(before_dir), run_archive(after_dir)
-    for side, archive, rows in (("before", archive_b, ob), ("after", archive_a, oa)):
-        reason = private_reason(archive, rows)
-        if reason:
+    reasons = [private_reason(archive_b, ob), private_reason(archive_a, oa)]
+    for side, reason in zip(("before", "after"), reasons):
+        if reason and not allow_private:
             raise Refused(f"the {side} arm {reason}; only the public corpus is compared")
+    if any(reasons) and assets:
+        raise Refused("--asset names a document, and a diff of a private or local run prints no names")
     report_b = load_json(before_dir / REPORT) if (before_dir / REPORT).is_file() else None
     report_a = load_json(after_dir / REPORT) if (after_dir / REPORT).is_file() else None
+    if any(reasons):
+        return compare_private(ob, oa, [identity(archive_b, report_b), identity(archive_a, report_a)],
+                               reasons, [report_b, report_a])
     zones = (before_dir / ZONES).is_file() and (after_dir / ZONES).is_file()
     zb = load_jsonl(before_dir / ZONES, PROVIDER) if zones else {}
     za = load_jsonl(after_dir / ZONES, PROVIDER) if zones else {}
@@ -651,16 +793,7 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
         problems.append(f"asset sets differ: {len(set(ob) - set(oa))} only before, "
                         f"{len(set(oa) - set(ob))} only after")
     ids = [identity(archive_b, report_b), identity(archive_a, report_a)]
-    for key in ids[0]:
-        b, a = ids[0][key], ids[1][key]
-        if key == "git_commit" or b == a:
-            continue
-        if b is None or a is None:
-            notes.append(f"{key} is recorded in one arm only")
-        elif key == "corpus_manifest_sha256":
-            problems.append(f"corpus manifests differ: {b[:12]} -> {a[:12]}")
-        else:
-            notes.append(f"{key} differs: {b} -> {a}")
+    compare_identities(ids, problems, notes)
     new_bytes = sorted(k for k in set(zb) & set(za)
                        if zb[k].get("source_sha256") and za[k].get("source_sha256")
                        and zb[k]["source_sha256"] != za[k]["source_sha256"])
@@ -715,14 +848,57 @@ def compare_real(before_dir: Path, after_dir: Path, assets: list[str]) -> dict:
     }
 
 
-def compare_arms(before: Path, after: Path, assets: list[str]) -> dict:
+def runner_value(key: str, value) -> str:
+    """A runner fact as printed: `model_sha256` as 12-hex prefixes, the rest as validated."""
+    return value[:12] if key.startswith("model_sha256.") else str(value)
+
+
+def check_runner(before: Path, after: Path) -> None:
+    """Refuse two arms that were not measured on one runner (ADR-0027 decision 4).
+
+    A CI arm carries `arm.json` (`bench_ab_args.py arm-json`). An arm without one is local: two local
+    arms are compared as always, a CI arm and a local one never are. Two records must name the roles
+    of the directories they sit in, and agree on every `RUNNER_KEYS` fact. Only key names and runner
+    facts, which `validate_context` limits to short plain values, are ever printed."""
+    paths = [before / ARM_RECORD, after / ARM_RECORD]
+    present = [p.exists() for p in paths]
+    if not any(present):
+        return
+    if not all(present):
+        side = "before" if present[0] else "after"
+        raise Refused(f"only the {side} arm has an {ARM_RECORD}: a CI arm is never compared with a local arm")
+    records = {}
+    for side, path in zip(("before", "after"), paths):
+        try:
+            records[side] = bench_ab_args.load_arm(path)
+        except bench_ab_args.Refused as error:
+            raise Refused(f"the {side} arm's record: {error}") from error
+        if records[side]["role"] != side:
+            raise Refused(f"the {side} arm's {ARM_RECORD} says role {records[side]['role']}: "
+                          "the arms were passed in the wrong order, or one record was copied")
+    context_b, context_a = records["before"]["context"], records["after"]["context"]
+    differing = []
+    for key in RUNNER_KEYS:
+        if key == "model_sha256":
+            pairs = [(f"{key}.{model}", context_b[key][model], context_a[key][model])
+                     for model in sorted(context_b[key])]
+        else:
+            pairs = [(key, context_b[key], context_a[key])]
+        differing += [f"context.{name} {runner_value(name, b)} vs {runner_value(name, a)}"
+                      for name, b, a in pairs if b != a]
+    if differing:
+        raise Refused("the arms were not measured in one workflow run on one runner: " + ", ".join(differing))
+
+
+def compare_arms(before: Path, after: Path, assets: list[str], allow_private: bool = False) -> dict:
+    check_runner(before, after)
     sb, sa = synthetic_reports(before), synthetic_reports(after)
     synthetic = {}
     for name in sorted(set(sb) & set(sa), key=report_order):
         synthetic[name] = compare_synthetic(load_json(sb[name]), load_json(sa[name]))
     real_b, real_a = before / "real", after / "real"
     has_real = [(real_b / OUTCOMES).is_file(), (real_a / OUTCOMES).is_file()]
-    real = compare_real(real_b, real_a, assets) if all(has_real) else None
+    real = compare_real(real_b, real_a, assets, allow_private) if all(has_real) else None
     return {
         "synthetic": synthetic,
         "synthetic_in_one_arm_only": {"before": sorted(set(sb) - set(sa)), "after": sorted(set(sa) - set(sb))},
@@ -763,7 +939,12 @@ def short_identity(ident: dict) -> str:
         # The capture's manifest file name and hash: no document text.
         text += f"; replay of {na(replay.get('run_manifest'))} (sha256 {str(replay.get('sha256'))[:12]})"
     # Last, so what precedes it reads as it did before the selector existed.
-    return text + f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
+    text += f"; line-1 select {na(ident.get('mrz_line1_select_arm'))}"
+    # The date-digits arm (#579) only when the report recorded it, so an older
+    # report's line reads exactly as it did.
+    if ident.get("mrz_date_digits_arm") is not None:
+        text += f"; date digits {ident['mrz_date_digits_arm']}"
+    return text
 
 
 def render_synthetic(name: str, r: dict) -> list[str]:
@@ -836,7 +1017,40 @@ def render_line1_selection(sel: dict | None) -> list[str]:
     return lines
 
 
+def render_private(real: dict) -> list[str]:
+    """Counts and enumerated transitions only: no asset id, no name, no hash and
+    no reason text, whatever the run holds."""
+    lines = ["real specimens (private or local track: counts and enumerated transitions only):"]
+    for side, reason in zip(("before", "after"), real["reasons"]):
+        lines.append(f"  {side}: {'no private or local marker' if reason is None else reason}")
+    lines += [f"  note: {n}" for n in real["notes"]]
+    b, a = real["documents"]
+    lines.append(f"  documents {b} -> {a}, paired {real['paired']}")
+    for name, field in real["fields"].items():
+        lines.append(f"  {name}: " + ", ".join(f"{v} {n[0]} -> {n[1]}" for v, n in field["counts"].items()))
+    for name, field in real["fields"].items():
+        for t in field["transitions"]:
+            lines.append(f"  {name} {t['documents']} \u00d7 {t['before']} to {t['after']}")
+    for side, alarm in zip(("before", "after"), real["alarms"]):
+        if alarm["false_positive_mrz"]:
+            lines.append(f"  ALARM ({side}): {alarm['false_positive_mrz']} false_positive_mrz")
+        if alarm["checksum_valid_on_failed_specimen"]:
+            lines.append(f"  ALARM ({side}): {alarm['checksum_valid_on_failed_specimen']} checksum-valid "
+                         f"read(s) of a checksum_failed_specimen")
+    fc = real["field_correctness"]
+    if fc["transitions"] is None:
+        lines.append("  field correctness: not recorded in both arms' report.json")
+    else:
+        lines.append(f"  field correctness: {fc['compared']} documents compared")
+        for name, counts in fc["transitions"].items():
+            lines.append(f"    {name}: " + ", ".join(f"{t} {n}" for t, n in counts.items()))
+        lines.append(f"  documents with an exact -> non-exact field: {fc['regressions']}")
+    return lines
+
+
 def render_real(real: dict) -> list[str]:
+    if real.get("private"):
+        return render_private(real)
     sb, sa = real["summary"]
     lines = ["real specimens:",
              f"  before: {short_identity(real['identity'][0])}",
@@ -1427,7 +1641,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"bench_ab_diff: not a directory: {arm}", file=sys.stderr)
             return 2
     try:
-        result = compare_arms(args.before, args.after, args.asset)
+        result = compare_arms(args.before, args.after, args.asset, allow_private=not args.expect_identical)
         if args.expect_identical and (result["synthetic"] or result["real"]):
             verdict = compare_neutral(args.before, args.after, result, args.ignore, args.check_pass_trace,
                                       args.check_report)

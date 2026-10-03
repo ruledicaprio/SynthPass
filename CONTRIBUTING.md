@@ -383,7 +383,9 @@ maintainer too. When `main` moves under an open PR, rebase locally and push with
 `--force-with-lease`, or run `gh pr update-branch --rebase <number>`; a conflict at a shared
 append point (the findings list in `knowledge/benchmarks/README.md`, the ADR index) is
 resolved by keeping both sides in date order. The real-specimen gate stays advisory because it
-is path-filtered and not yet skip-safe. (Earlier releases also required a Python
+is path-filtered and not yet skip-safe. A Windows run (`.github/workflows/windows.yml`: the
+workspace tests and the `tools/` suite on `windows-latest`) runs every Monday and on demand; it is
+not a required check either. (Earlier releases also required a Python
 gRPC smoke test and a cross-language bridge test; both were removed as required checks in v0.7.5
 along with the gRPC backend and its Python sidecar — see CHANGELOG.md.) No review approval is
 required (solo maintainer), but a PR and passing CI always are.

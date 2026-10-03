@@ -20,16 +20,20 @@
 //! a serious Tier-2 failure mode (the LLM inventing entire identities on
 //! MRZ-less fronts) was found by hand instead of by CI.
 //!
-//! Both entry points funnel into [`run_prepped`], the one place accuracy and
+//! Both entry points funnel into [`run_prepped_with_dump_options`], the one place accuracy and
 //! unsupported-assertion are computed, so the two corpus sources cannot
 //! silently diverge in what "correct" means.
 //!
 //! A third source is a **replay** ([`run_provider_bench_replay`], ADR-0024
 //! amendment 3): the public corpus's pages are rebuilt from a captured
 //! `provider-bench-ocr-passes.jsonl` instead of by OCR, and then run through the
-//! same [`run_prepped`]. Tier 1 is a pure function of the page text, so a replay
+//! same [`run_prepped_with_dump_options`]. Tier 1 is a pure function of the page text, so a replay
 //! measures everything downstream of `OcrPage::text` and nothing upstream.
 
+use crate::archive::{
+    document_code_classes, Archive, ArchiveTrack, DocRecord, OcrRecord, PrivateDocRecord,
+    RetryStop, RetryVariant, Sha256Hex, Tier1ReadRecord, ZoneClasses,
+};
 use crate::{classify_names, miss_kind, CorpusDoc, MissReason, NameError, RealSpecimenDoc};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -127,7 +131,7 @@ fn mrz_zone_mismatch(recovered: &str, truth: &str) -> usize {
 /// hand-analysis this instrumentation replaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-enum CheckCoverage {
+pub(crate) enum CheckCoverage {
     /// A dedicated ICAO check digit protects this field on its own —
     /// document number, date of birth, date of expiry, or (TD3 only)
     /// personal number — or this field *is* that check digit's own
@@ -741,7 +745,7 @@ pub fn mrz_field_line(format: &str, field: &str) -> Option<usize> {
 /// or a position (`usize`); nothing on this type or [`mrz_field_mismatch`],
 /// which builds it, ever reads a character out of the zones it is given.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
-struct FieldMismatch {
+pub(crate) struct FieldMismatch {
     /// Differing character count per field name, e.g. `{"optional_data_2":
     /// 7, "composite_cd": 1}`.
     by_field: BTreeMap<String, usize>,
@@ -861,6 +865,179 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
     Some(result)
 }
 
+/// How a labelled specimen's recovered zone compares with its hand-transcribed truth: counts
+/// and column positions, never a character of either zone. Computed once per labelled
+/// document ([`truth_comparison`]) and shared by the OCR miss dump and the archive
+/// (ADR-0024), so the two cannot disagree.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct TruthComparison {
+    /// Differing characters over the longer of the two zones ([`mrz_zone_mismatch`]).
+    pub(crate) zone_mismatch: Option<usize>,
+    /// Cells compared ([`compared_cells`]).
+    pub(crate) compared_cells: Option<usize>,
+    /// Where the differences are, by field ([`mrz_field_mismatch`]); needs a resolved format.
+    pub(crate) field_mismatch: Option<FieldMismatch>,
+    /// The classes of the fixture's document code, the first two cells of line 1, in the
+    /// archive's symbols (`A<` for `P<`, `AA` for `PS`): [`document_code_classes`]. A class
+    /// string, never the code itself, and independent of what was recovered. Added after the
+    /// first three keys; the schema stays 1 because readers ignore keys they do not know.
+    pub(crate) code_cells: Option<String>,
+}
+
+/// [`TruthComparison`] of `recovered` against `truth`: `None` for a document with no
+/// hand-transcribed zone, and otherwise a comparison whose parts are `None` where there is no
+/// recovered zone (or, for the field map, no resolved `format`).
+fn truth_comparison(
+    recovered: Option<&mrz::MrzData>,
+    truth: Option<&str>,
+    format: Option<&str>,
+) -> Option<TruthComparison> {
+    truth_comparison_of_zone(recovered.map(|data| data.mrz_lines.as_str()), truth, format)
+}
+
+/// [`truth_comparison`] from the recovered zone's text, for a caller that holds the zone and not
+/// the parsed [`mrz::MrzData`] (the `synthpass-bench` archive).
+pub(crate) fn truth_comparison_of_zone(
+    recovered: Option<&str>,
+    truth: Option<&str>,
+    format: Option<&str>,
+) -> Option<TruthComparison> {
+    let truth = truth?;
+    Some(TruthComparison {
+        zone_mismatch: recovered.map(|zone| mrz_zone_mismatch(zone, truth)),
+        compared_cells: recovered.map(|zone| compared_cells(zone, truth)),
+        field_mismatch: recovered
+            .zip(format)
+            .and_then(|(zone, format)| mrz_field_mismatch(format, zone, truth)),
+        code_cells: Some(document_code_classes(truth)),
+    })
+}
+
+/// Writes one document's archive record for one provider (ADR-0024, Decision 5).
+///
+/// `detail` is the [`DocumentDetail`] just pushed, so the record's `ledger_row` is exactly
+/// what the outcome ledger writes for the document. `tier1_zone` is the Tier-1 parse of the
+/// provider's own input (`None` when nothing parsed), `fields` the provider's values (`None`
+/// when the reader errored). The record holds the provider-input OCR text verbatim and never
+/// the fixture's text: a labelled specimen contributes [`TruthComparison`]'s counts, positions
+/// and the code's two cell classes only. Nothing here can fail the run: [`Archive::record`] returns `()`.
+#[allow(clippy::too_many_arguments)]
+fn archive_document(
+    archive: &Archive,
+    provider: &'static str,
+    bench_page: &BenchPage,
+    detail: &DocumentDetail,
+    read_elapsed: Duration,
+    tier1_zone: Option<&mrz::MrzData>,
+    fields: Option<BTreeMap<&'static str, Option<String>>>,
+    truth: Option<&TruthComparison>,
+) {
+    let track = if bench_page.synthetic {
+        ArchiveTrack::Synthetic
+    } else {
+        match bench_page.asset_id.as_deref() {
+            Some(id) => ArchiveTrack::from_corpus(crate::asset_track(id)),
+            // A real page with no asset ID cannot be placed in a track, so it is dropped:
+            // never filed as public, and never as a private record either.
+            None => return,
+        }
+    };
+    if track == ArchiveTrack::Private {
+        archive_private_document(
+            archive,
+            provider,
+            bench_page,
+            detail,
+            read_elapsed,
+            tier1_zone,
+            truth,
+        );
+        return;
+    }
+    let record = DocRecord {
+        kind: "doc",
+        run_id: archive.run_id(),
+        provider: provider.to_string(),
+        track: track.as_str(),
+        name: &bench_page.name,
+        asset_id: bench_page.asset_id.as_deref(),
+        source_sha256: bench_page.source_sha256.as_deref(),
+        ledger_row: crate::report::OutcomeRow::from(detail),
+        read_ok: detail.read_ok,
+        read_us: read_elapsed.as_micros(),
+        field_correctness: detail.field_correctness.as_ref().map(|fields| {
+            fields
+                .iter()
+                .map(|(field, correctness)| (*field, correctness.as_str()))
+                .collect()
+        }),
+        ocr: OcrRecord {
+            text: &bench_page.page.text,
+            rotation: bench_page.page.rotation,
+            mrz_band_score: bench_page.page.mrz_band_score,
+            chargrid: bench_page.page.chargrid.as_deref(),
+            ocr_passes: bench_page.pass_objects.as_deref(),
+        },
+        tier1_read: tier1_zone.map(|data| Tier1ReadRecord {
+            lines: data.mrz_lines.lines().map(str::to_string).collect(),
+            damaged_recovery: data.damaged_recovery,
+            valid: data.valid(),
+        }),
+        fields,
+        truth,
+    };
+    archive.record(track, &record);
+}
+
+/// Writes one private-track document's text-free record (ADR-0024, Decision 7). It reads no
+/// `name`, no `asset_id`, no OCR text and no field value from its arguments, and it cannot be
+/// written without them being left out: [`PrivateDocRecord`] has nowhere to put them. The
+/// recovered zone is kept as character classes only. A page whose image hash is not a SHA-256
+/// has no key and writes nothing, as does an archive that is off.
+fn archive_private_document(
+    archive: &Archive,
+    provider: &'static str,
+    bench_page: &BenchPage,
+    detail: &DocumentDetail,
+    read_elapsed: Duration,
+    tier1_zone: Option<&mrz::MrzData>,
+    truth: Option<&TruthComparison>,
+) {
+    let (Some(run_id), Some(source_sha256)) = (
+        Sha256Hex::new(&archive.run_id()),
+        bench_page.source_sha256.as_deref().and_then(Sha256Hex::new),
+    ) else {
+        return;
+    };
+    let record = PrivateDocRecord {
+        kind: "private_doc",
+        run_id,
+        provider,
+        track: ArchiveTrack::Private.as_str(),
+        source_sha256,
+        outcome: detail.miss_reason.as_ref().map_or("hit", crate::miss_kind),
+        mrz_format: detail.mrz_format,
+        mrz_found: detail.mrz_found,
+        mrz_checksums_valid: detail.mrz_checksums_valid,
+        check_states: detail.check_states.clone(),
+        retry_variant_id: detail
+            .retry_variant_id
+            .as_deref()
+            .and_then(RetryVariant::parse),
+        retry_budget_hit: detail.retry_budget_hit,
+        retry_stop: detail.retry_stop.as_deref().and_then(RetryStop::parse),
+        retry_damaged_recovery: detail.retry_damaged_recovery,
+        tier1_damaged_recovery: detail.tier1_damaged_recovery,
+        read_us: read_elapsed.as_micros(),
+        ocr_ms: detail.ocr_elapsed.as_millis(),
+        mrz_band_score: bench_page.page.mrz_band_score,
+        rotation: bench_page.page.rotation,
+        truth,
+        zone_classes: tier1_zone.map(|data| ZoneClasses::of_zone(&data.mrz_lines)),
+    };
+    archive.record_private(&record);
+}
+
 /// One in-denominator real-specimen miss (`checksum_failed` or
 /// `no_mrz_found`), as written to `provider-bench-miss-ocr-dump.jsonl` when
 /// `run_prepped` is given a `dump_ocr_dir`. Owned strings throughout — the
@@ -869,7 +1046,9 @@ fn mrz_field_mismatch(format: &str, recovered: &str, truth: &str) -> Option<Fiel
 /// iteration. This is a diagnostic artifact, not a hot path.
 ///
 /// For a `no_mrz_found` row `recovered_mrz_lines` is empty, `check_states` is
-/// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. What
+/// absent, and `zone_mismatch` is `None`: nothing MRZ-shaped parsed. So for a
+/// `checksum_failed` row whose zone the opt-in repeated-line rule refused
+/// (#579), which leaves no read. What
 /// matters there is `mrz_band_score` (was a band even found?) and
 /// `raw_ocr_text` (what did the recognizer see?) — the localization-vs-
 /// recognition question `ADR-0008` chunk 1C cell (b) asks.
@@ -1018,14 +1197,16 @@ pub struct ProviderReport {
 /// unsupported on a given specimen is enough to go and look; printing the
 /// fabricated surname itself would put document content into a terminal and a
 /// JSON report for no additional diagnostic power.
+#[derive(Debug)]
 pub struct DocumentDetail {
     /// Corpus-local identity: a synthetic document's seed, or a real
     /// specimen's file stem. Public-domain specimen filenames, not PII.
     pub name: String,
     /// Exact samples-relative asset identity for real-specimen joins.
     pub asset_id: Option<String>,
-    /// Whether `mrz::find_and_parse` recovered an MRZ from this document's
-    /// OCR text — which bucket this document counted toward.
+    /// Whether `mrz::find_and_parse_with`, under this process's parse options,
+    /// recovered an MRZ from this document's OCR text — which bucket this
+    /// document counted toward.
     pub mrz_found: bool,
     /// The document's ICAO 9303 MRZ format, resolved per corpus source —
     /// the M6 plan's "report Tier-1 hit rate keyed by mrz::Format" applied to
@@ -1137,11 +1318,10 @@ pub struct DocumentDetail {
     /// exists and `SYNTHPASS_OCR_CHARGRID` was not `off`. See that field's
     /// doc for the possible values.
     pub chargrid: Option<String>,
-    /// This document's own Tier-1 parse's `MrzData::damaged_recovery` —
+    /// This document's Tier-1 read's `MrzData::damaged_recovery` —
     /// independent of `retry_damaged_recovery`, which describes the reading
-    /// the *native OCR retry loop* accepted, not this harness's own
-    /// `mrz::find_and_parse` of the final OCR text (`read_mrz`/`decoded`).
-    /// `None` when Tier 1 found no MRZ at all.
+    /// the *native OCR retry loop* accepted. `None` when Tier 1 found no MRZ
+    /// at all.
     pub tier1_damaged_recovery: Option<bool>,
     /// The line-1 selector's verdict on this document's Tier-1 read (#574),
     /// text-free. Present on a default run (the selector is on by default);
@@ -1324,6 +1504,7 @@ impl CapabilitySnapshot {
 /// the bench history and not quoted as accuracy. The two populations to quote
 /// are [`Self::accepted_reads`] (read quality) and [`Self::scored`]
 /// (end-to-end), each with its own document count.
+#[derive(Debug)]
 pub struct AccuracyStats {
     /// How many of `documents` contributed at least one ground-truth field.
     /// Always equal to `documents` for the synthetic corpus (every
@@ -1597,6 +1778,7 @@ fn compare_document(
 /// planned Qwen-vs-Moondream comparison. So this is computed only when
 /// `Capability::vision` is `false`; a vision-capable provider gets
 /// `NotApplicable` with the reason recorded, never a silently-wrong number.
+#[derive(Debug)]
 pub enum UnsupportedAssertion {
     /// Computed over the non-null answered fields of a `!capability.vision`
     /// provider, split by whether the document gave it an MRZ to anchor on.
@@ -1622,6 +1804,7 @@ pub enum UnsupportedAssertion {
 /// split are not the same size and a rate alone would hide that: "40% over
 /// 4 documents" and "40% over 120" are different claims, and the whole point
 /// of this split is that the smaller half is the one nobody had measured.
+#[derive(Debug)]
 pub struct AssertionBucket {
     /// `None` when the provider made **no assertions at all** over this
     /// subset — not the same fact as a measured rate of zero, and on this
@@ -1668,6 +1851,7 @@ const VISION_REASON: &str = "capability.vision is true — the verbatim-in-OCR-t
 /// exactly `0.0` regardless of how accurate the provider actually is. That's the
 /// same shape of bug [`AssertionBucket::rate`]'s `Option` and
 /// [`UnsupportedAssertion::NotApplicable`] both exist to prevent, one metric over.
+#[derive(Debug)]
 pub enum Tier1HitRate {
     /// Computed over a deterministic provider's nonempty scored population:
     /// the fraction with `miss_reason.is_none()`, excluding off-denominator classes.
@@ -1729,6 +1913,7 @@ const NOT_DETERMINISTIC_REASON: &str = "capability.deterministic is false — th
 /// `0.0` there would fabricate "every name wrong" out of "nothing was
 /// measured", the exact bug [`AccuracyStats`]'s `Option`s and
 /// [`AssertionBucket::rate`] both already exist to prevent.
+#[derive(Debug)]
 pub enum StrictNameHitRate {
     /// `strict_hits`, `name_scorable_documents` and `name_scorable_hits` are
     /// carried alongside both rates (rather than just the rates) so a caller
@@ -1769,6 +1954,7 @@ pub struct SpeedStats {
     pub p95: Duration,
 }
 
+#[derive(Debug)]
 pub struct JsonValidityStats {
     /// `synthpass_llm::repair::repair_fallbacks()` delta across this
     /// provider's whole loop — how many of its answers needed JSON repair
@@ -1879,8 +2065,10 @@ struct BenchPage {
     /// this `None`. Used solely to sub-classify a `checksum_failed` miss.
     ground_truth_mrz: Option<String>,
     image_path: PathBuf,
-    /// Whether `mrz::find_and_parse` recovered *any* MRZ from this document's
-    /// OCR text — parsed, not necessarily checksum-valid.
+    /// Whether `mrz::find_and_parse_with`, under this process's parse options
+    /// (`synthpass_die::mrz_parse_options`), recovered *any* MRZ from this
+    /// document's OCR text — parsed, not necessarily checksum-valid. A zone an
+    /// opt-in rule refuses (#579) is not recovered.
     ///
     /// This is the "zero anchor vs some anchor" split, and it is deliberately
     /// the found/not-found line rather than the checksum-valid/invalid one.
@@ -1946,11 +2134,12 @@ struct BenchPage {
     /// once in [`prep_specimens`]/[`prep_corpus`] and shared by every reader,
     /// the same way the OCR text is.
     ocr_elapsed: Duration,
-    /// The readings of every OCR pass, when a pass trace exists for this
-    /// document: a replay, or a live run with `--dump-ocr-passes`. Empty
-    /// otherwise. Used only to say which passes read a line-1 proposal
-    /// ([`line1_selection_detail`]); document text, never written out.
-    pass_readings: Vec<PassProvenance>,
+    /// Every OCR pass, when a pass trace exists for this document: a replay, or a live run
+    /// with `--dump-ocr-passes`; `None` otherwise (the benchmark adds no tracing of its own,
+    /// which would change timing under the retry loop's budget). Used to say which passes read
+    /// a line-1 proposal ([`line1_selection_detail`], through [`pass_provenance`]) and, under
+    /// ADR-0024, written to the archive's `ocr_passes`. **Document text.**
+    pass_objects: Option<Vec<crate::ocr_passes::PassObject>>,
 }
 
 /// Process-wide sequence keeps duplicate display names and concurrent runs distinct.
@@ -2047,7 +2236,7 @@ fn prep_corpus(ocr: &NativeOcr, corpus: &[CorpusDoc], progress: bool) -> Vec<Opt
                 synthetic: true,
                 known_or_guessed_format: Some(doc.labels.mrz_format.as_str()),
                 ocr_elapsed,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             })
         })
         .collect()
@@ -2080,7 +2269,8 @@ fn prep_specimens(
             let (page, image_path, ocr_elapsed) =
                 ocr_and_keep_path(ocr, &doc.image, passes.is_some().then_some(&mut records))
                     .ok()?;
-            let pass_readings = pass_provenance(&crate::ocr_passes::pass_objects(&records));
+            let traced = passes.is_some();
+            let pass_objects = crate::ocr_passes::pass_objects(&records);
             if let Some(collector) = passes.as_deref_mut() {
                 collector.push(
                     &doc.name,
@@ -2091,10 +2281,28 @@ fn prep_specimens(
                 );
             }
             let mut bench_page = specimen_bench_page(doc, page, image_path, ocr_elapsed);
-            bench_page.pass_readings = pass_readings;
+            bench_page.pass_objects = traced.then_some(pass_objects);
             Some(bench_page)
         })
         .collect()
+}
+
+/// The parse options for the printed-zone validity parse: the arm's options
+/// with the repeated-line refusal and the date-digits rule forced off (#579).
+///
+/// That parse decides whether the *document's* printed zone conforms, which
+/// selects the `checksum_failed_specimen` denominator rung. A refusal, or a
+/// letter-date rule, is a property of a run's reading, not of the document, so
+/// neither may move the denominator between arms.
+fn printed_zone_parse_options() -> mrz::ParseOptions {
+    printed_zone_parse_options_from(synthpass_die::mrz_parse_options())
+}
+
+/// [`printed_zone_parse_options`] over explicit options, testable without the
+/// process environment.
+fn printed_zone_parse_options_from(opts: mrz::ParseOptions) -> mrz::ParseOptions {
+    opts.with_refuse_repeated_line(false)
+        .with_date_digits(false)
 }
 
 /// One real specimen's [`BenchPage`], from its corpus document and the OCR page
@@ -2124,10 +2332,14 @@ fn specimen_bench_page(
     // `None` (unlabelled) is not evidence of non-conformance — see
     // `BenchPage::printed_zone_nonconforming`.
     let printed_zone_nonconforming = ground_truth_mrz.as_deref().is_some_and(|zone| {
-        !mrz::find_and_parse_with(zone, &synthpass_die::mrz_parse_options())
-            .is_ok_and(|d| d.valid())
+        !mrz::find_and_parse_with(zone, &printed_zone_parse_options()).is_ok_and(|d| d.valid())
     });
-    let found = mrz::find_and_parse(&page.text);
+    // Under this process's arms, as `prep_corpus` parses, so `mrz_found` and
+    // the leading-filler flag describe the run's read: a zone an opt-in rule
+    // refuses (#579) is not found here, and `tier1_miss_reason`'s refusal rung
+    // keeps it out of `no_mrz_found`. With every arm at its default this is
+    // `mrz::find_and_parse`.
+    let found = mrz::find_and_parse_with(&page.text, &synthpass_die::mrz_parse_options());
     let mrz_found = found.is_ok();
     let document_number_leading_filler = matches!(found, Err(mrz::MrzError::LeadingFiller { .. }));
     // Derived from the filename, the same way the corpus manifest
@@ -2166,7 +2378,7 @@ fn specimen_bench_page(
         synthetic: false,
         known_or_guessed_format,
         ocr_elapsed,
-        pass_readings: Vec::new(),
+        pass_objects: None,
     }
 }
 
@@ -2181,9 +2393,20 @@ pub async fn run_provider_bench(
     corpus: &[CorpusDoc],
     measure_memory: bool,
     progress: bool,
+    archive: Option<&Archive>,
 ) -> Vec<ProviderReport> {
     let prepped = prep_corpus(ocr, corpus, progress);
-    run_prepped(catalog, &prepped, measure_memory, None, progress).await
+    run_prepped_with_dump_options(
+        catalog,
+        &prepped,
+        measure_memory,
+        None,
+        false,
+        None,
+        progress,
+        archive,
+    )
+    .await
 }
 
 /// Runs every reader in `catalog` against every real specimen in
@@ -2230,6 +2453,7 @@ pub async fn run_provider_bench_real_with_dump_options(
         dump_ocr_hits,
         run_manifest.as_deref(),
         progress,
+        None,
     )
     .await
 }
@@ -2260,6 +2484,9 @@ pub struct RealDumpOptions<'a> {
     /// ([`crate::ocr_passes::check_passes_destination`]) and refused the
     /// private track.
     pub ocr_passes_dir: Option<&'a Path>,
+    /// The per-document archive (ADR-0024), when this run writes one. A side output: it
+    /// changes nothing else, and no run reads it.
+    pub archive: Option<&'a Archive>,
 }
 
 /// [`run_provider_bench_real_with_dump_options`] with the full set of dumps.
@@ -2305,6 +2532,7 @@ pub async fn run_provider_bench_real_with_options(
         dumps.ocr_hits,
         run_manifest.as_deref(),
         progress,
+        dumps.archive,
     )
     .await)
 }
@@ -2459,7 +2687,7 @@ fn replay_pages(
                 temporary_image_path(),
                 Duration::ZERO,
             );
-            bench_page.pass_readings = pass_provenance(&row.ocr_passes);
+            bench_page.pass_objects = Some(row.ocr_passes.clone());
             Some(bench_page)
         })
         .collect())
@@ -2508,6 +2736,7 @@ pub async fn run_provider_bench_replay(
         dumps.ocr_hits,
         run_manifest.as_deref(),
         progress,
+        dumps.archive,
     )
     .await)
 }
@@ -2588,6 +2817,134 @@ fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
     )
 }
 
+/// One document's Tier-1 miss classification for one reading: `None` for a
+/// hit.
+///
+/// `read` is the reader's Tier-1 read of `bench_page`'s text under `opts`,
+/// this process's parse options (`synthpass_die::read_tier1`);
+/// `checksums_valid` is the reading's `Evidence::mrz_checksums_valid`, and
+/// `document_number` the document number it extracted. Kept out of
+/// [`run_prepped_with_dump_options`] so the rungs are tested with explicit
+/// reads and options: the opt-in rules that reach the refusal rung (#579)
+/// never run in CI.
+fn tier1_miss_reason(
+    bench_page: &BenchPage,
+    read: Result<&mrz::MrzData, &mrz::MrzError>,
+    checksums_valid: bool,
+    document_number: Option<&str>,
+    opts: &mrz::ParseOptions,
+) -> Option<MissReason> {
+    let read_mrz = read.ok();
+    let rejected_by = crate::rejected_by(&bench_page.page.text, opts, read);
+    // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
+    // found, then checksum validity, then — only when this document is
+    // labelled — a document-number check against ground truth. A
+    // specimen with no label that clears those gets no further check;
+    // that is a hit, not an unknown.
+    //
+    // The rungs are ordered by **what the document makes possible**,
+    // before anything about what the run achieved. Three populations
+    // cannot produce a Tier-1 hit no matter how good the pipeline gets,
+    // and each is scored off the denominator rather than counted as a
+    // failure to do the impossible:
+    //
+    //   * `no_mrz_expected` — the document carries no zone at all.
+    //   * `redacted_mrz`    — the zone is physically blacked out.
+    //   * `checksum_failed_specimen` — the *printed* zone fails its own
+    //     ICAO check digits, so even a byte-perfect read fails.
+    //
+    // Getting that order wrong is what this whole classification was
+    // rebuilt for. Every one of the three used to be decided by what OCR
+    // happened to return:
+    //
+    //   * An MRZ-less front has no `ocr_fixtures/` label to contradict,
+    //     so a hallucinated checksum-valid zone reached the final `else`,
+    //     found no ground truth, and was counted as a Tier-1 **hit** —
+    //     while the 42 correct refusals were counted as `no_mrz_found`.
+    //   * `Redacted` sat *after* the `mrz_found` gate, so 9 of the 36
+    //     redacted specimens were scored out and 27 were scored in as
+    //     detection failures, split by nothing but whether the blackout
+    //     bar happened to OCR into parseable noise. The cleaner the
+    //     redaction, the worse the document scored.
+    //   * A non-conforming printed zone was only recognised when OCR
+    //     recovered it *exactly*, which caught 1 of the 16 the
+    //     2026-09-08 writeup identified.
+    if !bench_page.mrz_expected {
+        if bench_page.mrz_found && checksums_valid {
+            Some(MissReason::FalsePositiveMrz)
+        } else {
+            // Includes the parseable-but-checksum-failing case: the
+            // check digits rejected it, which is the system working.
+            Some(MissReason::NoMrzExpected)
+        }
+    } else if bench_page.redacted {
+        // Before the `mrz_found` gate, not after. Whether a blackout bar
+        // resolves into something parseable is a property of the bar's
+        // texture, not of the pipeline, and it is not stable run to run.
+        Some(MissReason::Redacted)
+    } else if bench_page.printed_zone_nonconforming {
+        // The printed zone fails its own check digits, so this document
+        // has no reachable hit. Reported whatever OCR returned, for the
+        // same reason as `redacted`: the document decides this, not the
+        // run.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: true,
+            rejected_by,
+        })
+    } else if !rejected_by.is_empty() {
+        // An opt-in rule (#579) cost this document a valid read: with it off,
+        // the same text reads valid. The date-digits rule leaves a read that
+        // is not `valid()`, the repeated-line rule a checksum-failed reading
+        // or none. A miss in `checksum_failed`, as a checksum-invalid read
+        // is, with the rule named. Above the leading-filler and `mrz_found`
+        // rungs, whose refusal or missing zone the rule itself caused.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: false,
+            rejected_by,
+        })
+    } else if bench_page.document_number_leading_filler {
+        // A structural refusal (#536), not "nothing MRZ-shaped was
+        // found" — its own bucket rather than folding into the
+        // `NoMrzFound` rung below.
+        Some(MissReason::DocumentNumberLeadingFiller)
+    } else if !bench_page.mrz_found {
+        Some(MissReason::NoMrzFound(String::new()))
+    } else if !checksums_valid {
+        // A genuine OCR misread: the printed zone is conforming (the
+        // rung above already took the specimens where it is not), so
+        // every failing check digit here is the pipeline's own.
+        //
+        // `read_mrz` is the reader's Tier-1 read, the same source
+        // `--dump-ocr` prints, so this check state describes that
+        // read.
+        Some(MissReason::ChecksumFailed {
+            check_states: read_mrz
+                .map(|d| crate::check_states(&d.checks))
+                .unwrap_or_default(),
+            specimen_nonconforming: false,
+            rejected_by: Vec::new(),
+        })
+    } else {
+        bench_page
+            .ground_truth
+            .as_ref()
+            .and_then(|gt| gt.get(&CoreField::DocumentNumber))
+            .and_then(|expected| {
+                let got = document_number.unwrap_or("");
+                (got != expected).then(|| MissReason::DocumentNumberMismatch {
+                    got: got.to_string(),
+                    expected: expected.clone(),
+                })
+            })
+    }
+}
+
 /// The shared reader loop both [`run_provider_bench`] and
 /// [`run_provider_bench_real`] funnel into — the one place accuracy and
 /// unsupported-assertion are computed, so the two corpus sources cannot
@@ -2622,6 +2979,7 @@ fn in_scored_tier1_population(miss_reason: &Option<MissReason>) -> bool {
 /// an hour and was otherwise completely silent until the final report; stderr
 /// keeps it clear of the stdout summary and the `--out` JSON that
 /// `scripts/run-bench.ps1` consumes.
+#[cfg(test)]
 async fn run_prepped(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
@@ -2637,10 +2995,19 @@ async fn run_prepped(
         false,
         None,
         progress,
+        None,
     )
     .await
 }
 
+/// [`run_prepped`] with the OCR dump flags and the archive.
+///
+/// `archive`, when `Some`, receives one record per document per provider, written right
+/// after the document's [`DocumentDetail`] is pushed (the error arm and the success arm are
+/// its only two ends) and flushed at each provider's end. It is a side output: nothing this
+/// loop computes reads it or changes because of it, and it can only warn (ADR-0024,
+/// Decision 1).
+#[allow(clippy::too_many_arguments)]
 async fn run_prepped_with_dump_options(
     catalog: &ProviderCatalog,
     prepped: &[Option<BenchPage>],
@@ -2649,6 +3016,7 @@ async fn run_prepped_with_dump_options(
     dump_ocr_hits: bool,
     run_manifest: Option<&str>,
     progress: bool,
+    archive: Option<&Archive>,
 ) -> Vec<ProviderReport> {
     let ocr_documents = prepped.iter().filter(|p| p.is_some()).count();
     let labelled_documents = prepped
@@ -2668,6 +3036,9 @@ async fn run_prepped_with_dump_options(
         .filter(|p| matches!(p, Some(bp) if !bp.mrz_found))
         .count();
 
+    // The parse options `synthpass_die::read_tier1` reads under, for the
+    // refusal rung's attribution (#579). Process-wide, so read once per run.
+    let parse_opts = synthpass_die::mrz_parse_options();
     let mut reports = Vec::with_capacity(catalog.readers().len());
     // Accumulated across every provider (each tagged in the row) and written
     // once after the loop — see `dump_ocr_dir` in this fn's doc.
@@ -2709,28 +3080,13 @@ async fn run_prepped_with_dump_options(
         }
 
         for (doc_index, bench_page) in prepped.iter().flatten().enumerate() {
-            // Mirrors `synthpass_pipeline::Pipeline::ocr_and_tier1`'s own
-            // `mrz::find_and_parse(&markdown)` — a *read* of this provider's
-            // OCR text, not any ground-truth labels: the hint must reflect
-            // what this run's OCR pass actually recovered, including a
-            // checksum-partial read, the same as production. `mrz_hint`
-            // itself is a no-op unless `SYNTHPASS_LLM_MRZ_HINT=1` is set, so
-            // this harness measures exactly the same gate the pipeline does.
-            let read_mrz = mrz::find_and_parse(&bench_page.page.text).ok();
-            let hint = synthpass_pipeline::mrz_hint(read_mrz.as_ref());
-            // The Tier-1 read the reader itself makes, under this process's
-            // arms (`SYNTHPASS_MRZ_CLASS_SWEEP`, `SYNTHPASS_MRZ_LINE1_SELECT`).
-            // `read_mrz` above stays this harness's hint parse, under the crate
-            // default options; since the #574 promotion production's hint derives
-            // from the routed read, which differs only in name fields, and the
-            // hint carries check-digit fields only, so the two hints agree
-            // (routing this parse is ADR-0024 step 0b). The dump zone below is
-            // the reader's read, so with an arm set it shows the zone the reader
-            // returned (#574, finding 3). With the class sweep and the line-1
-            // selector both `off` the two are one parse: `mrz_parse_options()`
-            // is then the crate default.
             let tier1 = synthpass_die::read_tier1(&bench_page.page.text);
-            let dump_zone: Option<&mrz::MrzData> = tier1.parsed.as_ref().ok();
+            let read_mrz = tier1.parsed.as_ref().ok();
+            // `read_mrz` is the reader's Tier-1 read under this process's
+            // arms, so the hint, the dump zone, the check states and
+            // `tier1_damaged_recovery` all describe one read (ADR-0024 step 0b).
+            let hint = synthpass_pipeline::mrz_hint(read_mrz);
+            let dump_zone: Option<&mrz::MrzData> = read_mrz;
             // `with_image`: harmless for every provider shipped today (all
             // text-only, so `DocumentContext::image` is ignored), and the
             // reason this harness is also the substrate for the planned
@@ -2801,10 +3157,29 @@ async fn run_prepped_with_dump_options(
                         retry_budget_hit: bench_page.page.retry_budget_hit,
                         retry_stop: bench_page.page.retry_stop.clone(),
                         chargrid: bench_page.page.chargrid.clone(),
-                        tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                        tier1_damaged_recovery: read_mrz.map(|d| d.damaged_recovery),
                         // No reading, so no selection was recorded.
                         line1_selection: None,
                     });
+                    if let (Some(archive), Some(detail)) = (archive, documents_detail.last()) {
+                        // No read: the fields are null; the truth comparison still
+                        // describes the Tier-1 zone against the fixture.
+                        let truth_cmp = truth_comparison(
+                            dump_zone,
+                            bench_page.ground_truth_mrz.as_deref(),
+                            detail.mrz_format,
+                        );
+                        archive_document(
+                            archive,
+                            reader.id().as_str(),
+                            bench_page,
+                            detail,
+                            elapsed,
+                            dump_zone,
+                            None,
+                            truth_cmp.as_ref(),
+                        );
+                    }
                     // `OcrError` sits inside the scored population: a reader
                     // that errored read nothing, so end-to-end counts every
                     // field this document has truth for as absent. It is not
@@ -2886,104 +3261,13 @@ async fn run_prepped_with_dump_options(
                 }
             }
 
-            // Mirrors `run_check`'s miss classification in `lib.rs`: no MRZ
-            // found, then checksum validity, then — only when this document is
-            // labelled — a document-number check against ground truth. A
-            // specimen with no label that clears those gets no further check;
-            // that is a hit, not an unknown.
-            //
-            // The rungs are ordered by **what the document makes possible**,
-            // before anything about what the run achieved. Three populations
-            // cannot produce a Tier-1 hit no matter how good the pipeline gets,
-            // and each is scored off the denominator rather than counted as a
-            // failure to do the impossible:
-            //
-            //   * `no_mrz_expected` — the document carries no zone at all.
-            //   * `redacted_mrz`    — the zone is physically blacked out.
-            //   * `checksum_failed_specimen` — the *printed* zone fails its own
-            //     ICAO check digits, so even a byte-perfect read fails.
-            //
-            // Getting that order wrong is what this whole classification was
-            // rebuilt for. Every one of the three used to be decided by what OCR
-            // happened to return:
-            //
-            //   * An MRZ-less front has no `ocr_fixtures/` label to contradict,
-            //     so a hallucinated checksum-valid zone reached the final `else`,
-            //     found no ground truth, and was counted as a Tier-1 **hit** —
-            //     while the 42 correct refusals were counted as `no_mrz_found`.
-            //   * `Redacted` sat *after* the `mrz_found` gate, so 9 of the 36
-            //     redacted specimens were scored out and 27 were scored in as
-            //     detection failures, split by nothing but whether the blackout
-            //     bar happened to OCR into parseable noise. The cleaner the
-            //     redaction, the worse the document scored.
-            //   * A non-conforming printed zone was only recognised when OCR
-            //     recovered it *exactly*, which caught 1 of the 16 the
-            //     2026-09-08 writeup identified.
-            let miss_reason = if !bench_page.mrz_expected {
-                if bench_page.mrz_found && reading.evidence.mrz_checksums_valid {
-                    Some(MissReason::FalsePositiveMrz)
-                } else {
-                    // Includes the parseable-but-checksum-failing case: the
-                    // check digits rejected it, which is the system working.
-                    Some(MissReason::NoMrzExpected)
-                }
-            } else if bench_page.redacted {
-                // Before the `mrz_found` gate, not after. Whether a blackout bar
-                // resolves into something parseable is a property of the bar's
-                // texture, not of the pipeline, and it is not stable run to run.
-                Some(MissReason::Redacted)
-            } else if bench_page.printed_zone_nonconforming {
-                // The printed zone fails its own check digits, so this document
-                // has no reachable hit. Reported whatever OCR returned, for the
-                // same reason as `redacted`: the document decides this, not the
-                // run.
-                Some(MissReason::ChecksumFailed {
-                    check_states: read_mrz
-                        .as_ref()
-                        .map(|d| crate::check_states(&d.checks))
-                        .unwrap_or_default(),
-                    specimen_nonconforming: true,
-                })
-            } else if bench_page.document_number_leading_filler {
-                // A structural refusal (#536), not "nothing MRZ-shaped was
-                // found" — its own bucket rather than folding into the
-                // `NoMrzFound` rung below.
-                Some(MissReason::DocumentNumberLeadingFiller)
-            } else if !bench_page.mrz_found {
-                Some(MissReason::NoMrzFound(String::new()))
-            } else if !reading.evidence.mrz_checksums_valid {
-                // A genuine OCR misread: the printed zone is conforming (the
-                // rung above already took the specimens where it is not), so
-                // every failing check digit here is the pipeline's own.
-                //
-                // `read_mrz` (this harness's own independent parse of the OCR
-                // text, computed once per document above) is the same source
-                // `--dump-ocr` already uses a few lines below to print which
-                // check digit(s) failed — reused here for the same reason.
-                Some(MissReason::ChecksumFailed {
-                    check_states: read_mrz
-                        .as_ref()
-                        .map(|d| crate::check_states(&d.checks))
-                        .unwrap_or_default(),
-                    specimen_nonconforming: false,
-                })
-            } else {
-                bench_page
-                    .ground_truth
-                    .as_ref()
-                    .and_then(|gt| gt.get(&CoreField::DocumentNumber))
-                    .and_then(|expected| {
-                        let got = reading
-                            .extraction
-                            .fields
-                            .get(CoreField::DocumentNumber)
-                            .unwrap_or("");
-                        (got != expected).then(|| MissReason::DocumentNumberMismatch {
-                            got: got.to_string(),
-                            expected: expected.clone(),
-                        })
-                    })
-            };
+            let miss_reason = tier1_miss_reason(
+                bench_page,
+                tier1.parsed.as_ref(),
+                reading.evidence.mrz_checksums_valid,
+                reading.extraction.fields.get(CoreField::DocumentNumber),
+                &parse_opts,
+            );
 
             // One predicate each, shared with the rates they sit beside, so
             // "accepted" and "scored" cannot drift from `accepted_reads` and
@@ -2996,6 +3280,13 @@ async fn run_prepped_with_dump_options(
                 scored.add_document(&comparison.tally);
             }
 
+            // The comparison against the hand-transcribed zone, once per labelled
+            // document: the dump below and the archive record both read it.
+            let truth_cmp = truth_comparison(
+                dump_zone,
+                bench_page.ground_truth_mrz.as_deref(),
+                mrz_format,
+            );
             let dump_miss_kind = match &miss_reason {
                 Some(
                     r @ (MissReason::ChecksumFailed { .. }
@@ -3055,33 +3346,22 @@ async fn run_prepped_with_dump_options(
                     }
                     // `no_mrz_found`: nothing MRZ-shaped parsed, so there is
                     // no zone to show — the band score and raw text above are
-                    // the whole story. (Also the "shouldn't happen" case where
-                    // `mrz_found` is true but `find_and_parse` recovered
-                    // nothing — same output, and just as informative.)
+                    // the whole story. Also a `checksum_failed` zone the
+                    // repeated-line rule refused (#579): the reader returned
+                    // no read, and the ledger's miss reason names the rule.
                     None => {
                         println!("  (nothing MRZ-shaped parsed)");
                         (Vec::new(), None)
                     }
                 };
 
-                let compared_cells = match (dump_zone, &bench_page.ground_truth_mrz) {
-                    (Some(data), Some(truth)) => Some(compared_cells(&data.mrz_lines, truth)),
-                    _ => None,
-                };
-                let zone_mismatch = match (dump_zone, &bench_page.ground_truth_mrz) {
-                    (Some(data), Some(truth)) => Some(mrz_zone_mismatch(&data.mrz_lines, truth)),
-                    _ => None,
-                };
+                let compared_cells = truth_cmp.as_ref().and_then(|t| t.compared_cells);
+                let zone_mismatch = truth_cmp.as_ref().and_then(|t| t.zone_mismatch);
                 // Field-level attribution needs a resolved format (to know
                 // which table to look positions up against) on top of
                 // `zone_mismatch`'s own two preconditions — see
                 // `MissOcrDump::field_mismatch_counts`'s doc.
-                let field_mismatch = match (dump_zone, &bench_page.ground_truth_mrz, mrz_format) {
-                    (Some(data), Some(truth), Some(format)) => {
-                        mrz_field_mismatch(format, &data.mrz_lines, truth)
-                    }
-                    _ => None,
-                };
+                let field_mismatch = truth_cmp.as_ref().and_then(|t| t.field_mismatch.as_ref());
                 // Printed alongside the zone above so a run stopped before the
                 // final JSONL flush (the usual `llm`-pass kill) still carries the
                 // ground-truth comparison for every labelled specimen.
@@ -3101,7 +3381,7 @@ async fn run_prepped_with_dump_options(
                         ),
                         None => {}
                     }
-                    if let Some(fm) = &field_mismatch {
+                    if let Some(fm) = field_mismatch {
                         println!("  per-field mismatch: {:?}", fm.by_field);
                         println!("  per-field coverage: {:?}", fm.coverage);
                     }
@@ -3120,9 +3400,9 @@ async fn run_prepped_with_dump_options(
                     check_states,
                     ground_truth_mrz: bench_page.ground_truth_mrz.clone(),
                     zone_mismatch,
-                    field_mismatch_counts: field_mismatch.as_ref().map(|f| f.by_field.clone()),
-                    field_mismatch_positions: field_mismatch.as_ref().map(|f| f.by_line.clone()),
-                    field_mismatch_coverage: field_mismatch.as_ref().map(|f| f.coverage.clone()),
+                    field_mismatch_counts: field_mismatch.map(|f| f.by_field.clone()),
+                    field_mismatch_positions: field_mismatch.map(|f| f.by_line.clone()),
+                    field_mismatch_coverage: field_mismatch.map(|f| f.coverage.clone()),
                     compared_cells,
                 });
             }
@@ -3173,9 +3453,7 @@ async fn run_prepped_with_dump_options(
                 }
                 None => (None, None),
             };
-            let check_states = read_mrz
-                .as_ref()
-                .map(|data| crate::check_states(&data.checks));
+            let check_states = read_mrz.map(|data| crate::check_states(&data.checks));
 
             documents_detail.push(DocumentDetail {
                 name: bench_page.name.clone(),
@@ -3198,7 +3476,7 @@ async fn run_prepped_with_dump_options(
                 retry_budget_hit: bench_page.page.retry_budget_hit,
                 retry_stop: bench_page.page.retry_stop.clone(),
                 chargrid: bench_page.page.chargrid.clone(),
-                tier1_damaged_recovery: read_mrz.as_ref().map(|d| d.damaged_recovery),
+                tier1_damaged_recovery: read_mrz.map(|d| d.damaged_recovery),
                 // From the reading's own evidence, so a provider that made no
                 // Tier-1 read records none; the proposal's line 1 is looked up
                 // in the pass trace, when there is one, and never stored.
@@ -3206,12 +3484,42 @@ async fn run_prepped_with_dump_options(
                     line1_selection_detail(
                         summary,
                         tier1.proposed_line1.as_deref(),
-                        &bench_page.pass_readings,
+                        &bench_page
+                            .pass_objects
+                            .as_deref()
+                            .map(pass_provenance)
+                            .unwrap_or_default(),
                     )
                 }),
             });
+            if let (Some(archive), Some(detail)) = (archive, documents_detail.last()) {
+                let fields = CoreField::ALL
+                    .iter()
+                    .map(|field| {
+                        (
+                            field.as_str(),
+                            reading.extraction.fields.get(*field).map(str::to_string),
+                        )
+                    })
+                    .collect();
+                archive_document(
+                    archive,
+                    reader.id().as_str(),
+                    bench_page,
+                    detail,
+                    elapsed,
+                    dump_zone,
+                    Some(fields),
+                    truth_cmp.as_ref(),
+                );
+            }
         }
 
+        // The provider's records are on disk before the next provider starts, so a run
+        // killed in a later provider (the `llm` pass) still leaves this one's.
+        if let Some(archive) = archive {
+            archive.flush();
+        }
         let repair_after = synthpass_llm::repair::repair_fallbacks();
         let rss_after = measure_memory.then(sample_rss).flatten();
 
@@ -3560,8 +3868,170 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed: Duration::ZERO,
-            pass_readings: Vec::new(),
+            pass_objects: None,
         }
+    }
+
+    /// A page that expects an MRZ, for [`tier1_miss_reason`]'s rungs, with
+    /// `text` as its OCR text.
+    fn ladder_page(mrz_found: bool, text: &str) -> BenchPage {
+        let mut page = rate_test_page();
+        page.mrz_expected = true;
+        page.mrz_found = mrz_found;
+        page.page.text = text.to_string();
+        page
+    }
+
+    const LADDER_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const LADDER_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+
+    /// The ICAO zone with line 2 read again as line 1, behind line 1's
+    /// document code and issuer: valid, and refused by the repeated-line rule.
+    fn ladder_repeated_zone() -> String {
+        format!("{}{}\n{LADDER_L2}", &LADDER_L1[..5], &LADDER_L2[5..])
+    }
+
+    fn refusing() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_refuse_repeated_line(true)
+    }
+
+    /// #579: with no rule in play the rungs are what they were: a
+    /// checksum-invalid read names its failed digits, and no read at all is
+    /// `no_mrz_found`.
+    #[test]
+    fn the_ladder_names_no_rule_for_a_default_read() {
+        let defaults = mrz::ParseOptions::default();
+        let text = format!("{LADDER_L1}\n{}", LADDER_L2.replacen("740812", "750812", 1));
+        let tampered = mrz::find_and_parse(&text).expect("shape is still valid TD3");
+        let reason = tier1_miss_reason(
+            &ladder_page(true, &text),
+            Ok(&tampered),
+            false,
+            None,
+            &defaults,
+        );
+        assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some("checksum invalid: date_of_birth, composite")
+        );
+
+        let reason = tier1_miss_reason(
+            &ladder_page(false, "no zone here"),
+            Err(&mrz::MrzError::NotFound),
+            false,
+            None,
+            &defaults,
+        );
+        assert_eq!(reason, Some(MissReason::NoMrzFound(String::new())));
+    }
+
+    /// #579: a zone the repeated-line rule refused is not found by the arm's
+    /// prep parse, and `mrz` may report it as `NotFound`. The refusal rung
+    /// keeps it out of `no_mrz_found`: a scored `checksum_failed` miss that
+    /// names the rule.
+    #[test]
+    fn a_refused_zone_is_a_checksum_failed_miss_that_names_the_rule() {
+        let text = ladder_repeated_zone();
+        for error in [
+            mrz::find_and_parse_with(&text, &refusing()).expect_err("refused"),
+            mrz::MrzError::NotFound,
+        ] {
+            let reason = tier1_miss_reason(
+                &ladder_page(false, &text),
+                Err(&error),
+                false,
+                None,
+                &refusing(),
+            );
+            assert_eq!(
+                reason.as_ref().map(miss_kind),
+                Some("checksum_failed"),
+                "{error}"
+            );
+            assert!(in_scored_tier1_population(&reason));
+            assert_eq!(
+                reason.map(|r| r.to_string()).as_deref(),
+                Some("rejected by the repeated-line rule: the Td3 zone holds a line twice")
+            );
+        }
+    }
+
+    /// #579: when the rule caused the miss, it is named even where another
+    /// refusal is what the parse reported, as a leading filler can be.
+    #[test]
+    fn the_refusal_rung_outranks_the_leading_filler_it_caused() {
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
+        page.document_number_leading_filler = true;
+        let leading_filler = mrz::MrzError::LeadingFiller {
+            field: mrz::Field::DocumentNumber,
+            line: 1,
+            position: 0,
+        };
+        let reason = tier1_miss_reason(&page, Err(&leading_filler), false, None, &refusing());
+        assert_eq!(reason.as_ref().map(miss_kind), Some("checksum_failed"));
+
+        // With no rule on, the leading filler is the reason, as before.
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&leading_filler),
+            false,
+            None,
+            &mrz::ParseOptions::default(),
+        );
+        assert_eq!(reason, Some(MissReason::DocumentNumberLeadingFiller));
+    }
+
+    /// #579: on a specimen whose printed zone is non-conforming, a refusal
+    /// stays `checksum_failed_specimen`, off the denominator, and names the
+    /// rule rather than an empty list of failed digits.
+    #[test]
+    fn a_refused_zone_on_a_nonconforming_specimen_stays_off_the_denominator() {
+        let text = ladder_repeated_zone();
+        let mut page = ladder_page(false, &text);
+        page.printed_zone_nonconforming = true;
+        let reason = tier1_miss_reason(
+            &page,
+            Err(&mrz::MrzError::NotFound),
+            false,
+            None,
+            &refusing(),
+        );
+        assert_eq!(
+            reason.as_ref().map(miss_kind),
+            Some("checksum_failed_specimen")
+        );
+        assert!(!in_scored_tier1_population(&reason));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some(
+                "rejected by the repeated-line rule: the Td3 zone holds a line twice \
+                 (printed zone is non-conforming)"
+            )
+        );
+    }
+
+    /// #579: the date-digits rule leaves a read whose check digits all
+    /// verify. The miss names the rule and the field, and keeps that read's
+    /// check states.
+    #[test]
+    fn a_date_digits_rejection_names_the_field_and_keeps_the_check_states() {
+        // The date of birth's `0` read as `A`: the same value modulo 10.
+        let text = format!("{LADDER_L1}\nL898902C36UTO74A8122F1204159ZE184226B<<<<<10");
+        let opts = mrz::ParseOptions::default().with_date_digits(true);
+        let read = mrz::find_and_parse_with(&text, &opts).expect("returned, not valid");
+        let reason = tier1_miss_reason(&ladder_page(true, &text), Ok(&read), false, None, &opts);
+        assert!(matches!(
+            &reason,
+            Some(MissReason::ChecksumFailed { check_states, .. })
+                if !check_states.is_empty()
+                    && check_states.values().all(|state| *state != Some(false))
+        ));
+        assert_eq!(
+            reason.map(|r| r.to_string()).as_deref(),
+            Some("rejected by the date-digits rule: date_of_birth not digits")
+        );
     }
 
     #[tokio::test]
@@ -3843,7 +4313,7 @@ mod tests {
         labelled_truth.insert(CoreField::Surname, "DOE".to_string());
         let prepped = vec![
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -3864,7 +4334,7 @@ mod tests {
                 ocr_elapsed: Duration::ZERO,
             }),
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: "fixture".to_string(),
@@ -4072,7 +4542,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4118,7 +4588,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -4199,7 +4669,7 @@ mod tests {
         assert!(!parsed.valid(), "but it must not validate");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: Some("passports/corrupted-td3-fixture.png".to_string()),
             source_sha256: Some("a".repeat(64)),
             name: "corrupted-td3-fixture".to_string(),
@@ -4236,6 +4706,7 @@ mod tests {
             false,
             Some("test-run.json"),
             false,
+            None,
         )
         .await;
 
@@ -4314,7 +4785,7 @@ mod tests {
         // OCR text with nothing MRZ-shaped in it: an MRZ is expected
         // (`mrz_expected: true`) but none was found.
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "no-mrz-found-fixture".to_string(),
@@ -4397,7 +4868,7 @@ mod tests {
         assert!(!recovered.valid());
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "labelled-nonconforming-specimen".to_string(),
@@ -4468,7 +4939,7 @@ mod tests {
         let ocr_zone = true_zone.replacen("L898902C36", "1898902C36", 1);
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "labelled-ocr-misread".to_string(),
@@ -4564,7 +5035,7 @@ mod tests {
         let zone = "P<UTODOE<<JANE<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<\n\
                     XXXXXXXXX0UTO8001014F2501017<<<<<<<<<<<<<<08";
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4620,7 +5091,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_Passport_Specimen_P0_UTO_2020_redacted_mrz".to_string(),
@@ -4670,7 +5141,7 @@ mod tests {
 
         let page = |name: &str, redacted: bool| {
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4735,7 +5206,7 @@ mod tests {
         // so it lands in `no_mrz_expected`.
         let page = |name: &str, mrz_expected: bool, mrz_found: bool| {
             Some(BenchPage {
-                pass_readings: Vec::new(),
+                pass_objects: None,
                 asset_id: None,
                 source_sha256: None,
                 name: name.to_string(),
@@ -4802,7 +5273,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -4857,7 +5328,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "Wonderland_ID_Specimen_2021_front_no_mrz".to_string(),
@@ -4901,6 +5372,72 @@ mod tests {
         assert_eq!(mrz_zone_mismatch("ABC\nDE", "ABC\nDEF"), 1);
         // a whole extra line counts every character
         assert_eq!(mrz_zone_mismatch("ABC", "ABC\nDEF"), 3);
+    }
+
+    /// The printed document code as classes (#664): the fixture's first two line-1 cells, as the
+    /// archive's class symbols, whatever was recovered.
+    #[test]
+    fn code_cells_are_the_classes_of_the_printed_codes_two_cells() {
+        let code_cells = |truth: Option<&str>, recovered: Option<&str>| {
+            truth_comparison_of_zone(recovered, truth, None).map(|t| t.code_cells)
+        };
+        for (truth, expected) in [
+            ("P<UTOERIKSSON<<ANNA<MARIA\nL898902C36UTO", "A<"),
+            ("I<UTOD231458907<<<<<<<<<<<<<<<\n7408122F", "A<"),
+            ("V<UTOERIKSSON<<ANNA<MARIA\nL8988901C4XXX", "A<"),
+            ("PSUTOERIKSSON<<ANNA<MARIA\nL898902C36UTO", "AA"),
+            ("POCHNLI<<NA<<<<<<<<<<<<<<<<<\nE12345678", "AA"),
+            ("IDFRABERTHIER\nL898902C36UTO", "AA"),
+            ("12UTO\nX", "99"),
+            ("\u{00e9}<UTO", "?<"),
+        ] {
+            assert_eq!(
+                code_cells(Some(truth), Some(truth)),
+                Some(Some(expected.to_string())),
+                "{expected}"
+            );
+            // The printed code does not depend on what was recovered.
+            assert_eq!(
+                code_cells(Some(truth), None),
+                Some(Some(expected.to_string())),
+                "{expected}, nothing recovered"
+            );
+            assert_eq!(
+                code_cells(Some(truth), Some("XX\nYY")),
+                Some(Some(expected.to_string())),
+                "{expected}, a different read"
+            );
+        }
+        // A one-character first line gives one symbol, an empty zone an empty string.
+        assert_eq!(code_cells(Some("P"), None), Some(Some("A".to_string())));
+        assert_eq!(code_cells(Some("<\nPS"), None), Some(Some("<".to_string())));
+        assert_eq!(code_cells(Some(""), None), Some(Some(String::new())));
+        // No hand-transcribed zone, no comparison at all.
+        assert_eq!(code_cells(None, Some("PS")), None);
+    }
+
+    /// The new key goes after the existing three, and the comparison still holds no zone text.
+    #[test]
+    fn a_truth_comparison_writes_code_cells_last_and_no_zone_text() {
+        let truth = "PSUTOERIKSSON<<ANNA<MARIA\nL898902C36UTO6908061F9406236ZE184226B<<<<<10";
+        let comparison =
+            truth_comparison_of_zone(Some(truth), Some(truth), Some("TD3")).expect("a comparison");
+        let json = serde_json::to_string(&comparison).expect("serialize");
+        let positions: Vec<usize> = [
+            "zone_mismatch",
+            "compared_cells",
+            "field_mismatch",
+            "code_cells",
+        ]
+        .iter()
+        .map(|key| json.find(&format!("\"{key}\"")).expect("key present"))
+        .collect();
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{json}");
+        assert!(json.ends_with(r#""code_cells":"AA"}"#), "{json}");
+        assert!(
+            !json.contains("ERIKSSON") && !json.contains("PSUTO"),
+            "{json}"
+        );
     }
 
     /// A different character than `c`, with a different ICAO check-digit
@@ -5567,7 +6104,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5617,7 +6154,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5673,7 +6210,7 @@ mod tests {
             .expect("no duplicate ids");
 
         let prepped = vec![Some(BenchPage {
-            pass_readings: Vec::new(),
+            pass_objects: None,
             asset_id: None,
             source_sha256: None,
             name: "fixture".to_string(),
@@ -5741,7 +6278,7 @@ mod tests {
             synthetic: false,
             known_or_guessed_format: None,
             ocr_elapsed,
-            pass_readings: Vec::new(),
+            pass_objects: None,
         })];
 
         let reports = run_prepped(&catalog, &prepped, false, None, false).await;
@@ -5814,7 +6351,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 2: Tier-1 hit, but the reader's fixed "JOHN" does not match
             // this document's true given names.
@@ -5834,7 +6371,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 3: no MRZ found, but still labelled with a name truth —
             // name-scorable, not a hit.
@@ -5854,7 +6391,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 4: a Tier-1 hit with no ground truth for either name field —
             // not name-scorable.
@@ -5874,7 +6411,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
             // 5: carries a name truth, but is outside `tier1_hit_rate`'s own
             // scored population (`mrz_expected: false` and `mrz_found:
@@ -5897,7 +6434,7 @@ mod tests {
                 synthetic: false,
                 known_or_guessed_format: None,
                 ocr_elapsed: Duration::ZERO,
-                pass_readings: Vec::new(),
+                pass_objects: None,
             }),
         ];
         // `FixedReader` returns the same `hit_evidence` for every document
@@ -6380,6 +6917,764 @@ mod tests {
         ))
     }
 
+    // --- the per-document archive (ADR-0024) -------------------------------
+
+    /// A run header for a test: only the fields a record's shape or a file's name depends on.
+    fn archive_test_header(started_unix_ms: u64) -> crate::archive::RunHeader {
+        use crate::archive::{Machine, RetryBudget, RunHeader, Scope, TrackFlags, SCHEMA};
+        RunHeader {
+            kind: "run",
+            schema: SCHEMA,
+            run_id: String::new(),
+            binary_name: "provider-bench".to_string(),
+            started_unix_ms,
+            pid: 1,
+            source: "local",
+            machine: Machine {
+                label: "test".to_string(),
+                os: "testos",
+                arch: "testarch",
+                cpus: 1,
+            },
+            binary: "provider-bench".to_string(),
+            binary_sha256: None,
+            git_commit: None,
+            working_tree_dirty: None,
+            argv: Some(Vec::new()),
+            scope: Scope {
+                corpus: "real-specimens",
+                format: None,
+                limit: None,
+                document_type: None,
+                profile: None,
+                seed_start: None,
+                count: 3,
+            },
+            tracks: TrackFlags {
+                private: false,
+                local: false,
+                covers: false,
+            },
+            samples_data_sha: None,
+            corpus_manifest_sha256: None,
+            documents_loaded: 3,
+            labelled_loaded: 1,
+            providers: Vec::new(),
+            ocr_arms: BTreeMap::new(),
+            retry_budget: Some(RetryBudget {
+                max_passes: 14,
+                max_seconds: 52,
+            }),
+            mrz_arms: BTreeMap::new(),
+            pivot_yy: 26,
+            model_paths: crate::report::ModelPathsReport::default(),
+            model_sha256: None,
+            replay_of: None,
+            env: BTreeMap::new(),
+        }
+        .with_run_id()
+    }
+
+    /// Every line of every finished archive file under `root/track`, parsed.
+    fn archive_lines(root: &Path, track: &str) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(root.join(track)) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "jsonl") {
+                let body = std::fs::read_to_string(&path).expect("read the archive file");
+                out.extend(
+                    body.lines()
+                        .map(|line| serde_json::from_str(line).expect("a JSON line")),
+                );
+            }
+        }
+        out
+    }
+
+    fn two_provider_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .with_reader(std::sync::Arc::new(ErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("two readers")
+    }
+
+    #[tokio::test]
+    async fn the_archive_sees_one_record_per_document_per_provider() {
+        let root = scratch_dir("archive-per-provider");
+        let corpus = replay_corpus();
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        run_provider_bench_replay(
+            &two_provider_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions {
+                archive: Some(&archive),
+                ..RealDumpOptions::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        // Before `finish`, the per-provider flush alone has put every record on disk: a run
+        // killed now would still leave them in the `.partial`.
+        let partial = std::fs::read_dir(root.join("public"))
+            .expect("the public track directory")
+            .flatten()
+            .map(|entry| entry.path())
+            .find(|path| path.extension().is_some_and(|ext| ext == "partial"))
+            .expect("the run is still partial");
+        let on_disk = std::fs::read_to_string(&partial).expect("readable while open");
+        assert_eq!(
+            on_disk.lines().count(),
+            1 + 3 * 2,
+            "every record is on disk before `finish`"
+        );
+        assert!(on_disk.ends_with('\n'), "no record is cut short");
+        archive.finish();
+
+        let lines = archive_lines(&root, "public");
+        assert_eq!(
+            lines.len(),
+            1 + 3 * 2,
+            "one header, three documents, two providers"
+        );
+        assert_eq!(lines[0]["kind"], "run");
+        let docs = &lines[1..];
+        assert!(docs
+            .iter()
+            .all(|d| d["kind"] == "doc" && d["track"] == "public"));
+        assert!(docs.iter().all(|d| d["run_id"] == lines[0]["run_id"]));
+        for provider in ["mrz", "erroring-test-reader"] {
+            let mut names: Vec<&str> = docs
+                .iter()
+                .filter(|d| d["provider"] == provider)
+                .map(|d| d["name"].as_str().expect("name"))
+                .collect();
+            names.sort_unstable();
+            assert_eq!(
+                names,
+                ["specimen-a", "specimen-b", "specimen-c"],
+                "{provider}"
+            );
+        }
+        // The error arm is a record too: no read, so no fields.
+        let errored = docs
+            .iter()
+            .find(|d| d["provider"] == "erroring-test-reader" && d["name"] == "specimen-a")
+            .expect("the erroring provider's record");
+        assert_eq!(errored["read_ok"], false);
+        assert!(errored["fields"].is_null());
+        assert_eq!(errored["ledger_row"]["outcome"], "ocr_error");
+        // A replay traces, so the record carries its (empty) pass list; the labelled document
+        // carries a comparison against its fixture, the others none.
+        let hit = docs
+            .iter()
+            .find(|d| d["provider"] == "mrz" && d["name"] == "specimen-a")
+            .expect("the mrz record of the labelled hit");
+        assert_eq!(hit["ledger_row"]["outcome"], "hit");
+        assert_eq!(hit["fields"]["surname"], "ERIKSSON");
+        assert_eq!(hit["ocr"]["ocr_passes"], serde_json::json!([]));
+        assert_eq!(hit["ocr"]["rotation"], 0);
+        assert_eq!(hit["tier1_read"]["valid"], true);
+        assert_eq!(hit["truth"]["zone_mismatch"], 0);
+        assert_eq!(hit["truth"]["code_cells"], "A<");
+        let unlabelled = docs
+            .iter()
+            .find(|d| d["provider"] == "mrz" && d["name"] == "specimen-b")
+            .expect("the mrz record of an unlabelled document");
+        assert!(unlabelled["truth"].is_null());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What a run reports, with the timings that differ between two runs of the same input
+    /// left out (`speed`, `ocr_elapsed`, `measured_rss_delta_bytes`): each provider's whole
+    /// report as text, its `documents_detail` rows included, and the ledger rows as the ledger
+    /// writes them. A replay's OCR time is zero, so the per-document detail is deterministic.
+    fn run_outputs(reports: &[ProviderReport]) -> (Vec<String>, Vec<crate::report::OutcomeRow>) {
+        (
+            reports
+                .iter()
+                .map(|r| {
+                    format!(
+                        "{} {} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                        r.provider_id,
+                        r.documents,
+                        r.accuracy,
+                        r.json_validity,
+                        r.unsupported_assertion,
+                        r.declared_resident_bytes,
+                        r.tier1_hit_rate,
+                        r.ocr_arms,
+                        (&r.strict_tier1_hit_rate, &r.documents_detail),
+                    )
+                })
+                .collect(),
+            reports
+                .iter()
+                .flat_map(|r| {
+                    r.documents_detail
+                        .iter()
+                        .map(crate::report::OutcomeRow::from)
+                })
+                .collect(),
+        )
+    }
+
+    /// One replay over the three-document corpus, with the OCR dump on so its bytes can be
+    /// compared, and `archive` (or none) attached.
+    async fn replay_with_dump(
+        dump_dir: &Path,
+        archive: Option<&Archive>,
+    ) -> (Vec<ProviderReport>, Vec<u8>) {
+        let corpus = replay_corpus();
+        let reports = run_provider_bench_replay(
+            &two_provider_catalog(),
+            &replay_specimens(&corpus),
+            &replay_capture(&corpus),
+            false,
+            &RealDumpOptions {
+                ocr_dir: Some(dump_dir),
+                ocr_hits: true,
+                archive,
+                ..RealDumpOptions::default()
+            },
+            false,
+        )
+        .await
+        .unwrap_or_else(|e| panic!("covered: {e}"));
+        let dump = std::fs::read(dump_dir.join("provider-bench-miss-ocr-dump.jsonl"))
+            .expect("the dump was written");
+        (reports, dump)
+    }
+
+    #[tokio::test]
+    async fn the_archive_changes_no_report_or_dump() {
+        let root = scratch_dir("archive-neutral-root");
+        let without_dir = scratch_dir("archive-neutral-without");
+        let with_dir = scratch_dir("archive-neutral-with");
+        let (without, dump_without) = replay_with_dump(&without_dir, None).await;
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let (with, dump_with) = replay_with_dump(&with_dir, Some(&archive)).await;
+        archive.finish();
+
+        assert!(
+            !archive_lines(&root, "public").is_empty(),
+            "the archive did write"
+        );
+        assert_eq!(run_outputs(&with), run_outputs(&without));
+        assert_eq!(
+            dump_with, dump_without,
+            "the miss dump is byte for byte the same"
+        );
+        for dir in [&root, &without_dir, &with_dir] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failing_archive_changes_no_report() {
+        let dir = scratch_dir("archive-failing");
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let root_is_a_file = dir.join("not-a-directory");
+        std::fs::write(&root_is_a_file, b"x").expect("a file where the root should be");
+        let without_dir = dir.join("without");
+        let with_dir = dir.join("with");
+        let (without, dump_without) = replay_with_dump(&without_dir, None).await;
+        let archive = Archive::start(&root_is_a_file, &archive_test_header(1_000_000_000_000));
+        let (with, dump_with) = replay_with_dump(&with_dir, Some(&archive)).await;
+        archive.finish();
+
+        assert_eq!(archive.warnings().len(), 1, "one warning, then off");
+        assert_eq!(run_outputs(&with), run_outputs(&without));
+        assert_eq!(dump_with, dump_without);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A labelled specimen whose OCR text is one zone and whose fixture is another, so the
+    /// fixture's text can be told apart from the OCR text in the bytes of a record.
+    fn labelled_page_with_a_different_fixture_zone() -> BenchPage {
+        let mut page = rate_test_page();
+        page.name = "labelled".to_string();
+        page.asset_id = Some("passports/labelled.png".to_string());
+        page.source_sha256 = Some("0".repeat(64));
+        page.page = OcrPage {
+            text: format!("{REPLAY_LINE_1}\n{REPLAY_LINE_2_VALID}"),
+            ..OcrPage::default()
+        };
+        page.mrz_found = true;
+        page.mrz_expected = true;
+        let mut fixture_line_1 = String::from("P<UTOSENTINELTRUTH<<ZQXJ");
+        while fixture_line_1.len() < 44 {
+            fixture_line_1.push('<');
+        }
+        page.ground_truth_mrz = Some(format!("{fixture_line_1}\n{REPLAY_LINE_2_VALID}"));
+        page.ground_truth = Some(HashMap::from([(
+            CoreField::Surname,
+            "ERIKSSON".to_string(),
+        )]));
+        page.known_or_guessed_format = Some("TD3");
+        page
+    }
+
+    #[tokio::test]
+    async fn a_doc_record_never_holds_the_fixture_zone() {
+        let root = scratch_dir("archive-no-fixture");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let prepped = vec![Some(labelled_page_with_a_different_fixture_zone())];
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &prepped,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+
+        let file = std::fs::read_dir(root.join("public"))
+            .expect("public/")
+            .flatten()
+            .next()
+            .expect("one file")
+            .path();
+        let bytes = std::fs::read_to_string(&file).expect("read");
+        assert!(bytes.contains("ERIKSSON"), "the OCR text is in the record");
+        for fixture_only in ["SENTINELTRUTH", "ZQXJ"] {
+            assert!(
+                !bytes.contains(fixture_only),
+                "{fixture_only} is fixture text"
+            );
+        }
+        // What the record does hold about the fixture: counts and positions.
+        let doc: serde_json::Value =
+            serde_json::from_str(bytes.lines().nth(1).expect("one record")).expect("JSON");
+        assert!(doc["truth"]["zone_mismatch"]
+            .as_u64()
+            .is_some_and(|n| n > 0));
+        assert!(doc["truth"]["compared_cells"].as_u64().is_some());
+        assert!(doc["truth"]["field_mismatch"]["by_field"].is_object());
+        assert!(
+            doc["ocr"]["ocr_passes"].is_null(),
+            "an untraced run adds no tracing"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_real_page_without_an_asset_id_is_not_archived() {
+        // It cannot be placed in a track, so it is treated as the most restrictive one.
+        let root = scratch_dir("archive-no-asset-id");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = None;
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(!root.join("public").exists() && !root.join("local").exists());
+        assert!(!root.join("private").exists());
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A retry stop from the closed set, the budget flag and the damaged-recovery flags are
+    /// carried into the private record as they are; only an unknown stop is left out.
+    #[tokio::test]
+    async fn the_retry_facts_of_a_private_document_reach_its_record() {
+        let root = scratch_dir("archive-private-retry");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = private_sentinel_page();
+        page.page.retry_variant_id = Some("general".to_string());
+        page.page.retry_stop = Some("pass_cap".to_string());
+        page.page.retry_budget_hit = true;
+        page.page.retry_damaged_recovery = Some(true);
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        let (_, private) = only_file_in(&root, "private");
+        assert!(!private.contains(PRIVATE_SENTINEL));
+        let record: serde_json::Value =
+            serde_json::from_str(private.lines().nth(1).expect("a record")).expect("JSON");
+        assert_eq!(record["retry_variant_id"], "general");
+        assert_eq!(record["retry_stop"], "pass_cap");
+        assert_eq!(record["retry_budget_hit"], true);
+        assert_eq!(record["retry_damaged_recovery"], true);
+        assert_eq!(record["tier1_damaged_recovery"], false);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_private_asset_is_archived_only_as_a_text_free_record() {
+        let root = scratch_dir("archive-private-asset");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = Some("private/labelled.png".to_string());
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        // Never a document record, in `public/` or `local/`; one text-free record.
+        assert!(!root.join("public").exists() && !root.join("local").exists());
+        let (_, private) = only_file_in(&root, "private");
+        assert_eq!(private.lines().count(), 2, "a header and one record");
+        for text in ["ERIKSSON", "labelled.png", "ANNA", "L898902C36"] {
+            assert!(!private.contains(text), "{text} is document text");
+        }
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn a_private_page_without_an_image_hash_has_no_key_and_writes_nothing() {
+        let root = scratch_dir("archive-private-no-hash");
+        let archive = Archive::start(&root, &archive_test_header(1_000_000_000_000));
+        let mut page = labelled_page_with_a_different_fixture_zone();
+        page.asset_id = Some("private/labelled.png".to_string());
+        page.source_sha256 = None;
+        run_prepped_with_dump_options(
+            &mrz_catalog(),
+            &[Some(page)],
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(std::fs::read_dir(&root).map_or(true, |mut dir| dir.next().is_none()));
+        assert!(archive.warnings().is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The one string every place text could hide carries in the private-record tests.
+    const PRIVATE_SENTINEL: &str = "SENTINELZQX";
+
+    /// A reader whose error text carries [`PRIVATE_SENTINEL`], so the miss reason of a private
+    /// document holds it in the ledger row (and, in a public record, would hold it too).
+    struct SentinelErroringReader {
+        capability: Capability,
+    }
+
+    #[async_trait::async_trait]
+    impl IntelligenceProvider for SentinelErroringReader {
+        fn id(&self) -> ProviderId {
+            ProviderId("sentinel-erroring-reader")
+        }
+        fn capability(&self) -> &Capability {
+            &self.capability
+        }
+        fn describe(&self) -> String {
+            "a failing test reader whose error names a document".into()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FieldReader for SentinelErroringReader {
+        async fn read(&self, _ctx: &DocumentContext<'_>) -> Result<Reading, ProviderError> {
+            Err(ProviderError::Failed {
+                detail: format!("could not read {PRIVATE_SENTINEL}"),
+            })
+        }
+    }
+
+    fn sentinel_catalog() -> ProviderCatalog {
+        ProviderCatalog::builder()
+            .with_reader(std::sync::Arc::new(synthpass_die::MrzReader::new()))
+            .with_reader(std::sync::Arc::new(SentinelErroringReader {
+                capability: Capability::deterministic_reader(),
+            }))
+            .build()
+            .expect("two readers")
+    }
+
+    /// A fabricated private document with [`PRIVATE_SENTINEL`] in its file name, asset ID,
+    /// OCR text, recovered zone, fixture zone, field values and retry stop. Nothing about it is
+    /// a real specimen.
+    fn private_sentinel_page() -> BenchPage {
+        let pad = |mut line: String| {
+            while line.len() < 44 {
+                line.push('<');
+            }
+            line
+        };
+        let mut page = rate_test_page();
+        page.name = PRIVATE_SENTINEL.to_string();
+        page.asset_id = Some(format!("private/{PRIVATE_SENTINEL}.png"));
+        page.source_sha256 = Some("b".repeat(64));
+        let zone_line_1 = pad(format!("P<UTO{PRIVATE_SENTINEL}<<ANNA<MARIA"));
+        page.page = OcrPage {
+            text: format!("{PRIVATE_SENTINEL} header\n{zone_line_1}\n{REPLAY_LINE_2_VALID}"),
+            rotation: 90,
+            mrz_band_score: Some(0.75),
+            retry_variant_id: Some("pass-03".to_string()),
+            retry_stop: Some(format!("stopped at {PRIVATE_SENTINEL}")),
+            ..OcrPage::default()
+        };
+        page.mrz_found = true;
+        page.mrz_expected = true;
+        page.ground_truth_mrz = Some(format!(
+            "{}\n{REPLAY_LINE_2_VALID}",
+            pad(format!("P<UTO{PRIVATE_SENTINEL}<<WXYZ"))
+        ));
+        page.ground_truth = Some(HashMap::from([(
+            CoreField::Surname,
+            format!("{PRIVATE_SENTINEL}X"),
+        )]));
+        page.known_or_guessed_format = Some("TD3");
+        page
+    }
+
+    /// Runs the hook over the fabricated private document and a public one, with an `argv`
+    /// that names the private file, and returns the archive root.
+    async fn archive_private_run(tag: &str, with_private_page: bool) -> PathBuf {
+        let root = scratch_dir(tag);
+        let mut header = archive_test_header(1_000_000_000_000);
+        header.argv = Some(vec![
+            "--real-specimens".to_string(),
+            "--include-private".to_string(),
+            format!("{PRIVATE_SENTINEL}.png"),
+        ]);
+        header.tracks.private = true;
+        let header = header.with_run_id();
+        let archive = Archive::start(&root, &header);
+        let mut prepped = vec![Some(labelled_page_with_a_different_fixture_zone())];
+        if with_private_page {
+            prepped.insert(0, Some(private_sentinel_page()));
+        }
+        run_prepped_with_dump_options(
+            &sentinel_catalog(),
+            &prepped,
+            false,
+            None,
+            false,
+            None,
+            false,
+            Some(&archive),
+        )
+        .await;
+        archive.finish();
+        assert!(archive.warnings().is_empty(), "{:?}", archive.warnings());
+        root
+    }
+
+    /// The one finished file in `root/track`, as text.
+    fn only_file_in(root: &Path, track: &str) -> (String, String) {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(root.join(track))
+            .unwrap_or_else(|e| panic!("{track}/ is missing: {e}"))
+            .flatten()
+            .map(|entry| entry.path())
+            .collect();
+        assert_eq!(files.len(), 1, "{files:?}");
+        let path = files.remove(0);
+        assert!(
+            path.extension().is_some_and(|ext| ext == "jsonl"),
+            "{path:?}"
+        );
+        (
+            path.file_name()
+                .expect("a name")
+                .to_string_lossy()
+                .into_owned(),
+            std::fs::read_to_string(&path).expect("read"),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_private_document_is_archived_text_free_through_the_hook() {
+        let root = archive_private_run("archive-private-hook", true).await;
+        let (private_name, private) = only_file_in(&root, "private");
+        let (public_name, public) = only_file_in(&root, "public");
+
+        // The whole private file, its header included, holds the sentinel nowhere.
+        assert!(
+            !private.contains(PRIVATE_SENTINEL),
+            "a private file carries no document text"
+        );
+        // Same stem as the run's other file.
+        assert_eq!(private_name, public_name);
+
+        let lines: Vec<serde_json::Value> = private
+            .lines()
+            .map(|line| serde_json::from_str(line).expect("a JSON line"))
+            .collect();
+        assert_eq!(lines.len(), 1 + 2, "a header, then one record per provider");
+        assert_eq!(lines[0]["kind"], "run");
+        assert!(
+            lines[0]["argv"].is_null(),
+            "no command line in a private file"
+        );
+        assert_eq!(lines[0]["tracks"]["private"], true);
+        let providers: Vec<&str> = lines[1..]
+            .iter()
+            .map(|d| d["provider"].as_str().expect("provider"))
+            .collect();
+        assert_eq!(providers, ["mrz", "sentinel-erroring-reader"]);
+
+        // Exactly the pinned keys, and none of the keys a document record carries.
+        let pinned = [
+            "kind",
+            "run_id",
+            "provider",
+            "track",
+            "source_sha256",
+            "outcome",
+            "mrz_format",
+            "mrz_found",
+            "mrz_checksums_valid",
+            "check_states",
+            "retry_variant_id",
+            "retry_budget_hit",
+            "retry_stop",
+            "retry_damaged_recovery",
+            "tier1_damaged_recovery",
+            "read_us",
+            "ocr_ms",
+            "mrz_band_score",
+            "rotation",
+            "truth",
+            "zone_classes",
+        ];
+        for record in &lines[1..] {
+            let mut keys: Vec<&str> = record
+                .as_object()
+                .expect("an object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            let mut expected = pinned.to_vec();
+            expected.sort_unstable();
+            assert_eq!(keys, expected);
+            assert_eq!(record["kind"], "private_doc");
+            assert_eq!(record["track"], "private");
+            assert_eq!(record["run_id"], lines[0]["run_id"]);
+            assert_eq!(record["source_sha256"], "b".repeat(64));
+        }
+        // `truth` may name a field in `by_field` (`name`, say) as a count key; what must be
+        // absent are the document record's own top-level keys.
+        for never in [
+            "name",
+            "asset_id",
+            "ocr",
+            "text",
+            "fields",
+            "field_correctness",
+            "names_exact",
+            "miss_reason",
+            "name_error",
+            "ledger_row",
+            "tier1_read",
+            "lines",
+            "chargrid",
+            "ocr_passes",
+        ] {
+            for record in &lines[1..] {
+                assert!(
+                    record.get(never).is_none(),
+                    "a private record has no `{never}` key"
+                );
+            }
+        }
+
+        // What the record does say: facts and classes. The recovered zone is classes only.
+        let read = &lines[1];
+        assert_eq!(read["outcome"], "hit");
+        assert_eq!(read["mrz_format"], "TD3");
+        assert_eq!(read["rotation"], 90);
+        assert_eq!(read["mrz_band_score"], 0.75);
+        assert_eq!(read["retry_variant_id"], "pass-03");
+        assert!(
+            read["retry_stop"].is_null(),
+            "a retry stop outside the closed set is left out"
+        );
+        assert_eq!(
+            read["zone_classes"],
+            serde_json::json!([
+                // `P<UTO` + the 11-letter sentinel, `<<ANNA<MARIA`, filler to 44 cells.
+                format!("A<{}<<AAAA<AAAAA{}", "A".repeat(14), "<".repeat(16)),
+                "A999999A99AAA9999999A9999999AA999999A<<<<<99"
+            ])
+        );
+        assert!(read["truth"]["zone_mismatch"]
+            .as_u64()
+            .is_some_and(|n| n > 0));
+        let errored = &lines[2];
+        assert_eq!(errored["outcome"], "ocr_error");
+
+        // Positive controls: the text the private file lacks is really there to be written. The
+        // public record of the same error holds the error text in its ledger row, and the
+        // public header holds the command line that names the private file.
+        assert!(
+            public.contains(&format!("could not read {PRIVATE_SENTINEL}")),
+            "the error text reaches a public record"
+        );
+        assert!(
+            public.contains(&format!("{PRIVATE_SENTINEL}.png")),
+            "the public header keeps argv"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+
+        // A public document in the same run writes its public record exactly as it does in a
+        // run that has no private document.
+        // Timings differ between two runs of the same input, so they are the one key left out.
+        let untimed = |text: &str| -> Vec<serde_json::Value> {
+            text.lines()
+                .map(|line| {
+                    let mut record: serde_json::Value =
+                        serde_json::from_str(line).expect("a JSON line");
+                    record.as_object_mut().expect("an object").remove("read_us");
+                    record
+                })
+                .collect()
+        };
+        let without = archive_private_run("archive-private-hook-without", false).await;
+        let (without_name, without_public) = only_file_in(&without, "public");
+        assert_eq!(
+            without_name, public_name,
+            "the same run, the same file name"
+        );
+        assert_eq!(untimed(&without_public), untimed(&public));
+        assert!(!without.join("private").exists());
+        let _ = std::fs::remove_dir_all(&without);
+    }
+
     /// The property the whole feature rests on: for the same page, a replayed row
     /// yields the same `DocumentDetail`, the same ledger row and the same dump
     /// row as the live path. Only `ocr_ms` differs, because no OCR ran.
@@ -6412,6 +7707,7 @@ mod tests {
             true,
             Some("run.json"),
             false,
+            None,
         )
         .await;
         let replay_reports = run_prepped_with_dump_options(
@@ -6422,6 +7718,7 @@ mod tests {
             true,
             Some("run.json"),
             false,
+            None,
         )
         .await;
 
@@ -6681,7 +7978,7 @@ mod tests {
     fn control_read(text: &str) -> synthpass_die::Tier1Read {
         synthpass_die::read_tier1_with(
             text,
-            &synthpass_die::mrz_parse_options_for(false),
+            &synthpass_die::mrz_parse_options_for(false, false, false),
             synthpass_die::Line1Arm::Control,
         )
     }
@@ -6784,6 +8081,28 @@ mod tests {
         }
     }
 
+    /// #579: the printed-zone validity parse ignores the repeated-line refusal
+    /// and the date-digits arm, so the `checksum_failed_specimen` denominator is
+    /// the same in every arm; the other options are untouched.
+    #[test]
+    fn the_printed_zone_parse_ignores_the_refusal_and_date_digits_arms() {
+        let refusing = synthpass_die::mrz_parse_options_for(false, true, false);
+        assert!(refusing.refuse_repeated_line);
+        assert!(!printed_zone_parse_options_from(refusing).refuse_repeated_line);
+        let digits = synthpass_die::mrz_parse_options_for(false, false, true);
+        assert!(digits.date_digits);
+        assert!(!printed_zone_parse_options_from(digits).date_digits);
+        let swept = synthpass_die::mrz_parse_options_for(true, true, true);
+        let pinned = printed_zone_parse_options_from(swept);
+        assert!(pinned.class_sweep);
+        assert!(!pinned.refuse_repeated_line);
+        assert!(!pinned.date_digits);
+        assert_eq!(
+            printed_zone_parse_options_from(mrz::ParseOptions::default()),
+            mrz::ParseOptions::default()
+        );
+    }
+
     /// With every `SYNTHPASS_MRZ_*` arm `off` the dump zone comes from
     /// `read_tier1`, which is what `mrz::find_and_parse` returns: the dump is
     /// byte-identical to what it was before the arms reached it (#574, finding
@@ -6802,7 +8121,7 @@ mod tests {
         for text in &texts {
             let off = synthpass_die::read_tier1_with(
                 text,
-                &synthpass_die::mrz_parse_options_for(false),
+                &synthpass_die::mrz_parse_options_for(false, false, false),
                 synthpass_die::Line1Arm::Off,
             );
             assert_eq!(off.parsed, mrz::find_and_parse(text), "{text}");

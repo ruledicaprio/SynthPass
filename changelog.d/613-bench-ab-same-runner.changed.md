@@ -1,0 +1,1 @@
+- **`bench_ab_diff.py` refuses arms from different runners.** Two CI arms whose `arm.json` records differ in any runner fact (run id, commit, CPU, core count, rustc, model hashes) or in role, and a CI arm paired with a local one, now exit 2 instead of being compared. Two local arms compare as before; they record no machine.

@@ -106,6 +106,11 @@ class IdentityAuditTests(unittest.TestCase):
         source = (ROOT / "crates/synthpass-bench/src/lib.rs").read_text(encoding="utf-8")
         start = source.index("fn find_image_files(")
         walk = source[start:source.index("\n/// Reads", start)]
+        # The track predicate the walk calls, and the enum it returns, sit inside this window
+        # and are compiled with it. If someone moves them out, fail here rather than compile a
+        # walk that no longer matches the production one.
+        for needed in ("pub enum CorpusTrack", "pub fn corpus_entry_track(", "fn corpus_track_allowed("):
+            self.assertIn(needed, walk)
         constants = "\n".join(re.findall(r'(?:pub )?const (?:IMAGE_EXTENSIONS|LOCAL_TRACK_DIR|COVERS_TRACK_DIR):[^;]+;', source))
         start = source.index("pub struct OptInTracks {")
         tracks = source[start:source.index("\n}", start) + 2]

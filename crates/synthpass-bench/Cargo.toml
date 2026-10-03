@@ -26,6 +26,15 @@ path = "src/bin/ground-truth.rs"
 name = "bench-report"
 path = "src/bin/bench-report.rs"
 
+# The elimination probe (knowledge/research/mrz-geometric-elimination.md, items
+# 1 and 2). Its tests (the zone finder on drawn boxes, the edge and profile
+# arithmetic, the floor, the output-directory refusal, and the positive control
+# on a generated page) guard a tool whose real run reads the public corpus;
+# without `test = true` they would be built and never run.
+[[example]]
+name = "elimination_probe"
+test = true
+
 [dependencies]
 # Self-contained review pages embed specimen images without external assets.
 base64 = "0.23"

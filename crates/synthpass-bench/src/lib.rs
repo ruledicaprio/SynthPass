@@ -19,11 +19,14 @@ use synthpass_gen::degrade::{apply_profile, CaptureProfile};
 use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
 use synthpass_ocr::NativeOcr;
 
+pub mod archive;
 pub mod bench_report;
 pub mod ground_truth;
 pub mod ocr_passes;
 pub mod provider_bench;
 pub mod report;
+pub mod step_summary;
+pub mod synthetic_ledger;
 
 /// Per-check-digit state for a parsed MRZ, keyed by the stable wire field
 /// names. `None` means the format does not print that digit; it is not a
@@ -418,20 +421,15 @@ fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let name = path
+            let is_dir = path.is_dir();
+            let track = path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .map(str::to_ascii_lowercase);
-            if !tracks.private && name.as_deref().is_some_and(|n| n.contains("private")) {
+                .map_or(CorpusTrack::Public, |name| corpus_entry_track(name, is_dir));
+            if !corpus_track_allowed(track, tracks) {
                 continue;
             }
-            if path.is_dir() {
-                if !tracks.local && name.as_deref() == Some(LOCAL_TRACK_DIR) {
-                    continue;
-                }
-                if !tracks.covers && name.as_deref() == Some(COVERS_TRACK_DIR) {
-                    continue;
-                }
+            if is_dir {
                 walk(&path, tracks, out);
             } else if path
                 .extension()
@@ -446,6 +444,63 @@ fn find_image_files(dir: &Path, tracks: OptInTracks) -> Vec<PathBuf> {
     walk(dir, tracks, &mut out);
     out.sort();
     out
+}
+
+/// The track a corpus entry belongs to, ordered from the least to the most restrictive
+/// (ADR-0024, Decision 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CorpusTrack {
+    /// The public corpus, which CI and the committed baseline measure.
+    Public,
+    /// `samples/covers/` ([`COVERS_TRACK_DIR`]).
+    Covers,
+    /// `samples/local/` ([`LOCAL_TRACK_DIR`]).
+    Local,
+    /// `samples/private/` and any name that contains `private`.
+    Private,
+}
+
+/// The track of one directory entry, from its name and whether it is a directory: the one
+/// rule the corpus walk (`find_image_files`) and the benchmark archive both apply, so the
+/// archive cannot file a document under a track the walk would not have put it in.
+///
+/// A name containing `private` (case-insensitive), file or directory, is the private track.
+/// A directory named exactly `local` or `covers` (case-insensitive) is that track; a file
+/// with such a name is not, and neither is a directory whose name merely contains one.
+pub fn corpus_entry_track(name: &str, is_dir: bool) -> CorpusTrack {
+    let name = name.to_ascii_lowercase();
+    if name.contains("private") {
+        CorpusTrack::Private
+    } else if is_dir && name == LOCAL_TRACK_DIR {
+        CorpusTrack::Local
+    } else if is_dir && name == COVERS_TRACK_DIR {
+        CorpusTrack::Covers
+    } else {
+        CorpusTrack::Public
+    }
+}
+
+/// Whether a walk with `tracks` opted in descends into (or lists) an entry of `track`.
+fn corpus_track_allowed(track: CorpusTrack, tracks: OptInTracks) -> bool {
+    match track {
+        CorpusTrack::Public => true,
+        CorpusTrack::Covers => tracks.covers,
+        CorpusTrack::Local => tracks.local,
+        CorpusTrack::Private => tracks.private,
+    }
+}
+
+/// The track of a specimen from its samples-relative asset ID (`/`-separated): [`corpus_entry_track`]
+/// of every component, the last being a file and the rest directories, and the most restrictive
+/// result. A document is in the private track if any component says so, however deep.
+pub fn asset_track(asset_id: &str) -> CorpusTrack {
+    let components: Vec<&str> = asset_id.split(['/', '\\']).collect();
+    components
+        .iter()
+        .enumerate()
+        .map(|(i, name)| corpus_entry_track(name, i + 1 < components.len()))
+        .max()
+        .unwrap_or(CorpusTrack::Public)
 }
 
 /// Reads `samples_root/ocr_fixtures/<stem>.json` and parses it as a v1
@@ -835,9 +890,16 @@ pub enum MissReason {
     /// document and for a labelled one whose recovered zone differs from the
     /// transcription — see the 2026-09-08 checksum_failed writeup. `miss_kind`
     /// reports the two as `checksum_failed_specimen` vs `checksum_failed`.
+    ///
+    /// `rejected_by` names the opt-in parse rules (#579) that cost the
+    /// document its read: with them switched off, the same text reads valid
+    /// ([`rejected_by`]). No failed check digit explains that part of the
+    /// miss, so the miss reason names the rule. Always empty under the default
+    /// parse options, which enable no such rule.
     ChecksumFailed {
         check_states: BTreeMap<&'static str, Option<bool>>,
         specimen_nonconforming: bool,
+        rejected_by: Vec<RejectedBy>,
     },
     /// A checksum-valid MRZ that disagrees with the ground truth. Rare and
     /// interesting: the check digits can validate over a misread that
@@ -900,6 +962,7 @@ impl std::fmt::Display for MissReason {
             Self::ChecksumFailed {
                 check_states,
                 specimen_nonconforming,
+                rejected_by,
             } => {
                 let failed: Vec<_> = [
                     "document_number",
@@ -911,9 +974,23 @@ impl std::fmt::Display for MissReason {
                 .into_iter()
                 .filter(|field| check_states.get(field) == Some(&Some(false)))
                 .collect();
-                write!(f, "checksum invalid: {}", failed.join(", "))?;
+                // The failed check digits, then the rules that rejected a
+                // valid read; "checksum invalid: " alone only when neither
+                // has anything to name, as before the rules existed.
+                let mut parts = Vec::new();
+                if !failed.is_empty() || rejected_by.is_empty() {
+                    parts.push(format!("checksum invalid: {}", failed.join(", ")));
+                }
+                parts.extend(rejected_by.iter().map(ToString::to_string));
+                write!(f, "{}", parts.join("; "))?;
                 if *specimen_nonconforming {
-                    write!(f, " (printed zone is non-conforming, read faithfully)")?;
+                    // A rejected zone is not a faithful read of the printed one.
+                    let read = if rejected_by.is_empty() {
+                        ", read faithfully"
+                    } else {
+                        ""
+                    };
+                    write!(f, " (printed zone is non-conforming{read})")?;
                 }
                 Ok(())
             }
@@ -930,6 +1007,126 @@ impl std::fmt::Display for MissReason {
                 f,
                 "document number begins with a filler (mrz::MrzError::LeadingFiller)"
             ),
+        }
+    }
+}
+
+/// An opt-in parse rule (#579) that cost a document its read, as
+/// [`MissReason::ChecksumFailed`] records it ([`rejected_by`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RejectedBy {
+    /// `SYNTHPASS_MRZ_REFUSE_REPEATED_LINE` (`mrz::ParseOptions::refuse_repeated_line`):
+    /// with the rule off, the text reads as this format's zone, and one of its
+    /// lines repeats another.
+    RepeatedLine { format: mrz::Format },
+    /// `SYNTHPASS_MRZ_DATE_DIGITS` (`mrz::ParseOptions::date_digits`): with the
+    /// rule off, the text reads as a zone whose named date fields
+    /// (`"date_of_birth"`, `"date_of_expiry"`) hold a character that is neither
+    /// a digit nor the filler.
+    DateDigits { fields: Vec<&'static str> },
+}
+
+impl std::fmt::Display for RejectedBy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::RepeatedLine { format } => write!(
+                f,
+                "rejected by the repeated-line rule: the {format:?} zone holds a line twice"
+            ),
+            Self::DateDigits { fields } if fields.is_empty() => {
+                write!(f, "rejected by the date-digits rule")
+            }
+            Self::DateDigits { fields } => write!(
+                f,
+                "rejected by the date-digits rule: {} not digits",
+                fields.join(", ")
+            ),
+        }
+    }
+}
+
+/// The opt-in parse rules (#579) that cost `text` its read: `parsed`, the read
+/// under `opts`, is not valid, and the same text parses to a valid read with
+/// the rule switched off.
+///
+/// Attributed by parsing again, not from `parsed`'s error, because `mrz` does
+/// not always say which rule declined a zone: the date-digits rule has no
+/// error of its own, and a repeated-line refusal can come back as `NotFound`
+/// when the checksum-failed reading left over looks like visual-zone text.
+///
+/// Each enabled rule is switched off on its own, and a rule whose removal
+/// restores a valid read is named, described from that read. When no single
+/// rule does it but removing all of them does, every enabled rule is named:
+/// they rejected the read together. The class sweep stays as `opts` sets it.
+///
+/// Empty when `parsed` is valid or `opts` enables neither rule, so a run with
+/// the default options never parses twice and never names a rule.
+pub fn rejected_by(
+    text: &str,
+    opts: &mrz::ParseOptions,
+    parsed: Result<&mrz::MrzData, &mrz::MrzError>,
+) -> Vec<RejectedBy> {
+    let enabled: Vec<OptInRule> = [
+        (opts.refuse_repeated_line, OptInRule::RepeatedLine),
+        (opts.date_digits, OptInRule::DateDigits),
+    ]
+    .into_iter()
+    .filter_map(|(on, rule)| on.then_some(rule))
+    .collect();
+    if enabled.is_empty() || parsed.is_ok_and(mrz::MrzData::valid) {
+        return Vec::new();
+    }
+    // The read of `text` with `rules` switched off, when it is valid.
+    let valid_without = |rules: &[OptInRule]| {
+        let mut without = *opts;
+        for rule in rules {
+            without = match rule {
+                OptInRule::RepeatedLine => without.with_refuse_repeated_line(false),
+                OptInRule::DateDigits => without.with_date_digits(false),
+            };
+        }
+        mrz::find_and_parse_with(text, &without)
+            .ok()
+            .filter(mrz::MrzData::valid)
+    };
+    let singles: Vec<RejectedBy> = enabled
+        .iter()
+        .filter_map(|&rule| valid_without(&[rule]).map(|read| rule.describe(&read)))
+        .collect();
+    if !singles.is_empty() {
+        return singles;
+    }
+    valid_without(&enabled).map_or_else(Vec::new, |read| {
+        enabled.iter().map(|rule| rule.describe(&read)).collect()
+    })
+}
+
+/// The opt-in rules [`rejected_by`] switches off one at a time.
+#[derive(Debug, Clone, Copy)]
+enum OptInRule {
+    RepeatedLine,
+    DateDigits,
+}
+
+impl OptInRule {
+    /// What this rule objected to in `read`, the valid read it declined.
+    fn describe(self, read: &mrz::MrzData) -> RejectedBy {
+        match self {
+            Self::RepeatedLine => RejectedBy::RepeatedLine {
+                format: read.format,
+            },
+            // The rule's own definition: a date field `Malformed` per
+            // `mrz::DateCompleteness`, a character neither a digit nor `<`.
+            Self::DateDigits => RejectedBy::DateDigits {
+                fields: [
+                    ("date_of_birth", read.date_of_birth),
+                    ("date_of_expiry", read.date_of_expiry),
+                ]
+                .into_iter()
+                .filter(|(_, date)| date.completeness() == mrz::DateCompleteness::Malformed)
+                .map(|(field, _)| field)
+                .collect(),
+            },
         }
     }
 }
@@ -1181,6 +1378,20 @@ pub struct HitResult {
     /// `mrz::find_and_parse_with` of the final OCR text. `None` when Tier 1
     /// found no MRZ at all.
     pub tier1_damaged_recovery: Option<bool>,
+    /// What the OCR page reported besides its text, whenever OCR itself succeeded: kept for the
+    /// per-document archive (ADR-0024), which records it, and read by nothing else. `None` only
+    /// where `raw_text` is.
+    pub ocr: Option<OcrFacts>,
+}
+
+/// The parts of an `OcrPage` (`synthpass_imageprep`) the benchmark archive records beside its
+/// text. Copied from the page `check_document` already has: no OCR call is added.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrFacts {
+    /// `OcrPage::rotation`: degrees clockwise applied before the main pass.
+    pub rotation: u16,
+    /// `OcrPage::mrz_band_score`: the winning band's score, `None` when no band was found.
+    pub mrz_band_score: Option<f64>,
 }
 
 /// Runs `image` through `ocr` and checks the result against `expected`'s
@@ -1221,6 +1432,7 @@ fn check_document_inner(
         fastrand_seed()
     ));
     let write_result = image.save(&path);
+    let mut ocr_facts = None;
     let (
         reason,
         fields,
@@ -1233,7 +1445,7 @@ fn check_document_inner(
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
-    ) = run_check(&path, write_result, ocr, expected, trace);
+    ) = run_check(&path, write_result, ocr, expected, trace, &mut ocr_facts);
     let _ = std::fs::remove_file(&path);
 
     HitResult {
@@ -1250,6 +1462,7 @@ fn check_document_inner(
         retry_variant_id,
         retry_damaged_recovery,
         tier1_damaged_recovery,
+        ocr: ocr_facts,
     }
 }
 
@@ -1311,6 +1524,7 @@ fn run_check(
     ocr: &NativeOcr,
     expected: &Labels,
     trace: Option<&mut Vec<synthpass_ocr::PassRecord>>,
+    ocr_facts: &mut Option<OcrFacts>,
 ) -> CheckOutcome {
     if let Err(e) = write_result {
         return (
@@ -1359,6 +1573,10 @@ fn run_check(
             )
         }
     };
+    *ocr_facts = Some(OcrFacts {
+        rotation: page.rotation,
+        mrz_band_score: page.mrz_band_score,
+    });
     let text = page.text;
     let retry_stop = page.retry_stop;
     let retry_variant_id = page.retry_variant_id;
@@ -1397,29 +1615,30 @@ fn run_check(
     // `MrzReader` makes, so a `SYNTHPASS_MRZ_LINE1_SELECT` arm (#574) reaches this
     // benchmark too. With the arm `off` it is exactly `find_and_parse_with` under
     // `mrz_parse_options()`.
+    let opts = synthpass_die::mrz_parse_options();
     let decoded = match synthpass_die::read_tier1(&text).parsed {
         Ok(decoded) => decoded,
-        // #536: a structural refusal, not "nothing MRZ-shaped was found" —
-        // give it its own miss bucket rather than folding it into
-        // `NoMrzFound`.
-        Err(mrz::MrzError::LeadingFiller { .. }) => {
-            return (
-                Some(MissReason::DocumentNumberLeadingFiller),
-                total_loss(&truth),
-                None,
-                Some(text),
-                false,
-                None,
-                None,
-                retry_stop,
-                retry_variant_id,
-                retry_damaged_recovery,
-                None,
-            )
-        }
         Err(e) => {
+            // #579: a zone an opt-in rule declined was found, so it is not
+            // "nothing MRZ-shaped": whatever error the parse reports, a
+            // `checksum_failed` miss that names the rule, as `provider-bench`
+            // classifies it. Its check digits verified, so none is listed.
+            let rejected_by = rejected_by(&text, &opts, Err(&e));
+            let reason = if !rejected_by.is_empty() {
+                MissReason::ChecksumFailed {
+                    check_states: BTreeMap::new(),
+                    specimen_nonconforming: false,
+                    rejected_by,
+                }
+            } else if matches!(e, mrz::MrzError::LeadingFiller { .. }) {
+                // #536: a structural refusal, not "nothing MRZ-shaped was
+                // found" — its own miss bucket rather than `NoMrzFound`.
+                MissReason::DocumentNumberLeadingFiller
+            } else {
+                MissReason::NoMrzFound(format!("{e:?}"))
+            };
             return (
-                Some(MissReason::NoMrzFound(format!("{e:?}"))),
+                Some(reason),
                 total_loss(&truth),
                 None,
                 Some(text),
@@ -1430,7 +1649,7 @@ fn run_check(
                 retry_variant_id,
                 retry_damaged_recovery,
                 None,
-            )
+            );
         }
     };
     let tier1_damaged_recovery = Some(decoded.damaged_recovery);
@@ -1458,6 +1677,7 @@ fn run_check(
                 // conformant zone, so a checksum failure here is always the
                 // OCR/parse pipeline, never a non-conforming source.
                 specimen_nonconforming: false,
+                rejected_by: rejected_by(&text, &opts, Ok(&decoded)),
             }),
             fields,
             line1_integrity,
@@ -2012,6 +2232,7 @@ mod tests {
         let reason = MissReason::ChecksumFailed {
             check_states: check_states.clone(),
             specimen_nonconforming: false,
+            rejected_by: Vec::new(),
         };
         assert_eq!(miss_kind(&reason), "checksum_failed");
         assert_eq!(
@@ -2022,6 +2243,7 @@ mod tests {
         let specimen = MissReason::ChecksumFailed {
             check_states,
             specimen_nonconforming: true,
+            rejected_by: Vec::new(),
         };
         assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
     }
@@ -2047,6 +2269,184 @@ mod tests {
         assert_eq!(
             reason.to_string(),
             "document number begins with a filler (mrz::MrzError::LeadingFiller)"
+        );
+    }
+
+    /// The ICAO TD3 specimen's lines (#579 fixtures).
+    const TD3_L1: &str = "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<";
+    const TD3_L2: &str = "L898902C36UTO7408122F1204159ZE184226B<<<<<10";
+    /// Its date of birth's `0` read as `A`. Both have value 0 modulo 10, so
+    /// every check digit still verifies: what the date-digits rule is for.
+    const TD3_L2_LETTER_DATE: &str = "L898902C36UTO74A8122F1204159ZE184226B<<<<<10";
+
+    /// Its line 2 read a second time behind line 1's document code and
+    /// issuer: a wrong physical line that still validates, because line 1
+    /// enters no check digit. What the repeated-line rule is for.
+    fn td3_repeated_zone() -> String {
+        format!("{}{}\n{TD3_L2}", &TD3_L1[..5], &TD3_L2[5..])
+    }
+
+    fn date_digits() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_date_digits(true)
+    }
+
+    fn refusing() -> mrz::ParseOptions {
+        mrz::ParseOptions::default().with_refuse_repeated_line(true)
+    }
+
+    /// #579: the default options enable neither rule, so nothing is
+    /// attributed and no miss reason moves, whatever the read: a valid read,
+    /// a checksum-invalid one, or an error.
+    #[test]
+    fn rejected_by_names_nothing_under_the_default_options() {
+        let defaults = mrz::ParseOptions::default();
+        let text = format!("{TD3_L1}\n{TD3_L2}");
+        let valid = mrz::find_and_parse(&text).expect("the ICAO specimen parses");
+        assert!(rejected_by(&text, &defaults, Ok(&valid)).is_empty());
+
+        let tampered = TD3_L2.replacen("740812", "750812", 1);
+        let text = format!("{TD3_L1}\n{tampered}");
+        let invalid = mrz::find_and_parse(&text).expect("still parses");
+        assert!(!invalid.valid());
+        assert!(rejected_by(&text, &defaults, Ok(&invalid)).is_empty());
+
+        for text in [
+            td3_repeated_zone(),
+            format!("{TD3_L1}\n{TD3_L2_LETTER_DATE}"),
+        ] {
+            assert!(
+                rejected_by(&text, &defaults, Err(&mrz::MrzError::NotFound)).is_empty(),
+                "no rule is on, so nothing is re-parsed"
+            );
+        }
+    }
+
+    /// #579: a valid read was not rejected, and a miss the rule did not cause
+    /// (a checksum failure that stays one with the rule off) names no rule.
+    #[test]
+    fn rejected_by_names_no_rule_that_did_not_cost_the_read() {
+        let text = format!("{TD3_L1}\n{TD3_L2}");
+        let valid = mrz::find_and_parse_with(&text, &refusing()).expect("parses");
+        assert!(valid.valid());
+        assert!(rejected_by(&text, &refusing(), Ok(&valid)).is_empty());
+
+        let tampered = TD3_L2.replacen("740812", "750812", 1);
+        let text = format!("{TD3_L1}\n{tampered}");
+        let invalid = mrz::find_and_parse_with(&text, &date_digits()).expect("still parses");
+        assert!(!invalid.checksum_consistent());
+        assert!(rejected_by(&text, &date_digits(), Ok(&invalid)).is_empty());
+    }
+
+    /// #579: with the date-digits rule on, the letter-date zone is not
+    /// `valid()` though every check digit verifies. The rule is named with the
+    /// field, in place of an empty list of failed check digits.
+    #[test]
+    fn rejected_by_names_the_date_digits_rule_and_its_field() {
+        let text = format!("{TD3_L1}\n{TD3_L2_LETTER_DATE}");
+        let read = mrz::find_and_parse_with(&text, &date_digits()).expect("returned, not valid");
+        assert!(read.checksum_consistent());
+        assert!(!read.valid());
+
+        let rules = rejected_by(&text, &date_digits(), Ok(&read));
+        assert_eq!(
+            rules,
+            vec![RejectedBy::DateDigits {
+                fields: vec!["date_of_birth"]
+            }]
+        );
+        let reason = MissReason::ChecksumFailed {
+            check_states: check_states(&read.checks),
+            specimen_nonconforming: false,
+            rejected_by: rules,
+        };
+        assert_eq!(miss_kind(&reason), "checksum_failed");
+        assert_eq!(
+            reason.to_string(),
+            "rejected by the date-digits rule: date_of_birth not digits"
+        );
+    }
+
+    /// #579: the repeated-line rule is named whatever error the parse
+    /// reported. `mrz` returns `RepeatedLine` for this zone alone, but can
+    /// return `NotFound` when a leftover reading looks like visual-zone text;
+    /// the attribution re-parses the text, so both name the rule. On a
+    /// non-conforming specimen the reason no longer claims a faithful read.
+    #[test]
+    fn rejected_by_names_a_repeated_line_refusal_whatever_the_error() {
+        let text = td3_repeated_zone();
+        let refused = mrz::find_and_parse_with(&text, &refusing());
+        assert!(matches!(refused, Err(mrz::MrzError::RepeatedLine { .. })));
+        let expected = vec![RejectedBy::RepeatedLine {
+            format: mrz::Format::Td3,
+        }];
+        assert_eq!(rejected_by(&text, &refusing(), refused.as_ref()), expected);
+        assert_eq!(
+            rejected_by(&text, &refusing(), Err(&mrz::MrzError::NotFound)),
+            expected
+        );
+
+        let reason = MissReason::ChecksumFailed {
+            check_states: BTreeMap::new(),
+            specimen_nonconforming: false,
+            rejected_by: expected.clone(),
+        };
+        assert_eq!(miss_kind(&reason), "checksum_failed");
+        assert_eq!(
+            reason.to_string(),
+            "rejected by the repeated-line rule: the Td3 zone holds a line twice"
+        );
+        let specimen = MissReason::ChecksumFailed {
+            check_states: BTreeMap::new(),
+            specimen_nonconforming: true,
+            rejected_by: expected,
+        };
+        assert_eq!(miss_kind(&specimen), "checksum_failed_specimen");
+        assert_eq!(
+            specimen.to_string(),
+            "rejected by the repeated-line rule: the Td3 zone holds a line twice \
+             (printed zone is non-conforming)"
+        );
+    }
+
+    /// #579: a checksum-failed read left after a refusal keeps its failed
+    /// digits in the reason, followed by the rule that declined the valid zone.
+    #[test]
+    fn a_refusal_behind_a_checksum_failed_read_names_both() {
+        let reason = MissReason::ChecksumFailed {
+            check_states: BTreeMap::from([("document_number", Some(false))]),
+            specimen_nonconforming: false,
+            rejected_by: vec![RejectedBy::RepeatedLine {
+                format: mrz::Format::Td2,
+            }],
+        };
+        assert_eq!(
+            reason.to_string(),
+            "checksum invalid: document_number; \
+             rejected by the repeated-line rule: the Td2 zone holds a line twice"
+        );
+    }
+
+    /// #579: with both rules on, a zone each rule declines on its own is
+    /// restored only with both off, so both are named.
+    #[test]
+    fn rules_that_reject_a_read_together_are_both_named() {
+        // The repeated zone, with a letter in line 2's date of birth: the date
+        // rule declines it as well as the repeated-line rule.
+        let line2 = TD3_L2_LETTER_DATE;
+        let text = format!("{}{}\n{line2}", &TD3_L1[..5], &line2[5..]);
+        let both = refusing().with_date_digits(true);
+        let parsed = mrz::find_and_parse_with(&text, &both);
+        assert!(!parsed.as_ref().is_ok_and(mrz::MrzData::valid));
+        assert_eq!(
+            rejected_by(&text, &both, parsed.as_ref()),
+            vec![
+                RejectedBy::RepeatedLine {
+                    format: mrz::Format::Td3
+                },
+                RejectedBy::DateDigits {
+                    fields: vec!["date_of_birth"]
+                },
+            ]
         );
     }
 
@@ -2661,6 +3061,112 @@ mod tests {
         );
         assert!(specimens.iter().any(|s| s.labels.is_some()));
         assert!(specimens.iter().any(|s| s.labels.is_none()));
+    }
+
+    /// ADR-0024, Decision 6: the archive files a document under the track the corpus walk puts
+    /// it in, by one predicate. For every combination of opt-in tracks, the walk lists exactly
+    /// the files whose asset track those tracks allow: a second rule in the archive would
+    /// disagree with the walk on one of these names.
+    #[test]
+    fn the_archive_track_is_the_corpus_walks_own() {
+        let root = std::env::temp_dir().join(format!(
+            "synthpass-bench-archive-track-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        // Files whose path has two non-public components: the walk needs both allowed.
+        const MULTI_TRACK: [&str; 2] = [
+            "deep/private/covers/x.png",
+            "LOCAL/covers/local-then-covers.png",
+        ];
+        // No two names differ only in case, so the tree is the same on a case-insensitive disk.
+        let files = [
+            "passports/plain.png",
+            "private/in-private-dir.png",
+            "passports/_Private_holder.png",
+            "LOCAL/in-local-dir.png",
+            "local.png",
+            "nested/CoVeRs/in-covers-dir.png",
+            "covers.png",
+            "locality/not-a-track.png",
+            "covers_extra/not-a-track.png",
+            "deep/private/covers/x.png",
+            "LOCAL/covers/local-then-covers.png",
+            "some_Private_track/y.png",
+        ];
+        for relative in files {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().expect("a parent")).expect("create the tree");
+            std::fs::write(&path, b"").expect("create a file");
+        }
+
+        for bits in 0..8u8 {
+            let tracks = OptInTracks {
+                private: bits & 1 != 0,
+                local: bits & 2 != 0,
+                covers: bits & 4 != 0,
+            };
+            let mut walked: Vec<String> = find_image_files(&root, tracks)
+                .iter()
+                .map(|p| {
+                    p.strip_prefix(&root)
+                        .expect("under the root")
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/")
+                })
+                .collect();
+            walked.sort();
+            // What each opt-in flag means, stated here rather than taken from the walk's own
+            // function, so a walk that mis-reads a flag cannot agree with its own mistake.
+            let allowed = |track: CorpusTrack| match track {
+                CorpusTrack::Public => true,
+                CorpusTrack::Covers => tracks.covers,
+                CorpusTrack::Local => tracks.local,
+                CorpusTrack::Private => tracks.private,
+            };
+            let mut expected: Vec<String> = files
+                .iter()
+                .filter(|relative| allowed(asset_track(relative)))
+                .map(|relative| (*relative).to_string())
+                .collect();
+            expected.sort();
+            // A file with two non-public components is listed only when the walk may enter
+            // both, which is narrower than the archive's "most restrictive" track allows, so
+            // for those the walk's list is a subset; for every other file the two agree.
+            let (multi, single): (Vec<String>, Vec<String>) = expected
+                .into_iter()
+                .partition(|relative| MULTI_TRACK.contains(&relative.as_str()));
+            let walked_single: Vec<String> = walked
+                .iter()
+                .filter(|relative| !MULTI_TRACK.contains(&relative.as_str()))
+                .cloned()
+                .collect();
+            assert_eq!(walked_single, single, "{tracks:?}");
+            assert!(
+                walked
+                    .iter()
+                    .filter(|relative| MULTI_TRACK.contains(&relative.as_str()))
+                    .all(|relative| multi.contains(relative)),
+                "{tracks:?}: the walk lists a file the archive would call a track it may not enter"
+            );
+        }
+
+        // The tracks themselves, pinned: the most restrictive component wins.
+        for (asset_id, track) in [
+            ("passports/plain.png", CorpusTrack::Public),
+            ("private/in-private-dir.png", CorpusTrack::Private),
+            ("passports/_Private_holder.png", CorpusTrack::Private),
+            ("LOCAL/in-local-dir.png", CorpusTrack::Local),
+            ("local.png", CorpusTrack::Public),
+            ("nested/CoVeRs/in-covers-dir.png", CorpusTrack::Covers),
+            ("covers.png", CorpusTrack::Public),
+            ("locality/not-a-track.png", CorpusTrack::Public),
+            ("deep/private/covers/x.png", CorpusTrack::Private),
+            ("LOCAL/covers/local-then-covers.png", CorpusTrack::Local),
+        ] {
+            assert_eq!(asset_track(asset_id), track, "{asset_id}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn repo_root() -> std::path::PathBuf {

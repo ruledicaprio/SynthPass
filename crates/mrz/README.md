@@ -30,7 +30,7 @@ which one failed, field by field. It is just as exact about what the arithmetic 
 
 - [Install](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#install) · [Formats](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#formats) · [Quick start](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#quick-start) · [Reading OCR output](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#reading-ocr-output) · [Emitting](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#emitting)
 - [Consistency versus validity](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#consistency-versus-validity) · [What a check digit cannot prove](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-check-digit-cannot-prove) · [What a passing parse guarantees](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#what-a-passing-parse-guarantees)
-- [Occluded cells](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#occluded-cells-apply_occlusion) · [Checking line 1](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#checking-line-1-select_line1) · [Conformance](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#conformance)
+- [Occluded cells](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#occluded-cells-apply_occlusion) · [One cell's layout](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#one-cells-layout-position_class) · [Checking line 1](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#checking-line-1-select_line1) · [Conformance](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#conformance)
 - [Feature flags](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#feature-flags) · [Versioning and MSRV](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#versioning-and-msrv) · [Changelog and roadmap](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#changelog-and-roadmap) · [License](https://github.com/ruledicaprio/SynthPass/blob/main/crates/mrz/README.md#license)
 
 ## Install
@@ -104,7 +104,9 @@ Edge cases, each with a runnable example on docs.rs:
 - **Noisy text.** HTML-escaped fillers and lines merged onto one physical line are handled.
 - **A valid zone that may hold the wrong line.** An issuing state in no registry, two near-identical
   lines, or a digit in a two-line format's name field ranks the zone below any unflagged valid zone in
-  the same text. It is still returned when there is no other; the rank never refuses a valid read.
+  the same text. It is still returned when there is no other; the rank never refuses a valid read
+  unless you opt in to `ParseOptions::refuse_repeated_line` (off by default), which drops a zone whose
+  lines repeat one another and returns `MrzError::RepeatedLine` when nothing else is left.
 - **Long document numbers.** A number longer than the 9-character field can overflow into optional
   data under Parts 5/6 note j. TD3 uses that form by crate policy; visas do not.
   [`full_document_number`](https://docs.rs/mrz/latest/mrz/struct.MrzData.html#method.full_document_number)
@@ -300,6 +302,32 @@ Three things to know before you use the result:
   them back from the OCR text.
 
 See the function's documentation for the full semantics, including the overflow-layout case.
+
+## One cell's layout: `position_class`
+
+[`position_class`](https://docs.rs/mrz/latest/mrz/fn.position_class.html) says which characters a
+format's layout allows at one cell: a digit, a digit or the filler, a letter, a letter or the
+filler, or any of the 37. It reads no text, so a reader that classifies cells one at a time can
+rule out impossible readings before it looks at the ink.
+
+```rust
+use mrz::{position_class, Format, PositionClass};
+
+// TD3 line 2, columns 10 to 27: nationality, date of birth and its check digit, sex, date of
+// expiry and its check digit.
+let classes: String = (10..=27)
+    .map(|column| match position_class(Format::Td3, 1, column) {
+        Some(PositionClass::Digit | PositionClass::DigitOrFiller) => '9',
+        _ => 'A',
+    })
+    .collect();
+assert_eq!(classes, "AAA9999999A9999999");
+```
+
+It describes the ordinary layout. A document number longer than nine characters puts the filler
+where its check digit would be, which `position_class` cannot see without the text. The digit
+classes are exactly the cells in which `find_and_parse`'s repair turns a misread letter into a
+digit, and a test keeps the two in step.
 
 ## Checking line 1: `select_line1`
 

@@ -241,6 +241,17 @@ Before any of this earns a decision record:
 5. All of it conditioned on the grid-fit self-check passing, since a misfitted grid invalidates every
    measurement above equally.
 
+*2026-10-01:* items 1 and 2 have a bench-only probe,
+[`elimination_probe`](../../crates/synthpass-bench/examples/elimination_probe.rs). It finds each line
+from ink alone, accepts a line only when every cell holds exactly one component (a self-check of the
+kind item 5 asks for), and measures against the reviewed fixtures' classes. No result is quoted here until a dated note
+records one.
+
+*2026-10-02:* item 3 now has a reader for the probe's `cells.jsonl`,
+[`elimination_offsets.py`](../../tools/elimination_offsets.py). It scores how sharply line 2's correlation with the
+eighteen-cell template peaks at the true offset, per fraction and per resolution step. No result is quoted until a
+dated note records one.
+
 A no-go keeps the numbers. Measuring that geometry cannot carry this would be a real result: it would
 say the residue is in segmentation or in genuinely ambiguous ink, and it would say so for the cost of a
 probe rather than the cost of a prototype.
