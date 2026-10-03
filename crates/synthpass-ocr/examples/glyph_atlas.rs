@@ -79,6 +79,20 @@
 //! `--cells 0,1`, TD3 `P<`, or any cells of line 1) writes them byte for byte as
 //! schema 2 did, the header and the timings apart.
 //!
+//! # An empty personal number (`--no-personal-number`)
+//!
+//! The generator fills the personal number by default, so TD3 line 2's cells
+//! 28-41 always hold letters and digits and never a filler truth. `--no-personal-number`
+//! (off by default) builds each seed's `GeneratorConfig` with
+//! `include_personal_number = false`, which leaves the field empty: 14 fillers in
+//! cells 28-41 and a `0` check digit in cell 42, as a passport that carries no
+//! personal number prints it. The generator reuses the personal number as every
+//! format's trailing optional field, so the flag blanks that field on every
+//! format. The personal number is the generator's last draw, so no other field of
+//! any seed changes: cells 0-27 of TD3 line 2 equal the default page's, seed by
+//! seed. A default run is byte for byte what it was; the flag shows in the
+//! header's `args`, and a run with it gets its own default `--out` suffix, `-nopn`.
+//!
 //! # Conventions (recorded in the header as well)
 //!
 //! - **Label collapse.** Labels 44 (`ocrs`'s mangled EUR class) and 49 both
@@ -153,6 +167,15 @@
 //! refuses a document code other than the format's own. Quote a code holding
 //! `<` in PowerShell. A default run (TD3, `P<`) is what the tool has always
 //! measured, to the byte.
+//!
+//! `--two-given-names` (off by default) gives each seed's identity a second given name, so the name
+//! field of line 1 holds a single filler between two letters, which the generator's own names never
+//! do (it draws one given name and one surname). After the seed's own draw, the given names become
+//! `<first> <second>`, where `<second>` is the given name of the identity drawn for the seed
+//! plus [`SECOND_NAME_SEED_OFFSET`]; nothing else of the seed's identity changes, and
+//! `mrz::emit` writes the space as one `<`. Everything left of that `<` is what the run measures
+//! without the flag. A name too long for the field loses its tail to the emitter's truncation, so
+//! not every seed keeps the single filler. The default output directory gains `-two-given-names`.
 //!
 //! Set `RTEN_NUM_THREADS` and never run it beside an A/B arm or a gate. After
 //! 20 computed renders it prints the rate and a projected total.
@@ -371,9 +394,18 @@ fn code_path_part(code: Code) -> String {
 
 /// The default `--out` directory name. A run that is not the default format
 /// and code adds both, and a line other than the first adds `-line<N>`, so two
-/// runs of one commit on one day do not collide; the default run keeps the name
+/// runs of one commit on one day do not collide, `--no-personal-number` adds `-nopn`
+/// and `--two-given-names` adds `-two-given-names`; the default run keeps the name
 /// it always had.
-fn default_out_name(date: &str, short: &str, format: Format, code: Code, line: usize) -> String {
+fn default_out_name(
+    date: &str,
+    short: &str,
+    format: Format,
+    code: Code,
+    line: usize,
+    no_personal_number: bool,
+    two_given_names: bool,
+) -> String {
     let mut name = if format == Format::Td3 && code == Format::Td3.default_code() {
         format!("{date}-{short}")
     } else {
@@ -384,6 +416,12 @@ fn default_out_name(date: &str, short: &str, format: Format, code: Code, line: u
             name.push_str(&format!("-{}-{}", format.flag(), code_path_part(code)));
         }
         name.push_str(&format!("-line{line}"));
+    }
+    if no_personal_number {
+        name.push_str("-nopn");
+    }
+    if two_given_names {
+        name.push_str("-two-given-names");
     }
     name
 }
@@ -399,13 +437,46 @@ fn passport_code_field(code: Code) -> String {
 }
 
 /// One seed's clean page and ground-truth labels for `format`, with `code` as
-/// the document code. With the default code this is what
-/// `generate_from_seed` returns.
-fn render_clean(seed: u64, format: Format, code: Code) -> (DynamicImage, synthpass_gen::Labels) {
-    let config = GeneratorConfig::with_document_type(seed, format.document_type());
+/// the document code. With the default code and both switches off this is what
+/// `generate_from_seed` returns. With `no_personal_number` on, the generator's own
+/// `include_personal_number = false` leaves the personal number empty (all
+/// filler); that field is the generator's last draw, so no other field of the
+/// seed moves. With `two_given_names` on, the given names become
+/// `<first> <second>` (see [`second_given_name`]).
+fn render_clean(
+    seed: u64,
+    format: Format,
+    code: Code,
+    no_personal_number: bool,
+    two_given_names: bool,
+) -> (DynamicImage, synthpass_gen::Labels) {
+    let mut config = GeneratorConfig::with_document_type(seed, format.document_type());
+    config.include_personal_number = !no_personal_number;
     let mut passport = synthpass_gen::data::generate_passport(&config);
     passport.document_type = passport_code_field(code);
+    if two_given_names {
+        passport.given_names = format!(
+            "{} {}",
+            passport.given_names,
+            second_given_name(seed, format)
+        );
+    }
     synthpass_gen::generate(&passport, &config)
+}
+
+/// Added to a seed to draw the second given name, so it never comes from a seed
+/// in a run's own range (a run's seeds are well below `2^32`).
+const SECOND_NAME_SEED_OFFSET: u64 = 1 << 32;
+
+/// The given name of the identity the generator draws for `seed` plus
+/// [`SECOND_NAME_SEED_OFFSET`], through the same document type and the same
+/// pools as the seed's own draw.
+fn second_given_name(seed: u64, format: Format) -> String {
+    let config = GeneratorConfig::with_document_type(
+        seed.wrapping_add(SECOND_NAME_SEED_OFFSET),
+        format.document_type(),
+    );
+    synthpass_gen::data::generate_passport(&config).given_names
 }
 
 /// Line one must start with the code, or the generator did not write what the
@@ -1926,6 +1997,10 @@ struct Args {
     line: usize,
     cells: Vec<usize>,
     out: Option<PathBuf>,
+    /// `--no-personal-number`: leave the personal-number field empty (all filler).
+    no_personal_number: bool,
+    /// Give each seed a second given name (see the module doc).
+    two_given_names: bool,
 }
 
 const USAGE: &str = "glyph_atlas: per-cell detection and recognition measurements under one \
@@ -1941,12 +2016,22 @@ degradation at a time (one MRZ line, synthetic renders, vendored font, oracle cr
                       the format: P for td3; A, C or I for td1 and td2; V for mrva and mrvb.
                       The second is A-Z or <. Quote a code holding < in PowerShell. Needs a
                       --release build when it is not the default.
+  --two-given-names   give each seed a second given name, so line one's name field holds a
+                      single filler between two letters (off by default; the seed's own draw
+                      is untouched; -two-given-names is added to the default --out)
   --axes <list>       comma list of resolution,jpeg,rotation,blur,noise,contrast (default: all)
   --seeds <n>         renders per step (default 100)
   --seed-start <n>    first seed (default 0)
   --cells <list>      cell indices of the chosen line (default 0,1)
+  --no-personal-number
+                      leave the personal-number field empty (all filler), as a passport that
+                      carries none does. The generator reuses that number as the trailing
+                      optional field of every format, so the flag blanks it on every format;
+                      for td3 line 2 that is cells 28-41 as fillers and cell 42 as 0. Off by
+                      default; the other fields of every seed are unchanged.
   --out <dir>         output directory (default artifacts/glyph-atlas/<date>-<shortsha>/, with
-                      -<format>-<code> added for a non-default format or code, < written 0;
+                      -<format>-<code> added for a non-default format or code, < written 0,
+                      -line<n> for a later line and -nopn for --no-personal-number;
                       an in-tree directory that git does not ignore is refused)
   --help              this text
 
@@ -2012,6 +2097,8 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
         line: DEFAULT_LINE,
         cells: DEFAULT_CELLS.to_vec(),
         out: None,
+        no_personal_number: false,
+        two_given_names: false,
     };
     // The code is checked against the format, so it waits until every flag
     // has been read and the two may come in either order.
@@ -2021,6 +2108,17 @@ fn parse_args(raw: &[String]) -> Result<Args, String> {
         let flag = raw[i].as_str();
         let value = raw.get(i + 1).map(String::as_str);
         let need = || value.ok_or_else(|| format!("{flag} needs a value"));
+        // The two switches: they take no value, so the loop steps over each alone.
+        if flag == "--two-given-names" {
+            args.two_given_names = true;
+            i += 1;
+            continue;
+        }
+        if flag == "--no-personal-number" {
+            args.no_personal_number = true;
+            i += 1;
+            continue;
+        }
         match flag {
             "--format" => {
                 let text = need()?;
@@ -2250,6 +2348,8 @@ fn run() -> Result<(), String> {
                 args.format,
                 args.code,
                 args.line,
+                args.no_personal_number,
+                args.two_given_names,
             ))
     }));
     check_out_dir(&out_dir, &absolutize(&root), |p| git_ignores(&root, p))?;
@@ -2283,7 +2383,13 @@ fn run() -> Result<(), String> {
     // Seed 0's clean render: the input of the alphabet self-check, which reads
     // line one whatever line the run measures, and (for line one) the check
     // that the generator wrote the document code the run says it measures.
-    let (image0, labels0) = render_clean(0, args.format, args.code);
+    let (image0, labels0) = render_clean(
+        0,
+        args.format,
+        args.code,
+        args.no_personal_number,
+        args.two_given_names,
+    );
     let first_line0: Vec<char> = labels0
         .mrz_lines
         .first()
@@ -2295,12 +2401,18 @@ fn run() -> Result<(), String> {
     // degraded render: a cell's truth glyphs are whatever the seeds draw.
     let truth_lines: Vec<Vec<char>> = (args.seed_start..args.seed_start + args.seeds)
         .map(|seed| {
-            render_clean(seed, args.format, args.code)
-                .1
-                .mrz_lines
-                .get(line_index)
-                .map(|text| text.chars().collect())
-                .ok_or_else(|| format!("seed {seed}: no MRZ line {}", args.line))
+            render_clean(
+                seed,
+                args.format,
+                args.code,
+                args.no_personal_number,
+                args.two_given_names,
+            )
+            .1
+            .mrz_lines
+            .get(line_index)
+            .map(|text| text.chars().collect())
+            .ok_or_else(|| format!("seed {seed}: no MRZ line {}", args.line))
         })
         .collect::<Result<_, _>>()?;
     let cell_truths = cell_truth_sets(&args.cells, &truth_lines)?;
@@ -2364,7 +2476,13 @@ fn run() -> Result<(), String> {
     let started = Instant::now();
 
     for seed in args.seed_start..args.seed_start + args.seeds {
-        let (image, labels) = render_clean(seed, args.format, args.code);
+        let (image, labels) = render_clean(
+            seed,
+            args.format,
+            args.code,
+            args.no_personal_number,
+            args.two_given_names,
+        );
         let clean = image.into_rgb8();
         let truth_line: Vec<char> = labels
             .mrz_lines
@@ -3523,22 +3641,321 @@ mod tests {
     #[test]
     fn the_default_output_name_moves_only_for_a_non_default_run() {
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<'], 1),
+            default_out_name(
+                "2026-10-01",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                1,
+                false,
+                false
+            ),
             "2026-10-01-abc1234"
         );
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', 'S'], 1),
+            default_out_name(
+                "2026-10-01",
+                "abc1234",
+                Format::Td3,
+                ['P', 'S'],
+                1,
+                false,
+                false
+            ),
             "2026-10-01-abc1234-td3-PS"
         );
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td1, ['I', '<'], 1),
+            default_out_name(
+                "2026-10-01",
+                "abc1234",
+                Format::Td1,
+                ['I', '<'],
+                1,
+                false,
+                false
+            ),
             "2026-10-01-abc1234-td1-I0"
         );
         // A later line has its own directory, so two runs of one commit do not collide.
         assert_eq!(
-            default_out_name("2026-10-01", "abc1234", Format::Td3, ['P', '<'], 2),
+            default_out_name(
+                "2026-10-01",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                2,
+                false,
+                false
+            ),
             "2026-10-01-abc1234-td3-P0-line2"
         );
+        // The second-given-name run has its own directory.
+        assert_eq!(
+            default_out_name(
+                "2026-10-01",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                1,
+                false,
+                true
+            ),
+            "2026-10-01-abc1234-two-given-names"
+        );
+    }
+
+    #[test]
+    fn the_two_given_names_flag_parses_and_is_off_by_default() {
+        assert!(!parsed(&[]).expect("defaults").two_given_names);
+        assert!(
+            parsed(&["--two-given-names"])
+                .expect("flag alone")
+                .two_given_names
+        );
+        // It takes no value: the flag after it is read as a flag, in either order.
+        let args = parsed(&["--two-given-names", "--seeds", "3", "--line", "1"]).expect("before");
+        assert!(args.two_given_names);
+        assert_eq!(args.seeds, 3);
+        let args = parsed(&["--seeds", "3", "--two-given-names"]).expect("after");
+        assert!(args.two_given_names);
+        assert_eq!(args.seeds, 3);
+        // The flag changes nothing else of the arguments.
+        let mut plain = parsed(&["--seeds", "3"]).expect("plain");
+        plain.two_given_names = true;
+        assert_eq!(plain, args);
+        assert!(parsed(&["--two-given-names=1"]).is_err());
+    }
+
+    /// Line one of seed `seed` as the generator writes it, with or without the second given name.
+    fn line_one(seed: u64, two_given_names: bool) -> Vec<char> {
+        let (_, labels) = render_clean(
+            seed,
+            Format::Td3,
+            Format::Td3.default_code(),
+            false,
+            two_given_names,
+        );
+        labels.mrz_lines[0].chars().collect()
+    }
+
+    /// Cells of the name field (from cell 5) holding a `<` with a letter on each side. The `<` of
+    /// `P<` in cell 1 is not one of them.
+    fn isolated_fillers(line: &[char]) -> Vec<usize> {
+        (5..line.len() - 1)
+            .filter(|&k| {
+                line[k] == '<'
+                    && line[k - 1].is_ascii_uppercase()
+                    && line[k + 1].is_ascii_uppercase()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn with_the_flag_seed_zero_has_one_filler_between_two_given_names() {
+        let plain = line_one(0, false);
+        let two = line_one(0, true);
+        assert_eq!(plain.len(), 44);
+        assert_eq!(two.len(), 44);
+        // Without the flag the generator draws one given name: no filler sits between two letters.
+        assert!(isolated_fillers(&plain).is_empty(), "{plain:?}");
+        // With it, exactly one does.
+        let isolated = isolated_fillers(&two);
+        assert_eq!(isolated.len(), 1, "{two:?}");
+        // The surname, the `<<` and the first given name sit in the cells they hold without the
+        // flag: the lines agree up to the end of the first given name, which is where the single
+        // filler now stands.
+        let separator = (5..43)
+            .find(|&k| plain[k] == '<' && plain[k + 1] == '<')
+            .expect("`<<`");
+        let first_end = (separator + 2..44)
+            .find(|&k| plain[k] == '<')
+            .expect("end of the name");
+        assert_eq!(&two[..first_end], &plain[..first_end]);
+        assert_eq!(isolated, vec![first_end]);
+        // The second name follows it, and nothing but the name field moved.
+        assert!(two[first_end + 1].is_ascii_uppercase());
+        let (_, with) = render_clean(0, Format::Td3, Format::Td3.default_code(), false, true);
+        let (_, without) = render_clean(0, Format::Td3, Format::Td3.default_code(), false, false);
+        assert_eq!(with.mrz_lines[1], without.mrz_lines[1]);
+    }
+
+    #[test]
+    fn the_second_name_comes_from_a_seed_outside_the_runs_range() {
+        assert!(SECOND_NAME_SEED_OFFSET >= u64::from(u32::MAX));
+        for seed in 0..5 {
+            let config = GeneratorConfig::with_document_type(
+                seed + SECOND_NAME_SEED_OFFSET,
+                Format::Td3.document_type(),
+            );
+            assert_eq!(
+                second_given_name(seed, Format::Td3),
+                synthpass_gen::data::generate_passport(&config).given_names,
+                "seed {seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn over_twenty_seeds_the_line_stays_44_cells_and_a_long_name_may_lose_the_filler() {
+        let mut kept = 0;
+        for seed in 0..20 {
+            let plain = line_one(seed, false);
+            let two = line_one(seed, true);
+            assert_eq!(two.len(), 44, "seed {seed}");
+            // The surname and the `<<` are where they were; only text after the first name differs.
+            let separator = (5..43)
+                .find(|&k| plain[k] == '<' && plain[k + 1] == '<')
+                .expect("`<<`");
+            assert_eq!(
+                &two[..separator + 2],
+                &plain[..separator + 2],
+                "seed {seed}"
+            );
+            match isolated_fillers(&two).len() {
+                // The emitter truncated the combined name to the 39 cells of the field.
+                0 => {}
+                1 => kept += 1,
+                n => panic!("seed {seed}: {n} fillers between letters"),
+            }
+        }
+        assert!(kept >= 1, "no seed of twenty kept the single filler");
+    }
+
+    // -- --no-personal-number -------------------------------------------
+
+    #[test]
+    fn the_personal_number_flag_is_off_by_default_and_is_a_bare_switch() {
+        assert!(!parsed(&[]).expect("defaults").no_personal_number);
+        assert!(
+            parsed(&["--no-personal-number"])
+                .expect("flag")
+                .no_personal_number
+        );
+        // A switch takes no value, so the flags around it still read theirs, in any order.
+        let args = parsed(&[
+            "--cells",
+            "28,29",
+            "--no-personal-number",
+            "--seeds",
+            "3",
+            "--line",
+            "2",
+        ])
+        .expect("mixed");
+        assert!(args.no_personal_number);
+        assert_eq!(
+            (args.cells.clone(), args.seeds, args.line),
+            (vec![28, 29], 3, 2)
+        );
+        let last = parsed(&["--seeds", "3", "--no-personal-number"]).expect("last");
+        assert!(last.no_personal_number && last.seeds == 3);
+    }
+
+    #[test]
+    fn with_the_flag_seed_zero_has_an_empty_personal_number_and_nothing_else_moves() {
+        let (_, plain) = render_clean(0, Format::Td3, Format::Td3.default_code(), false, false);
+        let (_, blank) = render_clean(0, Format::Td3, Format::Td3.default_code(), true, false);
+        let plain: Vec<char> = plain.mrz_lines[1].chars().collect();
+        let blank: Vec<char> = blank.mrz_lines[1].chars().collect();
+        assert_eq!(blank.len(), 44);
+        // Cells 28-41 are the personal number: all filler. Cell 42 is its check digit, 0.
+        assert!(blank[28..42].iter().all(|&c| c == '<'), "{blank:?}");
+        assert_eq!(blank[42], '0');
+        // The default page has a personal number there, so the flag does change it.
+        assert!(plain[28..42].iter().any(|&c| c != '<'), "{plain:?}");
+        // The personal number is the generator's last draw: cells 0-27 are the default page's.
+        assert_eq!(blank[..28], plain[..28]);
+    }
+
+    #[test]
+    fn the_personal_number_flag_gives_a_run_its_own_default_directory() {
+        assert_eq!(
+            default_out_name(
+                "2026-10-03",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                2,
+                true,
+                false
+            ),
+            "2026-10-03-abc1234-td3-P0-line2-nopn"
+        );
+        assert_eq!(
+            default_out_name(
+                "2026-10-03",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                1,
+                true,
+                false
+            ),
+            "2026-10-03-abc1234-nopn"
+        );
+        assert_eq!(
+            default_out_name(
+                "2026-10-03",
+                "abc1234",
+                Format::Td1,
+                ['I', '<'],
+                1,
+                true,
+                false
+            ),
+            "2026-10-03-abc1234-td1-I0-nopn"
+        );
+        // The flag off leaves every name as it was.
+        assert_eq!(
+            default_out_name(
+                "2026-10-03",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                2,
+                false,
+                false
+            ),
+            "2026-10-03-abc1234-td3-P0-line2"
+        );
+    }
+
+    #[test]
+    fn the_usage_text_describes_the_personal_number_flag() {
+        assert!(USAGE.contains("--no-personal-number"));
+        assert!(USAGE.contains("blanks it on every format"));
+    }
+
+    #[test]
+    fn the_two_switches_combine_and_each_keeps_its_own_effect() {
+        let args =
+            parsed(&["--no-personal-number", "--two-given-names", "--seeds", "2"]).expect("both");
+        assert!(args.no_personal_number && args.two_given_names);
+        assert_eq!(args.seeds, 2);
+        // Both suffixes, in a fixed order.
+        assert_eq!(
+            default_out_name(
+                "2026-10-03",
+                "abc1234",
+                Format::Td3,
+                ['P', '<'],
+                1,
+                true,
+                true
+            ),
+            "2026-10-03-abc1234-nopn-two-given-names"
+        );
+        // With both on, line one has the single `<` and line two has an empty personal number;
+        // with only the second given name, line two is the seed's own.
+        let code = Format::Td3.default_code();
+        let (_, both) = render_clean(0, Format::Td3, code, true, true);
+        let (_, names_only) = render_clean(0, Format::Td3, code, false, true);
+        let (_, blank_only) = render_clean(0, Format::Td3, code, true, false);
+        let line1: Vec<char> = both.mrz_lines[0].chars().collect();
+        assert_eq!(isolated_fillers(&line1).len(), 1, "{line1:?}");
+        assert_eq!(both.mrz_lines[0], names_only.mrz_lines[0]);
+        assert_eq!(both.mrz_lines[1], blank_only.mrz_lines[1]);
+        assert_ne!(both.mrz_lines[1], names_only.mrz_lines[1]);
     }
 
     #[test]
@@ -3556,7 +3973,7 @@ mod tests {
     #[test]
     #[cfg_attr(debug_assertions, ignore = "needs a release build")]
     fn seed_zero_with_code_ps_starts_with_ps() {
-        let (_, labels) = render_clean(0, Format::Td3, ['P', 'S']);
+        let (_, labels) = render_clean(0, Format::Td3, ['P', 'S'], false, false);
         let first: String = labels.mrz_lines[0].chars().take(2).collect();
         assert_eq!(first, "PS");
         assert_eq!(labels.mrz_lines[0].chars().count(), 44);
@@ -3565,7 +3982,7 @@ mod tests {
     #[test]
     #[cfg_attr(debug_assertions, ignore = "needs a release build")]
     fn seed_zero_with_td1_and_code_id_starts_with_id_and_is_thirty_cells() {
-        let (_, labels) = render_clean(0, Format::Td1, ['I', 'D']);
+        let (_, labels) = render_clean(0, Format::Td1, ['I', 'D'], false, false);
         let line = &labels.mrz_lines[0];
         assert!(line.starts_with("ID"), "{line}");
         assert_eq!(line.chars().count(), 30);
@@ -3576,7 +3993,7 @@ mod tests {
     fn the_default_code_renders_exactly_what_the_generator_renders() {
         // `--code` left at its default must leave today's runs untouched.
         for format in [Format::Td3, Format::Td1, Format::MrvA] {
-            let (image, labels) = render_clean(7, format, format.default_code());
+            let (image, labels) = render_clean(7, format, format.default_code(), false, false);
             let (plain, plain_labels, _) = generate_from_seed(
                 &GeneratorConfig::with_document_type(7, format.document_type()),
             );

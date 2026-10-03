@@ -3005,6 +3005,7 @@ dependencies = [
  "mrz",
  "rand 0.9.5",
  "rand_chacha",
+ "sha2",
 ]
 
 [[package]]

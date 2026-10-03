@@ -55,7 +55,7 @@ the record.
 | [0022](ADR-0022-declarative-layout-plugins.md) | Declarative layout plugins: a closed, geometry-only schema, checked at load time | Proposed |
 | [0023](ADR-0023-cli-output-contract.md) | The CLI's output contract: `--json`, and stdout/stderr for everything else | Accepted (2026-09-26) |
 | [0024](ADR-0024-per-document-benchmark-archive.md) | Keep every benchmark run's per-document evidence in a local archive | Accepted (2026-09-27; amended 2026-09-29, 2026-10-01) |
-| [0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) | Tier 1 reads a single OCR pass only when two passes agree | Proposed (not adopted by #550; 2026-10-01 note) |
+| [0025](ADR-0025-tier1-reads-one-pass-only-when-two-agree.md) | Tier 1 reads a single OCR pass only when two passes agree | Accepted (2026-10-03; rule 3, the full concatenation, is what `main` reads) |
 | [0026](ADR-0026-covered-cells-are-occluded.md) | Covered MRZ cells are reported as `occluded`, never as text | Accepted (2026-09-28) |
 | [0027](ADR-0027-ci-runners-measure-public-benchmark-arms.md) | GitHub runners measure synthetic and public benchmark arms; nothing private, no text, no timings | Accepted (2026-09-29) |
 | [0028](ADR-0028-scale-follows-the-measured-mrz-pitch.md) | SynthPass owns every resample; scale follows the measured MRZ pitch | Proposed |
