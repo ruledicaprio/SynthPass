@@ -32,3 +32,6 @@ embedded-fonts = []
 [dev-dependencies]
 # Golden render hashes (tests/golden_render.rs).
 sha2 = "0.11"
+# Property tests for the layout validator (src/layout/properties.rs); already
+# in the lockfile through `mrz`.
+proptest = "1"

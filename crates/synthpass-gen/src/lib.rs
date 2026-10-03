@@ -1,5 +1,6 @@
-//! `synthpass-gen` — a deterministic, pure-Rust synthetic TD3 passport
-//! data-page generator.
+//! `synthpass-gen` — a deterministic, pure-Rust synthetic identity-document
+//! data-page generator for the five ICAO 9303 machine-readable formats (TD1,
+//! TD2, TD3, MRV-A and MRV-B).
 //!
 //! Given a seed and a small set of parameters, [`generate`] produces a
 //! rendered document-style image plus perfectly accurate ground-truth labels
@@ -38,6 +39,17 @@
 //! [`data::generate_passport`] is a pure function of `config.seed`: the same
 //! seed always produces byte-identical identity data and pixels. See
 //! `tests/determinism.rs`.
+//!
+//! ## Layouts
+//!
+//! The renderer and the labels take a [`ValidatedLayout`]: the portrait and
+//! visual-zone rectangles of one format, checked at construction
+//! ([`ValidatedLayout::try_from_spec`]) so that nothing can sit on the
+//! watermark or the MRZ, no two fields overlap, and every value the generator
+//! can draw stays inside its labelled box. The functions without a layout
+//! argument ([`generate`], [`generate_with`], [`generate_from_seed`]) use the
+//! built-in layout of `config.document_type`; the `_with_layout` variants take
+//! another one.
 
 pub mod data;
 pub mod degrade;
@@ -49,6 +61,7 @@ mod mrz_line;
 pub mod render;
 
 pub use labels::{FieldLabel, Labels, OccludedKind, OccludedSpan};
+pub use layout::{LayoutError, LayoutSpec, ValidatedLayout};
 pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
 pub use render::{RedactSpan, RedactStyle, RenderOptions};
 
@@ -60,18 +73,45 @@ pub use render::{RedactSpan, RedactStyle, RenderOptions};
 /// watermark and the generic template) render unconditionally as part of
 /// this call — there is no configuration path that skips them.
 ///
-/// Supports TD1, TD2, and TD3 document types based on `config.document_type`.
+/// Supports all five formats — TD1, TD2, TD3, MRV-A and MRV-B — chosen by
+/// `config.document_type`, on that format's built-in layout.
 pub fn generate(passport: &Passport, config: &GeneratorConfig) -> (image::DynamicImage, Labels) {
     generate_with(passport, config, &RenderOptions::default())
         .expect("default render options are valid")
 }
 
+/// [`generate`] with render options, on `config.document_type`'s built-in
+/// layout.
 pub fn generate_with(
     passport: &Passport,
     config: &GeneratorConfig,
     options: &RenderOptions,
 ) -> Result<(image::DynamicImage, Labels), String> {
-    let labels = labels::build_labels(passport, config.document_type);
+    generate_with_layout(
+        passport,
+        config,
+        ValidatedLayout::builtin(config.document_type),
+        options,
+    )
+}
+
+/// [`generate_with`] on an explicit [`ValidatedLayout`]. Fails when the
+/// layout's format is not `config.document_type`, so a caller cannot label one
+/// format's MRZ with another's rectangles.
+pub fn generate_with_layout(
+    passport: &Passport,
+    config: &GeneratorConfig,
+    layout: &ValidatedLayout,
+    options: &RenderOptions,
+) -> Result<(image::DynamicImage, Labels), String> {
+    if layout.format() != config.document_type {
+        return Err(format!(
+            "layout is for {} but the config asks for {}",
+            layout.format().as_str(),
+            config.document_type.as_str()
+        ));
+    }
+    let labels = labels::build_labels_with_layout(passport, layout);
     let mut labels = labels;
     if let Some(span) = options.redact {
         labels.occluded.push(OccludedSpan {
@@ -86,7 +126,7 @@ pub fn generate_with(
             },
         });
     }
-    let image = render::render_with(passport, &labels, config.document_type, options)?;
+    let image = render::render_with_layout(passport, &labels, layout, options)?;
     Ok((image, labels))
 }
 
@@ -98,4 +138,56 @@ pub fn generate_from_seed(config: &GeneratorConfig) -> (image::DynamicImage, Lab
     let passport = data::generate_passport(config);
     let (image, labels) = generate(&passport, config);
     (image, labels, passport)
+}
+
+/// [`generate_from_seed`] on an explicit [`ValidatedLayout`]; the identity
+/// drawn for a seed does not depend on the layout. Fails when the layout's
+/// format is not `config.document_type`.
+pub fn generate_from_seed_with_layout(
+    config: &GeneratorConfig,
+    layout: &ValidatedLayout,
+) -> Result<(image::DynamicImage, Labels, Passport), String> {
+    let passport = data::generate_passport(config);
+    let (image, labels) =
+        generate_with_layout(&passport, config, layout, &RenderOptions::default())?;
+    Ok((image, labels, passport))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FORMATS: [DocumentType; 5] = [
+        DocumentType::TD1,
+        DocumentType::TD2,
+        DocumentType::TD3,
+        DocumentType::MrvA,
+        DocumentType::MrvB,
+    ];
+
+    #[test]
+    fn layout_entry_points_on_the_builtin_match_the_plain_ones() {
+        for format in FORMATS {
+            let config = GeneratorConfig::with_document_type(7, format);
+            let layout = ValidatedLayout::builtin(format);
+            let (plain_image, plain_labels, plain_passport) = generate_from_seed(&config);
+            let (image, labels, passport) =
+                generate_from_seed_with_layout(&config, layout).expect("matching format");
+            assert_eq!(image.to_rgb8().into_raw(), plain_image.to_rgb8().into_raw());
+            assert_eq!(labels, plain_labels);
+            assert_eq!(passport, plain_passport);
+        }
+    }
+
+    #[test]
+    fn a_layout_for_another_format_is_refused() {
+        let config = GeneratorConfig::with_document_type(7, DocumentType::TD3);
+        let layout = ValidatedLayout::builtin(DocumentType::TD1);
+        let err = generate_from_seed_with_layout(&config, layout).unwrap_err();
+        assert!(err.contains("TD1") && err.contains("TD3"), "{err}");
+        let passport = data::generate_passport(&config);
+        assert!(
+            generate_with_layout(&passport, &config, layout, &RenderOptions::default()).is_err()
+        );
+    }
 }

@@ -1,9 +1,18 @@
-//! Fixed pixel geometry for ICAO 9303 document data pages.
+//! Pixel geometry for ICAO 9303 document data pages.
 //!
-//! Every rectangle here is a deterministic constant — the same layout is used
-//! for every render, which is what lets [`crate::labels::Labels`] be 100%
-//! accurate by construction: the generator knows exactly where it is about to
-//! draw a field before it draws it.
+//! Every rectangle is known before anything is drawn — the layout is never
+//! inferred from the image — which is what lets [`crate::labels::Labels`] be
+//! 100% accurate by construction: the generator knows exactly where it is
+//! about to draw a field before it draws it.
+//!
+//! The five built-in layouts are deterministic constants ([`for_format`]).
+//! Alongside them, a [`ValidatedLayout`] is the geometry the renderer and the
+//! labels actually consume: a [`LayoutSpec`] (the format plus the portrait and
+//! the ten visual-zone rectangles) that passed every check in
+//! [`ValidatedLayout::try_from_spec`], on top of the engine-owned
+//! [`FormatFrame`] (canvas, frame, watermark band and MRZ), which a layout
+//! cannot change. The built-ins go through the same checks
+//! ([`ValidatedLayout::builtin`]); ADR-0022 Decisions 3-7 are the contract.
 //!
 //! Supports TD1 (3×30 chars), TD2 (2×36 chars), TD3 (2×44 chars), MRV-A
 //! (2×44 chars), and MRV-B (2×36 chars) MRZ formats, each on its **own**
@@ -30,6 +39,15 @@
 
 use crate::model::DocumentType;
 
+mod validated;
+
+#[cfg(test)]
+mod properties;
+
+pub use validated::{
+    frame_for, FormatFrame, LayoutError, LayoutField, LayoutSpec, ValidatedLayout,
+};
+
 /// A pixel-space bounding box, `(x, y)` top-left plus `width`/`height`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
@@ -49,9 +67,56 @@ impl Rect {
         }
     }
 
+    /// The right edge, `x + width`; `None` when it overflows `u32`.
+    pub fn right(self) -> Option<u32> {
+        self.x.checked_add(self.width)
+    }
+
+    /// The bottom edge, `y + height`; `None` when it overflows `u32`.
+    pub fn bottom(self) -> Option<u32> {
+        self.y.checked_add(self.height)
+    }
+
+    /// Whether the rectangle covers no pixel (zero width or zero height).
+    pub fn is_empty(self) -> bool {
+        self.width == 0 || self.height == 0
+    }
+
     /// Whether this rectangle lies entirely within a `width x height` image.
+    /// A rectangle whose edges overflow `u32` is not within any image.
     pub fn within_bounds(self, width: u32, height: u32) -> bool {
-        self.x + self.width <= width && self.y + self.height <= height
+        matches!(
+            (self.right(), self.bottom()),
+            (Some(right), Some(bottom)) if right <= width && bottom <= height
+        )
+    }
+
+    /// Whether `inner` lies entirely within this rectangle. An overflowing
+    /// rectangle, on either side, is never contained or containing.
+    pub fn contains(self, inner: Rect) -> bool {
+        matches!(
+            (self.right(), self.bottom(), inner.right(), inner.bottom()),
+            (Some(right), Some(bottom), Some(inner_right), Some(inner_bottom))
+                if inner.x >= self.x
+                    && inner.y >= self.y
+                    && inner_right <= right
+                    && inner_bottom <= bottom
+        )
+    }
+
+    /// Whether the two rectangles share at least one pixel. Rectangles that
+    /// only touch along an edge do not intersect, and an empty rectangle
+    /// intersects nothing. The edges are summed in `u64`, where two `u32`
+    /// values cannot overflow, so this holds for any input.
+    pub fn intersects(self, other: Rect) -> bool {
+        if self.is_empty() || other.is_empty() {
+            return false;
+        }
+        let edge = |origin: u32, extent: u32| u64::from(origin) + u64::from(extent);
+        u64::from(self.x) < edge(other.x, other.width)
+            && u64::from(other.x) < edge(self.x, self.width)
+            && u64::from(self.y) < edge(other.y, other.height)
+            && u64::from(other.y) < edge(self.y, self.height)
     }
 }
 
@@ -150,15 +215,21 @@ pub const MRZ_FONT_PX: f32 = 40.0;
 /// nominal than the next integer up (23 px = 1.073 cap).
 pub const MRZ_CELL_WIDTH: u32 = 22;
 
+/// Thickness, in pixels, of the plain frame `render.rs` draws around every
+/// canvas. The permitted placement area of a [`ValidatedLayout`] starts
+/// inside it.
+pub const FRAME_THICKNESS: u32 = 6;
+
 // ---------------------------------------------------------------------
 // Per-format page geometry.
 // ---------------------------------------------------------------------
 
 /// Everything needed to render or label one document, as a single bundle
-/// returned by [`for_format`]. Replaces piecemeal lookups against the
-/// TD3-only module consts above for any caller that needs to work across
-/// formats (`labels::build_labels`, `render::render`).
-#[derive(Debug, Clone)]
+/// returned by [`for_format`] or [`ValidatedLayout::page`]. Replaces
+/// piecemeal lookups against the TD3-only module consts above for any caller
+/// that needs to work across formats (`labels::build_labels`,
+/// `render::render`).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PageLayout {
     pub width: u32,
     pub height: u32,
@@ -539,6 +610,32 @@ mod tests {
                 "{r:?} escapes the {IMAGE_WIDTH}x{IMAGE_HEIGHT} canvas"
             );
         }
+    }
+
+    #[test]
+    fn rect_edges_are_checked_never_wrapped() {
+        let huge = Rect::new(u32::MAX - 1, u32::MAX - 1, 5, 5);
+        assert_eq!(huge.right(), None);
+        assert_eq!(huge.bottom(), None);
+        assert!(!huge.within_bounds(u32::MAX, u32::MAX));
+        assert!(!Rect::new(0, 0, 10, 10).contains(huge));
+        assert!(!huge.contains(Rect::new(u32::MAX, u32::MAX, 0, 0)));
+        let max = Rect::new(u32::MAX, u32::MAX, u32::MAX, u32::MAX);
+        assert!(max.intersects(max));
+        assert!(!max.intersects(Rect::new(0, 0, 10, 10)));
+    }
+
+    #[test]
+    fn rect_intersects_is_strict_and_symmetric() {
+        let a = Rect::new(10, 10, 10, 10);
+        let touching = Rect::new(20, 10, 10, 10);
+        let overlapping = Rect::new(19, 19, 10, 10);
+        let empty = Rect::new(12, 12, 0, 5);
+        assert!(!a.intersects(touching) && !touching.intersects(a));
+        assert!(a.intersects(overlapping) && overlapping.intersects(a));
+        assert!(!a.intersects(empty) && !empty.intersects(a));
+        assert!(a.contains(Rect::new(10, 10, 10, 10)));
+        assert!(!a.contains(overlapping));
     }
 
     #[test]

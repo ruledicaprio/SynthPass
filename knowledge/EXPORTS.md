@@ -247,11 +247,12 @@ annotate. Shipping them needs, in order:
    already computes the `portrait` rect, the `watermark` rect, and `mrz_lines: Vec<Rect>` (per
    line, not just the band); `mrz_char_rect_for_line()` gives per-character cells. `Labels`
    surfaces none of it. COCO/YOLO want at least the portrait box and the per-line MRZ boxes.
-2. **Decide ink-tight vs slot boxes.** `Labels` rects are fixed layout column slots (`SURNAME`
-   is always 700 px wide regardless of the value). With the default build (`embedded-fonts`
-   off) the placeholder bar fills the slot, so the box is tight; with real fonts on, VIZ text
-   is left-aligned and narrower. Detection training usually wants tight boxes — that means a
-   glyph-ink bounding box the codebase does not compute anywhere today.
+2. **Decide ink-tight vs slot boxes.** `Labels` rects are layout slots (TD3's `SURNAME` is always
+   700 px wide regardless of the value). The default build has `embedded-fonts` on, so VIZ text is
+   real glyphs, left-aligned and narrower than its slot; under `--no-default-features` a
+   placeholder bar fills the slot, so the box is tight. Detection training usually wants tight
+   boxes. The crate-private `render::text_ink` now computes the glyph-ink box of a VIZ value (the
+   layout fit check uses it, ADR-0022 Decision 4), but no label carries it yet.
 3. **Invent the class taxonomy.** COCO/YOLO need an integer category set. `CoreField::ALL` is
    a natural 10-class basis, but `mrz_line` (2–3 boxes), the MRZ band, and `personal_number`
    (optional, and a different width per format) complicate a fixed list, and the five formats have different layouts.
