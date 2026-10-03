@@ -9,7 +9,8 @@ use mrz::Date;
 use rand::{Rng, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 
-use crate::model::{GeneratorConfig, Passport, Sex};
+use crate::layout::LayoutField;
+use crate::model::{DocumentType, GeneratorConfig, Passport, Sex};
 
 /// Fictional given names, split by sex so [`Sex`] and name agree.
 const GIVEN_NAMES_M: &[&str] = &[
@@ -168,6 +169,89 @@ fn random_date(rng: &mut ChaCha8Rng, year_lo: i32, year_hi: i32) -> Date {
     Date::new(year, month, day)
 }
 
+/// Every value [`generate_passport`] can put in one visual-zone field, as the
+/// visual zone draws it. The layout fit check
+/// ([`crate::layout::ValidatedLayout::try_from_spec`]) measures these, so each
+/// description is a superset of what the generator produces — never a sample
+/// of it. Reading these changes no RNG draw and no draw order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum VizDomain {
+    /// A finite set of printed strings (a name pool, the country codes, ...).
+    Pool(Vec<&'static str>),
+    /// A fixed-length random string: the allowed characters at each position.
+    Positional(Vec<Vec<char>>),
+}
+
+fn alnum_positions(len: usize) -> VizDomain {
+    VizDomain::Positional(vec![ALNUM.iter().map(|&b| char::from(b)).collect(); len])
+}
+
+/// How many characters of the drawn personal number `doc_type`'s zone carries,
+/// and so how many the visual zone paints: the zone truncates the 14-character
+/// draw to its element width (TD1 11, TD2 7, MRV-B 8), read back from the
+/// emitted lines exactly as [`crate::labels::build_labels`] does.
+fn personal_number_len(doc_type: DocumentType) -> usize {
+    let probe = Passport {
+        document_type: doc_type.document_code().to_string(),
+        issuing_country: "UTO".to_string(),
+        surname: "A".to_string(),
+        given_names: "A".to_string(),
+        surname_native: None,
+        given_names_native: None,
+        document_number: "Z".repeat(9),
+        nationality: "UTO".to_string(),
+        date_of_birth: Date::new(1990, 1, 1),
+        sex: Sex::M,
+        date_of_expiry: Date::new(2030, 1, 1),
+        personal_number: Some("Z".repeat(14)),
+    };
+    let lines = crate::mrz_line::build_mrz_lines(&probe, doc_type);
+    crate::mrz_line::emitted_personal_number(&lines, doc_type).map_or(0, |v| v.chars().count())
+}
+
+/// The possible printed values of `field` on `doc_type`, or `None` for the
+/// portrait, which prints no text.
+pub(crate) fn viz_domain(doc_type: DocumentType, field: LayoutField) -> Option<VizDomain> {
+    let digit = || ('0'..='9').collect::<Vec<char>>();
+    Some(match field {
+        LayoutField::Portrait => return None,
+        LayoutField::DocumentType => VizDomain::Pool(vec![doc_type.document_code()]),
+        LayoutField::IssuingCountry | LayoutField::Nationality => {
+            VizDomain::Pool(COUNTRY_CODES.to_vec())
+        }
+        // The visual zone prints the native Cyrillic form wherever the
+        // issuing state has one, the Latin pool otherwise.
+        LayoutField::Surname => {
+            VizDomain::Pool(SURNAMES.iter().chain(SURNAMES_CYR).copied().collect())
+        }
+        LayoutField::GivenNames => VizDomain::Pool(
+            GIVEN_NAMES_M
+                .iter()
+                .chain(GIVEN_NAMES_F)
+                .chain(GIVEN_NAMES_CYR_M)
+                .chain(GIVEN_NAMES_CYR_F)
+                .copied()
+                .collect(),
+        ),
+        LayoutField::DocumentNumber => alnum_positions(9),
+        // `YYYY-MM-DD` (`labels::iso_date`): digits around two hyphens.
+        LayoutField::DateOfBirth | LayoutField::DateOfExpiry => VizDomain::Positional(vec![
+            digit(),
+            digit(),
+            digit(),
+            digit(),
+            vec!['-'],
+            digit(),
+            digit(),
+            vec!['-'],
+            digit(),
+            digit(),
+        ]),
+        LayoutField::Sex => VizDomain::Pool(vec!["M", "F", "X"]),
+        LayoutField::PersonalNumber => alnum_positions(personal_number_len(doc_type)),
+    })
+}
+
 /// Generate a fictional [`Passport`] deterministically from `config.seed`.
 ///
 /// Birth years are drawn from 1950-2008 and expiry years from 2027-2036: both
@@ -278,5 +362,84 @@ mod tests {
             let p = generate_passport(&GeneratorConfig::new(seed));
             assert!(p.date_of_birth.to_epoch_days() < p.date_of_expiry.to_epoch_days());
         }
+    }
+
+    /// The fit check's value descriptions are supersets of what the generator
+    /// draws: every generated value, on every format, belongs to its domain.
+    #[test]
+    fn viz_domains_cover_every_generated_value() {
+        use crate::labels::build_labels;
+        use crate::layout::LayoutField;
+        use crate::model::DocumentType;
+
+        let covered = |domain: &VizDomain, value: &str| match domain {
+            VizDomain::Pool(values) => values.contains(&value),
+            VizDomain::Positional(positions) => {
+                value.chars().count() == positions.len()
+                    && value
+                        .chars()
+                        .zip(positions)
+                        .all(|(c, set)| set.contains(&c))
+            }
+        };
+        for format in [
+            DocumentType::TD1,
+            DocumentType::TD2,
+            DocumentType::TD3,
+            DocumentType::MrvA,
+            DocumentType::MrvB,
+        ] {
+            for seed in 0..1500u64 {
+                let cfg = GeneratorConfig::with_document_type(seed, format);
+                let labels = build_labels(&generate_passport(&cfg), format);
+                let surname = labels.surname_native.as_ref().unwrap_or(&labels.surname);
+                let given = labels
+                    .given_names_native
+                    .as_ref()
+                    .unwrap_or(&labels.given_names);
+                let mut values = vec![
+                    (LayoutField::DocumentType, &labels.document_type),
+                    (LayoutField::IssuingCountry, &labels.issuing_country),
+                    (LayoutField::Surname, surname),
+                    (LayoutField::GivenNames, given),
+                    (LayoutField::DocumentNumber, &labels.document_number),
+                    (LayoutField::Nationality, &labels.nationality),
+                    (LayoutField::DateOfBirth, &labels.date_of_birth),
+                    (LayoutField::Sex, &labels.sex),
+                    (LayoutField::DateOfExpiry, &labels.date_of_expiry),
+                ];
+                values.extend(
+                    labels
+                        .personal_number
+                        .as_ref()
+                        .map(|l| (LayoutField::PersonalNumber, l)),
+                );
+                for (field, label) in values {
+                    let domain = viz_domain(format, field).expect("a text field");
+                    assert!(
+                        covered(&domain, &label.value),
+                        "{format:?} seed {seed} {field}: {:?} is outside its domain",
+                        label.value
+                    );
+                }
+            }
+        }
+        assert_eq!(viz_domain(DocumentType::TD3, LayoutField::Portrait), None);
+    }
+
+    #[test]
+    fn personal_number_domain_is_as_long_as_the_zone_carries() {
+        use crate::layout::LayoutField;
+        use crate::model::DocumentType;
+
+        let len = |format| match viz_domain(format, LayoutField::PersonalNumber) {
+            Some(VizDomain::Positional(positions)) => positions.len(),
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(len(DocumentType::TD1), 11);
+        assert_eq!(len(DocumentType::TD2), 7);
+        assert_eq!(len(DocumentType::TD3), 14);
+        assert_eq!(len(DocumentType::MrvA), 14);
+        assert_eq!(len(DocumentType::MrvB), 8);
     }
 }

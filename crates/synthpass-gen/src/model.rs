@@ -25,7 +25,8 @@ impl Sex {
     }
 }
 
-/// A synthetic, fictional TD3 passport identity.
+/// A synthetic, fictional identity, rendered as any of the five formats
+/// ([`DocumentType`]).
 ///
 /// Every field describes an invented person drawn deterministically from a
 /// seed (see [`crate::data`]) — never a real one. Dates are internally
