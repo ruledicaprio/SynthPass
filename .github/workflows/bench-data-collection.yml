@@ -133,6 +133,18 @@ jobs:
             echo "::error::count must be a positive integer, got '$count'"
             exit 1
           fi
+          # One `synthpass-bench` process renders every image of its run before the first OCR pass
+          # (`generate_corpus`), so memory grows with --count: five formats at --count 1000 and at
+          # --count 2000 each aborted in about 10 s on 15.7 GB, and a runner has about that much
+          # (knowledge/benchmarks/synthetic-scale-2026-10-02.md, "Memory limit, as measured"). 200 is
+          # the value that has run green nightly. Windowing generate_corpus is the real fix and is
+          # not done here. The length test comes first, so a very long number never reaches the
+          # numeric comparison, where `[` would error out and let it through.
+          max_count=200
+          if [ "${#count}" -gt "${#max_count}" ] || [ "$count" -gt "$max_count" ]; then
+            echo "::error::count above $max_count is refused (got '$count'): it risks the measured out-of-memory abort, because generate_corpus renders every image of a run before the first OCR pass (knowledge/benchmarks/synthetic-scale-2026-10-02.md, 'Memory limit, as measured')"
+            exit 1
+          fi
           seed_start=$(python3 tools/bench_nightly_rows.py next-seed \
             --data-dir data-branch --document-type "$FORMAT")
           echo "count=$count" >> "$GITHUB_OUTPUT"
