@@ -16,6 +16,13 @@ Standard library only, matching every other `tools/` script.
 
 ## Commands
 
+Public mode is selected by AB_CORPUS=public at validation. It requires the default
+formats/profile/count/seed values. `run` then accepts no --format and invokes
+`provider-bench --real-specimens --mrz-only --write-text-free-outcomes`; both console
+streams are discarded because diagnostic failures can contain real text. Only the
+report JSON and text-free projection are published by the workflow. Synthetic
+mode (the default) retains the original normalized plan.
+
     bench_ab_args.py validate --plan PLAN.json [--github-output FILE]
         Reads AB_BEFORE_REF, AB_AFTER_REF, AB_BEFORE_ENV, AB_AFTER_ENV, AB_FORMATS, AB_PROFILE,
         AB_COUNT, AB_SEED and AB_EXPECT_IDENTICAL. Writes PLAN.json, and `name=value` lines for
@@ -80,6 +87,7 @@ from pathlib import Path
 import bench_nightly_rows as nightly
 
 PLAN_SCHEMA = 1
+CORPORA = ("synthetic", "public")
 ARM_SCHEMA = 1
 ROLES = ("before", "after")
 FORMATS = ("td1", "td2", "td3", "mrva", "mrvb")
@@ -276,6 +284,14 @@ def parse_bool(text: str, label: str) -> bool:
 
 def validate(environ) -> dict:
     """The normalized plan for the raw inputs in `environ`, or `Refused`."""
+    corpus = environ.get("AB_CORPUS", "synthetic")
+    if corpus not in CORPORA:
+        raise Refused("corpus: must be synthetic or public")
+    if corpus == "public":
+        for variable, default in (("AB_FORMATS", "td1 td2 td3 mrva mrvb"),
+                                  ("AB_PROFILE", "clean"), ("AB_COUNT", "100"), ("AB_SEED", "0")):
+            if environ.get(variable) != default:
+                raise Refused(f"{variable}: public corpus requires the default")
     raw = {}
     for key, variable in ENV_VARIABLES.items():
         value = environ.get(variable)
@@ -287,7 +303,7 @@ def validate(environ) -> dict:
             else:
                 raise Refused(f"{variable} is not set")
         raw[key] = value
-    return {
+    plan = {
         "schema": PLAN_SCHEMA,
         "before_ref": parse_ref(raw["before_ref"], "before_ref"),
         "after_ref": parse_ref(raw["after_ref"], "after_ref"),
@@ -300,11 +316,17 @@ def validate(environ) -> dict:
         "expect_identical": parse_bool(raw["expect_identical"], "expect_identical"),
         "pinned": dict(PINNED),
     }
+    # Keep legacy synthetic plans byte-for-byte unchanged.
+    if corpus == "public":
+        plan["corpus"] = corpus
+    return plan
 
 
 def output_lines(plan: dict) -> list[str]:
     """`$GITHUB_OUTPUT` lines. Every value has passed a validator above, so none holds a newline."""
     return [
+        f"corpus={plan.get('corpus', 'synthetic')}",
+        "binary=" + ("provider-bench" if plan.get("corpus") == "public" else "synthpass-bench"),
         f"before_ref={plan['before_ref']}",
         f"after_ref={plan['after_ref']}",
         f"formats={' '.join(plan['formats'])}",
@@ -320,8 +342,14 @@ def output_lines(plan: dict) -> list[str]:
 
 def check_plan(plan) -> dict:
     """A plan read back from a file is checked again, so a step never trusts a file it did not write."""
-    if not isinstance(plan, dict) or set(plan) != set(PLAN_KEYS) or plan["schema"] != PLAN_SCHEMA:
+    if not isinstance(plan, dict) or set(plan) not in (set(PLAN_KEYS), set(PLAN_KEYS) | {"corpus"}) or plan["schema"] != PLAN_SCHEMA:
         raise Refused("the plan file is not a schema-1 plan")
+    if "corpus" in plan:
+        if plan["corpus"] not in CORPORA:
+            raise Refused("the plan's corpus is invalid")
+        if plan["corpus"] == "public" and (plan["formats"] != list(FORMATS) or
+                plan["profile"] != "clean" or plan["count"] != 100 or plan["seed"] != 0):
+            raise Refused("public corpus requires default synthetic parameters")
     for key in ("before_ref", "after_ref"):
         if not isinstance(plan[key], str):
             raise Refused(f"the plan's {key} is not a string")
@@ -363,10 +391,20 @@ def arm_environment(plan: dict, role: str, inherited) -> dict[str, str]:
     return env
 
 
-def run_arm(plan: dict, role: str, fmt: str, binary: Path, cwd: Path, out_dir: Path) -> int:
+def run_arm(plan: dict, role: str, fmt: str | None, binary: Path, cwd: Path, out_dir: Path) -> int:
     """Run `synthpass-bench` for one format in one arm; return its exit status."""
+    check_plan(plan)
     if role not in ROLES:
         raise Refused("role must be before or after")
+    if plan.get("corpus") == "public":
+        if fmt is not None:
+            raise Refused("public corpus does not accept --format")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        argv = [str(binary.resolve()), "--real-specimens", "--mrz-only",
+                "--write-text-free-outcomes", "--out", str((out_dir / "report.json").resolve())]
+        # Even diagnostic errors can contain specimen text. Publish neither stream.
+        return subprocess.run(argv, cwd=cwd, env=arm_environment(plan, role, os.environ),
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
     if fmt not in plan["formats"]:
         raise Refused("that format is not in the plan")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -457,9 +495,13 @@ def format_env(env: dict[str, str]) -> str:
 
 def summary_lines(plan: dict, before: dict, after: dict) -> list[str]:
     """Counts and validated tokens only: nothing here comes from a report."""
+    if plan.get("corpus") == "public":
+        scope = "corpus public"
+    else:
+        scope = (f"formats: {' '.join(plan['formats'])}; profile {plan['profile']}; {plan['count']} documents "
+                 f"per format from seed {plan['seed']}")
     lines = [
-        f"formats: {' '.join(plan['formats'])}; profile {plan['profile']}; {plan['count']} documents "
-        f"per format from seed {plan['seed']}; expect_identical {str(plan['expect_identical']).lower()}",
+        f"{scope}; expect_identical {str(plan['expect_identical']).lower()}",
         f"pinned on both arms: {format_env(plan['pinned'])}",
     ]
     for arm in (before, after):
@@ -490,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
     run_cmd = commands.add_parser("run", help="measure one format in one arm")
     run_cmd.add_argument("--plan", type=Path, required=True)
     run_cmd.add_argument("--role", required=True)
-    run_cmd.add_argument("--format", required=True)
+    run_cmd.add_argument("--format")
     run_cmd.add_argument("--binary", type=Path, required=True)
     run_cmd.add_argument("--cwd", type=Path, required=True)
     run_cmd.add_argument("--out-dir", type=Path, required=True)
@@ -522,7 +564,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"bench-ab: before env {format_env(plan['before_env'])}; after env {format_env(plan['after_env'])}")
         elif args.command == "run":
             code = run_arm(load_plan(args.plan), args.role, args.format, args.binary, args.cwd, args.out_dir)
-            print(f"bench-ab: {args.role} {args.format}: synthpass-bench exited {code}", flush=True)
+            scope = args.role if args.format is None else f"{args.role} {args.format}"
+            print(f"bench-ab: {scope}: {args.binary.stem} exited {code}", flush=True)
             return code
         elif args.command == "arm-json":
             plan = load_plan(args.plan)
