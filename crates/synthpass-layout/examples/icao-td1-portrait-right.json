@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "icao-td1-portrait-right",
+  "description": "TD1 with the text block at the left edge and the portrait at the right.",
+  "format": "td1",
+  "portrait": {"x": 650, "y": 40, "width": 150, "height": 210},
+  "document_type": {"x": 40, "y": 40, "width": 100, "height": 28},
+  "issuing_country": {"x": 150, "y": 40, "width": 100, "height": 28},
+  "surname": {"x": 40, "y": 74, "width": 580, "height": 28},
+  "given_names": {"x": 40, "y": 108, "width": 580, "height": 28},
+  "document_number": {"x": 40, "y": 142, "width": 220, "height": 28},
+  "nationality": {"x": 40, "y": 176, "width": 120, "height": 28},
+  "date_of_birth": {"x": 170, "y": 176, "width": 170, "height": 28},
+  "sex": {"x": 350, "y": 176, "width": 60, "height": 28},
+  "date_of_expiry": {"x": 40, "y": 210, "width": 170, "height": 28},
+  "personal_number": {"x": 40, "y": 244, "width": 320, "height": 28}
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "icao-mrvb-portrait-tall-right",
+  "description": "MRV-B with a full-height portrait at the right edge and the text block at the left.",
+  "format": "mrvb",
+  "portrait": {"x": 800, "y": 6, "width": 196, "height": 328},
+  "document_type": {"x": 50, "y": 50, "width": 120, "height": 32},
+  "issuing_country": {"x": 190, "y": 50, "width": 120, "height": 32},
+  "surname": {"x": 50, "y": 92, "width": 688, "height": 32},
+  "given_names": {"x": 50, "y": 134, "width": 688, "height": 32},
+  "document_number": {"x": 50, "y": 176, "width": 260, "height": 32},
+  "nationality": {"x": 50, "y": 218, "width": 150, "height": 32},
+  "date_of_birth": {"x": 220, "y": 218, "width": 200, "height": 32},
+  "sex": {"x": 440, "y": 218, "width": 70, "height": 32},
+  "date_of_expiry": {"x": 50, "y": 260, "width": 200, "height": 32},
+  "personal_number": {"x": 50, "y": 302, "width": 400, "height": 32}
+}
