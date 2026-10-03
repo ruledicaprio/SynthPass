@@ -252,6 +252,12 @@ records one.
 eighteen-cell template peaks at the true offset, per fraction and per resolution step. No result is quoted until a
 dated note records one.
 
+*2026-10-03:* items 1 and 2 are measured on the 46 public specimens the probe locates,
+[`elimination-probe-items-1-2-2026-10-03.md`](../benchmarks/elimination-probe-items-1-2-2026-10-03.md): the digit-over-letter
+top edge holds in distribution (median AUC 0.997 within a line at the 2% edge) but is a sub-pixel gap at the corpus's
+resolution, so one threshold holds in 28 of 56 lines; the left quarter separates every undisputed `K` from every filler at
+native and down to 9 px per cell. No decision follows; ADR-0014 stays Proposed.
+
 A no-go keeps the numbers. Measuring that geometry cannot carry this would be a real result: it would
 say the residue is in segmentation or in genuinely ambiguous ink, and it would say so for the cost of a
 probe rather than the cost of a prototype.
