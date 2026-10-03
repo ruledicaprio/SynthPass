@@ -33,6 +33,8 @@ the constraints and the direction before you open a source file:
 - **[ROADMAP.md](ROADMAP.md)** — the authoritative milestone spine, Definition of
   Done per phase, what's shipped vs. planned. If another doc's roadmap section
   disagrees with this one, this one wins.
+- **[PLAN_2026_Q4.md](PLAN_2026_Q4.md)** — the order of work for October to December 2026,
+  with the owner's answers. Planning text: `ROADMAP.md` wins any disagreement.
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the entry point to how the system is
   built: overview, components, extension seams, known limitations, and the
   engineering conventions (§13). Its topic pages are in [architecture/](architecture/).
