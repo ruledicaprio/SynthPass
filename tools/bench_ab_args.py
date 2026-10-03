@@ -495,9 +495,13 @@ def format_env(env: dict[str, str]) -> str:
 
 def summary_lines(plan: dict, before: dict, after: dict) -> list[str]:
     """Counts and validated tokens only: nothing here comes from a report."""
+    if plan.get("corpus") == "public":
+        scope = "corpus public"
+    else:
+        scope = (f"formats: {' '.join(plan['formats'])}; profile {plan['profile']}; {plan['count']} documents "
+                 f"per format from seed {plan['seed']}")
     lines = [
-        f"formats: {' '.join(plan['formats'])}; profile {plan['profile']}; {plan['count']} documents "
-        f"per format from seed {plan['seed']}; expect_identical {str(plan['expect_identical']).lower()}",
+        f"{scope}; expect_identical {str(plan['expect_identical']).lower()}",
         f"pinned on both arms: {format_env(plan['pinned'])}",
     ]
     for arm in (before, after):
@@ -560,7 +564,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"bench-ab: before env {format_env(plan['before_env'])}; after env {format_env(plan['after_env'])}")
         elif args.command == "run":
             code = run_arm(load_plan(args.plan), args.role, args.format, args.binary, args.cwd, args.out_dir)
-            print(f"bench-ab: {args.role} {args.format}: synthpass-bench exited {code}", flush=True)
+            scope = args.role if args.format is None else f"{args.role} {args.format}"
+            print(f"bench-ab: {scope}: {args.binary.stem} exited {code}", flush=True)
             return code
         elif args.command == "arm-json":
             plan = load_plan(args.plan)

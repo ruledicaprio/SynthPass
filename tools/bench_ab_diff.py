@@ -1618,8 +1618,7 @@ PUBLIC_KINDS = {"hit", "no_mrz_found", "checksum_failed", "document_number_misma
                 "ocr_error", "redacted_mrz", "no_mrz_expected", "false_positive_mrz",
                 "document_number_leading_filler", "checksum_failed_specimen"}
 PUBLIC_BOOLEANS = ("mrz_found", "mrz_checksums_valid", "names_exact",
-                   "retry_budget_hit", "retry_damaged_recovery", "tier1_damaged_recovery",
-                   "line1_flagged")
+                   "retry_budget_hit", "retry_damaged_recovery", "tier1_damaged_recovery")
 PUBLIC_CHECKS = {"composite", "document_number", "date_of_birth", "date_of_expiry",
                  "personal_number", "optional_data_1", "optional_data_2"}
 
@@ -1636,11 +1635,11 @@ def public_rows(directory: Path) -> dict:
         outcome = raw.get("outcome")
         if outcome not in PUBLIC_KINDS:
             raise Refused("invalid public outcome")
-        fmt = raw.get("mrz_format", raw.get("format"))
+        fmt = raw.get("mrz_format")
         if fmt not in (None, "TD1", "TD2", "TD3", "MRVA", "MRVB", "MRV-A", "MRV-B"):
             raise Refused("invalid public format")
         safe = {"outcome": outcome, "miss_kind": None if outcome == "hit" else outcome,
-                "format": fmt}
+                "mrz_format": fmt}
         for key in PUBLIC_BOOLEANS:
             value = raw.get(key)
             if value is not None and type(value) is not bool:

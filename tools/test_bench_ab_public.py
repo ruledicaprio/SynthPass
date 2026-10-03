@@ -9,13 +9,17 @@ from unittest import mock
 
 import bench_ab_args as a
 import bench_ab_diff as d
-from test_bench_ab_args import inputs
+from test_bench_ab_args import SHA, context, inputs
+
+
+LEDGER = Path(__file__).resolve().parent.parent / "knowledge" / "benchmarks" / "real-specimen-outcomes.jsonl"
+LEDGER_ROWS = 40
 
 
 def row():
-    return {"asset_id": "public-doc", "format": "TD3", "outcome": "hit",
+    return {"asset_id": "public-doc", "mrz_format": "TD3", "outcome": "hit",
             "miss_reason": None, "check_states": {"composite": True},
-            "names_exact": True, "line1_flagged": False}
+            "names_exact": True}
 
 
 class PublicArm(unittest.TestCase):
@@ -81,6 +85,59 @@ class PublicArm(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertNotIn("SECRET-123456", output.getvalue())
             self.assertNotIn("future_column", output.getvalue())
+
+    def test_committed_ledger_rows_read_as_a_neutral_projection(self):
+        """Real column names, from the committed ledger: `text_free_projection` sets each
+        `miss_reason` to its `outcome`, and the diff must accept every row that results."""
+        with LEDGER.open(encoding="utf-8") as ledger:
+            source = [json.loads(line) for _, line in zip(range(LEDGER_ROWS), ledger)]
+        self.assertEqual(len(source), LEDGER_ROWS)
+        texts = {r["miss_reason"] for r in source if r["miss_reason"] and r["miss_reason"] != r["outcome"]}
+        self.assertTrue(texts, "the fixture rows must carry miss_reason text for this test to bite")
+        projected = [r | {"miss_reason": r["outcome"]} for r in source]
+        with tempfile.TemporaryDirectory() as tmp:
+            before, after = Path(tmp)/"before", Path(tmp)/"after"
+            for directory in (before, after):
+                directory.mkdir()
+                lines = [json.dumps(r) + "\n" for r in projected]
+                (directory/d.PUBLIC_OUTCOMES).write_text("".join(lines), encoding="utf-8")
+            for extra in ([], ["--json"]):
+                with self.subTest(extra=extra):
+                    output = io.StringIO()
+                    with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                        code = d.main([str(before), str(after), "--public", "--expect-identical", *extra])
+                    self.assertEqual(code, 0, output.getvalue())
+                    for text in texts:
+                        self.assertNotIn(text, output.getvalue())
+                    if not extra:
+                        self.assertIn(f"documents [{LEDGER_ROWS}, {LEDGER_ROWS}]", output.getvalue())
+                        self.assertIn("NEUTRAL", output.getvalue())
+
+    def test_public_run_names_the_binary_that_ran(self):
+        plan = a.validate(inputs(AB_CORPUS="public"))
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp)/"plan.json"
+            plan_path.write_text(json.dumps(plan), encoding="utf-8")
+            output = io.StringIO()
+            with mock.patch.object(a, "run_arm", return_value=0), contextlib.redirect_stdout(output):
+                code = a.main(["run", "--plan", str(plan_path), "--role", "before",
+                               "--binary", str(Path(tmp)/"bin"/"provider-bench"),
+                               "--cwd", tmp, "--out-dir", str(Path(tmp)/"out")])
+        self.assertEqual(code, 0)
+        self.assertIn("bench-ab: before: provider-bench exited 0", output.getvalue())
+        self.assertNotIn("None", output.getvalue())
+
+    def test_public_summary_states_the_corpus_not_synthetic_parameters(self):
+        plan = a.validate(inputs(AB_CORPUS="public"))
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = Path(tmp)/"provider-bench"
+            binary.write_bytes(b"x")
+            before = a.build_arm(plan, "before", SHA, binary, context())
+            after = a.build_arm(plan, "after", "c" * 40, binary, context())
+            text = " | ".join(a.summary_lines(plan, before, after))
+        self.assertIn("corpus public; expect_identical false", text)
+        for synthetic in ("formats:", "profile", "documents per format", "seed"):
+            self.assertNotIn(synthetic, text)
 
     def test_per_asset_diff_and_neutral_verdict(self):
         with tempfile.TemporaryDirectory() as tmp:

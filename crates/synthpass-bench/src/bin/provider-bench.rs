@@ -329,7 +329,6 @@ impl Default for Args {
 }
 
 fn usage() {
-    eprintln!("  --write-text-free-outcomes  write public MRZ text-free outcomes beside --out without a baseline");
     eprintln!(
         "Usage: provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH] \
          [--measure-memory] [--real-specimens]"
@@ -428,6 +427,7 @@ fn usage() {
          committed baseline at PATH; exit non-zero on a regression or an outcome-ledger sha \
          mismatch (missing PATH is written and passes)"
     );
+    eprintln!("  --write-text-free-outcomes  write public MRZ text-free outcomes beside --out without a baseline");
 }
 
 /// `true` iff `main` should print usage and exit rather than parse `args` at
@@ -2894,6 +2894,8 @@ fn repo_root() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn text_free_outcomes_flag_requires_public_real_mrz_only_without_baseline() {
         let parsed = parse_args(&argv(&[
@@ -2924,7 +2926,6 @@ mod tests {
         }
         assert!(!Args::default().write_text_free_outcomes);
     }
-    use super::*;
 
     #[test]
     fn undefined_rates_render_as_na_but_measured_zero_is_zero_percent() {

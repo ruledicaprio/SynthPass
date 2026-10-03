@@ -330,6 +330,9 @@ jobs:
             echo "A/B compared; the full diff is in the bench-ab artifact (kept 3 days)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
+      # The public diff is text-free by its contract (counts, asset ids, enumerated columns). Its exit
+      # code is read after the files are written, so a NOT NEUTRAL (3) or refused (2) result still
+      # leaves ab/public-diff.txt, ab/public-diff.json and the summary copy: the evidence that matters.
       - name: Diff public projections
         if: steps.plan.outputs.corpus == 'public'
         env:
@@ -337,12 +340,22 @@ jobs:
         run: |
           set -o pipefail
           options=(--public)
+          if [ "$EXPECT_IDENTICAL" = true ]; then options+=(--expect-identical); fi
           python3 tools/bench_ab_args.py summary --plan ab/plan.json \
             --before ab/before/arm.json --after ab/after/arm.json | tee -a "$GITHUB_STEP_SUMMARY"
-          if [ "$EXPECT_IDENTICAL" = true ]; then options+=(--expect-identical); fi
-          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" | tee ab/public-diff.txt
-          cat ab/public-diff.txt >> "$GITHUB_STEP_SUMMARY"
-          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" --json > ab/public-diff.json
+
+          rc=0
+          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" > ab/public-diff.txt || rc=$?
+          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" --json > ab/public-diff.json || true
+
+          cat ab/public-diff.txt
+          { echo '```'; cat ab/public-diff.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$rc" in
+            0) if [ "$EXPECT_IDENTICAL" = true ]; then echo "A/A verdict: NEUTRAL" | tee -a "$GITHUB_STEP_SUMMARY"; fi ;;
+            3) echo "::error::NOT NEUTRAL: the same ref read differently in the two arms (see the summary)"; exit 1 ;;
+            *) echo "::error::bench_ab_diff --public refused (exit $rc)"; exit 1 ;;
+          esac
 
       - name: Keep public measurements
         if: always() && steps.plan.outputs.corpus == 'public'
