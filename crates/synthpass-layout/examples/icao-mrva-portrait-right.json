@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "name": "icao-mrva-portrait-right",
+  "description": "MRV-A with the text block at the left edge and the portrait at the right.",
+  "format": "mrva",
+  "portrait": {"x": 860, "y": 50, "width": 240, "height": 320},
+  "document_type": {"x": 50, "y": 50, "width": 130, "height": 34},
+  "issuing_country": {"x": 200, "y": 50, "width": 130, "height": 34},
+  "surname": {"x": 50, "y": 96, "width": 782, "height": 34},
+  "given_names": {"x": 50, "y": 142, "width": 782, "height": 34},
+  "document_number": {"x": 50, "y": 188, "width": 280, "height": 34},
+  "nationality": {"x": 50, "y": 234, "width": 160, "height": 34},
+  "date_of_birth": {"x": 230, "y": 234, "width": 210, "height": 34},
+  "sex": {"x": 460, "y": 234, "width": 75, "height": 34},
+  "date_of_expiry": {"x": 50, "y": 280, "width": 210, "height": 34},
+  "personal_number": {"x": 50, "y": 326, "width": 420, "height": 34}
+}

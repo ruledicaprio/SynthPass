@@ -3017,6 +3017,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "synthpass-layout"
+version = "1.7.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "synthpass-gen",
+]
+
+[[package]]
 name = "synthpass-license"
 version = "1.7.0"
 dependencies = [
