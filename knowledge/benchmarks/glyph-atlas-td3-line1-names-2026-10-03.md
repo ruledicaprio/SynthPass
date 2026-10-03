@@ -69,9 +69,11 @@ throughout.**
    - **By axis** (steps and rates in the pooled per-step table below, all filler truths): **rotation is the axis with the
      lowest rate of `<` in all four positions** (47.8% in the later tail down to 1.1% for the first `<` of the separator,
      over the degraded steps; table in answer 4). **Floors** (a floor is the most severe step still read as itself in at least 90 of a cell's renders): of the
-     30 cells with 20 or more fillers, **cells 11-15, 19-23 and 32 have none, the clean render already misses**; cells
-     24-31 and 33-43 hold to between 18 and 5 px per cell, to between 1.5 and 0.5 degrees of rotation, to between 0 and 2.5
-     sigma of blur, and on contrast to 0.5 or through every step (Observed; the table is below).
+     30 cells with 20 or more fillers, **cells 11-15, 19-22 and 32 have no floor on any axis, the clean render already
+     misses**; cell 23 has one, on jpeg only (to 90, fails at 75); cells 24-31 and 33-43 hold to between 18 and 5 px per
+     cell, to between 1.5 and 0.5 degrees of rotation and to between 0 and 2.5 sigma of blur; on contrast cells 24-28 and
+     30 hold to 1, cells 29 and 31 to 0.8, cell 33 to 0.5, and cells 34-43 through every step (Observed; the table is
+     below).
 
 3. **A letter read as the filler (the reverse).** **Never: 0 of 1,372 clean letter renders and 0 of 74,088
    degraded letter renders have `<` as the winner**, on any axis and in any cell. Letters are read as themselves in
