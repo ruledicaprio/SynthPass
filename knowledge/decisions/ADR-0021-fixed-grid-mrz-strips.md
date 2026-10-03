@@ -1130,3 +1130,63 @@ call):
 7. **Baseline.** `ambiguous_alignment` and the incomplete-search outcome stay inside the scored
    denominator. Every moved asset is inspected before the baseline is regenerated from the CI
    artifact.
+
+## Amendment 2 (2026-10-01) — anchor classes per document code, for item 7b (cells 0–1 only)
+
+**Status is unchanged: Proposed.** This is written with
+[ADR-0028](ADR-0028-scale-follows-the-measured-mrz-pitch.md), which uses item 7b's line-pair
+signature to rank band candidates before it measures their pitch. It widens 7b's first bullet from
+`P` alone to one class per document family. It keeps all three of 7b's constraints: the signature
+ranks and never gates, order does not decide, and the crate home is unchanged.
+
+### Why
+
+- **Cell 1 is the weakest cell 7b leans on.** On clean synthetic TD3 renders `P` reads as itself,
+  and the `<` after it is read as `S` in 96 of 100
+  ([glyph atlas](../benchmarks/glyph-atlas-p-filler-2026-09-30.md)). `PS` is also a legitimate
+  Part 4 §4.4 code, so no rule can tell the two apart. Cells 1–2 carry no check digit in any
+  format (Part 3 §4.9).
+- **The corpus shows the same failure.** In the single-pass reads that `samples/corpus.jsonl`
+  records under `mrz.observed`, every passport whose document code came back wrong with every
+  check digit valid is labelled `P<`, and its `<` came back as a letter or a digit.
+- **7b excluded TD1 and TD2 "as in 7a". 7a's reason is geometric, the reference edge.** The first
+  letter of a card's document code is fixed by the text of the standard. So the cell classes below
+  extend to cards. 7a's reference-edge anchor keeps its scope.
+
+### The classes
+
+| Family | Cell 0 | Cell 1 | Source |
+| --- | --- | --- | --- |
+| TD3 | `P` | `<`, or a letter. The §4.4 second letters (`P E D O R T S L M`) and `U` (Part 8) are the expected ones; other letters, which issuers used before harmonisation, still match | Doc 9303 Part 4 §4.4; Part 8 §4.1.5 |
+| TD1, TD2 | `A`, `C` or `I` | `<`, or a letter at the issuer's discretion, within the exclusions of each part's Note k. The two parts differ on which pairs are excluded | Doc 9303 Part 5 §4.2.2, Note k; Part 6 §4.2.2, Note k |
+| MRV-A, MRV-B | `V` | `<`, or a letter at the issuer's discretion | Doc 9303 Part 7 §4.2.2.1, §7.2.2.1 |
+
+1. **Cell 0 carries the anchor. Cell 1 is weak evidence.** For ranking only, an `S` read at cell 1
+   after `P` matches the class as well as `<` does. The anchor never supplies a value: the reported
+   document code is what the parse returned.
+2. **Cells 0–1 only.** Cells 2–4 keep 7b's registry rule. Nothing after cell 1 enters a class. The
+   atlas cannot measure it, because the generator draws the issuing state per seed and the tool
+   keys each cell on seed 0's glyph.
+3. **A read outside every class lowers the rank and excludes nothing.** A digit at cell 1 is one
+   example. Whether the parser should refuse such a zone is a question for `mrz`, not for this
+   amendment.
+4. **The classes are provisional until measured.** Extend the glyph atlas
+   ([#433](https://github.com/ruledicaprio/SynthPass/issues/433)) from `P<` to a list of codes. Keep
+   its six degradation axes and its cells 0–1, and run three tiers, stopping where the cost says:
+   1. **The codes the corpus prints, most frequent first.**
+      - TD3: `P<`, `PP`, `PA`, `PO`, `PC`, `PM`, `PE`, `PN`, `PB`, `PD`, `PS`, `PV`, `PX`.
+      - Cards: `ID`, `I<`, `IO`, `IP`, `AR`, `CA`, `CB`, `CL`, `C<`.
+      - Visas: `VC`.
+   2. **Legal but unseen.**
+      - The rest of §4.4 (`PR`, `PT`, `PL`) and `PU`.
+      - `IC`, `A<` and `AC`.
+      - `V<`.
+   3. **Completeness.** Every cell-1 symbol (A–Z and `<`) after each legal first letter.
+
+   The output is each cell's read rate per code, and the confusion table.
+5. **What that measurement decides, not decided here:**
+   - the final classes;
+   - whether a reported document code needs a second witness: the printed VIZ field 03, or
+     agreement across passes.
+
+   The first question is cell 1 = `<` after `P`.

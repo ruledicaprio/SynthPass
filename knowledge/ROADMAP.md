@@ -430,6 +430,12 @@ The named documents are in [`benchmarks/README.md`](benchmarks/README.md#post-m6
   check digit protects refuses the zone. Default-off behind `SYNTHPASS_OCR_OCCLUSION` until
   the synthetic redaction profiles and the real-specimen arm meet the ADR's go/no-go. A
   correctness change, not a hit-rate one: no scored miss fails on a covered cell.
+- Photo scale ([#563](https://github.com/ruledicaprio/SynthPass/issues/563),
+  [`ADR-0028`](decisions/ADR-0028-scale-follows-the-measured-mrz-pitch.md), Proposed): SynthPass
+  chooses the scale of every image the OCR engine reads, from the zone's measured pitch, instead
+  of passing full-resolution photos to `ocrs`'s fixed-size resize. Nothing is built. The first
+  steps are behaviour-neutral trace and imageprep changes, and default output changes only at
+  step 6, on pages outside the identity window, after the real-specimen gate.
 
 **Tier-2 / normalization.**
 
