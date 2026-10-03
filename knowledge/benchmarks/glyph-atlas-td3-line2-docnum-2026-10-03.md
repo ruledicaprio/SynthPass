@@ -33,7 +33,7 @@ personal number took letters and digits too, and no filler in any of the 100 see
 so the filler padding of a short personal number is not in these renders. At the clean step the 900 renders of cells
 0-8 are 631 letters and 269 digits, and the 1,400 renders of cells 28-41 are 1,018 letters and 382 digits, no filler.
 Each cell's glyphs are listed in the summary header; every cell takes 31 to 36 of the 36 alphanumerics, and cell 0
-never takes `I`, `Q` or `U` (the document-number alphabet's first cell). Every cell has 100 renders per step, one per
+took no `I`, `Q` or `U` in these 100 seeds (the generator draws every cell from the same 36 symbols, so about two symbols per cell are absent by chance, not excluded). Every cell has 100 renders per step, one per
 seed, with no missing recognition.
 
 **Pooling.** A cell's 100 renders are split among its glyphs, so one (cell, glyph) pair has a handful. The tables
