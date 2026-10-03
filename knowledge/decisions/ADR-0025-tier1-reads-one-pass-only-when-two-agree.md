@@ -1,7 +1,23 @@
 # ADR-0025 — Tier 1 reads a single OCR pass only when two passes agree
 
-**Status:** Proposed
+**Status:** Accepted (owner, 2026-10-03)
 **Date:** 2026-09-27
+
+**2026-10-03: accepted by the owner.** This answers the question the 2026-10-01 note below left
+open, which OCR pass Tier 1 reads. It changes no code:
+
+- Rules (1) and (2) have no trigger on `main`. Both need a retry stop that confirms or holds a
+  pass, and the retry loop has had neither since `SYNTHPASS_OCR_STOP=clean` and
+  `SYNTHPASS_OCR_CONFIRM_PASSES` were removed on 2026-09-28 (#550). `synthpass-ocr` now warns once
+  if either is still set, and every run stops on the first checksum-valid reading.
+- Tier 1 therefore parses the full concatenation of every pass, rule (3). That is what `main`
+  does today.
+- Rules (1) and (2) apply again only if a stop that confirms or holds a pass returns. That stop
+  needs its own A/B first. The re-run note's lever, a `clean` that stops on a superseding reading
+  only when a second pass agrees, stays Hypothesized and unbuilt
+  ([note](../benchmarks/retry-stop-rerun-2026-09-27.md)).
+- ADR-0024's build step 6 (schema 2) no longer waits on this question (ADR-0024, "Where the build
+  stands", 2026-10-03).
 
 **2026-10-01: not adopted, and kept as the record.** This ADR lands on `main` as Proposed (the
 owner's decision of 2026-10-01). The handoff it proposes was never adopted:

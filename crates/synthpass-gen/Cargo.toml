@@ -28,3 +28,7 @@ default = ["embedded-fonts"]
 # ~480 KB of font bytes baked in. The two ethics guardrails (synthetic
 # watermark + generic template) render unconditionally either way.
 embedded-fonts = []
+
+[dev-dependencies]
+# Golden render hashes (tests/golden_render.rs).
+sha2 = "0.11"
