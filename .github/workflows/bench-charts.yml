@@ -282,19 +282,8 @@ jobs:
                 Note "${track}: previous report missing; not compared."
                 continue
               }
-              # provider-bench's Report has count and providers, but no
-              # top-level hit count. Do not invent one from provider rates.
-              try {
-                $oldReport = Get-Content -LiteralPath $before -Raw | ConvertFrom-Json
-                $newReport = Get-Content -LiteralPath $after -Raw | ConvertFrom-Json
-                if ($oldReport.tier1_hits -is [long] -and $newReport.tier1_hits -is [long]) {
-                  Note "${track}: tier1_hits $($oldReport.tier1_hits) -> $($newReport.tier1_hits) (top-level key)."
-                } else {
-                  Note "${track}: not compared (no top-level hit-count key in provider-bench reports)."
-                }
-              } catch {
-                Note "${track}: reports unreadable; not compared."
-              }
+              # provider-bench reports have no top-level hit count to compare.
+              Note "${track}: not compared (provider-bench reports carry no top-level hit count)."
             }
           } catch {
             Note 'Weekly diff unavailable; benchmark results are unaffected.'
