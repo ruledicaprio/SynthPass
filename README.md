@@ -219,6 +219,7 @@ Full index: [knowledge/README.md](knowledge/README.md).
 │   ├── synthpass-imageprep/ MRZ preprocessing (crop, contrast, deskew, texture suppression)
 │   │                       + layout geometry; wasm32-clean, shared by synthpass-ocr/mrz-wasm
 │   ├── synthpass-gen/      Synthetic document factory: seeded identities, all 5 formats, watermark
+│   ├── synthpass-layout/   JSON layout files for the generator: schema, the 5 built-ins as data, identity
 │   ├── synthpass-bench/    Benchmark harness + corpus runner behind the CI accuracy gate
 │   ├── synthpass-core/     Canonical Extraction schema (v1 + v2), normalizers, audit/crypto helpers
 │   ├── synthpass-die/      Document Intelligence Engine: provider catalog, MRZ reader, routing
