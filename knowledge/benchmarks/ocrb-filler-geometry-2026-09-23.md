@@ -167,6 +167,13 @@ repair outcome. It is recorded here and not run.
 **≈0.025 cap**, not 0.035; see
 [`ocrb-standards-vs-priors-2026-09-24.md`](ocrb-standards-vs-priors-2026-09-24.md).
 
+*Amended 2026-10-02:* the A/B was run, at +0.025 cap and as a render-time offset rather than a
+font edit, in [#604](https://github.com/ruledicaprio/SynthPass/pull/604), and the PR was closed unmerged on
+2026-10-01. At the generator's 40 px font size 0.025 cap is 0.54 px, so the offset also moved the
+filler's edges on the pixel grid, and the two A/Bs could not separate that from the position;
+synthetic filler reads fell rather than rose. The vendored filler stays at 0.508. The record is the
+[2026-10-02 entry in `FINDINGS.md`](FINDINGS.md#2026-10-02--604-the-filler--drawn-0025-cap-higher-at-render-time-the-move-is-054-px-synthetic-filler-reads-fall-and-the-pr-is-closed-unmerged).
+
 ## 4. Print-quality limits relevant to chargrid's `DEFAULT_INK_FLOOR = 0.05`
 
 Numbers and section references only (ISO 1831-1980 unless stated):

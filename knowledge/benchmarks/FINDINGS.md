@@ -19,6 +19,7 @@ regenerate.
 | Date | Finding | Evidence | Status | Where |
 | --- | --- | --- | --- | --- |
 | 2026-10-02 | [Document code on real specimens: 15 of 46 printed letter-filler codes are read with a letter in the filler cell, 8 of them in accepted hits; 20 of 21 printed two-letter codes are read as two letters](document-code-witness-2026-10-02.md) | Observed on public real specimens, default arms, one local release `provider-bench --real-specimens --mrz-only --progress` run (win11-i7-1255U, `RTEN_NUM_THREADS=8`, no `--dump-ocr-passes`, no `--include-private`, no `--include-local`), run id `ab80f5069392`, 15:21:20Z to 15:52:38Z, exit 0 | current | document-code-witness-2026-10-02.md |
+| 2026-10-02 | [#604, the filler `<` drawn 0.025 cap higher at render time: the move is 0.54 px, synthetic filler reads fall, and the PR is closed unmerged](#2026-10-02--604-the-filler--drawn-0025-cap-higher-at-render-time-the-move-is-054-px-synthetic-filler-reads-fall-and-the-pr-is-closed-unmerged) | Observed | current | FINDINGS.md (Weak-spot findings) |
 | 2026-10-02 | [Glyph atlas on MRZ line 2: 98.0% (TD3) and 99.3% (TD1) of clean cells read as themselves, and on degraded renders 90% of the wrong winners lie outside the cell's layout class](glyph-atlas-line2-2026-10-02.md) | Observed on synthetic renders, vendored font, oracle crop (three `glyph_atlas` runs on one desktop PC; the counts below come from their three summary files) | current | glyph-atlas-line2-2026-10-02.md |
 | 2026-10-02 | [Glyph atlas on TD3 line 2, 30 seeds on the laptop: 587 of 600 clean cells read as themselves, nationality 3 is the weak cell (24 / 30), and 91.4% of wrong winners lie outside the cell's class](glyph-atlas-td3-line2-cells-2026-10-02.md) | Observed on synthetic renders, vendored font, oracle crop | current | glyph-atlas-td3-line2-cells-2026-10-02.md |
 | 2026-10-02 | [Synthetic scale, 10,000 fresh documents: 75.3% Tier-1 hits (TD1 52.3% to MRV-B 86.2%), the fixed slice's 391 / 500 reproduced, 3,880 hits with a wrong scored field](synthetic-scale-2026-10-02.md) | Observed on synthetic renders, `clean` profile, one laptop, commit `a779c7f` (105 `synthpass-bench` runs plus a 5-run thread-scaling series, counts from their reports and ledgers) | current | synthetic-scale-2026-10-02.md |
@@ -1621,3 +1622,101 @@ builds: TD1 at `55c03a2` and the other four formats at `53fb184`.
 
 Seeds, builds and what this does not claim:
 [`synthetic-headline-2026-10-01.md`](synthetic-headline-2026-10-01.md).
+
+---
+
+### 2026-10-02 — #604, the filler `<` drawn 0.025 cap higher at render time: the move is 0.54 px, synthetic filler reads fall, and the PR is closed unmerged
+
+**Observed**, from [#604](https://github.com/ruledicaprio/SynthPass/pull/604)'s own A/B comments and one render probe, no new OCR run. #604
+(`gpt/411-filler-raise`, head `aae8a1d`, base `26f1bba`; #411 to-do 2) left the vendored
+`ocr-b.ttf` untouched and raised only the `<` glyph in `draw_mrz_glyphs` by
+`0.025 × mrz_cap_height_px`, the cap taken from the `H` outline, with two tests: the rendered ink
+centre at 0.53 ± 0.01 cap, and the 36 letters and digits byte-identical to the old path. It was
+measured twice on the laptop and closed unmerged by the owner on 2026-10-01
+([decision](https://github.com/ruledicaprio/SynthPass/pull/604#issuecomment-5922491797)); the branch stays. This entry records the discarded
+change and what its measurements can and cannot say.
+
+- **The raise is 0.54 px** (Derived from the font tables and `layout.rs`, confirmed by the probe).
+  `ab_glyph` scales a font by its hhea height, 1319 − (−332) = 1651 units, so at
+  `MRZ_FONT_PX = 40` one unit is 0.0242 px, the `H` cap (890 units) is 21.56 px, and 0.025 cap is
+  **0.539 px**. The baseline sits at an integer `line_rect.y` plus a scaled ascent of 31.956 px,
+  so the raise moves the glyph's pixel-grid phase from .956 to .417. In `ocrs`'s 64 px line
+  input, at native resolution, that is about 0.69 px.
+- **Ink is conserved; nothing is heavier.** Probe (Observed, 2026-10-02): a lone `<` drawn by
+  `draw_mrz_glyphs` on a white 48 × 64 canvas at `Rect::new(8, 8, 22, 50)`, coverage read back as
+  `(255 − R) / 225`, on the old path and on #604's, after its three commits were cherry-picked
+  onto `1c38bf6` (no conflict; both PR tests pass there). Total coverage 95.289 → 95.311 (+0.02 %,
+  u8 rounding). The outline is the same, resampled half a pixel up: the top edge row goes from
+  0.28 to 0.99 coverage and the bottom from 0.41 to 0.03, 22 → 23 ink rows. The 2026-09-29 A/B
+  comment's "heavier filler" was a label, not a measurement.
+- **The bench A/B moved no format beyond noise** (Derived from
+  [the comment](https://github.com/ruledicaprio/SynthPass/pull/604#issuecomment-5900143969): five formats × 100 clean seeds, `26f1bba` against
+  `aae8a1d`, `tools/bench_ab_diff.py`; 67-85 reads per format change, because every document
+  re-renders). Hits TD1 59 → 56, TD2 81 → 82, TD3 74 → 72, MRV-A 87 → 87, MRV-B 90 → 89,
+  every |z| ≤ 0.43 on a two-proportion test at n = 100. Strict names TD1 32 → 21 (z −1.76),
+  TD2 48 → 58 (+1.42), TD3 48 → 41 (−1.00), MRV-A 48 → 34 (−2.01), MRV-B 61 → 56 (−0.72);
+  only MRV-A strict and TD1 correct (31 → 19, z −1.96) reach a nominal 5 %, and neither survives
+  the twenty-odd comparisons made. The two new prefix-wrong accepts (TD3 seed 1, a line-1 shift
+  after the code's filler is dropped; MRV-A seed 61, `JPN` read as `UPN`) are real gate events,
+  because M4's limit is zero by policy. That red gate is what blocked the merge.
+- **The glyph-atlas A/B read the raised filler as `<` less often, 813 → 278 of 5,900** (Observed
+  on the laptop, [the comment](https://github.com/ruledicaprio/SynthPass/pull/604#issuecomment-5907755008): before is the
+  [first sweep](glyph-atlas-p-filler-2026-09-30.md)'s data at `5860cb9`, after is `eef5bb9` with
+  the branch merged, no same-commit control arm). Cell 0 (`P`) 5,579 → 5,546; cell 1 (`<`) down
+  on 39 of 59 steps, 16 beyond the Wilson 95 % intervals, none up beyond them; at the clean render
+  4 → 1 / 100 with `S` the winner in 99; at JPEG quality 20, 75 → 0. Between the arms nothing in
+  `synthpass-gen` or in the atlas's reading path changed (`5860cb9..eef5bb9` touches those crates
+  only in a test of the atlas, #623, and an accessor the atlas does not call, #622; the
+  `synthpass-gen` tree is the same object at both), so that confound is cleared.
+- **What the atlas cannot tell apart.** Its 100 seeds vary the rest of the line, not cells 0 and
+  1, whose pixels are identical across seeds. Each arm is therefore one fixed `<` raster seen
+  through 59 correlated steps, and the before arm's own note shows that raster sitting on a
+  `<` / `S` decision boundary that flips on small pixel changes (clean 4 / 100; JPEG q30 4 against
+  q20 75). A half-pixel vertical move is, by construction, a change of raster phase, so the A/B
+  measured one phase against another and cannot separate that from the ISO position reading worse.
+  The PR's stated basis, fidelity to ISO 1073-2's 0.532 cap and the real-print median 0.528, was
+  never tested.
+- **The ink-centre test is quantised to half a pixel** (Derived from the probe). It takes the
+  first and last non-white rows, so its centre moves in 0.5 px steps (0.023 cap) while its band is
+  ± 0.01 cap (± 0.22 px): the band holds exactly one attainable value, 28.5 px, and the assertion
+  is in practice "first ink row 17, last 39", decided by two edge pixels of 1.6 % and 3.0 %
+  coverage. It passes only inside a window a few tenths of a pixel wide: 0.39-0.74 px
+  (0.018-0.034 cap) by where the outline crosses a row boundary, about 0.45-0.68 px
+  (0.021-0.032 cap) once `blend()`'s rounding of the slivers is counted (an exact-area model); the
+  0.035 cap #404 proposed would fail it. The continuous outline midpoint after the raise is
+  0.530 cap, so the geometry meets the pin; the test cannot measure it. By the same metric `S`
+  reads 0.531 cap while its centre of mass is 0.504, so the number is not comparable across
+  glyphs.
+- **Also found.** #411's table row "Ours: raise by 0.035 cap (#404)" is false: #404 was the
+  `tools/ocrb_metrics.py` PR and moved no pixel, and no raise has ever been on `main` (the
+  un-raised render measures 0.508 cap by the PR's own method). #604 took its cap from the `H`
+  outline (890 units); `layout.rs` and the OCR-B notes use the 885-unit flat-capital median, on
+  which the raise is 0.536 px. A render-time offset is not a Modified Version under the font's
+  OFL; editing the TTF would be, and would oblige a rename away from the Reserved Font Name.
+
+**Hypothesized.** Every synthetic MRZ line is drawn at the same unchosen baseline phase (.956,
+the fractional part of the scaled ascent), and this A/B suggests per-cell filler reads are
+sensitive to it. A constant nobody chose and nobody has measured.
+
+**What this does not claim.** It does not claim the raise is wrong, or right: at this font size a
+sub-pixel offset cannot test the position hypothesis. It does not claim anything about real
+print, where every glyph lands at a random phase. It does not reopen #604.
+
+**Next measurements**, each of which separates phase from position; the pick is the owner's: an
+offset set on one commit (−1, −0.5, 0, +0.5, +1 px) behind an off-by-default knob, through the
+atlas; a phase-randomised A/B whose arms differ only by the 0.54 px filler offset; or an
+observational check on the real TD3 specimens whose filler centres the
+[2026-09-23 note](ocrb-filler-geometry-2026-09-23.md) measured, correlating filler misreads with
+the measured centre. Supersampling the render does not help: it changes every glyph's
+anti-aliasing at once.
+
+**Invocation.** PR #604 at `aae8a1d`; its A/Bs as linked above (bench: five
+`synthpass-bench --document-type <fmt> --profile clean --count 100 --seed 0 --dump-ocr` runs per
+arm, release builds, compared with `tools/bench_ab_diff.py`; atlas: `glyph_atlas` on TD3 cells 0
+and 1, 100 seeds per step, 59 steps, `RTEN_NUM_THREADS=4`). Probe: commits `3be2a3f`, `79d194e`
+and `aae8a1d` cherry-picked onto `1c38bf6` in a detached worktree; a temporary test beside
+`rendered_filler_ink_centre_is_0_53_cap` in `crates/synthpass-gen/src/render.rs` printing the
+scaled ascent, `mrz_cap_height_px`, and the per-row coverage and bounds of a lone `<` on the old
+and the new path; `cargo test -p synthpass-gen --lib render::tests -- --nocapture`, 9 / 9 passed.
+Font tables read with a standard-library TrueType parser; `ab_glyph 0.2.32`'s scaling confirmed
+in its source.
