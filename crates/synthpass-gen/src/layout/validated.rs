@@ -11,7 +11,8 @@
 //! (see [`LayoutError`]):
 //!
 //! 1. per rectangle, in [`LayoutField::ALL`] order: not empty, no arithmetic
-//!    overflow, inside the permitted area, and (visual-zone fields) at least as
+//!    overflow, inside the permitted area (the frame, down to the lowest bottom
+//!    edge among the format's built-in rectangles), and (visual-zone fields) at least as
 //!    tall as the shortest visual-zone row among the five built-ins;
 //! 2. no two rectangles overlap;
 //! 3. every visual-zone rectangle holds the widest value the generator can draw
@@ -168,9 +169,26 @@ pub struct FormatFrame {
     pub mrz_lines: Vec<Rect>,
     /// MRZ cells per line.
     pub mrz_chars: u32,
-    /// Where a layout rectangle may sit: inside the frame and entirely above
-    /// the watermark band, so nothing lands on the watermark or the MRZ.
+    /// Where a layout rectangle may sit: inside the frame, and no lower than
+    /// the lowest bottom edge among the format's eleven built-in rectangles
+    /// (portrait included), so no layout brings the visual zone closer to the
+    /// MRZ than a built-in does (ADR-0022 Decision 3). That edge is derived
+    /// from [`for_format`] and never lies below the watermark top, so nothing
+    /// lands on the watermark or the MRZ either.
     pub permitted: Rect,
+}
+
+/// The lowest bottom edge (`y + height`, exclusive) among the eleven built-in
+/// rectangles of `format`, portrait included, clamped to the watermark top.
+fn permitted_bottom(format: DocumentType) -> u32 {
+    let spec = LayoutSpec::builtin(format);
+    let lowest = spec
+        .rects()
+        .into_iter()
+        .filter_map(|rect| rect.bottom())
+        .max()
+        .unwrap_or(0);
+    lowest.min(for_format(format).watermark.y)
 }
 
 /// The engine-owned frame of `format`.
@@ -185,7 +203,7 @@ pub fn frame_for(format: DocumentType) -> FormatFrame {
             t,
             t,
             page.width.saturating_sub(2 * t),
-            page.watermark.y.saturating_sub(t),
+            permitted_bottom(format).saturating_sub(t),
         ),
         watermark: page.watermark,
         mrz_lines: page.mrz_lines,
@@ -202,7 +220,8 @@ pub enum LayoutError {
     EmptyRect { field: LayoutField },
     /// `x + width` or `y + height` does not fit in `u32`.
     Overflow { field: LayoutField },
-    /// The rectangle leaves the permitted area (frame, watermark band).
+    /// The rectangle leaves the permitted area (frame, or below the lowest
+    /// built-in rectangle of its format).
     OutsidePermittedArea { field: LayoutField, permitted: Rect },
     /// The two rectangles share a pixel. `field` is the earlier in
     /// [`LayoutField::ALL`] order.
@@ -228,6 +247,9 @@ pub enum LayoutError {
     /// The fit check cannot measure glyphs in this build (no embedded font),
     /// and the spec is not a built-in layout.
     FitCheckUnavailable,
+    /// The build embeds the fonts, but loading them failed: the fit check
+    /// cannot run, and the feature is not what is missing.
+    FontUnavailable(String),
 }
 
 impl LayoutError {
@@ -241,11 +263,12 @@ impl LayoutError {
             LayoutError::TooShort { .. } => "too-short",
             LayoutError::TextDoesNotFit { .. } => "text-fit",
             LayoutError::FitCheckUnavailable => "fit-check-unavailable",
+            LayoutError::FontUnavailable(_) => "font-unavailable",
         }
     }
 
-    /// The field the rule failed on; `None` for [`Self::FitCheckUnavailable`],
-    /// which concerns the build, not a rectangle.
+    /// The field the rule failed on; `None` for [`Self::FitCheckUnavailable`]
+    /// and [`Self::FontUnavailable`], which concern the build, not a rectangle.
     pub fn field(&self) -> Option<LayoutField> {
         match self {
             LayoutError::EmptyRect { field }
@@ -254,7 +277,7 @@ impl LayoutError {
             | LayoutError::Overlap { field, .. }
             | LayoutError::TooShort { field, .. }
             | LayoutError::TextDoesNotFit { field, .. } => Some(*field),
-            LayoutError::FitCheckUnavailable => None,
+            LayoutError::FitCheckUnavailable | LayoutError::FontUnavailable(_) => None,
         }
     }
 }
@@ -297,6 +320,10 @@ impl fmt::Display for LayoutError {
                 u64::from(rect.x) + u64::from(rect.width),
                 rect.y,
                 u64::from(rect.y) + u64::from(rect.height),
+            ),
+            LayoutError::FontUnavailable(reason) => write!(
+                f,
+                "text-fit: the embedded fonts failed to load ({reason}), so the fit check cannot run"
             ),
             LayoutError::FitCheckUnavailable => f.write_str(
                 "text-fit: the fit check needs the `embedded-fonts` feature to measure glyphs; \
@@ -381,6 +408,8 @@ impl ValidatedLayout {
     /// and a spec equal to its format's built-in layout is accepted — the fit
     /// of the built-ins is proven by tests in a build that has the font — while
     /// every other spec is rejected with [`LayoutError::FitCheckUnavailable`].
+    /// With the feature on, a font that fails to load is
+    /// [`LayoutError::FontUnavailable`] instead.
     pub fn try_from_spec(spec: LayoutSpec) -> Result<Self, LayoutError> {
         let frame = frame_for(spec.format);
         let minimum_height = min_visual_zone_height();
@@ -420,7 +449,10 @@ impl ValidatedLayout {
         match load_fonts() {
             Ok(fonts) => fit::check(&spec, &fonts)?,
             Err(_) if spec == LayoutSpec::builtin(spec.format) => {}
-            Err(_) => return Err(LayoutError::FitCheckUnavailable),
+            Err(_) if cfg!(not(feature = "embedded-fonts")) => {
+                return Err(LayoutError::FitCheckUnavailable)
+            }
+            Err(e) => return Err(LayoutError::FontUnavailable(e.to_string())),
         }
 
         let page = PageLayout {
@@ -569,6 +601,16 @@ pub(super) mod tests {
             assert_eq!(frame.frame_thickness, FRAME_THICKNESS);
             // The permitted area is inside the frame and entirely above the
             // watermark band, so it cannot touch the watermark or the MRZ.
+            // It ends at the lowest bottom edge of the built-in's eleven
+            // rectangles, so no layout reaches closer to the MRZ than that.
+            let lowest = LayoutSpec::builtin(format)
+                .rects()
+                .iter()
+                .map(|r| r.bottom().unwrap())
+                .max()
+                .unwrap();
+            assert_eq!(frame.permitted.bottom().unwrap(), lowest, "{format:?}");
+            assert!(lowest <= frame.watermark.y, "{format:?}");
             assert!(Rect::new(0, 0, frame.width, frame.height).contains(frame.permitted));
             assert!(frame.permitted.x >= FRAME_THICKNESS && frame.permitted.y >= FRAME_THICKNESS);
             assert!(frame.permitted.bottom().unwrap() <= frame.watermark.y);
@@ -627,12 +669,23 @@ pub(super) mod tests {
 
     #[test]
     fn a_rectangle_outside_the_permitted_area_is_rejected() {
-        let watermark_y = frame_for(DocumentType::TD3).watermark.y;
+        // The lowest bottom among TD3's built-in rectangles (the portrait's).
+        let edge = LayoutSpec::builtin(DocumentType::TD3)
+            .rects()
+            .iter()
+            .map(|r| r.bottom().unwrap())
+            .max()
+            .unwrap();
         for (field, rect) in [
+            // One pixel below the lowest built-in rectangle.
+            (
+                LayoutField::PersonalNumber,
+                Rect::new(60, edge - 33, 400, 34),
+            ),
             // Reaching the watermark band.
             (
                 LayoutField::PersonalNumber,
-                Rect::new(60, watermark_y - 10, 400, 34),
+                Rect::new(60, frame_for(DocumentType::TD3).watermark.y - 10, 400, 34),
             ),
             // Inside the frame stroke.
             (LayoutField::DocumentType, Rect::new(2, 60, 120, 34)),
@@ -653,10 +706,10 @@ pub(super) mod tests {
                 "{e}"
             );
         }
-        // One pixel above the watermark band is allowed.
+        // A rectangle ending exactly at the lowest built-in bottom is allowed.
         let ok = td3_with(
             LayoutField::PersonalNumber,
-            Rect::new(60, watermark_y - 34, 400, 34),
+            Rect::new(60, edge - 34, 400, 34),
         );
         assert!(passes_but_maybe_fit(ok));
     }
@@ -726,9 +779,9 @@ pub(super) mod tests {
 
     #[test]
     fn canonical_bytes_change_with_the_format_and_with_any_coordinate() {
-        let base = ValidatedLayout::builtin(DocumentType::TD3).canonical_bytes();
         #[cfg(feature = "embedded-fonts")]
         {
+            let base = ValidatedLayout::builtin(DocumentType::TD3).canonical_bytes();
             let mut spec = LayoutSpec::builtin(DocumentType::TD3);
             spec.nationality.x += 1;
             let moved = ValidatedLayout::try_from_spec(spec).unwrap();
@@ -744,10 +797,6 @@ pub(super) mod tests {
                 assert_ne!(a, b);
             }
         }
-        // Same rectangles, another format: only the format byte differs.
-        let mut other = base.clone();
-        other[20] = 1;
-        assert_ne!(other, base);
     }
 
     #[cfg(feature = "embedded-fonts")]
@@ -788,7 +837,7 @@ pub(super) mod tests {
         }
 
         #[test]
-        fn the_left_edge_is_checked() {
+        fn a_rectangle_flush_with_the_frame_is_accepted_because_the_pen_start_shifts_ink_in() {
             // A rectangle flush against the frame inner edge would let a
             // left-hanging glyph reach into the frame: the start shift
             // (`pen_start`) keeps the ink inside, so this stays valid.

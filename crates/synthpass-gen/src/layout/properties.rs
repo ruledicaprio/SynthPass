@@ -59,16 +59,21 @@ fn perturbed_spec() -> impl Strategy<Value = LayoutSpec> {
     let delta = (-2i64..=2, -2i64..=2, -6i64..=12, -2i64..=2);
     (any_format(), prop::collection::vec(delta, 11)).prop_map(|(format, deltas)| {
         let base = LayoutSpec::builtin(format).rects();
+        // The permitted area ends at the lowest built-in bottom, so a nudge
+        // down would leave it for every rectangle that sits on that edge:
+        // keep each nudged rectangle inside, so acceptance stays common.
+        let bottom = frame_for(format).permitted.bottom().unwrap_or(u32::MAX);
         let moved: Vec<Rect> = base
             .iter()
             .zip(&deltas)
             .map(|(r, &(dx, dy, dw, dh))| {
                 let add = |v: u32, d: i64| u32::try_from((i64::from(v) + d).max(1)).unwrap_or(1);
+                let height = add(r.height, dh);
                 Rect::new(
                     add(r.x, dx),
-                    add(r.y, dy),
+                    add(r.y, dy).min(bottom.saturating_sub(height)).max(1),
                     add(r.width, dw),
-                    add(r.height, dh),
+                    height,
                 )
             })
             .collect();
