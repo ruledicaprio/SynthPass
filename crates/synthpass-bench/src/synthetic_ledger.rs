@@ -61,6 +61,16 @@ pub struct LedgerRow {
     pub elapsed_ms: u128,
 }
 
+impl LedgerRow {
+    /// The row as the ledger file writes it: `wrong_fields` sorted. One definition, used by
+    /// [`ledger_text`] and by the per-document archive, whose record carries the same row.
+    #[must_use]
+    pub fn normalised(mut self) -> Self {
+        self.wrong_fields.sort_unstable();
+        self
+    }
+}
+
 /// The rows as the file's exact text: one compact JSON object per line, sorted
 /// by (`format`, `seed`), each row's `wrong_fields` sorted, ending in a newline
 /// (an empty slice is an empty string). The `Err` is `serde_json`'s message. A
@@ -68,10 +78,7 @@ pub struct LedgerRow {
 /// is not expected, but it is returned rather than skipped: a silently shorter
 /// ledger would read as seeds that vanished.
 pub fn ledger_text(rows: &[LedgerRow]) -> Result<String, String> {
-    let mut sorted: Vec<LedgerRow> = rows.to_vec();
-    for row in &mut sorted {
-        row.wrong_fields.sort_unstable();
-    }
+    let mut sorted: Vec<LedgerRow> = rows.iter().cloned().map(LedgerRow::normalised).collect();
     sorted.sort_by(|a, b| (&a.format, a.seed).cmp(&(&b.format, b.seed)));
     let mut text = String::new();
     for row in &sorted {

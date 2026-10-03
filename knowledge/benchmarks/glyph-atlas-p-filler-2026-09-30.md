@@ -242,8 +242,8 @@ These are candidate explanations. None was tested by this run.
   synthetic renders is not a rate on print.
 - **Nothing to adopt.** No rank, threshold or constant is proposed. ADR-0021 stays Proposed, and
   no ADR, code, baseline or headline changes.
-- **Nothing about PR [#604](https://github.com/ruledicaprio/SynthPass/pull/604)** (the frozen
-  filler raise) or its effect. See the next measurements for what could be run.
+- **Nothing about PR [#604](https://github.com/ruledicaprio/SynthPass/pull/604)** (the filler raise,
+  closed unmerged 2026-10-01) or its effect. See the next measurements for what could be run.
 - **No composed degradations.** The axes never compose, and real images degrade on several at once.
 
 ## Next measurements
@@ -255,6 +255,10 @@ row by row with this `summary.json`.
   winner at cell 1 moves on synthetic renders when the filler is drawn at the height the
   [filler geometry note](ocrb-filler-geometry-2026-09-23.md) measured. This is a follow-up
   measurement only, and it would carry the same evidence label and the same limits.
+  *Run 2026-09-30, in [#604's comments](https://github.com/ruledicaprio/SynthPass/pull/604#issuecomment-5907755008),
+  without a same-commit control arm; #604 was closed on that result. What the run can and cannot
+  separate is in the
+  [2026-10-02 `FINDINGS.md` entry](FINDINGS.md#2026-10-02--604-the-filler--drawn-0025-cap-higher-at-render-time-the-move-is-054-px-synthetic-filler-reads-fall-and-the-pr-is-closed-unmerged).*
 - **Other cells.** `--cells` accepts any of TD3 line one's 44 cells, for example a cell inside
   the trailing filler run, whose neighbours are also `<`. That would bear on the neighbour
   question above. `I<`, `ID` and `V<` are document codes of other formats (identity cards and

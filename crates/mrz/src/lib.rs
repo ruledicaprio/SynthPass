@@ -48,6 +48,7 @@
 //! | A parsed record to judge | [`MrzData::valid`] for the *read*, [`MrzData::validity`] for the *document's dates* |
 //! | A glyph the OCR could not read | [`solve_field`], [`solve_substitution`], and [`Blindspot`] for what no check digit can catch |
 //! | Cells an image shows as covered | [`apply_occlusion`] with a [`CellMask`]: it withholds fields no check digit covers, and refuses a covered check-digit cell |
+//! | A cell to read without its neighbours | [`position_class`]: which characters the layout allows there, a [`PositionClass`] |
 //!
 //! A valid composite check digit establishes checksum consistency, not
 //! byte-identity. It does not prove the document is in date — see
@@ -94,6 +95,8 @@
 //! - `parser` — the five fixed-layout parsers and the free-text scanner
 //! - `occlusion` — [`apply_occlusion`], [`CellMask`], [`Occluded`], [`ZoneField`]
 //!   (withholds covered, unverifiable fields from a parsed zone)
+//! - `position` — [`position_class`], [`PositionClass`] (which characters each
+//!   cell of a layout allows)
 //! - `line1_select` — the shadow line-1 selector, [`select_line1`] (opt-in; measured once, see its docs)
 //! - `emit` — the five emitters and Part 3 §4.6 name encoding
 //! - `checksum` — check-digit math and OCR line normalization
@@ -134,6 +137,7 @@ mod line1_select;
 mod mrz_date;
 mod occlusion;
 mod parser;
+mod position;
 mod rank;
 mod repair;
 mod sex;
@@ -160,6 +164,7 @@ pub use parser::{
     parse_mrv_b_with, parse_td1, parse_td1_with, parse_td2, parse_td2_with, parse_td3,
     parse_td3_with,
 };
+pub use position::{position_class, PositionClass};
 pub use repair::{
     solve_class_sweep, solve_field, solve_substitution, substitution_candidates, width_candidates,
     FieldKind, Resolution, CONFUSABLES, MRZ_ALPHABET, UNKNOWN,
@@ -2032,13 +2037,14 @@ mod tests {
 
     #[test]
     fn td3_long_document_number_round_trips() {
-        // The overflow line is an independent parser fixture. Its remainder
-        // check digit is 0: the full value's 7-3-1 sum is 360.
+        // The full document number's 7-3-1 sum is 360, so its check digit is 0.
         let pinned = parse_td3(
             "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
-            "L898902C3<UTO7408122F120415912340<<<<<<<<<<0",
+            "L898902C3<UTO7408122F120415912340<<<<<<<<<44",
         )
         .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
         assert_eq!(
             pinned.document_number_full.as_deref(),
             Some("L898902C31234")
@@ -2072,11 +2078,15 @@ mod tests {
 
     #[test]
     fn overflow_coexists_with_personal_number() {
+        // AB1234567890: 10·7 + 11·3 + 1·1 + 2·7 + 3·3 + 4·1 + 5·7 + 6·3 +
+        // 7·1 + 8·7 + 9·3 = 274, so the document-number digit is 4.
         let pinned = parse_td3(
             "P<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<<<<<<<<<",
             "AB1234567<UTO7408122F12041598904<ZE184<<<<37",
         )
         .unwrap();
+        assert!(pinned.valid(), "checks: {:?}", pinned.checks);
+        assert_eq!(pinned.checks.document_number, Some(true));
         assert_eq!(pinned.document_number_full.as_deref(), Some("AB1234567890"));
         assert_eq!(pinned.personal_number(), Some("ZE184"));
 
@@ -2093,22 +2103,30 @@ mod tests {
 
     #[test]
     fn td2_and_td1_long_document_numbers_round_trip() {
+        // D23145890XY: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 33·7 + 34·3 = 540, so the document-number digit is 0.
         let pinned_td2 = parse_td2(
             "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
             "D23145890<UTO7408122F1204159XY0<<<<0",
         )
         .unwrap();
+        assert!(pinned_td2.valid(), "checks: {:?}", pinned_td2.checks);
+        assert_eq!(pinned_td2.checks.document_number, Some(true));
         assert_eq!(
             pinned_td2.document_number_full.as_deref(),
             Some("D23145890XY")
         );
 
+        // D23145890ABCDE: 13·7 + 2·3 + 3·1 + 1·7 + 4·3 + 5·1 + 8·7 + 9·3 +
+        // 0·1 + 10·7 + 11·3 + 12·1 + 13·7 + 14·3 = 455, so its digit is 5.
         let pinned_td1 = parse_td1(
             "I<UTOD23145890<ABCDE5<<<<<<<<<",
             "7408122F1204159UTO<<<<<<<<<<<0",
             "ERIKSSON<<ANNA<MARIA<<<<<<<<<<",
         )
         .unwrap();
+        assert!(pinned_td1.valid(), "checks: {:?}", pinned_td1.checks);
+        assert_eq!(pinned_td1.checks.document_number, Some(true));
         assert_eq!(
             pinned_td1.document_number_full.as_deref(),
             Some("D23145890ABCDE")
@@ -2149,14 +2167,6 @@ mod tests {
         // TD2's optional field is 7 wide, so a remainder of 6 + check + filler
         // does not fit — the number is truncated to 9 as it always was, and the
         // ordinary (non-overflow) encoding still validates.
-        let pinned = parse_td2(
-            "I<UTOERIKSSON<<ANNA<MARIA<<<<<<<<<<<",
-            "D231458907UTO7408122F1204159<<<<<<<6",
-        )
-        .unwrap();
-        assert_eq!(pinned.document_number_full, None);
-        assert_eq!(pinned.document_number, "D23145890");
-
         let td2 = Td2Fields {
             document_number: "D23145890ABCDEF".into(), // remainder 7 → needs 9
             date_of_birth: MrzDate::Calendar(Date::new(1974, 8, 12)),

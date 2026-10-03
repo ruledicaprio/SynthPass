@@ -39,6 +39,14 @@ trend history is read.
   `scored`, `tier1_hits`, `tolerance`, `by_miss_kind{…}`, `measured_on_ci_sha`,
   `samples_data_sha`, `measured_date`. Written only by CI; local `rten` inference differs by
   float rounding, so a local count is never a baseline.
+- **The per-document archive** `<git common dir>/synthpass-bench-archive/{public,local}/*.jsonl`
+  (ADR-0024, written by `provider-bench` and `synthpass-bench`): a run header, then one record per document per provider (one per seed for a `synthpass-bench` file, named `-synthpass-bench-`, with the same keys where the synthetic path has them), with the provider-input
+  OCR text, the ledger row, the read's field values and mismatch positions against the fixture.
+  Skip `*.partial` (a run that was killed). `local/` is `samples/local/`. `private/` (a
+  `--include-private` run only) holds text-free `private_doc` records keyed by image SHA-256,
+  with the zone as character classes; `tools/archive_query.py` does not read it, and a run's
+  private header has `argv` `null`. The rest is document content: cite it by asset ID, counts and
+  positions, never a line of text.
 - **Local reports** `artifacts/*.json` from `provider-bench` (per-document `documents_detail`
   with `miss_reason`, `mrz_format`, `read_ok`; `tier1_hit_rate` is a tagged enum —
   `not_applicable` is not zero) and `synthpass-bench`; `--dump-ocr` rows in

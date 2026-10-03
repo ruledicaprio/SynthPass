@@ -29,8 +29,9 @@ The engine gives no help (Observed, `ocrs` 0.13.1 and `ocrs-models` source):
 - its detection constants are in pass-image pixels.
 
 **Pixel thresholds do not transfer across photo sizes.** That is why the published blur and
-threshold constants fail on photographs ten times larger than a scan. ADR-0028 (#642, Proposed) has SynthPass
-do every resample itself, at a scale chosen from the zone's measured pitch. On that normalised band
+threshold constants fail on photographs ten times larger than a scan.
+[ADR-0028](ADR-0028-scale-follows-the-measured-mrz-pitch.md) (#642, Proposed) has SynthPass do every
+resample itself, at a scale chosen from the zone's measured pitch. On that normalised band
 a threshold can be stated in the print's own units, which ICAO and ISO fix:
 
 - the pitch, 2.54 mm;

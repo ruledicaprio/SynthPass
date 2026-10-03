@@ -9,8 +9,9 @@
 //!
 //! The switch is off by default and the default parse must not move, so the
 //! first test pins that. Every zone here is constructed from the crate's
-//! emitters with invented data, except `KOSOVO_2023`, the committed public OCR
-//! text `rank_wrong_line_zones.rs` already pins.
+//! emitters with invented data, except two public specimens' OCR text:
+//! `KOSOVO_2023`, which `rank_wrong_line_zones.rs` already pins, and
+//! `CROATIA_2002`.
 
 mod support;
 
@@ -376,7 +377,7 @@ fn different_lines_are_never_refused() {
     assert_eq!(data.mrz_lines, text);
 }
 
-// --- 9. A real specimen -----------------------------------------------------
+// --- 9. Real specimens ------------------------------------------------------
 
 /// Kosovo passport 2023 (TD3), the OCR text the real-specimen bench dumped, as
 /// `rank_wrong_line_zones.rs` pins it. The first pass repeats line 2; the rank
@@ -449,6 +450,62 @@ fn kosovo_2023_is_unchanged_under_refusal() {
         "P<RKSBERISHA<<VLORA<<<<<<<<<<<<<<<<<<<<<<<<<\n\
          P000000005RKS0108308F33073081001234567<<<<14"
     );
+}
+
+/// Croatia ID card 2002, the OCR text the real-specimen bench dumped (#579; pinned
+/// on review of #633). By default the scan returns a checksum-valid TD2 zone in
+/// which one line repeats another. With the switch on, that zone is refused and
+/// the checksum-failed TD1 reading is what is left.
+const CROATIA_2002: &str = r##"Banide
+"SAVSKA CESTA 31
+ZAGREB
+Tadaia
+PU/ZAGREB??KA
+Datu izavania/Date 
+12.12.2002
+Tads
+ond arkiress
+HR
+jeRin
+2002
+IOHRVO00000OOOO<<<<<<<<<<<<<<
+7701018F0212126HRV<<<<<<<<<<<0
+SPECIMEN~<SPECIMEN<<<<<<<<<<<
+IOHRVOOOOOOOOOO<K<<<<<<<<<<K
+TOHRVO0O0000000<<<<<<<<<<<<<<<
+7701018F0212126HRV<<<<<<3
+SPECTMENS<SPECIMEN<<<<<<<<<<
+TOHRVOOOOOOOOOO<<<K<<<<<<<<<<<
+7701018FO212126HRV<S<SS<S<
+SPECIMEN<SPECIMEN<<<<<<<
+7701018F0212126HRV<<<
+SPECIMEN<SPECIMEN<<<<<<
+IOHRVOOODOOOOOO<<<<<<<<<<<<<<<
+7701018F0212126HRV<<<<<<<<<<<0
+SPECTMEN<<SPECIMEN<<<<<<<<<<33
+7701018F0212126HRV<<<
+SPECIMEN<SPECIMEN<<<<<<
+IOHRVO0000000O0<<<<<<<<<<<
+7701018F0212126HRV<<<<<<<
+SPECIMEN<SPECIMEN<<<
+7701018FO212126HRV<<<<<<<<
+7701018F0212126HRV3<<233<<<<0
+IOHRVOOOO0OOOOO<<K<<<<<<<<<<<<
+SPECIMEN<SPECIMEN<<<
+TOHRVOOO000OOOO<<<<<<<<<<<<<<<
+7701018F0212126HRV3<<3<<<<<<<<0
+SPECIMENS<SPECIMENE<<<3333333<"##;
+
+#[test]
+fn croatia_2002_falls_back_to_its_checksum_failed_reading_under_refusal() {
+    let off = find_and_parse_with(CROATIA_2002, &ParseOptions::default()).expect("parses");
+    assert_eq!(off, find_and_parse(CROATIA_2002).expect("parses"));
+    assert_eq!(off.format, Format::Td2);
+    assert!(off.valid());
+
+    let on = find_and_parse_with(CROATIA_2002, &refusing()).expect("parses");
+    assert_eq!(on.format, Format::Td1);
+    assert!(!on.valid(), "checks: {:?}", on.checks);
 }
 
 // --- Display ----------------------------------------------------------------

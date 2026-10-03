@@ -128,7 +128,7 @@ fn native_ocr_recovers_mrz_from_a_180_degree_rotated_page() {
 /// - UAE 2011: a retry variant validates late (`pass-03`), so three retry
 ///   passes were appended before the accepting one and the page-text tail is
 ///   made of several passes.
-const GENERAL_VALID_SAMPLE: &str = "China_Passport_Specimen_P0_CHN_2012_mrz.png";
+const GENERAL_VALID_SAMPLE: &str = "China_Passport_Specimen_PO_CHN_2012_mrz.png";
 const VARIANT_VALID_SAMPLE: &str = "Canada_Passport_Specimen_PP_CAN_2023_mrz_wide.jpg";
 const LATE_VARIANT_VALID_SAMPLE: &str =
     "United_Arab_Emirates_Passport_Specimen_P0_ARE_2011_mrz.jpg";

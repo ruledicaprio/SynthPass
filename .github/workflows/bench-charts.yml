@@ -26,6 +26,7 @@ on:
         default: ""
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
 
@@ -198,6 +199,97 @@ jobs:
             }
           }
 
+      - name: Compare with the previous successful bench run
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_RUN_ID: ${{ github.run_id }}
+        run: |
+          # Advisory only, including missing/expired artifacts and bad reports.
+          # Never emit report fields, OCR text, or external command diagnostics.
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Note([string]$text) {
+            Write-Host $text
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value $text
+          }
+          try {
+            $runsJson = & gh run list --workflow bench-charts.yml --status success --limit 2 --json databaseId 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              Note 'Weekly diff: previous successful runs unavailable.'
+              exit 0
+            }
+            $previous = @($runsJson | ConvertFrom-Json) | Where-Object { "$($_.databaseId)" -ne $env:CURRENT_RUN_ID } | Select-Object -First 1
+            if ($null -eq $previous) {
+              Note 'Weekly diff: no previous successful run.'
+              exit 0
+            }
+            $previousDir = Join-Path $env:RUNNER_TEMP 'prev'
+            & gh run download $previous.databaseId -n "bench-reports-$($previous.databaseId)" -D $previousDir *> $null
+            if ($LASTEXITCODE -ne 0) {
+              Note 'Weekly diff: previous artifact unavailable or expired.'
+              exit 0
+            }
+            $diffDir = 'artifacts/weekly-diff'
+            New-Item -ItemType Directory -Force -Path $diffDir | Out-Null
+            Note "## Weekly bench diff (previous run $($previous.databaseId))"
+            foreach ($track in @('td1', 'td2', 'td3', 'mrva', 'mrvb')) {
+              $name = "$track-synthpass-bench-report.json"
+              $before = Join-Path $previousDir $name
+              $after = Join-Path 'artifacts' $name
+              if (-not (Test-Path $after)) { continue }
+              if (-not (Test-Path $before)) {
+                Note "${track}: previous report missing; nothing to compare."
+                continue
+              }
+              try {
+                # Default text output includes recognized field values. Read
+                # JSON privately, then allow only counts, seeds and classes.
+                $diffJson = & python tools/synth_ab_diff.py $before $after --json 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                  Note "${track}: reports unreadable or corpora differ; not compared."
+                  continue
+                }
+                $diff = $diffJson | ConvertFrom-Json
+                $lines = @()
+                foreach ($key in @('hits', 'correct', 'wrong_accepts', 'valid_misses', 'count')) {
+                  $lines += "${key}: $([long]$diff.before.$key) -> $([long]$diff.after.$key)"
+                }
+                $classPattern = '^(correct|wrong|valid-miss|refused) -> (correct|wrong|valid-miss|refused)$'
+                foreach ($class in $diff.classes.PSObject.Properties) {
+                  if ($class.Name -notmatch $classPattern) { throw 'Unexpected class' }
+                  $lines += "$($class.Name): $([long]$class.Value)"
+                }
+                foreach ($moved in $diff.moved) {
+                  if ($moved.class -notmatch $classPattern) { throw 'Unexpected class' }
+                  $lines += "seed $([long]$moved.seed): $($moved.class)"
+                }
+                Set-Content -LiteralPath (Join-Path $diffDir "$track.txt") -Value $lines -Encoding utf8
+                Note "### $track"
+                Note ('```text' + "`n" + ($lines -join "`n") + "`n" + '```')
+              } catch {
+                Note "${track}: comparison unavailable; not compared."
+              }
+            }
+            foreach ($track in @('passport', 'id_card', 'driving_license', 'real-specimens')) {
+              $name = "$track-provider-bench-report.json"
+              $before = Join-Path $previousDir $name
+              $after = Join-Path 'artifacts' $name
+              if (-not (Test-Path $after)) { continue }
+              if (-not (Test-Path $before)) {
+                Note "${track}: previous report missing; not compared."
+                continue
+              }
+              # provider-bench reports have no top-level hit count to compare.
+              Note "${track}: not compared (provider-bench reports carry no top-level hit count)."
+            }
+          } catch {
+            Note 'Weekly diff unavailable; benchmark results are unaffected.'
+          }
+          exit 0
+
       - name: Preserve the identity audit
         if: always()
         uses: actions/upload-artifact@v7
@@ -217,8 +309,8 @@ jobs:
         with:
           name: bench-reports-${{ github.run_id }}
           path: |
-            artifacts/synthpass-bench-report.json
-            artifacts/provider-bench-report.json
+            artifacts/*-report.json
+            artifacts/weekly-diff/
           if-no-files-found: ignore
           retention-days: 30
 

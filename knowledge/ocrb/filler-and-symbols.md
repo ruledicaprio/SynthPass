@@ -76,6 +76,11 @@ fact that the baseline comes from other glyphs in the row. The centre is less af
   [`ocrb-filler-geometry-2026-09-23.md`](../benchmarks/ocrb-filler-geometry-2026-09-23.md) §3 is
   to raise the glyph by 0.03-0.04 cap. The ISO illustration supports the lower end of that range
   (about +0.025-0.03). It also supports a height of about 0.97 rather than 1.0.
+  *Tried 2026-09-29 as a render-time offset of +0.025 cap
+  ([#604](https://github.com/ruledicaprio/SynthPass/pull/604)) and closed unmerged 2026-10-01: at the
+  generator's 40 px font size that is 0.54 px, and the A/Bs could not separate the position from
+  the raster phase. The vendored position stays; the record is the
+  [2026-10-02 `FINDINGS.md` entry](../benchmarks/FINDINGS.md#2026-10-02--604-the-filler--drawn-0025-cap-higher-at-render-time-the-move-is-054-px-synthetic-filler-reads-fall-and-the-pr-is-closed-unmerged).*
 - Any `<` template for [ADR-0014](../decisions/ADR-0014-per-cell-ocrb-classification.md) should be
   centred at 0.53 cap, not at the vendored 0.51.
 

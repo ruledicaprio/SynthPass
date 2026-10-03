@@ -26,6 +26,13 @@ name: Bench data collection
 # artifact instead (`dry-run`, `contents: read`): a dispatch from a branch can never write
 # `bench-data`.
 #
+# The advisory (ADR-0027 decision 7). After the rows are appended, and before they are pushed,
+# `tools/bench_nightly_advisory.py` reads the branch and reports what tonight changed: a job
+# summary, one `::warning::` per flag, and one aggregate line appended to `advisory.jsonl` in the
+# same commit as the rows. It turns the run red only for a severe fixed-slice flag or an invalid
+# measurement, and only in the last step, after the push: a red advisory never loses the rows. It is
+# never a required check and never opens an issue.
+#
 # Writes to a dedicated `bench-data` branch (not `main`, which is protected — see CONTRIBUTING.md)
 # so this can push automatically without a PR per run.
 
@@ -126,6 +133,18 @@ jobs:
             echo "::error::count must be a positive integer, got '$count'"
             exit 1
           fi
+          # One `synthpass-bench` process renders every image of its run before the first OCR pass
+          # (`generate_corpus`), so memory grows with --count: five formats at --count 1000 and at
+          # --count 2000 each aborted in about 10 s on 15.7 GB, and a runner has about that much
+          # (knowledge/benchmarks/synthetic-scale-2026-10-02.md, "Memory limit, as measured"). 200 is
+          # the value that has run green nightly. Windowing generate_corpus is the real fix and is
+          # not done here. The length test comes first, so a very long number never reaches the
+          # numeric comparison, where `[` would error out and let it through.
+          max_count=200
+          if [ "${#count}" -gt "${#max_count}" ] || [ "$count" -gt "$max_count" ]; then
+            echo "::error::count above $max_count is refused (got '$count'): it risks the measured out-of-memory abort, because generate_corpus renders every image of a run before the first OCR pass (knowledge/benchmarks/synthetic-scale-2026-10-02.md, 'Memory limit, as measured')"
+            exit 1
+          fi
           seed_start=$(python3 tools/bench_nightly_rows.py next-seed \
             --data-dir data-branch --document-type "$FORMAT")
           echo "count=$count" >> "$GITHUB_OUTPUT"
@@ -198,6 +217,15 @@ jobs:
           git -C code fetch --quiet --depth 1 "$REPO_URL" "$GITHUB_SHA"
           git -C code checkout --quiet FETCH_HEAD
 
+      # The advisory tells a generator change from noise by comparing the generator's tree at two
+      # commits, so it needs the history behind this one. Best effort: without it the advisory warns
+      # that it cannot decide, and never fails on it.
+      - name: Fetch main's history for the generator check
+        timeout-minutes: 10
+        run: |
+          git -C code fetch --quiet --unshallow "$REPO_URL" "$GITHUB_SHA" \
+            || echo "::warning::could not fetch main's history; the advisory cannot tell a generator change"
+
       - name: Download this run's measurements
         env:
           RUN_ID: ${{ github.run_id }}
@@ -209,6 +237,7 @@ jobs:
         run: python3 code/tools/bench_nightly_rows.py assemble --artifacts artifacts --out new-rows
 
       - name: Append the rows to bench-data and push
+        id: push
         run: |
           gh auth setup-git
           rc=0
@@ -231,7 +260,18 @@ jobs:
           # every rebase.
           python3 ../code/tools/bench_nightly_rows.py guard --file fresh.jsonl
 
+          # The advisory reads the branch with tonight's rows already appended and appends one
+          # aggregate line to advisory.jsonl, so that line travels in the same commit as the rows.
+          # Its exit status is kept, not acted on here: the run goes red in the last step, after
+          # the push, so a red night never loses its rows.
+          advisory_rc=0
+          python3 ../code/tools/bench_nightly_advisory.py \
+            --data-dir . --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}" \
+            --advisory-out advisory.jsonl --repo ../code || advisory_rc=$?
+          echo "advisory_rc=$advisory_rc" >> "$GITHUB_OUTPUT"
+
           git add fresh.jsonl fixed.jsonl runs.jsonl
+          if [ -f advisory.jsonl ]; then git add advisory.jsonl; fi
           if git diff --cached --quiet; then
             echo "no new rows, nothing to commit"
             exit 0
@@ -254,6 +294,16 @@ jobs:
             python3 ../code/tools/bench_nightly_rows.py guard --file fresh.jsonl
           done
           echo "::error::could not push to bench-data after 5 attempts; re-run this job within 3 days"
+          exit 1
+
+      # After the push, so a red night still publishes its rows. `advisory_rc` is empty when the
+      # push step never reached the advisory; that step's own failure already fails the run.
+      - name: Fail the run if the advisory is red
+        if: ${{ !cancelled() && steps.push.outputs.advisory_rc != '' && steps.push.outputs.advisory_rc != '0' }}
+        env:
+          ADVISORY_RC: ${{ steps.push.outputs.advisory_rc }}
+        run: |
+          echo "::error::the nightly advisory is red (exit $ADVISORY_RC); the rows were published, see the job summary"
           exit 1
 
       - name: Fail the run if a measurement failed
@@ -281,6 +331,8 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          # The advisory compares the generator at two commits, so it needs the history.
+          fetch-depth: 0
 
       - name: Download this run's measurements
         env:
@@ -292,6 +344,26 @@ jobs:
           echo "Dry run on ${GITHUB_REF}: nothing is written to bench-data." >> "$GITHUB_STEP_SUMMARY"
           python3 tools/bench_nightly_rows.py assemble --artifacts artifacts --out would-be-rows
           wc -l would-be-rows/*.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Read-only and anonymous, like the measure jobs: the branch's history, with tonight's
+      # would-be rows appended in a scratch copy, is what the advisory reads. Nothing is pushed.
+      - name: Run the advisory on the would-be rows
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}.git
+        run: |
+          rc=0
+          git ls-remote --exit-code --heads "$REPO_URL" bench-data >/dev/null 2>&1 || rc=$?
+          case "$rc" in
+            0) git clone --quiet --depth 1 --branch bench-data --single-branch "$REPO_URL" data-branch ;;
+            2) echo "no bench-data branch yet"; mkdir data-branch ;;
+            *) echo "::error::could not list the bench-data branch (git exit $rc)"; exit 1 ;;
+          esac
+          for f in fresh fixed runs; do cat "would-be-rows/$f.jsonl" >> "data-branch/$f.jsonl"; done
+          advisory_rc=0
+          python3 tools/bench_nightly_advisory.py \
+            --data-dir data-branch --run-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT:-1}" \
+            --advisory-out would-be-rows/advisory.jsonl --repo . || advisory_rc=$?
+          echo "advisory exit status: $advisory_rc (a dry run never fails on it)"
 
       - name: Keep the would-be rows
         uses: actions/upload-artifact@v7

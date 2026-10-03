@@ -1,0 +1,1 @@
+- Complete the `tools/README.md` script index so every Python tool and test has one documented row.

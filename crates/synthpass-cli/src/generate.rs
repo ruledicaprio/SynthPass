@@ -9,7 +9,10 @@
 
 use serde::Serialize;
 use std::path::Path;
-use synthpass_gen::{generate_from_seed, DocumentType, GeneratorConfig, Labels};
+use synthpass_gen::{
+    data, generate_with, DocumentType, GeneratorConfig, Labels, RedactSpan, RedactStyle,
+    RenderOptions,
+};
 
 /// Parsed `synthpass generate` arguments.
 #[derive(Debug)]
@@ -19,6 +22,8 @@ struct GenerateArgs {
     profile: String,
     out_dir: String,
     document_type: DocumentType,
+    redact: Option<RedactSpan>,
+    redact_raw: Option<String>,
 }
 
 impl Default for GenerateArgs {
@@ -29,6 +34,8 @@ impl Default for GenerateArgs {
             profile: "clean".to_string(),
             out_dir: ".".to_string(),
             document_type: DocumentType::TD3,
+            redact: None,
+            redact_raw: None,
         }
     }
 }
@@ -52,7 +59,7 @@ const LABELS_SUFFIX: &str = "labels.json";
 
 fn usage() {
     eprintln!(
-        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]"
+        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--redact STYLE:LINE:FIRST-LAST] [--out-dir DIR]"
     );
     eprintln!("  --count N            number of documents to generate (default: 1)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -64,6 +71,7 @@ fn usage() {
         "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to generate (default: td3)"
     );
     eprintln!("  --out-dir DIR        output directory (default: .)");
+    eprintln!("  --redact SPAN        fill-black|fill-white|fill-grey|blur|graded-blur:LINE:FIRST-LAST (clean profile only)");
 }
 
 /// Hand-rolled flag parser, consistent with the rest of this CLI's style
@@ -131,10 +139,26 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
                 parsed.out_dir = v.clone();
                 i += 2;
             }
+            "--redact" => {
+                let v = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--redact requires STYLE:LINE:FIRST-LAST".to_string())?;
+                parsed.redact_raw = Some(v.clone());
+                i += 2;
+            }
             other => {
                 return Err(format!("unknown argument: {other}"));
             }
         }
+    }
+
+    if parsed.redact_raw.is_some() && parsed.profile != "clean" {
+        return Err(
+            "--redact requires --profile clean because capture profiles move MRZ cells".into(),
+        );
+    }
+    if let Some(raw) = parsed.redact_raw.take() {
+        parsed.redact = Some(parse_redact(&raw, parsed.document_type)?);
     }
 
     // `generate_command` computes `parsed.seed + i` for `i` in `0..parsed.count`,
@@ -152,6 +176,34 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
     }
 
     Ok(parsed)
+}
+
+fn parse_redact(value: &str, doc_type: DocumentType) -> Result<RedactSpan, String> {
+    let parts: Vec<_> = value.split(':').collect();
+    if parts.len() != 3 {
+        return Err("--redact span must be STYLE:LINE:FIRST-LAST".into());
+    }
+    let style = match parts[0] {
+        "fill-black" => RedactStyle::FillBlack,
+        "fill-white" => RedactStyle::FillWhite,
+        "fill-grey" => RedactStyle::FillGrey,
+        "blur" => RedactStyle::Blur,
+        "graded-blur" => RedactStyle::GradedBlur,
+        other => return Err(format!("--redact style '{other}' is unknown")),
+    };
+    let line = parts[1]
+        .parse()
+        .map_err(|_| format!("--redact line '{}' is not a number", parts[1]))?;
+    let (first, last) = parts[2]
+        .split_once('-')
+        .ok_or_else(|| "--redact cells must be FIRST-LAST".to_string())?;
+    let first: usize = first
+        .parse()
+        .map_err(|_| format!("--redact first cell '{first}' is not a number"))?;
+    let last: usize = last
+        .parse()
+        .map_err(|_| format!("--redact last cell '{last}' is not a number"))?;
+    RedactSpan::new(doc_type, line, first, last, style).map_err(|e| format!("--redact {e}"))
 }
 
 /// Maps this CLI's `--profile` string to `synthpass_gen::degrade`'s
@@ -241,6 +293,16 @@ struct LabelsJson {
     profile: String,
     image_width: u32,
     image_height: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    occluded: Vec<OccludedJson>,
+}
+
+#[derive(Serialize)]
+struct OccludedJson {
+    line: usize,
+    first: usize,
+    last: usize,
+    kind: String,
 }
 
 #[derive(Serialize)]
@@ -286,6 +348,16 @@ fn labels_to_json(
         profile: profile.to_string(),
         image_width: width,
         image_height: height,
+        occluded: labels
+            .occluded
+            .iter()
+            .map(|s| OccludedJson {
+                line: s.line,
+                first: s.first,
+                last: s.last,
+                kind: s.kind.as_str().to_string(),
+            })
+            .collect(),
     }
 }
 
@@ -315,7 +387,15 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
     for i in 0..parsed.count {
         let seed = parsed.seed + i;
         let config = GeneratorConfig::with_document_type(seed, parsed.document_type);
-        let (image, labels, passport) = generate_from_seed(&config);
+        let passport = data::generate_passport(&config);
+        let (image, labels) = generate_with(
+            &passport,
+            &config,
+            &RenderOptions {
+                redact: parsed.redact,
+            },
+        )
+        .map_err(std::io::Error::other)?;
         let image = degrade_placeholder(image, &parsed.profile, seed);
         let (width, height) = (image.width(), image.height());
 
@@ -578,5 +658,146 @@ mod tests {
         let args = vec!["--nope".to_string()];
         let err = parse_args(&args).unwrap_err();
         assert!(err.contains("unknown argument"));
+    }
+
+    #[test]
+    fn redact_span_validates_style_geometry_and_profile() {
+        for (arg, expected) in [
+            ("nope:0:0-1", "style"),
+            ("blur:9:0-1", "line"),
+            ("blur:0:2-1", "first cell"),
+            ("blur:0:0-44", "last cell"),
+        ] {
+            let args = vec!["--redact".to_string(), arg.to_string()];
+            assert!(parse_args(&args).unwrap_err().contains(expected));
+        }
+        let args = vec![
+            "--redact".into(),
+            "blur:0:0-1".into(),
+            "--profile".into(),
+            "mobile".into(),
+        ];
+        assert!(parse_args(&args)
+            .unwrap_err()
+            .contains("requires --profile clean"));
+    }
+
+    #[test]
+    fn redacted_sidecar_records_span_and_preserves_printed_mrz() {
+        let root =
+            std::env::temp_dir().join(format!("synthpass_redact_labels_{}", std::process::id()));
+        let plain_dir = root.join("plain");
+        let red_dir = root.join("red");
+        let run = |dir: &Path, extra: &[&str]| {
+            let mut args = vec![
+                "--seed".into(),
+                "565".into(),
+                "--out-dir".into(),
+                dir.to_string_lossy().into_owned(),
+            ];
+            args.extend(extra.iter().map(|s| (*s).to_string()));
+            generate_command(&args).unwrap();
+        };
+        run(&plain_dir, &[]);
+        run(&red_dir, &["--redact", "blur:1:3-5"]);
+        let read = |dir: &Path| -> serde_json::Value {
+            serde_json::from_slice(
+                &std::fs::read(dir.join(format!("synthpass_565.{LABELS_SUFFIX}"))).unwrap(),
+            )
+            .unwrap()
+        };
+        let plain = read(&plain_dir);
+        let red = read(&red_dir);
+        assert!(plain.get("occluded").is_none());
+        assert_eq!(plain["mrz_lines"], red["mrz_lines"]);
+        assert_eq!(red["occluded"][0]["line"], 1);
+        assert_eq!(red["occluded"][0]["first"], 3);
+        assert_eq!(red["occluded"][0]["last"], 5);
+        assert_eq!(red["occluded"][0]["kind"], "blur");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn refused_redaction_returns_usage_without_writing_outputs() {
+        let out =
+            std::env::temp_dir().join(format!("synthpass_redact_refused_{}", std::process::id()));
+        std::fs::create_dir_all(&out).unwrap();
+        let args = vec![
+            "--profile".into(),
+            "mobile".into(),
+            "--redact".into(),
+            "blur:0:0-1".into(),
+            "--out-dir".into(),
+            out.to_string_lossy().into_owned(),
+        ];
+        assert!(matches!(
+            generate_command(&args).unwrap(),
+            crate::Exit::Usage
+        ));
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn no_redact_outputs_match_origin_main_seed_565_for_every_format() {
+        let expected = [
+            (
+                "td1",
+                "7F2EB2F9AF1B33FEEE668D766B6AEBAC413BCC34CA3EDE5BC01AC0603123A9C4",
+                "066BF79D5906E74EE8D3935E5173F151DA16E4EADAE6C544B432C7D86A120AD3",
+            ),
+            (
+                "td2",
+                "18DC7290325521038362F5A94B341F21C8D58E3939BECACB943217216ACA4B43",
+                "B3E8E5CF7B99C90233BDB42E7C35093F5C1E9084C4AB6121225366309F97457E",
+            ),
+            (
+                "td3",
+                "196CFF01179E59D310C1556B71996929B30DB5EA092880AB814AC2128E541A9B",
+                "18F3532782867444FA808CCDE0C9E8AD2B3D8C96E2F21D18E84C234329E99A6D",
+            ),
+            (
+                "mrva",
+                "0E2FF020C3BBAFACBE0D8BF9A5BBC30DFD9F4B978DF410B0C491992323D6EC95",
+                "4731125BFEF9710121DB44A54514418FC11FB075A128A91148DDA14D298CA93F",
+            ),
+            (
+                "mrvb",
+                "40B9067B0FD53FB941C509A0D5A575AE0165AC42EBD373A47ED3EFA41824EB1D",
+                "E5EA96F278F9E25CB2DDE61AE01C8DBC31EED4D9087DE32B1383F18BDF72316C",
+            ),
+        ];
+        for (format, png_hash, labels_hash) in expected {
+            let dir = std::env::temp_dir().join(format!(
+                "synthpass_redact_unchanged_{}_{}",
+                std::process::id(),
+                format
+            ));
+            let args = vec![
+                "--seed".into(),
+                "565".into(),
+                "--document-type".into(),
+                format.into(),
+                "--out-dir".into(),
+                dir.to_string_lossy().into_owned(),
+            ];
+            generate_command(&args).unwrap();
+            let stem = if format == "td3" {
+                "synthpass_565".to_string()
+            } else {
+                format!("synthpass_565_{format}")
+            };
+            let png = std::fs::read(dir.join(format!("{stem}.png"))).unwrap();
+            let labels = std::fs::read(dir.join(format!("{stem}.{LABELS_SUFFIX}"))).unwrap();
+            assert_eq!(
+                synthpass_core::audit::sha256_hex(&png).to_uppercase(),
+                png_hash
+            );
+            assert_eq!(
+                synthpass_core::audit::sha256_hex(&labels).to_uppercase(),
+                labels_hash
+            );
+            std::fs::remove_dir_all(&dir).ok();
+        }
     }
 }

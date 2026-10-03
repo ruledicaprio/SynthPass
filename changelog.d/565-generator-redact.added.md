@@ -1,0 +1,1 @@
+- Add deterministic `synthpass generate --redact` styles for covering an inclusive MRZ cell span, and report the covered cells in the labels sidecar.

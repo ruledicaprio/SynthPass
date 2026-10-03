@@ -66,6 +66,10 @@ it. Review the regenerated SVG and commit it yourself on a normal branch/PR
 (knowledge/benchmarks/README.md's live-tracks dashboard is where it's
 embedded).
 
+Raw reports stay in artifacts/<track>-synthpass-bench-report.json for
+synthetic tracks or artifacts/<track>-provider-bench-report.json for real
+tracks, so running several tracks retains every report.
+
 .PARAMETER Track
 Which benchmark track to run: passport, id_card, driving_license,
 real-specimens, td1, td2, td3, mrva, or mrvb. The last five are synthetic
@@ -95,9 +99,10 @@ Pass through provider-bench --measure-memory (requires building with
 Skip regenerating knowledge/img/<track>-bench-trend.svg after the push.
 
 .PARAMETER FromReport
-Skip running provider-bench entirely and flatten an existing report JSON
+Skip running the benchmark entirely and flatten an existing report JSON
 instead (e.g. one produced by a slow manual run you don't want to redo, or a
-historical file being folded into this system for the first time). git_sha
+historical file being folded into this system for the first time). Pass an
+explicit path; the per-track output names do not affect this parameter. git_sha
 defaults to a "backfilled, unknown" placeholder rather than the current
 HEAD, since a report produced by an earlier/different run was not
 necessarily measured against what's checked out right now -- override with
@@ -200,7 +205,7 @@ if ($FromReport) {
     $reportPath = (Resolve-Path $FromReport).Path
     Write-Host "Using existing report: $reportPath (skipping the bench run)"
 } elseif ($isSyntheticTrack) {
-    $reportPath = Join-Path $repoRoot "artifacts/synthpass-bench-report.json"  # gitignored
+    $reportPath = Join-Path $repoRoot "artifacts/$Track-synthpass-bench-report.json"  # gitignored
 
     $benchArgs = @("--document-type", $Track, "--profile", "clean", "--count", "$Count", "--seed", "$Seed", "--out", $reportPath)
 
@@ -210,7 +215,7 @@ if ($FromReport) {
         throw "synthpass-bench failed (exit $LASTEXITCODE)"
     }
 } else {
-    $reportPath = Join-Path $repoRoot "artifacts/provider-bench-report.json"  # gitignored
+    $reportPath = Join-Path $repoRoot "artifacts/$Track-provider-bench-report.json"  # gitignored
 
     $benchArgs = @("--real-specimens")
     if ($Track -ne "real-specimens") { $benchArgs += @("--format", $Track) }
