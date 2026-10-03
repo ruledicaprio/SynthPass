@@ -1,8 +1,10 @@
 //! Ground-truth labels: every field's exact string value plus its bounding
-//! box, known ahead of drawing since the layout is a set of fixed constants —
-//! so labels are 100% accurate by construction, never inferred after the fact.
+//! box, known ahead of drawing since the layout is fixed before anything is
+//! rendered — a [`ValidatedLayout`] (the built-in one of the format unless the
+//! caller supplies another) — so labels are 100% accurate by construction,
+//! never inferred after the fact.
 
-use crate::layout::Rect;
+use crate::layout::{Rect, ValidatedLayout};
 use crate::model::{DocumentType, Passport};
 use crate::mrz_line::{build_mrz_lines, emitted_personal_number};
 
@@ -92,12 +94,19 @@ impl Labels {
     }
 }
 
-/// Build the ground-truth [`Labels`] for `passport`, using the fixed
-/// [`crate::layout`] rectangles. The MRZ lines come from
+/// Build the ground-truth [`Labels`] for `passport`, using the built-in
+/// [`crate::layout`] rectangles of `doc_type`. The MRZ lines come from
 /// [`crate::mrz_line::build_mrz_lines`] — the single source of truth also
 /// used by the renderer, so the drawn text and the label always agree.
 pub fn build_labels(passport: &Passport, doc_type: DocumentType) -> Labels {
-    let page = crate::layout::for_format(doc_type);
+    build_labels_with_layout(passport, ValidatedLayout::builtin(doc_type))
+}
+
+/// [`build_labels`] on an explicit [`ValidatedLayout`]: its format picks the
+/// MRZ and its rectangles are the label boxes.
+pub fn build_labels_with_layout(passport: &Passport, layout: &ValidatedLayout) -> Labels {
+    let doc_type = layout.format();
+    let page = layout.page();
     let mrz_line_strings = build_mrz_lines(passport, doc_type);
     let mrz_rects = &page.mrz_lines;
 
