@@ -10,7 +10,7 @@ cell 42. On that field the check digits are **blind to exactly #537's substituti
 ([`char_value`](../../crates/mrz/src/checksum.rs)) are `<` = 0, `0` = 0, `A` = 10, `K` = 20 and `U` = 30, and the
 weights 7, 3 and 1 share no factor with 10, so a `<` read as `0`, `A`, `K` or `U` changes no weighted sum mod 10 and
 leaves cell 42 and the composite in cell 43 valid. Any other glyph changes a sum, so a read of it is visible to them
-(Observed, from the table). How often a filler in that field is read as one of the four is the measurable form of
+(derived from the table above, not measured). How often a filler in that field is read as one of the four is the measurable form of
 #537's risk. This run asks it with `glyph_atlas --no-personal-number` (#690), which turns the generator's existing
 `include_personal_number` off: the personal number is the generator's last draw, so no other field of any seed moves
 (cells 0-8 hold the same truths as in #685, seed by seed). The atlas reads the oracle line crop, bypasses imageprep,
@@ -44,8 +44,9 @@ degraded steps are the six axes' steps without their identity steps. **Blind** i
 ## The answer
 
 1. **Truth composition (Observed).** Cells 28-41: 1,400 clean renders, **all `<`**. Cell 42: 100 of 100 are `0`.
-   Cell 43: five digits, the even ones (0, 2, 4, 6, 8: 18, 25, 23, 17 and 17 of the 100 seeds), whose cause was not
-   investigated. Cells 0-8: 631 letter and 269 digit truths at the clean step, **the same multiset as #685's**, cell by
+   Cell 43: five digits, the even ones (0, 2, 4, 6, 8: 18, 25, 23, 17 and 17 of the 100 seeds), which is derived, not
+   observed: the weights 7, 3 and 1 are odd, so each check digit has the parity of its field's value sum, every field
+   plus its check digit sums to an even number, and the composite check digit of a valid TD3 line 2 is always even. Cells 0-8: 631 letter and 269 digit truths at the clean step, **the same multiset as #685's**, cell by
    cell. The preflight's truths matched, so the brief's expectation held this time.
 2. **The filler read as something else.** At the clean render **1,385 of 1,400 cells read as `<`** (98.9%, Wilson
    98.2-99.3); the 15 misses are `?` 11, `5` 2, `3` 1 and `8` 1, all in cells 28-33 (cell 28 has 6). Over the degraded
@@ -60,7 +61,7 @@ degraded steps are the six axes' steps without their identity steps. **Blind** i
      **jpeg** 39 of 15,400 (0.3%), nearly all `?`.
 
    **Floors** (table below): resolution to 6 px per cell in cells 29-37 and to 5 px in cells 38-41 (cell 28: to 15);
-   jpeg and noise hold at every step in 13 and 12 of the 14 cells; blur to 3 sigma in cells 30-41 (cell 29: 2.5, cell
+   jpeg holds at every step in all 14 cells and noise in 12 of the 14 (cells 28 and 29 do not); blur to 3 sigma in cells 30-41 (cell 29: 2.5, cell
    28: none below the clean render); rotation from 1.5 degrees to every step, cell by cell. Cell 28 is the weakest on
    five of the six axes (answer 4).
 3. **The check-blind substitutions.** **233 of 75,600 degraded renders (0.31%, Wilson 0.27-0.35) read a `<` as `0` or
@@ -81,7 +82,8 @@ degraded steps are the six axes' steps without their identity steps. **Blind** i
    **Where they occur:** 43 (cell, axis, step) triples hold one. **Rotation dominates: 129 of the 233 are at 5 degrees
    (129 of 1,400 renders, 9.2%, all `K`), 29 at 2 degrees, 14 at 4**, none below 1.5. The `K`s at rotation sit in cells
    28-32 (138 of 174: cell 29 alone 60) and in cells 37, 40 and 41 (30); the `0`s sit in cell 28 (resolution 4 px: 20 of
-   the 21; blur 2 to 4 sigma: 12) with 3 more in cells 29 and 40. By cell: 28: 67, 29: 62, 30: 37, 32: 20, 37: 13, 41:
+   the 21; blur 2 to 4 sigma: 12; **rotation at 2 degrees: the 2 on that axis**) with 3 more in cells 29 (blur, 2) and 40
+   (resolution 4 px, 1). By cell: 28: 67, 29: 62, 30: 37, 32: 20, 37: 13, 41:
    11, 31: 10, 40: 7, 33: 6; **cells 34-36, 38 and 39: none**. Cell 28's share of its own wrong winners is 5.7% blind
    (67 of 1,173), cells 29-41's is 2.6% (166 of 6,452). The reverse direction exists too: **cell 42's `0` read as `<` 157
    times** (answer 5), also blind, since `<` and `0` are both 0.
@@ -109,8 +111,8 @@ degraded steps are the six axes' steps without their identity steps. **Blind** i
    are not identical, and the difference is small in total.** Clean: 850 of 900 (94.4%, 92.8-95.8) against 855 of 900
    (95.0%, 93.4-96.2). Degraded: 42,922 of 48,600 (88.31%) against 42,934 (88.34%), **12 renders apart**. 380 of the 531
    (cell, axis, step) triples differ, by at most 9 renders, in both directions (a cell's net over all steps runs from
-   -45 to +36). Cell 0 is the one cell whose clean rate dropped by more than 2 renders' worth of noise at no step: 95
-   against 97 clean, 4,743 against 4,778 of 5,400 degraded (87.8% against 88.5%); cells 1-8: 38,179 against 38,156
+   -45 to +36). Cell 0 lost the most: its net over all steps is -45 renders, the largest drop of the nine cells (95
+   against 97 at the clean render, 4,743 against 4,778 of 5,400 degraded (87.8% against 88.5%)); cells 1-8: 38,179 against 38,156
    of 43,200. **A repeat of this very command on the same machine is identical:** the partial first run's 127,494
    records equal the finished run's, all of them, timing aside, so run-to-run noise is not what moves the reads
    (Observed). The only input that differs from #685 is the rest of the line, so it is a **line-context effect**
