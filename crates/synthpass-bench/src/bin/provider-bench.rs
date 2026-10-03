@@ -19,6 +19,10 @@
 //!                [--format NAME] [--verbose] [--dump-ocr] [--dump-ocr-passes]
 //!                [--replay-ocr-passes DIR] [--no-archive]
 //!                [--write-baseline PATH] [--assert-baseline PATH]
+//!                [--write-text-free-outcomes]
+//!   --write-text-free-outcomes
+//!                      Write real-specimen-outcomes-text-free.jsonl beside --out
+//!                      without asserting a baseline; public --real-specimens --mrz-only only.
 //!   --count N          number of documents to check (default: 20)
 //!   --seed N           base seed; document i uses seed N+i (default: 0)
 //!   --profile NAME     clean|mobile|scanner|worn|border-kiosk|damaged|all (default: clean)
@@ -290,6 +294,8 @@ struct Args {
     /// or a miss bucket up, beyond the baseline's `tolerance`). A path that
     /// does not exist yet is written and passes — the first-run bootstrap.
     assert_baseline: Option<String>,
+    /// Write a text-free outcome projection without asserting a baseline.
+    write_text_free_outcomes: bool,
 }
 
 impl Default for Args {
@@ -317,11 +323,13 @@ impl Default for Args {
             no_archive: false,
             write_baseline: None,
             assert_baseline: None,
+            write_text_free_outcomes: false,
         }
     }
 }
 
 fn usage() {
+    eprintln!("  --write-text-free-outcomes  write public MRZ text-free outcomes beside --out without a baseline");
     eprintln!(
         "Usage: provider-bench [--count N] [--seed N] [--profile NAME] [--out PATH] \
          [--measure-memory] [--real-specimens]"
@@ -569,8 +577,22 @@ fn parse_args(args: &[String]) -> Result<Args, String> {
                 parsed.assert_baseline = Some(v.clone());
                 i += 2;
             }
+            "--write-text-free-outcomes" => {
+                parsed.write_text_free_outcomes = true;
+                i += 1;
+            }
             other => return Err(format!("unknown argument: {other}")),
         }
+    }
+    if parsed.write_text_free_outcomes
+        && (!parsed.real_specimens
+            || !parsed.mrz_only
+            || parsed.include_private
+            || parsed.include_local)
+    {
+        return Err(
+            "--write-text-free-outcomes requires public --real-specimens --mrz-only".into(),
+        );
     }
     if parsed.format.is_some() && !parsed.real_specimens {
         return Err("--format is only valid together with --real-specimens".to_string());
@@ -2781,6 +2803,12 @@ async fn main() {
     // The outcome rows are built from the same `mrz` report the snapshot
     // reads, borrowed here rather than taken so `reports` is still whole for
     // the `Report` JSON below.
+    let projection_rows = parsed.write_text_free_outcomes.then(|| {
+        reports
+            .iter()
+            .find(|r| r.provider_id == "mrz")
+            .map(build_outcome_rows)
+    });
     let baseline_snapshot = (parsed.write_baseline.is_some() || parsed.assert_baseline.is_some())
         .then(|| {
             reports
@@ -2834,6 +2862,16 @@ async fn main() {
         synthpass_die::date_digits_arm().0
     );
     println!("report written to {}", parsed.out);
+    if let Some(rows) = projection_rows {
+        let Some(rows) = rows else {
+            eprintln!("text-free outcomes require the mrz provider");
+            std::process::exit(1);
+        };
+        if write_run_ledger_projection(&parsed.out, &rows).is_err() {
+            eprintln!("could not write text-free outcomes");
+            std::process::exit(1);
+        }
+    }
     if let Some(dir) = replay_dir {
         println!("replay of the capture in {}", dir.display());
     }
@@ -2856,6 +2894,36 @@ fn repo_root() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_free_outcomes_flag_requires_public_real_mrz_only_without_baseline() {
+        let parsed = parse_args(&argv(&[
+            "--real-specimens",
+            "--mrz-only",
+            "--write-text-free-outcomes",
+        ]))
+        .expect("public projection mode");
+        assert!(parsed.write_text_free_outcomes);
+        assert!(parsed.assert_baseline.is_none() && parsed.write_baseline.is_none());
+        for flags in [
+            vec!["--write-text-free-outcomes"],
+            vec!["--real-specimens", "--write-text-free-outcomes"],
+            vec![
+                "--real-specimens",
+                "--mrz-only",
+                "--write-text-free-outcomes",
+                "--include-private",
+            ],
+            vec![
+                "--real-specimens",
+                "--mrz-only",
+                "--write-text-free-outcomes",
+                "--include-local",
+            ],
+        ] {
+            assert!(parse_args(&argv(&flags)).is_err());
+        }
+        assert!(!Args::default().write_text_free_outcomes);
+    }
     use super::*;
 
     #[test]

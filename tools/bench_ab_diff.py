@@ -1613,6 +1613,63 @@ def render_neutral(result: dict) -> str:
     return "\n".join(lines)
 
 
+PUBLIC_OUTCOMES = "real-specimen-outcomes-text-free.jsonl"
+PUBLIC_KINDS = {"hit", "no_mrz_found", "checksum_failed", "document_number_mismatch",
+                "ocr_error", "redacted_mrz", "no_mrz_expected", "false_positive_mrz",
+                "document_number_leading_filler", "checksum_failed_specimen"}
+PUBLIC_BOOLEANS = ("mrz_found", "mrz_checksums_valid", "names_exact",
+                   "retry_budget_hit", "retry_damaged_recovery", "tier1_damaged_recovery",
+                   "line1_flagged")
+PUBLIC_CHECKS = {"composite", "document_number", "date_of_birth", "date_of_expiry",
+                 "personal_number", "optional_data_1", "optional_data_2"}
+
+
+def public_rows(directory: Path) -> dict:
+    """Read only named columns; validate values before they can become output."""
+    rows = {}
+    for line in (directory / PUBLIC_OUTCOMES).read_text(encoding="utf-8").splitlines():
+        raw = json.loads(line)
+        asset = raw.get("asset_id")
+        if not isinstance(asset, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_./-]{0,255}", asset) \
+                or asset.startswith(("private/", "local/")) or asset in rows:
+            raise Refused("invalid or duplicate public asset identity")
+        outcome = raw.get("outcome")
+        if outcome not in PUBLIC_KINDS:
+            raise Refused("invalid public outcome")
+        fmt = raw.get("mrz_format", raw.get("format"))
+        if fmt not in (None, "TD1", "TD2", "TD3", "MRVA", "MRVB", "MRV-A", "MRV-B"):
+            raise Refused("invalid public format")
+        safe = {"outcome": outcome, "miss_kind": None if outcome == "hit" else outcome,
+                "format": fmt}
+        for key in PUBLIC_BOOLEANS:
+            value = raw.get(key)
+            if value is not None and type(value) is not bool:
+                raise Refused("invalid public boolean")
+            safe[key] = value
+        checks = raw.get("check_states")
+        if checks is not None and (not isinstance(checks, dict) or
+                any(k not in PUBLIC_CHECKS or (v is not None and type(v) is not bool)
+                    for k, v in checks.items())):
+            raise Refused("invalid public check state")
+        safe["check_states"] = checks
+        rows[asset] = safe
+    if not rows:
+        raise Refused("empty public projection")
+    return rows
+
+
+def public_diff(before: Path, after: Path) -> dict:
+    check_runner(before, after)
+    old, new = public_rows(before), public_rows(after)
+    if old.keys() != new.keys():
+        raise Refused("public arms measured different document sets")
+    transitions = [{"asset_id": asset, "before": old.get(asset), "after": new.get(asset)}
+                   for asset in sorted(old.keys() | new.keys()) if old.get(asset) != new.get(asset)]
+    return {"documents": [len(old), len(new)],
+            "hits": [sum(r["outcome"] == "hit" for r in arm.values()) for arm in (old, new)],
+            "transitions": transitions, "neutral": not transitions}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     ap.add_argument("before", type=Path, help="the before arm's directory")
@@ -1620,6 +1677,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--asset", action="append", default=[],
                     help="a real specimen's asset_id to report whether or not it changed (repeatable)")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
+    ap.add_argument("--public", action="store_true", help="compare text-free public projections only")
     ap.add_argument("--expect-identical", action="store_true",
                     help="neutrality mode: exit 0 if every document reads the same in both arms, 3 if not; "
                          "prints counts and ids, never OCR text")
@@ -1631,6 +1689,23 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ignore", action="append", default=[], metavar="KEY",
                     help="with --expect-identical: a row key to leave out of the comparison (repeatable)")
     args = ap.parse_args(argv)
+    if args.public:
+        if args.asset or args.ignore or args.check_report or args.check_pass_trace:
+            ap.error("public mode accepts only --json and --expect-identical")
+        try:
+            result = public_diff(args.before, args.after)
+        except (Refused, OSError, ValueError, KeyError, TypeError):
+            print("bench_ab_diff: refused public projection", file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(result, sort_keys=True, indent=2))
+        else:
+            print(f"public: documents {result['documents']}; hits {result['hits']}; changed {len(result['transitions'])}")
+            for change in result["transitions"]:
+                print(change["asset_id"] + ": " + json.dumps({k: change[k] for k in ("before", "after")}, sort_keys=True))
+            if args.expect_identical:
+                print("NEUTRAL" if result["neutral"] else "NOT NEUTRAL")
+        return 3 if args.expect_identical and not result["neutral"] else 0
     if not args.expect_identical:
         if args.check_pass_trace or args.check_report or args.ignore:
             ap.error("--check-pass-trace, --check-report and --ignore need --expect-identical")

@@ -1,0 +1,1 @@
+The advisory benchmark A/B workflow can measure the pinned public corpus with text-free projections. `provider-bench --write-text-free-outcomes` writes its public MRZ outcome projection without asserting a baseline.

@@ -1,6 +1,6 @@
-name: Bench A/B (synthetic)
+name: Bench A/B
 
-# A before/after A/B of two refs on the five synthetic MRZ formats, both arms on ONE runner, one
+# A before/after A/B of two refs on synthetic formats or pinned public specimens, both arms on ONE runner, one
 # after the other, from binaries built in this run (ADR-0027 decisions 3, 4, 5 and 8, build-order
 # item 5). It is a dispatch and nothing else: it never runs on a schedule or a pull request, and
 # it is never a gate. Its verdict is advisory and about reads, not speed: no timing is a result.
@@ -35,7 +35,7 @@ name: Bench A/B (synthetic)
 #   `run:` script, which would splice text into the shell source. The arms' NAME=VALUE pairs are
 #   applied by `bench_ab_args.py run` from the plan through `subprocess`, never split by a shell.
 #
-# Publication. The reports, each arm's standard output and the full diff hold synthetic OCR zone
+# Publication (synthetic mode). The reports, each arm's standard output and the full diff hold synthetic OCR zone
 # text, so they go ONLY into one artifact kept 3 days (ADR-0027 decision 5). The job log and the
 # step summary carry counts only: the two arms' refs, commits, knobs and binary hashes, the diff's
 # per-format summary lines (the lines that start `<format>.json:`, which hold counts) and the
@@ -44,9 +44,11 @@ name: Bench A/B (synthetic)
 # neutrality output is printed too: it names counts, seeds and hash prefixes and never a line of
 # text, by its contract (tools/bench_ab_diff.py, "Neutrality mode").
 #
-# Scope. The five synthetic formats only. The public real-specimen corpus arm is a follow-up: its
-# artifacts and log must first be proven text-free (ADR-0027 decision 5: CI never dumps real
-# OCR text, not even as a short-lived artifact). Each arm's `arm.json` records the runner (its
+# Scope. Synthetic formats (default), or public real specimens at the dispatching ref's baseline
+# samples_data_sha. Public runs discard both console streams and publish only report JSON,
+# text-free outcome projections and enumerated diffs. No OCR dumps or archives are uploaded.
+# Allow about 2 hours for two public arms plus cold builds; the 300-minute timeout covers both.
+# Each arm's `arm.json` records the runner (its
 # `context` block is the nightly's), and tools/bench_ab_diff.py refuses arms whose records differ
 # in any runner fact or role, or where only one arm has a record (ADR-0027 decision 4, build item
 # 6). The two arms of this job share one runner, so the refusal fires only for a broken job.
@@ -61,6 +63,11 @@ name: Bench A/B (synthetic)
 on:
   workflow_dispatch:
     inputs:
+      corpus:
+        description: "Corpus: synthetic or pinned public real specimens"
+        type: choice
+        options: [synthetic, public]
+        default: synthetic
       before_ref:
         description: "Before arm: a branch, tag or commit of this repository"
         default: "main"
@@ -124,6 +131,7 @@ jobs:
       - name: Validate the dispatch inputs
         id: plan
         env:
+          AB_CORPUS: ${{ github.event.inputs.corpus }}
           AB_BEFORE_REF: ${{ github.event.inputs.before_ref }}
           AB_AFTER_REF: ${{ github.event.inputs.after_ref }}
           AB_BEFORE_ENV: ${{ github.event.inputs.before_env }}
@@ -189,27 +197,52 @@ jobs:
           echo "before=$(git -C arm-before rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "after=$(git -C arm-after rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Resolve the public corpus pin
+        if: steps.plan.outputs.corpus == 'public'
+        run: |
+          pin=$(python3 -c 'import json,re; p=json.load(open("knowledge/benchmarks/real-specimen-mrz-baseline.json"))["samples_data_sha"]; assert isinstance(p,str) and re.fullmatch("[0-9a-f]{40}",p); print(p)')
+          echo "SAMPLES_DATA_SHA=$pin" >> "$GITHUB_ENV"
+
+      - name: Pull pinned public images into both arms
+        if: steps.plan.outputs.corpus == 'public'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($role in @('before', 'after')) {
+            $script = Join-Path $env:GITHUB_WORKSPACE "arm-$role/scripts/sync-samples.ps1"
+            & $script -DataRef $env:SAMPLES_DATA_SHA
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       # Each arm's binary is copied out of the shared target directory the moment it is built, and
       # each arm runs from its own copy (`bin/<role>/`), so neither can pick up the other's. The
       # model files are copied beside each arm's sources: a bench built from a tree looks there.
       - name: Build the before arm
         working-directory: arm-before
-        run: cargo build -p synthpass-bench --release --bin synthpass-bench
+        env:
+          BENCH_BINARY: ${{ steps.plan.outputs.binary }}
+        run: cargo build -p synthpass-bench --release --bin "$BENCH_BINARY"
 
       - name: Keep the before binary
+        env:
+          BENCH_BINARY: ${{ steps.plan.outputs.binary }}
         run: |
           mkdir -p bin/before
-          cp "$CARGO_TARGET_DIR/release/synthpass-bench" bin/before/synthpass-bench
+          cp "$CARGO_TARGET_DIR/release/$BENCH_BINARY" "bin/before/$BENCH_BINARY"
           cp text-detection.rten text-recognition.rten arm-before/
 
       - name: Build the after arm
         working-directory: arm-after
-        run: cargo build -p synthpass-bench --release --bin synthpass-bench
+        env:
+          BENCH_BINARY: ${{ steps.plan.outputs.binary }}
+        run: cargo build -p synthpass-bench --release --bin "$BENCH_BINARY"
 
       - name: Keep the after binary
+        env:
+          BENCH_BINARY: ${{ steps.plan.outputs.binary }}
         run: |
           mkdir -p bin/after
-          cp "$CARGO_TARGET_DIR/release/synthpass-bench" bin/after/synthpass-bench
+          cp "$CARGO_TARGET_DIR/release/$BENCH_BINARY" "bin/after/$BENCH_BINARY"
           cp text-detection.rten text-recognition.rten arm-after/
 
       # For each format, the before arm and then the after arm, so a slow patch of the runner
@@ -217,6 +250,7 @@ jobs:
       # the plan; it writes the report and the raw OCR text (`--dump-ocr`) under ab/<role>/ and
       # prints one line per run. The formats are validated tokens (letters and digits).
       - name: Measure both arms
+        if: steps.plan.outputs.corpus == 'synthetic'
         env:
           FORMATS: ${{ steps.plan.outputs.formats }}
         run: |
@@ -228,21 +262,31 @@ jobs:
             done
           done
 
+      - name: Measure both public arms
+        if: steps.plan.outputs.corpus == 'public'
+        run: |
+          for role in before after; do
+            python3 tools/bench_ab_args.py run --plan ab/plan.json --role "$role" \
+              --binary "bin/$role/provider-bench" --cwd "arm-$role" --out-dir "ab/$role"
+          done
+
       - name: Record both arms
         env:
           BEFORE_SHA: ${{ steps.shas.outputs.before }}
           AFTER_SHA: ${{ steps.shas.outputs.after }}
+          BENCH_BINARY: ${{ steps.plan.outputs.binary }}
         run: |
           python3 tools/bench_ab_args.py arm-json --plan ab/plan.json --role before \
-            --git-sha "$BEFORE_SHA" --binary bin/before/synthpass-bench --out ab/before/arm.json
+            --git-sha "$BEFORE_SHA" --binary "bin/before/$BENCH_BINARY" --out ab/before/arm.json
           python3 tools/bench_ab_args.py arm-json --plan ab/plan.json --role after \
-            --git-sha "$AFTER_SHA" --binary bin/after/synthpass-bench --out ab/after/arm.json
+            --git-sha "$AFTER_SHA" --binary "bin/after/$BENCH_BINARY" --out ab/after/arm.json
 
       # The full diff (zone text and all) goes to ab/diff.txt and ab/diff.json, which are in the
       # artifact and nowhere else. Exit 0: an A/B; 1: not an A/B (different documents, or a report
       # that disagrees with its own counts); 2: unreadable, or refused (arms not from this run's one
       # runner).
       - name: Diff the arms
+        if: steps.plan.outputs.corpus == 'synthetic'
         env:
           EXPECT_IDENTICAL: ${{ steps.plan.outputs.expect_identical }}
         run: |
@@ -286,10 +330,38 @@ jobs:
             echo "A/B compared; the full diff is in the bench-ab artifact (kept 3 days)" | tee -a "$GITHUB_STEP_SUMMARY"
           fi
 
-      # `if: always()`: a failed diff or a timed-out arm still leaves what was measured. 3 days,
-      # because the files hold synthetic OCR text (ADR-0027 decision 5).
+      - name: Diff public projections
+        if: steps.plan.outputs.corpus == 'public'
+        env:
+          EXPECT_IDENTICAL: ${{ steps.plan.outputs.expect_identical }}
+        run: |
+          set -o pipefail
+          options=(--public)
+          python3 tools/bench_ab_args.py summary --plan ab/plan.json \
+            --before ab/before/arm.json --after ab/after/arm.json | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$EXPECT_IDENTICAL" = true ]; then options+=(--expect-identical); fi
+          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" | tee ab/public-diff.txt
+          cat ab/public-diff.txt >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/bench_ab_diff.py ab/before ab/after "${options[@]}" --json > ab/public-diff.json
+
+      - name: Keep public measurements
+        if: always() && steps.plan.outputs.corpus == 'public'
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench-ab-public
+          path: |
+            ab/before/report.json
+            ab/after/report.json
+            ab/before/real-specimen-outcomes-text-free.jsonl
+            ab/after/real-specimen-outcomes-text-free.jsonl
+            ab/public-diff.txt
+            ab/public-diff.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Synthetic OCR text is retained for at most 3 days (ADR-0027 decision 5).
       - name: Keep the measurement
-        if: always()
+        if: always() && steps.plan.outputs.corpus == 'synthetic'
         uses: actions/upload-artifact@v7
         with:
           name: bench-ab
