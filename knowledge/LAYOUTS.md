@@ -115,7 +115,7 @@ first, then the rule.
 
 | Check | Message begins |
 | --- | --- |
-| input over 65,536 bytes, refused before parsing | `input: N bytes exceeds the 65536-byte limit` |
+| input over 65,536 bytes, refused before parsing | `input: over 65536 bytes, which is the limit` |
 | not UTF-8 | `input: not valid UTF-8 (first bad byte at offset N)` |
 | not JSON, an unknown, duplicate or missing key, or a value that is not a `u32` or a known `format` | `layout JSON: …` with serde_json's line and column, and the text next to the error, which carries the key |
 | `schema_version` other than 1 | `schema_version: N is not supported` |
@@ -139,8 +139,11 @@ rectangle before the next. Rule 2 runs over all pairs, and rule 3 over the text 
 
 **Text fit.** The generator knows the widest value each field can hold. The loader shapes that
 value with the embedded font at the size the renderer uses, places it at the rectangle's left edge
-and requires all its ink to land inside the rectangle on all four sides, so a rectangle that is too short or too narrow fails. This is what keeps the exported labels
-accurate by construction. The built-in widths are known to fit; narrowing a rectangle is the usual
+and requires all its ink to land inside the rectangle on all four sides. This is what keeps the exported labels
+accurate by construction. **Text is drawn at 70 % of the rectangle's height**: a 34 px row draws
+23.8 px text, a 28 px row 19.6 px. So height and width trade off: making a rectangle taller
+makes its text larger, and a larger text needs more width. A built-in's width is known to fit at
+that built-in's height only; at a greater height it may not. Narrowing a rectangle is the usual
 way to fail, and the message gives the ink span to widen it by. Widening the generator's value pools
 can make a previously accepted layout fail this check later, and it will say which field.
 
@@ -186,7 +189,7 @@ apart.
 1. Pick a `format` and read its canvas and permitted area in section 3.
 2. Copy that format's `layouts/<format>.json`, set a new `name`, and move rectangles.
 3. Keep every rectangle in the permitted area, no text field under 28 px tall, and no two
-   rectangles overlapping. Keep widths at or above the built-in's unless you have measured.
+   rectangles overlapping. Keep each width at or above the built-in's, and widen it if you make the rectangle taller (text is 70 % of the height, section 4).
 4. Load it. The first message names the field and the rule that failed. Fix it and load again.
 
 Do not edit the files in `layouts/`: they are written by the crate's emitter, and a test requires
