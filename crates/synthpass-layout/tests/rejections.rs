@@ -161,8 +161,8 @@ fn input_over_64_kib_is_refused_before_parsing_and_exactly_64_kib_loads() {
     // Not JSON at all: only the size check can have refused it.
     let oversized = vec![b'x'; MAX_BYTES + 1];
     let err = parse_bytes(&oversized).expect_err("oversized");
-    assert!(matches!(err, LayoutFileError::TooLarge { len } if len == MAX_BYTES + 1));
-    assert_names(&err.to_string(), &["input", "65537", "65536-byte limit"]);
+    assert!(matches!(err, LayoutFileError::TooLarge));
+    assert_names(&err.to_string(), &["input", "over 65536 bytes"]);
 
     let mut exact = td3().into_bytes();
     exact.resize(MAX_BYTES, b' ');
@@ -172,7 +172,7 @@ fn input_over_64_kib_is_refused_before_parsing_and_exactly_64_kib_loads() {
     exact.push(b' ');
     assert!(matches!(
         parse_bytes(&exact),
-        Err(LayoutFileError::TooLarge { .. })
+        Err(LayoutFileError::TooLarge)
     ));
 }
 
@@ -238,11 +238,16 @@ fn an_overlong_description_is_refused() {
 fn an_unknown_format_is_refused() {
     assert_names(
         &refused(&edit("\"format\": \"td3\"", "\"format\": \"td4\"")),
-        &["unknown variant `td4`", "td1", "mrvb"],
+        &[
+            "unknown variant `td4`",
+            "td1",
+            "mrvb",
+            "\"format\": \"td4\"",
+        ],
     );
     assert_names(
         &refused(&edit("\"format\": \"td3\"", "\"format\": \"TD3\"")),
-        &["unknown variant `TD3`"],
+        &["unknown variant `TD3`", "\"format\": \"TD3\""],
     );
 }
 
@@ -317,4 +322,45 @@ fn a_format_given_as_an_object_is_refused() {
         &refused(&json),
         &["invalid type", "map", "a string", "\"format\": {"],
     );
+}
+
+/// A scratch file under the OS temp dir, removed on drop.
+struct TempFile(std::path::PathBuf);
+
+impl TempFile {
+    fn new(tag: &str, bytes: &[u8]) -> Self {
+        let path = std::env::temp_dir().join(format!(
+            "synthpass-layout-{}-{tag}.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write the scratch file");
+        TempFile(path)
+    }
+}
+
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[test]
+fn load_path_stops_reading_one_byte_past_the_limit() {
+    // Valid JSON padded with whitespace: if `take` allowed only MAX_BYTES the
+    // oversized file would be truncated to a valid 64 KiB file and load.
+    let mut bytes = td3().into_bytes();
+    bytes.resize(MAX_BYTES, b' ');
+    let exact = TempFile::new("exact", &bytes);
+    synthpass_layout::load_path(&exact.0).expect("exactly 64 KiB loads");
+
+    bytes.push(b' ');
+    let over = TempFile::new("over", &bytes);
+    let err = synthpass_layout::load_path(&over.0).expect_err("one byte over");
+    assert!(matches!(err, LayoutFileError::TooLarge), "{err}");
+
+    // A far larger file is refused the same way (and read only to the limit).
+    bytes.resize(4 * MAX_BYTES, b' ');
+    let huge = TempFile::new("huge", &bytes);
+    let err = synthpass_layout::load_path(&huge.0).expect_err("4x over");
+    assert!(matches!(err, LayoutFileError::TooLarge), "{err}");
 }

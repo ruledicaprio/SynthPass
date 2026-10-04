@@ -2,8 +2,8 @@
 //!
 //! `SYNTHPASS_LAYOUT_BLESS=1 cargo test -p synthpass-layout --test bless`
 //!
-//! Without the variable this test only checks that the committed files match
-//! what it would write (`tests/builtins.rs` pins the same thing).
+//! Without the variable this test does nothing: `tests/builtins.rs` is what
+//! pins the committed files to the emitter's output.
 
 use std::fs;
 use std::path::Path;

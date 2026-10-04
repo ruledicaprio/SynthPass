@@ -95,7 +95,7 @@ fn near(text: &str, line: usize, column: usize) -> String {
 /// `description`, then the geometry rules of `ValidatedLayout::try_from_spec`.
 pub fn parse_bytes(bytes: &[u8]) -> Result<LoadedLayout, LayoutFileError> {
     if bytes.len() > MAX_BYTES {
-        return Err(LayoutFileError::TooLarge { len: bytes.len() });
+        return Err(LayoutFileError::TooLarge);
     }
     let text = std::str::from_utf8(bytes).map_err(|e| LayoutFileError::NotUtf8 {
         valid_up_to: e.valid_up_to(),

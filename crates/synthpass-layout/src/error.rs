@@ -11,7 +11,9 @@ use synthpass_gen::LayoutError;
 #[derive(Debug)]
 pub enum LayoutFileError {
     /// The input is longer than [`crate::MAX_BYTES`]; refused before parsing.
-    TooLarge { len: usize },
+    /// `load_path` reads one byte past the limit and stops, so the length of
+    /// an oversized file is not known and not reported.
+    TooLarge,
     /// The input is not UTF-8.
     NotUtf8 { valid_up_to: usize },
     /// Not JSON, or JSON that breaks the schema: an unknown, duplicate or
@@ -49,9 +51,9 @@ pub enum NameError {
 impl fmt::Display for LayoutFileError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            LayoutFileError::TooLarge { len } => write!(
+            LayoutFileError::TooLarge => write!(
                 f,
-                "input: {len} bytes exceeds the {}-byte limit",
+                "input: over {} bytes, which is the limit",
                 crate::MAX_BYTES
             ),
             LayoutFileError::NotUtf8 { valid_up_to } => {
@@ -90,13 +92,6 @@ impl fmt::Display for LayoutFileError {
     }
 }
 
-impl std::error::Error for LayoutFileError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            LayoutFileError::Json { source, .. } => Some(source),
-            LayoutFileError::Layout(e) => Some(e),
-            LayoutFileError::Io { source, .. } => Some(source),
-            _ => None,
-        }
-    }
-}
+/// No `source()`: `Display` already prints the wrapped serde_json, layout and
+/// I/O errors in full, so a chain printer would print each twice.
+impl std::error::Error for LayoutFileError {}
