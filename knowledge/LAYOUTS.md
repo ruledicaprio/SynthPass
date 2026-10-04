@@ -138,7 +138,7 @@ Rule 1 runs per rectangle in the order of section 2 (portrait first), all four c
 rectangle before the next. Rule 2 runs over all pairs, and rule 3 over the text fields.
 
 **Text fit.** The generator knows the widest value each field can hold. The loader shapes that
-value with the embedded font at the size the renderer uses, places it at the rectangle's left edge
+value with embedded PT Sans at the size the default renderer uses, places it at the rectangle's left edge
 and requires all its ink to land inside the rectangle on all four sides. This is what keeps the exported labels
 accurate by construction. **Text is drawn at 70 % of the rectangle's height**: a 34 px row draws
 23.8 px text, a 28 px row 19.6 px. So height and width trade off: making a rectangle taller
@@ -146,6 +146,11 @@ makes its text larger, and a larger text needs more width. A built-in's width is
 that built-in's height only; at a greater height it may not. Narrowing a rectangle is the usual
 way to fail, and the message gives the ink span to widen it by. Widening the generator's value pools
 can make a previously accepted layout fail this check later, and it will say which field.
+
+The opt-in VIZ fonts in [ADR-0030](decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md)
+are drawn at or below the PT Sans size (k_F ≤ 1), using their own ascent and left-side bearing.
+The fit checker continues measuring PT Sans only; MRZ text remains OCR-B. Fonts cannot be
+selected by a layout file.
 
 ## 5. What a layout cannot express
 

@@ -383,10 +383,21 @@ fn draw_mrz_glyphs(
     }
 }
 
-fn draw_text_field(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fonts>) {
+fn draw_text_field(
+    img: &mut RgbImage,
+    rect: Rect,
+    text: &str,
+    fonts: Option<(&Fonts, crate::fonts::VizFont)>,
+) {
     #[cfg(feature = "embedded-fonts")]
-    if let Some(fonts) = fonts {
-        draw_glyph_text(img, &fonts.viz, text, rect, viz_px_scale(rect));
+    if let Some((fonts, font)) = fonts {
+        draw_glyph_text(
+            img,
+            fonts.viz_font(font),
+            text,
+            rect,
+            viz_px_scale(rect) * font.scale(),
+        );
         return;
     }
     #[cfg(not(feature = "embedded-fonts"))]
@@ -698,18 +709,26 @@ pub fn render_with_layout(
 
     let fonts: Option<Fonts> = load_fonts().ok();
     let fonts_ref = fonts.as_ref();
+    let viz_font = match labels.viz_font {
+        Some(name) => crate::fonts::VizFont::ALL
+            .into_iter()
+            .find(|font| font.name() == name)
+            .ok_or_else(|| "labels contain an unknown VIZ font".to_string())?,
+        None => crate::fonts::VizFont::PtSans,
+    };
+    let viz_fonts = fonts_ref.map(|fonts| (fonts, viz_font));
 
     draw_text_field(
         &mut img,
         page.document_type,
         &labels.document_type.value,
-        fonts_ref,
+        viz_fonts,
     );
     draw_text_field(
         &mut img,
         page.issuing_country,
         &labels.issuing_country.value,
-        fonts_ref,
+        viz_fonts,
     );
     // A real passport prints the name in its native script; the MRZ band
     // (drawn below from `labels.mrz_lines`) carries the Latin transliteration.
@@ -723,35 +742,35 @@ pub fn render_with_layout(
         .given_names_native
         .as_ref()
         .map_or(labels.given_names.value.as_str(), |fl| fl.value.as_str());
-    draw_text_field(&mut img, page.surname, surname_viz, fonts_ref);
-    draw_text_field(&mut img, page.given_names, given_names_viz, fonts_ref);
+    draw_text_field(&mut img, page.surname, surname_viz, viz_fonts);
+    draw_text_field(&mut img, page.given_names, given_names_viz, viz_fonts);
     draw_text_field(
         &mut img,
         page.document_number,
         &labels.document_number.value,
-        fonts_ref,
+        viz_fonts,
     );
     draw_text_field(
         &mut img,
         page.nationality,
         &labels.nationality.value,
-        fonts_ref,
+        viz_fonts,
     );
     draw_text_field(
         &mut img,
         page.date_of_birth,
         &labels.date_of_birth.value,
-        fonts_ref,
+        viz_fonts,
     );
-    draw_text_field(&mut img, page.sex, &labels.sex.value, fonts_ref);
+    draw_text_field(&mut img, page.sex, &labels.sex.value, viz_fonts);
     draw_text_field(
         &mut img,
         page.date_of_expiry,
         &labels.date_of_expiry.value,
-        fonts_ref,
+        viz_fonts,
     );
     if let Some(pn) = &labels.personal_number {
-        draw_text_field(&mut img, page.personal_number, &pn.value, fonts_ref);
+        draw_text_field(&mut img, page.personal_number, &pn.value, viz_fonts);
     }
 
     // Draw MRZ lines from this format's own PageLayout.

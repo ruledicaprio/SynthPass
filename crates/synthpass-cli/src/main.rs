@@ -184,9 +184,9 @@ fn print_usage() {
         "  synthpass fingerprint              print this machine's fingerprint (send to your vendor)"
     );
     println!("  synthpass verify-license [path]    verify a license file (default: SYNTHPASS_LICENSE_PATH or ./license.synthpass)");
-    println!("  synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--out-dir DIR]");
+    println!("  synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--viz-font NAME|random] [--out-dir DIR]");
     println!("                                     generate synthetic td1|td2|td3|mrva|mrvb document images + label JSON (no license required)");
-    println!("  synthpass export --format jsonl|hf [--count N] [--seed N] [--document-type TYPE] [--pack-pages N] --out-dir DIR");
+    println!("  synthpass export --format jsonl|hf [--count N] [--seed N] [--document-type TYPE] [--viz-font NAME|random] [--pack-pages N] --out-dir DIR");
     println!("                                     export a synthetic corpus as a training dataset (no license required to run; a license");
     println!("                                     lacking the 'export' feature is metered with a warning — see knowledge/EXPORTS.md)");
     println!("  synthpass --help, -h               show this message");

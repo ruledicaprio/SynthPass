@@ -1,0 +1,1 @@
+- **Opt-in embedded VIZ fonts.** `synthpass generate` and `synthpass export` accept `--viz-font` with a fixed embedded font or `random`, selected deterministically from a separate seed stream. Labels and export records include the actual `viz_font` only when requested; default output and OCR-B MRZ rendering remain unchanged (ADR-0030).

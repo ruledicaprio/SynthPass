@@ -1,6 +1,50 @@
 //! The fictional identity model and generator configuration.
 
+use crate::fonts::VizFont;
 pub use mrz::Date;
+use rand::{RngCore, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+
+/// Fixed nonzero domain tag for the VIZ font stream, separate from content.
+pub const VIZ_FONT_STREAM: u64 = 0x5649_5a5f_464f_4e54;
+
+/// An opt-in embedded font or a deterministic pick from the closed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VizFontChoice {
+    Font(VizFont),
+    Random,
+}
+
+impl VizFontChoice {
+    /// Parse an embedded font name or `random`.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        if value == "random" {
+            return Ok(Self::Random);
+        }
+        VizFont::ALL
+            .into_iter()
+            .find(|font| font.name() == value)
+            .map(Self::Font)
+            .ok_or_else(|| {
+                format!(
+                    "unknown VIZ font '{value}' (valid: {}, random)",
+                    VizFont::ALL.map(VizFont::name).join(", ")
+                )
+            })
+    }
+
+    /// Resolve without consuming either the content or degradation stream.
+    pub fn resolve(self, seed: u64) -> VizFont {
+        match self {
+            Self::Font(font) => font,
+            Self::Random => {
+                let mut rng = ChaCha8Rng::seed_from_u64(seed);
+                rng.set_stream(VIZ_FONT_STREAM);
+                VizFont::ALL[(rng.next_u64() % 5) as usize]
+            }
+        }
+    }
+}
 
 /// Visual-zone sex marker. `X` means unspecified there; the MRZ prints `<`.
 ///
@@ -198,6 +242,8 @@ impl TryFrom<mrz::Format> for DocumentType {
 /// is a render/content option, not a source of extra randomness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratorConfig {
+    /// Opt-in VIZ font; absence preserves the historical PT Sans output.
+    pub viz_font: Option<VizFontChoice>,
     /// Seed for the deterministic identity generator (`ChaCha8Rng`).
     pub seed: u64,
     /// Document type to generate (defaults to TD3 for backward compatibility).
@@ -211,6 +257,7 @@ impl Default for GeneratorConfig {
     fn default() -> Self {
         Self {
             seed: 0,
+            viz_font: None,
             document_type: DocumentType::TD3,
             include_personal_number: true,
         }
@@ -222,6 +269,7 @@ impl GeneratorConfig {
     pub fn new(seed: u64) -> Self {
         Self {
             seed,
+            viz_font: None,
             document_type: DocumentType::TD3,
             include_personal_number: true,
         }
@@ -231,6 +279,7 @@ impl GeneratorConfig {
     pub fn with_document_type(seed: u64, doc_type: DocumentType) -> Self {
         Self {
             seed,
+            viz_font: None,
             document_type: doc_type,
             include_personal_number: true,
         }

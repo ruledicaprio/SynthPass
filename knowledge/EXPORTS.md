@@ -27,7 +27,7 @@ corpora most training recipes were built on (see
 
 ```text
 synthpass export --format FMT [--count N] [--seed N] [--document-type TYPE]
-                 [--profile clean] [--pack-pages N] --out-dir DIR
+                 [--profile clean] [--viz-font NAME] [--pack-pages N] --out-dir DIR
   --format FMT          jsonl | hf        (coco / yolo error as "not implemented yet")
   --count N             number of documents to generate and export (default: 100)
   --seed N              base seed; document i uses seed N + i (default: 0)
@@ -35,6 +35,8 @@ synthpass export --format FMT [--count N] [--seed N] [--document-type TYPE]
                         "all" round-robins the five formats across the corpus by
                         document index, matching synthpass-bench's --profile all
   --profile clean       fixed at "clean" in v1 (see "Capture profiles" below)
+  --viz-font NAME       pt-sans | liberation-sans | source-sans-3 | liberation-serif |
+                        liberation-mono | random (default: PT Sans, unrecorded)
   --pack-pages N        concatenate N documents per JSONL row with <page> separators
                         (default: 1). Applies to hf too — its rows are the same JSONL rows.
   --out-dir DIR         output directory, required (created if absent)
@@ -111,6 +113,13 @@ One JSON object per line. One line per row; a row is one document when `--pack-p
   "ground_truth": "…<page>…"            // documents[*].ground_truth joined with "<page>"
 }
 ```
+
+**Optional font metadata.** Each `documents[*]` entry has `viz_font` only when `--viz-font`
+was supplied, including an explicit `pt-sans`. Its value is the actual font name from the
+closed set above; `random` records the resolved name, never `random`. Font selection uses
+a separate fixed-tag seed stream and changes neither identity values nor label boxes nor
+MRZ lines. Without the flag the field is absent and default export bytes are unchanged.
+The manifest's reproduction command includes the option when supplied.
 
 **Field vocabulary.** The VIZ `field` names are `synthpass_core::v2::CoreField`'s `serde` names
 for the fields the generator paints on the card front (`document_type`, `issuing_country`,

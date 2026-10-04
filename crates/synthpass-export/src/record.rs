@@ -47,6 +47,9 @@ pub struct MrzRecord {
 /// One generated document as a training row entry.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DocumentRecord {
+    /// Actual VIZ font, omitted unless the caller selected a font option.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub viz_font: Option<&'static str>,
     pub seed: u64,
     /// `"td1"`..`"mrvb"`.
     pub document_type: String,
@@ -88,9 +91,14 @@ impl GeneratedDoc {
     /// record and the same pixels.
     pub fn build(seed: u64, doc_type: DocumentType) -> Self {
         let config = GeneratorConfig::with_document_type(seed, doc_type);
-        let (image, labels, _passport) = generate_from_seed(&config);
+        Self::build_with_config(&config)
+    }
+
+    /// Generate with an optional VIZ font choice, recording the resolved font.
+    pub fn build_with_config(config: &GeneratorConfig) -> Self {
+        let (image, labels, _passport) = generate_from_seed(config);
         let (width, height) = (image.width(), image.height());
-        let record = build_record(seed, doc_type, &labels, width, height);
+        let record = build_record(config.seed, config.document_type, &labels, width, height);
         Self { record, image }
     }
 }
@@ -220,6 +228,7 @@ fn build_record(
 
     let doctype = doc_type_lower(doc_type);
     DocumentRecord {
+        viz_font: labels.viz_font,
         seed,
         document_type: doctype.to_string(),
         mrz_format: labels.mrz_format.as_str().to_string(),

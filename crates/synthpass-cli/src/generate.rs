@@ -22,6 +22,7 @@ struct GenerateArgs {
     profile: String,
     out_dir: String,
     document_type: DocumentType,
+    viz_font: Option<synthpass_gen::VizFontChoice>,
     redact: Option<RedactSpan>,
     redact_raw: Option<String>,
 }
@@ -34,6 +35,7 @@ impl Default for GenerateArgs {
             profile: "clean".to_string(),
             out_dir: ".".to_string(),
             document_type: DocumentType::TD3,
+            viz_font: None,
             redact: None,
             redact_raw: None,
         }
@@ -59,7 +61,7 @@ const LABELS_SUFFIX: &str = "labels.json";
 
 fn usage() {
     eprintln!(
-        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--redact STYLE:LINE:FIRST-LAST] [--out-dir DIR]"
+        "Usage: synthpass generate [--count N] [--seed N] [--profile NAME] [--document-type TYPE] [--viz-font NAME|random] [--redact STYLE:LINE:FIRST-LAST] [--out-dir DIR]"
     );
     eprintln!("  --count N            number of documents to generate (default: 1)");
     eprintln!("  --seed N             base seed; document i uses seed N+i (default: 0)");
@@ -71,6 +73,7 @@ fn usage() {
         "  --document-type TYPE td1|td2|td3|mrva|mrvb — the ICAO 9303 MRZ format to generate (default: td3)"
     );
     eprintln!("  --out-dir DIR        output directory (default: .)");
+    eprintln!("  --viz-font NAME      pt-sans|liberation-sans|source-sans-3|liberation-serif|liberation-mono|random (default: PT Sans, unrecorded)");
     eprintln!("  --redact SPAN        fill-black|fill-white|fill-grey|blur|graded-blur:LINE:FIRST-LAST (clean profile only)");
 }
 
@@ -130,6 +133,16 @@ fn parse_args(args: &[String]) -> Result<GenerateArgs, String> {
                 // shape `--profile` uses, not as a second source of truth.
                 parsed.document_type =
                     DocumentType::parse(&lower).map_err(|e| format!("--document-type: {e}"))?;
+                i += 2;
+            }
+            "--viz-font" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--viz-font requires a value".to_string())?;
+                parsed.viz_font = Some(
+                    synthpass_gen::VizFontChoice::parse(value)
+                        .map_err(|e| format!("--viz-font: {e}"))?,
+                );
                 i += 2;
             }
             "--out-dir" => {
@@ -255,6 +268,8 @@ impl From<&synthpass_gen::FieldLabel> for FieldLabelJson {
 /// type at all.
 #[derive(Serialize)]
 struct LabelsJson {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    viz_font: Option<&'static str>,
     document_type: FieldLabelJson,
     issuing_country: FieldLabelJson,
     surname: FieldLabelJson,
@@ -321,6 +336,7 @@ fn labels_to_json(
     height: u32,
 ) -> LabelsJson {
     LabelsJson {
+        viz_font: labels.viz_font,
         document_type: (&labels.document_type).into(),
         issuing_country: (&labels.issuing_country).into(),
         surname: (&labels.surname).into(),
@@ -386,7 +402,8 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
 
     for i in 0..parsed.count {
         let seed = parsed.seed + i;
-        let config = GeneratorConfig::with_document_type(seed, parsed.document_type);
+        let mut config = GeneratorConfig::with_document_type(seed, parsed.document_type);
+        config.viz_font = parsed.viz_font;
         let passport = data::generate_passport(&config);
         let (image, labels) = generate_with(
             &passport,
@@ -435,6 +452,43 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viz_font_parser_and_sidecar_preserve_absent_field() {
+        for name in synthpass_gen::fonts::VizFont::ALL
+            .map(synthpass_gen::fonts::VizFont::name)
+            .into_iter()
+            .chain(["random"])
+        {
+            let args = ["--viz-font".to_string(), name.to_string()];
+            assert_eq!(
+                parse_args(&args).expect("font choice").viz_font,
+                Some(synthpass_gen::VizFontChoice::parse(name).expect("known font"))
+            );
+        }
+        let error = parse_args(&["--viz-font".into(), "unknown".into()]).expect_err("unknown");
+        for name in synthpass_gen::fonts::VizFont::ALL
+            .map(synthpass_gen::fonts::VizFont::name)
+            .into_iter()
+            .chain(["random"])
+        {
+            assert!(error.contains(name));
+        }
+        let mut config = GeneratorConfig::new(42);
+        let (_, labels, _) = synthpass_gen::generate_from_seed(&config);
+        let default =
+            serde_json::to_value(labels_to_json(&labels, 42, "clean", 1200, 840)).expect("JSON");
+        assert!(default.get("viz_font").is_none());
+        config.viz_font = Some(synthpass_gen::VizFontChoice::Font(
+            synthpass_gen::fonts::VizFont::PtSans,
+        ));
+        let (_, labels, _) = synthpass_gen::generate_from_seed(&config);
+        let mut explicit =
+            serde_json::to_value(labels_to_json(&labels, 42, "clean", 1200, 840)).expect("JSON");
+        assert_eq!(explicit["viz_font"], "pt-sans");
+        explicit.as_object_mut().expect("object").remove("viz_font");
+        assert_eq!(explicit, default);
+    }
 
     /// Runs the full generate command against a temp directory and checks
     /// the expected PNG/`.labels.json` pairs exist and the sidecar's ground

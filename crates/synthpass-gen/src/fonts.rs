@@ -7,7 +7,7 @@
 
 use ab_glyph::FontArc;
 
-/// The closed VIZ font set admitted by ADR-0030. Rendering still uses PT Sans.
+/// The closed VIZ font set admitted by ADR-0030. PT Sans remains the default.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum VizFont {
     #[default]
@@ -28,7 +28,7 @@ impl VizFont {
         Self::LiberationMono,
     ];
 
-    /// Stable name reserved for the future opt-in interface.
+    /// Stable name for the opt-in interface and labels.
     pub const fn name(self) -> &'static str {
         match self {
             Self::PtSans => "pt-sans",
@@ -58,7 +58,7 @@ static OCR_B_BYTES: &[u8] = include_bytes!("../fonts/ocr-b.ttf");
 #[cfg(feature = "embedded-fonts")]
 static SANS_BYTES: &[u8] = include_bytes!("../fonts/sans.ttf");
 
-/// Embedded fonts. The renderer still uses the unchanged PT Sans/OCR-B pair.
+/// Embedded fonts. Default rendering uses the unchanged PT Sans/OCR-B pair.
 pub struct Fonts {
     /// Monospaced OCR-B-style font for the MRZ band.
     pub mrz: FontArc,
