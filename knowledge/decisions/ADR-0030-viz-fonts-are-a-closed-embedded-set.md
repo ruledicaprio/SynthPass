@@ -1,6 +1,6 @@
 # ADR-0030 — The VIZ draws from a closed set of embedded open-licence fonts, opt-in, and no font needs more room than PT Sans
 
-**Status:** Accepted (owner, 2026-10-04). Decision 5 was amended the same day; see the amendment at the end.
+**Status:** Accepted (owner, 2026-10-04). Decision 5 was amended twice the same day; see the amendments at the end.
 **Date:** 2026-10-04
 
 ## Context
@@ -70,36 +70,44 @@
    - A document under `random` therefore has the same names, dates, numbers and layout as its default render; only
      the glyphs differ.
    - The same seed always gives the same font.
-5. **No font may need more room than PT Sans (the admission rule).** Amended on 2026-10-04. The amendment at the end
-   of this ADR records the first version and why it changed.
-   - **The scale.** Every other font F has a constant k_F in (0, 1], pinned in code. F is drawn at k_F × 70 % of the
-     rectangle's height.
+5. **No font may need more room than PT Sans (the admission rule).** Amended twice on 2026-10-04. The amendments at the
+   end of this ADR record the earlier versions and why they changed.
    - **Where F may ink.**
      - **Placement.** The renderer anchors every font at the rectangle's top-left corner:
        - the baseline sits at the rectangle's top plus the font's own ascent;
        - the pen starts at the left edge, moved right past any negative left-side bearing.
 
        This is `flow_glyphs` and `pen_start` in `crates/synthpass-gen/src/render.rs`.
-     - **The area.** Drawn that way at k_F, F's ink must lie inside the area from the rectangle's top-left corner to
-       the bottom-right corner of PT Sans's ink.
+     - **The area.** Drawn that way, F's ink must lie inside the area from the rectangle's top-left corner to the
+       bottom-right corner of PT Sans's ink.
      - **PT Sans's ink** is the union over the field's whole domain at 70 %, as the fit check measures it.
-   - **Choosing k_F.**
-     - **Right and bottom.** These edges of F's ink grow with k. k_F is the largest value that keeps both at or inside
-       PT Sans's in every built-in rectangle.
-     - **Top and left.** No k can fix these edges. The placement keeps both inside the rectangle unless a glyph rises
-       above its font's ascent. If F's ink crosses the rectangle's top or left edge in any built-in rectangle, F cannot
-       be admitted, whatever k_F is.
+   - **The scale, per field.** In each field, F is drawn at k × 70 % of the rectangle's height. k is the largest value
+     in (0, 1] that keeps F's ink inside the area over the field's whole domain.
+     - **Right and bottom.** These edges grow with k, and they set it. Bisection finds it.
+     - **Top and left.** The placement keeps both inside the rectangle unless a glyph rises above its font's ascent.
+       One f32 rounding of the scaled size can still move ink by a pixel. So k steps down from the bisection's value
+       until all four edges are inside.
+   - **Computed once, held in a snapshot.**
+     - k depends only on the field's rectangle, its domain and the font.
+     - The generator computes it once per layout and font, and reuses it.
+     - A snapshot test holds the built-in layouts' table, so a change to a font, a layout or the rule shows up in
+       review.
+   - **A field no scale fits.**
+     - If no k in (0, 1] keeps F inside the area in some field, F cannot draw that layout.
+     - Asking for F with that layout is an error that names the field, and `random` picks only among the fonts that
+       can draw it.
+     - Every font fits every field of the built-in layouts.
    - **Why that suffices.**
-     - Outlines are unhinted and scale linearly with size, and so does the placement.
      - The fit check proves that PT Sans's ink lies inside the rectangle.
-     - F's top and left edges are inside the rectangle by the rule, and its right and bottom edges are no further out
+     - At its scale, F's top and left edges are inside the rectangle, and its right and bottom edges are no further out
        than PT Sans's.
-     - A rectangle that fits PT Sans therefore fits every admitted font, up to a pixel of rounding. The test absorbs
-       that rounding by checking every built-in rectangle at its own size.
+     - So every rectangle that fits PT Sans fits F, in every layout, the custom ones included. This holds by
+       construction, at each field's own size.
    - **What stays the same.** The fit check keeps measuring PT Sans only. No layout that validates today stops
      validating, the committed examples included.
-   - **Tests and docs.** A test recomputes every k_F and fails if a pinned value is too large.
-     [LAYOUTS.md](../LAYOUTS.md) says that the other fonts are drawn at or below the PT Sans size.
+   - **Tests and docs.**
+     - A test checks the rule at the computed scale in every built-in field, and holds the snapshot.
+     - [LAYOUTS.md](../LAYOUTS.md) says that the other fonts are drawn at or below the PT Sans size.
 6. **Coverage.** A test checks that every character any field's domain can produce maps to a real glyph, not
    `.notdef`, in every font of the set.
 7. **Recorded in the labels.** When `--viz-font` is given, the labels file records the font's name as `viz_font`.
@@ -115,8 +123,8 @@
 - **Variety on by default.** It would move every golden hash and every synthetic number at once, with no measurement to
   say whether the change helps. Opt-in comes first, and a default change can follow the evidence.
 - **Checking every layout against every font.** This is stricter, but layouts that validate today could start failing,
-  the committed examples among them, and every new font would reopen every layout. The admission rule moves that cost
-  onto the font, and pays it once.
+  the committed examples among them, and every new font would reopen every layout. Instead, validation keeps measuring
+  PT Sans only, and each font fits itself to each field (Decision 5).
 - **The proprietary originals, or URW's Nimbus clones.** The originals cannot be redistributed, and the clones carry
   (A)GPL terms the project does not take.
 - **Subset fonts.** They are smaller, but a subset is a Modified Version under the OFL. Unmodified files keep the
@@ -137,10 +145,10 @@
   - **What to expect.** The MRZ reads should not move, because the MRZ font is unchanged. Any VIZ-dependent figure
     that moves is the finding.
   - **The default.** Whether variety becomes the default is decided on that note.
-- **A wider font.** A font later found wider than PT Sans in some field is not an exception to the rule: its k_F
-  shrinks.
+- **A wider font.** A font later found wider than PT Sans in some field is not an exception to the rule: its scale
+  shrinks in that field.
 
-## Amendment (2026-10-04): the admission rule checks the rectangle's top and left, and PT Sans's right and bottom
+## Amendment 1 (2026-10-04): the admission rule checks the rectangle's top and left, and PT Sans's right and bottom
 
 **What changed.** As first accepted, Decision 5 required F's ink to stay inside PT Sans's ink in every built-in
 rectangle. No k_F satisfies that for the three Liberation fonts:
@@ -158,5 +166,38 @@ This came up while PR 1 was being implemented, on TD1's letter `I`.
 
 **Rejected: drawing every font on PT Sans's baseline.** It fixes the top edge, but a narrow glyph such as `I` then
 fails the same way at the left edge: shrinking F moves its left ink toward the pen, out of PT Sans's.
+
+**Decided by** the owner on 2026-10-04.
+
+## Amendment 2 (2026-10-04): one scale per field, computed by the rule, instead of one per font
+
+**What changed.** After amendment 1, each font had one constant k_F: the smallest value any of its built-in fields
+allowed.
+- **One field set it.** For Liberation Serif and Liberation Mono, that value came from TD1's one-letter document code
+  `I`, whose slab serifs reach further right than PT Sans's bare stem.
+- **The result.** Drawn at that one value everywhere, Mono's capitals came out at 37 % of PT Sans's height and Serif's at
+  62 %.
+- **The risk.** A measurement of the fonts would then have measured small text as much as typefaces.
+
+**What replaced it.** The same rule, applied to each field: every field gets the largest scale that keeps the font
+inside its area. This was measured on PR 1's code over the five built-in layouts, 50 fields per font. PR 2's snapshot
+test holds the exact table.
+
+| Font | k per field: min / median / max | Capital height at that k, median |
+|---|---|---:|
+| Liberation Sans | 0.751 / 0.779 / 0.992 | 89 % |
+| Source Sans 3 | 0.997 / 1.0 / 1.0 | 91 % |
+| Liberation Serif | 0.569 / 0.754 / 0.941 | 82 % |
+| Liberation Mono | 0.346 / 0.969 / 1.0 | 104 % |
+
+Capital height is a share of PT Sans's in the same field. Only the one-letter document codes stay small.
+
+- **The guarantee is unchanged.** It now holds by construction for every layout, rather than up to a pixel of rounding.
+- **The cost.** Computing every built-in layout for all four fonts takes about 2 s, measured. It is paid once per
+  layout and font.
+- **Review.** A snapshot test keeps the built-in table reviewable.
+
+**Rejected: a pinned table of 200 constants.** It would be as reviewable as the snapshot, but it covers only the
+built-in layouts, and a custom layout needs the computation anyway.
 
 **Decided by** the owner on 2026-10-04.
