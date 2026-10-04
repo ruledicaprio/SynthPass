@@ -58,6 +58,10 @@ the constraints and the direction before you open a source file:
   (`crates/synthpass-export`); COCO / YOLO remain deferred on geometry
   `synthpass_gen::Labels` does not yet surface
   ([decisions/ADR-0007](decisions/ADR-0007-dataset-export-format.md)).
+- **[LAYOUTS.md](LAYOUTS.md)** — the layout file format (`crates/synthpass-layout`): every
+  key, the coordinate system, the per-format permitted area, each load-time check and its
+  error, the layout identity, and what a layout cannot express
+  ([decisions/ADR-0022](decisions/ADR-0022-declarative-layout-plugins.md)).
 - **[ADVERSARIAL.md](ADVERSARIAL.md)** — the degraded capture profiles
   (mobile/scanner/worn/border-kiosk) as the adversarial corpus: what each
   simulates, and gate status.
