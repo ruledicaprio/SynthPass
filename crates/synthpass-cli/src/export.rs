@@ -21,13 +21,14 @@ struct ExportArgs {
     count: u64,
     seed: u64,
     document_type: DocTypeChoice,
+    viz_font: Option<synthpass_gen::VizFontChoice>,
     pack_pages: u32,
     out_dir: PathBuf,
 }
 
 fn usage() {
     eprintln!(
-        "Usage: synthpass export --format FMT [--count N] [--seed N] [--document-type TYPE] [--pack-pages N] --out-dir DIR"
+        "Usage: synthpass export --format FMT [--count N] [--seed N] [--document-type TYPE] [--viz-font NAME|random] [--pack-pages N] --out-dir DIR"
     );
     eprintln!("  --format FMT          jsonl | hf");
     eprintln!("  --count N             documents to generate and export (default: 100)");
@@ -36,6 +37,7 @@ fn usage() {
     eprintln!("  --pack-pages N        documents concatenated per JSONL row, joined with <page> (default: 1)");
     eprintln!("  --profile clean       fixed at 'clean' in v1 (accepted for forward-compat)");
     eprintln!("  --out-dir DIR         output directory (required; created if absent)");
+    eprintln!("  --viz-font NAME       pt-sans|liberation-sans|source-sans-3|liberation-serif|liberation-mono|random (default: PT Sans, unrecorded)");
     eprintln!();
     eprintln!("Format and schema: knowledge/EXPORTS.md. Runs without a license; a license");
     eprintln!("lacking the 'export' feature is metered with a warning, not refused.");
@@ -48,6 +50,7 @@ fn parse_args(args: &[String]) -> Result<ExportArgs, String> {
     let mut seed: u64 = 0;
     let mut document_type = DocTypeChoice::One(synthpass_gen::DocumentType::TD3);
     let mut pack_pages: u32 = 1;
+    let mut viz_font = None;
     let mut out_dir: Option<PathBuf> = None;
 
     let mut i = 0;
@@ -84,6 +87,16 @@ fn parse_args(args: &[String]) -> Result<ExportArgs, String> {
                     .ok_or_else(|| "--document-type requires a value".to_string())?;
                 document_type =
                     DocTypeChoice::parse(v).map_err(|e| format!("--document-type: {e}"))?;
+                i += 2;
+            }
+            "--viz-font" => {
+                let value = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--viz-font requires a value".to_string())?;
+                viz_font = Some(
+                    synthpass_gen::VizFontChoice::parse(value)
+                        .map_err(|e| format!("--viz-font: {e}"))?,
+                );
                 i += 2;
             }
             "--pack-pages" => {
@@ -125,6 +138,7 @@ fn parse_args(args: &[String]) -> Result<ExportArgs, String> {
         count,
         seed,
         document_type,
+        viz_font,
         pack_pages,
         out_dir: out_dir.ok_or_else(|| "--out-dir is required".to_string())?,
     })
@@ -146,11 +160,27 @@ pub fn export_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::error
         }
     };
 
+    if let Some(choice) = parsed.viz_font {
+        let formats = match parsed.document_type {
+            DocTypeChoice::One(format) => vec![format],
+            DocTypeChoice::All => DocTypeChoice::ROUND_ROBIN.to_vec(),
+        };
+        for format in formats {
+            if let Err(error) = choice
+                .resolve_for_layout(parsed.seed, synthpass_gen::ValidatedLayout::builtin(format))
+            {
+                eprintln!("❌ {error}");
+                usage();
+                return Ok(crate::Exit::Usage);
+            }
+        }
+    }
     let cfg = ExportConfig {
         format: parsed.format,
         count: parsed.count,
         seed_base: parsed.seed,
         document_type: parsed.document_type,
+        viz_font: parsed.viz_font,
         pack_pages: parsed.pack_pages,
         out_dir: parsed.out_dir,
     };
@@ -181,6 +211,43 @@ pub fn export_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::error
 mod tests {
     use super::*;
     use synthpass_gen::DocumentType;
+
+    #[test]
+    fn viz_font_values_parse_and_unknown_lists_valid_values() {
+        for name in synthpass_gen::fonts::VizFont::ALL
+            .map(synthpass_gen::fonts::VizFont::name)
+            .into_iter()
+            .chain(["random"])
+        {
+            let parsed = parse(&["--format", "jsonl", "--out-dir", "out", "--viz-font", name])
+                .expect("valid font");
+            assert_eq!(
+                parsed.viz_font,
+                Some(synthpass_gen::VizFontChoice::parse(name).expect("known font"))
+            );
+        }
+        let error = parse_err(&[
+            "--format",
+            "jsonl",
+            "--out-dir",
+            "out",
+            "--viz-font",
+            "unknown",
+        ]);
+        for name in synthpass_gen::fonts::VizFont::ALL
+            .map(synthpass_gen::fonts::VizFont::name)
+            .into_iter()
+            .chain(["random"])
+        {
+            assert!(error.contains(name));
+        }
+        assert_eq!(
+            parse(&["--format", "jsonl", "--out-dir", "out"])
+                .expect("default")
+                .viz_font,
+            None
+        );
+    }
 
     fn args(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()

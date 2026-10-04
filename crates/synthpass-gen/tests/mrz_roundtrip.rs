@@ -255,6 +255,7 @@ fn viz_personal_number_agrees_with_the_zone() {
 fn generated_mrz_round_trips_without_personal_number() {
     let cfg = GeneratorConfig {
         seed: 999,
+        viz_font: None,
         document_type: DocumentType::TD3,
         include_personal_number: false,
     };

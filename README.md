@@ -94,6 +94,12 @@ help text changes.*
 | check a license file | `synthpass verify-license path/to/license` |
 | decrypt an encrypted result | `synthpass decrypt result.json.enc` (needs `SYNTHPASS_KEY`) |
 
+Both `generate` and `export` accept `--viz-font pt-sans|liberation-sans|source-sans-3|liberation-serif|liberation-mono|random`.
+This is opt-in: without it, images and labels stay unchanged. `random` deterministically
+picks one embedded VIZ font per seed from a separate stream; labels record the actual font
+as `viz_font`. The MRZ remains OCR-B. See [ADR-0030](knowledge/decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md)
+and the [export schema](knowledge/EXPORTS.md).
+
 From a source checkout, `cargo run -p synthpass-cli -- <command>` does the same. The
 web server's routes are in [architecture/pipeline.md](knowledge/architecture/pipeline.md#front-ends),
 and every environment variable and exit code in
@@ -247,6 +253,6 @@ Full index: [knowledge/README.md](knowledge/README.md).
 [MIT](LICENSE) © Rusmir Skopljak. Bundled third-party licenses are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (the MRZ demo's OCR-B model is ©
 [DoubangoTelecom](https://github.com/DoubangoTelecom/tesseractMRZ), BSD-3-Clause; vendored
-generator fonts OCR-B / PT Sans are OFL 1.1). SynthPass is an open-source project under the
+generator fonts OCR-B, PT Sans, Liberation Sans / Serif / Mono and Source Sans 3 are OFL 1.1). SynthPass is an open-source project under the
 Identra stewardship — trademark and attribution guidance in
 [knowledge/BRANDING.md](knowledge/BRANDING.md).

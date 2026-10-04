@@ -131,6 +131,8 @@ pub struct ExportConfig {
     /// Base seed; document `i` uses `seed_base + i`.
     pub seed_base: u64,
     pub document_type: DocTypeChoice,
+    /// Optional embedded VIZ font choice; absence preserves export bytes.
+    pub viz_font: Option<synthpass_gen::VizFontChoice>,
     /// Documents concatenated per JSONL row, joined with `<page>`. `1` = one
     /// document per row.
     pub pack_pages: u32,
@@ -141,7 +143,7 @@ impl ExportConfig {
     /// The exact `synthpass export …` command line that reproduces this export,
     /// recorded in the manifest.
     pub fn command_line(&self) -> String {
-        format!(
+        let command = format!(
             "synthpass export --format {} --count {} --seed {} --document-type {} --profile clean --pack-pages {} --out-dir {}",
             self.format.as_str(),
             self.count,
@@ -149,7 +151,17 @@ impl ExportConfig {
             self.document_type.as_str(),
             self.pack_pages,
             self.out_dir.display(),
-        )
+        );
+        match self.viz_font {
+            None => command,
+            Some(choice) => format!(
+                "{command} --viz-font {}",
+                match choice {
+                    synthpass_gen::VizFontChoice::Font(font) => font.name(),
+                    synthpass_gen::VizFontChoice::Random => "random",
+                }
+            ),
+        }
     }
 }
 
@@ -214,7 +226,12 @@ pub fn run(cfg: &ExportConfig) -> Result<ExportSummary, ExportError> {
     let docs: Vec<GeneratedDoc> = (0..cfg.count)
         .map(|i| {
             let seed = cfg.seed_base + i;
-            GeneratedDoc::build(seed, cfg.document_type.for_index(i))
+            let mut config = synthpass_gen::GeneratorConfig::with_document_type(
+                seed,
+                cfg.document_type.for_index(i),
+            );
+            config.viz_font = cfg.viz_font;
+            GeneratedDoc::build_with_config(&config)
         })
         .collect();
 

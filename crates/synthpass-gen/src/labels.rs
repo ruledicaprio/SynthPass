@@ -27,6 +27,8 @@ impl FieldLabel {
 /// Ground truth for one generated document.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Labels {
+    /// Actual embedded font name, present only when explicitly requested.
+    pub viz_font: Option<&'static str>,
     pub document_type: FieldLabel,
     pub issuing_country: FieldLabel,
     pub surname: FieldLabel,
@@ -121,6 +123,7 @@ pub fn build_labels_with_layout(passport: &Passport, layout: &ValidatedLayout) -
     );
 
     Labels {
+        viz_font: None,
         document_type: FieldLabel::new(passport.document_type.clone(), page.document_type),
         issuing_country: FieldLabel::new(passport.issuing_country.clone(), page.issuing_country),
         surname: FieldLabel::new(passport.surname.clone(), page.surname),

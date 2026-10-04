@@ -6,8 +6,10 @@
 //! gracefully to placeholder bars — see `render.rs`.
 
 use ab_glyph::FontArc;
+pub(crate) mod scaling;
+pub use scaling::{FieldScale, FieldScales};
 
-/// The closed VIZ font set admitted by ADR-0030. Rendering still uses PT Sans.
+/// The closed VIZ font set admitted by ADR-0030. PT Sans remains the default.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum VizFont {
     #[default]
@@ -28,7 +30,7 @@ impl VizFont {
         Self::LiberationMono,
     ];
 
-    /// Stable name reserved for the future opt-in interface.
+    /// Stable name for the opt-in interface and labels.
     pub const fn name(self) -> &'static str {
         match self {
             Self::PtSans => "pt-sans",
@@ -38,19 +40,6 @@ impl VizFont {
             Self::LiberationMono => "liberation-mono",
         }
     }
-
-    /// Admission factor relative to the renderer's 70%-height scale.
-    pub const fn scale(self) -> f32 {
-        match self {
-            Self::PtSans => 1.0,
-            Self::LiberationSans => 0.7510,
-            Self::SourceSans3 => 0.9965,
-            Self::LiberationSerif => 0.5690,
-            // Avoid a one-pixel floating-point top escape for Cyrillic Й.
-            // Within 0.000102 of the bisection limit; tested at every builtin.
-            Self::LiberationMono => 0.34634,
-        }
-    }
 }
 
 #[cfg(feature = "embedded-fonts")]
@@ -58,24 +47,54 @@ static OCR_B_BYTES: &[u8] = include_bytes!("../fonts/ocr-b.ttf");
 #[cfg(feature = "embedded-fonts")]
 static SANS_BYTES: &[u8] = include_bytes!("../fonts/sans.ttf");
 
-/// Embedded fonts. The renderer still uses the unchanged PT Sans/OCR-B pair.
+/// Embedded fonts. Default rendering uses the unchanged PT Sans/OCR-B pair.
 pub struct Fonts {
     /// Monospaced OCR-B-style font for the MRZ band.
     pub mrz: FontArc,
     /// Proportional sans font for the human-readable VIZ fields.
     pub viz: FontArc,
-    alternatives: [FontArc; 4],
 }
 
 impl Fonts {
     /// Access an embedded VIZ family without changing the default rendering font.
-    pub fn viz_font(&self, font: VizFont) -> &FontArc {
-        match font {
-            VizFont::PtSans => &self.viz,
-            VizFont::LiberationSans => &self.alternatives[0],
-            VizFont::SourceSans3 => &self.alternatives[1],
-            VizFont::LiberationSerif => &self.alternatives[2],
-            VizFont::LiberationMono => &self.alternatives[3],
+    pub fn viz_font(&self, font: VizFont) -> Result<&FontArc, FontError> {
+        if font == VizFont::PtSans {
+            return Ok(&self.viz);
+        }
+        #[cfg(feature = "embedded-fonts")]
+        {
+            use std::sync::OnceLock;
+            static LIBERATION_SANS: OnceLock<Result<FontArc, FontError>> = OnceLock::new();
+            static SOURCE_SANS: OnceLock<Result<FontArc, FontError>> = OnceLock::new();
+            static LIBERATION_SERIF: OnceLock<Result<FontArc, FontError>> = OnceLock::new();
+            static LIBERATION_MONO: OnceLock<Result<FontArc, FontError>> = OnceLock::new();
+            let (cache, bytes): (&OnceLock<Result<FontArc, FontError>>, &'static [u8]) = match font
+            {
+                VizFont::PtSans => return Ok(&self.viz),
+                VizFont::LiberationSans => (
+                    &LIBERATION_SANS,
+                    include_bytes!("../fonts/liberation-sans.ttf"),
+                ),
+                VizFont::SourceSans3 => {
+                    (&SOURCE_SANS, include_bytes!("../fonts/source-sans-3.ttf"))
+                }
+                VizFont::LiberationSerif => (
+                    &LIBERATION_SERIF,
+                    include_bytes!("../fonts/liberation-serif.ttf"),
+                ),
+                VizFont::LiberationMono => (
+                    &LIBERATION_MONO,
+                    include_bytes!("../fonts/liberation-mono.ttf"),
+                ),
+            };
+            cache
+                .get_or_init(|| FontArc::try_from_slice(bytes).map_err(|_| FontError::NotEmbedded))
+                .as_ref()
+                .map_err(|error| *error)
+        }
+        #[cfg(not(feature = "embedded-fonts"))]
+        {
+            Err(FontError::NotEmbedded)
         }
     }
 }
@@ -107,20 +126,7 @@ pub fn load_fonts() -> Result<Fonts, FontError> {
     {
         let mrz = FontArc::try_from_slice(OCR_B_BYTES).map_err(|_| FontError::NotEmbedded)?;
         let viz = FontArc::try_from_slice(SANS_BYTES).map_err(|_| FontError::NotEmbedded)?;
-        let parse = |bytes: &'static [u8]| {
-            FontArc::try_from_slice(bytes).map_err(|_| FontError::NotEmbedded)
-        };
-        let alternatives = [
-            parse(include_bytes!("../fonts/liberation-sans.ttf"))?,
-            parse(include_bytes!("../fonts/source-sans-3.ttf"))?,
-            parse(include_bytes!("../fonts/liberation-serif.ttf"))?,
-            parse(include_bytes!("../fonts/liberation-mono.ttf"))?,
-        ];
-        Ok(Fonts {
-            mrz,
-            viz,
-            alternatives,
-        })
+        Ok(Fonts { mrz, viz })
     }
     #[cfg(not(feature = "embedded-fonts"))]
     {
@@ -146,9 +152,12 @@ mod tests {
     #[test]
     #[cfg(feature = "embedded-fonts")]
     fn embedded_fonts_parse_successfully() {
-        // With the feature on, both vendored OFL fonts must actually parse —
+        // With the feature on, the vendored OFL fonts must actually parse —
         // a corrupt or mismatched TTF would silently fall back to placeholder
         // bars instead of failing loudly, which is worse than a build error.
-        assert!(load_fonts().is_ok());
+        let fonts = load_fonts().expect("primary embedded fonts");
+        for font in VizFont::ALL {
+            assert!(fonts.viz_font(font).is_ok(), "{}", font.name());
+        }
     }
 }

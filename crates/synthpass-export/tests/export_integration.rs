@@ -23,6 +23,7 @@ fn cfg(format: ExportFormat, out: PathBuf) -> ExportConfig {
         count: 6,
         seed_base: 100,
         document_type: DocTypeChoice::One(DocumentType::TD3),
+        viz_font: None,
         pack_pages: 1,
         out_dir: out,
     }
@@ -124,6 +125,7 @@ fn document_type_all_round_robins_and_packs() {
         count: 10,
         seed_base: 0,
         document_type: DocTypeChoice::All,
+        viz_font: None,
         pack_pages: 3,
         out_dir: out.clone(),
     };

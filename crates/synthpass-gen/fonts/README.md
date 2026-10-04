@@ -34,10 +34,11 @@ The fonts' OFL licenses are also summarized in the root [`THIRD_PARTY_NOTICES.md
 ## Release provenance and byte pins
 
 The four additional VIZ Regular files are unmodified upstream releases, not subsets.
-They are accessible through `Fonts::viz_font`; rendering still uses PT Sans. No CLI,
-configuration, label, golden hash or synthetic baseline changes in ADR-0030 PR 1.
+They are accessible through `Fonts::viz_font`. PT Sans is the default VIZ font;
+`--viz-font` selects an alternative embedded VIZ font or `random`. OCR-B remains
+the MRZ font, and the default golden hashes and synthetic baselines are unchanged.
 Admission follows [ADR-0030 Decision 5](../../../knowledge/decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md),
-as amended in [#704](https://github.com/ruledicaprio/SynthPass/pull/704).
+as amended in [#708](https://github.com/ruledicaprio/SynthPass/pull/708).
 
 | File | Family / version | Release asset or original source | File SHA-256 | Bytes | Licence |
 |---|---|---|---|---:|---|
@@ -60,20 +61,27 @@ Release archive SHA-256s (shared by each corresponding file's entry above):
 The four additional files total 1,554,992 bytes. Each family is embedded only under
 `embedded-fonts`; no runtime font files or network downloads are used.
 
-## Admission factors
+## Per-field admission scales
 
-Factors multiply 70% of each field rectangle's height. The renderer is not yet
-using the alternatives. Tests recompute the right/bottom maximum by bisection
-for all 50 built-in text fields, and check top/left against the rectangle.
+ADR-0030 Decision 5, as amended in #708, computes one factor per field, rather
+than one pin per font. The factor multiplies 70% of that rectangle's height.
+Fixed-step bisection bounds right/bottom by PT Sans's domain ink; bounded fixed
+step-down checks literal top/left pixel rounding. PT Sans remains exactly 1.0.
+The renderer reuses the computed f32 pixel size, cached per validated layout and
+font; a refused field names the font, format and field, and `random` filters it out.
 
-| Font | Pinned k_F | Binding format | Field | Edge |
-|---|---:|---|---|---|
-| PT Sans | 1.00000 | all | scale cap | n/a |
-| Liberation Sans | 0.75100 | TD1 | given names | right |
-| Source Sans 3 | 0.99650 | TD2 | surname | bottom |
-| Liberation Serif | 0.56900 | TD1 | document type | right |
-| Liberation Mono | 0.34634 | TD1 | document type | right |
+The 250-row snapshot is in `../tests/fixtures/viz_field_scales.tsv` relative to
+the crate source tree (`crates/synthpass-gen/tests/fixtures/viz_field_scales.tsv`).
 
-The tiny Mono margin also avoids outward pixel rounding at the top of Cyrillic
-`Й` (whose outline reaches exactly the font's ascent). The test checks the literal
-pixel box at every built-in size: no tolerance or baseline change is applied.
+| Font | Minimum k | Median k | Maximum k |
+|---|---:|---:|---:|
+| PT Sans | 1.000000 | 1.000000 | 1.000000 |
+| Liberation Sans | 0.751090 | 0.779110 | 0.991678 |
+| Source Sans 3 | 0.996573 | 1.000000 | 1.000000 |
+| Liberation Serif | 0.569087 | 0.754073 | 0.940534 |
+| Liberation Mono | 0.346441 | 0.969438 | 1.000000 |
+
+Only the one-letter document code constrains Mono and Serif to small factors.
+The test checks all four literal edges and that k + 0.001 fails right or bottom
+unless capped at 1. No tolerance or baseline change is applied. Alternative
+faces are parsed lazily through named `OnceLock` caches, independent of PT Sans.

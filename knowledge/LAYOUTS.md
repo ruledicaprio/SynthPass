@@ -138,7 +138,7 @@ Rule 1 runs per rectangle in the order of section 2 (portrait first), all four c
 rectangle before the next. Rule 2 runs over all pairs, and rule 3 over the text fields.
 
 **Text fit.** The generator knows the widest value each field can hold. The loader shapes that
-value with the embedded font at the size the renderer uses, places it at the rectangle's left edge
+value with embedded PT Sans at the size the default renderer uses, places it at the rectangle's left edge
 and requires all its ink to land inside the rectangle on all four sides. This is what keeps the exported labels
 accurate by construction. **Text is drawn at 70 % of the rectangle's height**: a 34 px row draws
 23.8 px text, a 28 px row 19.6 px. So height and width trade off: making a rectangle taller
@@ -146,6 +146,17 @@ makes its text larger, and a larger text needs more width. A built-in's width is
 that built-in's height only; at a greater height it may not. Narrowing a rectangle is the usual
 way to fail, and the message gives the ink span to widen it by. Widening the generator's value pools
 can make a previously accepted layout fail this check later, and it will say which field.
+
+The opt-in VIZ fonts in [ADR-0030](decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md)
+are drawn at a per-field scale at or below the PT Sans size (0 < k ≤ 1), using their own
+ascent and left-side bearing. ADR-0030 Decision 5, as amended in #708, computes the largest
+scale inside the rectangle's top-left and PT Sans's domain-ink bottom-right, stepping down
+for f32 edge rounding. Results are cached once per validated layout and font, including
+refusals. A fixed font that cannot draw a field is refused with the font, format and field
+in the error; `random` picks only among fonts admitted by that layout. The built-in table
+is held in `crates/synthpass-gen/tests/fixtures/viz_field_scales.tsv`.
+The fit checker continues measuring PT Sans only; MRZ text remains OCR-B. Fonts cannot be
+selected by a layout file.
 
 ## 5. What a layout cannot express
 

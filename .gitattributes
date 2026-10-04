@@ -30,3 +30,6 @@ crates/synthpass-bench/tests/fixtures/mrz_wire_golden.jsonl text eol=lf
 # output, which ends lines with LF; under core.autocrlf the checkout would have CRLF. Same
 # class of file, and same reason, as the pins above.
 crates/synthpass-layout/layouts/*.json text eol=lf
+# Font snapshot/golden tests embed these bytes and compare LF-joined rows.
+crates/synthpass-gen/tests/fixtures/golden_viz_liberation_mono.tsv text eol=lf
+crates/synthpass-gen/tests/fixtures/viz_field_scales.tsv text eol=lf

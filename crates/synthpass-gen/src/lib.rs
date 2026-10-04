@@ -62,7 +62,7 @@ pub mod render;
 
 pub use labels::{FieldLabel, Labels, OccludedKind, OccludedSpan};
 pub use layout::{LayoutError, LayoutSpec, ValidatedLayout};
-pub use model::{DocumentType, GeneratorConfig, Passport, Sex};
+pub use model::{DocumentType, GeneratorConfig, Passport, Sex, VizFontChoice};
 pub use render::{RedactSpan, RedactStyle, RenderOptions};
 
 /// Generate a synthetic document data page: a fictional identity drawn
@@ -113,6 +113,14 @@ pub fn generate_with_layout(
     }
     let labels = labels::build_labels_with_layout(passport, layout);
     let mut labels = labels;
+    labels.viz_font = config
+        .viz_font
+        .map(|choice| {
+            choice
+                .resolve_for_layout(config.seed, layout)
+                .map(|font| font.name())
+        })
+        .transpose()?;
     if let Some(span) = options.redact {
         labels.occluded.push(OccludedSpan {
             line: span.line(),

@@ -1,11 +1,10 @@
-//! ADR-0030 Decision 5, as amended in #704. Share the validator's domain bound
-//! and the renderer's placement, rather than approximating glyph advances.
+//! ADR-0030 Decision 5, as amended in #708.
 use super::{load_fonts, VizFont};
 use crate::data::{viz_domain, VizDomain};
 use crate::layout::{widest_ink_at_scale, LayoutField, ValidatedLayout};
-use crate::model::DocumentType;
+use crate::model::{DocumentType, VizFontChoice};
 use crate::render::viz_px_scale;
-use ab_glyph::{Font, FontArc};
+use ab_glyph::Font;
 
 const FORMATS: [DocumentType; 5] = [
     DocumentType::TD1,
@@ -15,128 +14,187 @@ const FORMATS: [DocumentType; 5] = [
     DocumentType::MrvB,
 ];
 
-fn characters(domain: &VizDomain) -> Vec<char> {
-    match domain {
-        VizDomain::Pool(values) => values.iter().flat_map(|s| s.chars()).collect(),
-        VizDomain::Positional(positions) => positions.iter().flatten().copied().collect(),
-    }
-}
-
-fn assert_coverage(font: &FontArc, domain: &VizDomain, context: &str) {
-    for c in characters(domain) {
-        assert_ne!(
-            font.glyph_id(c).0,
-            0,
-            "{context}: uncovered U+{:04X}",
-            c as u32
-        );
-    }
-}
-
 #[test]
 fn all_viz_fonts_cover_every_domain() {
-    let fonts = load_fonts().expect("all embedded fonts load");
+    let fonts = load_fonts().expect("embedded fonts");
     for format in FORMATS {
         for field in LayoutField::ALL {
             let Some(domain) = viz_domain(format, field) else {
                 continue;
             };
-            for family in VizFont::ALL {
-                assert_coverage(
-                    fonts.viz_font(family),
-                    &domain,
-                    &format!("{} {format:?} {field:?}", family.name()),
-                );
+            let characters: Vec<char> = match &domain {
+                VizDomain::Pool(values) => values.iter().flat_map(|s| s.chars()).collect(),
+                VizDomain::Positional(positions) => positions.iter().flatten().copied().collect(),
+            };
+            for font in VizFont::ALL {
+                for &c in &characters {
+                    assert_ne!(
+                        fonts.viz_font(font).expect("embedded font").glyph_id(c).0,
+                        0,
+                        "{} {format:?} {field}: U+{:04X}",
+                        font.name(),
+                        c as u32
+                    );
+                }
             }
         }
     }
 }
 
 #[test]
-fn pinned_viz_scales_are_admissible_and_maximal() {
-    let fonts = load_fonts().expect("all embedded fonts load");
-    let mut results = Vec::new();
-    for family in VizFont::ALL {
-        let font = fonts.viz_font(family);
-        let mut maximum = 1.0f32;
-        let mut binding = "cap at 1.0".to_string();
-        for format in FORMATS {
-            let layout = ValidatedLayout::builtin(format);
+fn computed_field_scales_satisfy_the_rule_and_are_maximal() {
+    let fonts = load_fonts().expect("embedded fonts");
+    for format in FORMATS {
+        let layout = ValidatedLayout::builtin(format);
+        for font in VizFont::ALL {
+            let scales = layout.viz_scales(font).expect("built-in admission");
+            assert!(std::ptr::eq(
+                scales,
+                layout.viz_scales(font).expect("cached")
+            ));
             for field in LayoutField::ALL {
                 let Some(domain) = viz_domain(format, field) else {
                     continue;
                 };
                 let rect = layout.spec().rect(field);
-                let px = viz_px_scale(rect);
-                let Some(reference) = widest_ink_at_scale(&fonts.viz, &domain, rect, px) else {
-                    continue;
-                };
-                let ink_at =
-                    |k| widest_ink_at_scale(font, &domain, rect, k * px).expect("domain has ink");
-                let pinned = ink_at(family.scale());
-                results.push((
-                    family,
-                    pinned.min_x >= rect.x as i32 && pinned.min_y >= rect.y as i32,
-                    format!("{format:?} {field:?}: top/left failure {pinned:?}, rect {rect:?}"),
-                ));
-                for (edge, bound) in [("right", reference.max_x), ("bottom", reference.max_y)] {
-                    let extent = |k| {
-                        let ink = ink_at(k);
-                        if edge == "right" {
-                            ink.max_x
-                        } else {
-                            ink.max_y
-                        }
-                    };
-                    let mut low = 0.0001f32;
-                    let mut high = 1.0f32;
-                    assert!(extent(low) <= bound, "no positive admissible scale");
-                    if extent(high) <= bound {
-                        continue;
-                    }
-                    for _ in 0..24 {
-                        let mid = (low + high) / 2.0;
-                        if extent(mid) <= bound {
-                            low = mid;
-                        } else {
-                            high = mid;
-                        }
-                    }
-                    if low < maximum {
-                        maximum = low;
-                        binding = format!("{format:?} {field:?} {edge}");
-                    }
+                let scale = scales.field(field);
+                let reference = widest_ink_at_scale(&fonts.viz, &domain, rect, viz_px_scale(rect))
+                    .expect("reference ink");
+                let ink = widest_ink_at_scale(
+                    fonts.viz_font(font).expect("embedded font"),
+                    &domain,
+                    rect,
+                    scale.px,
+                )
+                .expect("font ink");
+                assert!(scale.k > 0.0 && scale.k <= 1.0);
+                assert!(
+                    ink.min_x >= rect.x as i32
+                        && ink.min_y >= rect.y as i32
+                        && ink.max_x <= reference.max_x
+                        && ink.max_y <= reference.max_y,
+                    "{} {format:?} {field}: k={} ink={ink:?} ref={reference:?}",
+                    font.name(),
+                    scale.k
+                );
+                if scale.k < 1.0 {
+                    let larger = widest_ink_at_scale(
+                        fonts.viz_font(font).expect("embedded font"),
+                        &domain,
+                        rect,
+                        (scale.k + 0.001) * viz_px_scale(rect),
+                    )
+                    .expect("larger ink");
+                    assert!(
+                        larger.max_x > reference.max_x || larger.max_y > reference.max_y,
+                        "{} {format:?} {field}: k={} is not maximal",
+                        font.name(),
+                        scale.k
+                    );
                 }
-                let ink = ink_at(family.scale());
-                // Record violations after measuring all families, so a diagnostic
-                // run prints the whole table rather than just its first failure.
-                results.push((
-                    family,
-                    ink.max_x <= reference.max_x && ink.max_y <= reference.max_y,
-                    format!("{format:?} {field:?}: {ink:?}, PT {reference:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn per_field_scale_snapshot_is_exact() {
+    let mut rows = Vec::new();
+    for format in FORMATS {
+        for field in LayoutField::ALL
+            .into_iter()
+            .filter(|field| field.is_visual_zone())
+        {
+            for font in VizFont::ALL {
+                let scale = ValidatedLayout::builtin(format)
+                    .viz_scales(font)
+                    .expect("built-in admission")
+                    .field(field);
+                rows.push(format!(
+                    "{}\t{}\t{}\t{:.6}\t{}",
+                    format.as_str(),
+                    field.name(),
+                    font.name(),
+                    scale.k,
+                    scale.binding
                 ));
             }
         }
+    }
+    for font in VizFont::ALL {
+        let mut values: Vec<_> = FORMATS
+            .into_iter()
+            .flat_map(|format| {
+                LayoutField::ALL
+                    .into_iter()
+                    .filter(|field| field.is_visual_zone())
+                    .map(move |field| {
+                        ValidatedLayout::builtin(format)
+                            .viz_scales(font)
+                            .expect("admitted")
+                            .field(field)
+                            .k
+                    })
+            })
+            .collect();
+        values.sort_by(f32::total_cmp);
         println!(
-            "{} pinned {:.6}, maximum {:.6}, binding {binding}",
-            family.name(),
-            family.scale(),
-            maximum
-        );
-        results.push((
-            family,
-            family.scale() > 0.0 && family.scale() <= maximum && maximum - family.scale() <= 0.01,
-            format!("maximum {maximum}, binding {binding}"),
-        ));
-    }
-    for (family, passes, context) in results {
-        assert!(
-            passes,
-            "{} pinned {}: {context}",
-            family.name(),
-            family.scale()
+            "SUMMARY {} {:.6} {:.6} {:.6}",
+            font.name(),
+            values[0],
+            (values[24] + values[25]) / 2.0,
+            values[49]
         );
     }
+    println!("SNAPSHOT_BEGIN\n{}\nSNAPSHOT_END", rows.join("\n"));
+    assert_eq!(
+        rows.join("\n"),
+        include_str!("../../tests/fixtures/viz_field_scales.tsv").trim_end()
+    );
+}
+
+#[test]
+fn refusal_names_the_field_and_random_filters_it_out() {
+    // Inject a single empty-ink domain: the reference area is undefined.
+    // No production domain, font bytes or layout-validation invariant is changed.
+    let layout = ValidatedLayout::builtin(DocumentType::TD2);
+    let admits = |font| {
+        super::scaling::compute_layout_with_domains(layout, font, |format, field| {
+            if font == VizFont::LiberationMono && field == LayoutField::GivenNames {
+                Some(VizDomain::Pool(vec![""]))
+            } else {
+                viz_domain(format, field)
+            }
+        })
+        .map(|_| ())
+    };
+    let error = VizFontChoice::Font(VizFont::LiberationMono)
+        .resolve_with(0, admits)
+        .expect_err("refused domain");
+    assert!(
+        error.contains("liberation-mono") && error.contains("TD2") && error.contains("given_names"),
+        "{error}"
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    let results: Vec<_> = VizFont::ALL
+        .into_iter()
+        .map(|font| (font, admits(font)))
+        .collect();
+    for seed in 0..200 {
+        let font = VizFontChoice::Random
+            .resolve_with(seed, |font| {
+                results
+                    .iter()
+                    .find(|(candidate, _)| *candidate == font)
+                    .expect("closed set")
+                    .1
+                    .clone()
+            })
+            .expect("remaining fonts");
+        assert_ne!(font, VizFont::LiberationMono);
+        seen.insert(font.name());
+    }
+    assert_eq!(seen.len(), 4);
 }
 
 #[test]
@@ -158,10 +216,7 @@ fn font_sha256_matches_provenance() {
             .collect();
         assert_eq!(digest, columns[4].trim_matches('`'), "{file}");
         assert_eq!(bytes.len().to_string(), columns[5], "{file} size");
-        assert!(
-            checked.insert(file.to_owned()),
-            "duplicate provenance entry"
-        );
+        assert!(checked.insert(file.to_owned()), "duplicate provenance");
     }
     let files: std::collections::BTreeSet<_> = std::fs::read_dir(directory)
         .expect("fonts directory")

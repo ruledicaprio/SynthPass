@@ -383,14 +383,20 @@ fn draw_mrz_glyphs(
     }
 }
 
-fn draw_text_field(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fonts>) {
+fn draw_text_field(
+    img: &mut RgbImage,
+    rect: Rect,
+    text: &str,
+    fonts: Option<&ab_glyph::FontArc>,
+    px: f32,
+) {
     #[cfg(feature = "embedded-fonts")]
-    if let Some(fonts) = fonts {
-        draw_glyph_text(img, &fonts.viz, text, rect, viz_px_scale(rect));
+    if let Some(font) = fonts {
+        draw_glyph_text(img, font, text, rect, px);
         return;
     }
     #[cfg(not(feature = "embedded-fonts"))]
-    let _ = (fonts, text);
+    let _ = (fonts, text, px);
     draw_placeholder_bar(img, rect);
 }
 
@@ -698,18 +704,35 @@ pub fn render_with_layout(
 
     let fonts: Option<Fonts> = load_fonts().ok();
     let fonts_ref = fonts.as_ref();
+    let viz_font = match labels.viz_font {
+        Some(name) => crate::fonts::VizFont::ALL
+            .into_iter()
+            .find(|font| font.name() == name)
+            .ok_or_else(|| "labels contain an unknown VIZ font".to_string())?,
+        None => crate::fonts::VizFont::PtSans,
+    };
+    let scales = layout.viz_scales(viz_font)?;
+    let viz_fonts = fonts_ref
+        .map(|fonts| fonts.viz_font(viz_font))
+        .transpose()
+        .map_err(|error| error.to_string())?;
+    let mut draw_viz = |field: layout::LayoutField, text: &str| {
+        draw_text_field(
+            &mut img,
+            layout.spec().rect(field),
+            text,
+            viz_fonts,
+            scales.field(field).px,
+        );
+    };
 
-    draw_text_field(
-        &mut img,
-        page.document_type,
+    draw_viz(
+        layout::LayoutField::DocumentType,
         &labels.document_type.value,
-        fonts_ref,
     );
-    draw_text_field(
-        &mut img,
-        page.issuing_country,
+    draw_viz(
+        layout::LayoutField::IssuingCountry,
         &labels.issuing_country.value,
-        fonts_ref,
     );
     // A real passport prints the name in its native script; the MRZ band
     // (drawn below from `labels.mrz_lines`) carries the Latin transliteration.
@@ -723,35 +746,24 @@ pub fn render_with_layout(
         .given_names_native
         .as_ref()
         .map_or(labels.given_names.value.as_str(), |fl| fl.value.as_str());
-    draw_text_field(&mut img, page.surname, surname_viz, fonts_ref);
-    draw_text_field(&mut img, page.given_names, given_names_viz, fonts_ref);
-    draw_text_field(
-        &mut img,
-        page.document_number,
+    draw_viz(layout::LayoutField::Surname, surname_viz);
+    draw_viz(layout::LayoutField::GivenNames, given_names_viz);
+    draw_viz(
+        layout::LayoutField::DocumentNumber,
         &labels.document_number.value,
-        fonts_ref,
     );
-    draw_text_field(
-        &mut img,
-        page.nationality,
-        &labels.nationality.value,
-        fonts_ref,
-    );
-    draw_text_field(
-        &mut img,
-        page.date_of_birth,
+    draw_viz(layout::LayoutField::Nationality, &labels.nationality.value);
+    draw_viz(
+        layout::LayoutField::DateOfBirth,
         &labels.date_of_birth.value,
-        fonts_ref,
     );
-    draw_text_field(&mut img, page.sex, &labels.sex.value, fonts_ref);
-    draw_text_field(
-        &mut img,
-        page.date_of_expiry,
+    draw_viz(layout::LayoutField::Sex, &labels.sex.value);
+    draw_viz(
+        layout::LayoutField::DateOfExpiry,
         &labels.date_of_expiry.value,
-        fonts_ref,
     );
     if let Some(pn) = &labels.personal_number {
-        draw_text_field(&mut img, page.personal_number, &pn.value, fonts_ref);
+        draw_viz(layout::LayoutField::PersonalNumber, &pn.value);
     }
 
     // Draw MRZ lines from this format's own PageLayout.
