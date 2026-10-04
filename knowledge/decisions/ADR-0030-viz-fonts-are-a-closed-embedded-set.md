@@ -1,6 +1,6 @@
-# ADR-0030 — The VIZ draws from a closed set of embedded open-licence fonts, opt-in, and no font out-inks PT Sans
+# ADR-0030 — The VIZ draws from a closed set of embedded open-licence fonts, opt-in, and no font needs more room than PT Sans
 
-**Status:** Accepted (owner, 2026-10-04)
+**Status:** Accepted (owner, 2026-10-04). Decision 5 was amended the same day; see the amendment at the end.
 **Date:** 2026-10-04
 
 ## Context
@@ -70,15 +70,32 @@
    - A document under `random` therefore has the same names, dates, numbers and layout as its default render; only
      the glyphs differ.
    - The same seed always gives the same font.
-5. **No font may out-ink PT Sans (the admission rule).**
+5. **No font may need more room than PT Sans (the admission rule).** Amended on 2026-10-04. The amendment at the end
+   of this ADR records the first version and why it changed.
    - **The scale.** Every other font F has a constant k_F in (0, 1], pinned in code. F is drawn at k_F × 70 % of the
      rectangle's height.
-   - **Choosing k_F.** It is the largest value for which F's ink stays inside PT Sans's ink in every built-in
-     rectangle, comparing the widest ink each font produces over the field's whole domain. Both are placed exactly as
-     the renderer places them.
-   - **Why that suffices.** Outlines are unhinted and scale linearly with size. A rectangle that fits PT Sans therefore
-     fits every admitted font, up to a pixel of rounding, which the test absorbs by checking every built-in rectangle
-     at its own size.
+   - **Where F may ink.**
+     - **Placement.** The renderer anchors every font at the rectangle's top-left corner:
+       - the baseline sits at the rectangle's top plus the font's own ascent;
+       - the pen starts at the left edge, moved right past any negative left-side bearing.
+
+       This is `flow_glyphs` and `pen_start` in `crates/synthpass-gen/src/render.rs`.
+     - **The area.** Drawn that way at k_F, F's ink must lie inside the area from the rectangle's top-left corner to
+       the bottom-right corner of PT Sans's ink.
+     - **PT Sans's ink** is the union over the field's whole domain at 70 %, as the fit check measures it.
+   - **Choosing k_F.**
+     - **Right and bottom.** These edges of F's ink grow with k. k_F is the largest value that keeps both at or inside
+       PT Sans's in every built-in rectangle.
+     - **Top and left.** No k can fix these edges. The placement keeps both inside the rectangle unless a glyph rises
+       above its font's ascent. If F's ink crosses the rectangle's top or left edge in any built-in rectangle, F cannot
+       be admitted, whatever k_F is.
+   - **Why that suffices.**
+     - Outlines are unhinted and scale linearly with size, and so does the placement.
+     - The fit check proves that PT Sans's ink lies inside the rectangle.
+     - F's top and left edges are inside the rectangle by the rule, and its right and bottom edges are no further out
+       than PT Sans's.
+     - A rectangle that fits PT Sans therefore fits every admitted font, up to a pixel of rounding. The test absorbs
+       that rounding by checking every built-in rectangle at its own size.
    - **What stays the same.** The fit check keeps measuring PT Sans only. No layout that validates today stops
      validating, the committed examples included.
    - **Tests and docs.** A test recomputes every k_F and fails if a pinned value is too large.
@@ -122,3 +139,24 @@
   - **The default.** Whether variety becomes the default is decided on that note.
 - **A wider font.** A font later found wider than PT Sans in some field is not an exception to the rule: its k_F
   shrinks.
+
+## Amendment (2026-10-04): the admission rule checks the rectangle's top and left, and PT Sans's right and bottom
+
+**What changed.** As first accepted, Decision 5 required F's ink to stay inside PT Sans's ink in every built-in
+rectangle. No k_F satisfies that for the three Liberation fonts:
+- The renderer hangs each font from the rectangle's top by its own ascent.
+- PT Sans's ascent is taller, so Liberation's capitals sit higher in the rectangle than PT Sans's do.
+- Shrinking F raises its baseline with it, so its top moves further out, not in.
+
+This came up while PR 1 was being implemented, on TD1's letter `I`.
+
+**What replaced it.** The rule now protects what the fit check protects: the rectangle.
+- **Top and left.** The renderer anchors these two edges to the rectangle, so they are checked against the rectangle.
+- **Right and bottom.** These two edges grow with k, and they may not pass PT Sans's.
+- **The guarantee is unchanged.** A rectangle that fits PT Sans fits every admitted font.
+- **The title changes with the rule**, from "no font out-inks PT Sans" to "no font needs more room than PT Sans".
+
+**Rejected: drawing every font on PT Sans's baseline.** It fixes the top edge, but a narrow glyph such as `I` then
+fails the same way at the left edge: shrinking F moves its left ink toward the pen, out of PT Sans's.
+
+**Decided by** the owner on 2026-10-04.
