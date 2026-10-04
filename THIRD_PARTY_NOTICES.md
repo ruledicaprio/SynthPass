@@ -81,8 +81,11 @@ Six fonts are vendored to render real glyphs when `synthpass-gen` is built with
 The four additional Regular VIZ fonts are Liberation Sans, Serif and Mono 2.1.5,
 and Source Sans 3.052R. They remain unmodified, with provenance and hashes in the
 [fonts README](crates/synthpass-gen/fonts/README.md). `embedded-fonts` is on by
-default; without it, none of these fonts is embedded. Rendering still uses PT Sans
-for VIZ and OCR-B for MRZ.
+default; without it, none of these fonts is embedded. PT Sans is the default VIZ
+font; `--viz-font` selects the other embedded VIZ fonts or `random`, following
+[ADR-0030 Decision 5](knowledge/decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md),
+as amended in [#708](https://github.com/ruledicaprio/SynthPass/pull/708).
+OCR-B remains the MRZ font.
 
 ---
 

@@ -253,6 +253,6 @@ Full index: [knowledge/README.md](knowledge/README.md).
 [MIT](LICENSE) © Rusmir Skopljak. Bundled third-party licenses are in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) (the MRZ demo's OCR-B model is ©
 [DoubangoTelecom](https://github.com/DoubangoTelecom/tesseractMRZ), BSD-3-Clause; vendored
-generator fonts OCR-B / PT Sans are OFL 1.1). SynthPass is an open-source project under the
+generator fonts OCR-B, PT Sans, Liberation Sans / Serif / Mono and Source Sans 3 are OFL 1.1). SynthPass is an open-source project under the
 Identra stewardship — trademark and attribution guidance in
 [knowledge/BRANDING.md](knowledge/BRANDING.md).

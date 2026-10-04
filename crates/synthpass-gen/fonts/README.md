@@ -34,10 +34,11 @@ The fonts' OFL licenses are also summarized in the root [`THIRD_PARTY_NOTICES.md
 ## Release provenance and byte pins
 
 The four additional VIZ Regular files are unmodified upstream releases, not subsets.
-They are accessible through `Fonts::viz_font`; rendering still uses PT Sans. No CLI,
-configuration, label, golden hash or synthetic baseline changes in ADR-0030 PR 1.
+They are accessible through `Fonts::viz_font`. PT Sans is the default VIZ font;
+`--viz-font` selects an alternative embedded VIZ font or `random`. OCR-B remains
+the MRZ font, and the default golden hashes and synthetic baselines are unchanged.
 Admission follows [ADR-0030 Decision 5](../../../knowledge/decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md),
-as amended in [#704](https://github.com/ruledicaprio/SynthPass/pull/704).
+as amended in [#708](https://github.com/ruledicaprio/SynthPass/pull/708).
 
 | File | Family / version | Release asset or original source | File SHA-256 | Bytes | Licence |
 |---|---|---|---|---:|---|
