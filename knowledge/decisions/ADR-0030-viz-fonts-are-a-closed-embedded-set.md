@@ -1,6 +1,6 @@
 # ADR-0030 — The VIZ draws from a closed set of embedded open-licence fonts, opt-in, and no font out-inks PT Sans
 
-**Status:** Proposed
+**Status:** Accepted (owner, 2026-10-04)
 **Date:** 2026-10-04
 
 ## Context
