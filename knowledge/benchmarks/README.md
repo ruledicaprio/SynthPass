@@ -273,13 +273,20 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
       `ocr_env`, and `max_passes` and `max_seconds` all match. Each of those changes what a number
       means: a re-rendered generator draws different documents, a new model or arm reads the same
       documents differently, and a different retry budget cuts different documents off. A pool is
-      per format, because the fingerprint is. A change of any key starts a new pool, so a pool's
-      interval is never over two measured populations.
+      per format, because the fingerprint is. A pool is a run of consecutive nights with one key:
+      when the key changes the pool ends, and a key that returns later starts a new pool, so
+      nothing is added across a change and a pool's date and commit range never encloses another
+      pool's night. (The advisory's baseline instead takes every night with the same fingerprint,
+      returning or not; the interval tool is stricter because it states one population.) The key
+      cannot see everything: the fingerprint hashes the clean renders only, so a change confined
+      to a degrade recipe (`crates/synthpass-gen/src/degrade.rs`) changes the fresh documents
+      without splitting a pool, and a pool's interval is over the documents drawn under one key,
+      not under one guaranteed generator.
     - **Why fixed nights add no n.** The fixed slice is the same 100 seeds every night (`clean`,
-      seeds 0-99), and the same binary reads the same seeds the same way. A second night repeats
-      the first night's documents, so summing nights would shrink the interval around a draw that
-      has not grown. The tool reports one night's figures and whether every night in the pool read
-      every seed identically. The fresh slice draws new seeds every night, so each night adds n and
+      seeds 0-99), so a second night repeats the first night's documents and summing nights would
+      shrink the interval around a draw that has not grown. The reads need not repeat: a pool can
+      span several commits, so the tool reports one night's figures and whether every night in the
+      pool read every seed identically (the same hit, miss kind and wrong fields). The fresh slice draws new seeds every night, so each night adds n and
       the fresh slice is pooled.
     - **Budget stops.** A row cut off by the retry budget (`retry_stop` `budget`) depends on runner
       speed, so it is left out of every rate and counted on its own line.

@@ -13,9 +13,12 @@ per-document record: counts, rates, intervals, run ids, short commit ids and fin
 Pools. A night joins a pool only when the generator fingerprint (the fixed header's hash of the
 rendered pixels, which a fresh row inherits from the fixed header of the same run and format), the
 OCR model hashes, the OCR and MRZ arms and `ocr_env` knobs, and `max_passes` and `max_seconds` all
-match. Nights that differ in any of them are never added together: a re-render or a new model is a
-different measured population. A pool is per format, because the fingerprint is. Each pool lists
-its nights and the first and last `git_sha` it spans.
+match. A pool is a run of consecutive nights with one key: when the key changes the pool ends, and a
+key that returns later starts a new pool, so nothing is added across a change and a pool's date and
+`git_sha` range never encloses another pool's night. A pool is per format, because the fingerprint
+is. Each pool lists its nights and the first and last `git_sha` it spans. The key cannot see
+everything: the fingerprint hashes the clean renders only, so a change confined to a degrade
+recipe changes the fresh documents without splitting a pool.
 
 Slices.
   * Fresh (`--profile all`, new seeds every night) is pooled across a pool's nights: every night
@@ -187,9 +190,13 @@ def _conditions(header: dict) -> str:
 def build_pools(history: advisory.History) -> tuple[list[dict], dict]:
     """Every pool of nights, per format, oldest first, and the runs and rows left outside any.
 
-    The nights come from `advisory._run_entries`, which drops a run whose fixed slice is not exactly
-    seeds 0-99 once each or whose header fingerprint disagrees with the rows. A run with no fresh
-    header has nothing to say about its fresh slice's conditions, so it is left out too.
+    A pool is a run of consecutive nights with one key. When the key changes the pool ends, and a
+    key that comes back later (X, then Y, then X) starts a new pool: the ranges of a pool never
+    enclose another pool's night, and nothing is added across a change. The nights come from
+    `advisory._run_entries`, which drops a run whose fixed slice is not exactly seeds 0-99 once each
+    or whose header fingerprint disagrees with the rows. A run with no fresh header has nothing to
+    say about its fresh slice's conditions, so it is left out too. Such a run also ends the pool
+    before it, since its own conditions are unknown.
     """
     fixed_index = advisory._by_key(history.fixed)
     fresh_index = advisory._by_key(history.fresh)
@@ -197,35 +204,38 @@ def build_pools(history: advisory.History) -> tuple[list[dict], dict]:
     for header in history.headers:
         headers.setdefault((header["run_id"], header["document_type"], header["slice"]), header)
 
-    pools: dict = {}
+    pools: list = []
     skipped = {"fixed_slice_unusable": 0, "no_fresh_header": 0}
     for fmt in rows_lib.FORMATS:
+        current = None  # (key, pool) of the pool still open for this format
         for entry in advisory._run_entries(history, fmt, fixed_index, fresh_index):
             fixed_header = headers[(entry["run_id"], fmt, "fixed")]
             fresh_header = headers.get((entry["run_id"], fmt, "fresh"))
             if entry["fingerprint"] is None:
                 skipped["fixed_slice_unusable"] += 1
+                current = None
                 continue
             if fresh_header is None:
                 skipped["no_fresh_header"] += 1
+                current = None
                 continue
-            key = (fmt, entry["fingerprint"], _conditions(fixed_header), _conditions(fresh_header))
-            pool = pools.setdefault(
-                key,
-                {
+            key = (entry["fingerprint"], _conditions(fixed_header), _conditions(fresh_header))
+            if current is None or current[0] != key:
+                pool = {
                     "document_type": fmt,
                     "fingerprint": entry["fingerprint"],
                     "conditions": {k: fixed_header.get(k) for k in CONDITION_KEYS},
                     "nights": [],
-                },
-            )
-            pool["nights"].append(entry)
+                }
+                pools.append(pool)
+                current = (key, pool)
+            current[1]["nights"].append(entry)
 
-    pooled_fresh = sum(len(night["fresh"]) for pool in pools.values() for night in pool["nights"])
-    pooled_fixed = sum(len(night["fixed"]) for pool in pools.values() for night in pool["nights"])
+    pooled_fresh = sum(len(night["fresh"]) for pool in pools for night in pool["nights"])
+    pooled_fixed = sum(len(night["fixed"]) for pool in pools for night in pool["nights"])
     skipped["fresh_rows_outside_a_pool"] = len(history.fresh) - pooled_fresh
     skipped["fixed_rows_outside_a_pool"] = len(history.fixed) - pooled_fixed
-    ordered = sorted(pools.values(), key=lambda pool: (pool["nights"][0]["timestamp"], rows_lib.FORMATS.index(pool["document_type"])))
+    ordered = sorted(pools, key=lambda pool: (pool["nights"][0]["timestamp"], rows_lib.FORMATS.index(pool["document_type"])))
     return ordered, skipped
 
 
@@ -316,6 +326,14 @@ def _slice_tables(pools: list[dict], slice_name: str) -> list[str]:
     quiet = [name for name in rows_lib.SCORED_FIELDS if name not in shown]
     if quiet:
         lines += ["", "No hit was wrong on: " + ", ".join(quiet) + "."]
+    unmeasured = [(fmt, profile, s["hits_without_field_outcomes"]) for fmt, profile, s in rows if s["hits_without_field_outcomes"]]
+    if unmeasured:
+        lines += [
+            "",
+            "Hits with no field outcomes, left out of the wrong shares' denominators: "
+            + ", ".join(f"{fmt} {profile} {count}" for fmt, profile, count in unmeasured)
+            + ".",
+        ]
     return lines
 
 

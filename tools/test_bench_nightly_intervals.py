@@ -166,6 +166,15 @@ class ShareTests(unittest.TestCase):
         self.assertEqual((s["wrong_on_any"]["k"], s["wrong_on_any"]["n"]), (3, 8))
         self.assertEqual(s["wrong_by_field"]["given_names"]["k"], 1)
 
+    def test_hits_without_field_outcomes_are_printed_when_there_are_any(self):
+        history = advisory.History()
+        add_night(history, 1, fresh=list(SPEC) + [dict(field_cer=False)])
+        text = m.render_markdown(m.build_report(history))
+        self.assertIn("Hits with no field outcomes, left out of the wrong shares' denominators: td3 all 1", text)
+        clean = advisory.History()
+        add_night(clean, 1, fresh=SPEC)
+        self.assertNotIn("Hits with no field outcomes", m.render_markdown(m.build_report(clean)))
+
     def test_a_hit_without_field_outcomes_is_counted_apart_and_left_out_of_the_denominator(self):
         rows = self.rows() + [make_row("1-1", "td3", "fresh", 99, field_cer=False)]
         s = m.shares(rows)
@@ -195,6 +204,29 @@ class PoolingTests(unittest.TestCase):
         self.assertNotEqual(before["fingerprint"], after["fingerprint"])
         self.assertEqual(m.fresh_figures(before["nights"])["all"]["documents"], 20)
         self.assertEqual(m.fresh_figures(after["nights"])["all"]["documents"], 10)
+
+    def test_a_key_that_returns_starts_a_new_pool_and_no_range_encloses_another_pool(self):
+        history = advisory.History()
+        add_night(history, 1, fresh=SPEC)
+        add_night(history, 2, fresh=SPEC)
+        add_night(history, 3, fresh=SPEC, salt="1")
+        add_night(history, 4, fresh=SPEC)  # the first key again
+        first, middle, last = one_pool(history)
+        self.assertEqual([len(p["nights"]) for p in (first, middle, last)], [2, 1, 1])
+        self.assertEqual(first["fingerprint"], last["fingerprint"])
+        self.assertEqual(m.fresh_figures(first["nights"])["all"]["documents"], 10 * 2)
+        self.assertEqual(m.fresh_figures(last["nights"])["all"]["documents"], 10)
+        report = m.build_report(history)
+        self.assertEqual([p["group"] for p in report["pools"]], ["A", "B", "C"])
+
+    def test_a_night_the_tool_cannot_read_ends_the_pool(self):
+        history = advisory.History()
+        add_night(history, 1, fresh=SPEC)
+        add_night(history, 2, fresh=SPEC)
+        add_night(history, 3, fresh=SPEC)
+        history.headers = [h for h in history.headers if not (h["run_id"] == "1002-1" and h["slice"] == "fresh")]
+        before, after = one_pool(history)
+        self.assertEqual((len(before["nights"]), len(after["nights"])), (1, 1))
 
     def test_a_new_model_arm_or_budget_also_splits_the_pool(self):
         for change in (
