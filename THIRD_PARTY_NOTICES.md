@@ -53,6 +53,10 @@ The Rust toolchain and `std` are dual MIT/Apache-2.0 (© The Rust Project Develo
 | Qwen 2.5 1.5B Instruct GGUF (downloaded at runtime, not vendored) | Apache-2.0 © Alibaba Cloud |
 | **OCR-B model `web/tessdata/mrz.traineddata`** | **BSD-3-Clause © DoubangoTelecom** — see below |
 | **`synthpass-gen` fonts** (`crates/synthpass-gen/fonts/ocr-b.ttf`, `sans.ttf`) | **SIL OFL 1.1** — see below |
+| **Liberation Sans** (`crates/synthpass-gen/fonts/liberation-sans.ttf`) | **SIL OFL 1.1**, Google Corporation / Red Hat — [licence](crates/synthpass-gen/fonts/OFL-liberation.txt) |
+| **Liberation Serif** (`crates/synthpass-gen/fonts/liberation-serif.ttf`) | **SIL OFL 1.1**, Google Corporation / Red Hat — [licence](crates/synthpass-gen/fonts/OFL-liberation.txt) |
+| **Liberation Mono** (`crates/synthpass-gen/fonts/liberation-mono.ttf`) | **SIL OFL 1.1**, Google Corporation / Red Hat — [licence](crates/synthpass-gen/fonts/OFL-liberation.txt) |
+| **Source Sans 3** (`crates/synthpass-gen/fonts/source-sans-3.ttf`) | **SIL OFL 1.1**, Adobe — [licence](crates/synthpass-gen/fonts/OFL-source-sans-3.txt) |
 
 ### DoubangoTelecom OCR-B trained data (BSD-3-Clause)
 
@@ -63,7 +67,7 @@ BSD-3-Clause license. The full license text is preserved at
 
 ### `synthpass-gen` fonts (SIL OFL 1.1)
 
-Two fonts are vendored to render real glyphs when `synthpass-gen` is built with
+Six fonts are vendored to render real glyphs when `synthpass-gen` is built with
 `--features embedded-fonts` (see [`crates/synthpass-gen/fonts/README.md`](crates/synthpass-gen/fonts/README.md)):
 
 - **`ocr-b.ttf`**, redistributed from [jaycee723/ocr-b](https://github.com/jaycee723/ocr-b),
@@ -74,8 +78,11 @@ Two fonts are vendored to render real glyphs when `synthpass-gen` is built with
   © 2010 ParaType Ltd., Reserved Font Names "PT Sans"/"ParaType". Full text:
   [`crates/synthpass-gen/fonts/OFL-sans.txt`](crates/synthpass-gen/fonts/OFL-sans.txt).
 
-Both are default-off (`embedded-fonts` is not in `synthpass-gen`'s default feature set), so
-neither font ships in any binary unless that feature is explicitly enabled at build time.
+The four additional Regular VIZ fonts are Liberation Sans, Serif and Mono 2.1.5,
+and Source Sans 3.052R. They remain unmodified, with provenance and hashes in the
+[fonts README](crates/synthpass-gen/fonts/README.md). `embedded-fonts` is on by
+default; without it, none of these fonts is embedded. Rendering still uses PT Sans
+for VIZ and OCR-B for MRZ.
 
 ---
 

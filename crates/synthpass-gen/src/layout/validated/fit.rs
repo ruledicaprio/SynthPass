@@ -56,7 +56,16 @@ pub(super) fn check(spec: &LayoutSpec, fonts: &Fonts) -> Result<(), LayoutError>
 /// The union of the ink boxes of every value in `domain`, drawn into `rect`;
 /// `None` when no value has any ink.
 fn widest_ink(font: &ab_glyph::FontArc, domain: &VizDomain, rect: Rect) -> Option<InkBox> {
-    let px_scale = viz_px_scale(rect);
+    widest_ink_at_scale(font, domain, rect, viz_px_scale(rect))
+}
+
+/// Shared domain bound at an explicit renderer scale, also used by font admission tests.
+pub(crate) fn widest_ink_at_scale(
+    font: &ab_glyph::FontArc,
+    domain: &VizDomain,
+    rect: Rect,
+    px_scale: f32,
+) -> Option<InkBox> {
     match domain {
         VizDomain::Pool(values) => union_all(
             values

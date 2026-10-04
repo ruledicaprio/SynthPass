@@ -1,6 +1,12 @@
 # Shell scripts must keep LF endings even when checked out on Windows — a CRLF shebang line
 # makes them unrunnable inside the Linux builder container ("bad interpreter: /usr/bin/env\r").
 *.sh text eol=lf
+*.ttf binary
+# Preserve upstream licence bytes, including their original line endings.
+# Upstream licences retain their intentional spaces, blank EOF and CRLF bytes.
+# All other files keep the normal whitespace checks.
+crates/synthpass-gen/fonts/OFL-liberation.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
+crates/synthpass-gen/fonts/OFL-source-sans-3.txt -text whitespace=-blank-at-eol,-blank-at-eof,cr-at-eol
 
 # The outcome ledger is pinned by sha256 inside the real-specimen baseline
 # (outcomes_sha256, checked by scripts/check-headline-numbers.sh). A CRLF checkout on
