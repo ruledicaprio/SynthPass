@@ -426,8 +426,11 @@ struct SeedResult {
     /// the other per-document bools.
     prefix_wrong_accepted_read: bool,
     /// Which of the 12 scored fields differed from truth, in `COMPARED_FIELDS`
-    /// order, when `wrong_accept` is `true`. Empty (and omitted from JSON)
-    /// otherwise, including on every non-hit.
+    /// order, for every document that has field outcomes: a hit or not. A
+    /// non-hit carries it too (a total loss names every field), so a count that
+    /// means "among the hits" must filter on `hit`, as `wrong_accept` does and
+    /// `wrong_field_counts_among_hits` does. Empty (and omitted from JSON) when
+    /// no field differed or OCR itself failed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     wrong_fields: Vec<&'static str>,
     /// `--ocr-passes` only: the full `OcrPage::text` this document's OCR
@@ -508,6 +511,135 @@ fn format_hit_rate(rate: Option<f64>) -> String {
         || "n/a".to_string(),
         |value| format!("{:.1}%", value * 100.0),
     )
+}
+
+/// The interval of `k` of `n` as text, ` (95% CI 34.8–65.2%)` for 19 of 38, or nothing when
+/// `n` is `0`: no denominator, no interval. Always appended to a line, never replacing any of its text.
+fn ci_suffix(k: u64, n: u64) -> String {
+    synthpass_bench::stats::wilson_interval(k, n).map_or_else(String::new, |(low, high)| {
+        format!(" (95% CI {:.1}–{:.1}%)", low * 100.0, high * 100.0)
+    })
+}
+
+/// The 95% Wilson interval as the JSON writes it, `[low, high]` fractions; `None` (`null`)
+/// when `n` is `0`.
+fn ci_pair(k: u64, n: u64) -> Option<[f64; 2]> {
+    synthpass_bench::stats::wilson_interval(k, n).map(|(low, high)| [low, high])
+}
+
+/// How many Tier-1 hits are wrong on each scored field, most first, then by field name. A hit
+/// wrong on two fields counts in both; a document that is not a hit counts nowhere, whatever
+/// its `wrong_fields` says. Its sum can exceed the number of wrong accepts.
+fn wrong_field_counts_among_hits(results: &[SeedResult]) -> Vec<(&'static str, u64)> {
+    let mut counts: BTreeMap<&'static str, u64> = BTreeMap::new();
+    for r in results.iter().filter(|r| r.hit) {
+        for field in &r.wrong_fields {
+            *counts.entry(*field).or_default() += 1;
+        }
+    }
+    let mut rows: Vec<(&'static str, u64)> = counts.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    rows
+}
+
+/// One population's mean CER for a field and how many documents it is over. `mean_cer` is
+/// `None` (and `documents` `0`) when no document of the population produced the field.
+#[derive(Debug, Clone, Serialize)]
+struct CerPopulation {
+    mean_cer: Option<f64>,
+    documents: u64,
+}
+
+/// A field's mean CER over the two populations the stdout table shows: every document OCR ran
+/// on (the table's own figure, unchanged), and the accepted reads ([`is_accepted_read`]).
+#[derive(Debug, Clone, Serialize)]
+struct FieldCerPopulations {
+    field: &'static str,
+    /// As [`FieldLineCer::line`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<usize>,
+    all_documents: CerPopulation,
+    accepted_reads: CerPopulation,
+}
+
+/// Mean CER per field over every document OCR ran on, and over the accepted reads, worst
+/// first by the all-documents mean (the order the table always had). A document with no
+/// parsed MRZ is a total loss in every field (`total_loss`), and one where OCR itself failed
+/// has no field rows, so a field's document count can be below the run's.
+fn cer_by_field_populations(results: &[SeedResult], format: &str) -> Vec<FieldCerPopulations> {
+    fn totals<'a>(
+        results: impl Iterator<Item = &'a SeedResult>,
+    ) -> BTreeMap<&'static str, (f64, u64)> {
+        let mut totals: BTreeMap<&'static str, (f64, u64)> = BTreeMap::new();
+        for f in results.flat_map(|r| &r.fields) {
+            let entry = totals.entry(f.field).or_insert((0.0, 0));
+            entry.0 += f.cer;
+            entry.1 += 1;
+        }
+        totals
+    }
+    let population = |entry: Option<&(f64, u64)>| match entry {
+        Some((sum, n)) => CerPopulation {
+            mean_cer: Some(sum / *n as f64),
+            documents: *n,
+        },
+        None => CerPopulation {
+            mean_cer: None,
+            documents: 0,
+        },
+    };
+    let all = totals(results.iter());
+    let accepted = totals(
+        results
+            .iter()
+            .filter(|r| is_accepted_read(r.hit, r.miss_kind)),
+    );
+    let mut rows: Vec<FieldCerPopulations> = all
+        .iter()
+        .map(|(field, entry)| FieldCerPopulations {
+            field,
+            line: synthpass_bench::provider_bench::mrz_field_line(format, field),
+            all_documents: population(Some(entry)),
+            accepted_reads: population(accepted.get(field)),
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        b.all_documents
+            .mean_cer
+            .partial_cmp(&a.all_documents.mean_cer)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    rows
+}
+
+/// One field of [`WrongFieldCounts`].
+#[derive(Serialize)]
+struct WrongFieldCount {
+    field: &'static str,
+    wrong: u64,
+    /// The 95% Wilson interval of `wrong` over the report's `hits`.
+    ci95: Option<[f64; 2]>,
+}
+
+/// `wrong_field_counts_among_hits` on the report: per-field wrong counts among the Tier-1
+/// hits (see [`wrong_field_counts_among_hits`]).
+#[derive(Serialize)]
+struct WrongFieldCounts {
+    hits: u64,
+    fields: Vec<WrongFieldCount>,
+}
+
+/// The intervals the stdout summary prints beside the two headline rates. Wilson, `z = 1.96`;
+/// `null` where the rate has no denominator. They measure which documents were drawn, not
+/// run-to-run noise: see `knowledge/benchmarks/README.md`.
+#[derive(Serialize)]
+struct Intervals {
+    method: &'static str,
+    z: f64,
+    /// `hits` over `count`.
+    hit_rate: Option<[f64; 2]>,
+    /// `wrong_accepts` over `hits`.
+    wrong_accept_rate: Option<[f64; 2]>,
 }
 
 #[derive(Serialize)]
@@ -645,6 +777,16 @@ struct Report {
     /// excludes `mean_cer_by_field` rows with no resolved line.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     mean_cer_by_line: BTreeMap<usize, f64>,
+    /// Each `mean_cer_by_field` row's mean CER and document count over both populations the
+    /// stdout table shows: every document OCR ran on (the same figure as `mean_cer_by_field`)
+    /// and the accepted reads. Added with the summary's n and intervals; nothing above changed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cer_by_field_populations: Vec<FieldCerPopulations>,
+    /// Per scored field, how many of the `hits` Tier-1 hits are wrong on it, with the 95%
+    /// Wilson interval of each count.
+    wrong_field_counts_among_hits: WrongFieldCounts,
+    /// The 95% Wilson intervals printed beside `hit_rate` and `wrong_accept_rate`.
+    intervals: Intervals,
     results: Vec<SeedResult>,
 }
 
@@ -753,11 +895,12 @@ fn main() {
         }
     }
     println!(
-        "\n{hits}/{} = {:.1}% (profile: {}, document-type: {})",
+        "\n{hits}/{} = {:.1}% (profile: {}, document-type: {}){}",
         parsed.count,
         hit_rate * 100.0,
         parsed.profile.as_str(),
-        parsed.document_type.as_str()
+        parsed.document_type.as_str(),
+        ci_suffix(hits, parsed.count)
     );
 
     // Miss classes. A hit rate alone cannot distinguish "OCR found no MRZ"
@@ -839,6 +982,7 @@ fn main() {
     // above, widened from hits to every read the router accepts.
     let accepted_reads = count_accepted_reads(&results);
     let document_number_mismatch_reads = accepted_reads - hits;
+    let wrong_field_counts = wrong_field_counts_among_hits(&results);
     let prefix_wrong_accepted_read_seeds: Vec<u64> = results
         .iter()
         .filter(|r| r.prefix_wrong_accepted_read)
@@ -877,14 +1021,29 @@ fn main() {
         // line-1 prefix subset is gated, by `--max-prefix-wrong-accepts`.
         println!(
             "\nof {hits} Tier-1 hits, {wrong_accepts} ({}) are wrong on at least one of the \
-             12 scored fields — report-only (issue #453)",
-            format_hit_rate(wrong_accept_rate)
+             12 scored fields — report-only (issue #453){}",
+            format_hit_rate(wrong_accept_rate),
+            ci_suffix(wrong_accepts, hits)
         );
         println!(
             "  of which {prefix_wrong_accepts} read document_type or issuing_country wrong \
              (line-1 prefix, gated by --max-prefix-wrong-accepts){}",
             format_seed_list(&prefix_wrong_accept_seeds)
         );
+        // Which fields those are. A hit wrong on two fields counts in both, so the counts can
+        // sum past `wrong_accepts`; the counts are over the hits, never over every document.
+        if !wrong_field_counts.is_empty() {
+            println!(
+                "  wrong fields among the {hits} Tier-1 hits (a hit wrong on two counts in both):"
+            );
+            for (field, wrong) in &wrong_field_counts {
+                println!(
+                    "    {field:<20}{wrong}/{hits} ({:.1}%){}",
+                    *wrong as f64 / hits as f64 * 100.0,
+                    ci_suffix(*wrong, hits)
+                );
+            }
+        }
     } else {
         println!(
             "\nnames exact among Tier-1 hits: {}",
@@ -917,38 +1076,47 @@ fn main() {
     // `mrz_field_line` is format-aware (TD1 assigns different fields to line
     // 1 than TD2/TD3 do), and shares `provider_bench`'s own ICAO field-layout
     // tables rather than restating them.
-    let mut totals: BTreeMap<&'static str, (f64, usize)> = BTreeMap::new();
-    for f in results.iter().flat_map(|r| &r.fields) {
-        let entry = totals.entry(f.field).or_insert((0.0, 0));
-        entry.0 += f.cer;
-        entry.1 += 1;
-    }
     let format = parsed.document_type.as_str();
-    let mut mean_cer_by_field: Vec<FieldLineCer> = totals
+    let cer_populations = cer_by_field_populations(&results, format);
+    let mean_cer_by_field: Vec<FieldLineCer> = cer_populations
         .iter()
-        .map(|(field, (sum, n))| FieldLineCer {
-            field,
-            mean_cer: sum / *n as f64,
-            line: synthpass_bench::provider_bench::mrz_field_line(format, field),
+        .filter_map(|row| {
+            row.all_documents.mean_cer.map(|mean_cer| FieldLineCer {
+                field: row.field,
+                mean_cer,
+                line: row.line,
+            })
         })
         .collect();
-    mean_cer_by_field.sort_by(|a, b| {
-        b.mean_cer
-            .partial_cmp(&a.mean_cer)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
     let mean_cer_by_line_map = mean_cer_by_line(&mean_cer_by_field);
     if !mean_cer_by_field.is_empty() {
         println!("\nmean character error rate by field (worst first):");
-        for row in &mean_cer_by_field {
+        // The population, which this table never named: the first figure and its n are over
+        // every document OCR ran on (a document with no parsed MRZ is a total loss, 1.0, in
+        // every field; one where OCR itself failed has no field rows, so n can be below the
+        // run's count). Beside it, the accepted reads, as provider-bench prints "mean (docs)".
+        println!(
+            "  population: every document OCR ran on (n per row; no parsed MRZ counts as 1.0, \
+             an OCR error counts none) | accepted reads (Tier-1 hits + document_number_mismatch)"
+        );
+        for row in &cer_populations {
+            let Some(all_mean) = row.all_documents.mean_cer else {
+                continue;
+            };
             let line_label = row.line.map_or_else(
                 || "no single line".to_string(),
                 |line| format!("line {line}"),
             );
+            let accepted = row
+                .accepted_reads
+                .mean_cer
+                .map_or_else(|| "n/a".to_string(), |mean| format!("{:.2}%", mean * 100.0));
             println!(
-                "  {:>7.2}%  {:<20}{line_label}",
-                row.mean_cer * 100.0,
-                row.field
+                "  {:>7.2}%  {:<20}{line_label}  ({} docs) | accepted reads {accepted} ({} docs)",
+                all_mean * 100.0,
+                row.field,
+                row.all_documents.documents,
+                row.accepted_reads.documents
             );
         }
 
@@ -1013,6 +1181,24 @@ fn main() {
         prefix_wrong_accepted_read_seeds,
         mean_cer_by_field,
         mean_cer_by_line: mean_cer_by_line_map,
+        cer_by_field_populations: cer_populations,
+        wrong_field_counts_among_hits: WrongFieldCounts {
+            hits,
+            fields: wrong_field_counts
+                .iter()
+                .map(|(field, wrong)| WrongFieldCount {
+                    field,
+                    wrong: *wrong,
+                    ci95: ci_pair(*wrong, hits),
+                })
+                .collect(),
+        },
+        intervals: Intervals {
+            method: "wilson",
+            z: synthpass_bench::stats::Z_95,
+            hit_rate: ci_pair(hits, parsed.count),
+            wrong_accept_rate: ci_pair(wrong_accepts, hits),
+        },
         results,
     };
     let json = serde_json::to_string_pretty(&report).expect("serialize report");
@@ -1603,6 +1789,17 @@ mod tests {
             prefix_wrong_accepted_read_seeds: Vec::new(),
             mean_cer_by_field: Vec::new(),
             mean_cer_by_line: BTreeMap::new(),
+            cer_by_field_populations: Vec::new(),
+            wrong_field_counts_among_hits: WrongFieldCounts {
+                hits,
+                fields: Vec::new(),
+            },
+            intervals: Intervals {
+                method: "wilson",
+                z: synthpass_bench::stats::Z_95,
+                hit_rate: None,
+                wrong_accept_rate: ci_pair(wrong_accepts, hits),
+            },
             results: Vec::new(),
         }
     }
@@ -1909,6 +2106,111 @@ mod tests {
             wrong_fields: Vec::new(),
             ocr_text: None,
             ocr_passes: None,
+        }
+    }
+
+    /// A hit wrong on two fields counts once in each, and a document that is not a hit counts
+    /// nowhere even when its `wrong_fields` names a field. Most first, ties by name.
+    #[test]
+    fn wrong_field_counts_cover_the_hits_only_and_count_a_hit_in_each_wrong_field() {
+        let mut hit_two = doc(None, &[], &[]);
+        hit_two.wrong_fields = vec!["given_names", "surname"];
+        let mut hit_one = doc(None, &[], &[]);
+        hit_one.wrong_fields = vec!["given_names"];
+        let mut hit_tied = doc(None, &[], &[]);
+        hit_tied.wrong_fields = vec!["sex"];
+        let hit_clean = doc(None, &[], &[]);
+        let mut miss = doc(Some("checksum_failed"), &["composite"], &[]);
+        miss.wrong_fields = vec!["given_names", "nationality"];
+        let mut mismatch = doc(Some("document_number_mismatch"), &[], &[]);
+        mismatch.wrong_fields = vec!["surname"];
+
+        let counts =
+            wrong_field_counts_among_hits(&[hit_two, hit_one, hit_tied, hit_clean, miss, mismatch]);
+        assert_eq!(
+            counts,
+            vec![("given_names", 2), ("sex", 1), ("surname", 1)],
+            "two hits are wrong on given_names, one on sex and one on surname; the two \
+             non-hits count nowhere, so no nationality row"
+        );
+        assert!(wrong_field_counts_among_hits(&[]).is_empty());
+    }
+
+    /// The two CER populations differ in size and are each reported with their own n: a
+    /// document with no parsed MRZ is in the first (as a total loss) but not the second, and
+    /// one where OCR failed has no field rows at all.
+    #[test]
+    fn cer_populations_report_each_populations_mean_and_document_count() {
+        let results = vec![
+            doc(None, &[], &[("surname", 0.0), ("given_names", 0.5)]),
+            doc(
+                Some("document_number_mismatch"),
+                &[],
+                &[("surname", 0.2), ("given_names", 0.0)],
+            ),
+            doc(
+                Some("no_mrz_found"),
+                &[],
+                &[("surname", 1.0), ("given_names", 1.0), ("sex", 1.0)],
+            ),
+            doc(Some("ocr_error"), &[], &[]),
+        ];
+        let rows = cer_by_field_populations(&results, "TD3");
+        let row = |field: &str| rows.iter().find(|r| r.field == field).expect(field);
+        let close = |got: Option<f64>, want: f64| {
+            let got = got.expect("a mean");
+            assert!((got - want).abs() < 1e-12, "{got} vs {want}");
+        };
+
+        let surname = row("surname");
+        assert_eq!(surname.all_documents.documents, 3);
+        close(surname.all_documents.mean_cer, 1.2 / 3.0);
+        assert_eq!(surname.accepted_reads.documents, 2);
+        close(surname.accepted_reads.mean_cer, 0.1);
+
+        let given = row("given_names");
+        assert_eq!(given.all_documents.documents, 3);
+        close(given.all_documents.mean_cer, 1.5 / 3.0);
+        assert_eq!(given.accepted_reads.documents, 2);
+        close(given.accepted_reads.mean_cer, 0.25);
+
+        // A field only the total loss produced: in the first population, absent from the
+        // second, and its mean there is `None`, not a fabricated zero.
+        let sex = row("sex");
+        assert_eq!(sex.all_documents.documents, 1);
+        assert_eq!(sex.accepted_reads.documents, 0);
+        assert_eq!(sex.accepted_reads.mean_cer, None);
+
+        // Worst first by the all-documents mean, as the table always sorted.
+        let order: Vec<&str> = rows.iter().map(|r| r.field).collect();
+        assert_eq!(order, ["sex", "given_names", "surname"]);
+        assert!(cer_by_field_populations(&[], "TD3").is_empty());
+    }
+
+    #[test]
+    fn an_interval_is_printed_only_with_a_denominator() {
+        assert_eq!(ci_suffix(19, 38), " (95% CI 34.8–65.2%)");
+        assert_eq!(ci_suffix(0, 0), "");
+        assert_eq!(ci_pair(0, 0), None);
+        let [low, high] = ci_pair(38, 50).expect("an interval");
+        assert!((low - 0.6259).abs() < 0.0005 && (high - 0.8570).abs() < 0.0005);
+    }
+
+    /// The JSON additions are top-level keys, with `null` intervals where a rate has no
+    /// denominator, and the report's existing keys are all still there.
+    #[test]
+    fn the_report_carries_the_new_keys_beside_the_old_ones() {
+        let json = serde_json::to_value(synthetic_rate_report(0, 0, 0)).expect("serialize");
+        assert_eq!(json["intervals"]["method"], "wilson");
+        assert_eq!(json["intervals"]["z"], 1.96);
+        assert!(json["intervals"]["wrong_accept_rate"].is_null());
+        assert_eq!(json["wrong_field_counts_among_hits"]["hits"], 0);
+        assert_eq!(
+            json["wrong_field_counts_among_hits"]["fields"],
+            serde_json::json!([])
+        );
+        for key in ["hit_rate", "wrong_accepts", "accepted_reads", "results"] {
+            assert!(json.get(key).is_some(), "{key}");
         }
     }
 
