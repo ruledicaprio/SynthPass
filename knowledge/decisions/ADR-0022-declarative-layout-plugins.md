@@ -153,3 +153,19 @@ parsing crate, or the generator would need `serde`. The pinned equality gives th
 **Explicitly not licensed by this decision:** art or free text on the page, layouts supplied over
 a network, a movable MRZ or watermark, executable plugins of any kind, country-accurate
 templates, and any crate not already in `Cargo.lock`.
+
+## Amendment 1 (2026-10-03) — visual-zone text starts inside its box; M8 PR 1 re-blesses the changed goldens
+
+**Status of this amendment:** Accepted (maintainer, 2026-10-03).
+
+Decision 4's fit check found ink one pixel left of the labelled box wherever a value starts with a
+left-hanging glyph, on all five formats. The maintainer chose to start the pen that many whole pixels
+further right (`render::pen_start`), in drawing and measuring alike, so the ink lands inside the box
+and the labels stay accurate by construction. The glyphs `J V Ж Л Ъ` hang one pixel left at both row
+heights. Over seeds 0..1999, 470 of 2,000 renders change on each of TD1, TD2 and TD3 (23.5 %), and all
+2,000 on MRV-A and MRV-B, whose document code is `V`. By field: surname 135, document number 118,
+personal number 112, issuing country 107, nationality 107, given names 49. The 13 TD goldens recorded
+by PR 0 are unchanged, because their seeds carry none of these glyphs. M8 PR 1
+([#697](https://github.com/ruledicaprio/SynthPass/pull/697)) therefore re-blesses 8 of PR 0's 21
+golden hashes and the seed-565 PNG pins in `synthpass-cli`; the labels hashes do not move. Decision 6's
+byte-identity holds from #697's goldens on.

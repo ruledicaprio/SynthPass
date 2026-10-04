@@ -11,15 +11,23 @@
 //!    template: a plain frame and neutral fill, no national emblem, coat of
 //!    arms, or issuing-country branding of any kind.
 //!
-//! When `embedded-fonts` is off (the default), VIZ and MRZ text degrade to
-//! placeholder bars drawn in the exact [`crate::layout`] rectangles, so
-//! bounding boxes stay meaningful even without real glyphs.
+//! When `embedded-fonts` is off (`--no-default-features`; it is on by
+//! default), VIZ and MRZ text degrade to placeholder bars drawn in the exact
+//! [`crate::layout`] rectangles, so bounding boxes stay meaningful even
+//! without real glyphs.
+//!
+//! The renderer draws whatever [`crate::layout::ValidatedLayout`] it is given
+//! ([`render_with_layout`]); [`render`] and [`render_with`] use the built-in
+//! layout of the requested format. VIZ text is measured by one function,
+//! [`text_ink`], which both the glyph drawing and the layout fit check
+//! ([`crate::layout::ValidatedLayout::try_from_spec`]) call, so the check
+//! measures exactly what is drawn.
 
 use image::{DynamicImage, Rgb, RgbImage};
 
 use crate::fonts::{load_fonts, Fonts};
 use crate::labels::Labels;
-use crate::layout::{self, PageLayout, Rect};
+use crate::layout::{self, PageLayout, Rect, ValidatedLayout};
 use crate::model::{DocumentType, Passport};
 
 /// Blur sigma for the uniform MRZ redaction, in cell widths. A sweep seed for #565 PR 6, not a measured value.
@@ -152,10 +160,11 @@ fn draw_placeholder_bar(img: &mut RgbImage, rect: Rect) {
     fill_rect(img, bar, PLACEHOLDER_BAR);
 }
 
-/// Placeholder rendering of one MRZ line: each of the 44 character cells is
-/// filled when the printed character is not the `<` filler, and left blank
-/// otherwise — this keeps the per-character bounding boxes meaningful (filler
-/// runs stay visually empty) without needing real glyphs.
+/// Placeholder rendering of one MRZ line: each of the line's `mrz_chars`
+/// character cells (30, 36 or 44, by format) is filled when the printed
+/// character is not the `<` filler, and left blank otherwise — this keeps the
+/// per-character bounding boxes meaningful (filler runs stay visually empty)
+/// without needing real glyphs.
 fn draw_mrz_placeholder(img: &mut RgbImage, line_rect: Rect, text: &str, mrz_chars: u32) {
     for (i, c) in text.chars().enumerate() {
         if c == '<' {
@@ -214,9 +223,124 @@ fn draw_one_glyph(img: &mut RgbImage, font: &ab_glyph::FontArc, glyph: ab_glyph:
     });
 }
 
-/// Flows `text` left-to-right using the font's own advance widths — fine for
-/// VIZ fields, which aren't checksum-validated and just need to look
-/// plausible within `rect`.
+/// The pixel size VIZ text is drawn at inside `rect`: 70% of its height.
+pub(crate) fn viz_px_scale(rect: Rect) -> f32 {
+    rect.height as f32 * 0.7
+}
+
+/// How far right of the rectangle's origin `first` must start so its ink box
+/// does not begin left of it: the whole pixels of its negative left side
+/// bearing (the sans `J` hooks about one pixel left of its pen position), `0.0`
+/// for every glyph whose bounds start at or right of the pen.
+pub(crate) fn left_overhang(font: &ab_glyph::FontArc, first: char, px_scale: f32) -> f32 {
+    use ab_glyph::{Font, ScaleFont};
+
+    let glyph = font.as_scaled(px_scale).scaled_glyph(first);
+    font.outline_glyph(glyph)
+        .map_or(0.0, |outlined| (-outlined.px_bounds().min.x).max(0.0))
+}
+
+/// Where the pen starts for `text` in `rect`: the rectangle's left edge, moved
+/// right by [`left_overhang`] of the first character, so the ink box starts
+/// inside the rectangle.
+pub(crate) fn pen_start(
+    font: &ab_glyph::FontArc,
+    text_first: char,
+    rect: Rect,
+    px_scale: f32,
+) -> f32 {
+    rect.x as f32 + left_overhang(font, text_first, px_scale)
+}
+
+/// The glyphs of `text` as the VIZ drawing places them: flowed left-to-right
+/// from [`pen_start`] using the font's own advance widths (no kerning, no
+/// clipping), with the baseline at `rect.y` plus the scaled ascent.
+/// [`draw_glyph_text`] draws exactly these glyphs, and [`text_ink`] measures
+/// exactly these.
+fn flow_glyphs(
+    font: &ab_glyph::FontArc,
+    text: &str,
+    rect: Rect,
+    px_scale: f32,
+) -> Vec<ab_glyph::Glyph> {
+    use ab_glyph::{point, Font, ScaleFont};
+
+    let scaled = font.as_scaled(px_scale);
+    let Some(first) = text.chars().next() else {
+        return Vec::new();
+    };
+    let mut x = pen_start(font, first, rect, px_scale);
+    let y = rect.y as f32 + scaled.ascent();
+    let mut glyphs = Vec::with_capacity(text.chars().count());
+    for c in text.chars() {
+        let id = scaled.glyph_id(c);
+        glyphs.push(id.with_scale_and_position(px_scale, point(x, y)));
+        x += scaled.h_advance(id);
+    }
+    glyphs
+}
+
+/// The integer pixel box (`min` inclusive, `max` exclusive) that drawing a text
+/// can touch: the union of the glyphs' rasterizer bounds, which is also the
+/// range [`draw_one_glyph`] writes within.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct InkBox {
+    pub min_x: i32,
+    pub min_y: i32,
+    pub max_x: i32,
+    pub max_y: i32,
+}
+
+impl InkBox {
+    pub(crate) fn union(self, other: InkBox) -> InkBox {
+        InkBox {
+            min_x: self.min_x.min(other.min_x),
+            min_y: self.min_y.min(other.min_y),
+            max_x: self.max_x.max(other.max_x),
+            max_y: self.max_y.max(other.max_y),
+        }
+    }
+
+    /// Whether this box lies within `rect` on all four sides.
+    pub(crate) fn within(self, rect: Rect) -> bool {
+        let right = i64::from(rect.x) + i64::from(rect.width);
+        let bottom = i64::from(rect.y) + i64::from(rect.height);
+        i64::from(self.min_x) >= i64::from(rect.x)
+            && i64::from(self.min_y) >= i64::from(rect.y)
+            && i64::from(self.max_x) <= right
+            && i64::from(self.max_y) <= bottom
+    }
+}
+
+/// The ink box of `text` drawn into `rect` at `px_scale`, or `None` when no
+/// glyph has an outline (an empty string, or only spaces). This is the one
+/// text-extent function: [`draw_glyph_text`] draws the same glyphs
+/// [`flow_glyphs`] yields, and the layout fit check calls this.
+pub(crate) fn text_ink(
+    font: &ab_glyph::FontArc,
+    text: &str,
+    rect: Rect,
+    px_scale: f32,
+) -> Option<InkBox> {
+    use ab_glyph::Font;
+
+    flow_glyphs(font, text, rect, px_scale)
+        .into_iter()
+        .filter_map(|glyph| font.outline_glyph(glyph))
+        .map(|outlined| {
+            let bounds = outlined.px_bounds();
+            InkBox {
+                min_x: bounds.min.x as i32,
+                min_y: bounds.min.y as i32,
+                max_x: bounds.max.x as i32,
+                max_y: bounds.max.y as i32,
+            }
+        })
+        .reduce(InkBox::union)
+}
+
+/// Draws `text` as [`flow_glyphs`] places it — fine for VIZ fields, which
+/// aren't checksum-validated and just need to look plausible within `rect`.
 #[cfg(feature = "embedded-fonts")]
 fn draw_glyph_text(
     img: &mut RgbImage,
@@ -225,16 +349,8 @@ fn draw_glyph_text(
     rect: Rect,
     px_scale: f32,
 ) {
-    use ab_glyph::{point, Font, ScaleFont};
-
-    let scaled = font.as_scaled(px_scale);
-    let mut x = rect.x as f32;
-    let y = rect.y as f32 + scaled.ascent();
-    for c in text.chars() {
-        let id = scaled.glyph_id(c);
-        let glyph = id.with_scale_and_position(px_scale, point(x, y));
+    for glyph in flow_glyphs(font, text, rect, px_scale) {
         draw_one_glyph(img, font, glyph);
-        x += scaled.h_advance(id);
     }
 }
 
@@ -270,7 +386,7 @@ fn draw_mrz_glyphs(
 fn draw_text_field(img: &mut RgbImage, rect: Rect, text: &str, fonts: Option<&Fonts>) {
     #[cfg(feature = "embedded-fonts")]
     if let Some(fonts) = fonts {
-        draw_glyph_text(img, &fonts.viz, text, rect, rect.height as f32 * 0.7);
+        draw_glyph_text(img, &fonts.viz, text, rect, viz_px_scale(rect));
         return;
     }
     #[cfg(not(feature = "embedded-fonts"))]
@@ -465,10 +581,88 @@ pub fn render(passport: &Passport, labels: &Labels, doc_type: DocumentType) -> D
         .expect("default render options are valid")
 }
 
+/// [`render`] with options, on `doc_type`'s built-in layout.
 pub fn render_with(
     passport: &Passport,
     labels: &Labels,
     doc_type: DocumentType,
+    options: &RenderOptions,
+) -> Result<DynamicImage, String> {
+    render_with_layout(
+        passport,
+        labels,
+        ValidatedLayout::builtin(doc_type),
+        options,
+    )
+}
+
+/// Whether every label rectangle is the one `page` places: the nine always
+/// present visual-zone fields, the personal number when it is labelled, and the
+/// MRZ band spanning `page.mrz_lines`.
+fn check_labels_match_layout(labels: &Labels, page: &PageLayout) -> Result<(), String> {
+    let mut pairs = vec![
+        (
+            "document_type",
+            labels.document_type.rect,
+            page.document_type,
+        ),
+        (
+            "issuing_country",
+            labels.issuing_country.rect,
+            page.issuing_country,
+        ),
+        ("surname", labels.surname.rect, page.surname),
+        ("given_names", labels.given_names.rect, page.given_names),
+        (
+            "document_number",
+            labels.document_number.rect,
+            page.document_number,
+        ),
+        ("nationality", labels.nationality.rect, page.nationality),
+        (
+            "date_of_birth",
+            labels.date_of_birth.rect,
+            page.date_of_birth,
+        ),
+        ("sex", labels.sex.rect, page.sex),
+        (
+            "date_of_expiry",
+            labels.date_of_expiry.rect,
+            page.date_of_expiry,
+        ),
+    ];
+    if let Some(label) = &labels.personal_number {
+        pairs.push(("personal_number", label.rect, page.personal_number));
+    }
+    if let Some((name, _, _)) = pairs.iter().find(|(_, label, placed)| label != placed) {
+        return Err(format!(
+            "labels do not match the layout: {name} rectangle differs"
+        ));
+    }
+    if let (Some(first), Some(last)) = (page.mrz_lines.first(), page.mrz_lines.last()) {
+        let band = Rect::new(
+            first.x,
+            first.y,
+            first.width,
+            (last.y + last.height) - first.y,
+        );
+        if labels.mrz_rect != band {
+            return Err("labels do not match the layout: MRZ rectangle differs".into());
+        }
+    }
+    Ok(())
+}
+
+/// [`render_with`] on an explicit [`ValidatedLayout`]: the layout's format
+/// picks the canvas, watermark band and MRZ, and its rectangles place the
+/// portrait and the visual-zone fields. `labels` must have been built from the
+/// same layout ([`crate::labels::build_labels_with_layout`]); a label rectangle
+/// that differs from the layout's, in the ten visual-zone fields or the MRZ
+/// band, is an error, so labels and pixels cannot silently disagree.
+pub fn render_with_layout(
+    passport: &Passport,
+    labels: &Labels,
+    layout: &ValidatedLayout,
     options: &RenderOptions,
 ) -> Result<DynamicImage, String> {
     // `labels` is the single source of drawn text (kept in sync with
@@ -476,7 +670,9 @@ pub fn render_with(
     // accepted for API symmetry with `crate::generate` and future per-field
     // render options (e.g. photo synthesis keyed off sex/nationality).
     let _ = passport;
-    let page: PageLayout = layout::for_format(doc_type);
+    let doc_type = layout.format();
+    let page: &PageLayout = layout.page();
+    check_labels_match_layout(labels, page)?;
     if let Some(span) = options.redact {
         if span.doc_type != doc_type {
             return Err("redaction document type does not match render document type".into());
@@ -489,7 +685,12 @@ pub fn render_with(
     // Generic, non-country template: a plain frame only. Deliberately no
     // national emblem, coat of arms, or issuing-country branding — guardrail
     // #2, unconditional regardless of `embedded-fonts`.
-    border_rect(&mut img, Rect::new(0, 0, page.width, page.height), FRAME, 6);
+    border_rect(
+        &mut img,
+        Rect::new(0, 0, page.width, page.height),
+        FRAME,
+        layout::FRAME_THICKNESS,
+    );
 
     // Portrait placeholder: a plain filled box, never a rendered likeness.
     fill_rect(&mut img, page.portrait, PORTRAIT_FILL);
@@ -626,6 +827,33 @@ fn blur_region(img: &mut RgbImage, rect: Rect, sigma: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_that_disagree_with_the_layout_are_an_error() {
+        let td3 = ValidatedLayout::builtin(DocumentType::TD3);
+        let config = crate::GeneratorConfig::with_document_type(9, DocumentType::TD3);
+        let passport = crate::data::generate_passport(&config);
+        let labels = crate::labels::build_labels_with_layout(&passport, td3);
+        let options = RenderOptions::default();
+        assert!(render_with_layout(&passport, &labels, td3, &options).is_ok());
+
+        let mut moved = labels.clone();
+        moved.surname.rect.x += 1;
+        let e = render_with_layout(&passport, &moved, td3, &options).unwrap_err();
+        assert!(e.contains("surname"), "{e}");
+
+        let mut moved = labels.clone();
+        moved.mrz_rect.y += 1;
+        let e = render_with_layout(&passport, &moved, td3, &options).unwrap_err();
+        assert!(e.contains("MRZ"), "{e}");
+
+        // Labels built for another format's layout.
+        let td1 = ValidatedLayout::builtin(DocumentType::TD1);
+        let td1_config = crate::GeneratorConfig::with_document_type(9, DocumentType::TD1);
+        let td1_passport = crate::data::generate_passport(&td1_config);
+        let other = crate::labels::build_labels_with_layout(&td1_passport, td1);
+        assert!(render_with_layout(&passport, &other, td3, &options).is_err());
+    }
 
     #[test]
     fn invalid_or_mismatched_redaction_spans_are_rejected_without_panicking() {
@@ -873,6 +1101,123 @@ mod tests {
                 differs,
                 "{doc_type:?}: watermark region must differ from the background fill"
             );
+        }
+    }
+
+    #[cfg(feature = "embedded-fonts")]
+    mod text_extent {
+        use super::*;
+        use crate::fonts::load_fonts;
+
+        /// Bounding box of the pixels `draw_glyph_text` changes.
+        fn drawn_box(text: &str, rect: Rect) -> Option<(i32, i32, i32, i32)> {
+            let fonts = load_fonts().expect("embedded fonts load");
+            let white = Rgb([255, 255, 255]);
+            let mut img =
+                RgbImage::from_pixel(rect.x + rect.width + 40, rect.y + rect.height + 40, white);
+            draw_glyph_text(&mut img, &fonts.viz, text, rect, viz_px_scale(rect));
+            let mut found: Option<(i32, i32, i32, i32)> = None;
+            for (x, y, px) in img.enumerate_pixels() {
+                if *px == white {
+                    continue;
+                }
+                let (x, y) = (x as i32, y as i32);
+                found = Some(found.map_or((x, y, x + 1, y + 1), |(a, b, c, d)| {
+                    (a.min(x), b.min(y), c.max(x + 1), d.max(y + 1))
+                }));
+            }
+            found
+        }
+
+        #[test]
+        fn the_ink_box_covers_every_drawn_pixel_and_is_tight() {
+            let fonts = load_fonts().expect("embedded fonts load");
+            let rect = Rect::new(60, 120, 700, 34);
+            for text in [
+                "VANTERPOOL",
+                "JOHAN",
+                "L898902C3",
+                "1974-08-12",
+                "ЦВЄТКОВ",
+                "M",
+                "I",
+            ] {
+                let ink = text_ink(&fonts.viz, text, rect, viz_px_scale(rect)).expect(text);
+                let (x0, y0, x1, y1) = drawn_box(text, rect).expect(text);
+                // The measured box contains everything drawn ...
+                assert!(
+                    ink.min_x <= x0 && ink.min_y <= y0 && ink.max_x >= x1 && ink.max_y >= y1,
+                    "{text}: drawn ({x0},{y0},{x1},{y1}) escapes {ink:?}"
+                );
+                // ... and is conservative by at most the rounding pixel.
+                assert!(
+                    x0 - ink.min_x <= 1
+                        && y0 - ink.min_y <= 1
+                        && ink.max_x - x1 <= 1
+                        && ink.max_y - y1 <= 1,
+                    "{text}: {ink:?} is looser than one pixel around ({x0},{y0},{x1},{y1})"
+                );
+            }
+        }
+
+        #[test]
+        fn a_one_glyph_text_extent_is_pinned() {
+            // 34 px row -> 23.8 px glyphs; pin the numbers so a change in the
+            // extent function (or the font) is a visible, reviewed change.
+            let fonts = load_fonts().expect("embedded fonts load");
+            let rect = Rect::new(60, 120, 700, 34);
+            let px = viz_px_scale(rect);
+            let m = text_ink(&fonts.viz, "M", rect, px).expect("M has ink");
+            let mm = text_ink(&fonts.viz, "MM", rect, px).expect("MM has ink");
+            assert_eq!((m.min_x, m.max_x, mm.min_x, mm.max_x), (61, 73, 61, 88));
+            assert_eq!((m.min_y, m.max_y), (mm.min_y, mm.max_y));
+            // Two glyphs reach exactly one advance further than one.
+            use ab_glyph::{Font, ScaleFont};
+            let scaled = fonts.viz.as_scaled(px);
+            let advance = scaled.h_advance(scaled.glyph_id('M'));
+            let delta = (mm.max_x - m.max_x) as f32;
+            assert!(
+                (delta - advance).abs() <= 1.0,
+                "advance {advance}, delta {delta}"
+            );
+            assert_eq!(text_ink(&fonts.viz, "", rect, px), None);
+            assert_eq!(text_ink(&fonts.viz, "   ", rect, px), None);
+        }
+
+        #[test]
+        fn text_that_hangs_left_of_the_pen_is_moved_inside_its_rectangle() {
+            let fonts = load_fonts().expect("embedded fonts load");
+            let rect = Rect::new(214, 142, 220, 28);
+            let px = viz_px_scale(rect);
+            // The sans `J` hooks about one pixel left of its pen position.
+            assert!(left_overhang(&fonts.viz, 'J', px) >= 1.0);
+            assert_eq!(left_overhang(&fonts.viz, ' ', px), 0.0);
+            for text in ["J", "JPN", "JOHAN", "V", "VANTERPOOL", "ЖУКОВ", "UTO"] {
+                let ink = text_ink(&fonts.viz, text, rect, px).expect(text);
+                assert!(ink.min_x >= rect.x as i32, "{text}: {ink:?}");
+                let (x0, ..) = drawn_box(text, rect).expect(text);
+                assert!(x0 >= rect.x as i32, "{text}: drawn from {x0}");
+            }
+        }
+
+        #[test]
+        fn ink_box_within_checks_all_four_sides() {
+            let rect = Rect::new(10, 10, 20, 20);
+            let ok = InkBox {
+                min_x: 10,
+                min_y: 10,
+                max_x: 30,
+                max_y: 30,
+            };
+            assert!(ok.within(rect));
+            for bad in [
+                InkBox { min_x: 9, ..ok },
+                InkBox { min_y: 9, ..ok },
+                InkBox { max_x: 31, ..ok },
+                InkBox { max_y: 31, ..ok },
+            ] {
+                assert!(!bad.within(rect), "{bad:?}");
+            }
         }
     }
 }
