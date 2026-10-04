@@ -387,7 +387,7 @@ fn section_b() {
 
     println!("\nΔ of the most frequent observed confusions (returned − printed, mod 10):");
     let mut frequent: Vec<_> = OBSERVED.iter().collect();
-    frequent.sort_by(|a, b| b.2.cmp(&a.2));
+    frequent.sort_by_key(|row| std::cmp::Reverse(row.2));
     for (a, b, n) in frequent.into_iter().take(8) {
         println!("  {a}→{b}: Δ≡{}  (n={n})", delta(*a, *b));
     }
