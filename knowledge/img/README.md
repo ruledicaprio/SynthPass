@@ -35,7 +35,12 @@ this folder — regenerate it from its source instead (see
 | `screenshot-synthpass-serve.png` | `synthpass serve` CLI output, hand-captured | manual |
 | `screenshot-web-mrz-validator.png` | The web MRZ validator UI, hand-captured | manual |
 | `synthetic_pass_example.png` | A generated synthetic TD1 ID card: `synthpass generate --document-type td1 --count 1 --seed 1 --profile clean`. The root `README.md` no longer embeds it; `bench-charts.yml` still refreshes it | `bench-charts.yml` |
-| `synthetic-five-formats.png` | The five synthetic formats (TD1, TD2, TD3, MRV-A, MRV-B), one document each from seed 42, fused in one image; the root `README.md` embeds it | `synthpass generate` ×5, composed by hand — see [below](#synthetic-five-formatspng) |
+| `synthetic-five-formats.png` | The five synthetic formats (TD1, TD2, TD3, MRV-A, MRV-B), one document each from seed 42, fused in one image; the root `README.md` embeds it | `synthpass generate` ×5, composed by a Pillow script — see [below](#synthetic-five-formatspng) |
+
+Referenced from [`../../README.md`](../../README.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md),
+[`../archive/roadmap-execution-log.md`](../archive/roadmap-execution-log.md),
+[`../benchmarks/PIPELINE.md`](../benchmarks/PIPELINE.md) and
+[`../benchmarks/README.md`](../benchmarks/README.md).
 
 ## synthetic-five-formats.png
 
@@ -51,14 +56,18 @@ synthpass generate --document-type mrva --count 1 --seed 42 --profile clean --ou
 synthpass generate --document-type mrvb --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42_mrvb.png
 ```
 
-The five renders were generated twice and are byte-identical. A script kept outside the repository
-(Python 3 with Pillow 12.3.0) scales each document with LANCZOS to a common height of 330 px, sets
-TD1, TD2 and TD3 in one row and MRV-A and MRV-B centred in a second, writes each label under its
-document in the vendored `crates/synthpass-gen/fonts/ocr-b.ttf`, and saves a 1600 × 832 PNG with
-`optimize=True` and no metadata, so the same renders give the same bytes. The watermark and the MRZ of
-every document are whole; only the scale changes. Synthetic output only: nothing from `samples/`.
+The five renders were generated twice and are byte-identical. A Pillow script kept outside the repository
+(its full text is in the body of [PR #702](https://github.com/ruledicaprio/SynthPass/pull/702), the only
+place it lives) scales each document with LANCZOS to a common height of 330 px, sets TD1, TD2 and TD3 in
+one row and MRV-A and MRV-B centred in a second, writes each label under its document in the vendored
+`crates/synthpass-gen/fonts/ocr-b.ttf`, and saves a 1600 × 832 PNG with `optimize=True` and no metadata.
+The watermark and the MRZ of every document are whole; only the scale changes. Synthetic output only:
+nothing from `samples/`.
 
-Referenced from [`../../README.md`](../../README.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md),
-[`../archive/roadmap-execution-log.md`](../archive/roadmap-execution-log.md),
-[`../benchmarks/PIPELINE.md`](../benchmarks/PIPELINE.md) and
-[`../benchmarks/README.md`](../benchmarks/README.md).
+**What reproduces.** The committed bytes were produced on Windows 11 with Python 3 and Pillow 12.3.0
+(zlib 1.3.1). The label font is opened with `layout_engine=ImageFont.Layout.BASIC`: with the RAQM engine,
+used wherever fribidi is installed, the labels render differently on another platform. The **decoded
+pixels** are the portable check, `sha256` of the 1600 × 832 RGB bytes
+`377f5237fe3fb60a717e64cc919d879f271c0f7a455772bc41294a31b280179d`; the PNG file itself
+(`3b4ce8dbdc60452e4396786acffdae03c78f48b47736f5eba89a795ee4eb530d`) can differ on another platform,
+because zlib builds differ, and the same pixels then still decode identically.
