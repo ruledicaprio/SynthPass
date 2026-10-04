@@ -40,7 +40,6 @@
 use crate::model::DocumentType;
 
 mod validated;
-#[cfg(all(test, feature = "embedded-fonts"))]
 pub(crate) use validated::fit::widest_ink_at_scale;
 
 #[cfg(test)]

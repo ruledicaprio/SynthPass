@@ -160,6 +160,21 @@ pub fn export_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::error
         }
     };
 
+    if let Some(choice) = parsed.viz_font {
+        let formats = match parsed.document_type {
+            DocTypeChoice::One(format) => vec![format],
+            DocTypeChoice::All => DocTypeChoice::ROUND_ROBIN.to_vec(),
+        };
+        for format in formats {
+            if let Err(error) = choice
+                .resolve_for_layout(parsed.seed, synthpass_gen::ValidatedLayout::builtin(format))
+            {
+                eprintln!("❌ {error}");
+                usage();
+                return Ok(crate::Exit::Usage);
+            }
+        }
+    }
     let cfg = ExportConfig {
         format: parsed.format,
         count: parsed.count,

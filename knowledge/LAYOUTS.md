@@ -148,7 +148,13 @@ way to fail, and the message gives the ink span to widen it by. Widening the gen
 can make a previously accepted layout fail this check later, and it will say which field.
 
 The opt-in VIZ fonts in [ADR-0030](decisions/ADR-0030-viz-fonts-are-a-closed-embedded-set.md)
-are drawn at or below the PT Sans size (k_F ≤ 1), using their own ascent and left-side bearing.
+are drawn at a per-field scale at or below the PT Sans size (0 < k ≤ 1), using their own
+ascent and left-side bearing. ADR-0030 Decision 5, as amended in #708, computes the largest
+scale inside the rectangle's top-left and PT Sans's domain-ink bottom-right, stepping down
+for f32 edge rounding. Results are cached once per validated layout and font, including
+refusals. A fixed font that cannot draw a field is refused with the font, format and field
+in the error; `random` picks only among fonts admitted by that layout. The built-in table
+is held in `crates/synthpass-gen/tests/fixtures/viz_field_scales.tsv`.
 The fit checker continues measuring PT Sans only; MRZ text remains OCR-B. Fonts cannot be
 selected by a layout file.
 

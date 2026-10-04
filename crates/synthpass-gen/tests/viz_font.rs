@@ -105,10 +105,7 @@ fn random_font_is_independent_of_identity_and_every_label_rectangle() {
 
 #[cfg(feature = "embedded-fonts")]
 #[test]
-fn liberation_mono_smallest_scale_matches_five_golden_hashes() {
-    assert!(VizFont::ALL
-        .iter()
-        .all(|font| font.scale() >= VizFont::LiberationMono.scale()));
+fn liberation_mono_per_field_scales_match_five_golden_hashes() {
     let mut actual = Vec::new();
     for format in FORMATS {
         let mut config = GeneratorConfig::with_document_type(42, format);

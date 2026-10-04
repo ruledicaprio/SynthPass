@@ -115,7 +115,12 @@ pub fn generate_with_layout(
     let mut labels = labels;
     labels.viz_font = config
         .viz_font
-        .map(|choice| choice.resolve(config.seed).name());
+        .map(|choice| {
+            choice
+                .resolve_for_layout(config.seed, layout)
+                .map(|font| font.name())
+        })
+        .transpose()?;
     if let Some(span) = options.redact {
         labels.occluded.push(OccludedSpan {
             line: span.line(),

@@ -197,7 +197,8 @@ One `manifest.json` at `--out-dir` root, generated (never hand-edited), mirrorin
 }
 ```
 
-Reproducing an export needs only `seed_base`, `document_type`, `profile`, `pack_pages`, and the
+Reproducing an export needs only `seed_base`, `document_type`, `profile`, `pack_pages`, any
+explicit `--viz-font` choice (recorded in the manifest command), and the
 `seed_base + i` rule (`include_personal_number` is always `true` from this path). Determinism is
 guaranteed by `crates/synthpass-gen/tests/determinism.rs` — byte-identical pixels and equal
 labels for a given seed across all five formats.

@@ -18,6 +18,8 @@ pub enum VizFontChoice {
 impl VizFontChoice {
     /// Parse an embedded font name or `random`.
     pub fn parse(value: &str) -> Result<Self, String> {
+        let lower = value.to_lowercase();
+        let value = lower.as_str();
         if value == "random" {
             return Ok(Self::Random);
         }
@@ -35,12 +37,43 @@ impl VizFontChoice {
 
     /// Resolve without consuming either the content or degradation stream.
     pub fn resolve(self, seed: u64) -> VizFont {
+        self.resolve_for_layout(
+            seed,
+            crate::layout::ValidatedLayout::builtin(DocumentType::TD3),
+        )
+        .expect("every embedded font fits the built-in TD3 layout")
+    }
+
+    /// Resolve only among fonts admitted by this layout, propagating fixed-font refusal.
+    pub fn resolve_for_layout(
+        self,
+        seed: u64,
+        layout: &crate::layout::ValidatedLayout,
+    ) -> Result<VizFont, String> {
+        self.resolve_with(seed, |font| layout.viz_scales(font).map(|_| ()))
+    }
+
+    pub(crate) fn resolve_with(
+        self,
+        seed: u64,
+        mut admits: impl FnMut(VizFont) -> Result<(), String>,
+    ) -> Result<VizFont, String> {
         match self {
-            Self::Font(font) => font,
+            Self::Font(font) => {
+                admits(font)?;
+                Ok(font)
+            }
             Self::Random => {
                 let mut rng = ChaCha8Rng::seed_from_u64(seed);
                 rng.set_stream(VIZ_FONT_STREAM);
-                VizFont::ALL[(rng.next_u64() % 5) as usize]
+                let admissible: Vec<_> = VizFont::ALL
+                    .into_iter()
+                    .filter(|&font| admits(font).is_ok())
+                    .collect();
+                if admissible.is_empty() {
+                    return Err("no VIZ font can draw this layout".to_string());
+                }
+                Ok(admissible[(rng.next_u64() % admissible.len() as u64) as usize])
             }
         }
     }
@@ -237,8 +270,8 @@ impl TryFrom<mrz::Format> for DocumentType {
 
 /// Generation parameters: the seed plus render options.
 ///
-/// The seed is the only thing that determines the generated identity and
-/// pixels — see the determinism test in `tests/`. `include_personal_number`
+/// The seed determines identity; render options, including the optional VIZ
+/// font, determine pixels — see the determinism test in `tests/`. `include_personal_number`
 /// is a render/content option, not a source of extra randomness.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GeneratorConfig {

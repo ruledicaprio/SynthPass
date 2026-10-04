@@ -398,6 +398,16 @@ pub fn generate_command(args: &[String]) -> Result<crate::Exit, Box<dyn std::err
         }
     };
 
+    if let Some(choice) = parsed.viz_font {
+        if let Err(error) = choice.resolve_for_layout(
+            parsed.seed,
+            synthpass_gen::ValidatedLayout::builtin(parsed.document_type),
+        ) {
+            eprintln!("❌ {error}");
+            usage();
+            return Ok(crate::Exit::Usage);
+        }
+    }
     std::fs::create_dir_all(&parsed.out_dir)?;
 
     for i in 0..parsed.count {

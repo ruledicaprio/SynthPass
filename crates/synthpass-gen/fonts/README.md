@@ -60,20 +60,27 @@ Release archive SHA-256s (shared by each corresponding file's entry above):
 The four additional files total 1,554,992 bytes. Each family is embedded only under
 `embedded-fonts`; no runtime font files or network downloads are used.
 
-## Admission factors
+## Per-field admission scales
 
-Factors multiply 70% of each field rectangle's height. The renderer is not yet
-using the alternatives. Tests recompute the right/bottom maximum by bisection
-for all 50 built-in text fields, and check top/left against the rectangle.
+ADR-0030 Decision 5, as amended in #708, computes one factor per field, rather
+than one pin per font. The factor multiplies 70% of that rectangle's height.
+Fixed-step bisection bounds right/bottom by PT Sans's domain ink; bounded fixed
+step-down checks literal top/left pixel rounding. PT Sans remains exactly 1.0.
+The renderer reuses the computed f32 pixel size, cached per validated layout and
+font; a refused field names the font, format and field, and `random` filters it out.
 
-| Font | Pinned k_F | Binding format | Field | Edge |
-|---|---:|---|---|---|
-| PT Sans | 1.00000 | all | scale cap | n/a |
-| Liberation Sans | 0.75100 | TD1 | given names | right |
-| Source Sans 3 | 0.99650 | TD2 | surname | bottom |
-| Liberation Serif | 0.56900 | TD1 | document type | right |
-| Liberation Mono | 0.34634 | TD1 | document type | right |
+The 250-row snapshot is in `../tests/fixtures/viz_field_scales.tsv` relative to
+the crate source tree (`crates/synthpass-gen/tests/fixtures/viz_field_scales.tsv`).
 
-The tiny Mono margin also avoids outward pixel rounding at the top of Cyrillic
-`Й` (whose outline reaches exactly the font's ascent). The test checks the literal
-pixel box at every built-in size: no tolerance or baseline change is applied.
+| Font | Minimum k | Median k | Maximum k |
+|---|---:|---:|---:|
+| PT Sans | 1.000000 | 1.000000 | 1.000000 |
+| Liberation Sans | 0.751090 | 0.779110 | 0.991678 |
+| Source Sans 3 | 0.996573 | 1.000000 | 1.000000 |
+| Liberation Serif | 0.569087 | 0.754073 | 0.940534 |
+| Liberation Mono | 0.346441 | 0.969438 | 1.000000 |
+
+Only the one-letter document code constrains Mono and Serif to small factors.
+The test checks all four literal edges and that k + 0.001 fails right or bottom
+unless capped at 1. No tolerance or baseline change is applied. Alternative
+faces are parsed lazily through named `OnceLock` caches, independent of PT Sans.

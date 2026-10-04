@@ -339,11 +339,19 @@ impl std::error::Error for LayoutError {}
 /// [`FormatFrame`] into the [`PageLayout`] the renderer and the labels use.
 /// The fields are private and the only constructors are
 /// [`try_from_spec`](Self::try_from_spec) and [`builtin`](Self::builtin).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ValidatedLayout {
     spec: LayoutSpec,
     page: PageLayout,
+    font_scales: [OnceLock<Result<crate::fonts::FieldScales, String>>; 5],
 }
+
+impl PartialEq for ValidatedLayout {
+    fn eq(&self, other: &Self) -> bool {
+        self.spec == other.spec && self.page == other.page
+    }
+}
+impl Eq for ValidatedLayout {}
 
 /// The five built-ins, validated once each. `builtin` is on every `generate`
 /// call, and the fit check shapes text, so it must not run per render.
@@ -383,6 +391,16 @@ fn min_visual_zone_height() -> u32 {
 }
 
 impl ValidatedLayout {
+    /// Cached admission result for this layout and embedded font.
+    pub fn viz_scales(
+        &self,
+        font: crate::fonts::VizFont,
+    ) -> Result<&crate::fonts::FieldScales, String> {
+        self.font_scales[font as usize]
+            .get_or_init(|| crate::fonts::scaling::compute_layout_scales(self, font))
+            .as_ref()
+            .map_err(Clone::clone)
+    }
     /// `format`'s built-in layout. It goes through [`Self::try_from_spec`] like
     /// any other spec (Decision 6), once per process: the result is cached.
     ///
@@ -473,7 +491,11 @@ impl ValidatedLayout {
             mrz_lines: frame.mrz_lines,
             mrz_chars: frame.mrz_chars,
         };
-        Ok(Self { spec, page })
+        Ok(Self {
+            spec,
+            page,
+            font_scales: std::array::from_fn(|_| OnceLock::new()),
+        })
     }
 
     /// The format this layout is for.
