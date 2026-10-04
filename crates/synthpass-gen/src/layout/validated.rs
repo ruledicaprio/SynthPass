@@ -26,7 +26,7 @@ use super::{for_format, PageLayout, Rect, FRAME_THICKNESS};
 use crate::fonts::load_fonts;
 use crate::model::DocumentType;
 
-mod fit;
+pub(crate) mod fit;
 
 /// The eleven placed rectangles of a layout, in the fixed order used by every
 /// check, error and [`ValidatedLayout::canonical_bytes`]: the portrait, then the
