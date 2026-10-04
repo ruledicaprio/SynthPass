@@ -25,6 +25,7 @@ pub mod ground_truth;
 pub mod ocr_passes;
 pub mod provider_bench;
 pub mod report;
+pub mod stats;
 pub mod step_summary;
 pub mod synthetic_ledger;
 

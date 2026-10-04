@@ -226,6 +226,42 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
   counts would be a reviewed workflow edit, like raising `N`
   ([#574](https://github.com/ruledicaprio/SynthPass/issues/574)). `hit`, `wrong_accept`,
   `prefix_wrong_accept` and the gate do not read it.
+- **Intervals in the synthetic summary** (`synthpass-bench`; the stdout block and three added
+  `bench-report.json` keys). Every figure in the block names the population it is over:
+  - **Tier-1 hits** (n = `hits`): the "wrong on at least one of the 12 scored fields" rate and the
+    per-field counts printed after it (`given_names 16/38`, …), from each document's
+    `wrong_fields`. A hit wrong on two fields counts in both fields, so the counts can sum past
+    the wrong-accept count; a document that is not a hit counts nowhere. JSON:
+    `wrong_field_counts_among_hits` (`hits`, and per field `wrong` and `ci95`).
+  - **Accepted reads** (hits plus `document_number_mismatch`): the prefix line, and the second
+    figure in each row of the mean-CER table.
+  - **Every document OCR ran on**: the first figure and its document count in each row of the
+    mean-CER table, which is the table's own mean, unchanged. A document with no parsed MRZ counts
+    as a total loss (CER 1.0 in every field); one where OCR itself failed has no field rows, so a
+    row's count can be below the run's. JSON: `cer_by_field_populations` (per field and line,
+    `all_documents` and `accepted_reads`, each `mean_cer` and `documents`; `mean_cer` is `null` when
+    no document of the population produced the field). A mean CER gets no interval.
+  - **Method.** The 95% Wilson score interval (`z` = 1.96, `synthpass_bench::stats`), printed as
+    `95% CI lo–hi%` after the hit rate (over `count`), the wrong-on-at-least-one rate (over `hits`)
+    and each per-field count (over `hits`), and absent when the denominator is 0 (`null` in the
+    JSON's `intervals`). Wilson rather than the normal approximation because the counts are tens
+    of documents and the rates sit near 0 or 1, where the normal interval runs outside 0–1 or
+    collapses to a point: 19 of 38 is 34.8–65.2%, 0 of 38 is 0.0–9.2%.
+  - **What it measures: which documents were drawn.** Accuracy here is deterministic: the same
+    binary on the same machine and seeds reads the same documents the same way. This repository
+    shows it: `tools/bench_ab_diff.py --expect-identical` ignores only `elapsed_ms`, `ocr_ms` and
+    `run_manifest` and passes a change that moves nothing, and `--diff-ledger` reports a changed
+    seed only when a deterministic field moved (see the per-seed ledger below). So the interval
+    does not describe run-to-run noise, which for a fixed binary and seeds is zero apart from
+    timing; it says how far the rate could sit from this one had other documents been drawn. Two
+    things it does not cover: reads can differ across machines (OCR inference floats can round
+    differently, which is why the committed ledger is CI-written), and a document that hit the
+    retry time budget depends on runner speed.
+  - **What it does not cover.** The fields are not independent (one document can be wrong on
+    several, and a name error often takes both names), so the per-field intervals are each a
+    separate binomial and not a joint statement. A mean CER has no interval. Real-specimen figures
+    are outside this: `provider-bench` is unchanged, and a real corpus is not a random draw
+    either.
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
