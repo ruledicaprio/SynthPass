@@ -34,7 +34,29 @@ this folder — regenerate it from its source instead (see
 | `format-comparison.svg` | Bar chart comparing all five formats' latest Tier-1 hit rate | `bench-chart --bars` — see [`../benchmarks/README.md`](../benchmarks/README.md#per-format-comparison-chart-bench-chart---bars) |
 | `screenshot-synthpass-serve.png` | `synthpass serve` CLI output, hand-captured | manual |
 | `screenshot-web-mrz-validator.png` | The web MRZ validator UI, hand-captured | manual |
-| `synthetic_pass_example.png` | A generated synthetic TD1 ID card: `synthpass generate --document-type td1 --count 1 --seed 1 --profile clean` | `bench-charts.yml` |
+| `synthetic_pass_example.png` | A generated synthetic TD1 ID card: `synthpass generate --document-type td1 --count 1 --seed 1 --profile clean`. The root `README.md` no longer embeds it; `bench-charts.yml` still refreshes it | `bench-charts.yml` |
+| `synthetic-five-formats.png` | The five synthetic formats (TD1, TD2, TD3, MRV-A, MRV-B), one document each from seed 42, fused in one image; the root `README.md` embeds it | `synthpass generate` ×5, composed by hand — see [below](#synthetic-five-formatspng) |
+
+## synthetic-five-formats.png
+
+Built from `main` at `c05a82d` (M8 PR 2, #699), with a debug build of the CLI
+(`cargo build -p synthpass-cli`). One document per format, seed 42, the `clean` profile (the default),
+each into its own scratch directory outside the repository:
+
+```
+synthpass generate --document-type td1  --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42_td1.png
+synthpass generate --document-type td2  --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42_td2.png
+synthpass generate --document-type td3  --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42.png
+synthpass generate --document-type mrva --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42_mrva.png
+synthpass generate --document-type mrvb --count 1 --seed 42 --profile clean --out-dir <dir>   # synthpass_42_mrvb.png
+```
+
+The five renders were generated twice and are byte-identical. A script kept outside the repository
+(Python 3 with Pillow 12.3.0) scales each document with LANCZOS to a common height of 330 px, sets
+TD1, TD2 and TD3 in one row and MRV-A and MRV-B centred in a second, writes each label under its
+document in the vendored `crates/synthpass-gen/fonts/ocr-b.ttf`, and saves a 1600 × 832 PNG with
+`optimize=True` and no metadata, so the same renders give the same bytes. The watermark and the MRZ of
+every document are whole; only the scale changes. Synthetic output only: nothing from `samples/`.
 
 Referenced from [`../../README.md`](../../README.md), [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md),
 [`../archive/roadmap-execution-log.md`](../archive/roadmap-execution-log.md),
