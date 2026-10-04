@@ -278,3 +278,43 @@ fn a_missing_file_names_its_path() {
     let err = synthpass_layout::load_path(path).expect_err("missing");
     assert_names(&err.to_string(), &["/nonexistent/dir/layout.json"]);
 }
+
+/// A layout file is one JSON object, and so is every rectangle: serde's
+/// sequence form and its externally tagged enum form are not part of the format.
+#[test]
+fn a_rectangle_given_as_an_array_is_refused() {
+    let json = edit(
+        "\"surname\": {\"x\": 60, \"y\": 120, \"width\": 700, \"height\": 34}",
+        "\"surname\": [60, 120, 700, 34]",
+    );
+    assert_names(
+        &refused(&json),
+        &[
+            "invalid type",
+            "sequence",
+            "a JSON object",
+            "\"surname\": [",
+        ],
+    );
+}
+
+#[test]
+fn a_file_given_as_an_array_is_refused() {
+    let json = "[1, \"icao-td3-builtin\", null, \"td3\", [860,100,260,340], [60,60,120,34], \
+                [220,60,120,34], [60,120,700,34], [60,170,700,34], [60,220,300,34], \
+                [60,270,200,34], [280,270,240,34], [540,270,80,34], [60,320,240,34], \
+                [60,370,400,34]]";
+    assert_names(
+        &refused(json),
+        &["invalid type", "sequence", "a JSON object"],
+    );
+}
+
+#[test]
+fn a_format_given_as_an_object_is_refused() {
+    let json = edit("\"format\": \"td3\"", "\"format\": {\"td3\": null}");
+    assert_names(
+        &refused(&json),
+        &["invalid type", "map", "a string", "\"format\": {"],
+    );
+}

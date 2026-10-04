@@ -100,10 +100,12 @@ pub fn parse_bytes(bytes: &[u8]) -> Result<LoadedLayout, LayoutFileError> {
     let text = std::str::from_utf8(bytes).map_err(|e| LayoutFileError::NotUtf8 {
         valid_up_to: e.valid_up_to(),
     })?;
-    let file: schema::LayoutFile = serde_json::from_str(text).map_err(|source| {
-        let near = near(text, source.line(), source.column());
-        LayoutFileError::Json { source, near }
-    })?;
+    let file: schema::LayoutFile = serde_json::from_str::<schema::MapOnly<_>>(text)
+        .map(|file| file.0)
+        .map_err(|source| {
+            let near = near(text, source.line(), source.column());
+            LayoutFileError::Json { source, near }
+        })?;
     if file.schema_version != SCHEMA_VERSION {
         return Err(LayoutFileError::SchemaVersion {
             found: file.schema_version,
