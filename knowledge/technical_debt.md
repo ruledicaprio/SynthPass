@@ -232,10 +232,11 @@ measured name-line read, but leaves a real name ending in `KK` unprotected if
 its separator is also lost. Revisit this tradeoff with the first real specimen
 that exhibits either case.
 
-### `#![forbid(unsafe_code)]` is declared in one crate of fourteen
+### `#![forbid(unsafe_code)]` is declared in two crates of fifteen
 
-Only `crates/mrz/src/lib.rs` forbids `unsafe`. The other thirteen crates merely happen to contain
-none in production: measured 2026-09-17, every `unsafe` in the workspace sits inside a
+`crates/mrz/src/lib.rs` and `crates/synthpass-layout/src/lib.rs` forbid `unsafe`. The other thirteen
+crates merely happen to contain none in production: measured 2026-09-17 (before `synthpass-layout`
+existed), every `unsafe` in the workspace sits inside a
 `#[cfg(test)]` module — `std::env::set_var`/`remove_var` (unsafe since Rust 2024) in
 `synthpass-ocr` and `synthpass-llm`, and a hand-rolled executor in `synthpass-die`'s
 `mrz_reader` tests. The image ingest path carries zero.

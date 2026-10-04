@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "name": "icao-td3-builtin",
+  "format": "td3",
+  "portrait": {"x": 860, "y": 100, "width": 260, "height": 340},
+  "document_type": {"x": 60, "y": 60, "width": 120, "height": 34},
+  "issuing_country": {"x": 220, "y": 60, "width": 120, "height": 34},
+  "surname": {"x": 60, "y": 120, "width": 700, "height": 34},
+  "given_names": {"x": 60, "y": 170, "width": 700, "height": 34},
+  "document_number": {"x": 60, "y": 220, "width": 300, "height": 34},
+  "nationality": {"x": 60, "y": 270, "width": 200, "height": 34},
+  "date_of_birth": {"x": 280, "y": 270, "width": 240, "height": 34},
+  "sex": {"x": 540, "y": 270, "width": 80, "height": 34},
+  "date_of_expiry": {"x": 60, "y": 320, "width": 240, "height": 34},
+  "personal_number": {"x": 60, "y": 370, "width": 400, "height": 34}
+}

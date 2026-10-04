@@ -110,7 +110,7 @@ types, `decrypt`) and on `synthpass-gen` and `synthpass-export` for its other co
 map leaves those edges out.
 
 `mrz-wasm` runs `mrz` and `synthpass-imageprep` in the browser demo. `synthpass-gen`,
-`synthpass-bench` and `synthpass-export` sit beside the extraction path. Every crate's
+`synthpass-layout`, `synthpass-bench` and `synthpass-export` sit beside the extraction path. Every crate's
 contract is [§13.1](#131-crate-responsibilities). How a document moves through them is
 [`architecture/pipeline.md`](architecture/pipeline.md).
 
@@ -257,6 +257,7 @@ section records the cross-crate policies.
 | `synthpass-pipeline` | Orchestrates OCR → Tier 1 MRZ validation → Tier 2 fallback → structured JSON. A checksum-valid MRZ skips Tier 2 entirely. Tier 2 has two assembly paths, `process_document` and `process_document_stream`; a Tier-2 change lands on both ([`architecture/pipeline.md`](architecture/pipeline.md#two-tier-2-paths)). |
 | `synthpass-gen` | Deterministic synthetic document factory (TD1/TD2/TD3 + MRV-A/MRV-B) with per-field ground truth. |
 | `synthpass-export` | Turns a `synthpass-gen` corpus into a training dataset on disk (JSONL / Hugging Face, DeepSeek-OCR 0–1000 coordinate convention) — spec in [`EXPORTS.md`](EXPORTS.md), format decisions in [`ADR-0007`](decisions/ADR-0007-dataset-export-format.md). |
+| `synthpass-layout` | Parses one layout file, local or embedded, into a `LoadedLayout` ([`LAYOUTS.md`](LAYOUTS.md), [`ADR-0022`](decisions/ADR-0022-declarative-layout-plugins.md)): the JSON schema, the five built-ins as committed data, the one emitter, and the layout identity (SHA-256 over `ValidatedLayout::canonical_bytes()`). Uses no network and is deterministic. Parsing lives here; validation stays in `synthpass-gen`, whose `ValidatedLayout::try_from_spec` is the only way to a layout the renderer accepts, so `synthpass-gen` stays free of `serde` (ADR-0007). |
 | `synthpass-bench` | Measures whether generated / real specimens survive the real Tier-1 pipeline. Not a `benches/` directory — a workspace member. |
 | `synthpass-cli` / `synthpass-serve` | Thin front-ends over `synthpass-pipeline`: argument parsing and HTTP handlers, plus license enforcement and feature metering, which live here so the pipeline stays license-agnostic. No extraction logic of their own. `synthpass-cli`'s argument parsing is hand-rolled, not `clap`: every shipped command is flag-light, and the flag-heavy `issue-license` lives in the vendor-only issuer. |
 | `synthpass-license` | Offline Ed25519-signed licensing for metered enterprise binaries; no phone-home. |

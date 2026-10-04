@@ -20,3 +20,7 @@ knowledge/benchmarks/mrz-matrix-probe-2026-09-18.json text eol=lf
 crates/synthpass-bench/tests/fixtures/bench_report/** text eol=lf
 # mrz_wire_golden compares MrzData's JSON with this file byte-for-byte; same reason.
 crates/synthpass-bench/tests/fixtures/mrz_wire_golden.jsonl text eol=lf
+# synthpass-layout's builtins test compares layouts/*.json byte-for-byte with the emitter's
+# output, which ends lines with LF; under core.autocrlf the checkout would have CRLF. Same
+# class of file, and same reason, as the pins above.
+crates/synthpass-layout/layouts/*.json text eol=lf
