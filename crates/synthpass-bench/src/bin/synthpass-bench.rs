@@ -426,8 +426,11 @@ struct SeedResult {
     /// the other per-document bools.
     prefix_wrong_accepted_read: bool,
     /// Which of the 12 scored fields differed from truth, in `COMPARED_FIELDS`
-    /// order, when `wrong_accept` is `true`. Empty (and omitted from JSON)
-    /// otherwise, including on every non-hit.
+    /// order, for every document that has field outcomes: a hit or not. A
+    /// non-hit carries it too (a total loss names every field), so a count that
+    /// means "among the hits" must filter on `hit`, as `wrong_accept` does and
+    /// `wrong_field_counts_among_hits` does. Empty (and omitted from JSON) when
+    /// no field differed or OCR itself failed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     wrong_fields: Vec<&'static str>,
     /// `--ocr-passes` only: the full `OcrPage::text` this document's OCR
@@ -1794,7 +1797,7 @@ mod tests {
             intervals: Intervals {
                 method: "wilson",
                 z: synthpass_bench::stats::Z_95,
-                hit_rate: ci_pair(hits, 1),
+                hit_rate: None,
                 wrong_accept_rate: ci_pair(wrong_accepts, hits),
             },
             results: Vec::new(),

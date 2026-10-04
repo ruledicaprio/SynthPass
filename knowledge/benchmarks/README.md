@@ -249,12 +249,14 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
     collapses to a point: 19 of 38 is 34.8–65.2%, 0 of 38 is 0.0–9.2%.
   - **What it measures: which documents were drawn.** Accuracy here is deterministic: the same
     binary on the same machine and seeds reads the same documents the same way. This repository
-    shows it: `tools/bench_ab_diff.py --expect-identical` ignores only `elapsed_ms`, `ocr_ms` and
-    `run_manifest` and passes a change that moves nothing, and `--diff-ledger` reports a changed
+    shows it: `tools/bench_ab_diff.py --expect-identical` ignores `elapsed_ms`, `ocr_ms` and
+    `run_manifest` (and an `ocr_text` or `ocr_passes` only one arm has) and passes a change that
+    moves nothing, and `--diff-ledger` reports a changed
     seed only when a deterministic field moved (see the per-seed ledger below). So the interval
     does not describe run-to-run noise, which for a fixed binary and seeds is zero apart from
-    timing; it says how far the rate could sit from this one had other documents been drawn. Two
-    things it does not cover: reads can differ across machines (OCR inference floats can round
+    timing; it says which generator-wide rates this one draw is consistent with. It is not a
+    prediction interval, and comparing two runs (an A/B) needs a two-sample test, not two
+    overlapping intervals. Two things it does not cover: reads can differ across machines (OCR inference floats can round
     differently, which is why the committed ledger is CI-written), and a document that hit the
     retry time budget depends on runner speed.
   - **What it does not cover.** The fields are not independent (one document can be wrong on

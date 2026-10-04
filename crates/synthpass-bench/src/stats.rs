@@ -8,22 +8,31 @@
 pub const Z_95: f64 = 1.96;
 
 /// The 95% Wilson score interval for `k` successes in `n` trials, as `(low, high)` fractions
-/// in `0..=1`. `None` when `n` is `0`: no trials, no interval, never a made-up one.
+/// in `0..=1`. `None` when `n` is `0` (no trials, no interval, never a made-up one) and when
+/// `k` exceeds `n` (not a count of successes in `n` trials, so no interval is made of it).
 ///
 /// Wilson rather than the normal approximation because the counts here are small (tens of
 /// documents) and the rates sit near `0` or `1`, where the normal interval leaves `0..=1` or
-/// collapses to a point. `k` above `n` is clamped to `n`.
+/// collapses to a point. The ends are exact: the low end is `0.0` when `k` is `0` and the high
+/// end `1.0` when `k` is `n`, not a rounding of them.
 pub fn wilson_interval(k: u64, n: u64) -> Option<(f64, f64)> {
-    if n == 0 {
+    if n == 0 || k > n {
         return None;
     }
-    let p = k.min(n) as f64 / n as f64;
+    let all = k == n;
+    let p = k as f64 / n as f64;
     let n = n as f64;
     let z2 = Z_95 * Z_95;
     let denominator = 1.0 + z2 / n;
     let centre = (p + z2 / (2.0 * n)) / denominator;
     let half = Z_95 * (p * (1.0 - p) / n + z2 / (4.0 * n * n)).sqrt() / denominator;
-    Some(((centre - half).max(0.0), (centre + half).min(1.0)))
+    let low = if k == 0 {
+        0.0
+    } else {
+        (centre - half).max(0.0)
+    };
+    let high = if all { 1.0 } else { (centre + half).min(1.0) };
+    Some((low, high))
 }
 
 #[cfg(test)]
@@ -52,6 +61,23 @@ mod tests {
         assert_eq!(wilson_interval(0, 0), None);
     }
 
+    /// More successes than trials is not a count, so it has no interval; it is not clamped
+    /// into one.
+    #[test]
+    fn more_successes_than_trials_has_no_interval() {
+        assert_eq!(wilson_interval(39, 38), None);
+        assert_eq!(wilson_interval(1, 0), None);
+    }
+
+    /// The ends are exact, not a floating-point neighbour of 0 and 1.
+    #[test]
+    fn the_ends_are_exact_at_zero_and_all() {
+        for n in 1..=60u64 {
+            assert_eq!(wilson_interval(0, n).unwrap().0, 0.0, "0/{n}");
+            assert_eq!(wilson_interval(n, n).unwrap().1, 1.0, "{n}/{n}");
+        }
+    }
+
     #[test]
     fn the_interval_stays_inside_zero_and_one_and_brackets_the_rate() {
         for n in 1..=60u64 {
@@ -59,7 +85,7 @@ mod tests {
                 let (low, high) = wilson_interval(k, n).unwrap();
                 let rate = k as f64 / n as f64;
                 assert!((0.0..=1.0).contains(&low) && (0.0..=1.0).contains(&high));
-                assert!(low <= rate + 1e-12 && rate <= high + 1e-12, "{k}/{n}");
+                assert!(low <= rate && rate <= high, "{k}/{n}");
             }
         }
     }
