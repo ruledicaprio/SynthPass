@@ -1,23 +1,83 @@
 //! Glyph loading, gated behind the `embedded-fonts` Cargo feature — **on by
-//! default**, because both OFL fonts are vendored under `fonts/` (see
-//! `fonts/README.md`). With the feature on, the two fonts are baked into the
+//! default**, because all OFL fonts are vendored under `fonts/` (see
+//! `fonts/README.md`). With the feature on, the fonts are baked into the
 //! binary via `include_bytes!`. Under `--no-default-features` it is off:
 //! [`load_fonts`] returns [`FontError::NotEmbedded`] and `render` degrades
 //! gracefully to placeholder bars — see `render.rs`.
 
 use ab_glyph::FontArc;
 
+/// The closed VIZ font set admitted by ADR-0030. Rendering still uses PT Sans.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum VizFont {
+    #[default]
+    PtSans,
+    LiberationSans,
+    SourceSans3,
+    LiberationSerif,
+    LiberationMono,
+}
+
+impl VizFont {
+    /// Every member of the closed set, in stable order.
+    pub const ALL: [Self; 5] = [
+        Self::PtSans,
+        Self::LiberationSans,
+        Self::SourceSans3,
+        Self::LiberationSerif,
+        Self::LiberationMono,
+    ];
+
+    /// Stable name reserved for the future opt-in interface.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::PtSans => "pt-sans",
+            Self::LiberationSans => "liberation-sans",
+            Self::SourceSans3 => "source-sans-3",
+            Self::LiberationSerif => "liberation-serif",
+            Self::LiberationMono => "liberation-mono",
+        }
+    }
+
+    /// Admission factor relative to the renderer's 70%-height scale.
+    pub const fn scale(self) -> f32 {
+        match self {
+            Self::PtSans => 1.0,
+            Self::LiberationSans => 0.7510,
+            Self::SourceSans3 => 0.9965,
+            Self::LiberationSerif => 0.5690,
+            // Avoid a one-pixel floating-point top escape for Cyrillic Й.
+            // Within 0.000102 of the bisection limit; tested at every builtin.
+            Self::LiberationMono => 0.34634,
+        }
+    }
+}
+
 #[cfg(feature = "embedded-fonts")]
 static OCR_B_BYTES: &[u8] = include_bytes!("../fonts/ocr-b.ttf");
 #[cfg(feature = "embedded-fonts")]
 static SANS_BYTES: &[u8] = include_bytes!("../fonts/sans.ttf");
 
-/// Loaded font pair used to render the VIZ text and the MRZ band.
+/// Embedded fonts. The renderer still uses the unchanged PT Sans/OCR-B pair.
 pub struct Fonts {
     /// Monospaced OCR-B-style font for the MRZ band.
     pub mrz: FontArc,
     /// Proportional sans font for the human-readable VIZ fields.
     pub viz: FontArc,
+    alternatives: [FontArc; 4],
+}
+
+impl Fonts {
+    /// Access an embedded VIZ family without changing the default rendering font.
+    pub fn viz_font(&self, font: VizFont) -> &FontArc {
+        match font {
+            VizFont::PtSans => &self.viz,
+            VizFont::LiberationSans => &self.alternatives[0],
+            VizFont::SourceSans3 => &self.alternatives[1],
+            VizFont::LiberationSerif => &self.alternatives[2],
+            VizFont::LiberationMono => &self.alternatives[3],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,13 +107,29 @@ pub fn load_fonts() -> Result<Fonts, FontError> {
     {
         let mrz = FontArc::try_from_slice(OCR_B_BYTES).map_err(|_| FontError::NotEmbedded)?;
         let viz = FontArc::try_from_slice(SANS_BYTES).map_err(|_| FontError::NotEmbedded)?;
-        Ok(Fonts { mrz, viz })
+        let parse = |bytes: &'static [u8]| {
+            FontArc::try_from_slice(bytes).map_err(|_| FontError::NotEmbedded)
+        };
+        let alternatives = [
+            parse(include_bytes!("../fonts/liberation-sans.ttf"))?,
+            parse(include_bytes!("../fonts/source-sans-3.ttf"))?,
+            parse(include_bytes!("../fonts/liberation-serif.ttf"))?,
+            parse(include_bytes!("../fonts/liberation-mono.ttf"))?,
+        ];
+        Ok(Fonts {
+            mrz,
+            viz,
+            alternatives,
+        })
     }
     #[cfg(not(feature = "embedded-fonts"))]
     {
         Err(FontError::NotEmbedded)
     }
 }
+
+#[cfg(all(test, feature = "embedded-fonts"))]
+mod admission;
 
 #[cfg(test)]
 mod tests {
