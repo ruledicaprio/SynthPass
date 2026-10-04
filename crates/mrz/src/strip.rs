@@ -1212,7 +1212,7 @@ mod tests {
         // alternate to swap in without changing format; TD1/TD2 admit three.
         for format in [Format::Td1, Format::Td2] {
             let lines = ordinary_fixture(format);
-            for code in [b'I', b'A', b'C'] {
+            for code in *b"IAC" {
                 let mut first = lines[0].as_bytes().to_vec();
                 first[0] = code;
                 let first = String::from_utf8(first).unwrap();
