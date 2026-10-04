@@ -1,6 +1,6 @@
 # The C3 and C6 refusal switches over one replayed capture: C3 refuses one scored hit (Croatia 2002, a read an earlier note showed to be wrong and the gate counts as a hit) and re-labels one miss, C6 re-labels one miss, and no synthetic correct read is lost
 
-**Date:** 2026-10-03 · **MAIN:** `c60936d` (`origin/main` when the job started; one release build of `provider-bench` and `synthpass-bench` from it served the capture, every replay and every synthetic arm; the run manifests say `working_tree_dirty: true`, which is the tree's untracked files only) · **DATA:** the local `samples/` mirror of `samples-data` at `65a5040` (the names after [#556](https://github.com/ruledicaprio/SynthPass/issues/556) and [#658](https://github.com/ruledicaprio/SynthPass/pull/658); every image's blob hash equals that revision's), corpus manifest sha256 `99a911af40a4` for the committed `samples/corpus.jsonl` (LF line endings); **the capture's run manifest records `002180019f5d`, the hash of the CRLF form of the same file that the laptop's Windows checkout (`core.autocrlf`) holds**, so an LF checkout recomputes the first value, not the recorded one, all 261 documents; synthetic clean, seeds 0-99 of each of the five formats · **Evidence:** Observed on one live capture, replayed, and on synthetic renders; Derived where marked · **Status:** current
+**Date:** 2026-10-03 · **MAIN:** `c60936d` (`origin/main` when the job started; one release build of `provider-bench` and `synthpass-bench` from it served the capture, every replay and every synthetic arm; the run manifests say `working_tree_dirty: true`, which is the tree's untracked files only) · **DATA:** the local `samples/` mirror of `samples-data` at `65a5040` (the names after [#556](https://github.com/ruledicaprio/SynthPass/issues/556) and [#658](https://github.com/ruledicaprio/SynthPass/pull/658); every image's blob hash equals that revision's), corpus manifest sha256 `99a911af40a4` for the committed `samples/corpus.jsonl` (LF line endings); **the capture's run manifest records `002180019f5d`, the hash of the CRLF form of the same file that the laptop's Windows checkout (`core.autocrlf`) holds**, so an LF checkout recomputes the first value, not the recorded one; the corpus is all 261 documents; synthetic clean, seeds 0-99 of each of the five formats · **Evidence:** Observed on one live capture, replayed, and on synthetic renders; Derived where marked · **Status:** current
 
 **2026-10-03.** This is the A/B that `knowledge/PLAN_2026_Q4.md` lists as "#579(b), (c), (d): the A/B", for the two
 opt-in refusal switches already on `main`:
@@ -49,12 +49,15 @@ The arms, quoted from each run's manifest (`mrz_arms`), not from the variable th
    `c3-control` and `c6-control` against the default arm. Each reads: real documents 261 / 261, ledger differ 0, dump
    171 / 171 rows differ 0, report rows 261 / 261 differ 0; five synthetic formats, 100 / 100 seeds each, `results[]`
    differ 0 and dump blocks differ 0 (hits 59, 81, 74, 87 and 90); budget stops 2 in both arms (France ID 2020's two
-   sides, which hit the 52 s budget in the capture). The runs differ in `flags`, `replay_of`, `model_paths` and **the recorded arm in both controls**
-   (`refuse_repeated_line` `control` in `c3-control`, `date_digits` `control` in `c6-control`, as the arms table shows).
-   `bench_ab_diff`'s run-level note names only `c6-control`'s, because its `identity()` compares `mrz_date_digits_arm`
-   but not `mrz_refuse_repeated_line_arm`: the tool cannot see the C3 arm, a gap in the tool and not in the runs (the
-   manifests and `report.json` record it, and the C3 placebo's identical result is the check that it took effect). The synthetic arms are live runs under the control variable, so for them this is an
-   identity check of two OCR runs, not a copy.
+   sides, which hit the 52 s budget in the capture). The runs differ in `flags`, `replay_of`, `model_paths` and **the
+   recorded arm in both controls** (`refuse_repeated_line` `control` in `c3-control`, `date_digits` `control` in
+   `c6-control`, as the arms table shows). `bench_ab_diff`'s run-level note names only `c6-control`'s, because its
+   `identity()` compares `mrz_date_digits_arm` but not `mrz_refuse_repeated_line_arm`: the tool cannot see the C3 arm, a
+   gap in the tool and not in the runs. **That the settings took effect is shown only by the arm each run's manifest and
+   `report.json` record (`mrz_arms`, quoted in the arms table), never by the placebo's result:** `control` behaves
+   exactly like `off`, and an unrecognised value falls back to `off` silently, so an identical result comes out whether
+   or not the variable was read. What the identical result shows is that `control` changes nothing. The synthetic arms
+   are live runs under the control variable, so for them this is an identity check of two OCR runs, not a copy.
 2. **The crosstab by `asset_id`, per rule (Observed).** "Correct" means a scored hit in the default arm. The ledger
    (outcome, miss reason, format and every other column) is compared for all 261 documents; no other document moves.
 
@@ -145,5 +148,5 @@ The arms, quoted from each run's manifest (`mrz_arms`), not from the variable th
 - **No timing as a result.** The replay and synthetic durations above are the harness's, kept for the record.
 - **The synthetic corpus is clean, seeds 0-99, five formats:** a rule that fires on a damaged profile or another seed
   range is not tested. A rule's cost on documents outside the 261 is not bounded by this run.
-- **No comparison with the 09-29 note's counts** (139 hits there, 137 here): the capture, the corpus and the baseline
-  have moved since.
+- **No comparison with the 09-29 note's counts beyond the one explained under answer 3** (139 hits there, 137 here, the
+  difference being the two documents #630 moved): the capture, the corpus and the baseline have moved since.
