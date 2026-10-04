@@ -264,6 +264,29 @@ owner and cadence, what it can honestly claim, and the ordered rework plan — i
     separate binomial and not a joint statement. A mean CER has no interval. Real-specimen figures
     are outside this: `provider-bench` is unchanged, and a real corpus is not a random draw
     either.
+  - **The nightly tool.** `tools/bench_nightly_intervals.py` gives the nightly rows on
+    `bench-data` the same intervals, per format and per profile, for the hit rate, the share of hits
+    wrong on at least one scored field and the share wrong on each field.
+    - **What it pools, and why on that key.** Nights are added together only when the generator
+      fingerprint (the fixed header's hash of the rendered pixels, which a fresh row inherits from
+      the fixed header of the same run and format), the OCR model hashes, the OCR and MRZ arms and
+      `ocr_env`, and `max_passes` and `max_seconds` all match. Each of those changes what a number
+      means: a re-rendered generator draws different documents, a new model or arm reads the same
+      documents differently, and a different retry budget cuts different documents off. A pool is
+      per format, because the fingerprint is. A change of any key starts a new pool, so a pool's
+      interval is never over two measured populations.
+    - **Why fixed nights add no n.** The fixed slice is the same 100 seeds every night (`clean`,
+      seeds 0-99), and the same binary reads the same seeds the same way. A second night repeats
+      the first night's documents, so summing nights would shrink the interval around a draw that
+      has not grown. The tool reports one night's figures and whether every night in the pool read
+      every seed identically. The fresh slice draws new seeds every night, so each night adds n and
+      the fresh slice is pooled.
+    - **Budget stops.** A row cut off by the retry budget (`retry_stop` `budget`) depends on runner
+      speed, so it is left out of every rate and counted on its own line.
+    - **Comparing two pools** is the advisory's two-proportion z-test
+      ([the nightly advisory](#the-nightly-advisory)), not two overlapping intervals; two intervals
+      that overlap can still differ, and the interval answers a different question (which rates one
+      draw is consistent with).
 - **Dated sweeps** — `routing-sweep-YYYY-MM-DD.md`, `provider-comparison-*.md`.
   Name the exact invocation that produced them.
 
