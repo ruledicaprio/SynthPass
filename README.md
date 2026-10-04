@@ -104,7 +104,9 @@ and every environment variable and exit code in
 SynthPass mints its own documents, so accuracy is graded against ground truth, not assumptions —
 every render ships a `.labels.json` sidecar of per-field labels and a checksum-valid MRZ.
 
-<img src="knowledge/img/synthetic_pass_example.png" alt="A generated TD1 ID card — watermarked SYNTHETIC / SPECIMEN, generic non-country template, fictional seed-drawn identity" width="300">
+<img src="knowledge/img/synthetic-five-formats.png" alt="The five synthetic document formats SynthPass mints, generated from seed 42: TD1, TD2, TD3, MRV-A and MRV-B. Each carries the SYNTHETIC / SPECIMEN watermark on the generic non-country template, a fictional seed-drawn identity and its machine-readable zone" width="800">
+
+<sub>One document per format, all from seed 42 (`--document-type td1|td2|td3|mrva|mrvb`); the commands below make a TD1 from seed 1, a different identity.</sub>
 
 ```powershell
 cargo run -p synthpass-cli -- generate --document-type td1 --count 1 --seed 1 --profile clean --out-dir out/
